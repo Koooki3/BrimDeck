@@ -12,20 +12,14 @@ namespace BrimDeck;
 public partial class MainWindow
 {
     internal void ShowModelDetails(bool details) { if (IsMusicPage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false); _details = details && Settings.UsagePage; RenderUsage(); }
-    internal void SelectQuotaGroup(string group)
-    {
-        foreach (var entry in Settings.EnabledApps.Where(app => app.QuotaSource == ProviderId.Antigravity)) _quotaGroups[entry.InstanceId] = group;
-        RenderUsage();
-    }
-    internal void SelectQuotaGroup(Guid instanceId, string group) { _quotaGroups[instanceId] = group; RenderUsage(); }
     internal FrameworkElement ScaledContent => ContentCanvas;
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
 
     private enum Tier { Roomy, Default, Dense, Compact, Tiny }
     private sealed record SegmentItem(string Text, string Name, bool Active, Action Select, string? Tip = null);
-    // Slots is the most quotas any page or group of this app shows, so switching keeps the same layout.
-    private sealed record QuotaView(List<UsageMetric> Quotas, List<string> Groups, int Pages, int Page, int Slots);
+    // Slots is the most quotas any page of this app shows, so switching pages keeps the same layout.
+    private sealed record QuotaView(List<UsageMetric> Quotas, int Pages, int Page, int Slots);
 
     // Every size is a whole DIP so text stays crisp; the panel steps between tiers instead of scaling continuously.
     private sealed record Layout(Tier Tier, double Name, double Number, double Label, double Reset, double Foot, double Plan, double Segment,
@@ -153,23 +147,18 @@ public partial class MainWindow
     {
         const int capacity = 2;
         var quotas = snapshot.Metrics.OrderBy(x => x.Window is > 0 ? x.Window.Value : int.MaxValue).ToList();
-        var groups = new List<string>();
-        string GroupOf(UsageMetric quota) => UI.QuotaGroup(new Quota(quota.Label, 0, null)) is { Length: > 0 } group ? group : "其他";
-        bool grouped = snapshot.Id == ProviderId.Antigravity && quotas.Any(x => GroupOf(x) != "其他");
-        // Sized for the fullest set the column can switch to: each group, or all quotas when there are no groups.
-        int slots = Math.Clamp(quotas.GroupBy(x => grouped ? GroupOf(x) : "").Select(x => x.Count()).DefaultIfEmpty(1).Max(), 1, capacity);
-        if (grouped)
-        {
-            groups = quotas.Select(GroupOf).Distinct().ToList();
-            var selected = _quotaGroups.GetValueOrDefault(entry.InstanceId, "Gemini");
-            if (!groups.Contains(selected)) selected = groups[0];
-            _quotaGroups[entry.InstanceId] = selected;
-            quotas = quotas.Where(x => GroupOf(x) == selected).ToList();
-        }
-        int pages = Math.Max(1, (quotas.Count + capacity - 1) / capacity);
-        int page = Math.Clamp(_quotaPages.GetValueOrDefault(entry.InstanceId), 0, pages - 1);
-        if (pages > 1) quotas = quotas.Skip(page * capacity).Take(capacity).ToList();
-        return new QuotaView(quotas, groups, pages, page, slots);
+        // Antigravity labels its quotas "Gemini · 5 小时", "Claude · 每周" and so on. Each group starts its own page, Gemini first,
+        // so the first page shows rows 1 and 2 (Gemini) and a click on the column shows rows 3 and 4 (Claude), the same rows and
+        // click-to-page as any other app with more than two quotas. Labels without a group come last.
+        var sets = snapshot.Id == ProviderId.Antigravity
+            ? quotas.GroupBy(x => UI.QuotaGroup(new Quota(x.Label, 0, null))).OrderBy(x => x.Key == "Gemini" ? 0 : x.Key.Length > 0 ? 1 : 2).Select(x => x.ToList()).ToList()
+            : [quotas];
+        var pages = sets.SelectMany(set => set.Chunk(capacity)).Select(x => x.ToList()).ToList();
+        if (pages.Count == 0) pages.Add([]);
+        // Sized for the fullest page the column can switch to.
+        int slots = Math.Clamp(pages.Max(x => x.Count), 1, capacity);
+        int page = Math.Clamp(_quotaPages.GetValueOrDefault(entry.InstanceId), 0, pages.Count - 1);
+        return new QuotaView(pages[page], pages.Count, page, slots);
     }
 
     private void RenderColumns(IReadOnlyList<DashboardColumn> columns)
@@ -193,7 +182,7 @@ public partial class MainWindow
             ApplicationPages.Children.Add(controls); ApplicationPages.Visibility = Visibility.Visible;
         }
         // The layout is fitted to everything the panel can show, not to the page on screen, so switching application
-        // pages, quota pages or groups never changes column widths, sizes or spacing. A short last page leaves its
+        // pages or quota pages never changes column widths, sizes or spacing. A short last page leaves its
         // remaining columns empty.
         int count = Math.Min(columns.Count, pageSize);
         double columnWidth = (ContentCanvas.Width - EdgeInset * 2) / count;
@@ -223,31 +212,22 @@ public partial class MainWindow
         column.RowDefinitions.Add(new RowDefinition());
         column.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        // Title row: the plan sits right after the name, the group switch keeps the right edge, and the name gives way first.
+        // Title row: the plan sits right after the name, and the name gives way first.
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.ColumnDefinitions.Add(new ColumnDefinition());
-        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var name = UI.Centered(entry.Name, layout.Name, off ? UI.Secondary : UI.Primary, FontWeights.SemiBold);
         name.HorizontalAlignment = HorizontalAlignment.Left;
         name.ToolTip = QuotaTooltip(snapshot);
         AutomationProperties.SetAutomationId(name, "quota-title-" + entry.InstanceId.ToString("N"));
         head.Children.Add(name);
-        name.Measure(new Size(double.PositiveInfinity, layout.Head));
-        double nameWidth = name.DesiredSize.Width, occupied = 0;
+        double occupied = 0;
         if (snapshot.Plan.Length > 0)
         {
             var chip = PlanChip(snapshot, layout);
             Grid.SetColumn(chip, 1); head.Children.Add(chip);
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
-        }
-        FrameworkElement? control = null;
-        if (view.Groups.Count > 1) control = GroupSwitch(entry, view.Groups, layout, innerWidth - occupied - nameWidth);
-        if (control is not null)
-        {
-            Grid.SetColumn(control, 3); head.Children.Add(control);
-            control.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += control.DesiredSize.Width;
         }
         name.MaxWidth = Math.Max(20, innerWidth - occupied);
         column.Children.Add(head);
@@ -328,7 +308,7 @@ public partial class MainWindow
         {
             surface.Background = Brushes.Transparent; surface.Cursor = Cursors.Hand;
             AutomationProperties.SetHelpText(surface, Loc.T($"点击此列切换配额，第 {view.Page + 1} 页，共 {view.Pages} 页。", $"Click this column to switch quotas. Page {view.Page + 1} of {view.Pages}."));
-            // Buttons handle their own mouse events, so statistics links and group switches act only once.
+            // Buttons handle their own mouse events, so statistics links act only once.
             surface.MouseLeftButtonUp += (_, e) => { e.Handled = true; NextQuotaPage(); };
         }
         return surface;
@@ -343,30 +323,6 @@ public partial class MainWindow
             Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(6, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center
         };
-    }
-
-    // Full group names when the title row has room, then a three-letter form, then initials. Groups keep the data's words
-    // as their keys; "其他" is shown translated.
-    private Border GroupSwitch(AppEntry entry, List<string> groups, Layout layout, double available)
-    {
-        var names = groups.Select(Loc.Label).ToList();
-        string[][] variants =
-        [
-            names.ToArray(),
-            names.Select(name => name.Length > 3 ? name[..3] + "…" : name).ToArray(),
-            names.Select(name => name[..1]).ToArray()
-        ];
-        Border chosen = null!;
-        foreach (var labels in variants)
-        {
-            var items = groups.Select((group, i) => new SegmentItem(labels[i], "Antigravity " + group,
-                group == _quotaGroups.GetValueOrDefault(entry.InstanceId, "Gemini"), () => SelectQuotaGroup(entry.InstanceId, group), labels[i] == names[i] ? null : names[i])).ToList();
-            chosen = Segmented(items, layout.Segment, Math.Ceiling(layout.Segment * 1.35), labels == variants[0] ? 7 : 5);
-            chosen.Measure(new Size(double.PositiveInfinity, layout.Head));
-            if (chosen.DesiredSize.Width + 6 <= available) break;
-        }
-        chosen.Margin = new Thickness(6, 0, 0, 0); chosen.VerticalAlignment = VerticalAlignment.Center;
-        return chosen;
     }
 
     // Three rows per quota: the period name, the used share with its reset countdown, and the track.
