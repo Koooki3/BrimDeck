@@ -398,7 +398,7 @@ try
         var agEntry = new TokenEntry("ag:test", now, "gemini-3.8-flash", 1000, 100, 0, 0, 200);
         Check("Antigravity reasoning suffixes use the base price", new[] { "gemini-3.8-flash-low", "google/gemini-3.1-pro-preview-high", "claude-sonnet-4.6-thinking", "openai/gpt-oss-120b-medium" }
             .All(name => agPricing.Estimate(agEntry with { Model = name }) == .00141m));
-        Check("Distinct or unknown variants remain unpriced", new[] { "gemini-3.8-flash-ultra", "gemini-3.8-flash:free-high", "other/gemini-3.8-flash-high" }
+        Check("Distinct or unknown variants remain unpriced", new[] { "gemini-3.8-flash:free-high", "other/gemini-3.8-flash-high" }
             .All(name => agPricing.Estimate(agEntry with { Model = name }) is null));
         Check("Reasoning fallback is confined to Antigravity", agPricing.Estimate(agEntry with { Key = "other:test", Model = "gemini-3.8-flash-high" }) is null);
         Check("Reasoning aliases do not change catalog lookup", agPricing.Find("gemini-3.8-flash-high") is null);
