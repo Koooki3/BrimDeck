@@ -341,7 +341,7 @@ public partial class MainWindow
         {
             Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
             Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(6, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center, ToolTip = string.Join("\n", new[] { snapshot.Plan, snapshot.PlanSource }.Where(x => x.Length > 0))
+            VerticalAlignment = VerticalAlignment.Center
         };
     }
 
