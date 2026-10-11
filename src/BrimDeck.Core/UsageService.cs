@@ -352,6 +352,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         if (snapshot.Plan.Length > 0) snapshot.PlanSource = Loc.T("Cursor 账户", "Cursor account");
         if (snapshot.Quotas.Count == 0) throw new InvalidDataException();
+        // The Grok Bot desktop app shares this Cursor account, and its weekly allowance is a separate figure from the
+        // billing-period quota above. Add it as one more row; a failure here must not drop the Cursor quota.
+        try
+        {
+            using var request = Bearer(HttpMethod.Post, "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus", token);
+            request.Content = JsonBody(new { });
+            using var doc = await SendAsync(_http, request, ct);
+            if (QuotaParser.SandUsage(doc.RootElement) is { } grokBot) snapshot.Quotas.Add(grokBot);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException && !ct.IsCancellationRequested) { }
         Connected(snapshot, Loc.T("Cursor 当前账期", "Cursor current billing period"), now);
         try { await ReadCursorEvents(snapshot, token, now, start, ct); }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException or TaskCanceledException)
