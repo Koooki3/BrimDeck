@@ -272,7 +272,8 @@ public partial class MainWindow
                     header || total && i < 2 ? UI.Tertiary : i == 1 || i >= 2 && i < widths.Length - 2 && !total ? UI.Secondary : UI.Primary,
                     !header && (total && i >= 2 || !total && i == 0 || i == widths.Length - 1) ? FontWeights.SemiBold : FontWeights.Normal);
                 text.TextAlignment = i >= 2 ? TextAlignment.Right : TextAlignment.Left;
-                text.ToolTip = labels[i];
+                // The app and model cells show no tooltip: it would only repeat the visible name.
+                if (i >= 2) text.ToolTip = labels[i];
                 FrameworkElement cell = text;
                 if (i == 0 && provider is { } id)
                 {
@@ -293,7 +294,7 @@ public partial class MainWindow
             var record = result.Rows[i];
             var row = Row(AppPresets.Name(record.Provider), record.Model, values[i], false, false, record.Provider);
             var tip = $"{AppPresets.Name(record.Provider)} · {record.Model}\n{TokenBreakdown(record.Entries)}\n{UI.CostNote(record.Entries, _app.Prices)}";
-            row.ToolTip = tip;
+            // The breakdown sits on the figure cells only, so hovering the app or model name shows no tooltip.
             foreach (var text in row.Children.OfType<TextBlock>().Where(text => Grid.GetColumn(text) >= 4)) text.ToolTip = tip;
             var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush("#0DFFFFFF"), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
             item.MouseEnter += (_, _) => item.Background = UI.Brush("#0AFFFFFF"); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
