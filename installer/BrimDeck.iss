@@ -195,19 +195,13 @@ end;
 
 // ----- Setup -----
 
-// Shortcut choices of the installed version, read before PrepareToInstall removes that version.
-function PreviousChoice(const Name: String): Boolean;
-var
-  Value: String;
-begin
-  Result := not RegQueryStringValue(HKA, '{#UninstallKey}', Name, Value) or (Value <> '0');
-end;
-
+// A first install defaults to a desktop shortcut and no Start menu shortcut. When a version is already installed,
+// PrepareToInstall replaces these with the shortcuts that exist at that moment.
 function InitializeSetup: Boolean;
 begin
   Result := EnsureAppClosed(WizardSilent);
-  DesktopShortcut := PreviousChoice('BrimDeck.DesktopShortcut');
-  StartMenuShortcut := PreviousChoice('BrimDeck.StartMenuShortcut');
+  DesktopShortcut := True;
+  StartMenuShortcut := False;
 end;
 
 function AddCheck(const Caption: String; Checked: Boolean): TNewCheckBox;
@@ -290,6 +284,15 @@ begin
     Log('No installed version found.');
     Exit;
   end;
+  // The uninstaller below deletes both shortcuts, including ones the user has kept, so record which exist now and
+  // restore exactly those in FinishShortcuts. A shortcut the user deleted stays deleted.
+  DesktopShortcut := FileExists(ExpandConstant('{autodesktop}\{#AppName}.lnk'));
+  StartMenuShortcut := FileExists(ExpandConstant('{autoprograms}\{#AppName}.lnk'));
+  if not WizardSilent then
+  begin
+    DesktopCheck.Checked := DesktopShortcut;
+    StartMenuCheck.Checked := StartMenuShortcut;
+  end;
   Uninstaller := QuotedPath(Uninstaller);
   if not FileExists(Uninstaller) then
   begin
@@ -312,13 +315,8 @@ begin
   end;
 end;
 
-function BoolValue(Value: Boolean): String;
-begin
-  if Value then Result := '1' else Result := '0';
-end;
-
-// Keeps the checked shortcuts, remembers the choice for the next update, and starts BrimDeck when requested.
-// Silent installs (in-app updates) keep the previous choice.
+// Keeps the checked shortcuts and starts BrimDeck when requested.
+// Silent installs (in-app updates) keep the shortcuts that existed before the update.
 procedure FinishShortcuts;
 var
   ResultCode: Integer;
@@ -332,8 +330,6 @@ begin
     DeleteFile(ExpandConstant('{autodesktop}\{#AppName}.lnk'));
   if not StartMenuShortcut then
     DeleteFile(ExpandConstant('{autoprograms}\{#AppName}.lnk'));
-  RegWriteStringValue(HKA, '{#UninstallKey}', 'BrimDeck.DesktopShortcut', BoolValue(DesktopShortcut));
-  RegWriteStringValue(HKA, '{#UninstallKey}', 'BrimDeck.StartMenuShortcut', BoolValue(StartMenuShortcut));
   if not WizardSilent and LaunchCheck.Checked then
     ExecAsOriginalUser(ExpandConstant('{app}\{#MainExe}'), '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
 end;
