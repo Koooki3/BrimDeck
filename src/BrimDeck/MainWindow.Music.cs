@@ -41,10 +41,8 @@ public partial class MainWindow
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
     // Drives the equalizer, which must keep moving while the cursor moves; see PromptTimer.
     private PromptTimer _musicTick = null!;
-    private DateTimeOffset _lastMusicTick = DateTimeOffset.UtcNow, _positionTick, _trackNoticeUntil, _trackNoticeArmedUntil;
-    // QQ Music reports the next song while it is stopped and starts playing it up to 1.5 s later (measured
-    // through its pipe). A song that starts within this window still shows its title; one started by hand later does not.
-    private static readonly TimeSpan TrackNoticeStartWindow = TimeSpan.FromSeconds(5);
+    private DateTimeOffset _lastMusicTick = DateTimeOffset.UtcNow, _positionTick, _trackNoticeUntil;
+    private readonly TrackNoticeGate _trackNotice = new();
     private bool _musicStarted, _seeking, _updatingSeek, _commandBusy;
     private MediaTrack? _seekTrack;
     private readonly MediaSeekPreview _seekPreview = new();
@@ -160,13 +158,9 @@ public partial class MainWindow
         {
             _seeking = false; _seekTrack = null;
             // A notice still on screen switches to the new title instead of giving way to the summary until playback starts.
-            _trackNoticeArmedUntil = _mediaTrack is not null && Settings.MusicTrackNotice ? now + TrackNoticeStartWindow : default;
+            if (_mediaTrack is not null && Settings.MusicTrackNotice) _trackNotice.Arm(now); else _trackNotice.Disarm();
         }
-        if (_trackNoticeArmedUntil != default && _mediaTrack is { State: MediaState.Playing })
-        {
-            if (now <= _trackNoticeArmedUntil) _trackNoticeUntil = now.AddSeconds(4);
-            _trackNoticeArmedUntil = default;
-        }
+        if (_trackNotice.Observe(_mediaTrack, now)) _trackNoticeUntil = now.AddSeconds(4);
         if (lyricsChanged) UpdateLyrics();
         if (changedSong || lyricsChanged || coverChanged || old?.State != _mediaTrack?.State || old?.HasTimeline != _mediaTrack?.HasTimeline) RenderCompact();
         if (IsMusicPage) RenderMusic();
