@@ -10,6 +10,7 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 | Codex | Reads the sign-in in `%USERPROFILE%\.codex\auth.json` and asks OpenAI for the account usage; if that fails, shows the quota from the session records and marks it as possibly out of date | Reads the local session records (`sessions` and `archived_sessions`) |
 | Antigravity | Reads from the local service of the running Antigravity desktop app (127.0.0.1 only) | Reads the local conversation databases of the desktop app and the CLI under `%USERPROFILE%\.gemini` |
 | Cursor | Reads the Cursor sign-in from `%APPDATA%\Cursor\User\globalStorage\state.vscdb` in read-only mode and asks Cursor for the account usage | Asks Cursor for the account usage details, including usage on other devices |
+| Grok Bot | Reads the Grok Bot desktop app's own sign-in (`%APPDATA%\Grok Bot\sand-secrets.json`) and asks Cursor for that account's weekly allowance. Each row can turn off "Fetch quota online": such a row reads no sign-in and sends nothing, and shows only the weekly allowance the Grok Bot desktop app cached on this PC (`%APPDATA%\Grok Bot\sand-client-persistence`) | Not available |
 | ZCode | Reads the ZCode sign-in and asks for the Coding Plan, Start Plan and MCP daily limits | Reads the local request records (`%USERPROFILE%\.zcode\cli\db\db.sqlite`) |
 | DeepSeek Harness | Reads the DeepSeek Harness sign-in (`%USERPROFILE%\.dsh\.credentials.yaml`) and asks the DeepSeek platform for the account balance and total cost; without a signed-in account, uses the API key saved there to ask for the balance | Reads the local session records (`%USERPROFILE%\.dsh\sessions`) |
 | Zhipu GLM, Z.ai GLM, DeepSeek, New API, Sub2API, Custom | Uses the key and site address entered in settings | Not available |
@@ -32,7 +33,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 ## Network and security
 
 - Connects only to: each tool's official APIs, sites you enter in settings, the OpenRouter model list (model prices), lyrics services (LRCLIB, NetEase Cloud Music, QQ Music), the cover addresses players provide, and GitHub Releases (updates).
-- Sign-in tokens are used only in memory and never written to disk; the Claude desktop app's sign-in cache is decrypted in memory with Windows encryption for the current user.
+- Sign-in tokens are used only in memory and never written to disk; the sign-in caches of the Claude and Grok Bot desktop apps are decrypted in memory with Windows encryption for the current user.
 - Custom scripts run in a sandbox with no access to files, processes or .NET objects; see the limits in [Supported tools](ai-tools.md#custom-script).
 - The sound behind the equalizer is analyzed only in memory and never saved.
 

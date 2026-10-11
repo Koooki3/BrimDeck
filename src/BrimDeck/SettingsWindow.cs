@@ -649,7 +649,7 @@ public sealed partial class SettingsWindow : Window
         Grid.SetColumn(remove, 8); row.Children.Add(remove);
         var border = new Border { Child = row, Height = AppRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = entry,
             RenderTransform = new TranslateTransform() };
-        if (!ProviderCatalog.IsBuiltIn(entry.QuotaSource) || entry.QuotaSource == ProviderId.Claude) AttachSourceDetails(entry, row, border);
+        if (!ProviderCatalog.IsBuiltIn(entry.QuotaSource) || ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) AttachSourceDetails(entry, row, border);
         return border;
     }
 
