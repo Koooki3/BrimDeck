@@ -328,6 +328,7 @@ public partial class MainWindow
         MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleXProperty, track.State == MediaState.Paused ? .94 : 1, animate, 250);
         MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleYProperty, track.State == MediaState.Paused ? .94 : 1, animate, 250);
         AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover")); body.Children.Add(art);
+        AttachCoverFocus(art);
         var right = new Grid(); Grid.SetColumn(right, 2); body.Children.Add(right);
         right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.HeaderHeight) });
         right.RowDefinitions.Add(new RowDefinition());

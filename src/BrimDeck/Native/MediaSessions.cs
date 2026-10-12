@@ -20,7 +20,7 @@ internal sealed class MediaSessions : IDisposable
         public Session Session { get; } = session;
         public string App { get; } = session.SourceAppUserModelId;
         public string Id { get; } = heir?.Id ?? "system:" + Guid.NewGuid().ToString("N");
-        public string ProcessName { get; } = ProcessNameFor(session.SourceAppUserModelId);
+        public string ProcessName { get; } = MediaAppTarget.ProcessName(session.SourceAppUserModelId);
         public bool Dirty = true, MetadataDirty = true;
         public Task? PendingRead;
         public int Revision;
@@ -614,15 +614,9 @@ internal sealed class MediaSessions : IDisposable
     private void UpdateMeter() => _meter.SetSource(Current is not null && _routes.TryGetValue(Current.Id, out var route) ? route.ProcessName : null,
         _visible && Current?.State == MediaState.Playing);
 
-    private static string ProcessNameFor(string id)
-    {
-        string lower = id.ToLowerInvariant();
-        if (lower.Contains("cloudmusic") || lower.Contains("netease")) return "cloudmusic";
-        if (lower.Contains("qqmusic")) return "QQMusic";
-        if (lower.Contains("msedge")) return "msedge";
-        if (lower.Contains("chrome")) return "chrome";
-        return Path.GetFileNameWithoutExtension(id.Split('!')[0]);
-    }
+    // The application playing the current song, for bringing its window forward.
+    public MediaAppOwner? CurrentOwner => Current is not null && _routes.TryGetValue(Current.Id, out var route)
+        ? new(route.Connection?.ProcessId, route.ProcessName, route.System?.App ?? "") : null;
     internal static string SourceName(string id)
     {
         string lower = id.ToLowerInvariant();
