@@ -9,9 +9,10 @@ public static class ProviderCatalog
 {
     public static readonly ProviderId[] BuiltIns = [ProviderId.Claude, ProviderId.Codex, ProviderId.Antigravity, ProviderId.Cursor];
     // Sources read automatically from local applications; only the first four are added to new settings by default.
-    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh];
+    public static readonly ProviderId[] AutomaticSources = [.. BuiltIns, ProviderId.GrokBot, ProviderId.ZCode, ProviderId.Dsh];
     public static readonly ProviderId[] Sources = [.. AutomaticSources, ProviderId.GlmChina, ProviderId.GlmGlobal, ProviderId.DeepSeek, ProviderId.NewApi, ProviderId.Sub2Api, ProviderId.Custom];
-    public static readonly ProviderId[] UsageSources = [.. AutomaticSources];
+    // Grok Bot keeps no token records on this PC, so it is a quota source only.
+    public static readonly ProviderId[] UsageSources = [.. BuiltIns, ProviderId.ZCode, ProviderId.Dsh];
     public static bool IsBuiltIn(ProviderId id) => AutomaticSources.Contains(id);
     public static bool IsUsageSource(ProviderId id) => UsageSources.Contains(id);
     // Which clients a statistics source covers; each reads the local records all of its clients share.
@@ -32,6 +33,8 @@ public static class ProviderCatalog
             "The quota is read from the Antigravity desktop app, which must be running; Antigravity CLI is not read"),
         ProviderId.Dsh => Loc.T("DeepSeek Harness 桌面版或网页版登录的 DeepSeek 账户余额；未登录账户时使用其中保存的 API 密钥",
             "The balance of the DeepSeek account that the DeepSeek Harness desktop or web app signed in with; without a signed-in account, the API key saved there is used"),
+        ProviderId.GrokBot => Loc.T("只显示 Grok Bot 桌面版登录账户的每周额度",
+            "Only the weekly allowance of the account signed in to the Grok Bot desktop app is shown"),
         _ => ""
     };
     public static string QuotaTip(ProviderId id) => Loc.T("配额来源：", "Quota source: ") + Name(id) + (QuotaDescription(id) is { Length: > 0 } text ? "\n" + text : "");
@@ -39,7 +42,7 @@ public static class ProviderCatalog
     public static string Group(ProviderId id) => IsBuiltIn(id) ? Loc.T("自动读取", "Read automatically") : Loc.T("手动填写", "Entered by hand");
     public static string Name(ProviderId id) => id switch
     {
-        ProviderId.GlmChina => Loc.T("智谱 GLM", "Zhipu GLM"), ProviderId.GlmGlobal => "Z.ai GLM", ProviderId.Dsh => "DeepSeek Harness", ProviderId.DeepSeek => "DeepSeek", ProviderId.NewApi => "New API", ProviderId.Sub2Api => "Sub2API", ProviderId.Custom => Loc.T("自定义", "Custom"),
+        ProviderId.GlmChina => Loc.T("智谱 GLM", "Zhipu GLM"), ProviderId.GlmGlobal => "Z.ai GLM", ProviderId.Dsh => "DeepSeek Harness", ProviderId.GrokBot => "Grok Bot", ProviderId.DeepSeek => "DeepSeek", ProviderId.NewApi => "New API", ProviderId.Sub2Api => "Sub2API", ProviderId.Custom => Loc.T("自定义", "Custom"),
         _ => id.ToString()
     };
     public static string Key(ProviderId id) => id switch
@@ -47,9 +50,11 @@ public static class ProviderCatalog
         ProviderId.GlmChina => "glm-cn", ProviderId.GlmGlobal => "glm-global", ProviderId.NewApi => "newapi", ProviderId.Sub2Api => "sub2api",
         _ => id.ToString().ToLowerInvariant()
     };
-    // Marks the Claude snapshot built only from this PC's records, shown by Claude rows that do not read online.
+    // Claude and Grok Bot rows each choose between the account API and the record the desktop app keeps on this PC.
+    public static bool HasOnlineSwitch(ProviderId id) => id is ProviderId.Claude or ProviderId.GrokBot;
+    // Marks the snapshot of such a source built only from this PC's records, shown by its rows that do not read online.
     public const string LocalQuota = "local";
-    public static bool ReadsLocalQuota(AppEntry entry) => entry.QuotaSource == ProviderId.Claude && !entry.QuotaOnline;
+    public static bool ReadsLocalQuota(AppEntry entry) => HasOnlineSwitch(entry.QuotaSource) && !entry.QuotaOnline;
     public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision }))
         + (ReadsLocalQuota(entry) ? ":" + LocalQuota : "");
     public static string RequestKey(AppEntry entry, string secret) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, secret }));

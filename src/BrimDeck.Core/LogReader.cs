@@ -218,6 +218,13 @@ public static class QuotaParser
         if (result.Count == 0 && plan.Get("totalPercentUsed").Number() is { } total) result.Add(new("账期额度", Math.Clamp(total, 0, 100), reset));
         return result;
     }
+    // GetSandUsageStatus reports one weekly figure for the Grok Bot / Cursor account: how much of the included
+    // allowance is used (0-100) and when it resets. usagePercent shares the same scale as the Cursor quotas above.
+    public static Quota? SandUsage(JsonElement root)
+    {
+        if (root.Get("usagePercent").Number() is not { } percent) return null;
+        return new("Grok Bot", Math.Clamp(percent, 0, 100), root.Get("nextResetTimestampUtc").Date());
+    }
     public static List<Quota> Antigravity(JsonElement root)
     {
         var result = new List<Quota>();

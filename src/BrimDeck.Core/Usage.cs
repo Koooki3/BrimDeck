@@ -16,6 +16,7 @@ public sealed record TokenEntry(string Key, DateTimeOffset Time, string Model,
 }
 
 // The most recent account quota values; Local marks values taken from the desktop application's own usage history.
+// Claude and Grok Bot each keep one.
 public sealed record ClaudeQuotaSnapshot(DateTimeOffset Time, string Plan, string PlanSource, string Source, List<Quota> Quotas, bool Local = false);
 
 public sealed class ProviderSnapshot(ProviderId id)

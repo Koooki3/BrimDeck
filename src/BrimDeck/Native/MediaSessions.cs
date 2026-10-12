@@ -13,17 +13,24 @@ namespace BrimDeck.Native;
 // Each route has one authoritative source and, in log mode only, a control supplement.
 internal sealed class MediaSessions : IDisposable
 {
-    private sealed class SystemSource(Session session)
+    // A session that continues a departed one of the same app (see MediaSessionHandover) keeps its route,
+    // song and artwork until its own have been read.
+    private sealed class SystemSource(Session session, SystemSource? heir = null)
     {
         public Session Session { get; } = session;
-        public string Id { get; } = "system:" + Guid.NewGuid().ToString("N");
+        public string App { get; } = session.SourceAppUserModelId;
+        public string Id { get; } = heir?.Id ?? "system:" + Guid.NewGuid().ToString("N");
         public string ProcessName { get; } = ProcessNameFor(session.SourceAppUserModelId);
         public bool Dirty = true, MetadataDirty = true;
         public Task? PendingRead;
         public int Revision;
-        public MediaTrack? Track;
-        public BitmapSource? Cover;
-        public byte[]? CoverBytes;
+        public MediaTrack? Track = heir?.Track;
+        public BitmapSource? Cover = heir?.Cover;
+        public byte[]? CoverBytes = heir?.CoverBytes;
+        // What the route shows, which differs from Track while MediaSwapGuard holds a change back.
+        public readonly MediaSwapGuard Guard = new();
+        public MediaTrack? Shown = heir?.Shown ?? heir?.Track;
+        public BitmapSource? ShownCover = heir?.ShownCover ?? heir?.Cover;
     }
     private sealed class CoverCache
     {
@@ -34,7 +41,7 @@ internal sealed class MediaSessions : IDisposable
         public byte[]? CoverBytes;
         public CancellationTokenSource? CoverCancellation;
     }
-    private sealed record Route(string Id, string ProcessName, SystemSource? System, IMediaPlayerConnection? Connection = null, bool Supplement = false);
+    private sealed record Route(string Id, string ProcessName, SystemSource? System, IMediaPlayerConnection? Connection = null, bool Supplement = false, bool Departed = false);
 
     private readonly Dispatcher _dispatcher;
     // Debounce and recheck decide when a track change reaches the panel, so they run on PromptTimer; see PromptTimer.
@@ -51,6 +58,9 @@ internal sealed class MediaSessions : IDisposable
     private const int RecentCoverCount = 16;
     private readonly LinkedList<(string Url, byte[] Bytes)> _recentCovers = new();
     private readonly Dictionary<string, Route> _routes = new();
+    private readonly MediaSessionHandover _handover = new();
+    // Sessions on screen that disappeared within the handover hold, by route id.
+    private readonly Dictionary<string, SystemSource> _departed = new();
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private bool _reading, _again, _disposed, _sessionListDirty = true, _visible, _requestingManager, _announcedRestarting;
     private DateTimeOffset _recoveryAt;
@@ -162,6 +172,7 @@ internal sealed class MediaSessions : IDisposable
         }
         Schedule();
     }
+    private static DateTimeOffset? Earliest(DateTimeOffset? a, DateTimeOffset? b) => a is { } x && b is { } y ? (x < y ? x : y) : a ?? b;
     private void ScheduleRecheck(DateTimeOffset? at)
     {
         _recheck.Stop();
@@ -201,14 +212,23 @@ internal sealed class MediaSessions : IDisposable
                 {
                     _sessionListDirty = false;
                     var live = _manager?.GetSessions().ToArray() ?? [];
+                    var synced = DateTimeOffset.UtcNow;
                     foreach (var removed in _sessions.Keys.Where(s => !live.Contains(s)).ToArray())
-                    { Unsubscribe(removed); _sessions.Remove(removed); }
+                    {
+                        var departed = _sessions[removed];
+                        Unsubscribe(removed); _sessions.Remove(removed);
+                        if (departed.Track is not null && Current?.Id == departed.Id)
+                        { _handover.Depart(departed.Id, departed.App, synced); _departed[departed.Id] = departed; }
+                    }
                     foreach (var session in live.Where(s => !_sessions.ContainsKey(s)))
                     {
-                        var source = new SystemSource(session);
+                        var heir = _handover.Claim(session.SourceAppUserModelId, synced) is { } continued && _departed.Remove(continued, out var previous) ? previous : null;
+                        var source = new SystemSource(session, heir);
                         _sessions.Add(session, source); Subscribe(session); _ = RetryMetadataAsync(source, source.Revision);
                     }
                 }
+                var heldAt = DateTimeOffset.UtcNow;
+                foreach (var id in _departed.Keys.Where(id => !_handover.Holds(id, heldAt)).ToArray()) _departed.Remove(id);
                 // Provider reads complete independently and schedule their own refresh. A slow
                 // Windows source must not delay native player events.
                 foreach (var source in _sessions.Values.Where(s => s.Dirty).ToArray()) _ = ReadSystemAsync(source);
@@ -216,6 +236,7 @@ internal sealed class MediaSessions : IDisposable
                 var routes = BuildRoutes();
                 var tracks = new List<MediaTrack>();
                 var covers = new Dictionary<string, BitmapSource?>();
+                DateTimeOffset? swapDue = null;
                 foreach (var route in routes)
                 {
                     MediaTrack? track;
@@ -223,10 +244,17 @@ internal sealed class MediaSessions : IDisposable
                     if (route.Connection?.Snapshot is { } native)
                     {
                         track = FromDesktop(native) with { Id = route.Id, Source = SourceName(route.ProcessName) };
-                        // If the log format is unavailable, the system source owns metadata.
-                        if (native.IsNeteaseLog && native.Title.Length == 0 && route.System?.Track is { } fallback)
-                            track = fallback with { Id = route.Id, IsNeteaseLog = true, CanSeek = false, CanShuffle = false, CanRepeat = false };
-                        if (route.Supplement) track = MediaRouting.Merge(track, route.System?.Track);
+                        var log = track;
+                        // NetEase's SMTC session, when switched on, reports a skip before its log does; it leads and the log fills in.
+                        var leading = route.Supplement && route.System?.Track is { } smtc && !string.IsNullOrWhiteSpace(smtc.Title) ? smtc : null;
+                        if (leading is not null) track = MediaRouting.PreferSystem(log, leading);
+                        else
+                        {
+                            // If the log format is unavailable, the system source owns metadata.
+                            if (native.IsNeteaseLog && native.Title.Length == 0 && route.System?.Track is { } fallback)
+                                track = fallback with { Id = route.Id, IsNeteaseLog = true, CanSeek = false, CanShuffle = false, CanRepeat = false };
+                            if (route.Supplement) track = MediaRouting.Merge(track, route.System?.Track);
+                        }
                         if (!_covers.TryGetValue(route.Id, out var cache)) _covers[route.Id] = cache = new();
                         // Not SongKey: it includes the duration, which QQ's pipe reports about a second after the song.
                         string key = (native.SongId ?? $"{track.Title}\n{track.Artist}\n{track.Album}") + "|" + native.CoverUrl;
@@ -239,9 +267,30 @@ internal sealed class MediaSessions : IDisposable
                             cache.Previous = null;
                             if (cache.Cover is null && native.CoverUrl is not null) { cache.Previous = shown; _ = ReadCoverAsync(cache, key, native.CoverUrl); }
                         }
-                        artwork = native.IsNeteaseLog && native.Title.Length == 0 ? route.System?.Cover : cache.Cover ?? cache.Previous;
+                        // The log's cover is the full-size album picture, so it is used once the log has reached the session's song.
+                        // Until then the session's thumbnail stands in; neither borrows another player's artwork.
+                        if (leading is not null)
+                            artwork = MediaRouting.LogMatchesSession(log, leading) && cache.Cover is { } logCover ? logCover : route.System!.Cover ?? cache.Cover ?? cache.Previous;
+                        else artwork = native.IsNeteaseLog && native.Title.Length == 0 ? route.System?.Cover : cache.Cover ?? cache.Previous;
                     }
-                    else { track = route.System?.Track is { } system ? system with { Id = route.Id } : null; artwork = route.System?.Cover; }
+                    else
+                    {
+                        var source = route.System;
+                        track = source?.Track is { } system ? system with { Id = route.Id } : null; artwork = source?.Cover;
+                        if (route.Departed)
+                        {
+                            // A departed session no longer plays; it only keeps its place until a successor arrives or the hold ends.
+                            if (source?.Shown is { } shown) { track = shown with { Id = route.Id }; artwork = source.ShownCover; }
+                            if (track is { State: MediaState.Playing }) track = track with { State = MediaState.Paused };
+                        }
+                        else if (source is not null && track is not null)
+                        {
+                            // Another tab's song standing in for a playing one during its track change is not shown; see MediaSwapGuard.
+                            if (source.Guard.Holds(source.Shown, track, heldAt)) { track = source.Shown! with { Id = route.Id }; artwork = source.ShownCover; }
+                            else { source.Shown = track; source.ShownCover = artwork; }
+                            swapDue = Earliest(swapDue, source.Guard.RecheckAt);
+                        }
+                    }
                     if (track is null) continue;
                     tracks.Add(track); covers[track.Id] = artwork;
                 }
@@ -258,7 +307,7 @@ internal sealed class MediaSessions : IDisposable
                 var decision = _stack.Update(tracks, now, preferred, Current?.Id);
                 // Starting playback in another player is a newer choice than a manual selection.
                 if (decision.Started is { } started && started != _selected) _selected = null;
-                ScheduleRecheck(decision.RecheckAt);
+                ScheduleRecheck(Earliest(Earliest(decision.RecheckAt, _handover.NextExpiry), swapDue));
                 var current = tracks.FirstOrDefault(t => t.Id == _pinned) ?? tracks.FirstOrDefault(t => t.Id == _selected)
                     ?? tracks.FirstOrDefault(t => t.Id == decision.Current);
                 // QQ Music reports a stop of 50 to 100 ms between songs. A stopped player leaves the compact view,
@@ -312,6 +361,7 @@ internal sealed class MediaSessions : IDisposable
         }
         foreach (var source in _sessions.Values.Where(s => !consumed.Contains(s)))
             routes.Add(new(source.Id, source.ProcessName, source));
+        foreach (var source in _departed.Values) routes.Add(new(source.Id, source.ProcessName, source, Departed: true));
         return routes;
     }
 
@@ -591,7 +641,7 @@ internal sealed class MediaSessions : IDisposable
         if (_manager is not null) { _manager.SessionsChanged -= SessionsChanged; _manager.CurrentSessionChanged -= CurrentChanged; }
         foreach (var session in _sessions.Keys) Unsubscribe(session);
         foreach (var cache in _covers.Values) cache.CoverCancellation?.Cancel();
-        _sessions.Clear(); _covers.Clear(); _routes.Clear();
+        _sessions.Clear(); _covers.Clear(); _routes.Clear(); _departed.Clear();
         foreach (var connection in _connections) { connection.Changed -= Schedule; connection.Dispose(); }
         _coverHttp.Dispose();
         _meter.Dispose();

@@ -23,18 +23,11 @@ internal static class ClaudeDesktopReader
                 var encrypted = root.TryGetProperty("oauth:tokenCacheV2", out var v2)
                     ? v2.Text() : root.Get("oauth:tokenCache").Text();
                 if (encrypted.Length == 0) continue;
-                using var state = BrimDeck.Core.SharedFile.Parse(Path.Combine(profile, "Local State"));
-                var wrappedKey = Convert.FromBase64String(state.RootElement.Get("os_crypt").Get("encrypted_key").Text());
-                if (!wrappedKey.AsSpan().StartsWith("DPAPI"u8)) throw new CryptographicException();
-                var key = ProtectedData.Unprotect(wrappedKey.AsSpan(5).ToArray(), null, DataProtectionScope.CurrentUser);
+                var key = ChromiumSecrets.Key(Path.Combine(profile, "Local State"));
                 byte[]? plain = null;
                 try
                 {
-                    var data = Convert.FromBase64String(encrypted);
-                    if (data.Length < 31 || !data.AsSpan().StartsWith("v10"u8)) throw new CryptographicException();
-                    plain = new byte[data.Length - 31];
-                    using var aes = new AesGcm(key, 16);
-                    aes.Decrypt(data.AsSpan(3, 12), data.AsSpan(15, plain.Length), data.AsSpan(data.Length - 16), plain);
+                    plain = ChromiumSecrets.Decrypt(key, encrypted);
                     using var cache = JsonDocument.Parse(plain);
                     var credentials = ClaudeDesktopCache.Parse(cache.RootElement, root.Get("lastKnownAccountUuid").Text(), DateTimeOffset.UtcNow);
                     if (credentials.Count > 0) return new(true, credentials);

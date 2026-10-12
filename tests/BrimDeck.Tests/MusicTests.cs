@@ -52,7 +52,23 @@ internal static class MusicTests
         check("Cancelled lyrics queries do not issue requests", cancelled && handler.Calls == 1);
         var nativeLyrics = await service.FindAsync(track with { EmbeddedLyrics = "[00:02]播放器提供的完整歌词" }, true, default);
         check("Native full lyrics bypass online lookup", nativeLyrics.At(2).Current == "播放器提供的完整歌词" && handler.Calls == 1);
+        using var versioned = new NeteaseLyricHandler(); using var versionedHttp = new HttpClient(versioned); using var versionedService = new LyricsService(versionedHttp);
+        var firstVersion = await versionedService.FindAsync(track with { Source = "NetEase", SongId = "netease:2692035029" }, true, default);
+        check("A NetEase lyric still at its first version is requested in full", firstVersion.At(1.5).Current == "first" && versioned.Requested.All(u => !u.Contains("lv=1")));
         await QqLyricsTests.Run(check);
+    }
+    // NetEase's lyric endpoint answers lv=<held version> with an empty lyric unless its own version is newer.
+    private sealed class NeteaseLyricHandler : HttpMessageHandler
+    {
+        public readonly List<string> Requested = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            string url = request.RequestUri!.ToString(); Requested.Add(url);
+            if (!url.StartsWith("https://music.163.com/api/song/lyric?", StringComparison.Ordinal)) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            var held = System.Text.RegularExpressions.Regex.Match(url, @"[?&]lv=(-?\d+)");
+            string lyric = held.Success && int.Parse(held.Groups[1].Value) >= 1 ? "" : "[00:01]first";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"lrc\":{\"version\":1,\"lyric\":\"" + lyric + "\"},\"code\":200}") });
+        }
     }
     private sealed class LyricsHandler : HttpMessageHandler
     {

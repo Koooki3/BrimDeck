@@ -121,13 +121,16 @@ internal static class UI
         int minutes = Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes));
         return Loc.T($"{minutes} 分后", $"in {minutes}m");
     }
-    // "Gemini · 5 小时额度" → "5 小时"; the group prefix is shown by the column's switch instead. The group stays in the
-    // data's words, since it also selects the group; the label is only shown, so it is translated.
+    // "Gemini · 5 小时" → group "Gemini", which orders the quota pages. The group stays in the data's words.
     public static string QuotaGroup(Quota quota) => quota.Label.Contains('·') ? quota.Label.Split('·')[0].Trim() : "";
+    // "5 小时额度" → "5 小时"; "Gemini · 5 小时" → "Gemini 5 小时" and "Claude · 每周" → "Claude 每周", written like
+    // Claude's "Opus 每周", so a grouped quota names its group in its own row. The shown label is translated.
     public static string QuotaLabel(Quota quota)
     {
-        var label = quota.Label.Contains('·') ? quota.Label.Split('·')[^1].Trim() : quota.Label;
-        return Loc.Label(label.Replace("额度", "", StringComparison.Ordinal).Trim());
+        var period = (quota.Label.Contains('·') ? quota.Label.Split('·')[^1] : quota.Label).Replace("额度", "", StringComparison.Ordinal).Trim();
+        var group = QuotaGroup(quota);
+        if (group.Length == 0) return Loc.Label(period);
+        return period == "每周" ? Loc.Label(group + " 每周") : group + " " + Loc.Label(period);
     }
     public static string DisplayPlan(string plan) => plan.Trim().ToLowerInvariant() switch
     { "prolite" => "Pro Lite", "pro" or "google ai pro" => "Pro", "google ai ultra" => "Ultra", "plus" => "Plus", "free" => "Free", "max" => "Max", "team" => "Team", "business" => "Business", "enterprise" => "Enterprise", _ => plan.Trim() };

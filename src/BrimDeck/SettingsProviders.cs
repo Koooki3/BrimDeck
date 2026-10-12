@@ -84,13 +84,17 @@ public sealed partial class SettingsWindow
         { _expandedSource = id; view.Detail.Visibility = Visibility.Visible; view.Row.Height = double.NaN; PointArrow(view.Arrow, true); }
     }
 
-    // Claude needs no site or key; its expanded row holds this row's own switch for reading the quota online.
-    private FrameworkElement ClaudeDetails(AppEntry entry)
+    // Claude and Grok Bot need no site or key; the expanded row holds this row's own switch for reading the quota online.
+    private FrameworkElement OnlineQuotaDetails(AppEntry entry)
     {
         var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
+        bool grokBot = entry.QuotaSource == ProviderId.GrokBot;
         string title = Loc.T("联网获取额度", "Fetch quota online");
-        string help = Loc.T("开启：使用 Claude Code 或桌面版的登录，联网获取额度。\n关闭：不联网，只显示 Claude 桌面版在本机记录的最新额度。",
-            "On: fetches the quota online with the Claude Code or desktop app sign-in.\nOff: no network access; shows the latest quota the Claude desktop app recorded on this PC.");
+        string help = grokBot
+            ? Loc.T("开启：使用 Grok Bot 桌面版的登录，联网获取每周额度。\n关闭：不联网，只显示 Grok Bot 桌面版在本机缓存的最新每周额度。",
+                "On: fetches the weekly allowance online with the Grok Bot desktop app sign-in.\nOff: no network access; shows the latest weekly allowance the Grok Bot desktop app cached on this PC.")
+            : Loc.T("开启：使用 Claude Code 或桌面版的登录，联网获取额度。\n关闭：不联网，只显示 Claude 桌面版在本机记录的最新额度。",
+                "On: fetches the quota online with the Claude Code or desktop app sign-in.\nOff: no network access; shows the latest quota the Claude desktop app recorded on this PC.");
         var line = new Grid();
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -108,7 +112,7 @@ public sealed partial class SettingsWindow
         line.Children.Add(heading);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.QuotaOnline, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title); AutomationProperties.SetHelpText(toggle, help);
-        AutomationProperties.SetAutomationId(toggle, "claude-online-" + entry.InstanceId.ToString("N"));
+        AutomationProperties.SetAutomationId(toggle, (grokBot ? "grokbot-online-" : "claude-online-") + entry.InstanceId.ToString("N"));
         Grid.SetColumn(toggle, 1); line.Children.Add(toggle);
         void Set(bool online)
         {
@@ -126,7 +130,7 @@ public sealed partial class SettingsWindow
     // between the warning and critical colors. Labels share one width so every field starts at the same place.
     private FrameworkElement SourceDetails(AppEntry entry)
     {
-        if (entry.QuotaSource == ProviderId.Claude) return ClaudeDetails(entry);
+        if (ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) return OnlineQuotaDetails(entry);
         var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12); Grid.SetIsSharedSizeScope(grid, true);
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };
         Func<bool> commitSite = () => true;
