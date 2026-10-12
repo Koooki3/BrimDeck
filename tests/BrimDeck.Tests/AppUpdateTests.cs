@@ -1,3 +1,4 @@
+using System.Net;
 using BrimDeck.Core;
 
 internal static class AppUpdateTests
@@ -56,6 +57,63 @@ internal static class AppUpdateTests
         check("unpackaged app can check but cannot overwrite its running executable", empty.HasUpdate && empty.Stage == AppUpdateStage.Available);
         var cancelled = new CancellationTokenSource(); cancelled.Cancel(); await empty.CheckAsync(true, cancelled.Token);
         check("canceled check is quiet and preserves available release", empty.HasUpdate && empty.Error is null);
+        await ScheduleTests(Path.Combine(root, "schedule"), check);
+    }
+
+    private static async Task ScheduleTests(string folder, Action<string, bool> check)
+    {
+        var start = new DateTimeOffset(2026, 10, 12, 0, 0, 0, TimeSpan.Zero); var now = start;
+        var backend = new UpdateFixture();
+        var service = new AppUpdates(backend, folder, () => now);
+        await service.CheckInBackgroundAsync(true);
+        check("no background check before 90 seconds", backend.Checks == 0);
+        now = start.AddSeconds(90); await service.CheckInBackgroundAsync(false);
+        check("offline skips a due background check", backend.Checks == 0);
+        await service.CheckInBackgroundAsync(true);
+        check("first background check runs 90 seconds after startup", backend.Checks == 1 && service.NoticeVersion == "0.2.0");
+        now = start.AddHours(6); await service.CheckInBackgroundAsync(true);
+        check("the next background check waits 6 hours after a success", backend.Checks == 1);
+        now = start.AddSeconds(90).AddHours(6); await service.CheckInBackgroundAsync(true);
+        check("background checks repeat every 6 hours", backend.Checks == 2);
+        backend.FailCheck = true;
+        now = now.AddHours(6); await service.CheckInBackgroundAsync(true);
+        check("background failures are silent", backend.Checks == 3 && service.Error is null && service.HasUpdate);
+        var first = service.NextBackgroundCheck - now;
+        now += first; await service.CheckInBackgroundAsync(true);
+        var second = service.NextBackgroundCheck - now;
+        now += second; await service.CheckInBackgroundAsync(true);
+        var third = service.NextBackgroundCheck - now;
+        now += third; await service.CheckInBackgroundAsync(true);
+        var fourth = service.NextBackgroundCheck - now;
+        check("failed checks retry after 15 minutes, 1 hour, then every 4 hours", first == TimeSpan.FromMinutes(15) && second == TimeSpan.FromHours(1) &&
+            third == TimeSpan.FromHours(4) && fourth == TimeSpan.FromHours(4) && backend.Checks == 6);
+        now += TimeSpan.FromMinutes(30); await service.CheckInBackgroundAsync(true);
+        check("no retry before the backoff ends", backend.Checks == 6);
+        backend.FailCheck = false; backend.Failure = new UpdateCheckException(HttpStatusCode.TooManyRequests, TimeSpan.FromHours(10));
+        now = now - TimeSpan.FromMinutes(30) + fourth; await service.CheckInBackgroundAsync(true);
+        check("Retry-After postpones the next check", backend.Checks == 7 && service.NextBackgroundCheck == now.AddHours(10));
+        now = now.AddHours(5); await service.CheckAsync(false);
+        check("opening settings also honors Retry-After", backend.Checks == 7);
+        backend.Failure = null; now = now.AddHours(5); await service.CheckInBackgroundAsync(true);
+        check("a success resets the backoff", backend.Checks == 8 && service.NextBackgroundCheck == now + UpdateSchedule.Interval);
+        var restarted = new AppUpdates(backend, folder, () => now);
+        await restarted.CheckInBackgroundAsync(true); now = now.AddSeconds(90); await restarted.CheckInBackgroundAsync(true);
+        check("the last success survives a restart and skips the startup check", backend.Checks == 8 && restarted.LastChecked == service.LastChecked && restarted.NoticeVersion == "0.2.0");
+        restarted.AutoCheck = false; now = now.AddHours(7); await restarted.CheckInBackgroundAsync(true); await restarted.CheckAsync(false);
+        check("turning automatic checks off stops background and open-settings checks", backend.Checks == 8);
+        await restarted.CheckAsync(true); restarted.SkipVersion();
+        check("a skipped version hides the notice and the prompt", backend.Checks == 9 && restarted.NoticeVersion is null && !restarted.ShouldPrompt(true, true));
+        check("the skipped version and the automatic setting persist", new AppUpdates(backend, folder, () => now) is { AutoCheck: false, NoticeVersion: null });
+        backend.Release = new("0.3.0", "", 100); await restarted.CheckAsync(true);
+        check("a newer version than the skipped one shows the notice again", restarted.NoticeVersion == "0.3.0");
+        backend.Release = null; await restarted.CheckAsync(true);
+        check("no newer version clears the notice", restarted.NoticeVersion is null && new AppUpdates(backend, folder, () => now).NoticeVersion is null);
+        var legacy = Path.Combine(folder, "legacy"); Directory.CreateDirectory(legacy);
+        File.WriteAllText(Path.Combine(legacy, "update-prompt.txt"), "0.2.0");
+        backend.Release = new("0.2.0", "Update notes", 100);
+        var migrated = new AppUpdates(backend, legacy, () => now); await migrated.CheckAsync(true);
+        check("update-prompt.txt is migrated once into update-state.json", migrated.HasUpdate && !migrated.ShouldPrompt(true, true) &&
+            !File.Exists(Path.Combine(legacy, "update-prompt.txt")) && File.Exists(Path.Combine(legacy, "update-state.json")));
     }
 }
 
@@ -68,6 +126,7 @@ internal sealed class UpdateFixture : IAppUpdateBackend
     public Task<AppRelease?>? CheckResult { get; set; }
     public Task? DownloadGate { get; set; }
     public bool FailCheck { get; set; }
+    public Exception? Failure { get; set; }
     public bool FailDownload { get; set; }
     public int Checks { get; private set; }
     public int Downloads { get; private set; }
@@ -78,6 +137,7 @@ internal sealed class UpdateFixture : IAppUpdateBackend
     {
         Checks++;
         if (FailCheck) throw new HttpRequestException();
+        if (Failure is not null) throw Failure;
         return CheckResult ?? Task.FromResult(Release);
     }
     public async Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation)

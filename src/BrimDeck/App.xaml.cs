@@ -67,6 +67,7 @@ public partial class App : Application
         Secrets = new ProviderSecrets(folder);
         Usage = new UsageService(new DesktopSources(), secrets: Secrets);
         Deck = new MainWindow(this); MainWindow = Deck; Deck.Show();
+        StartBackgroundUpdates();
         _save.Tick += (_, _) => FlushSettings();
         _tray = new TrayIcon(Deck, OpenSettings, ExitApplication);
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
@@ -100,7 +101,10 @@ public partial class App : Application
         Resources["PinSourceName"] = Loc.T("固定显示", "Pin");
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
-    public void OpenSettings()
+    public void OpenSettings() => ShowSettings(false);
+    // The panel's update dot opens the About page with the update dialog.
+    internal void OpenUpdateSettings() => ShowSettings(true);
+    private void ShowSettings(bool update)
     {
         if (_settingsWindow is null)
         {
@@ -111,7 +115,7 @@ public partial class App : Application
         }
         if (_settingsWindow.WindowState == WindowState.Minimized) _settingsWindow.WindowState = WindowState.Normal;
         _settingsWindow.Activate();
-        _ = _settingsWindow.CheckUpdatesOnOpenAsync();
+        _ = update ? _settingsWindow.ShowUpdateNoticeAsync() : _settingsWindow.CheckUpdatesOnOpenAsync();
     }
     public void UpdateSettings(DeckSettings settings)
     {
@@ -152,7 +156,7 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); _tray?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); StopBackgroundUpdates(); _tray?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
