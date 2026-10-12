@@ -74,7 +74,7 @@ public partial class MainWindow : Window
         InitializeMusic();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
-        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); };
+        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); _app.CheckUpdatesIfDue(); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
         _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(); };
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false)); };
@@ -162,8 +162,8 @@ public partial class MainWindow : Window
     // The toolbar's fixed buttons are declared in XAML; their names follow the interface language.
     private void ApplyLanguage()
     {
-        AIUsageButton.ToolTip = Loc.T("AI 用量", "AI usage"); System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, (string)AIUsageButton.ToolTip);
-        MusicPageButton.ToolTip = Loc.T("音乐", "Music"); System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, (string)MusicPageButton.ToolTip);
+        System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
+        System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
     public void Preview(bool enabled, bool expanded = true)
@@ -392,7 +392,7 @@ public partial class MainWindow : Window
         if (_popupReturnArea is { } area && area.Contains(screenPoint)) return;
         _leave.Stop(); SetExpanded(false);
     }
-    private void Settings_Click(object sender, RoutedEventArgs e) => _app.OpenSettings();
+    private void Settings_Click(object sender, RoutedEventArgs e) { if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings(); else _app.OpenSettings(); }
     private async Task<IReadOnlyList<ProviderSnapshot>> LoadSnapshotsAsync(DateTime? historyStart)
     {
         var settings = Settings.Copy();

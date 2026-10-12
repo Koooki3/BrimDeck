@@ -79,15 +79,14 @@ public partial class MainWindow
         return snapshot.Entries.Where(x => x.Time.LocalDateTime >= start).ToList();
     }
 
-    // The cheap part of a render: clock, status tooltip and the synchronization button. Run on every expansion.
+    // The cheap part of a render: clock, gear tooltip and the synchronization button. Run on every expansion.
     internal void RefreshStatus()
     {
         RenderSyncButton();
         RenderPageSwitch();
         ClockLabel.Text = DateTime.Now.ToString("HH:mm");
-        var updateStatus = _refreshing ? Loc.T("更新中", "Updating") : LastRefreshError is not null ? Loc.T("更新失败", "Update failed") :
-            _updatedAt is { } time ? Loc.T($"更新于 {time.LocalDateTime:MM-dd HH:mm:ss}", $"Updated {time.LocalDateTime:MM-dd HH:mm:ss}") : Loc.T("尚未更新", "Not updated yet");
-        SettingsButton.ToolTip = Loc.T("设置", "Settings") + "\n" + updateStatus;
+        // The gear shows a tooltip only while it carries the update notice.
+        SettingsButton.ToolTip = _app.Updates.NoticeVersion is { } version ? Loc.T($"新版本 {version} 可用", $"Version {version} is available") : null;
     }
 
     public void RenderUsage()
@@ -140,7 +139,7 @@ public partial class MainWindow
             AutomationProperties.SetName(button, item.Name);
             strip.Children.Add(button);
         }
-        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(Math.Round(lineHeight / 3) + 1), Padding = new Thickness(1) };
+        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
     }
 
     private QuotaView Quotas(AppEntry entry, ProviderSnapshot snapshot)
@@ -171,7 +170,7 @@ public partial class MainWindow
             var controls = new StackPanel { Orientation = Orientation.Horizontal };
             Button PageButton(string label, string name, int step)
             {
-                var button = ModelAction(label, name, () => { _applicationPage += step; RenderUsage(); });
+                var button = ModelAction(label, name, () => { _applicationPage += step; RenderUsage(); }, toolTip: false);
                 button.IsEnabled = step < 0 ? _applicationPage > 0 : _applicationPage + 1 < pages;
                 button.Padding = new Thickness(6, 0, 6, 0); return button;
             }

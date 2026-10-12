@@ -695,8 +695,6 @@ public sealed partial class SettingsWindow : Window
                     if (quota)
                     {
                         current.QuotaSource = id; current.Site = ""; current.Script = id == ProviderId.Custom ? ProviderScripts.Example : ""; current.SecretRevision = Guid.Empty;
-                        if (!ProviderCatalog.IsBuiltIn(id) && current.ThemeColor.Length == 0)
-                            current.ThemeColor = AppPresets.Palette.FirstOrDefault(color => s.Apps.Where(a => a.InstanceId != entry.InstanceId).All(a => a.Theme != color)) ?? AppPresets.Palette[0];
                     }
                     else current.UsageSource = id;
                 });
@@ -787,35 +785,72 @@ public sealed partial class SettingsWindow : Window
         return button;
     }
 
-    // Preset swatches plus a hexadecimal field; "默认" restores the preset value.
+    // A saturation/value square with a hue strip, preset swatches and a hexadecimal field. Dragging or typing changes one pending
+    // color shown by every part without closing the popup; "确定" or Enter applies it. A swatch applies its color at once, "默认"
+    // restores the preset value, and a click outside closes the popup without changes.
+    // choose receives the new color, or "" for the default; the caller closes the popup.
     private Border ColorPicker(string current, bool isDefault, Action<string> choose)
     {
-        var panel = new StackPanel { Width = 200 };
+        const double width = 224;
+        static Color Parse(string value) => (Color)ColorConverter.ConvertFromString(value);
+        static string Hex(Color color) => ColorMath.ToHex(color.R, color.G, color.B);
+        static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        string pending = AppPresets.NormalizeColor(current) is { Length: > 0 } valid ? valid : "#FFFFFF";
+        var panel = new StackPanel { Width = width };
+        var area = new HsvColorPicker(width, 132, _palette.Border) { Margin = new Thickness(0, 0, 0, 12) };
+        AutomationProperties.SetName(area, Loc.T("颜色选择器", "Color picker"));
+        panel.Children.Add(area);
         var palette = new UniformGrid { Columns = 6 };
-        foreach (var color in AppPresets.Palette)
-        {
-            bool selected = string.Equals(color, current, StringComparison.OrdinalIgnoreCase);
-            var swatch = ActionButton("", () => choose(color)); swatch.Padding = new Thickness(0); swatch.Width = 31; swatch.Height = 31;
-            swatch.Content = new Ellipse { Width = 20, Height = 20, Fill = UI.Brush(color), Stroke = UI.Brush(selected ? TextPrimary : _palette.Border), StrokeThickness = selected ? 2 : 1 };
-            swatch.ToolTip = color; AutomationProperties.SetName(swatch, Loc.T("颜色 ", "Color ") + color); palette.Children.Add(swatch);
-        }
         panel.Children.Add(palette);
+
         var entry = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
-        var reset = ActionButton(Loc.T("默认", "Default"), () => choose("")); reset.IsEnabled = !isDefault; reset.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(reset, Dock.Right); entry.Children.Add(reset);
+        var ok = ActionButton(Loc.T("确定", "OK"), () => { }, primary: true); ok.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(ok, Dock.Right);
+        var reset = ActionButton(Loc.T("默认", "Default"), () => choose("")); reset.IsEnabled = !isDefault; reset.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(reset, Dock.Right);
+        entry.Children.Add(ok); entry.Children.Add(reset);
+        var dot = new Ellipse { Width = 20, Height = 20, Stroke = UI.Brush(_palette.Border), StrokeThickness = 1, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        DockPanel.SetDock(dot, Dock.Left); entry.Children.Add(dot);
         var field = new StackPanel { Orientation = Orientation.Horizontal };
         var hash = TextLine("#", 12, TextSecondary); hash.VerticalAlignment = VerticalAlignment.Center; hash.Margin = new Thickness(0, 0, 4, 0); field.Children.Add(hash);
-        var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), Text = current.TrimStart('#'), Width = 72, TextAlignment = TextAlignment.Left, VerticalAlignment = VerticalAlignment.Center, MaxLength = 6 };
+        var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), Width = 60, TextAlignment = TextAlignment.Left, VerticalAlignment = VerticalAlignment.Center, MaxLength = 6 };
         AutomationProperties.SetName(input, Loc.T("颜色值", "Color value")); field.Children.Add(input);
         var chip = new Border { Child = field, Height = 28, CornerRadius = new CornerRadius(6), Background = UI.Brush(Inset), BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(1), Padding = new Thickness(9, 0, 9, 0) };
         input.GotKeyboardFocus += (_, _) => chip.BorderBrush = UI.Brush(UI.Accent); input.LostKeyboardFocus += (_, _) => chip.BorderBrush = Brushes.Transparent;
-        void Commit() { var value = AppPresets.NormalizeColor(input.Text); if (value.Length > 0 && !string.Equals(value, current, StringComparison.OrdinalIgnoreCase)) choose(value); }
-        input.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Commit(); e.Handled = true; } };
         entry.Children.Add(chip); panel.Children.Add(entry);
-        return new Border
+
+        var rings = new List<(Ellipse Ring, string Color)>();
+        bool typing = false;
+        void Select(string color, object? source)
+        {
+            pending = color;
+            if (source != area) area.SetColor(Parse(color));
+            if (source != input) { typing = true; input.Text = color.TrimStart('#'); typing = false; }
+            dot.Fill = UI.Brush(color);
+            foreach (var (ring, preset) in rings) { bool selected = Same(preset, color); ring.Stroke = UI.Brush(selected ? TextPrimary : _palette.Border); ring.StrokeThickness = selected ? 2 : 1; }
+            ok.IsEnabled = !Same(pending, current);
+        }
+        void Commit() { if (!Same(pending, current)) choose(pending); }
+        foreach (var color in AppPresets.Palette)
+        {
+            var swatch = ActionButton("", () => choose(color)); swatch.Padding = new Thickness(0); swatch.Width = 31; swatch.Height = 31;
+            var ring = new Ellipse { Width = 20, Height = 20, Fill = UI.Brush(color) }; swatch.Content = ring; rings.Add((ring, color));
+            swatch.ToolTip = color; AutomationProperties.SetName(swatch, Loc.T("颜色 ", "Color ") + color); palette.Children.Add(swatch);
+        }
+        area.Changed += color => Select(Hex(color), area);
+        input.TextChanged += (_, _) => { if (!typing && input.Text.Length == 6 && AppPresets.NormalizeColor(input.Text) is { Length: > 0 } value) Select(value, input); };
+        input.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            if (AppPresets.NormalizeColor(input.Text) is { Length: > 0 } value) { Select(value, input); Commit(); }
+            e.Handled = true;
+        };
+        ok.Click += (_, _) => Commit();
+        Select(pending, null);
+        var surface = new Border
         {
             Child = panel, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9), Padding = new Thickness(10)
+            CornerRadius = new CornerRadius(9), Padding = new Thickness(12)
         };
+        return surface;
     }
 
     // Replaces one application row in place, so the rest of the page neither rebuilds nor flickers.

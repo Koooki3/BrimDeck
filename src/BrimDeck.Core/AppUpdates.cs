@@ -1,3 +1,6 @@
+using System.Net;
+using System.Text.Json;
+
 namespace BrimDeck.Core;
 
 public enum AppUpdateStage { Idle, Checking, Available, Downloading, Ready, Installing }
@@ -13,15 +16,61 @@ public interface IAppUpdateBackend
     void PrepareRestart();
 }
 
+// A version check the server refused; RetryAfter carries its Retry-After header when it sent one.
+public sealed class UpdateCheckException(HttpStatusCode status, TimeSpan? retryAfter)
+    : HttpRequestException($"The update manifest request failed with status {(int)status}.", null, status)
+{
+    public TimeSpan? RetryAfter { get; } = retryAfter;
+}
+
+// When automatic checks run. The first comes 90 seconds after startup unless the last successful check is less than
+// 6 hours old; then every 6 hours. A failed check is retried after 15 minutes, 1 hour, then every 4 hours, and never
+// before the server's Retry-After time.
+public static class UpdateSchedule
+{
+    public static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(90);
+    public static readonly TimeSpan Interval = TimeSpan.FromHours(6);
+    public static readonly TimeSpan MaxRetryAfter = TimeSpan.FromDays(1);
+
+    public static TimeSpan Backoff(int failures) => failures switch
+    {
+        <= 0 => TimeSpan.Zero, 1 => TimeSpan.FromMinutes(15), 2 => TimeSpan.FromHours(1), _ => TimeSpan.FromHours(4)
+    };
+
+    public static DateTimeOffset NextCheck(DateTimeOffset started, DateTimeOffset? lastSuccess, int failures, DateTimeOffset? lastFailure, DateTimeOffset? retryUntil)
+    {
+        var due = started + StartupDelay;
+        if (lastSuccess is { } success && success + Interval > due) due = success + Interval;
+        if (failures > 0 && lastFailure is { } failure && failure + Backoff(failures) > due) due = failure + Backoff(failures);
+        if (retryUntil is { } retry && retry > due) due = retry;
+        return due;
+    }
+}
+
+// update-state.json in the data folder. It replaced update-prompt.txt, which held only the prompted version.
+public sealed class AppUpdateState
+{
+    public DateTimeOffset? LastSuccess { get; set; }
+    public string? AvailableVersion { get; set; }
+    public string? PromptedVersion { get; set; }
+    public string? SkippedVersion { get; set; }
+    public bool AutoCheck { get; set; } = true;
+}
+
 // All commands originate on the UI thread. The backend may report progress from a worker thread.
 public sealed class AppUpdates
 {
     private readonly IAppUpdateBackend _backend;
-    private readonly string _promptFile;
+    private readonly string _stateFile;
     private readonly Func<DateTimeOffset> _clock;
     private readonly SynchronizationContext? _context = SynchronizationContext.Current;
-    private string? _promptedVersion;
+    private readonly AppUpdateState _state = new();
+    private readonly DateTimeOffset _started;
+    private int _failures;
+    private DateTimeOffset? _lastFailure, _retryUntil;
     private Task? _check;
+    // Background checks fail silently; a check that a person started or joined reports its error.
+    private bool _quiet;
     private CancellationTokenSource? _download;
     public event Action? Changed;
     public AppUpdateStage Stage { get; private set; }
@@ -33,22 +82,64 @@ public sealed class AppUpdates
     public int Progress { get; private set; }
     public string? Error { get; private set; }
     public DateTimeOffset? LastChecked { get; private set; }
+    public DateTimeOffset NextBackgroundCheck => UpdateSchedule.NextCheck(_started, LastChecked, _failures, _lastFailure, _retryUntil);
 
     public AppUpdates(IAppUpdateBackend backend, string dataDirectory, Func<DateTimeOffset>? clock = null)
     {
-        _backend = backend; _clock = clock ?? (() => DateTimeOffset.UtcNow);
-        _promptFile = Path.Combine(dataDirectory, "update-prompt.txt");
-        try { if (File.Exists(_promptFile)) _promptedVersion = File.ReadAllText(_promptFile).Trim(); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        _backend = backend; _clock = clock ?? (() => DateTimeOffset.UtcNow); _started = _clock();
+        _stateFile = Path.Combine(dataDirectory, "update-state.json");
+        LoadState(Path.Combine(dataDirectory, "update-prompt.txt"));
+        LastChecked = _state.LastSuccess;
         Release = backend.PendingRelease;
         Stage = Release is null ? AppUpdateStage.Idle : AppUpdateStage.Ready;
     }
 
+    public bool AutoCheck
+    {
+        get => _state.AutoCheck;
+        set { if (_state.AutoCheck == value) return; _state.AutoCheck = value; SaveState(); Notify(); }
+    }
+
+    public bool IsSkipped(string? version) => version is not null && version == _state.SkippedVersion;
+
+    // The version the panel marks: newer than this copy and not skipped. The last check's result is remembered across restarts.
+    public string? NoticeVersion
+    {
+        get
+        {
+            var version = Release?.Version ?? _state.AvailableVersion;
+            return version is not null && !IsSkipped(version) && ApplicationVersion.Compare(version, CurrentVersion) > 0 ? version : null;
+        }
+    }
+
+    public void SkipVersion()
+    {
+        if (Release is null || IsSkipped(Release.Version)) return;
+        _state.SkippedVersion = Release.Version; SaveState(); Notify();
+    }
+
     public Task CheckAsync(bool manual, CancellationToken cancellation = default)
     {
-        if (_check is { IsCompleted: false }) return _check;
+        if (_check is { IsCompleted: false }) { if (manual) _quiet = false; return _check; }
         if (Stage is AppUpdateStage.Downloading or AppUpdateStage.Ready or AppUpdateStage.Installing) return Task.CompletedTask;
-        if (!manual && LastChecked is { } last && _clock() - last < TimeSpan.FromMinutes(30)) return Task.CompletedTask;
+        if (!manual)
+        {
+            if (!AutoCheck || _retryUntil is { } retry && _clock() < retry) return Task.CompletedTask;
+            // A remembered release without its details is fetched again even within the gap.
+            bool remembered = Release is null && NoticeVersion is not null;
+            if (!remembered && LastChecked is { } last && _clock() - last < TimeSpan.FromMinutes(30)) return Task.CompletedTask;
+        }
+        _quiet = false;
+        return _check = CheckCoreAsync(cancellation);
+    }
+
+    // Called by the panel's minute clock, after a network change and after waking from sleep.
+    public Task CheckInBackgroundAsync(bool networkAvailable, CancellationToken cancellation = default)
+    {
+        if (_check is { IsCompleted: false }) return _check;
+        if (!AutoCheck || !networkAvailable || _clock() < NextBackgroundCheck) return Task.CompletedTask;
+        if (Stage is AppUpdateStage.Downloading or AppUpdateStage.Ready or AppUpdateStage.Installing) return Task.CompletedTask;
+        _quiet = true;
         return _check = CheckCoreAsync(cancellation);
     }
 
@@ -60,27 +151,28 @@ public sealed class AppUpdates
             var release = await _backend.CheckAsync(cancellation);
             cancellation.ThrowIfCancellationRequested();
             Release = release; LastChecked = _clock();
+            _failures = 0; _lastFailure = null; _retryUntil = null;
+            _state.LastSuccess = LastChecked; _state.AvailableVersion = release?.Version; SaveState();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (Exception) { Error = Loc.T("暂时无法检查更新，请检查网络后重试。", "Updates cannot be checked right now. Check the network and try again."); }
+        catch (Exception ex)
+        {
+            _failures++; _lastFailure = _clock();
+            if (ex is UpdateCheckException { RetryAfter: { } wait } && wait > TimeSpan.Zero)
+                _retryUntil = _lastFailure + (wait < UpdateSchedule.MaxRetryAfter ? wait : UpdateSchedule.MaxRetryAfter);
+            if (!_quiet) Error = Loc.T("暂时无法检查更新，请检查网络后重试。", "Updates cannot be checked right now. Check the network and try again.");
+        }
         finally { Stage = HasUpdate ? AppUpdateStage.Available : AppUpdateStage.Idle; Notify(); }
     }
 
     public bool ShouldPrompt(bool settingsVisible, bool settingsActive) => settingsVisible && settingsActive &&
-        Stage is AppUpdateStage.Available or AppUpdateStage.Ready && Release?.Version != _promptedVersion;
+        Stage is AppUpdateStage.Available or AppUpdateStage.Ready && Release?.Version != _state.PromptedVersion && !IsSkipped(Release?.Version);
 
     // Persist when a dialog is actually shown, so cancel/close and subsequent app launches do not repeat it.
     public void MarkPromptShown()
     {
         if (Release is null) return;
-        _promptedVersion = Release.Version;
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(_promptFile)!);
-            File.WriteAllText(_promptFile + ".tmp", _promptedVersion);
-            File.Move(_promptFile + ".tmp", _promptFile, true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        _state.PromptedVersion = Release.Version; SaveState();
     }
 
     public async Task DownloadAsync(CancellationToken cancellation = default)
@@ -113,6 +205,42 @@ public sealed class AppUpdates
         Stage = AppUpdateStage.Installing; Error = null; Notify();
         try { saveSettings(); _backend.PrepareRestart(); return true; }
         catch (Exception) { Stage = AppUpdateStage.Ready; Error = Loc.T("暂时无法安装更新，请重试。", "The update cannot be installed right now. Try again."); Notify(); return false; }
+    }
+
+    // The old update-prompt.txt is read once: its version moves into update-state.json and the file is removed.
+    private void LoadState(string legacyFile)
+    {
+        try
+        {
+            if (File.Exists(_stateFile))
+            {
+                var saved = JsonSerializer.Deserialize<AppUpdateState>(File.ReadAllText(_stateFile));
+                if (saved is not null)
+                {
+                    _state.LastSuccess = saved.LastSuccess is { } time && time <= _clock() ? time : null;
+                    _state.AvailableVersion = saved.AvailableVersion; _state.PromptedVersion = saved.PromptedVersion;
+                    _state.SkippedVersion = saved.SkippedVersion; _state.AutoCheck = saved.AutoCheck;
+                }
+            }
+            else if (File.Exists(legacyFile))
+            {
+                _state.PromptedVersion = File.ReadAllText(legacyFile).Trim() is { Length: > 0 } version ? version : null;
+                if (SaveState()) File.Delete(legacyFile);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
+    }
+
+    private bool SaveState()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_stateFile)!);
+            File.WriteAllText(_stateFile + ".tmp", JsonSerializer.Serialize(_state));
+            File.Move(_stateFile + ".tmp", _stateFile, true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
 
     private void Notify() => Changed?.Invoke();

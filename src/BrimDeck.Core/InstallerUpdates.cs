@@ -74,10 +74,16 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
-        var manifest = UpdateManifest.Parse(await _http.GetStringAsync(_manifest, timeout.Token).ConfigureAwait(false));
+        using var response = await _http.GetAsync(_manifest, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) throw new UpdateCheckException(response.StatusCode, RetryAfter(response.Headers.RetryAfter));
+        var manifest = UpdateManifest.Parse(await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
         _available = IsNewer(manifest) ? manifest : null;
         return _available is null ? null : Describe(_available);
     }
+
+    // Retry-After is either a number of seconds or a date.
+    private static TimeSpan? RetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue? value) =>
+        value?.Delta ?? (value?.Date is { } date ? date - DateTimeOffset.UtcNow : null);
 
     private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(30);
     public async Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation)

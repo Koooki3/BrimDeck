@@ -113,7 +113,7 @@ public partial class MainWindow
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
-        foreach (var control in new FrameworkElement[] { AIUsageButton, MusicPageButton, MediaSourceButton, SettingsButton, ClockLabel })
+        foreach (var control in new FrameworkElement[] { AIUsageButton, MusicPageButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
         PageSwitch.Visibility = _details && !IsMusicPage ? Visibility.Collapsed : Visibility.Visible;
         AIUsageButton.Visibility = Settings.UsagePage ? Visibility.Visible : Visibility.Collapsed;
@@ -134,9 +134,6 @@ public partial class MainWindow
         MediaSourceLabel.Text = _mediaTrack is { } playing ? Loc.Label(playing.Source) : alone ? FullControlButtonLabel : "";
         MediaSourcePin.Visibility = _pinnedMedia is not null && _pinnedMedia == _mediaTrack?.Id ? Visibility.Visible : Visibility.Collapsed;
         MediaSourceChevron.Visibility = _mediaTrack is not null && (_mediaTracks.Count > 1 || entry) ? Visibility.Visible : Visibility.Collapsed;
-        SettingsButton.Style = (Style)FindResource(IsMusicPage ? (object)"PanelMusicSettingsButton" : typeof(Button));
-        SettingsButton.Width = IsMusicPage ? 28 : 32; SettingsButton.Height = IsMusicPage ? 24 : 32;
-        SettingsButton.FontSize = IsMusicPage ? 16 : 18;
     }
     private void MediaChanged()
     {
@@ -328,6 +325,7 @@ public partial class MainWindow
         MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleXProperty, track.State == MediaState.Paused ? .94 : 1, animate, 250);
         MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleYProperty, track.State == MediaState.Paused ? .94 : 1, animate, 250);
         AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover")); body.Children.Add(art);
+        AttachCoverFocus(art);
         var right = new Grid(); Grid.SetColumn(right, 2); body.Children.Add(right);
         right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.HeaderHeight) });
         right.RowDefinitions.Add(new RowDefinition());

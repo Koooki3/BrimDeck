@@ -35,9 +35,24 @@
       </ControlTemplate>
     </Setter.Value></Setter>
   </Style>
-  <Style x:Key="PanelMusicSettingsButton" TargetType="Button" BasedOn="{StaticResource PanelIconButton}">
+  <!-- An icon button without a hover background: the icon fills most of its box, so hover only brightens the icon.
+       The foreground is set from code (the paused sync turns red), so the icon's opacity carries the feedback. -->
+  <Style x:Key="PanelGlyphButton" TargetType="Button" BasedOn="{StaticResource PanelIconButton}">
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-      <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="5">
+      <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+        <ContentPresenter x:Name="Glyph" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity=".78"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Glyph" Property="Opacity" Value="1"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Glyph" Property="Opacity" Value=".6"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value=".4"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="PanelSettingsButton" TargetType="Button" BasedOn="{StaticResource PanelIconButton}">
+    <Setter Property="Width" Value="28"/><Setter Property="Height" Value="24"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="6">
         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Border>
       <ControlTemplate.Triggers>
