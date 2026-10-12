@@ -188,6 +188,8 @@ public partial class MainWindow
     {
         if (_detailPopup is not null) { _detailPopup.Activate(); return; }
         _leave.Stop(); _popupReturnArea = null; _detailPopup = popup; popup.Owner = this;
+        // A layered window renders grayscale text unless told otherwise; its rounded background is opaque, so ClearType is safe.
+        RenderOptions.SetClearTypeHint(popup, ClearTypeHint.Enabled);
         var point = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
         var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
         point = transform.Transform(point);
@@ -270,7 +272,8 @@ public partial class MainWindow
                     header || total && i < 2 ? UI.Tertiary : i == 1 || i >= 2 && i < widths.Length - 2 && !total ? UI.Secondary : UI.Primary,
                     !header && (total && i >= 2 || !total && i == 0 || i == widths.Length - 1) ? FontWeights.SemiBold : FontWeights.Normal);
                 text.TextAlignment = i >= 2 ? TextAlignment.Right : TextAlignment.Left;
-                text.ToolTip = labels[i];
+                // The app and model cells show no tooltip: it would only repeat the visible name.
+                if (i >= 2) text.ToolTip = labels[i];
                 FrameworkElement cell = text;
                 if (i == 0 && provider is { } id)
                 {
@@ -291,12 +294,14 @@ public partial class MainWindow
             var record = result.Rows[i];
             var row = Row(AppPresets.Name(record.Provider), record.Model, values[i], false, false, record.Provider);
             var tip = $"{AppPresets.Name(record.Provider)} · {record.Model}\n{TokenBreakdown(record.Entries)}\n{UI.CostNote(record.Entries, _app.Prices)}";
-            row.ToolTip = tip;
+            // The breakdown sits on the figure cells only, so hovering the app or model name shows no tooltip.
             foreach (var text in row.Children.OfType<TextBlock>().Where(text => Grid.GetColumn(text) >= 4)) text.ToolTip = tip;
             var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush("#0DFFFFFF"), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
             item.MouseEnter += (_, _) => item.Background = UI.Brush("#0AFFFFFF"); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
             list.Children.Add(item);
         }
+        // The viewport clip would turn the rows grayscale; they lie over the island's opaque black surface.
+        RenderOptions.SetClearTypeHint(list, ClearTypeHint.Enabled);
         // Focusable so the arrow keys scroll the list; an outline around the whole list would only add noise.
         var scroll = new ScrollViewer { Content = list, Style = (Style)FindResource("ModelScrollViewer"), Focusable = true, FocusVisualStyle = null };
         _modelScroll = scroll;

@@ -154,7 +154,9 @@ public sealed partial class LyricsService : IDisposable
     private async Task<Lyrics> FindNeteaseId(string id, double duration, CancellationToken token)
     {
         if (!Regex.IsMatch(id, @"\A[0-9]{1,16}\z")) return Lyrics.Empty;
-        var data = await Get($"https://music.163.com/api/song/lyric?id={id}&lv=1&kv=-1&tv=-1", token);
+        // lv, kv and tv name the lyric versions the caller already holds; the reply leaves out a version that is
+        // not newer. lv=1 therefore received an empty lyric for every song still at its first version (measured).
+        var data = await Get($"https://music.163.com/api/song/lyric?id={id}&lv=-1&kv=-1&tv=-1", token);
         return data is { ValueKind: JsonValueKind.Object } value && value.TryGetProperty("lrc", out var lrc)
             ? Lyrics.Parse(Str(lrc, "lyric"), null, duration, "网易云音乐") : Lyrics.Empty;
     }

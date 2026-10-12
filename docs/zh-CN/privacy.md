@@ -10,6 +10,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | Codex | 读取 `%USERPROFILE%\.codex\auth.json` 中的登录，向 OpenAI 查询账户用量；查询失败时显示会话记录中的配额，并标明可能已过时 | 读取本地会话记录（`sessions` 与 `archived_sessions`） |
 | Antigravity | 从正在运行的 Antigravity 桌面版的本机服务（仅限 127.0.0.1）读取 | 读取 `%USERPROFILE%\.gemini` 下桌面版与 CLI 的本地会话数据库 |
 | Cursor | 以只读方式从 `%APPDATA%\Cursor\User\globalStorage\state.vscdb` 读取登录，向 Cursor 查询账户用量 | 向 Cursor 查询账户用量明细，包含该账户在其他设备上的用量 |
+| Grok Bot | 读取 Grok Bot 桌面版自己的登录（`%APPDATA%\Grok Bot\sand-secrets.json`），向 Cursor 查询该账户的每周额度。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Grok Bot 桌面版在本机缓存的每周额度（`%APPDATA%\Grok Bot\sand-client-persistence`） | 不提供 |
 | ZCode | 读取 ZCode 的登录，查询 Coding Plan、Start Plan 与 MCP 每日额度 | 读取本地请求记录（`%USERPROFILE%\.zcode\cli\db\db.sqlite`） |
 | DeepSeek Harness | 读取 DeepSeek Harness 的登录（`%USERPROFILE%\.dsh\.credentials.yaml`），向 DeepSeek 开放平台查询账户余额与累计消费金额；未登录账户时，使用其中保存的 API 密钥查询余额 | 读取本地会话记录（`%USERPROFILE%\.dsh\sessions`） |
 | 智谱 GLM、Z.ai GLM、DeepSeek、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址 | 不提供 |
@@ -32,7 +33,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 ## 联网与安全
 
 - 仅连接以下地址：各工具的官方接口、你在设置中填写的站点、OpenRouter 模型目录（同步模型单价）、歌词服务（LRCLIB、网易云音乐、QQ 音乐）、播放器提供的封面地址，以及 GitHub Releases（检查更新）。
-- 读取的登录令牌仅在内存中使用，不写入磁盘；Claude 桌面版的登录缓存使用当前用户的 Windows 加密功能在内存中解密。
+- 读取的登录令牌仅在内存中使用，不写入磁盘；Claude 桌面版与 Grok Bot 桌面版的登录缓存使用当前用户的 Windows 加密功能在内存中解密。
 - 自定义脚本在沙盒中运行，无法访问文件、进程或 .NET 对象，限制详见[支持的工具](ai-tools.md#自定义脚本)。
 - 律动条所用的声音仅在内存中分析，不会保存。
 

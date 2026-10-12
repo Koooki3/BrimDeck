@@ -9,6 +9,7 @@ public sealed record LocalEndpoint(int Port, string Scheme, string Token);
 public interface IDesktopSources
 {
     ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => new(false, []);
+    GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => new(false, "");
     string? ReadCursorToken(string database);
     Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation);
     // Runs a read-only query against a local SQLite database; null means the database could not be opened or queried.
@@ -32,7 +33,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
     private readonly SemaphoreSlim _gate = new(1);
-    private ClaudeQuotaSnapshot? _claudeRetained;
+    private ClaudeQuotaSnapshot? _claudeRetained, _grokBotRetained;
     private readonly ConfiguredProviders _configured = new(secrets, http, clock);
     public Task<ProviderTestResult> TestProviderAsync(AppEntry entry, CancellationToken ct = default) => _configured.TestAsync(entry, ct);
 
@@ -43,16 +44,22 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             // Each underlying source is read once, even when several columns reuse it.
             var required = settings.RequiredProviders;
-            // The Claude account API is asked only for rows that read online; rows that do not share one local snapshot.
+            // The Claude and Grok Bot account APIs are asked only for rows that read online; rows that do not share one local snapshot.
             bool claudeOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && app.QuotaOnline);
-            bool claudeLocal = settings.EnabledApps.Any(ProviderCatalog.ReadsLocalQuota);
+            bool claudeLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && ProviderCatalog.ReadsLocalQuota(app));
+            bool grokBotOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && app.QuotaOnline);
+            bool grokBotLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.GrokBot && ProviderCatalog.ReadsLocalQuota(app));
             // A stalled source ends with a timeout status instead of holding every later refresh behind this gate.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             deadline.CancelAfter(TimeSpan.FromSeconds(90));
-            var tasks = ProviderCatalog.UsageSources.Where(required.Contains).Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation));
+            // Grok Bot has no usage records, so it is read only for its online quota rows.
+            var sources = ProviderCatalog.UsageSources.Where(required.Contains);
+            if (grokBotOnline) sources = sources.Append(ProviderId.GrokBot);
+            var tasks = sources.Select(id => FetchAsync(id, usageStart, claudeOnline, deadline.Token, cancellation));
             var configured = _configured.RefreshAsync(settings.EnabledApps, deadline.Token);
             List<ProviderSnapshot> results = [.. await Task.WhenAll(tasks), .. await configured];
             if (claudeLocal) results.Add(ReadClaudeLocal(usageStart));
+            if (grokBotLocal) results.Add(ReadGrokBotLocal(usageStart));
             return results;
         }
         finally { _gate.Release(); }
@@ -122,6 +129,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.Dsh:
                     await ReadDshAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.GrokBot:
+                    await ReadGrokBotAsync(snapshot, now, ct);
                     break;
             }
         }
@@ -315,6 +325,114 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         snapshot.UsageNote += ClaudeUsageNote;
     }
 
+    // Grok Bot rows that read online use the Grok Bot desktop app's own sign-in, never Cursor's, and ask only for the
+    // weekly allowance. The token is never refreshed. When the request fails, the newer of the last reading and the
+    // desktop app's own cache is shown; a rejected sign-in discards the last reading but still shows the cache.
+    private async Task ReadGrokBotAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        GrokBotSignIn signIn;
+        try { signIn = desktop.ReadGrokBotDesktop(_locations); }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or FormatException or
+            ArgumentException or System.Security.Cryptography.CryptographicException)
+        { signIn = new(true, "", true); }
+        Exception? failure = null;
+        if (signIn.Token.Length > 0)
+        {
+            try
+            {
+                using var request = Bearer(HttpMethod.Post, GrokBotUsage.StatusUri, signIn.Token);
+                request.Content = JsonBody(new { });
+                using var doc = await SendAsync(_http, request, ct);
+                var reading = GrokBotUsage.Status(doc.RootElement) ?? throw new InvalidDataException();
+                snapshot.Quotas = reading.Quotas;
+                snapshot.Plan = reading.Plan;
+                snapshot.PlanSource = reading.Plan.Length > 0 ? Loc.T("Grok Bot 账户", "Grok Bot account") : "";
+                Connected(snapshot, Loc.T("Grok Bot 账户 · 每周额度", "Grok Bot account · weekly allowance"), now);
+                if (reading.UsedPercent is null) snapshot.Status += PooledNote;
+                _grokBotRetained = new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, reading.Quotas);
+                return;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ex is
+                HttpRequestException or OperationCanceledException or IOException or InvalidDataException or JsonException or FormatException)
+            { failure = ex; }
+            if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) _grokBotRetained = null;
+        }
+        else if (!signIn.ReadFailed)
+        {
+            _grokBotRetained = null;
+            snapshot.StatusLabel = signIn.Detected ? Loc.T("等待登录", "Waiting for sign-in") : Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请先登录 Grok Bot 桌面版，然后刷新配额", "Sign in to the Grok Bot desktop app, then refresh the quota.");
+            return;
+        }
+        if (GrokBotFreshest(now) is { } kept) { RetainGrokBot(snapshot, kept, failure, now); return; }
+        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        snapshot.StatusLabel = Loc.T("读取失败", "Read failed");
+        snapshot.Status = Loc.T("已发现 Grok Bot 桌面版，暂时无法读取登录信息", "The Grok Bot desktop app was found, but its sign-in cannot be read right now.");
+    }
+
+    // The desktop app's cached reading, ignored when it claims a time well in the future.
+    private GrokBotReading? ReadGrokBotCache(DateTimeOffset now)
+        => GrokBotUsage.ReadCache(GrokBotUsage.Folder(_locations.Roaming)) is { } reading && reading.ReadAt <= now.AddMinutes(5) ? reading : null;
+    private static string PooledNote => Loc.T("；账户使用企业共享额度，没有单独的使用比例", "; the account uses a pooled enterprise allowance, which has no share of its own");
+    private static string GrokBotCacheSource => Loc.T("Grok Bot 桌面版 · 本地缓存", "Grok Bot desktop app · local cache");
+    private static string GrokBotCachePlanSource => Loc.T("Grok Bot 桌面版本地缓存", "Grok Bot desktop app local cache");
+
+    // A cached reading newer than the last interface reading replaces it; the cache carries its own reset time.
+    private ClaudeQuotaSnapshot? GrokBotFreshest(DateTimeOffset now)
+    {
+        var kept = _grokBotRetained;
+        if (ReadGrokBotCache(now) is { ReadAt: { } time } cached && (kept is null || time > kept.Time))
+            _grokBotRetained = kept = new(time, cached.Plan, cached.Plan.Length > 0 ? GrokBotCachePlanSource : "", GrokBotCacheSource, cached.Quotas, true);
+        return kept;
+    }
+
+    private static void RetainGrokBot(ProviderSnapshot snapshot, ClaudeQuotaSnapshot kept, Exception? failure, DateTimeOffset now)
+    {
+        snapshot.IsStale = true;
+        snapshot.Quotas = kept.Quotas.ToList();
+        if (kept.Plan.Length > 0) { snapshot.Plan = kept.Plan; snapshot.PlanSource = kept.PlanSource; }
+        snapshot.LiveQuota = true; snapshot.QuotaTime = kept.Time; snapshot.Source = kept.Source;
+        var time = kept.Time.LocalDateTime.ToString(kept.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+        var shown = kept.Local ? Loc.T($"显示 Grok Bot 桌面版 {time} 缓存的额度", $"showing the allowance the Grok Bot desktop app cached at {time}")
+            : Loc.T($"显示 {time} 读取的额度", $"showing the allowance read at {time}");
+        (snapshot.StatusLabel, snapshot.Status) = failure switch
+        {
+            null => (Loc.T("读取失败", "Read failed"), Loc.T($"暂时无法读取 Grok Bot 桌面版的登录信息，{shown}", $"The Grok Bot desktop app sign-in cannot be read right now; {shown}.")),
+            HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden } => (Loc.T("登录已失效", "Sign-in expired"),
+                Loc.T($"Grok Bot 桌面版的登录已失效，请打开 Grok Bot 桌面版；{shown}", $"The Grok Bot desktop app sign-in has expired. Open the Grok Bot desktop app; {shown}.")),
+            HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } => (Loc.T("稍后重试", "Retrying later"), Loc.T($"请求频繁，{shown}，稍后自动重试", $"Too many requests; {shown}. Retrying automatically later.")),
+            OperationCanceledException => (Loc.T("稍后重试", "Retrying later"), Loc.T($"读取超时，{shown}，稍后自动重试", $"Reading timed out; {shown}. Retrying automatically later.")),
+            InvalidDataException or JsonException or FormatException => (Loc.T("稍后重试", "Retrying later"), Loc.T($"数据格式发生变化，{shown}", $"The data format has changed; {shown}.")),
+            _ => (Loc.T("稍后重试", "Retrying later"), Loc.T($"账户接口暂时不可用，{shown}，稍后自动重试", $"The account API is temporarily unavailable; {shown}. Retrying automatically later."))
+        };
+    }
+
+    // Grok Bot rows that do not read online share this snapshot. No sign-in is read and no request is sent: the quota is
+    // the weekly allowance the desktop app last cached on this PC.
+    private ProviderSnapshot ReadGrokBotLocal(DateTime? usageStart)
+    {
+        var now = _clock();
+        var snapshot = new ProviderSnapshot(ProviderId.GrokBot) { Configurations = [ProviderCatalog.LocalQuota], UsageStart = usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29) };
+        if (ReadGrokBotCache(now) is not { ReadAt: { } readAt } reading)
+        {
+            snapshot.StatusLabel = Loc.T("无本地记录", "No local record");
+            snapshot.Status = Loc.T("Grok Bot 桌面版尚未在本机记录每周额度", "The Grok Bot desktop app has not recorded a weekly allowance on this PC yet.");
+            return snapshot;
+        }
+        snapshot.Quotas = reading.Quotas;
+        snapshot.Plan = reading.Plan;
+        if (reading.Plan.Length > 0) snapshot.PlanSource = GrokBotCachePlanSource;
+        snapshot.IsStale = true;
+        // The update time is when BrimDeck read the cache; the status gives the time the desktop app took the reading.
+        snapshot.LiveQuota = true; snapshot.QuotaTime = now;
+        snapshot.Source = GrokBotCacheSource;
+        var time = readAt.LocalDateTime.ToString(readAt.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+        snapshot.StatusLabel = Loc.T("本地记录", "Local record");
+        snapshot.Status = reading.UsedPercent is null ? Loc.T($"来自 Grok Bot 桌面版，最新记录于 {time}", $"From the Grok Bot desktop app, latest record at {time}") + PooledNote
+            : Loc.T($"来自 Grok Bot 桌面版，最新记录于 {time}", $"From the Grok Bot desktop app, latest record at {time}.");
+        return snapshot;
+    }
+
     private async Task ReadCursorAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
         var token = desktop.ReadCursorToken(_locations.CursorDatabase);
@@ -352,6 +470,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         if (snapshot.Plan.Length > 0) snapshot.PlanSource = Loc.T("Cursor 账户", "Cursor account");
         if (snapshot.Quotas.Count == 0) throw new InvalidDataException();
+        // The Grok Bot desktop app shares this Cursor account, and its weekly allowance is a separate figure from the
+        // billing-period quota above. Add it as one more row; a failure here must not drop the Cursor quota.
+        try
+        {
+            using var request = Bearer(HttpMethod.Post, "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus", token);
+            request.Content = JsonBody(new { });
+            using var doc = await SendAsync(_http, request, ct);
+            if (QuotaParser.SandUsage(doc.RootElement) is { } grokBot) snapshot.Quotas.Add(grokBot);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException && !ct.IsCancellationRequested) { }
         Connected(snapshot, Loc.T("Cursor 当前账期", "Cursor current billing period"), now);
         try { await ReadCursorEvents(snapshot, token, now, start, ct); }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException or TaskCanceledException)

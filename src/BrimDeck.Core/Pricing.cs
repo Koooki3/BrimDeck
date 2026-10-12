@@ -29,6 +29,9 @@ public sealed class Pricing : IDisposable
     private readonly SemaphoreSlim _gate = new(1);
     private DateTimeOffset? _lastAttempt;
     private Dictionary<string, ModelPrice> _lookup = new(StringComparer.OrdinalIgnoreCase);
+    // Per model family ("gemini", "claude-opus", "gpt-oss"), the words that follow the version in catalog IDs, such as "lite" in
+    // "gemini-3.5-flash-lite". They name distinct priced models, so the Antigravity fallback never drops them.
+    private Dictionary<string, HashSet<string>> _tiers = new(StringComparer.Ordinal);
     // Each refresh prices thousands of records that share a few model names; results are kept until the catalog changes.
     private System.Collections.Concurrent.ConcurrentDictionary<string, ModelPrice?> _found = new(StringComparer.Ordinal);
     public int ModelCount { get; private set; }
@@ -173,8 +176,18 @@ public sealed class Pricing : IDisposable
         foreach (var remote in _remote.Values)
             if (_manual.TryGetValue(Normalize(remote.Model[(remote.Model.IndexOf('/') + 1)..]), out var manual))
                 lookup.TryAdd(Normalize(remote.Model), manual);
+        var tiers = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var model in models)
+        {
+            var id = Normalize(model.Model); id = id[(id.IndexOf('/') + 1)..];
+            if (id.IndexOf(':') is var colon and >= 0) id = id[..colon];
+            var segments = id.Split('-');
+            if (Shape(segments) is not { } shape) continue;
+            if (!tiers.TryGetValue(shape.Family, out var words)) tiers[shape.Family] = words = new(StringComparer.Ordinal);
+            foreach (var word in segments[(shape.Version + 1)..]) if (word.Length > 0 && !char.IsDigit(word[0])) words.Add(word);
+        }
         // The table is replaced before the cache, so a concurrent Find never stores an old answer in the new cache.
-        _lookup = lookup; _found = new(StringComparer.Ordinal); ModelCount = models.Length;
+        _lookup = lookup; _tiers = tiers; _found = new(StringComparer.Ordinal); ModelCount = models.Length;
         Changed?.Invoke();
     }
     private Dictionary<string, ModelPrice> MergedModels()
@@ -270,25 +283,44 @@ public sealed class Pricing : IDisposable
         }
         return new(amount, reported, estimated, unpriced);
     }
+    // Antigravity adds its own words to a model name: reasoning levels and other qualifiers, such as "claude-opus-5-5-high",
+    // "claude-opus-4-6-thinking", "gpt-oss-120b-medium" (names seen in Antigravity records, confirmed by the user) and
+    // "gemini-3.8-flash-control". The catalog lists only base models, so a name without its own price takes the price of the
+    // catalog model whose ID is its longest prefix ending at a "-": "gemini-3.8-flash-control" → "google/gemini-3.8-flash".
+    // Exact catalog and manual entries are tried first by the caller, and the fallback applies to Antigravity records only.
+    //   - The prefix keeps the family and its version: "claude-opus" or "gemini" alone never matches.
+    //   - A cut directly before a number is skipped, so "claude-opus-4" never prices "claude-opus-4-7-thinking" or "claude-opus-4-6x".
+    //   - The longest prefix wins, so "gemini-3.5-flash-lite-low" keeps the Flash-Lite price.
+    //   - If a dropped word names a distinct model of the same family in the catalog (a tier word, such as "lite" in
+    //     "gemini-3.5-flash-lite" or "mini" in "gpt-5-mini"), the name stays unpriced instead of taking a cheaper or dearer base.
+    //   - A Gemini Pro model that the catalog lists only as a preview: "gemini-3.1-pro-low" → "google/gemini-3.1-pro-preview".
+    // Antigravity writes Claude versions as "4-6" and the catalog as "4.6"; Normalize turns both into "4-6".
+    // Models offered: https://antigravity.google/docs/models; IDs: https://antigravity.google/docs/enterprise
     private ModelPrice? FindAntigravityBase(string model)
     {
-        // Reasoning settings are not separate model prices. Keep this fallback local to
-        // Antigravity; exact catalog/manual entries above always take precedence.
-        // https://antigravity.google/docs/models
-        // https://ai.google.dev/gemini-api/docs/thinking
-        // https://platform.claude.com/docs/en/build-with-claude/extended-thinking
-        // https://huggingface.co/openai/gpt-oss-120b
         var key = Normalize(model);
-        var pattern = key switch
+        var vendor = key[..(key.IndexOf('/') + 1)];
+        var segments = key[vendor.Length..].Split('-');
+        if (Shape(segments) is not { } shape) return null;
+        var tiers = _tiers;
+        for (int length = segments.Length; length > shape.Version; length--)
         {
-            var s when Regex.IsMatch(s, @"^(google/)?gemini-\d") => @"-(minimal|low|medium|high)$",
-            var s when Regex.IsMatch(s, @"^(anthropic/)?claude-(sonnet|opus|haiku)-\d") => @"-thinking$",
-            var s when Regex.IsMatch(s, @"^(openai/)?gpt-oss-(20b|120b)-") => @"-(low|medium|high)$",
-            _ => null
-        };
-        if (pattern is null) return null;
-        var baseModel = Regex.Replace(key, pattern, "");
-        return baseModel != key ? Find(baseModel) : null;
+            if (length < segments.Length && (segments[length].Length == 0 || char.IsDigit(segments[length][0]))) continue;
+            var candidate = vendor + string.Join('-', segments[..length]);
+            var price = length < segments.Length ? Find(candidate) : null;
+            if (price is null && Regex.IsMatch(candidate, @"^(google/)?gemini-\d[\d.]*-pro$")) price = Find(candidate + "-preview");
+            if (price is null) continue;
+            return tiers.TryGetValue(shape.Family, out var words) && segments[length..].Any(words.Contains) ? null : price;
+        }
+        return null;
+    }
+    // A model family is the words before the version, the first later word that starts with a digit:
+    // "gemini-3.5-flash-lite" → ("gemini", 1), "claude-opus-4-6" → ("claude-opus", 2), "gpt-oss-120b" → ("gpt-oss", 2).
+    private static (string Family, int Version)? Shape(string[] segments)
+    {
+        for (int i = 1; i < segments.Length; i++)
+            if (segments[i].Length > 0 && char.IsDigit(segments[i][0])) return (string.Join('-', segments[..i]), i);
+        return null;
     }
     public void Dispose() { if (_ownsHttp) _http.Dispose(); }
 }

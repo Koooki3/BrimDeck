@@ -9,6 +9,7 @@ namespace BrimDeck.Native;
 public sealed class DesktopSources : IDesktopSources
 {
     public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => ClaudeDesktopReader.Read(locations);
+    public GrokBotSignIn ReadGrokBotDesktop(DataLocations locations) => GrokBotDesktopReader.Read(locations);
 
     public string? ReadCursorToken(string database)
     {

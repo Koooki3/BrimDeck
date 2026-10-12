@@ -10,9 +10,10 @@ public enum WindowBehavior { Normal, Line, Hide }
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop or web) signed in with; DeepSeek uses a key entered by hand.
+// GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
 // Statistics sources are saved as numbers. 8 and 9 were a short-lived split of Claude and are retired:
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
-public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13 }
+public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14 }
 public enum SettingsTheme { System, Light, Dark }
 public enum DeckPage { Usage, Music }
 public enum DefaultDeckPage { Last, Usage, Music }
@@ -44,12 +45,12 @@ public sealed class AppEntry
     public Guid InstanceId { get; set; } = Guid.NewGuid();
     [JsonConverter(typeof(QuotaSourceConverter))]
     public ProviderId QuotaSource { get; set; }
-    public ProviderId UsageSource { get => _usageSource ?? (ProviderCatalog.IsBuiltIn(QuotaSource) ? QuotaSource : ProviderId.Claude); set => _usageSource = value; }
+    public ProviderId UsageSource { get => _usageSource ?? (ProviderCatalog.IsUsageSource(QuotaSource) ? QuotaSource : ProviderId.Claude); set => _usageSource = value; }
     public string Site { get; set; } = "";
     public string Script { get; set; } = "";
     public Guid SecretRevision { get; set; }
-    // Claude rows only: read the quota from the account API. When off, the row sends no request and shows the quota the
-    // Claude desktop app recorded on this PC. Each row has its own choice.
+    // Claude and Grok Bot rows only: read the quota from the account API. When off, the row sends no request and shows the
+    // quota the desktop app (Claude or Grok Bot) recorded on this PC. Each row has its own choice.
     public bool QuotaOnline { get; set; } = true;
     [JsonIgnore] public string ConfigurationKey => ProviderCatalog.ConfigurationKey(this);
     // Shorthand for QuotaSource in code. The "Id" member of old files is converted by SettingsMigrations.

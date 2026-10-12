@@ -9,8 +9,16 @@ namespace BrimDeck.Native;
 
 // One reader belongs to one main-process generation. The owner disposes it as soon
 // as the process exits or CDP takes over. No timers or file handles survive disposal.
+// The player appends through a handle it keeps open. Windows reports the growth of such a file to
+// directory watchers only when some process opens it, which made changes arrive up to 5 s late (measured).
+// The length read through a newly opened handle is always current, so the reader opens the file briefly
+// at every poll. It never keeps it open: a handle held between polls makes replacing the file fail,
+// which would stop the player from rotating its log. The watcher only reports renames and deletions early.
 internal sealed class NeteaseLogReader : IDisposable
 {
+    // While a song plays or loads a track change reaches the panel within this interval; paused or idle it may wait longer.
+    private const int ActivePoll = 250, IdlePoll = 750;
+    private const long AliveInterval = 2000;
     private const long TailBytes = 2 * 1024 * 1024;
     // A song that has played or sat paused for a long time can have its start record
     // further back than the tail. Startup widens the replay for it, but never past this.
@@ -27,6 +35,7 @@ internal sealed class NeteaseLogReader : IDisposable
     private readonly object _watchGate = new();
     private FileSystemWatcher? _watcher;
     private Task? _worker;
+    private long _aliveAt;
     private long _offset = -1;
     private (uint Volume, uint High, uint Low)? _file;
     private bool _discardLine;
@@ -51,8 +60,8 @@ internal sealed class NeteaseLogReader : IDisposable
             if (_stop.IsCancellationRequested) return;
             if (_watcher is not null || !Directory.Exists(Path.GetDirectoryName(_path))) return;
             var watcher = new FileSystemWatcher(Path.GetDirectoryName(_path)!, Path.GetFileName(_path))
-            { NotifyFilter = NotifyFilters.FileName | NotifyFilters.Size | NotifyFilters.LastWrite };
-            watcher.Changed += Wake; watcher.Created += Wake; watcher.Renamed += Wake; watcher.Deleted += Wake;
+            { NotifyFilter = NotifyFilters.FileName };
+            watcher.Created += Wake; watcher.Renamed += Wake; watcher.Deleted += Wake;
             watcher.Error += (_, _) => _wake.Writer.TryWrite(true);
             _watcher = watcher; watcher.EnableRaisingEvents = true;
         }
@@ -61,13 +70,13 @@ internal sealed class NeteaseLogReader : IDisposable
     {
         try
         {
-            while (!_stop.IsCancellationRequested && _process.IsAlive())
+            while (!_stop.IsCancellationRequested && Alive())
             {
                 try { Watch(); await ReadAsync(_stop.Token).ConfigureAwait(false); }
                 catch (IOException) { Invalidate(); }
                 catch (UnauthorizedAccessException) { Invalidate(); }
                 using var check = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-                check.CancelAfter(TimeSpan.FromSeconds(5));
+                check.CancelAfter(State.Track?.State is MediaState.Playing or MediaState.Unknown || State.Buffering ? ActivePoll : IdlePoll);
                 try { await _wake.Reader.ReadAsync(check.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (!_stop.IsCancellationRequested) { }
             }
@@ -75,13 +84,21 @@ internal sealed class NeteaseLogReader : IDisposable
         catch (OperationCanceledException) { }
         finally { lock (_watchGate) { _watcher?.Dispose(); _watcher = null; } }
     }
+    // Asking for the process at every poll would open it four times a second.
+    private bool Alive()
+    {
+        long now = Environment.TickCount64;
+        if (now - _aliveAt < AliveInterval) return true;
+        _aliveAt = now; return _process.IsAlive();
+    }
     private async Task ReadAsync(CancellationToken token)
     {
-        // Open for this notification only; rotation and the player's own cleanup stay possible.
+        // Open for this poll only; rotation and the player's own cleanup stay possible.
         if (!File.Exists(_path)) { Invalidate(); return; }
         await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 16384, FileOptions.Asynchronous);
         var identity = GetFileInformationByHandle(stream.SafeFileHandle, out var info) ? (info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow) : ((uint, uint, uint)?)null;
         long length = stream.Length;
+        if (length == _offset && identity == _file) return;
         var original = State;
         var state = original;
         if (_offset < 0 || length < _offset || identity != _file)
@@ -100,14 +117,14 @@ internal sealed class NeteaseLogReader : IDisposable
             }
         }
         else state = await ReadLinesAsync(stream, state, length, token).ConfigureAwait(false);
-        if (!_stop.IsCancellationRequested && _process.IsAlive() && state != original)
+        if (!_stop.IsCancellationRequested && state != original && _process.IsAlive())
         { Volatile.Write(ref _state, state); Changed?.Invoke(); }
     }
     private async Task<NeteaseLogState> ReadLinesAsync(FileStream stream, NeteaseLogState state, long length, CancellationToken token)
     {
         stream.Position = _offset;
         var bytes = new byte[16384]; var chars = new char[Encoding.UTF8.GetMaxCharCount(bytes.Length)];
-        // Capture the observed length. Further writes trigger another notification.
+        // Capture the observed length. Further writes are found by the next poll.
         while (_offset < length)
         {
             int count = await stream.ReadAsync(bytes.AsMemory(0, (int)Math.Min(bytes.Length, length - _offset)), token).ConfigureAwait(false);

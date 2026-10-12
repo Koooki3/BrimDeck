@@ -13,6 +13,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Claude | ✓ | ✓ | Sign in to Claude Code or the Claude desktop app on this PC. Usage comes from Claude Code |
 | Codex | ✓ | ✓ | Sign in to Codex on this PC |
 | Cursor | ✓ | ✓ | Sign in to Cursor on this PC |
+| Grok Bot | ✓ | | Sign in to the Grok Bot desktop app on this PC |
 | Antigravity | ✓ | ✓ | The Antigravity desktop app must be running for its quota to be read |
 | ZCode | ✓ | ✓ | Sign in to ZCode on this PC |
 | DeepSeek Harness | ✓ | ✓ | Sign in to a DeepSeek account in the DeepSeek Harness desktop or web app, or save an API key there |
@@ -21,7 +22,22 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | New API, Sub2API relay sites | ✓ | | Enter the site address and key in settings |
 | Custom | ✓ | | Write a short JavaScript script |
 
-Sources you enter by hand have no local usage records; choose another tool as the usage app for Today and 7 days.
+Sources you enter by hand and Grok Bot have no local usage records; choose another tool as the usage app for Today and 7 days.
+
+## Fetch quota online for Claude and Grok Bot
+
+Rows whose quota source is Claude or Grok Bot can be expanded, and each row has its own "Fetch quota online" switch (on by default):
+
+- **On**: the app's sign-in on this PC is used to read the account quota online. If a read fails, the last successful reading or the quota the desktop app recorded on this PC is shown, with its time.
+- **Off**: no sign-in is read and nothing is sent; only the latest quota the desktop app recorded on this PC is shown. This data is marked as old and does not trigger quota alerts.
+
+## Grok Bot
+
+A Grok Bot row shows only the weekly allowance of the account signed in to the Grok Bot desktop app: the share used, the reset time and the plan name. Other Cursor quotas and on-demand spending are not shown.
+
+- **Online**: read with the Grok Bot desktop app's own sign-in, not the Cursor editor's, and the sign-in is never renewed. If the sign-in has expired, open the Grok Bot desktop app.
+- **Offline**: shows the weekly allowance the Grok Bot desktop app cached on this PC, timed when the desktop app last read it.
+- When the account uses a pooled enterprise allowance, the share used is not shown.
 
 ## DeepSeek Harness
 

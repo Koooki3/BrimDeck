@@ -156,18 +156,27 @@ internal sealed class ClockFace : FrameworkElement
         if (!run.Cells && run.Spacing == 0)
         {
             var whole = Text(run.Text, run, paint);
-            dc?.DrawText(whole, new Point(x, baseline - whole.Baseline));
+            Paint(dc, whole, new Point(x, baseline - whole.Baseline), paint);
             x += whole.WidthIncludingTrailingWhitespace;
         }
         else for (int i = 0; i < run.Text.Length; i++)
         {
             var text = Text(run.Text[i].ToString(), run, paint);
             double advance = text.WidthIncludingTrailingWhitespace, box = run.Cells && char.IsAsciiDigit(run.Text[i]) ? cell : advance;
-            dc?.DrawText(text, new Point(x + (box - advance) / 2, baseline - text.Baseline));
+            Paint(dc, text, new Point(x + (box - advance) / 2, baseline - text.Baseline), paint);
             x += box + (i < run.Text.Length - 1 ? spacing : 0);
         }
         if (dc is not null && run.Opacity < 1) dc.Pop();
         return x;
+    }
+    // DrawText moves each line to the nearest whole device pixel, which undoes the sub-pixel baseline from Baseline below:
+    // at 11.5 DIP the cap height is not a whole number of pixels, so the snapped digits end up to half a pixel off centre.
+    // Filling the glyph outlines keeps the exact position the metrics give.
+    private static void Paint(DrawingContext? dc, FormattedText text, Point origin, Brush paint)
+    {
+        if (dc is null) return;
+        var outline = text.BuildGeometry(origin); outline.Freeze();
+        dc.DrawGeometry(paint, null, outline);
     }
     private static readonly Dictionary<(Typeface, double, double), double> DigitCells = [];
     private double DigitCell(Run run)

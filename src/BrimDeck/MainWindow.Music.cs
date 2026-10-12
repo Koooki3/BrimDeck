@@ -41,10 +41,8 @@ public partial class MainWindow
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
     // Drives the equalizer, which must keep moving while the cursor moves; see PromptTimer.
     private PromptTimer _musicTick = null!;
-    private DateTimeOffset _lastMusicTick = DateTimeOffset.UtcNow, _positionTick, _trackNoticeUntil, _trackNoticeArmedUntil;
-    // QQ Music reports the next song while it is stopped and starts playing it up to 1.5 s later (measured
-    // through its pipe). A song that starts within this window still shows its title; one started by hand later does not.
-    private static readonly TimeSpan TrackNoticeStartWindow = TimeSpan.FromSeconds(5);
+    private DateTimeOffset _lastMusicTick = DateTimeOffset.UtcNow, _positionTick, _trackNoticeUntil;
+    private readonly TrackNoticeGate _trackNotice = new();
     private bool _musicStarted, _seeking, _updatingSeek, _commandBusy;
     private MediaTrack? _seekTrack;
     private readonly MediaSeekPreview _seekPreview = new();
@@ -160,13 +158,9 @@ public partial class MainWindow
         {
             _seeking = false; _seekTrack = null;
             // A notice still on screen switches to the new title instead of giving way to the summary until playback starts.
-            _trackNoticeArmedUntil = _mediaTrack is not null && Settings.MusicTrackNotice ? now + TrackNoticeStartWindow : default;
+            if (_mediaTrack is not null && Settings.MusicTrackNotice) _trackNotice.Arm(now); else _trackNotice.Disarm();
         }
-        if (_trackNoticeArmedUntil != default && _mediaTrack is { State: MediaState.Playing })
-        {
-            if (now <= _trackNoticeArmedUntil) _trackNoticeUntil = now.AddSeconds(4);
-            _trackNoticeArmedUntil = default;
-        }
+        if (_trackNotice.Observe(_mediaTrack, now)) _trackNoticeUntil = now.AddSeconds(4);
         if (lyricsChanged) UpdateLyrics();
         if (changedSong || lyricsChanged || coverChanged || old?.State != _mediaTrack?.State || old?.HasTimeline != _mediaTrack?.HasTimeline) RenderCompact();
         if (IsMusicPage) RenderMusic();
@@ -244,7 +238,8 @@ public partial class MainWindow
             var state = track.State switch { MediaState.Playing => Loc.T("播放中", "Playing"), MediaState.Paused => Loc.T("已暂停", "Paused"),
                 MediaState.Stopped => Loc.T("已停止", "Stopped"), _ => Loc.T("状态未知", "Unknown state") };
             var label = $"{Loc.Label(track.Source)} · {track.Title} · {state}";
-            var row = new Grid();
+            // The menu's viewport clip would turn the row grayscale; the menu's background beneath it is opaque.
+            var row = new Grid(); RenderOptions.SetClearTypeHint(row, ClearTypeHint.Enabled);
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -370,6 +365,8 @@ public partial class MainWindow
             text.TextWrapping = TextWrapping.Wrap; text.LineHeight = c.LyricLine; text.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
             var lyrics = new ScrollViewer { Content = text, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 VerticalAlignment = VerticalAlignment.Center, Height = lyricLines * c.LyricLine, CanContentScroll = false, Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible };
+            // The viewport clip would turn the lyrics grayscale; they lie over the island's opaque black surface.
+            RenderOptions.SetClearTypeHint(text, ClearTypeHint.Enabled);
             AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
         }
         if (c != MusicTier.Compact && layout.MiddleHeight >= c.LyricLine)
@@ -684,7 +681,7 @@ public partial class MainWindow
             _quotaCarousel = new QuotaCarousel(items, layout, _quotaElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation) { VerticalAlignment = VerticalAlignment.Center }; middle.Children.Add(_quotaCarousel);
         }
         if (layout.TextWidth > 0)
-        { _compactMarquee = new MusicMarquee { Text = text, Width = layout.TextWidth, Height = 22, Margin = new Thickness(layout.VisibleRings > 0 ? 8 : 0, 0, 0, 0) }; middle.Children.Add(_compactMarquee); }
+        { _compactMarquee = new MusicMarquee { Text = text, Width = layout.TextWidth, Height = 22, Backdrop = Colors.Black, Margin = new Thickness(layout.VisibleRings > 0 ? 8 : 0, 0, 0, 0) }; middle.Children.Add(_compactMarquee); }
         CompactRings.Children.Add(grid); UpdateMusicTimer();
     }
     private void UpdateMusicTimer()

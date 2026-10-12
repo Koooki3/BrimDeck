@@ -177,7 +177,6 @@ internal sealed class MusicMarquee : FrameworkElement
     private bool _scrolling, _running, _hovered;
     public MusicMarquee()
     {
-        TextOptions.SetTextHintingMode(this, TextHintingMode.Animated);
         Loaded += (_, _) => UpdateAnimation();
         Unloaded += (_, _) => { _hovered = false; ResetAnimation(); };
         IsVisibleChanged += (_, _) => UpdateAnimation();
@@ -196,10 +195,36 @@ internal sealed class MusicMarquee : FrameworkElement
     }
     public bool CenterWhenFits { get; init; } = true;
     public Brush Foreground { get; init; } = UI.Brush(UI.Primary);
+    // With a backdrop, the text is drawn by a child that re-enables ClearType below this element's clip, and the edge fades are
+    // drawn over the text in the backdrop color instead of an opacity mask. A clip or a mask on the drawing element forces grayscale.
+    public Color? Backdrop
+    {
+        get => _backdrop;
+        init
+        {
+            _backdrop = value;
+            if (value is not { } color) return;
+            _left.Color = _right.Color = Color.FromArgb(0, color.R, color.G, color.B);
+            _glyphs = new Glyphs(this); RenderOptions.SetClearTypeHint(_glyphs, ClearTypeHint.Enabled);
+            AddVisualChild(_glyphs); ClipToBounds = true;
+        }
+    }
+    private readonly Color? _backdrop;
+    private readonly Glyphs? _glyphs;
+    private Brush? _fade;
+    private UIElement Painter => _glyphs ?? (UIElement)this;
+    private sealed class Glyphs(MusicMarquee owner) : FrameworkElement
+    {
+        protected override void OnRender(DrawingContext dc) => owner.Draw(dc, RenderSize);
+    }
+    protected override int VisualChildrenCount => _glyphs is null ? 0 : 1;
+    protected override Visual GetVisualChild(int index) => _glyphs ?? throw new ArgumentOutOfRangeException(nameof(index));
+    protected override Size MeasureOverride(Size availableSize) { _glyphs?.Measure(availableSize); return default; }
+    protected override Size ArrangeOverride(Size finalSize) { _glyphs?.Arrange(new Rect(finalSize)); return finalSize; }
     private FormattedText Formatted => _formatted ??= new(Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
         Typeface, FontSize, Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
     public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
-    private void ResetText() { _formatted = null; ResetAnimation(); InvalidateVisual(); }
+    private void ResetText() { _formatted = null; ResetAnimation(); Painter.InvalidateVisual(); }
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     { base.OnDpiChanged(oldDpi, newDpi); ResetText(); }
     private double EdgeStop => _fadeWidth > 0 ? Math.Min(.5, Edge / _fadeWidth) : 0;
@@ -237,30 +262,46 @@ internal sealed class MusicMarquee : FrameworkElement
             _right.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_scroll.Children[2]);
             _running = true;
         }
-        if (_scroll is null || _running == running) return;
-        if (running) _scroll.Controller!.Resume(); else _scroll.Controller!.Pause();
-        _running = running;
+        if (_scroll is not null && _running != running)
+        {
+            if (running) _scroll.Controller!.Resume(); else _scroll.Controller!.Pause();
+            _running = running;
+        }
+        // Scrolling text takes the animated quality, which follows fractional offsets smoothly; otherwise WPF chooses, so resting
+        // text gets the static quality and the island's scaling still counts as motion. The mode is a composition flag and does not
+        // draw the text again.
+        TextOptions.SetTextHintingMode(Painter, _running ? TextHintingMode.Animated : TextHintingMode.Auto);
     }
-    protected override void OnRender(DrawingContext dc)
+    protected override void OnRender(DrawingContext dc) { if (_glyphs is null) Draw(dc, RenderSize); }
+    // The size comes from the element that draws: the child renders during this element's arrange, before its own size is set.
+    private void Draw(DrawingContext dc, Size size)
     {
-        if (ActualWidth <= 0) return;
+        if (size.Width <= 0) return;
         var text = Formatted;
-        double overflow = Math.Max(0, text.Width - ActualWidth);
-        double fadeWidth = overflow > 0 ? ActualWidth : 0;
+        double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        double Snap(double value) => Math.Round(value * scale) / scale;
+        // Whole device pixels for the scroll distance, the centred start and the baseline, so resting glyphs are not split across
+        // pixels at 150 %. The small allowance keeps rounding noise from starting a one-pixel scroll.
+        double overflow = Math.Max(0, Math.Ceiling((text.Width - size.Width) * scale - .01) / scale);
+        double fadeWidth = overflow > 0 ? size.Width : 0;
         if (_fadeWidth != fadeWidth)
         {
             _fadeWidth = fadeWidth;
             // Coordinates from this element's own width, like MusicVisuals.Fade.
-            OpacityMask = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), _left, _right, new(Colors.Transparent, 1) },
+            var edge = _backdrop ?? Colors.Transparent;
+            var fade = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(edge, 0), _left, _right, new(edge, 1) },
                 new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute } : null;
+            if (_glyphs is null) OpacityMask = fade; else _fade = fade;
         }
         if (_overflow != overflow) { _overflow = overflow; ResetAnimation(); }
         // Cover the whole box, as the carousel's background does, so the mask layer's edge is not the text's edge.
-        if (overflow > 0) dc.DrawRectangle(Brushes.Transparent, null, new Rect(RenderSize));
-        dc.PushClip(new RectangleGeometry(new Rect(RenderSize)));
+        if (overflow > 0) dc.DrawRectangle(Brushes.Transparent, null, new Rect(size));
+        if (_glyphs is null) dc.PushClip(new RectangleGeometry(new Rect(size)));
         dc.PushTransform(_shift);
-        dc.DrawText(text, new Point(overflow == 0 && CenterWhenFits ? (ActualWidth - text.Width) / 2 : 0, (ActualHeight - text.Height) / 2));
-        dc.Pop(); dc.Pop();
+        double x = overflow == 0 && CenterWhenFits ? Snap((size.Width - text.Width) / 2) : 0;
+        dc.DrawText(text, new Point(x, Snap((size.Height - text.Height) / 2 + text.Baseline) - text.Baseline));
+        dc.Pop();
+        if (_glyphs is null) dc.Pop(); else if (_fade is not null) dc.DrawRectangle(_fade, null, new Rect(size));
         UpdateAnimation();
     }
 }

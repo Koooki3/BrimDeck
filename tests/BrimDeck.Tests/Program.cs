@@ -26,6 +26,7 @@ try
     await ConfiguredProviderTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);
     await DshUsageTests.Run(root, Check);
+    await GrokBotUsageTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[
@@ -365,6 +366,9 @@ try
     Check("Claude fractional reset", QuotaParser.Claude(Json("""{"five_hour":{"utilization":25,"resets_at":"2026-09-06T12:33:44.123456Z"}}""")).Single().ResetAt is not null);
     var cursor = QuotaParser.Cursor(Json("""{"individualUsage":{"plan":{"autoPercentUsed":"12.5","apiPercentUsed":20}},"billingCycleEnd":"1789000000000"}"""));
     Check("Cursor fractional percent preserved", cursor.Count == 2 && cursor[0].UsedPercent == 12.5 && cursor[0].ResetAt is not null);
+    var grokBot = QuotaParser.SandUsage(Json("""{"usagePercent":0.856,"nextResetTimestampUtc":"2026-10-18T07:21:38.721Z"}"""));
+    Check("Grok Bot usage becomes a quota row with its reset", grokBot is { Label: "Grok Bot", UsedPercent: 0.856 } && grokBot.ResetAt is not null);
+    Check("Grok Bot usage without a percent is skipped", QuotaParser.SandUsage(Json("""{"nextResetTimestampUtc":"2026-10-18T07:21:38.721Z"}""")) is null);
     Check("Antigravity missing fraction is unknown", QuotaParser.Antigravity(Json("""{"userStatus":{"cascadeModelConfigData":{"clientModelConfigs":[{"label":"A","quotaInfo":{}}]}}}""")).Count == 0);
     Check("Antigravity zero fraction means depleted", QuotaParser.Antigravity(Json("""{"groups":[{"buckets":[{"bucketId":"gemini-5h","remainingFraction":0}]}]}""")).Single().Remaining == 0);
     Check("Cursor free membership is displayed as a real plan", PlanParser.Cursor(Json("""{"membershipType":"free"}""")) == "free");
@@ -394,7 +398,7 @@ try
         var agEntry = new TokenEntry("ag:test", now, "gemini-3.8-flash", 1000, 100, 0, 0, 200);
         Check("Antigravity reasoning suffixes use the base price", new[] { "gemini-3.8-flash-low", "google/gemini-3.1-pro-preview-high", "claude-sonnet-4.6-thinking", "openai/gpt-oss-120b-medium" }
             .All(name => agPricing.Estimate(agEntry with { Model = name }) == .00141m));
-        Check("Distinct or unknown variants remain unpriced", new[] { "gemini-3.8-flash-ultra", "gemini-3.8-flash:free-high", "other/gemini-3.8-flash-high" }
+        Check("Distinct or unknown variants remain unpriced", new[] { "gemini-3.8-flash:free-high", "other/gemini-3.8-flash-high" }
             .All(name => agPricing.Estimate(agEntry with { Model = name }) is null));
         Check("Reasoning fallback is confined to Antigravity", agPricing.Estimate(agEntry with { Key = "other:test", Model = "gemini-3.8-flash-high" }) is null);
         Check("Reasoning aliases do not change catalog lookup", agPricing.Find("gemini-3.8-flash-high") is null);

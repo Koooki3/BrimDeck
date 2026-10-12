@@ -43,7 +43,6 @@ public partial class MainWindow : Window
     private bool _details;
     private int _applicationPage;
     private readonly Dictionary<Guid, int> _quotaPages = new();
-    private readonly Dictionary<Guid, string> _quotaGroups = new();
     private DateTimeOffset? _updatedAt;
     private ScreenContext _context;
     // Threshold levels seen per quota; a rise after the first reading briefly widens the compact island.
