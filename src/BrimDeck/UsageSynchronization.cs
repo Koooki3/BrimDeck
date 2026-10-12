@@ -57,7 +57,7 @@ public partial class MainWindow
         var tip = _details ? _refreshing ? Loc.T("正在同步用量与模型消耗…", "Syncing usage and model consumption…") : Loc.T("立即同步用量与模型消耗", "Sync usage and model consumption now")
             : Settings.UsageAutoSync ? Loc.T("每 60 秒自动同步一次，点击关闭同步", "Syncs automatically every 60 seconds. Click to turn syncing off.")
             : Loc.T("同步已关闭，点击开启", "Syncing is off. Click to turn it on.");
-        SyncButton.ToolTip = tip;
+        if (SyncButton.ToolTip is System.Windows.Controls.ToolTip shown) shown.Content = tip; else SyncButton.ToolTip = UI.LeftwardToolTip(tip);
         AutomationProperties.SetName(SyncButton, _details ? tip : Settings.UsageAutoSync ? Loc.T("关闭自动同步", "Turn off automatic sync") : Loc.T("开启自动同步", "Turn on automatic sync"));
 
         bool onScreen = _expanded && !IsMusicPage && Settings.UsagePage && !IsSuppressed;
