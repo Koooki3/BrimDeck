@@ -64,7 +64,6 @@
                 <Grid x:Name="ModelToolbar" Margin="10,0,96,0" Visibility="Collapsed" VerticalAlignment="Center"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,20,0">
                   <Button x:Name="MediaSourceButton" Style="{StaticResource PanelSourceButton}" Width="Auto" MaxWidth="150" Padding="8,0" Margin="0,0,2,0" Click="MediaSource_Click" Visibility="Collapsed">
-                    <Button.RenderTransform><TranslateTransform Y="1"/></Button.RenderTransform>
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <Viewbox x:Name="MediaSourcePin" Width="10" Height="10" Margin="0,0,4,0" VerticalAlignment="Center" Visibility="Collapsed">
@@ -83,7 +82,7 @@
                                  Foreground="{Binding Foreground, ElementName=MediaSourceButton}" VerticalAlignment="Center" Visibility="Collapsed"/>
                     </Grid>
                   </Button>
-                  <Button x:Name="SyncButton" Style="{StaticResource PanelIconButton}" Margin="10,0,4,0" VerticalAlignment="Center" Click="Sync_Click">
+                  <Button x:Name="SyncButton" Style="{StaticResource PanelGlyphButton}" Margin="10,0,4,0" VerticalAlignment="Center" Click="Sync_Click">
                     <Grid Width="24" Height="24">
                     <!-- Countdown to the next automatic sync: a static ring filled once a second, 12 o'clock, counterclockwise. -->
                     <Path x:Name="SyncTrack" Stroke="#1FFFFFFF" StrokeThickness="1.2" Visibility="Collapsed">
@@ -101,9 +100,7 @@
                     </Grid></Viewbox>
                     </Grid>
                   </Button>
-                  <Button x:Name="SettingsButton" Content="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="18" Width="32" Height="32" Padding="0"
-                          HorizontalContentAlignment="Center" Foreground="#9EEBEBF5"
-                          Background="Transparent" BorderThickness="0" Click="Settings_Click"/>
+                  <Button x:Name="SettingsButton" Style="{StaticResource PanelSettingsButton}" Content="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="16" Click="Settings_Click"/>
                 </StackPanel>
               </Grid>
           </Grid>

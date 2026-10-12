@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Shapes;
@@ -51,6 +52,13 @@ internal static class UI
         return new Path { Data = geometry, Fill = brush, Width = formatted.WidthIncludingTrailingWhitespace,
             Height = bounds.Height, Stretch = Stretch.None, VerticalAlignment = VerticalAlignment.Center, UseLayoutRounding = false };
     }
+    // WPF keeps a hover tooltip open while the pointer stays in the convex hull of the owner and the tooltip.
+    // A tooltip that hangs to the right of its owner therefore stays open over the neighbour on that side.
+    // This one is right-aligned under its owner and extends to the left, so the hull leaves out the right-hand neighbour.
+    private const double ToolTipGap = 4;
+    private static readonly CustomPopupPlacementCallback Leftward = (popup, target, _) =>
+        [new CustomPopupPlacement(new Point(target.Width - popup.Width, target.Height + ToolTipGap), PopupPrimaryAxis.Horizontal)];
+    public static ToolTip LeftwardToolTip(object content) => new() { Content = content, Placement = PlacementMode.Custom, CustomPopupPlacementCallback = Leftward };
     // A single line whose height is exactly the given value, independent of the font's own line box.
     public static TextBlock Fixed(string text, double size, double lineHeight, string color, FontWeight? weight = null, FontFamily? font = null)
     {

@@ -22,6 +22,7 @@
     <Style x:Key="PanelOutsetKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
       <Border BorderBrush="#0A84FF" BorderThickness="1" CornerRadius="10" Margin="-2"/>
     </ControlTemplate></Setter.Value></Setter></Style>
+    <CornerRadius x:Key="SegmentCorner">5</CornerRadius>
     <!-- One segment of a joined switch on the panel: the selected segment carries Tag="Selected". -->
     <Style x:Key="SegmentButton" TargetType="Button">
       <Setter Property="Foreground" Value="#9EEBEBF5"/>
@@ -33,7 +34,7 @@
       <Setter Property="FocusVisualStyle" Value="{StaticResource PanelKeyboardFocus}"/>
       <Setter Property="Template"><Setter.Value>
         <ControlTemplate TargetType="Button">
-          <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent">
+          <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource SegmentCorner}" Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent">
             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
           <ControlTemplate.Triggers>
@@ -43,6 +44,11 @@
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value></Setter>
+    </Style>
+    <!-- A standalone toolbar action in the segment look: 6 DIP corner and a gray hover, like the other toolbar buttons. -->
+    <Style x:Key="ToolbarActionButton" TargetType="Button" BasedOn="{StaticResource SegmentButton}">
+      <Style.Resources><CornerRadius x:Key="SegmentCorner">6</CornerRadius></Style.Resources>
+      <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#18FFFFFF"/></Trigger></Style.Triggers>
     </Style>
     <Style TargetType="Button">
       <Setter Property="Foreground" Value="#DCDEE7"/><Setter Property="Background" Value="#252730"/>

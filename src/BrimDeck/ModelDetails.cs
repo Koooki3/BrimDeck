@@ -72,12 +72,15 @@ public partial class MainWindow
     private string ModelPeriodLabel => _customRange is { } range ? $"{range.Start:MM-dd}–{range.End:MM-dd}" : PeriodName(_days);
     private static string PeriodName(int days) => days == 1 ? Loc.T("今日", "Today") : Loc.T($"{days} 天", $"{days} days");
 
-    private Button ModelAction(string text, string name, Action click, bool active = false, bool icon = false)
+    private System.Windows.Controls.ToolTip? _backToolTip;
+    // content wraps the label when the button shows more than its text; toolTip false leaves only the accessible name.
+    private Button ModelAction(string text, string name, Action click, bool active = false, bool icon = false,
+        string style = "ToolbarActionButton", double height = 24, bool toolTip = true, Func<TextBlock, UIElement>? content = null)
     {
         var label = UI.Centered(text, icon ? 14 : 12, UI.Secondary, font: icon ? new FontFamily("Segoe MDL2 Assets") : null);
         label.ClearValue(TextBlock.ForegroundProperty); label.ClearValue(TextBlock.FontWeightProperty);
-        var button = new Button { Content = label, Height = 24, Padding = new Thickness(icon ? 6 : 9, 0, icon ? 6 : 9, 0),
-            Style = (Style)FindResource("SegmentButton"), Tag = active ? "Selected" : null, ToolTip = name };
+        var button = new Button { Content = content is null ? label : content(label), Height = height, Padding = new Thickness(icon ? 6 : 9, 0, icon ? 6 : 9, 0),
+            Style = (Style)FindResource(style), Tag = active ? "Selected" : null, ToolTip = toolTip ? name : null };
         AutomationProperties.SetName(button, name); button.Click += (_, _) => click(); return button;
     }
 
@@ -86,40 +89,43 @@ public partial class MainWindow
     private FrameworkElement ModelApplicationFilter(IReadOnlyList<ProviderId> apps, int stage)
     {
         if (stage == 4)
-            return ModelAction(Loc.T($"应用 · {_modelApps.Count} ▾", $"Apps · {_modelApps.Count} ▾"), Loc.T("筛选应用", "Filter apps"), () => OpenModelApplications(apps));
+            return ModelAction(Loc.T($"应用 · {_modelApps.Count} ▾", $"Apps · {_modelApps.Count} ▾"), Loc.T("筛选应用", "Filter apps"), () => OpenModelApplications(apps), toolTip: false);
         var strip = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var app in apps)
         {
             var name = AppPresets.Name(app);
             var label = stage == 0 ? name : stage == 1 ? name.Length > 3 ? name[..3] + "…" : name : name[..1];
-            var button = ModelAction(label, Loc.T("筛选 ", "Filter ") + name, () => ToggleModelApp(app), _modelApps.Contains(app));
-            button.Padding = new Thickness(stage >= 2 ? 5 : 8, 0, stage >= 2 ? 5 : 8, 0);
-            if (stage >= 2)
+            UIElement Tab(TextBlock shown)
             {
-                var contents = new StackPanel { Orientation = Orientation.Horizontal };
-                contents.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(StatisticsTheme(app)), Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center });
-                var labelContent = (UIElement)button.Content; button.Content = null;
-                contents.Children.Add(labelContent); button.Content = contents;
+                // A hidden SemiBold copy reserves the selected width, so selecting a tab does not resize it.
+                var reserve = UI.Centered(label, 12, UI.Secondary, FontWeights.SemiBold); reserve.Visibility = Visibility.Hidden;
+                var text = new Grid { Children = { reserve, shown } };
+                if (stage < 2) return text;
+                var dot = new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(StatisticsTheme(app)), Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center };
+                return new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, text } };
             }
+            var button = ModelAction(label, Loc.T("筛选 ", "Filter ") + name, () => ToggleModelApp(app), _modelApps.Contains(app),
+                style: "SegmentButton", height: 22, toolTip: false, content: Tab);
+            button.Padding = new Thickness(stage >= 2 ? 5 : 8, 0, stage >= 2 ? 5 : 8, 0);
             strip.Children.Add(button);
         }
-        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(7), Padding = new Thickness(1) };
+        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
     }
 
     private Button ModelDateButton(bool iconOnly)
     {
         Button button = null!;
-        button = ModelAction(iconOnly ? "\uE787" : ModelPeriodLabel, Loc.T("按时间", "By date"), () => OpenModelDates(button), _customRange is not null, iconOnly);
+        button = ModelAction(iconOnly ? "\uE787" : ModelPeriodLabel, Loc.T("按时间", "By date"), () => OpenModelDates(button), _customRange is not null, iconOnly, toolTip: false);
         if (!iconOnly)
         {
             var content = new StackPanel { Orientation = Orientation.Horizontal };
-            content.Children.Add(UI.Centered("\uE787", 12, UI.Secondary, font: new FontFamily("Segoe MDL2 Assets")));
+            var icon = UI.Centered("\uE787", 12, UI.Secondary, font: new FontFamily("Segoe MDL2 Assets"));
+            // The calendar glyph sits slightly above the label; move the glyph, not the label. The top margin centers it
+            // 2/3 DIP lower (one device pixel at 150%), and layout rounding keeps it on whole pixels at every scale.
+            icon.Margin = new Thickness(0, 4.0 / 3, 0, 0); content.Children.Add(icon);
             var label = UI.Centered(_customRange is null ? Loc.T("按时间", "By date") : ModelPeriodLabel, 12, _customRange is null ? UI.Secondary : UI.Primary);
             label.Margin = new Thickness(6, 0, 0, 0); content.Children.Add(label); button.Content = content;
         }
-        button.ToolTip = _customRange is { } range
-            ? Loc.T($"按时间\n{range.Start:yyyy-MM-dd} 至 {range.End:yyyy-MM-dd}（含结束日期）", $"By date\n{range.Start:yyyy-MM-dd} to {range.End:yyyy-MM-dd} (end date included)")
-            : Loc.T("按时间", "By date");
         return button;
     }
 
@@ -130,6 +136,8 @@ public partial class MainWindow
         ModelToolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
         ModelToolbar.ColumnDefinitions.Add(new ColumnDefinition());
         var back = ModelAction("\uE76B", Loc.T("返回用量", "Back to usage"), () => ShowModelDetails(false), icon: true);
+        _backToolTip ??= UI.LeftwardToolTip(null!);
+        _backToolTip.Content = back.ToolTip; back.ToolTip = _backToolTip;
         ModelToolbar.Children.Add(back);
         var filters = new Grid { Name = "ModelFilters", HorizontalAlignment = HorizontalAlignment.Left };
         for (int i = 0; i < 5; i++) filters.ColumnDefinitions.Add(new ColumnDefinition
@@ -142,12 +150,13 @@ public partial class MainWindow
         for (int stage = 0; stage <= 4; stage++)
         {
             applications = ModelApplicationFilter(apps, stage);
-            dates = ModelDateButton(stage >= 3 && _customRange is null);
+            // From stage 3 the date button shows only the calendar icon, with or without a custom range; a selected range keeps its highlight.
+            dates = ModelDateButton(stage >= 3);
             if (stage == 4) periods = Periods(3);
             foreach (var element in new[] { applications, periods, dates }) element.Measure(new Size(double.PositiveInfinity, 28));
             if (applications.DesiredSize.Width + periods.DesiredSize.Width + dates.DesiredSize.Width + 16 <= available) break;
             if (stage == 4)
-                applications = ModelAction(Loc.T("应用 ▾", "Apps ▾"), Loc.T("筛选应用", "Filter apps"), () => OpenModelApplications(apps));
+                applications = ModelAction(Loc.T("应用 ▾", "Apps ▾"), Loc.T("筛选应用", "Filter apps"), () => OpenModelApplications(apps), toolTip: false);
         }
         Grid.SetColumn(periods, 2); Grid.SetColumn(dates, 4);
         filters.Children.Add(applications); filters.Children.Add(periods); filters.Children.Add(dates);
@@ -177,7 +186,7 @@ public partial class MainWindow
         {
             Button button = null!;
             button = ModelAction(AppPresets.Name(app), Loc.T("筛选 ", "Filter ") + AppPresets.Name(app), () =>
-            { ToggleModelApp(app); button.Tag = _modelApps.Contains(app) ? "Selected" : null; }, _modelApps.Contains(app));
+            { ToggleModelApp(app); button.Tag = _modelApps.Contains(app) ? "Selected" : null; }, _modelApps.Contains(app), toolTip: false);
             button.Margin = new Thickness(0, 3, 0, 3); stack.Children.Add(button);
         }
         popup.Content = new Border { Child = stack, Background = UI.Brush("#1A1A1D"), CornerRadius = new CornerRadius(10), Padding = new Thickness(8), BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1) };
@@ -272,8 +281,6 @@ public partial class MainWindow
                     header || total && i < 2 ? UI.Tertiary : i == 1 || i >= 2 && i < widths.Length - 2 && !total ? UI.Secondary : UI.Primary,
                     !header && (total && i >= 2 || !total && i == 0 || i == widths.Length - 1) ? FontWeights.SemiBold : FontWeights.Normal);
                 text.TextAlignment = i >= 2 ? TextAlignment.Right : TextAlignment.Left;
-                // The app and model cells show no tooltip: it would only repeat the visible name.
-                if (i >= 2) text.ToolTip = labels[i];
                 FrameworkElement cell = text;
                 if (i == 0 && provider is { } id)
                 {
