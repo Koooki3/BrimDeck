@@ -695,8 +695,6 @@ public sealed partial class SettingsWindow : Window
                     if (quota)
                     {
                         current.QuotaSource = id; current.Site = ""; current.Script = id == ProviderId.Custom ? ProviderScripts.Example : ""; current.SecretRevision = Guid.Empty;
-                        if (!ProviderCatalog.IsBuiltIn(id) && current.ThemeColor.Length == 0)
-                            current.ThemeColor = AppPresets.Palette.FirstOrDefault(color => s.Apps.Where(a => a.InstanceId != entry.InstanceId).All(a => a.Theme != color)) ?? AppPresets.Palette[0];
                     }
                     else current.UsageSource = id;
                 });
