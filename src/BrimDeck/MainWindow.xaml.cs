@@ -284,16 +284,10 @@ public partial class MainWindow : Window
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
         _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _compactClock = null;
-        if (_alert is { } alert)
+        if (_alert is not null)
         {
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;
-            var ring = UI.Ring(alert.Used, alert.Entry.Theme, 14, 2.2); ring.Margin = new Thickness(0, 0, 8, 0); ring.VerticalAlignment = VerticalAlignment.Center;
-            CompactAlert.Children.Add(ring);
-            var name = UI.Fixed(alert.Name, 11.5, 16, UI.Primary, FontWeights.SemiBold); name.MaxWidth = 76; name.ToolTip = alert.Name;
-            CompactAlert.Children.Add(name);
-            var text = UI.Fixed(Loc.T($"{alert.Label}已用 {alert.Used:0}%", $"{alert.Label}{alert.Used:0}% used"), 11.5, 16, UI.Secondary); text.Margin = new Thickness(8, 0, 0, 0); CompactAlert.Children.Add(text);
-            var reset = UI.ShortReset(alert.ResetAt);
-            if (reset.Length > 0) { var sub = UI.Fixed(Loc.T(reset + "重置", reset.StartsWith("in ", StringComparison.Ordinal) ? "resets " + reset : reset), 11.5, 16, UI.Tertiary); sub.Margin = new Thickness(8, 0, 0, 0); CompactAlert.Children.Add(sub); }
+            // LayoutCompactAlert (MainWindow.CompactLayout.cs) builds the alert row from _alert and sizes it for the shape.
             ApplyCollapsedLayout();
             return;
         }

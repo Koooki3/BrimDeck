@@ -678,13 +678,14 @@ public partial class MainWindow
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return ("", track.CurrentLyric ?? "", "");
         return _lyrics.At(track, DateTimeOffset.UtcNow);
     }
-    private const double CompactClockGap = 8;
     // The color taken from the playing song's cover; the fallback brush used without a cover is not opaque.
     internal Color? CoverColor => _mediaCover is not null && _mediaTrack is { State: not MediaState.Stopped } && _musicAccent is SolidColorBrush { Color.A: 255 } accent ? accent.Color : null;
     private void RenderCompactMusic()
     {
-        // The collapsed shape gives the row's width in DIPs.
-        double contentWidth = Math.Max(0, Collapsed.ContentWidth);
+        // The collapsed shape gives the row's width in DIPs and the height scale; every size below follows from them.
+        var shape = Collapsed; _compactRendered = shape;
+        double scale = CompactMusicLayout.SafeScale(shape.Scale);
+        double contentWidth = CompactContentWidth(shape);
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
         bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
@@ -699,29 +700,40 @@ public partial class MainWindow
             }
         }
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
-        // The clock keeps its own width at the right; the rest goes to the cover, rings, text and equalizer as before.
-        // Shown alone, it is centred.
-        var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now) : null;
-        bool clockAlone = clock is not null && !media && apps.Count == 0;
-        double clockRoom = clock is not null && !clockAlone ? clock.ReservedWidth + CompactClockGap : 0;
-        var layout = CompactMusicLayout.Calculate(Math.Max(0, contentWidth - clockRoom), media, apps.Count, text.Length > 0); CurrentCompactLayout = layout;
-        var grid = new Grid { Width = contentWidth, Height = 24 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(media ? 28 : 0) }); grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(media ? 26 : 0) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(clockRoom) });
-        if (clock is not null)
+        // The clock keeps its own width at the right; shown alone, it is centred.
+        var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
+        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0); CurrentCompactLayout = layout;
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        double row = layout.RowHeight;
+        var grid = new Grid { Width = SnapDown(contentWidth, dpi), Height = row };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.CoverWidth, dpi)) }); grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.EqualizerWidth, dpi)) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ClockAlone ? 0 : SnapDown(layout.ClockWidth, dpi)) });
+        if (clock is not null && layout.ClockWidth > 0)
         {
-            clock.VerticalAlignment = VerticalAlignment.Center;
-            clock.HorizontalAlignment = clockAlone ? HorizontalAlignment.Center : HorizontalAlignment.Right;
-            if (clockAlone) Grid.SetColumnSpan(clock, 4); else Grid.SetColumn(clock, 3);
-            grid.Children.Add(clock); _compactClock = clock;
+            var region = CompactRegion(clock, layout.ClockWidth, clock.ReservedWidth, clock.Height, row, layout.ClockAlone ? RegionAnchor.Center : RegionAnchor.Right, dpi);
+            region.HorizontalAlignment = layout.ClockAlone ? HorizontalAlignment.Center : HorizontalAlignment.Right;
+            if (layout.ClockAlone) Grid.SetColumnSpan(region, 4); else Grid.SetColumn(region, 3);
+            grid.Children.Add(region); _compactClock = clock;
         }
-        if (media)
+        if (media && layout.CoverWidth > 0)
         {
-            var cover = MusicVisuals.Cover(_mediaCover, 20, 4); cover.HorizontalAlignment = HorizontalAlignment.Left; cover.VerticalAlignment = VerticalAlignment.Center; AutomationProperties.SetName(cover, _mediaTrack!.Caption); grid.Children.Add(cover);
-            _compactEqualizer = new MusicEqualizer { Bars = 4, Width = 18, Height = 14, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(UI.Secondary), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(_compactEqualizer, 2); grid.Children.Add(_compactEqualizer);
+            var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
+            grid.Children.Add(CompactRegion(cover, layout.CoverWidth, layout.CoverSize, layout.CoverSize, row, RegionAnchor.Left, dpi));
+        }
+        if (media && layout.EqualizerWidth > 0)
+        {
+            _compactEqualizer = new MusicEqualizer { Bars = 4, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(UI.Secondary) };
+            var region = CompactRegion(_compactEqualizer, layout.EqualizerWidth, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Right, dpi);
+            Grid.SetColumn(region, 2); grid.Children.Add(region);
         }
         var middle = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(middle, 1); grid.Children.Add(middle);
-        if (layout.VisibleRings > 0)
+        // The rings, the space between and the lyric are snapped cumulatively from the middle's left edge and kept inside its
+        // column, so rounding never pushes one region into the next.
+        double middleColumn = Math.Max(0, grid.Width - grid.ColumnDefinitions[0].Width.Value - grid.ColumnDefinitions[2].Width.Value - grid.ColumnDefinitions[3].Width.Value);
+        double ringEnd = Math.Min(middleColumn, SnapDown(layout.RingWidth, dpi)), textStart = Math.Min(middleColumn, SnapDown(layout.RingWidth + layout.Between, dpi));
+        double textEnd = Math.Min(middleColumn, SnapDown(layout.RingWidth + layout.Between + layout.TextWidth, dpi));
+        if (layout.RingWidth > 0 && apps.Count > 0)
         {
             var items = apps.Select(entry =>
             {
@@ -735,7 +747,12 @@ public partial class MainWindow
             _quotaCarousel = new QuotaCarousel(items, layout, _quotaElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation) { VerticalAlignment = VerticalAlignment.Center }; middle.Children.Add(_quotaCarousel);
         }
         if (layout.TextWidth > 0)
-        { _compactMarquee = new MusicMarquee { Text = text, Width = layout.TextWidth, Height = 22, Backdrop = Colors.Black, Margin = new Thickness(layout.VisibleRings > 0 ? 8 : 0, 0, 0, 0) }; middle.Children.Add(_compactMarquee); }
+        {
+            // Too narrow for a meaningful stretch of text, the lyric rests at its start, cut at the edge.
+            _compactMarquee = new MusicMarquee { Text = text, Width = Math.Max(0, textEnd - textStart), Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
+                ScrollAllowed = layout.TextScrolls, Backdrop = Colors.Black, Margin = new Thickness(_quotaCarousel is not null && middle.Children.Contains(_quotaCarousel) ? textStart - ringEnd : textStart, 0, 0, 0) };
+            middle.Children.Add(_compactMarquee);
+        }
         CompactRings.Children.Add(grid); UpdateMusicTimer();
     }
     private void UpdateMusicTimer()

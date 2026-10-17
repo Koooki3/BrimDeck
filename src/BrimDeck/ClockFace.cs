@@ -23,15 +23,19 @@ internal sealed class ClockFace : FrameworkElement
     private readonly Color[] _colors;
     private DateTime _time;
     private double? _reserved;
+    // The collapsed row's height scale. The face is laid out at 1 and its outlines are drawn scaled: every glyph is filled as
+    // geometry, so a scaled outline is the same as one built at the larger size.
+    private readonly double _scale;
 
     // One color fills the face; more are spread evenly across it from left to right.
-    public ClockFace(ClockStyle style, bool h24, Color[] colors, DateTime time)
+    public ClockFace(ClockStyle style, bool h24, Color[] colors, DateTime time, double scale = 1)
     {
         _style = style; _h24 = h24; _colors = colors.Length > 0 ? colors : [White]; _time = time;
-        Height = FaceHeight; IsHitTestVisible = false;
+        _scale = CompactMusicLayout.SafeScale(scale);
+        Height = FaceHeight * _scale; IsHitTestVisible = false;
         var glow = _colors[_colors.Length / 2];
-        if (style == ClockStyle.Neon) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = 9, Opacity = .85 };
-        else if (style == ClockStyle.Segment) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = 5, Opacity = .6 };
+        if (style == ClockStyle.Neon) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = 9 * _scale, Opacity = .85 };
+        else if (style == ClockStyle.Segment) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = 5 * _scale, Opacity = .6 };
     }
 
     public static string Title(ClockStyle style) => style switch
@@ -68,19 +72,25 @@ internal sealed class ClockFace : FrameworkElement
         set { if (value == _time) return; _time = value; InvalidateVisual(); }
     }
     // The widest the face gets on any day: a two-digit hour, a two-digit month and day, every weekday, morning and afternoon.
-    public double ReservedWidth => _reserved ??= Enumerable.Range(22, 7).SelectMany(day => new[] { 10, 22 }.Select(hour => new DateTime(2025, 12, day, hour, 0, 0)))
+    // In DIPs at the face's scale. A scaled face is rounded up to a whole DIP so the regions beside it stay on whole DIPs;
+    // the default face keeps its measured width, as in the settings preview.
+    public double ReservedWidth => _scale == 1 ? UnitReserved : Math.Ceiling(UnitReserved * _scale - .001);
+    private double UnitReserved => _reserved ??= Enumerable.Range(22, 7).SelectMany(day => new[] { 10, 22 }.Select(hour => new DateTime(2025, 12, day, hour, 0, 0)))
         .Max(time => Layout(null, time, 0, Brushes.White));
 
-    protected override Size MeasureOverride(Size availableSize) => new(ReservedWidth, FaceHeight);
+    protected override Size MeasureOverride(Size availableSize) => new(ReservedWidth, FaceHeight * _scale);
 
     protected override void OnRender(DrawingContext dc)
     {
         double width = Layout(null, _time, 0, Brushes.White), scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
-        double x = Math.Round((ReservedWidth - width) / 2 * scale) / scale;
+        // The start is a whole device pixel after scaling, as at the default size.
+        double x = Math.Round((ReservedWidth - width * _scale) / 2 * scale) / scale / _scale;
         Brush paint = Fill(_colors);
         if (paint is LinearGradientBrush gradient) { gradient.MappingMode = BrushMappingMode.Absolute; gradient.StartPoint = new Point(x, 0); gradient.EndPoint = new Point(x + width, 0); }
         paint.Freeze();
+        if (_scale != 1) dc.PushTransform(new ScaleTransform(_scale, _scale));
         Layout(dc, _time, x, paint);
+        if (_scale != 1) dc.Pop();
     }
 
     // Draws the face from x when dc is set; returns the width either way.

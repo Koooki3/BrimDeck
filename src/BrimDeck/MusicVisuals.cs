@@ -88,6 +88,8 @@ internal sealed class MusicEqualizer : FrameworkElement
     public bool Playing { get; set; }
     public float Peak { get; set; }
     public int Bars { get; init; } = 5;
+    // Bar width in DIPs; the collapsed row scales it with its height.
+    public double BarWidth { get; init; } = 3;
     private readonly (double Time, double Peak)[] _history = new (double, double)[64];
     private readonly double[] _levels = new double[5], _drawn = new double[5];
     private readonly DrawingGroup _drawing = new();
@@ -156,8 +158,9 @@ internal sealed class MusicEqualizer : FrameworkElement
         using var dc = _drawing.Open();
         for (int i = 0; i < Math.Min(Bars, _levels.Length); i++)
         {
-            double height = Math.Clamp(3 + _levels[i] * Math.Max(0, size.Height - 3), 3, Math.Max(3, size.Height));
-            dc.DrawRoundedRectangle(Color, null, new Rect(i * (size.Width - 3) / Math.Max(1, Bars - 1), (size.Height - height) / 2, 3, height), 1.5, 1.5);
+            double bar = BarWidth;
+            double height = Math.Clamp(bar + _levels[i] * Math.Max(0, size.Height - bar), bar, Math.Max(bar, size.Height));
+            dc.DrawRoundedRectangle(Color, null, new Rect(i * Math.Max(0, size.Width - bar) / Math.Max(1, Bars - 1), (size.Height - height) / 2, bar, height), bar / 2, bar / 2);
         }
     }
 }
@@ -195,6 +198,10 @@ internal sealed class MusicMarquee : FrameworkElement
         set { if (_fontSize == value) return; _fontSize = value; ResetText(); }
     }
     public bool CenterWhenFits { get; init; } = true;
+    // The edge fade's width; the collapsed row scales it with its height. The scroll speed does not change.
+    public double EdgeWidth { get; init; } = Edge;
+    // False when the region is too narrow for a meaningful stretch of text: the text then rests at its start, cut at the edge.
+    public bool ScrollAllowed { get; init; } = true;
     public Brush Foreground { get; init; } = UI.Brush(UI.Primary);
     // With a backdrop, the text is drawn by a child that re-enables ClearType below this element's clip, and the edge fades are
     // drawn over the text in the backdrop color instead of an opacity mask. A clip or a mask on the drawing element forces grayscale.
@@ -228,7 +235,7 @@ internal sealed class MusicMarquee : FrameworkElement
     private void ResetText() { _formatted = null; ResetAnimation(); Painter.InvalidateVisual(); }
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     { base.OnDpiChanged(oldDpi, newDpi); ResetText(); }
-    private double EdgeStop => _fadeWidth > 0 ? Math.Min(.5, Edge / _fadeWidth) : 0;
+    private double EdgeStop => _fadeWidth > 0 ? Math.Min(.5, EdgeWidth / _fadeWidth) : 0;
     private void ResetAnimation()
     {
         _scroll?.Controller?.Remove(); _scroll = null; _running = false;
@@ -238,10 +245,10 @@ internal sealed class MusicMarquee : FrameworkElement
     }
     private void UpdateAnimation()
     {
-        bool running = _scrolling && IsLoaded && IsVisible && !_hovered && _overflow > 0 && _formatted is not null;
+        bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && _overflow > 0 && _formatted is not null;
         if (_scroll is null && running)
         {
-            double travel = _overflow / Speed, ramp = Math.Min(travel, Edge / Speed), edge = EdgeStop;
+            double travel = _overflow / Speed, ramp = Math.Min(travel, EdgeWidth / Speed), edge = EdgeStop;
             static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
             var duration = TimeSpan.FromSeconds(3 + travel);
             DoubleAnimationUsingKeyFrames Track(params DoubleKeyFrame[] frames)
@@ -323,18 +330,26 @@ internal sealed class QuotaCarousel : Grid
     public TimeSpan Elapsed => _begun ? _cycle!.GetCurrentTime(this) ?? _elapsed : _elapsed;
     public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
     {
-        Rotates = layout.ScrollRings && items.Count > layout.VisibleRings;
+        // The region is the layout's ring width in whole device pixels; rings sit in fixed slots from its left edge and its
+        // right edge cuts whichever ring it falls on. Rotation only moves the rings through the region, never resizes it.
         // Ring positions, the visible width and the travel all use whole device pixels. Layout rounding
         // would otherwise widen each 5 DIP gap at 150 % and carry the last ring into the edge fade.
         double scale = VisualTreeHelper.GetDpi(Application.Current?.MainWindow ?? (Visual)this).DpiScaleX;
         double Snap(double value) => Math.Round(value * scale, MidpointRounding.AwayFromZero) / scale;
-        double step = Snap(layout.RingSize + layout.RingGap), edge = Rotates ? Snap(FadeEdge) : 0;
-        double span = layout.VisibleRings > 0 ? (layout.VisibleRings - 1) * step + layout.RingSize : 0;
-        Width = span + 2 * edge; Height = layout.RingSize; ClipToBounds = true;
+        double step = Snap(layout.RingSize + layout.RingGap);
+        double span = Math.Floor(Math.Max(0, layout.RingWidth) * scale + .001) / scale, full = items.Count > 0 ? (items.Count - 1) * step + layout.RingSize : 0;
+        // Short of one whole ring, the first ring is cut at the region's edge and rests.
+        Rotates = layout.ScrollRings && items.Count > 1 && span >= layout.RingSize && span < full;
+        double edge = Rotates ? Snap(layout.RingEdge) : 0;
+        // The left fade lies outside, over the cover's gap, so the first ring is whole at rest; the right fade lies inside the
+        // region, so nothing is drawn past its right edge toward the lyric. It spans up to one ring gap: a ring the edge cuts
+        // fades out over what shows of it, so a sliver of a pixel or two is all but transparent instead of a hard line. It
+        // never reaches the first ring, and like the region its width follows the row's width continuously.
+        Width = span + edge; Height = layout.RingSize; ClipToBounds = true;
         _strip = new Canvas { Width = items.Count * step, Height = layout.RingSize, RenderTransform = new TranslateTransform() };
         for (int i = 0; i < items.Count; i++)
         {
-            var ring = UI.Ring(items[i].Used, items[i].Color, layout.RingSize, 2);
+            var ring = UI.Ring(items[i].Used, items[i].Color, layout.RingSize, layout.RingThickness);
             Canvas.SetLeft(ring, edge + i * step); _strip.Children.Add(ring);
         }
         // A Canvas measures the strip at its full width. Inside the Grid the strip would be
@@ -344,15 +359,18 @@ internal sealed class QuotaCarousel : Grid
         ToolTip = string.Join("\n", items.Select(i => i.Tip));
         AutomationProperties.SetName(this, Loc.T("配额环 ", "Quota rings ") + ToolTip);
         if (!Rotates) return;
-        // The edge fades lie outside the rings' own width, over the gaps beside them, so the
-        // first and last rings are whole at rest and only rings in motion pass through a fade.
-        Margin = new Thickness(-edge, 0, -edge, 0);
-        OpacityMask = MusicVisuals.Fade(Width, edge);
+        Margin = new Thickness(-edge, 0, 0, 0);
+        double fade = Math.Clamp(span - layout.RingSize, 0, Snap(layout.RingGap));
+        OpacityMask = new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), new(Colors.White, edge / Width),
+            new(Colors.White, (Width - fade) / Width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(Width, 0)) { MappingMode = BrushMappingMode.Absolute };
         // The masked content is composited from a layer the size of what is drawn. A transparent
         // background extends that layer to the box, so its resampled edge column falls on empty
         // space instead of repeating a ring's outermost pixels.
         Background = Brushes.Transparent;
-        Travel = (items.Count - layout.VisibleRings) * step;
+        // The glide moves by whole ring steps, so at the end the rings stand in the same slots as at the start: the first is
+        // whole at the left edge, and the last is whole before the right fade. Since the fade is at most span - ring, this
+        // never moves the last ring out of the region.
+        Travel = Math.Ceiling((full + fade - span) / step - 1e-6) * step;
         _discrete = !animate; _cycle = Cycle();
         _elapsed = TimeSpan.FromTicks(elapsed.Ticks % _cycle.Duration.TimeSpan.Ticks);
         Loaded += (_, _) => Update();
