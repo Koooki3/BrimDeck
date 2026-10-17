@@ -1,0 +1,178 @@
+namespace BrimDeck.Core;
+
+// Limits and defaults of the three collapsed styles, in DIPs. The defaults reproduce the fixed sizes used before these
+// values became settings: notch 238 x 32 at the screen edge, capsule 196 x 32 five DIPs below it, line 56 x 4 four DIPs below it.
+public static class CollapsedLimits
+{
+    // The height at which compact content is drawn at its designed size; Scale is the surface height divided by this.
+    public const double BaseHeight = 32;
+    public const double NotchWidthDefault = 238, NotchWidthMin = 180, NotchWidthMax = 800;
+    public const double NotchHeightDefault = 32, NotchHeightMin = 24, NotchHeightMax = 64;
+    public const double CapsuleWidthDefault = 196, CapsuleWidthMin = 140, CapsuleWidthMax = 800;
+    public const double CapsuleHeightDefault = 32, CapsuleHeightMin = 24, CapsuleHeightMax = 64;
+    // CapsuleTopMax is only the limit for saved values; on a monitor the capsule may go down until its bottom edge meets the
+    // bottom of the work area (CapsuleTopRange).
+    public const double CapsuleTopDefault = 5, CapsuleTopMin = 0, CapsuleTopMax = 4000;
+    public const double LineLengthDefault = 56, LineLengthMin = 24, LineLengthMax = 600;
+    // The thickness is chosen in half-DIP steps.
+    public const double LineThicknessDefault = 4, LineThicknessMin = 2, LineThicknessMax = 8, LineThicknessStep = 0.5;
+    public const double LineTopDefault = 4, LineTopMin = 0, LineTopMax = 16;
+    // Saved horizontal offsets are kept within this range; each monitor narrows them further when the shape is resolved.
+    public const double OffsetDefault = 0, OffsetLimit = 4000;
+    // The smallest content scale the height range allows (24 / 32). The largest is 64 / 32 = 2; there is no further cap.
+    public const double ContentMinScale = NotchHeightMin / BaseHeight;
+    // Horizontal space kept free at each end of the content at scale 1; it grows with the scale.
+    public const double NotchInset = 30, CapsuleInset = 16;
+    // The notch's bottom corners and the curved shoulders that join it to the screen edge keep these sizes at every
+    // width and height.
+    public const double NotchCorner = 12, NotchShoulder = 16;
+    // The panel opened from a lowered capsule reaches this far above the capsule's vertical centre (see CollapsedGeometry.PanelTop).
+    public const double CapsulePanelReach = 24;
+}
+
+// The collapsed surface as it is drawn on one monitor.
+// Surface: position and size in DIPs, relative to the monitor's top-left corner.
+// Scale: Surface.Height / CollapsedLimits.BaseHeight for the notch and the capsule (0.75 to 2); 1 for the line, which has no content.
+// Inset: free space at each end of the content, in DIPs: the style's base inset (30 notch, 16 capsule) times Scale; 0 for the line.
+// ContentWidth: width available to the content in DIPs, Surface.Width - 2 * Inset, never below 0. It is not divided by Scale.
+// BottomRadius and TopRadius: corner radii; Shoulder: the notch's shoulder radius (0 for the other styles).
+public sealed record CollapsedShape(CompactStyle Style, DipRect Surface, double Scale, double Inset, double ContentWidth,
+    double BottomRadius, double TopRadius, double Shoulder);
+
+// Turns the collapsed-style settings into a shape on a given monitor. The saved values are never changed here: a monitor that
+// is too small for them only narrows what is drawn on it.
+// monitor: the monitor's bounds in DIPs; only its width and height are used.
+// work: the monitor's work area in DIPs, relative to the monitor's top-left corner.
+// The notch is placed against the top of the monitor, over a top taskbar as before. The capsule and the line stay within the
+// work area. Every result lies on the monitor, with a width and height of at least 0, for any input.
+public static class CollapsedGeometry
+{
+    public static CollapsedShape Resolve(DeckSettings settings, CompactStyle style, DipRect monitor, DipRect work, double pixelsPerDip = 1)
+    {
+        var (screen, area) = Sanitize(monitor, work);
+        switch (style)
+        {
+            case CompactStyle.Capsule:
+            {
+                double width = Math.Min(Value(settings.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault), area.Width);
+                double height = Math.Min(Value(settings.CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault), area.Height);
+                var (topMin, topMax) = TopRange(height, area.Height, double.PositiveInfinity);
+                double top = Math.Clamp(Value(settings.CapsuleTop, CollapsedLimits.CapsuleTopMin, CollapsedLimits.CapsuleTopMax, CollapsedLimits.CapsuleTopDefault), topMin, topMax);
+                double scale = height / CollapsedLimits.BaseHeight, inset = CollapsedLimits.CapsuleInset * scale;
+                var surface = new DipRect(area.X + Place(area.Width, width, settings.CapsuleOffsetX), area.Y + top, width, height);
+                return new(style, surface, scale, inset, Math.Max(0, width - 2 * inset), height / 2, height / 2, 0);
+            }
+            case CompactStyle.Line:
+            {
+                double length = Math.Min(Value(settings.LineLength, CollapsedLimits.LineLengthMin, CollapsedLimits.LineLengthMax, CollapsedLimits.LineLengthDefault), area.Width);
+                double thickness = Math.Min(SnapToDevicePixels(RoundLineThickness(settings.LineThickness), pixelsPerDip), area.Height);
+                var (topMin, topMax) = TopRange(thickness, area.Height, CollapsedLimits.LineTopMax);
+                double top = Math.Clamp(Value(settings.LineTop, CollapsedLimits.LineTopMin, CollapsedLimits.LineTopMax, CollapsedLimits.LineTopDefault), topMin, topMax);
+                var surface = new DipRect(area.X + Place(area.Width, length, settings.LineOffsetX), area.Y + top, length, thickness);
+                return new(style, surface, 1, 0, length, thickness / 2, thickness / 2, 0);
+            }
+            default:
+            {
+                double width = Math.Min(Value(settings.NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault), screen.Width);
+                double height = Math.Min(Value(settings.NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault), screen.Height);
+                double scale = height / CollapsedLimits.BaseHeight, inset = CollapsedLimits.NotchInset * scale;
+                var surface = new DipRect(Place(screen.Width, width, settings.NotchOffsetX), 0, width, height);
+                return new(CompactStyle.Notch, surface, scale, inset, Math.Max(0, width - 2 * inset), CollapsedLimits.NotchCorner, 0, CollapsedLimits.NotchShoulder);
+            }
+        }
+    }
+
+    // The horizontal offsets that move a surface of this width on this monitor; larger saved offsets act as these limits.
+    public static (double Min, double Max) OffsetXRange(CompactStyle style, double width, DipRect monitor, DipRect work)
+    {
+        double span = Span(style, monitor, work);
+        double half = double.IsFinite(width) ? Math.Max(0, (span - Math.Clamp(width, 0, span)) / 2) : 0;
+        return (-half, half);
+    }
+
+    // The widths that fit the style on this monitor: the setting's range, narrowed by the monitor or its work area.
+    public static (double Min, double Max) WidthRange(CompactStyle style, DipRect monitor, DipRect work)
+    {
+        var (min, max) = style switch
+        {
+            CompactStyle.Capsule => (CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax),
+            CompactStyle.Line => (CollapsedLimits.LineLengthMin, CollapsedLimits.LineLengthMax),
+            _ => (CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax)
+        };
+        double high = Math.Min(max, Span(style, monitor, work));
+        return (Math.Min(min, high), high);
+    }
+
+    // The distances from the top of the work area at which a capsule of this height stays within it: 0 to workH - H.
+    public static (double Min, double Max) CapsuleTopRange(double height, DipRect work)
+        => TopRange(Finite(height), Finite(work.Height), double.PositiveInfinity);
+
+    // Where the open panel starts, in DIPs from the top of the monitor (work is relative to the monitor).
+    // Notch and line: the screen edge (0). Capsule within the hover bridge (CollapsedHover.HasBridge): the top of the work area,
+    // which is the screen edge unless the taskbar is at the top. Capsule lowered beyond the bridge: CapsulePanelLift(height)
+    // above the capsule's top. Either way the capsule's panel never starts above the work area, and it moves up as far as
+    // needed to keep a panel of this height inside the work area. bottomLimit, when given, is a lower bottom edge for the
+    // panel than the work area's (the window keeps room below it).
+    public static double PanelTop(CollapsedShape shape, DipRect work, double pageHeight, double bottomLimit = double.PositiveInfinity)
+    {
+        if (shape.Style != CompactStyle.Capsule || !double.IsFinite(work.Y) || !double.IsFinite(work.Height)) return 0;
+        double top = Math.Max(0, work.Y), bottom = top + Finite(work.Height);
+        if (!double.IsNaN(bottomLimit)) bottom = Math.Min(bottom, bottomLimit);
+        double wanted = CollapsedHover.HasBridge(CompactStyle.Capsule, shape.Surface, work.Y) ? top : shape.Surface.Y - CapsulePanelLift(shape.Surface.Height);
+        return Math.Clamp(wanted, top, Math.Max(top, bottom - Finite(pageHeight)));
+    }
+
+    // How far the panel opened from a lowered capsule starts above the capsule's top: max(0, 24 - H / 2), 8 at the default height.
+    public static double CapsulePanelLift(double capsuleHeight) => Math.Max(0, CollapsedLimits.CapsulePanelReach - Finite(capsuleHeight) / 2);
+
+    // The same for the line (at most 16).
+    public static (double Min, double Max) LineTopRange(double thickness, DipRect work)
+        => TopRange(Finite(thickness), Finite(work.Height), CollapsedLimits.LineTopMax);
+
+    // A thickness rounded to the nearest half DIP within 2 to 8; a value that is not a number gives the default.
+    public static double RoundLineThickness(double value)
+        => double.IsFinite(value)
+            ? Math.Clamp(Math.Round(value / CollapsedLimits.LineThicknessStep, MidpointRounding.AwayFromZero) * CollapsedLimits.LineThicknessStep, CollapsedLimits.LineThicknessMin, CollapsedLimits.LineThicknessMax)
+            : CollapsedLimits.LineThicknessDefault;
+
+    // A length in DIPs moved to the nearest whole number of device pixels (at least one), given in DIPs again. Rounding is
+    // monotonic: a larger value never gives a smaller result, though neighbouring values may give the same one.
+    public static double SnapToDevicePixels(double dip, double pixelsPerDip)
+    {
+        double scale = double.IsFinite(pixelsPerDip) && pixelsPerDip > 0 ? pixelsPerDip : 1;
+        double pixels = double.IsFinite(dip) ? Math.Max(1, Math.Round(dip * scale, MidpointRounding.AwayFromZero)) : 1;
+        return pixels / scale;
+    }
+
+    private static (double Min, double Max) TopRange(double height, double areaHeight, double limit)
+        => (0, Math.Clamp(areaHeight - Math.Max(0, height), 0, limit));
+
+    // Where a surface of the given width starts within a span: centred, moved by the offset as far as the span allows.
+    private static double Place(double span, double width, double offset)
+    {
+        double half = Math.Max(0, (span - width) / 2);
+        double shift = double.IsFinite(offset) ? Math.Clamp(offset, -CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetLimit) : 0;
+        return half + Math.Clamp(shift, -half, half);
+    }
+
+    private static double Span(CompactStyle style, DipRect monitor, DipRect work)
+    {
+        var (screen, area) = Sanitize(monitor, work);
+        return style == CompactStyle.Notch ? screen.Width : area.Width;
+    }
+
+    private static double Value(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
+    private static double Finite(double value) => double.IsFinite(value) ? Math.Max(0, value) : 0;
+
+    // A monitor with sizes that are not numbers or negative counts as empty. The work area is kept within the monitor; one
+    // that is missing or empty is replaced by the whole monitor.
+    private static (DipRect Screen, DipRect Area) Sanitize(DipRect monitor, DipRect work)
+    {
+        double width = Finite(monitor.Width), height = Finite(monitor.Height);
+        var screen = new DipRect(0, 0, width, height);
+        if (!double.IsFinite(work.X) || !double.IsFinite(work.Y) || !double.IsFinite(work.Width) || !double.IsFinite(work.Height)) return (screen, screen);
+        double left = Math.Clamp(work.X, 0, width), top = Math.Clamp(work.Y, 0, height);
+        double right = Math.Clamp(work.X + Math.Max(0, work.Width), left, width), bottom = Math.Clamp(work.Y + Math.Max(0, work.Height), top, height);
+        return right - left <= 0 || bottom - top <= 0 ? (screen, screen) : (screen, new DipRect(left, top, right - left, bottom - top));
+    }
+}

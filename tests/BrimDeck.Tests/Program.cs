@@ -20,6 +20,8 @@ try
     ColorMathTests.Run(Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
+    CollapsedHoverTests.Run(Check);
+    CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);

@@ -307,7 +307,7 @@ public sealed partial class SettingsWindow : Window
         _appRowMotionVersions.Clear();
         _sourceRows.Clear();
         _appRows = null;
-        if (page != 2 && _preview) { _preview = false; _app.Deck.Preview(false); }
+        if (page != _page && _preview) { _preview = false; _app.Deck.Preview(false); }
         // Rebuilding the same page after a change keeps the reader where they were; only switching pages starts at the top.
         double keep = page == _page ? Math.Max(_scroll.VerticalOffset, _keptOffset) : 0; _keptOffset = 0;
         _page = page; _navigation.Children.Clear(); _content.Children.Clear(); _aboutUpdateView = null; _scroll.ScrollToTop();
@@ -434,7 +434,7 @@ public sealed partial class SettingsWindow : Window
         Group([.. rows]);
     }
     // Monitors were connected, removed or rearranged; the list of displays is built again.
-    internal void DisplaysChanged() { if (IsLoaded && _page == 0) ShowPage(0); }
+    internal void DisplaysChanged() { if (!IsLoaded) return; if (_page == 0) ShowPage(0); else if (_page == 1) _refreshCollapsedRanges?.Invoke(); }
     private void Compact()
     {
         SectionTitle(Loc.T("收起样式", "Collapsed style"));
@@ -550,7 +550,7 @@ public sealed partial class SettingsWindow : Window
             {
                 case 0:s.LaunchAtStartup=false;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.Display=defaults.Display;s.DisplayMonitors=[];break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
-                    s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=defaults.ClockGradient;s.Clock24Hour=defaults.Clock24Hour;break;
+                    s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=defaults.ClockGradient;s.Clock24Hour=defaults.Clock24Hour;CopyCollapsedSize(s,defaults);break;
                 case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;break;
                 case 3:s.QuotaAlerts=defaults.QuotaAlerts;s.Apps=defaults.Apps;break;
                 case 5:s.MusicText=defaults.MusicText;s.MusicCoverColor=defaults.MusicCoverColor;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;

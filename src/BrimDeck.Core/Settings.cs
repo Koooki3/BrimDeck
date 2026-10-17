@@ -158,6 +158,21 @@ public sealed class DeckSettings
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
     public CompactStyle Style { get; set; } = CompactStyle.Notch;
+    // Size and position of each collapsed style in DIPs; limits and defaults are in CollapsedLimits. OffsetX moves the surface
+    // from the centre; each monitor narrows the offset to what fits (CollapsedGeometry) without changing the saved value.
+    public double NotchWidth { get; set; } = CollapsedLimits.NotchWidthDefault;
+    public double NotchHeight { get; set; } = CollapsedLimits.NotchHeightDefault;
+    public double NotchOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    public double CapsuleWidth { get; set; } = CollapsedLimits.CapsuleWidthDefault;
+    public double CapsuleHeight { get; set; } = CollapsedLimits.CapsuleHeightDefault;
+    public double CapsuleOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    // Distance from the top of the work area. Saved up to 4000; each monitor stops the capsule at the bottom of its work area.
+    public double CapsuleTop { get; set; } = CollapsedLimits.CapsuleTopDefault;
+    public double LineLength { get; set; } = CollapsedLimits.LineLengthDefault;
+    // In half-DIP steps.
+    public double LineThickness { get; set; } = CollapsedLimits.LineThicknessDefault;
+    public double LineTop { get; set; } = CollapsedLimits.LineTopDefault;
+    public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
@@ -292,6 +307,19 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         Language = Loc.Normalize(Language);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
+        static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
+        static double Offset(double value) => Fit(value, -CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetDefault);
+        NotchWidth = Fit(NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault);
+        NotchHeight = Fit(NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault);
+        NotchOffsetX = Offset(NotchOffsetX);
+        CapsuleWidth = Fit(CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
+        CapsuleHeight = Fit(CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault);
+        CapsuleOffsetX = Offset(CapsuleOffsetX);
+        CapsuleTop = Fit(CapsuleTop, CollapsedLimits.CapsuleTopMin, CollapsedLimits.CapsuleTopMax, CollapsedLimits.CapsuleTopDefault);
+        LineLength = Fit(LineLength, CollapsedLimits.LineLengthMin, CollapsedLimits.LineLengthMax, CollapsedLimits.LineLengthDefault);
+        LineThickness = CollapsedGeometry.RoundLineThickness(LineThickness);
+        LineTop = Fit(LineTop, CollapsedLimits.LineTopMin, CollapsedLimits.LineTopMax, CollapsedLimits.LineTopDefault);
+        LineOffsetX = Offset(LineOffsetX);
         if (QuickSize is { } quick && !Enum.IsDefined(quick)) QuickSize = null;
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;

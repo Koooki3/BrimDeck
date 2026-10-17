@@ -667,7 +667,10 @@ public partial class MainWindow
             }
         }
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
-        MusicIndicator.Width = CompactWidth(CompactStyle.Line) * (track.HasTimeline ? position.TotalSeconds / track.Duration.TotalSeconds : 0);
+        // The progress runs along the indicator's own length, whatever length is set.
+        double length = double.IsFinite(Collapsed.Surface.Width) ? Math.Max(0, Collapsed.Surface.Width) : 0;
+        double progress = track.HasTimeline && track.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / track.Duration.TotalSeconds, 0, 1) : 0;
+        MusicIndicator.Width = length * progress;
     }
     private (string Previous, string Current, string Next) CurrentLyrics(MediaTrack track)
     {
@@ -680,7 +683,8 @@ public partial class MainWindow
     internal Color? CoverColor => _mediaCover is not null && _mediaTrack is { State: not MediaState.Stopped } && _musicAccent is SolidColorBrush { Color.A: 255 } accent ? accent.Color : null;
     private void RenderCompactMusic()
     {
-        double contentWidth = Math.Max(0, CompactWidth(EffectiveStyle) - (EffectiveStyle == CompactStyle.Notch ? 60 : 32));
+        // The collapsed shape gives the row's width in DIPs.
+        double contentWidth = Math.Max(0, Collapsed.ContentWidth);
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
         bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";

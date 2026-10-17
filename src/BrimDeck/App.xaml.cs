@@ -115,6 +115,13 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
+    // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the
+    // panel is resumed either way, in case the two disagree (ResumeAfterPreview does nothing when no preview is on).
+    internal void EndPreviewFromDeck()
+    {
+        _settingsWindow?.EndPreview();
+        Deck.ResumeAfterPreview();
+    }
     // The panel's update dot opens the About page with the update dialog.
     internal void OpenUpdateSettings() => ShowSettings(true);
     private void ShowSettings(bool update)
