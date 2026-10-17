@@ -8,6 +8,10 @@ namespace BrimDeck.Core;
 public enum CompactStyle { Notch, Capsule, Line }
 public enum WindowBehavior { Normal, Line, Hide }
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
+// The monitors that show the panel. Chosen uses DisplayMonitors and falls back to the primary monitor while none of them is connected.
+public enum DisplayPlacement { Primary, Chosen }
+// A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named.
+public sealed record ChosenDisplay(string Id, string Name);
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop or web) signed in with; DeepSeek uses a key entered by hand.
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
@@ -154,8 +158,25 @@ public sealed class DeckSettings
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
     public CompactStyle Style { get; set; } = CompactStyle.Notch;
+    // Size and position of each collapsed style in DIPs; limits and defaults are in CollapsedLimits. OffsetX moves the surface
+    // from the centre; each monitor narrows the offset to what fits (CollapsedGeometry) without changing the saved value.
+    public double NotchWidth { get; set; } = CollapsedLimits.NotchWidthDefault;
+    public double NotchHeight { get; set; } = CollapsedLimits.NotchHeightDefault;
+    public double NotchOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    public double CapsuleWidth { get; set; } = CollapsedLimits.CapsuleWidthDefault;
+    public double CapsuleHeight { get; set; } = CollapsedLimits.CapsuleHeightDefault;
+    public double CapsuleOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    // Distance from the top of the work area. Saved up to 4000; each monitor stops the capsule at the bottom of its work area.
+    public double CapsuleTop { get; set; } = CollapsedLimits.CapsuleTopDefault;
+    public double LineLength { get; set; } = CollapsedLimits.LineLengthDefault;
+    // In half-DIP steps.
+    public double LineThickness { get; set; } = CollapsedLimits.LineThicknessDefault;
+    public double LineTop { get; set; } = CollapsedLimits.LineTopDefault;
+    public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
+    public string HideHotkey { get; set; } = "";
+    public string ExpandHotkey { get; set; } = "";
     public bool MusicPage { get; set; } = true;
-    public double MusicWidth { get; set; } = 520;
+    public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
     // The notch and the capsule each keep their own choices; the indicator only offers the playback progress.
     public bool NotchSummary { get; set; } = true;
@@ -192,6 +213,9 @@ public sealed class DeckSettings
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
+    public DisplayPlacement Display { get; set; }
+    // Kept while Display is Primary, so that choosing displays again restores them.
+    public List<ChosenDisplay> DisplayMonitors { get; set; } = [];
     public bool UsagePage { get; set; } = true;
     public bool UsageAutoSync { get; set; } = true;
     // The settings window's size when last closed, in DIPs, and whether it was maximized. Empty until it is closed once;
@@ -251,6 +275,7 @@ public sealed class DeckSettings
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
+        copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         return copy;
     }
     public void Normalize()
@@ -268,7 +293,7 @@ public sealed class DeckSettings
         Width = double.IsFinite(Width) ? Math.Clamp(Width, 440, 1200) : 760;
         Width = Math.Max(Width, MinimumWidth);
         Height = double.IsFinite(Height) ? Math.Clamp(Height, 140, 400) : 240;
-        MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, 440, 1200) : 520;
+        MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, 440, 1200) : 440;
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, 140, 400) : 200;
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
@@ -284,10 +309,29 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         Language = Loc.Normalize(Language);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
+        static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
+        static double Offset(double value) => Fit(value, -CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetLimit, CollapsedLimits.OffsetDefault);
+        NotchWidth = Fit(NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault);
+        NotchHeight = Fit(NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault);
+        NotchOffsetX = Offset(NotchOffsetX);
+        CapsuleWidth = Fit(CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
+        CapsuleHeight = Fit(CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault);
+        CapsuleOffsetX = Offset(CapsuleOffsetX);
+        CapsuleTop = Fit(CapsuleTop, CollapsedLimits.CapsuleTopMin, CollapsedLimits.CapsuleTopMax, CollapsedLimits.CapsuleTopDefault);
+        LineLength = Fit(LineLength, CollapsedLimits.LineLengthMin, CollapsedLimits.LineLengthMax, CollapsedLimits.LineLengthDefault);
+        LineThickness = CollapsedGeometry.RoundLineThickness(LineThickness);
+        LineTop = Fit(LineTop, CollapsedLimits.LineTopMin, CollapsedLimits.LineTopMax, CollapsedLimits.LineTopDefault);
+        LineOffsetX = Offset(LineOffsetX);
+        HideHotkey ??= "";
+        ExpandHotkey ??= "";
         if (QuickSize is { } quick && !Enum.IsDefined(quick)) QuickSize = null;
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
+        if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
+        DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
+            .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
+        if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
     }
 }
 

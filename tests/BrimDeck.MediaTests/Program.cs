@@ -137,7 +137,7 @@ try
     using var portProbe = new TcpListener(IPAddress.Loopback, 0); portProbe.Start(); int port = ((IPEndPoint)portProbe.LocalEndpoint).Port; portProbe.Stop();
     var builder = WebApplication.CreateSlimBuilder(); builder.Logging.ClearProviders(); builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
     await using var server = builder.Build(); server.UseWebSockets();
-    WebSocket? active = null; string binding = ""; int commands = 0, connections = 0; bool loseReply = false;
+    WebSocket? active = null; string binding = "", lastCommand = ""; int commands = 0, connections = 0; bool loseReply = false;
     var write = new SemaphoreSlim(1, 1);
     async Task Wire(object value)
     {
@@ -145,7 +145,7 @@ try
         try { if (active is { State: WebSocketState.Open } socket) await socket.SendAsync(JsonSerializer.SerializeToUtf8Bytes(value).AsMemory(), WebSocketMessageType.Text, true, default); }
         finally { write.Release(); }
     }
-    object Snapshot(string id = "42", double? position = 18000) => new { title = "CDP song", artist = "Artist", album = "Album", songId = id, durationMs = 180000, positionMs = position, state = "paused", mode = "playCycle", canControl = true, canSeek = true, canMode = true };
+    object Snapshot(string id = "42", double? position = 18000, bool canLike = false, bool liked = false) => new { title = "CDP song", artist = "Artist", album = "Album", songId = id, durationMs = 180000, positionMs = position, state = "paused", mode = "playCycle", canControl = true, canSeek = true, canMode = true, canLike, liked };
     server.MapGet("/json", () => Results.Json(new[] { new { type = "page", webSocketDebuggerUrl = $"ws://127.0.0.1:{port}/devtools/page/test" } }));
     server.Map("/devtools/page/test", async context =>
     {
@@ -165,7 +165,7 @@ try
                 if (method == "Runtime.evaluate")
                 {
                     string expression = packet.GetProperty("params").GetProperty("expression").GetString()!;
-                    if (expression.Contains(".command(")) { commands++; if (loseReply) continue; value = new { dispatched = true }; }
+                    if (expression.Contains(".command(")) { commands++; lastCommand = expression; if (loseReply) continue; value = new { dispatched = true }; }
                     else if (expression.Contains(".keepalive(")) value = true;
                     else value = new { ready = true, snapshot = Snapshot() };
                 }
@@ -192,6 +192,11 @@ try
         loseReply = true;
         Check("Lost CDP command reply remains uncertain and is not resent", await cdp.CommandAsync(MediaCommand.Next, MediaState.Paused) == DesktopCommandResult.Uncertain && commands == 2);
         loseReply = false;
+        Check("CDP like is unavailable while the page reports it cannot like", await cdp.CommandAsync(MediaCommand.Like, MediaState.Paused) == DesktopCommandResult.Unavailable && commands == 2);
+        await Wire(new { method = "Runtime.bindingCalled", @params = new { name = binding, executionContextId = 1, payload = JsonSerializer.Serialize(Snapshot("43", 22000, canLike: true, liked: true)) } });
+        await Until("CDP snapshot carries the liked state", () => cdp.Snapshot is { CanLike: true, Liked: true });
+        Check("CDP like names the current song on the current bridge", await cdp.CommandAsync(MediaCommand.Like, MediaState.Paused) == DesktopCommandResult.Sent && commands == 3
+            && lastCommand.StartsWith($"window.{NeteaseCdpConnection.BridgeObject}.command(", StringComparison.Ordinal) && lastCommand.Contains("\"command\":\"like\"") && lastCommand.Contains("\"songId\":\"43\""));
         await Wire(new { method = "Runtime.executionContextsCleared", @params = new { } });
         await Until("CDP reconnects after page reload", () => connections >= 2 && cdp.Ready, 6000);
     }

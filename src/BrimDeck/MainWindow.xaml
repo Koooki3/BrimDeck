@@ -6,10 +6,11 @@
     <ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ModelDetailsResources.xaml"/><ResourceDictionary Source="ToolbarResources.xaml"/><ResourceDictionary Source="MusicResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary>
   </Window.Resources>
   <Grid x:Name="Stage" Background="{x:Null}">
-    <!-- Hover state belongs to the zone, so moving between the panel and the strip above it never counts as leaving. -->
-    <Grid x:Name="HoverZone" HorizontalAlignment="Center" VerticalAlignment="Top" Background="{x:Null}"
+    <!-- Hover state belongs to the zone, so moving between the panel and the strip above it never counts as leaving.
+         The zone starts at the island's left edge: its left margin places the island within the window (see SetExpanded). -->
+    <Grid x:Name="HoverZone" HorizontalAlignment="Left" VerticalAlignment="Top" Background="{x:Null}"
           MouseEnter="Island_MouseEnter" MouseLeave="Island_MouseLeave">
-      <Grid x:Name="IslandShadow" HorizontalAlignment="Center" VerticalAlignment="Top"
+      <Grid x:Name="IslandShadow" HorizontalAlignment="Left" VerticalAlignment="Top"
             Width="{Binding ActualWidth, ElementName=Island}" Height="{Binding ActualHeight, ElementName=Island}"
             Margin="{Binding Margin, ElementName=Island}" Opacity="0" IsHitTestVisible="False">
         <Grid.Effect>
@@ -19,16 +20,17 @@
                             ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}"/>
       </Grid>
       <!-- In compact form this strip covers the whole bounding box from the screen edge down, including the notch shoulders,
-           the rounded corners and the gap above the capsule. It sits below the island so compact content keeps its own hit testing. -->
+           the rounded corners and the gap above the capsule. It sits below the island so compact content keeps its own hit testing.
+           Collapsed, SetExpanded places it at the box HoverExtensionBox gives; open, it stretches across the island again. -->
       <Border x:Name="HoverExtension" Background="#01000000" Height="0" VerticalAlignment="Top" HorizontalAlignment="Stretch"/>
-      <local:IslandBorder x:Name="Island" HorizontalAlignment="Center" VerticalAlignment="Top" Width="238" Height="32"
+      <local:IslandBorder x:Name="Island" HorizontalAlignment="Left" VerticalAlignment="Top" Width="238" Height="32"
               Background="Black" BorderThickness="0" CornerRadius="0,0,12,12" ShoulderRadius="16" MaterialOpacity="1" ClipToBounds="True">
         <!-- The layered window and the island's rounded clip would leave text in grayscale; the surface beneath is opaque black,
              so ClearType is safe here. Text under a fade, a mask or another clip falls back to grayscale until that ends. -->
         <Grid RenderOptions.ClearTypeHint="Enabled">
           <Border x:Name="MusicIndicator" Height="4" HorizontalAlignment="Left" VerticalAlignment="Center" Background="#FF55555A" CornerRadius="2" Visibility="Collapsed" IsHitTestVisible="False"/>
           <!-- Compact music, quotas and the clock share the fixed content area; quota alerts take precedence. -->
-          <Grid x:Name="Compact" HorizontalAlignment="Center" VerticalAlignment="Center" Height="26" RenderTransformOrigin="0.5,0.5">
+          <Grid x:Name="Compact" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform><ScaleTransform x:Name="CompactScale"/></Grid.RenderTransform>
             <StackPanel x:Name="CompactRings" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             <StackPanel x:Name="CompactAlert" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>

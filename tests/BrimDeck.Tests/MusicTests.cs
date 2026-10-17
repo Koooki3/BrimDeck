@@ -15,14 +15,18 @@ internal static class MusicTests
             && MusicPlaybackModes.Next(modes with { Repeat = MediaRepeat.None }) == MusicPlaybackMode.List);
         check("Repeat-only sources omit shuffle", MusicPlaybackModes.Supported(modes with { CanShuffle = false }).SequenceEqual([MusicPlaybackMode.List, MusicPlaybackMode.Track, MusicPlaybackMode.Order]));
         check("Sources without modes omit the mode control", MusicPlaybackModes.Supported(new MediaTrack()).Count == 0);
+        PageLayout(check);
         var narrow = CompactMusicLayout.Calculate(115, true, 4, true);
-        check("A narrow compact row keeps one rotating ring beside a scrolling lyric", narrow.VisibleRings == 1 && narrow.ScrollRings && narrow.RingSize == 10 && narrow.TextWidth == 43);
+        check("A narrow compact row keeps one rotating ring, at full size, beside a scrolling lyric", narrow.VisibleRings == 1 && narrow.ScrollRings && narrow.RingSize == 12 && narrow.TextWidth == 41);
         var capsule = CompactMusicLayout.Calculate(91.3, true, 4, true);
-        check("The capsule beside the widest clock still shows a ring and the lyric", capsule.VisibleRings == 1 && capsule.TextWidth > 19);
+        check("The capsule beside the widest clock cuts its first ring at the region's edge instead of shrinking it", capsule.VisibleRings == 0 && capsule.RingSize == 12
+            && Math.Abs(capsule.RingWidth - 11.3) < 1e-9 && capsule.TextWidth == 18 && capsule.TextScrolls);
         var tight = CompactMusicLayout.Calculate(84, true, 4, true);
-        check("Rings give way to the lyric once it would fall below its minimum", tight.VisibleRings == 0 && tight.TextWidth == 30);
-        check("Without the clock the notch shows four rings and the capsule three beside the lyric", CompactMusicLayout.Calculate(178, true, 4, true).VisibleRings == 4
-            && CompactMusicLayout.Calculate(164, true, 4, true).VisibleRings == 3);
+        check("Short of one ring, the lyric keeps its minimum, then the space between, then the first ring is cut", tight.VisibleRings == 0 && !tight.ScrollRings
+            && tight.TextWidth == 18 && tight.Between == 8 && tight.RingWidth == 4 && tight.TextScrolls && tight.RingSize == 12);
+        check("Without the clock the default notch and capsule rotate two full-size rings beside the lyric", CompactMusicLayout.Calculate(178, true, 4, true) is { VisibleRings: 2, ScrollRings: true, RingSize: 12, RingGap: 8 }
+            && CompactMusicLayout.Calculate(164, true, 4, true) is { VisibleRings: 2, ScrollRings: true, RingSize: 12, RingGap: 8 });
+        CompactLayout(check);
         var now = DateTimeOffset.UtcNow;
         var track = new MediaTrack { Title = "测试曲目", Artist = "测试歌手", Start = TimeSpan.FromSeconds(10), End = TimeSpan.FromSeconds(210), ReportedPosition = TimeSpan.FromSeconds(20), PositionAt = now, State = MediaState.Playing, Rate = 2 };
         check("Playback position applies rate and timeline origin", track.Position(now.AddSeconds(3)).TotalSeconds == 16);
@@ -57,6 +61,48 @@ internal static class MusicTests
         check("A NetEase lyric still at its first version is requested in full", firstVersion.At(1.5).Current == "first" && versioned.Requested.All(u => !u.Contains("lv=1")));
         await QqLyricsTests.Run(check);
     }
+    private static void PageLayout(Action<string, bool> check)
+    {
+        MusicLayout At(PanelSize size) { var (w, h) = MusicSizes.For(size); return MusicLayout.Calculate(w, h, true, true); }
+        var compact = At(PanelSize.Compact); var standard = At(PanelSize.Standard); var spacious = At(PanelSize.Spacious);
+        check("The presets are densities 0, 1 and 2, the largest panel 3", compact.Density == 0 && standard.Density == 1 && spacious.Density == 2
+            && MusicLayout.Calculate(1200, 400, true, true).Density == 3);
+        check("The compact preset puts the artist on the title line to keep a lyric line", compact.MergeTitle && compact.LyricLines == 1);
+        check("The standard preset gives the artist its own line above one lyric line", !standard.MergeTitle && standard.LyricLines == 1);
+        check("The spacious preset shows the lines before and after the current lyric", !spacious.MergeTitle && spacious.LyricLines == 3);
+        check("Without lyrics the artist keeps its own line at the compact preset", !MusicLayout.Calculate(440, 140, false, true).MergeTitle);
+        check("A tall, narrow panel stays one step above the narrow preset", MusicLayout.DensityFor(440, 400) == 1);
+        check("Without a timeline the cover takes the progress row's room",
+            MusicLayout.Calculate(440, 200, true, false).Cover > standard.Cover && MusicLayout.Calculate(440, 200, true, false).ProgressHeight == 0);
+        check("The standard music preset is 440 wide, as wide as the compact one", MusicSizes.For(PanelSize.Standard) == (440, 200)
+            && new DeckSettings().MusicWidth == 440 && new DeckSettings().MusicHeight == 200);
+        check("The bottom margin below the transport equals the side margin", standard.Metrics.Bottom == standard.Metrics.Side && spacious.Metrics.Bottom == spacious.Metrics.Side);
+        var failures = new List<string>(); double title = 0;
+        for (double h = 140; h <= 400; h += 2)
+        {
+            var growing = MusicLayout.Calculate(1200, h, true, true).Metrics;
+            if (growing.Title < title) failures.Add($"title shrinks at {h}");
+            title = growing.Title;
+            for (double w = 440; w <= 1200; w += 20)
+                foreach (bool timeline in new[] { true, false })
+                foreach (bool lyrics in new[] { true, false })
+                {
+                    var l = MusicLayout.Calculate(w, h, lyrics, timeline, logMode: true); var c = l.Metrics;
+                    string at = $"{w}x{h} timeline={timeline} lyrics={lyrics}";
+                    double barTop = l.ProgressY + (c.SeekRow - c.Bar) / 2, inkTop = l.ControlsY + c.Play / 8;
+                    double upperBottom = (timeline ? barTop : inkTop) - c.SectionGap;
+                    if (l.Cover < 40 || l.CoverY < 0 || l.CoverY + l.Cover > upperBottom + .5) failures.Add("cover " + at);
+                    if (l.TextX + l.TextWidth != l.BodyWidth || l.TextWidth < c.MinColumn) failures.Add("text column " + at);
+                    if (l.HeaderHeight + (l.LyricLines > 0 ? c.MiddleGap + l.LyricLines * c.LyricLine : 0) > l.Cover) failures.Add("text height " + at);
+                    if (lyrics && l.LyricLines == 0) failures.Add("no lyric line " + at);
+                    if (Math.Abs(l.ControlsY + c.Play * 7 / 8 - l.BodyHeight) > .5) failures.Add("transport bottom " + at);
+                    if (timeline && (l.TimesY < l.ProgressY + (c.SeekRow + c.BarHover) / 2 || l.TimesY + c.TimeLine + c.ControlsGap > inkTop + .5)) failures.Add("times " + at);
+                    if (l.ModeX < 0 || l.ModeX + c.Mode + 16 > l.TripletX || l.TripletX + l.TripletWidth > l.BodyWidth || Math.Abs(l.TripletX + l.TripletWidth / 2 - l.BodyWidth / 2) > .5) failures.Add("transport " + at);
+                    if (!l.ShowFullControl) failures.Add("full control entry " + at);
+                }
+        }
+        check("The music page fits every size from 440x140 to 1200x400" + (failures.Count > 0 ? ": " + string.Join("; ", failures.Take(5)) : ""), failures.Count == 0);
+    }
     // NetEase's lyric endpoint answers lv=<held version> with an empty lyric unless its own version is newer.
     private sealed class NeteaseLyricHandler : HttpMessageHandler
     {
@@ -78,5 +124,198 @@ internal static class MusicTests
             Calls++; Identified = request.Headers.UserAgent.ToString().Contains("BrimDeck"); Authorization |= request.Headers.Authorization is not null;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"trackName\":\"测试曲目\",\"artistName\":\"测试歌手\",\"duration\":200,\"syncedLyrics\":\"[00:01]歌词\"}") });
         }
+    }
+    // The collapsed row for any width and height: regions that clip instead of hiding, sizes that follow the height.
+    private static void CompactLayout(Action<string, bool> check)
+    {
+        check("The whole-row overload at the default height equals the old one", CompactMusicLayout.Calculate(178, 1, true, 4, true, 0) == CompactMusicLayout.Calculate(178, true, 4, true));
+        var standard = CompactMusicLayout.Calculate(178, 1, true, 4, true, 33);
+        check("The default notch with a clock keeps the old regions", standard.CoverWidth == 28 && standard.EqualizerWidth == 26 && standard.ClockWidth == 41
+            && standard.MiddleWidth == 83 && standard.CoverSize == 20 && standard.EqualizerSize == 18 && standard.EqualizerBar == 3 && standard.TextFont == 11.5
+            && standard.TextHeight == 22 && standard.RowHeight == 24 && standard.RingThickness == 2 && standard.TextEdge == 6 && standard.RingEdge == 3);
+        var wide = CompactMusicLayout.Calculate(400, 1, true, 4, true, 33);
+        check("A wider row only widens the middle, and the lyric takes the rest", wide.CoverWidth == standard.CoverWidth && wide.EqualizerWidth == standard.EqualizerWidth
+            && wide.ClockWidth == standard.ClockWidth && wide.MiddleWidth - standard.MiddleWidth == 222 && wide.VisibleRings == 4 && wide.RingSize == 12 && !wide.ScrollRings
+            && wide.TextWidth == wide.MiddleWidth - wide.RingWidth - wide.Between);
+        var tall = CompactMusicLayout.Calculate(400, 1.5, true, 4, true, 50);
+        check("A taller row scales the cover, equalizer, rings and type, in whole and half DIPs", tall.CoverSize == 30 && tall.CoverWidth == 42 && tall.EqualizerSize == 27
+            && tall.EqualizerHeight == 21 && tall.EqualizerWidth == 39 && tall.ClockWidth == 62 && tall.TextFont == 17.5 && tall.TextHeight == 33 && tall.RowHeight == 36
+            && tall.RingSize == 18 && tall.RingThickness == 3 && tall.TextEdge == 9);
+        var shortRow = CompactMusicLayout.Calculate(178, .75, true, 4, true, 25);
+        check("A shorter row scales down", shortRow.CoverSize == 15 && shortRow.TextFont == 8.5 && shortRow.RowHeight == 18 && shortRow.RingThickness == 1.5);
+
+        // The middle gives way first; then the equalizer, the cover and the clock, each to nothing before the next.
+        var sides = CompactMusicLayout.Calculate(95, 1, true, 4, true, 33);
+        check("With no room left for the middle every side region is whole", sides.MiddleWidth == 0 && sides.CoverWidth == 28 && sides.EqualizerWidth == 26 && sides.ClockWidth == 41);
+        var noEq = CompactMusicLayout.Calculate(85, 1, true, 4, true, 33);
+        check("The equalizer region shrinks first", noEq.EqualizerWidth == 16 && noEq.CoverWidth == 28 && noEq.ClockWidth == 41);
+        var noCover = CompactMusicLayout.Calculate(55, 1, true, 4, true, 33);
+        check("The cover region shrinks next", noCover.EqualizerWidth == 0 && noCover.CoverWidth == 14 && noCover.ClockWidth == 41);
+        var clockOnly = CompactMusicLayout.Calculate(20, 1, true, 4, true, 33);
+        check("The clock region shrinks last", clockOnly.EqualizerWidth == 0 && clockOnly.CoverWidth == 0 && clockOnly.ClockWidth == 20 && clockOnly.TextWidth == 0 && clockOnly.RingWidth == 0);
+        var resting = CompactMusicLayout.Calculate(54 + 10, 1, true, 4, true, 0);
+        check("A lyric region under its minimum rests, cut at the edge", resting.TextWidth == 10 && !resting.TextScrolls && resting.RingWidth == 0);
+        var ringsOnly = CompactMusicLayout.Calculate(54 + 6, 1, true, 4, false, 0);
+        check("Rings alone in less than one ring show the first ring cut", ringsOnly.VisibleRings == 0 && ringsOnly.RingWidth == 6 && !ringsOnly.ScrollRings && ringsOnly.TextWidth == 0);
+        var alone = CompactMusicLayout.Calculate(20, 1, false, 0, false, 33);
+        check("A lone clock has no gap and is cut to the row", alone.ClockAlone && alone.ClockWidth == 20);
+
+        // Any width, scale and clock width gives finite regions that are never negative and never add up to more than the row.
+        double[] widths = [0, .4, 1, 7, 17.9, 18, 36, 54, 84, 91.3, 115, 164, 178, 400, 1e6, double.NaN, -5, double.PositiveInfinity];
+        double[] scales = [.75, 1, 1.25, 1.5, 2, 3, 0, -1, double.NaN, double.PositiveInfinity, 1e-9];
+        double[] clocks = [0, 33, 80, double.NaN, -3];
+        bool sane = true;
+        foreach (var w in widths) foreach (var s in scales) foreach (var clock in clocks) foreach (var media in new[] { true, false })
+        foreach (var rings in new[] { 0, 1, 4, 12, -2 }) foreach (var text in new[] { true, false })
+        {
+            var l = CompactMusicLayout.Calculate(w, s, media, rings, text, clock * (double.IsFinite(s) && s > 0 ? s : 1));
+            double[] values = [l.MiddleWidth, l.RingWidth, l.TextWidth, l.Between, l.CoverWidth, l.EqualizerWidth, l.ClockWidth, l.RingSize, l.RingGap, l.TextFont, l.TextHeight, l.RowHeight, l.Scale];
+            double row = double.IsFinite(w) && w > 0 ? w : 0;
+            sane &= values.All(v => double.IsFinite(v) && v >= 0) && l.VisibleRings >= 0 && l.VisibleRings <= Math.Max(0, rings)
+                && l.CoverWidth + l.MiddleWidth + l.EqualizerWidth + (l.ClockAlone ? 0 : l.ClockWidth) <= row + 1e-9
+                && l.RingWidth + l.Between + l.TextWidth <= l.MiddleWidth + 1e-9 && (!l.ClockAlone || l.ClockWidth <= row + 1e-9);
+        }
+        check("Every width and scale gives finite, non-negative regions within the row", sane);
+
+        // One DIP more width changes each side region by at most one DIP and never makes one smaller.
+        bool steady = true;
+        foreach (var s in new[] { .75, 1, 1.5, 2 })
+        {
+            var previous = CompactMusicLayout.Calculate(0, s, true, 4, true, 33 * s);
+            for (int w = 1; w <= 600; w++)
+            {
+                var next = CompactMusicLayout.Calculate(w, s, true, 4, true, 33 * s);
+                foreach (var (a, b) in new[] { (previous.CoverWidth, next.CoverWidth), (previous.EqualizerWidth, next.EqualizerWidth), (previous.ClockWidth, next.ClockWidth), (previous.MiddleWidth, next.MiddleWidth) })
+                    steady &= b >= a - 1e-9 && b - a <= 1 + 1e-9;
+                previous = next;
+            }
+        }
+        check("Regions follow the width without jumps", steady);
+
+        // The 23:20 / 23:21 report: six rings beside a lyric, a few DIPs short of fitting them all, used to rotate three rings
+        // in 40 % of the middle, and one DIP wider showed all six beside the lyric's 56 DIP: 60 DIP moved at once.
+        double sideRegions = 28 + 26;
+        var before = CompactMusicLayout.Calculate(sideRegions + 175, 1, true, 6, true, 0);
+        var after = CompactMusicLayout.Calculate(sideRegions + 176, 1, true, 6, true, 0);
+        check("One DIP across the old all-rings threshold moves the rings and the lyric by at most one DIP",
+            Math.Abs(after.RingWidth - before.RingWidth) <= 1 && Math.Abs(after.TextWidth - before.TextWidth) <= 1 && before.ScrollRings && after.ScrollRings);
+        check("All rings stand still once the middle holds them in its 40 % share", CompactMusicLayout.Calculate(sideRegions + 280, 1, true, 6, true, 0) is { RingWidth: 112, ScrollRings: false, VisibleRings: 6 });
+
+        // Every region, for every style, height, clock, ring count, lyric and cover, moves by at most one DIP per DIP of
+        // width from 0 to 800, also between rotating and static rings. Snapped to device pixels the way the row lays them out
+        // (cumulatively from the middle's left edge, kept inside its column), adjacent regions never overlap.
+        var screen = new DipRect(0, 0, 3840, 2160);
+        bool continuous = true, apart = true, sameInputsSameRow = true; string firstJump = "", firstOverlap = "";
+        foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule, CompactStyle.Line })
+        foreach (var height in new[] { 24d, 32, 40, 48, 64 })
+        foreach (var clock in new[] { 0d, 33 })
+        foreach (var media in new[] { true, false })
+        foreach (var text in new[] { true, false })
+        for (int rings = 0; rings <= 8; rings++)
+        {
+            CompactMusicLayout? last = null;
+            for (int w = 0; w <= 800; w++)
+            {
+                var settings = new DeckSettings { NotchWidth = w, NotchHeight = height, CapsuleWidth = w, CapsuleHeight = height, LineLength = w, LineThickness = height / 8 };
+                var shape = CollapsedGeometry.Resolve(settings, style, screen, screen);
+                // Straight from the raw width as well, since the settings clamp the shape's width.
+                foreach (var (content, raw) in new[] { (shape.ContentWidth, false), ((double)w, true) })
+                {
+                    var l = CompactMusicLayout.Calculate(content, shape.Scale, media, rings, text, clock * shape.Scale);
+                    // Nothing else feeds the row: the same inputs give the same regions, whatever the lyric or the carousel do.
+                    sameInputsSameRow &= l == CompactMusicLayout.Calculate(content, shape.Scale, media, rings, text, clock * shape.Scale);
+                    if (!raw) continue;
+                    if (last is not null)
+                    {
+                        double[] a = [last.CoverWidth, last.MiddleWidth, last.RingWidth, last.Between, last.TextWidth, last.EqualizerWidth, last.ClockWidth];
+                        double[] b = [l.CoverWidth, l.MiddleWidth, l.RingWidth, l.Between, l.TextWidth, l.EqualizerWidth, l.ClockWidth];
+                        for (int i = 0; i < a.Length; i++)
+                            if (Math.Abs(a[i] - b[i]) > 1 + 1e-9) { if (continuous) firstJump = $"{style} h{height} clock{clock} rings{rings} text{text} w{w} region{i}: {a[i]} -> {b[i]}"; continuous = false; }
+                    }
+                    last = l;
+                    foreach (var dpi in new[] { 1, 1.25, 1.5, 1.75, 2 })
+                    {
+                        double Down(double v) => double.IsFinite(v) && v > 0 ? Math.Floor(v * dpi + .001) / dpi : 0;
+                        double row = Down(content), coverCol = Down(l.CoverWidth), eqCol = Down(l.EqualizerWidth), clockCol = l.ClockAlone ? 0 : Down(l.ClockWidth);
+                        double middleCol = Math.Max(0, row - coverCol - eqCol - clockCol);
+                        double ringEnd = Math.Min(middleCol, Down(l.RingWidth)), textStart = Math.Min(middleCol, Down(l.RingWidth + l.Between));
+                        double textEnd = Math.Min(middleCol, Down(l.RingWidth + l.Between + l.TextWidth));
+                        // The carousel draws up to its own snapped width; its left fade lies over the cover's whole gap.
+                        double carousel = Math.Floor(l.RingWidth * dpi + .001) / dpi;
+                        bool ok = coverCol + eqCol + clockCol <= row + 1e-9 && ringEnd <= textStart && textStart <= textEnd && carousel <= textStart + 1e-9
+                            && (l.RingWidth == 0 || l.CoverWidth == 0 || l.CoverWidth - l.CoverSize >= l.RingEdge);
+                        if (!ok && apart) { firstOverlap = $"{style} h{height} clock{clock} rings{rings} w{w} dpi{dpi}"; apart = false; }
+                    }
+                }
+            }
+        }
+        check("Every region follows the width continuously, for every style, height, clock and ring count" + (continuous ? "" : ": " + firstJump), continuous);
+        check("Adjacent regions never overlap at any width, height or DPI" + (apart ? "" : ": " + firstOverlap), apart);
+        check("The row depends on its width, height, ring count and toggles alone", sameInputsSameRow);
+        // The carousel's arithmetic (MusicVisuals.QuotaCarousel): the right fade spans at most one ring gap and never reaches
+        // the first ring, and the glide by whole ring steps ends with the last ring whole before the fade, inside the region.
+        bool carouselFits = true;
+        foreach (var s in new[] { .75, 1, 1.3125, 1.5, 2 }) foreach (var dpi in new[] { 1, 1.25, 1.5, 2 })
+        for (int rings = 2; rings <= 8; rings++) for (int w = 0; w <= 800; w++)
+        {
+            var l = CompactMusicLayout.Calculate(w, s, true, rings, true, 33 * s);
+            double step = Math.Round((l.RingSize + l.RingGap) * dpi, MidpointRounding.AwayFromZero) / dpi;
+            double span = Math.Floor(l.RingWidth * dpi + .001) / dpi, allRings = (rings - 1) * step + l.RingSize;
+            if (!(l.ScrollRings && span >= l.RingSize && span < allRings)) continue;
+            double fade = Math.Clamp(span - l.RingSize, 0, Math.Round(l.RingGap * dpi, MidpointRounding.AwayFromZero) / dpi);
+            double k = Math.Ceiling((allRings + fade - span) / step - 1e-6);
+            carouselFits &= k >= 1 && k <= rings - 1 && allRings - k * step <= span - fade + 1e-9 && fade <= span - l.RingSize + 1e-9;
+        }
+        check("The rotating rings' fade and glide keep the first and last rings whole at rest", carouselFits);
+
+        // The quota notice: the reset time gives way first, then the name, then the ring; the used text last.
+        var full = CompactAlertLayout.Calculate(300, 1, 60, 70, 40);
+        check("A notice with room shows every part at the default sizes", full.RingWidth == 22 && full.NameWidth == 68 && full.TextWidth == 70 && full.ResetWidth == 48
+            && full.RingSize == 14 && full.FontSize == 11.5 && full.LineHeight == 16 && Math.Abs(full.RingThickness - 2.2) < 1e-9);
+        var longName = CompactAlertLayout.Calculate(300, 1, 120, 70, 0);
+        check("The name keeps its 76 DIP cap", longName.NameWidth == 84 && longName.ResetWidth == 0);
+        var noReset = CompactAlertLayout.Calculate(150, 1, 60, 70, 40);
+        check("The reset time gives way before the name", noReset.ResetWidth == 0 && noReset.NameWidth == 58 && noReset.RingWidth == 22 && noReset.TextWidth == 70);
+        var textOnly = CompactAlertLayout.Calculate(60, 1, 60, 70, 40);
+        check("The name, then the ring give way before the used text", textOnly.NameWidth == 0 && textOnly.RingWidth == 0 && textOnly.TextWidth == 60 && textOnly.Total == 60);
+        var bigAlert = CompactAlertLayout.Calculate(1000, 2, 60, 70, 40);
+        check("A taller notice scales its ring and type", bigAlert.RingSize == 28 && bigAlert.FontSize == 23 && bigAlert.LineHeight == 32 && bigAlert.Gap == 16 && bigAlert.NameWidth == 76);
+        bool alertSane = true;
+        foreach (var w in widths) foreach (var s in scales) foreach (var part in new[] { 0, 30, double.NaN, -4, 1e6 })
+        {
+            var a = CompactAlertLayout.Calculate(w, s, part, part, part);
+            double row = double.IsFinite(w) && w > 0 ? w : 0;
+            alertSane &= new[] { a.RingWidth, a.NameWidth, a.TextWidth, a.ResetWidth, a.RingSize, a.FontSize }.All(v => double.IsFinite(v) && v >= 0) && a.Total <= row + 1e-9;
+        }
+        check("Every notice width and scale gives finite, non-negative regions within the row", alertSane);
+
+        // Every size in the row follows the height alone: across widths 0 to 800, for each style and height, the rings, cover,
+        // equalizer, clock and type keep one size; only the regions change.
+        var monitor = new DipRect(0, 0, 3840, 2160);
+        bool fixedSizes = true, regionsMove = false;
+        foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule, CompactStyle.Line })
+        foreach (var height in new[] { 24d, 28, 32, 40, 44, 50, 64 })
+        {
+            string? first = null, firstRaw = null;
+            for (int w = 0; w <= 800; w++)
+            {
+                var settings = new DeckSettings { NotchWidth = w, NotchHeight = height, CapsuleWidth = w, CapsuleHeight = height, LineLength = w, LineThickness = height / 8 };
+                var shape = CollapsedGeometry.Resolve(settings, style, monitor, monitor);
+                // Through the shape (whose width the settings clamp) and straight from the raw width.
+                foreach (var (l, raw) in new[] { (CompactMusicLayout.Calculate(shape.ContentWidth, shape.Scale, true, 4, true, 33 * shape.Scale), false),
+                    (CompactMusicLayout.Calculate(w, shape.Scale, true, 4, true, 33 * shape.Scale), true) })
+                {
+                    string key = string.Join("|", l.RingSize, l.RingGap, l.RingThickness, l.RingEdge, l.CoverSize, l.CoverRadius, l.EqualizerSize, l.EqualizerHeight,
+                        l.EqualizerBar, l.ClockFace, l.TextFont, l.TextHeight, l.TextEdge, l.RowHeight);
+                    if (raw) { firstRaw ??= key; fixedSizes &= key == firstRaw; } else { first ??= key; fixedSizes &= key == first; }
+                    fixedSizes &= l.RingSize == Math.Max(1, CompactMusicLayout.Whole(12 * l.Scale)) && l.RingGap == CompactMusicLayout.Whole(8 * l.Scale)
+                        && l.CoverSize == Math.Max(1, CompactMusicLayout.Whole(20 * l.Scale)) && l.EqualizerSize == Math.Max(1, CompactMusicLayout.Whole(18 * l.Scale));
+                    // A region narrower than one ring cuts it; the ring keeps its size.
+                    if (l.VisibleRings == 0 && l.RingWidth > 0 && l.RingWidth < l.RingSize) regionsMove = true;
+                }
+            }
+        }
+        check("Ring, cover, equalizer, clock and type sizes depend on the height alone, for every width and style", fixedSizes);
+        check("A short row cuts the ring region instead of shrinking the rings", regionsMove);
     }
 }

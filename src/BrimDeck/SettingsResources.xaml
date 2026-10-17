@@ -263,6 +263,47 @@
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- A slider whose zero sits in the middle: the fill runs from the center tick to the thumb. Code places CenterFill. -->
+  <Style x:Key="SettingsCenteredSlider" TargetType="Slider">
+    <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocus}"/>
+    <Setter Property="Height" Value="24"/><Setter Property="Focusable" Value="True"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider">
+      <Grid Background="Transparent">
+        <Border Height="3" CornerRadius="1.5" Background="{DynamicResource SettingsTrackBrush}" Margin="8,0" VerticalAlignment="Center"/>
+        <Border x:Name="CenterFill" Height="3" Width="0" HorizontalAlignment="Left" VerticalAlignment="Center" Background="{DynamicResource SettingsSliderAccent}" IsHitTestVisible="False"/>
+        <Border Width="1" Height="9" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SettingsScrollThumb}" IsHitTestVisible="False"/>
+        <Track x:Name="PART_Track" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}" Orientation="Horizontal">
+          <Track.DecreaseRepeatButton><RepeatButton Style="{StaticResource SettingsTrack}" Background="Transparent" Command="Slider.DecreaseLarge"/></Track.DecreaseRepeatButton>
+          <Track.Thumb><Thumb Width="16" Height="24" Cursor="Hand">
+            <Thumb.Template><ControlTemplate TargetType="Thumb">
+              <Grid Background="Transparent">
+                <Ellipse x:Name="Knob" Width="14" Height="14" Fill="White" Stroke="#B6BCC6" StrokeThickness="0.6" RenderTransformOrigin="0.5,0.5">
+                  <Ellipse.RenderTransform><ScaleTransform x:Name="KnobScale"/></Ellipse.RenderTransform>
+                  <Ellipse.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Direction="270" Opacity="0.45"/></Ellipse.Effect>
+                </Ellipse>
+              </Grid>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsDragging" Value="True"><Setter TargetName="Knob" Property="Fill" Value="#ECECF0"/></Trigger>
+                <EventTrigger RoutedEvent="MouseEnter"><BeginStoryboard><Storyboard>
+                  <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleX" To="1.12" Duration="0:0:0.12"/>
+                  <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleY" To="1.12" Duration="0:0:0.12"/>
+                </Storyboard></BeginStoryboard></EventTrigger>
+                <EventTrigger RoutedEvent="MouseLeave"><BeginStoryboard><Storyboard>
+                  <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.12"/>
+                  <DoubleAnimation Storyboard.TargetName="KnobScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.12"/>
+                </Storyboard></BeginStoryboard></EventTrigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate></Thumb.Template>
+          </Thumb></Track.Thumb>
+          <Track.IncreaseRepeatButton><RepeatButton Style="{StaticResource SettingsTrack}" Background="Transparent" Command="Slider.IncreaseLarge"/></Track.IncreaseRepeatButton>
+        </Track>
+        <Border x:Name="Focus" BorderThickness="1" BorderBrush="#800A84FF" CornerRadius="8" IsHitTestVisible="False" Visibility="Collapsed"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style x:Key="SettingsToggle" TargetType="CheckBox">
     <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsSwitchFocus}"/>
     <Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/><Setter Property="Cursor" Value="Hand"/>
@@ -384,6 +425,17 @@
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer">
       <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" Margin="{TemplateBinding Padding}"/>
+        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Style="{StaticResource SettingsScrollBar}" Margin="4,0,0,0" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"/>
+      </Grid>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- The page area: the scroll bar's column is always reserved, so a page that starts or stops scrolling keeps its width.
+       The settings window gives this column back from its right margin, so the bar sits in that margin. -->
+  <Style x:Key="SettingsPageScrollViewer" TargetType="ScrollViewer" BasedOn="{StaticResource SettingsScrollViewer}">
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer">
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/></Grid.ColumnDefinitions>
         <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" Margin="{TemplateBinding Padding}"/>
         <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Style="{StaticResource SettingsScrollBar}" Margin="4,0,0,0" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"/>
       </Grid>

@@ -8,6 +8,9 @@ namespace BrimDeck.Core;
 public sealed record TokenPrices(decimal Input, decimal Output, decimal? CacheRead, decimal? CacheWrite, decimal? CacheWriteHour);
 public sealed record PriceTier(long MinimumPromptTokens, TokenPrices Prices);
 public sealed record ModelPrice(string Model, TokenPrices Prices, IReadOnlyList<PriceTier> Tiers);
+public enum RecoveryStatus { Recovered, TooFewRecords, Undetermined, Inconsistent }
+// Records is the number of records with an API amount; Needed is how many the fit requires.
+public sealed record PriceRecovery(RecoveryStatus Status, TokenPrices? Prices, int Records, int Needed);
 public sealed record CostSummary(decimal Amount, int Reported, int Estimated, int Unpriced)
 {
     public bool HasValue => Reported + Estimated > 0;
@@ -250,26 +253,83 @@ public sealed class Pricing : IDisposable
         found[model] = price;
         return price;
     }
-    public decimal? Estimate(TokenEntry entry)
+    // The catalog or manual model whose prices apply to a record.
+    public ModelPrice? Match(TokenEntry entry)
     {
-        if (entry.ReportedCostUsd is { } reported) return reported;
         var model = Find(entry.Model);
         if (model is null && entry.Key.StartsWith("ag:", StringComparison.Ordinal))
             model = FindAntigravityBase(entry.Model);
-        if (model is null) return null;
+        return model;
+    }
+    // Blank cache prices in a manual entry: a cache read costs nothing, a cache write costs the input price, and a
+    // one-hour cache write costs the cache write price. Remote entries keep a missing cache price as unknown, so
+    // their records stay unpriced rather than guessed.
+    public TokenPrices Effective(ModelPrice model, TokenPrices prices)
+    {
+        if (!_manual.TryGetValue(Normalize(model.Model), out var manual) || !ReferenceEquals(manual, model)) return prices;
+        var write = prices.CacheWrite ?? prices.Input;
+        return prices with { CacheRead = prices.CacheRead ?? 0, CacheWrite = write, CacheWriteHour = prices.CacheWriteHour ?? write };
+    }
+    public decimal? Estimate(TokenEntry entry)
+    {
+        if (entry.ReportedCostUsd is { } reported) return reported;
+        if (Match(entry) is not { } model) return null;
         long prompt = entry.Input + entry.CacheRead + entry.CacheWrite + entry.CacheWriteHour;
-        var prices = model.Tiers.LastOrDefault(t => prompt >= t.MinimumPromptTokens)?.Prices ?? model.Prices;
-        // Blank cache prices in a manual entry: a cache read costs nothing, a cache write costs the input price, and a
-        // one-hour cache write costs the cache write price. Remote entries keep a missing cache price as unknown, so
-        // their records stay unpriced rather than guessed.
-        if (_manual.TryGetValue(Normalize(model.Model), out var manual) && ReferenceEquals(manual, model))
-        {
-            var write = prices.CacheWrite ?? prices.Input;
-            prices = prices with { CacheRead = prices.CacheRead ?? 0, CacheWrite = write, CacheWriteHour = prices.CacheWriteHour ?? write };
-        }
+        var prices = Effective(model, model.Tiers.LastOrDefault(t => prompt >= t.MinimumPromptTokens)?.Prices ?? model.Prices);
         if ((entry.CacheRead > 0 && prices.CacheRead is null) || (entry.CacheWrite > 0 && prices.CacheWrite is null) || (entry.CacheWriteHour > 0 && prices.CacheWriteHour is null)) return null;
         return entry.Input * prices.Input + entry.Output * prices.Output + entry.CacheRead * (prices.CacheRead ?? 0) +
             entry.CacheWrite * (prices.CacheWrite ?? 0) + entry.CacheWriteHour * (prices.CacheWriteHour ?? 0);
+    }
+    // Cursor reports the amount of each record but not the unit prices behind it. The amount is the token counts
+    // times fixed per-category prices, so a least-squares fit over a model's records recovers those prices. The fit is
+    // kept only when it reproduces every record's amount, which rejects tiered or otherwise non-linear pricing and
+    // sets with too few records to fix each price. A category without tokens has no recoverable price and stays null.
+    public static PriceRecovery FromReported(IEnumerable<TokenEntry> source)
+    {
+        var entries = source.Where(t => t.ReportedCostUsd is not null && t.Total > 0).ToArray();
+        Func<TokenEntry, long>[] counts = [t => t.Input, t => t.Output, t => t.CacheRead, t => t.CacheWrite, t => t.CacheWriteHour];
+        var used = Enumerable.Range(0, counts.Length).Where(c => entries.Any(t => counts[c](t) > 0)).ToArray();
+        int k = used.Length, needed = k + 3;
+        PriceRecovery Failed(RecoveryStatus status) => new(status, null, entries.Length, needed);
+        if (entries.Length < needed) return Failed(RecoveryStatus.TooFewRecords);
+        if (!used.Contains(0) || !used.Contains(1)) return Failed(RecoveryStatus.Undetermined);
+        // Each column is scaled to at most 1, so the normal equations stay well conditioned.
+        var scale = used.Select(c => (double)entries.Max(t => counts[c](t))).ToArray();
+        var a = new double[k, k + 1];
+        foreach (var entry in entries)
+        {
+            var x = used.Select((c, i) => counts[c](entry) / scale[i]).ToArray();
+            double y = (double)entry.ReportedCostUsd!.Value;
+            for (int i = 0; i < k; i++)
+            {
+                for (int j = 0; j < k; j++) a[i, j] += x[i] * x[j];
+                a[i, k] += x[i] * y;
+            }
+        }
+        double largest = Enumerable.Range(0, k).Max(i => a[i, i]);
+        for (int p = 0; p < k; p++)
+        {
+            int best = p;
+            for (int r = p + 1; r < k; r++) if (Math.Abs(a[r, p]) > Math.Abs(a[best, p])) best = r;
+            for (int c = 0; c <= k; c++) (a[p, c], a[best, c]) = (a[best, c], a[p, c]);
+            if (Math.Abs(a[p, p]) < 1e-10 * largest) return Failed(RecoveryStatus.Undetermined);
+            for (int r = 0; r < k; r++)
+                if (r != p) { double f = a[r, p] / a[p, p]; for (int c = p; c <= k; c++) a[r, c] -= f * a[p, c]; }
+        }
+        var prices = new double[k];
+        for (int i = 0; i < k; i++)
+        {
+            prices[i] = a[i, k] / a[i, i] / scale[i];
+            if (prices[i] < -1e-12) return Failed(RecoveryStatus.Inconsistent);
+        }
+        // Cursor gives amounts to 1e-7 USD; a millionth of a dollar leaves room for that rounding and nothing more.
+        foreach (var entry in entries)
+        {
+            double predicted = used.Select((c, i) => counts[c](entry) * prices[i]).Sum(), actual = (double)entry.ReportedCostUsd!.Value;
+            if (Math.Abs(predicted - actual) > 1e-6 + 1e-6 * actual) return Failed(RecoveryStatus.Inconsistent);
+        }
+        decimal? Price(int category) => Array.IndexOf(used, category) is var i and >= 0 ? (decimal)Math.Round(Math.Max(0, prices[i]) * 1e6, 6) / 1_000_000m : null;
+        return new(RecoveryStatus.Recovered, new(Price(0)!.Value, Price(1)!.Value, Price(2), Price(3), Price(4)), entries.Length, needed);
     }
     public CostSummary Summarize(IEnumerable<TokenEntry> entries)
     {

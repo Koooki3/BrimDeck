@@ -3,7 +3,7 @@
 Each column of the AI usage page can be set up separately in Settings › Quotas and usage:
 
 - **Quota source**: the plan, quota usage and reset countdowns shown in the column.
-- **Usage app**: the tokens and estimated cost for Today and 7 days at the bottom of the column, and its model details.
+- **Usage app**: the tokens and estimated cost for Today and Week (the last 7 days) at the bottom of the column, and its model details.
 - **Display name and colors**: a custom name, and the theme, warning and critical colors.
 
 The same tool can appear in several columns. It is read only once, and totals are never counted twice.
@@ -22,7 +22,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | New API, Sub2API relay sites | ✓ | | Enter the site address and key in settings |
 | Custom | ✓ | | Write a short JavaScript script |
 
-Sources you enter by hand and Grok Bot have no local usage records; choose another tool as the usage app for Today and 7 days.
+Sources you enter by hand and Grok Bot have no local usage records; choose another tool as the usage app for Today and Week.
 
 ## Fetch quota online for Claude and Grok Bot
 

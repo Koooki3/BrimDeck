@@ -97,17 +97,20 @@ internal static class UI
     public static string Number(long number) => number switch
     { >= 1_000_000_000 => (number / 1_000_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "B", >= 1_000_000 => (number / 1_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "M", >= 1000 => (number / 1000d).ToString("0.#", CultureInfo.InvariantCulture) + "K", _ => number.ToString("N0") };
     public static string Cost(IEnumerable<TokenEntry> entries, Pricing pricing) => Cost(pricing.Summarize(entries));
-    public static string Cost(CostSummary cost) => "$" + cost.Amount.ToString("N2", CultureInfo.InvariantCulture) + (cost.Unpriced > 0 ? " +" : "");
-    public static string CostNote(IEnumerable<TokenEntry> entries, Pricing pricing) => CostNote(pricing.Summarize(entries), pricing);
-    public static string CostNote(CostSummary cost, Pricing pricing)
+    public static string Cost(CostSummary cost) => Amount(cost) + (cost.Unpriced > 0 ? " +" : "");
+    public static string Amount(CostSummary cost) => "$" + cost.Amount.ToString("N2", CultureInfo.InvariantCulture);
+    public static string? CostNote(IEnumerable<TokenEntry> entries, Pricing pricing) => CostNote(pricing.Summarize(entries), pricing);
+    // Null when there is nothing to add to the amount itself, so the cost shows no tooltip.
+    public static string? CostNote(CostSummary cost, Pricing pricing)
     {
         if (!cost.HasValue && cost.Unpriced == 0) return Loc.T("无用量记录", "No usage records");
         if (!cost.HasValue && cost.Unpriced > 0) return pricing.LastError ?? Loc.T("未匹配到完整价格", "Prices could not be matched for every record");
-        var note = cost.IsEstimate ? Loc.T("按模型单价计算 · USD", "Estimated from model prices · USD") : Loc.T("接口金额 · USD", "Amount from the API · USD");
-        if (cost.IsEstimate && pricing.UpdatedAt is { } time) note += Loc.T($"\n价格更新 {time.LocalDateTime:MM-dd HH:mm}", $"\nPrices updated {time.LocalDateTime:MM-dd HH:mm}");
-        if (cost.IsEstimate && (pricing.IsStale || pricing.LastError is not null)) note += Loc.T(" · 缓存", " · cached");
-        if (cost.Unpriced > 0) note += Loc.T($"\n{cost.Unpriced} 条记录未计价", "\n" + Loc.Count(cost.Unpriced, "record has", "records have") + " no price");
-        return note;
+        var lines = new List<string>();
+        if (cost.IsEstimate && pricing.UpdatedAt is { } time)
+            lines.Add(Loc.T($"价格更新 {time.LocalDateTime:MM-dd HH:mm}", $"Prices updated {time.LocalDateTime:MM-dd HH:mm}") +
+                (pricing.IsStale || pricing.LastError is not null ? Loc.T(" · 缓存", " · cached") : ""));
+        if (cost.Unpriced > 0) lines.Add(Loc.T($"{cost.Unpriced} 条记录未计价", Loc.Count(cost.Unpriced, "record has", "records have") + " no price"));
+        return lines.Count == 0 ? null : string.Join("\n", lines);
     }
     public static string Reset(DateTimeOffset? date)
     {
@@ -143,4 +146,30 @@ internal static class UI
     public static string DisplayPlan(string plan) => plan.Trim().ToLowerInvariant() switch
     { "prolite" => "Pro Lite", "pro" or "google ai pro" => "Pro", "google ai ultra" => "Ultra", "plus" => "Plus", "free" => "Free", "max" => "Max", "team" => "Team", "business" => "Business", "enterprise" => "Enterprise", _ => plan.Trim() };
     public static void OpenUrl(string url) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+}
+
+// One line of text set to a given width: the space between its characters grows evenly to fill it, and the glyphs keep their
+// shapes. Captions stacked in a column, such as "Today" over "Week", then start and end on the same vertical lines.
+// Text that already has the width, such as "今日" and "七日", is drawn as it is.
+internal sealed class JustifiedText(string text, double size, string color, double width) : FrameworkElement
+{
+    private static FormattedText Format(string text, double size, Brush brush, double pixelsPerDip) =>
+        new(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface(UI.PanelFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal), size, brush, pixelsPerDip);
+    public static double NaturalWidth(string text, double size) => Format(text, size, Brushes.White, 1).WidthIncludingTrailingWhitespace;
+
+    protected override Size MeasureOverride(Size availableSize) => new(width, Format(text, size, Brushes.White, 1).Height);
+    protected override void OnRender(DrawingContext drawing)
+    {
+        double pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var brush = UI.Brush(color);
+        var whole = Format(text, size, brush, pixelsPerDip);
+        double extra = text.Length > 1 ? (width - whole.WidthIncludingTrailingWhitespace) / (text.Length - 1) : 0;
+        if (extra <= 0) { drawing.DrawText(whole, new Point()); return; }
+        // Each character keeps its natural place, the width of the text before it, plus the added spacing.
+        for (int i = 0; i < text.Length; i++)
+        {
+            double x = (i == 0 ? 0 : Format(text[..i], size, brush, pixelsPerDip).WidthIncludingTrailingWhitespace) + i * extra;
+            drawing.DrawText(Format(text[i].ToString(), size, brush, pixelsPerDip), new Point(x, 0));
+        }
+    }
 }

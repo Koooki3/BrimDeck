@@ -23,7 +23,18 @@ public partial class App : Application
     public ProviderSecrets Secrets { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
     public AppUpdates Updates { get; internal set; } = null!;
+    // The main panel. It owns the tray icon, reads the usage data and takes the settings preview; every other chosen
+    // monitor gets a panel that shows the same data.
     public MainWindow Deck { get; private set; } = null!;
+    private readonly Dictionary<string, MainWindow> _otherDecks = [];
+    public IEnumerable<MainWindow> Decks => _otherDecks.Values.Prepend(Deck);
+    public IReadOnlyList<DisplayInfo> Displays { get; private set; } = [];
+    private bool _arrangePending;
+    // Every panel shows the one set of players, and their lyrics are looked up once.
+    internal MediaSessions? Media { get; private set; }
+    internal event Action? MediaChanged;
+    internal LyricsService Lyrics { get; } = new();
+    private readonly HashSet<MainWindow> _presentingMedia = [];
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
 
@@ -66,10 +77,13 @@ public partial class App : Application
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
         Usage = new UsageService(new DesktopSources(), secrets: Secrets);
-        Deck = new MainWindow(this); MainWindow = Deck; Deck.Show();
+        Deck = new MainWindow(this); MainWindow = Deck;
+        Displays = Native.Displays.Current(); AssignDisplays();
+        Deck.Show();
+        InitializeHotkeys();
         StartBackgroundUpdates();
         _save.Tick += (_, _) => FlushSettings();
-        _tray = new TrayIcon(Deck, OpenSettings, ExitApplication);
+        _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden);
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(OpenSettings), null, Timeout.Infinite, false);
         if (e.Args.Contains("--settings")) OpenSettings();
@@ -102,6 +116,13 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
+    // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the
+    // panel is resumed either way, in case the two disagree (ResumeAfterPreview does nothing when no preview is on).
+    internal void EndPreviewFromDeck()
+    {
+        _settingsWindow?.EndPreview();
+        Deck.ResumeAfterPreview();
+    }
     // The panel's update dot opens the About page with the update dialog.
     internal void OpenUpdateSettings() => ShowSettings(true);
     private void ShowSettings(bool update)
@@ -133,12 +154,60 @@ public partial class App : Application
             !settings.EnabledApps.Select(e => e.ConfigurationKey).ToHashSet().SetEquals(Settings.EnabledApps.Select(e => e.ConfigurationKey));
         bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
         settings.Normalize(); Settings = settings;
+        ApplyHotkeys();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
-        Deck.ApplySettings();
+        AssignDisplays();
+        foreach (var deck in Decks.ToList()) deck.ApplySettings();
         QueueSave();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
+    }
+    // A panel reports display changes (monitors added or removed, the primary changed, a work area or scale changed).
+    // Each panel receives the same messages, so they are handled once, after Windows has moved the windows to the new layout.
+    internal void DisplaysChanged()
+    {
+        if (_arrangePending || Exiting) return;
+        _arrangePending = true;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+        {
+            _arrangePending = false;
+            if (Exiting) return;
+            Displays = Native.Displays.Current(); AssignDisplays();
+            foreach (var deck in Decks.ToList()) deck.ApplySettings();
+            _settingsWindow?.DisplaysChanged();
+        });
+    }
+    // Gives the main panel its monitor and opens or closes the panels of the other monitors. A panel that keeps its
+    // monitor is kept, with its state.
+    internal void AssignDisplays()
+    {
+        var plan = DisplayLayout.Arrange(Settings.Display, Settings.DisplayMonitors.Select(d => d.Id).ToList(), Displays.Select(d => (d.Id, d.Primary)).ToList());
+        Deck.Display = Displays.FirstOrDefault(d => d.Id == plan.Main);
+        foreach (var id in _otherDecks.Keys.Except(plan.Others).ToList())
+        { var deck = _otherDecks[id]; _otherDecks.Remove(id); deck.Retire(); }
+        // Panels are opened only once the main panel runs, so that they can take its data.
+        if (!Deck.IsLoaded) return;
+        foreach (var id in plan.Others)
+        {
+            var display = Displays.First(d => d.Id == id);
+            if (_otherDecks.TryGetValue(id, out var deck)) { deck.Display = display; continue; }
+            deck = new MainWindow(this, Deck) { Display = display };
+            _otherDecks[id] = deck; deck.Show();
+        }
+    }
+    internal void StartMedia()
+    {
+        bool wanted = Settings.MediaWanted;
+        if (wanted && Media is null) { Media = new MediaSessions(Dispatcher); Media.Changed += RaiseMediaChanged; _ = Media.StartAsync(); }
+        else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
+    }
+    private void RaiseMediaChanged() => MediaChanged?.Invoke();
+    // Audio levels are read while any panel shows music.
+    internal void PresentMedia(MainWindow deck, bool active)
+    {
+        if (active) _presentingMedia.Add(deck); else _presentingMedia.Remove(deck);
+        Media?.SetPresentationActive(_presentingMedia.Count > 0);
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
@@ -156,8 +225,8 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); StopBackgroundUpdates(); _tray?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); StopBackgroundUpdates(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Media?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

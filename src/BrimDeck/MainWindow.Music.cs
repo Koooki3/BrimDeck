@@ -29,13 +29,12 @@ public partial class MainWindow
     }
     private DeckPage _page;
     private double _pageWidth = 760;
-    private MediaSessions? _media;
+    private MediaSessions? _media => _app.Media;
     private MediaTrack? _mediaTrack;
     private IReadOnlyList<MediaTrack> _mediaTracks = [];
     private string? _pinnedMedia;
     private BitmapSource? _mediaCover;
     private Brush _musicAccent = UI.Brush(UI.Secondary);
-    private readonly LyricsService _lyricsService = new();
     private Lyrics _lyrics = Lyrics.Empty;
     private CancellationTokenSource? _lyricsRequest;
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
@@ -49,7 +48,9 @@ public partial class MainWindow
     private Slider? _musicSeek;
     private readonly ScaleTransform _musicCoverScale = new(1, 1);
     internal MusicLayout? CurrentMusicLayout { get; private set; }
-    private TextBlock? _musicElapsed, _musicDuration, _lyricPrevious, _lyricCurrent, _lyricNext, _musicMessage;
+    private TextBlock? _musicElapsed, _musicDuration, _lyricPrevious, _lyricNext, _musicMessage;
+    // The current line scrolls when it is wider than the column; the lines around it are cut off with an ellipsis.
+    private MusicMarquee? _lyricCurrent;
     private Grid? _musicInfo;
     private Canvas? _musicControls;
     private Button? _musicFullControl;
@@ -70,11 +71,14 @@ public partial class MainWindow
         _sourceMenuWatch = new(Dispatcher, TickSourceMenu) { Interval = TimeSpan.FromMilliseconds(40) };
         _musicTick = new(Dispatcher, TickMusic) { Interval = TimeSpan.FromMilliseconds(33) };
         IsVisibleChanged += (_, _) => UpdateMusicTimer();
+        _app.MediaChanged += MediaChanged;
     }
     private void StartMusic()
     {
         _musicStarted = true;
         ApplyMusicSettings();
+        // A panel opened while music plays takes the current song without announcing it as a new one.
+        if (_media is { } media) { _pinnedMedia = media.Pinned; ApplyMediaUpdate(media.Current, media.Tracks, media.Cover, notice: false); }
     }
     private void ApplyMusicSettings()
     {
@@ -82,11 +86,8 @@ public partial class MainWindow
         if (!Settings.MusicPage && _page == DeckPage.Music) _page = DeckPage.Usage;
         if (!Settings.UsagePage && Settings.MusicPage) _page = DeckPage.Music;
         if (!Settings.UsagePage || IsMusicPage) _details = false;
-        if (_musicStarted && Settings.MediaWanted && _media is null)
-        { _media = new MediaSessions(Dispatcher); _media.Changed += MediaChanged; _ = _media.StartAsync(); }
-        if (!Settings.MediaWanted && _media is not null)
-        { _media.Changed -= MediaChanged; _media.Dispose(); _media = null; _mediaTrack = null; _mediaCover = null; _mediaTracks = []; }
-        if (!Settings.MediaWanted) _seekPreview.Observe(null, DateTimeOffset.UtcNow);
+        if (_musicStarted) _app.StartMedia();
+        if (!Settings.MediaWanted) { _mediaTrack = null; _mediaCover = null; _mediaTracks = []; _seekPreview.Observe(null, DateTimeOffset.UtcNow); }
         UpdateLyrics();
         _musicRenderKey = "";
     }
@@ -110,6 +111,28 @@ public partial class MainWindow
         ApplySettings(animatePage: changed && _expanded && !_preview);
     }
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
+    // The header shared by both pages (see PanelHeader). Its row holds the page's top margin, so the clock, the switch and the
+    // right group are centred on one line, and the switch and the gear line up with the page's content edges. Toolbar's own
+    // height replaces its binding to the row: the row may be one DIP taller, and the controls are centred in the even part.
+    // Only layout values change, and setting an unchanged value does nothing.
+    private PanelHeader _header = PanelHeader.For(36, 20);
+    private void ApplyHeader(PanelHeader header)
+    {
+        _header = header;
+        ToolbarRow.Height = new GridLength(header.Row);
+        Toolbar.Height = header.Height;
+        PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
+        foreach (var button in new[] { AIUsageButton, MusicPageButton })
+        {
+            button.Height = header.ButtonHeight;
+            // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
+            button.ApplyTemplate();
+            if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelHeader.ButtonRadius);
+        }
+        SettingsButton.Height = header.SettingsHeight;
+        if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, header.RightMargin, 0);
+        ApplicationPages.Margin = new Thickness(header.Side + (Settings.MusicPage ? 72 : 36), 0, 0, 0);
+    }
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
@@ -122,7 +145,7 @@ public partial class MainWindow
         MusicPageButton.Background = UI.Brush(IsMusicPage ? UI.FillSelected : "Transparent");
         AIUsageButton.Foreground = UI.Brush(!IsMusicPage ? UI.Primary : UI.Secondary);
         MusicPageButton.Foreground = UI.Brush(IsMusicPage ? UI.Primary : UI.Secondary);
-        ApplicationPages.Margin = new Thickness(Settings.MusicPage ? 82 : 46, 0, 0, 0);
+        ApplicationPages.Margin = new Thickness(_header.Side + (Settings.MusicPage ? 72 : 36), 0, 0, 0);
         // With the entry switched on the source menu has one more row. Without a source that row stands alone in the button.
         bool entry = FullControlEntryShown, alone = entry && _mediaTrack is null;
         MediaSourceButton.Visibility = IsMusicPage && (_mediaTrack is not null || entry) ? Visibility.Visible : Visibility.Collapsed;
@@ -141,7 +164,7 @@ public partial class MainWindow
         _pinnedMedia = _media.Pinned;
         ApplyMediaUpdate(_media.Current, _media.Tracks, _media.Cover);
     }
-    private void ApplyMediaUpdate(MediaTrack? track, IReadOnlyList<MediaTrack> tracks, BitmapSource? cover)
+    private void ApplyMediaUpdate(MediaTrack? track, IReadOnlyList<MediaTrack> tracks, BitmapSource? cover, bool notice = true)
     {
         bool changedSong = _mediaTrack?.Id != track?.Id || _mediaTrack is not null && track is not null && !SameMediaSong(_mediaTrack, track);
         bool lyricsChanged = changedSong || _mediaTrack?.SongKey != track?.SongKey || _mediaTrack?.SongId != track?.SongId || _mediaTrack?.EmbeddedLyrics != track?.EmbeddedLyrics;
@@ -155,7 +178,7 @@ public partial class MainWindow
         {
             _seeking = false; _seekTrack = null;
             // A notice still on screen switches to the new title instead of giving way to the summary until playback starts.
-            if (_mediaTrack is not null && Settings.MusicTrackNotice) _trackNotice.Arm(now); else _trackNotice.Disarm();
+            if (_mediaTrack is not null && Settings.MusicTrackNotice && notice) _trackNotice.Arm(now); else _trackNotice.Disarm();
         }
         if (_trackNotice.Observe(_mediaTrack, now)) _trackNoticeUntil = now.AddSeconds(4);
         if (lyricsChanged) UpdateLyrics();
@@ -186,7 +209,7 @@ public partial class MainWindow
         var request = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _lyricsRequest = request;
         try
         {
-            var lyrics = await _lyricsService.FindAsync(requested, true, request.Token);
+            var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
             if (request.IsCancellationRequested || _lyricsKey != key) return;
             _lyrics = lyrics; _musicRenderKey = "";
             if (IsMusicPage) RenderMusic(); RenderCompact();
@@ -206,6 +229,8 @@ public partial class MainWindow
         _media?.Pin(_pinnedMedia);
         RenderPageSwitch();
     }
+    // NetEase Cloud Music's own red for a liked song.
+    private const string LikedColor = "#EC4141";
     internal static string FullControlEntryLabel => Loc.T("网易云音乐 · 完整控制", "NetEase Cloud Music · Full control");
     // Alone in the toolbar the entry has at most 150 DIP; the full English name would lose "Full control" to the ellipsis.
     internal static string FullControlButtonLabel => Loc.T("网易云音乐 · 完整控制", "NetEase full control");
@@ -289,12 +314,12 @@ public partial class MainWindow
             && _media?.RestartingNetease != true && _media?.Error is null;
         string message = _media?.RestartingNetease == true ? Loc.T("正在重启网易云…", "Restarting NetEase Cloud Music…") : _media?.Error ?? "";
         var modes = track is null ? [] : MusicPlaybackModes.Supported(track);
-        var layout = MusicLayout.Calculate(w, h, hasLyrics, track?.HasTimeline == true, modes.Count > 0, message.Length > 0, logMode, transport: !showSmtcHint);
+        var layout = MusicLayout.Calculate(w, h, hasLyrics, track?.HasTimeline == true, message.Length > 0, logMode, transport: !showSmtcHint);
         CurrentMusicLayout = layout;
-        var c = layout.Tier;
-        ToolbarRow.Height = new GridLength(c.Toolbar);
+        var c = layout.Metrics;
+        ApplyHeader(PanelHeader.Music(c));
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.HasTimeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         // Keep the transport layer attached: replacing a hovered button restarts
@@ -302,7 +327,7 @@ public partial class MainWindow
         foreach (var child in MusicContent.Children.Cast<UIElement>().Where(child => child != _musicControls).ToArray())
             MusicContent.Children.Remove(child);
         _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _lyricCurrent = null; _lyricPrevious = null; _lyricNext = null; _musicMessage = null; _musicInfo = null;
-        MusicContent.Margin = new Thickness(c.Side, c.Top, c.Side, c.Bottom);
+        MusicContent.Margin = new Thickness(c.Side, 0, c.Side, c.Bottom);
         if (track is null)
         {
             MusicContent.Children.Clear(); _musicControls = null; _musicFullControl = null; _musicSmtcHint = null; _musicControlButtons.Clear();
@@ -316,45 +341,53 @@ public partial class MainWindow
             MusicContent.Children.Add(empty); return;
         }
         var body = new Grid();
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.Cover) });
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(c.Gap) });
-        body.ColumnDefinitions.Add(new ColumnDefinition());
-        var art = MusicVisuals.Cover(_mediaCover, layout.Cover, c.Radius, outlined: true);
-        art.VerticalAlignment = VerticalAlignment.Top; art.Margin = new Thickness(0, layout.CoverY - layout.BodyY, 0, 0);
+        var upper = new Grid { Height = layout.Cover, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, layout.CoverY, 0, 0) };
+        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.Cover) });
+        upper.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(c.Gap) });
+        upper.ColumnDefinitions.Add(new ColumnDefinition());
+        body.Children.Add(upper);
+        var art = MusicVisuals.Cover(_mediaCover, layout.Cover, layout.CoverRadius, outlined: true);
         art.RenderTransformOrigin = new Point(.5, .5); art.RenderTransform = _musicCoverScale;
         MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleXProperty, track.State == MediaState.Paused ? .94 : 1, animate, 250);
         MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleYProperty, track.State == MediaState.Paused ? .94 : 1, animate, 250);
-        AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover")); body.Children.Add(art);
+        AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover")); upper.Children.Add(art);
         AttachCoverFocus(art);
-        var right = new Grid(); Grid.SetColumn(right, 2); body.Children.Add(right);
+        var right = new Grid(); Grid.SetColumn(right, 2); upper.Children.Add(right);
         right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.HeaderHeight) });
         right.RowDefinitions.Add(new RowDefinition());
-        right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(c.Lift + c.Play +
-            (layout.ProgressHeight > 0 ? c.ProgressGap + layout.ProgressHeight : 0)) });
+        double equalizerWidth = Math.Max(27, Math.Round(c.Equalizer * 1.7));
         var header = new Grid();
-        header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(43) });
+        header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(equalizerWidth + 16) });
         var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
         var title = UI.Fixed(track.Title, c.Title, c.TitleLine, UI.Primary, FontWeights.SemiBold);
         AutomationProperties.SetName(title, Loc.T("歌名 ", "Title ") + track.Title); titles.Children.Add(title);
         if (layout.MergeTitle)
         {
             if (track.Artist.Length > 0) title.Inlines.Add(new Run(" · " + track.Artist) { Foreground = UI.Brush(UI.Secondary), FontSize = c.Artist, FontWeight = FontWeights.Normal });
+            ShowCutText(title, track.Artist.Length > 0 ? track.Title + " · " + track.Artist : track.Title);
         }
-        else titles.Children.Add(UI.Fixed(string.Join(" · ", new[] { track.Artist, track.Album }.Where(s => s.Length > 0)), c.Artist, c.ArtistLine, UI.Secondary));
+        else
+        {
+            string artist = string.Join(" · ", new[] { track.Artist, track.Album }.Where(s => s.Length > 0));
+            var line = UI.Fixed(artist, c.Artist, c.ArtistLine, UI.Secondary); titles.Children.Add(line);
+            ShowCutText(title, track.Title); ShowCutText(line, artist);
+        }
         header.Children.Add(titles);
-        _musicEqualizer = new MusicEqualizer { Width = 27, Height = c.Equalizer, Color = _musicAccent, HorizontalAlignment = HorizontalAlignment.Right,
+        _musicEqualizer = new MusicEqualizer { Width = equalizerWidth, Height = c.Equalizer, Color = _musicAccent, HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, (c.TitleLine - c.Equalizer) / 2, 0, 0) };
         Grid.SetColumn(_musicEqualizer, 1); header.Children.Add(_musicEqualizer); right.Children.Add(header);
 
-        var middle = new Grid { Margin = new Thickness(0, 0, 0, c.MiddleGap) }; Grid.SetRow(middle, 1); right.Children.Add(middle); _musicInfo = middle;
+        var middle = new Grid(); Grid.SetRow(middle, 1); right.Children.Add(middle); _musicInfo = middle;
         bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
         int lyricLines = playerLyrics ? Math.Min(1, layout.LyricLines) : layout.LyricLines;
         if (hasLyrics && lyricLines > 0 && synchronized)
         {
             var lyrics = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            if (lyricLines == 3) { _lyricPrevious = UI.Fixed("", c.LyricSide, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricPrevious); }
-            _lyricCurrent = UI.Fixed("", c.Lyric, c.LyricLine, UI.Primary); lyrics.Children.Add(_lyricCurrent);
-            if (lyricLines == 3) { _lyricNext = UI.Fixed("", c.LyricSide, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricNext); }
+            // All lines share one size; only the brightness marks the current one.
+            if (lyricLines == 3) { _lyricPrevious = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricPrevious); }
+            _lyricCurrent = new MusicMarquee { FontSize = c.Lyric, Height = c.LyricLine, CenterWhenFits = false, Backdrop = Colors.Black };
+            lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
+            if (lyricLines >= 2) { _lyricNext = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricNext); }
             lyrics.Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible; middle.Children.Add(lyrics);
         }
         else if (hasLyrics && lyricLines > 0)
@@ -367,23 +400,22 @@ public partial class MainWindow
             RenderOptions.SetClearTypeHint(text, ClearTypeHint.Enabled);
             AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
         }
-        if (c != MusicTier.Compact && layout.MiddleHeight >= c.LyricLine)
+        if (layout.MiddleHeight >= c.MiddleGap + c.LyricLine)
         {
-            _musicMessage = UI.Fixed(message, 11.5, c.LyricLine, UI.Tertiary);
+            _musicMessage = UI.Fixed(message, c.Lyric, c.LyricLine, UI.Tertiary);
             _musicMessage.Visibility = layout.ShowMessage ? Visibility.Visible : Visibility.Collapsed; middle.Children.Add(_musicMessage);
         }
-        var footer = new Grid(); Grid.SetRow(footer, 2); right.Children.Add(footer);
         if (track.HasTimeline)
         {
-            var progress = new Grid { Height = c.ProgressRow, VerticalAlignment = VerticalAlignment.Top };
-            progress.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
-            progress.ColumnDefinitions.Add(new ColumnDefinition());
-            progress.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(50) });
-            _musicElapsed = UI.Fixed("", c.Time, c.ProgressRow, UI.Secondary); progress.Children.Add(_musicElapsed);
-            _musicDuration = UI.Fixed("", c.Time, c.ProgressRow, UI.Secondary); _musicDuration.TextAlignment = TextAlignment.Right; Grid.SetColumn(_musicDuration, 2); progress.Children.Add(_musicDuration);
+            var times = new Grid { Height = c.TimeLine, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, layout.TimesY, 0, 0), IsHitTestVisible = false };
+            _musicElapsed = UI.Fixed("", c.Time, c.TimeLine, UI.Secondary); times.Children.Add(_musicElapsed);
+            _musicDuration = UI.Fixed("", c.Time, c.TimeLine, UI.Secondary); _musicDuration.HorizontalAlignment = HorizontalAlignment.Right; times.Children.Add(_musicDuration);
+            foreach (var time in new[] { _musicElapsed, _musicDuration }) Typography.SetNumeralAlignment(time, FontNumeralAlignment.Tabular);
+            body.Children.Add(times);
             _musicSeek = new MusicSeekSlider { Style = (Style)FindResource("MusicSeek"), RestHeight = c.Bar, HoverHeight = c.BarHover, BarHeight = c.Bar,
-                Accent = ((SolidColorBrush)_musicAccent).Color, DurationSeconds = track.Duration.TotalSeconds, Height = c.ProgressRow, AnimationsEnabled = animate, IsEnabled = track.CanSeek };
-            AutomationProperties.SetName(_musicSeek, Loc.T("播放进度", "Playback position")); Grid.SetColumn(_musicSeek, 1); progress.Children.Add(_musicSeek);
+                Accent = ((SolidColorBrush)_musicAccent).Color, DurationSeconds = track.Duration.TotalSeconds, Height = c.SeekRow, AnimationsEnabled = animate, IsEnabled = track.CanSeek,
+                VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, layout.ProgressY, 0, 0) };
+            AutomationProperties.SetName(_musicSeek, Loc.T("播放进度", "Playback position"));
             // Slider handles move-to-point before instance handlers; observe that handled event too.
             _musicSeek.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler((sender, _) =>
             {
@@ -402,7 +434,7 @@ public partial class MainWindow
             _musicSeek.LostMouseCapture += async (_, _) => { if (_seeking && _musicSeek?.IsMouseCaptureWithin == false) await CommitSeek(); };
             _musicSeek.ValueChanged += (_, _) => { if (!_updatingSeek && _seeking) UpdateSeekLabels(_musicSeek.Value); };
             _musicSeek.PreviewKeyUp += async (_, e) => { if (e.Key is Key.Left or Key.Right or Key.Home or Key.End or Key.PageDown or Key.PageUp) { _seekTrack = _mediaTrack; _seeking = true; await CommitSeek(); } };
-            footer.Children.Add(progress);
+            body.Children.Add(_musicSeek);
         }
         if (_musicControls is null)
         {
@@ -410,10 +442,10 @@ public partial class MainWindow
             MusicContent.Children.Add(_musicControls);
         }
         var controls = _musicControls;
-        controls.Width = layout.ColumnWidth; controls.Height = c.Play;
-        controls.Margin = new Thickness(layout.ColumnX - c.Side, layout.ControlsY - layout.BodyY, 0, 0);
+        controls.Width = layout.BodyWidth; controls.Height = c.Play;
+        controls.Margin = new Thickness(0, layout.ControlsY, 0, 0);
         var visibleControls = new HashSet<MediaCommand>();
-        void Add(MediaCommand id, string name, string glyph, double size, double x, bool enabled, Func<Task> command, bool mode = false, bool single = false)
+        void Add(MediaCommand id, string name, string glyph, double size, double x, bool enabled, Func<Task> command, bool mode = false, bool single = false, string? color = null)
         {
             visibleControls.Add(id);
             if (!_musicControlButtons.TryGetValue(id, out var slot))
@@ -423,10 +455,10 @@ public partial class MainWindow
                 slot = (created, ""); controls.Children.Add(created);
             }
             var button = slot.Button;
-            string iconKey = $"{glyph}|{size}|{mode}|{single}";
+            string iconKey = $"{glyph}|{size}|{mode}|{single}|{color}";
             if (slot.Icon != iconKey)
             {
-                UIElement icon = MusicVisuals.Icon(glyph, size, UI.Brush(mode ? UI.Secondary : UI.Primary));
+                UIElement icon = MusicVisuals.Icon(glyph, size, UI.Brush(color ?? (mode ? UI.Secondary : UI.Primary)));
                 if (single)
                 {
                     var container = new Grid { Width = size, Height = size }; container.Children.Add(icon);
@@ -439,7 +471,7 @@ public partial class MainWindow
             _musicControlButtons[id] = (button, iconKey);
             button.Width = size + 16; button.Height = size + 16;
             button.IsEnabled = enabled; button.AnimationsEnabled = animate; button.Tag = command;
-            Canvas.SetLeft(button, x - layout.ColumnX - 8); Canvas.SetTop(button, (c.Play - size) / 2 - 8);
+            Canvas.SetLeft(button, x - 8); Canvas.SetTop(button, (c.Play - size) / 2 - 8);
             AutomationProperties.SetName(button, name);
         }
         if (modes.Count > 0)
@@ -469,15 +501,15 @@ public partial class MainWindow
             hint.Inlines.Add(new Run(SmtcHintWhy) { Foreground = UI.Brush(UI.Tertiary) });
             hint.Inlines.Add(new LineBreak());
             hint.Inlines.Add(new Run(SmtcHintHow) { Foreground = UI.Brush(UI.Secondary) });
-            double[] sizes = c == MusicTier.Compact ? [10.5, 10, 9.5] : [11.5, 11, 10.5, 10];
+            var sizes = Enumerable.Range(0, 4).Select(step => c.Time - step * .5).Where(size => size >= 9.5);
             bool fitted = false;
             foreach (var label in layout.ShowFullControl ? MusicLayout.FullControlLabels : [""])
             {
                 double reserve = label.Length > 0 ? EntryWidth(label) : 0;
                 foreach (double size in sizes)
                 {
-                    double width = layout.ColumnWidth - (reserve > 0 ? reserve + MusicLayout.FullControlGap : 0);
-                    hint.FontSize = size; hint.LineHeight = size >= 11 ? 14 : size >= 10.5 ? 13 : 12; hint.Width = width;
+                    double width = layout.BodyWidth - (reserve > 0 ? reserve + MusicLayout.FullControlGap : 0);
+                    hint.FontSize = size; hint.LineHeight = Math.Max(12, Math.Round(size * 1.25)); hint.Width = width;
                     hint.Measure(new Size(width, double.PositiveInfinity));
                     if (hint.DesiredSize.Height <= c.Play + 2) { fitted = true; break; }
                 }
@@ -490,9 +522,14 @@ public partial class MainWindow
         {
             if (_musicSmtcHint is not null) _musicSmtcHint.Visibility = Visibility.Collapsed;
             double gx = layout.TripletX;
-            Add(MediaCommand.Previous, Loc.T("上一首", "Previous"), "previous", c.Skip, gx, track.CanPrevious, () => RunMediaCommand(track, MediaCommand.Previous)); gx += c.Skip + c.ControlGap;
-            Add(MediaCommand.PlayPause, track.State == MediaState.Playing ? Loc.T("暂停", "Pause") : Loc.T("播放", "Play"), track.State == MediaState.Playing ? "pause" : "play", c.Play, gx, track.CanToggle, () => RunMediaCommand(track, MediaCommand.PlayPause)); gx += c.Play + c.ControlGap;
+            Add(MediaCommand.Previous, Loc.T("上一首", "Previous"), "previous", c.Skip, gx, track.CanPrevious, () => RunMediaCommand(track, MediaCommand.Previous)); gx += c.Skip + layout.ControlGap;
+            Add(MediaCommand.PlayPause, track.State == MediaState.Playing ? Loc.T("暂停", "Pause") : Loc.T("播放", "Play"), track.State == MediaState.Playing ? "pause" : "play", c.Play, gx, track.CanToggle, () => RunMediaCommand(track, MediaCommand.PlayPause)); gx += c.Play + layout.ControlGap;
             Add(MediaCommand.Next, Loc.T("下一首", "Next"), "next", c.Skip, gx, track.CanNext, () => RunMediaCommand(track, MediaCommand.Next));
+            // The heart mirrors the mode button: right of next, as far from it as the mode button is from previous. Only
+            // full control offers it, and the full-control entry, which shares this side, appears only without full control.
+            if (track.CanLike)
+                Add(MediaCommand.Like, track.Liked ? Loc.T("取消喜欢", "Unlike") : Loc.T("喜欢", "Like"), track.Liked ? "liked" : "like", c.Mode,
+                    layout.TripletX + layout.TripletWidth + (layout.TripletX - layout.ModeX - c.Mode), true, () => RunMediaCommand(track, MediaCommand.Like), mode: true, color: track.Liked ? LikedColor : null);
             if (layout.ShowFullControl)
                 foreach (var label in MusicLayout.FullControlLabels)
                     if ((entryWidth = EntryWidth(label)) <= layout.FullControlRoom) { entryLabel = label; break; }
@@ -512,10 +549,25 @@ public partial class MainWindow
             // The app-wide TextBlock style wraps; pixel snapping must never push the last character to a second line.
             enable.Width = entryWidth;
             enable.Content = new TextBlock { Text = entryLabel, FontFamily = UI.TextFont, FontSize = c.Time, TextWrapping = TextWrapping.NoWrap };
-            Canvas.SetLeft(enable, layout.ColumnWidth - entryWidth); Canvas.SetTop(enable, (c.Play - 26) / 2);
+            Canvas.SetLeft(enable, layout.BodyWidth - entryWidth); Canvas.SetTop(enable, (c.Play - 26) / 2);
         }
         if (_musicFullControl is not null) _musicFullControl.Visibility = entryLabel is not null ? Visibility.Visible : Visibility.Collapsed;
         MusicContent.Children.Insert(0, body); UpdateMusicPosition();
+    }
+    // The page suppresses tooltips. A title or artist line cut off by its ellipsis still shows its whole text on hover.
+    private static void ShowCutText(TextBlock block, string text)
+    {
+        if (text.Length == 0) return;
+        block.SetValue(SuppressMusicToolTipsProperty, false);
+        block.ToolTip = text;
+        block.ToolTipOpening += (_, e) =>
+        {
+            double shown = block.ActualWidth;
+            block.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            bool cut = block.DesiredSize.Width > shown + .5;
+            block.InvalidateMeasure();
+            if (!cut) e.Handled = true;
+        };
     }
     private async Task CyclePlaybackMode(MediaTrack track)
     {
@@ -615,7 +667,10 @@ public partial class MainWindow
             }
         }
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
-        MusicIndicator.Width = CompactWidth(CompactStyle.Line) * (track.HasTimeline ? position.TotalSeconds / track.Duration.TotalSeconds : 0);
+        // The progress runs along the indicator's own length, whatever length is set.
+        double length = double.IsFinite(Collapsed.Surface.Width) ? Math.Max(0, Collapsed.Surface.Width) : 0;
+        double progress = track.HasTimeline && track.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / track.Duration.TotalSeconds, 0, 1) : 0;
+        MusicIndicator.Width = length * progress;
     }
     private (string Previous, string Current, string Next) CurrentLyrics(MediaTrack track)
     {
@@ -623,12 +678,14 @@ public partial class MainWindow
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return ("", track.CurrentLyric ?? "", "");
         return _lyrics.At(track, DateTimeOffset.UtcNow);
     }
-    private const double CompactClockGap = 8;
     // The color taken from the playing song's cover; the fallback brush used without a cover is not opaque.
     internal Color? CoverColor => _mediaCover is not null && _mediaTrack is { State: not MediaState.Stopped } && _musicAccent is SolidColorBrush { Color.A: 255 } accent ? accent.Color : null;
     private void RenderCompactMusic()
     {
-        double contentWidth = Math.Max(0, CompactWidth(EffectiveStyle) - (EffectiveStyle == CompactStyle.Notch ? 60 : 32));
+        // The collapsed shape gives the row's width in DIPs and the height scale; every size below follows from them.
+        var shape = Collapsed; _compactRendered = shape;
+        double scale = CompactMusicLayout.SafeScale(shape.Scale);
+        double contentWidth = CompactContentWidth(shape);
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
         bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
@@ -643,29 +700,40 @@ public partial class MainWindow
             }
         }
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
-        // The clock keeps its own width at the right; the rest goes to the cover, rings, text and equalizer as before.
-        // Shown alone, it is centred.
-        var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now) : null;
-        bool clockAlone = clock is not null && !media && apps.Count == 0;
-        double clockRoom = clock is not null && !clockAlone ? clock.ReservedWidth + CompactClockGap : 0;
-        var layout = CompactMusicLayout.Calculate(Math.Max(0, contentWidth - clockRoom), media, apps.Count, text.Length > 0); CurrentCompactLayout = layout;
-        var grid = new Grid { Width = contentWidth, Height = 24 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(media ? 28 : 0) }); grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(media ? 26 : 0) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(clockRoom) });
-        if (clock is not null)
+        // The clock keeps its own width at the right; shown alone, it is centred.
+        var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
+        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0); CurrentCompactLayout = layout;
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        double row = layout.RowHeight;
+        var grid = new Grid { Width = SnapDown(contentWidth, dpi), Height = row };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.CoverWidth, dpi)) }); grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.EqualizerWidth, dpi)) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ClockAlone ? 0 : SnapDown(layout.ClockWidth, dpi)) });
+        if (clock is not null && layout.ClockWidth > 0)
         {
-            clock.VerticalAlignment = VerticalAlignment.Center;
-            clock.HorizontalAlignment = clockAlone ? HorizontalAlignment.Center : HorizontalAlignment.Right;
-            if (clockAlone) Grid.SetColumnSpan(clock, 4); else Grid.SetColumn(clock, 3);
-            grid.Children.Add(clock); _compactClock = clock;
+            var region = CompactRegion(clock, layout.ClockWidth, clock.ReservedWidth, clock.Height, row, layout.ClockAlone ? RegionAnchor.Center : RegionAnchor.Right, dpi);
+            region.HorizontalAlignment = layout.ClockAlone ? HorizontalAlignment.Center : HorizontalAlignment.Right;
+            if (layout.ClockAlone) Grid.SetColumnSpan(region, 4); else Grid.SetColumn(region, 3);
+            grid.Children.Add(region); _compactClock = clock;
         }
-        if (media)
+        if (media && layout.CoverWidth > 0)
         {
-            var cover = MusicVisuals.Cover(_mediaCover, 20, 4); cover.HorizontalAlignment = HorizontalAlignment.Left; cover.VerticalAlignment = VerticalAlignment.Center; AutomationProperties.SetName(cover, _mediaTrack!.Caption); grid.Children.Add(cover);
-            _compactEqualizer = new MusicEqualizer { Bars = 4, Width = 18, Height = 14, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(UI.Secondary), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(_compactEqualizer, 2); grid.Children.Add(_compactEqualizer);
+            var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
+            grid.Children.Add(CompactRegion(cover, layout.CoverWidth, layout.CoverSize, layout.CoverSize, row, RegionAnchor.Left, dpi));
+        }
+        if (media && layout.EqualizerWidth > 0)
+        {
+            _compactEqualizer = new MusicEqualizer { Bars = 4, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(UI.Secondary) };
+            var region = CompactRegion(_compactEqualizer, layout.EqualizerWidth, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Right, dpi);
+            Grid.SetColumn(region, 2); grid.Children.Add(region);
         }
         var middle = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(middle, 1); grid.Children.Add(middle);
-        if (layout.VisibleRings > 0)
+        // The rings, the space between and the lyric are snapped cumulatively from the middle's left edge and kept inside its
+        // column, so rounding never pushes one region into the next.
+        double middleColumn = Math.Max(0, grid.Width - grid.ColumnDefinitions[0].Width.Value - grid.ColumnDefinitions[2].Width.Value - grid.ColumnDefinitions[3].Width.Value);
+        double ringEnd = Math.Min(middleColumn, SnapDown(layout.RingWidth, dpi)), textStart = Math.Min(middleColumn, SnapDown(layout.RingWidth + layout.Between, dpi));
+        double textEnd = Math.Min(middleColumn, SnapDown(layout.RingWidth + layout.Between + layout.TextWidth, dpi));
+        if (layout.RingWidth > 0 && apps.Count > 0)
         {
             var items = apps.Select(entry =>
             {
@@ -679,17 +747,23 @@ public partial class MainWindow
             _quotaCarousel = new QuotaCarousel(items, layout, _quotaElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation) { VerticalAlignment = VerticalAlignment.Center }; middle.Children.Add(_quotaCarousel);
         }
         if (layout.TextWidth > 0)
-        { _compactMarquee = new MusicMarquee { Text = text, Width = layout.TextWidth, Height = 22, Backdrop = Colors.Black, Margin = new Thickness(layout.VisibleRings > 0 ? 8 : 0, 0, 0, 0) }; middle.Children.Add(_compactMarquee); }
+        {
+            // Too narrow for a meaningful stretch of text, the lyric rests at its start, cut at the edge.
+            _compactMarquee = new MusicMarquee { Text = text, Width = Math.Max(0, textEnd - textStart), Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
+                ScrollAllowed = layout.TextScrolls, Backdrop = Colors.Black, Margin = new Thickness(_quotaCarousel is not null && middle.Children.Contains(_quotaCarousel) ? textStart - ringEnd : textStart, 0, 0, 0) };
+            middle.Children.Add(_compactMarquee);
+        }
         CompactRings.Children.Add(grid); UpdateMusicTimer();
     }
     private void UpdateMusicTimer()
     {
         bool musicVisible = MusicPresentationVisible;
-        _media?.SetPresentationActive(musicVisible);
+        _app.PresentMedia(this, musicVisible);
         bool progressVisible = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && _mediaTrack is { HasTimeline: true, State: not MediaState.Stopped };
         bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
         // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours.
         _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
+        UpdateLyricScrolling();
         UpdateQuotaCarousel();
         bool needed = IsVisible && !IsSuppressed && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
@@ -698,6 +772,8 @@ public partial class MainWindow
         else _musicTick.Stop();
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }
+    private void UpdateLyricScrolling() => _lyricCurrent?.SetScrolling(Settings.Animations && SystemParameters.ClientAreaAnimation
+        && MusicAudioActive && IsVisible && !IsSuppressed && _expanded && IsMusicPage);
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
     private void UpdateQuotaCarousel()
         => _quotaCarousel?.SetRunning(IsVisible && !IsSuppressed && !_expanded && _alert is null, _pointerInside);
@@ -710,7 +786,7 @@ public partial class MainWindow
         bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
         bool playing = animations && MusicAudioActive;
         bool musicVisible = MusicPresentationVisible;
-        _media?.SetPresentationActive(musicVisible);
+        _app.PresentMedia(this, musicVisible);
         float peak = musicVisible ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the flowing bars; the session peak is the fallback.
         bool flowing = musicVisible && _media?.FlowLevels(_flowLevels) == true;
@@ -719,5 +795,5 @@ public partial class MainWindow
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _media?.Dispose(); _lyricsService.Dispose(); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.PresentMedia(this, false); }
 }

@@ -27,7 +27,7 @@ public sealed partial class SettingsWindow
     private void ShowStyleOptions(CompactStyle style, CompactStyle? previous)
     {
         if (_styleOptions is not { } host) return;
-        var incoming = Collect(() => StyleOptions(style));
+        var incoming = Collect(() => { StyleOptions(style); CollapsedSizeOptions(style); });
         var outgoing = host.Children.OfType<FrameworkElement>().LastOrDefault();
         double width = host.ActualWidth;
         if (outgoing is null || previous is not { } from || from == style || width <= 0 || !SystemParameters.ClientAreaAnimation)

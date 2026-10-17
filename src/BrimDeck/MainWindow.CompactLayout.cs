@@ -1,0 +1,115 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using BrimDeck.Core;
+
+namespace BrimDeck;
+
+// The collapsed row's sizes for any width and height the user sets. The collapsed shape (CollapsedGeometry) gives the row's
+// width in DIPs and a height scale; nothing is scaled by a transform. Sizes and font sizes are computed directly and
+// positions fall on whole device pixels, so the text keeps ClearType and the pixel snapping of the default size.
+public partial class MainWindow
+{
+    // The shape the collapsed row was last built for; a new shape rebuilds it. Both hooks run on every shape and alert change
+    // and on every open and close, so they only rebuild when something they depend on has changed.
+    private CollapsedShape? _compactRendered;
+    private bool _compactRendering;
+    private (CollapsedShape Shape, object Alert)? _alertRendered;
+    private static readonly object AlertRegionTag = new();
+
+    // The row's width. The notch's shoulders and bottom corners keep their sizes at every height while its inset shrinks with
+    // the height, so the row also keeps clear of both curves: at least the shoulder plus the corner radius from each end,
+    // which is within the default 30 DIP inset at the default height.
+    private static double CompactContentWidth(CollapsedShape shape)
+    {
+        double width = double.IsFinite(shape.ContentWidth) ? Math.Max(0, shape.ContentWidth) : 0;
+        if (shape.Style != CompactStyle.Notch) return width;
+        double curves = (double.IsFinite(shape.Shoulder) ? Math.Max(0, shape.Shoulder) : 0) + (double.IsFinite(shape.BottomRadius) ? Math.Max(0, shape.BottomRadius) : 0);
+        double surface = double.IsFinite(shape.Surface.Width) ? Math.Max(0, shape.Surface.Width) : 0;
+        return Math.Min(width, Math.Max(0, surface - 2 * curves));
+    }
+
+    // Runs several times for one change; every value is computed from the shape alone, so repeating it changes nothing.
+    partial void ApplyCompactGeometry(CollapsedShape shape)
+    {
+        double scale = CompactMusicLayout.SafeScale(shape.Scale), dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        Compact.Width = SnapDown(CompactContentWidth(shape), dpi);
+        // The content box: the 24 DIP row with a DIP above and below, as at the default height.
+        Compact.Height = Math.Max(1, CompactMusicLayout.Whole(26 * scale));
+        if (shape.Style == CompactStyle.Line)
+        {
+            // The progress bar is as thick as the indicator, at least one device pixel, and rounded at its ends.
+            double thickness = double.IsFinite(shape.Surface.Height) && shape.Surface.Height > 0 ? shape.Surface.Height : 4;
+            thickness = Math.Max(1, Math.Round(thickness * dpi, MidpointRounding.AwayFromZero)) / dpi;
+            MusicIndicator.Height = thickness; MusicIndicator.CornerRadius = new CornerRadius(thickness / 2);
+        }
+        // RenderCompact runs these hooks again; by then the shape matches, so this does not repeat.
+        if (!Equals(shape, _compactRendered) && !_compactRendering)
+        {
+            _compactRendered = shape; _compactRendering = true;
+            try { RenderCompact(); } finally { _compactRendering = false; }
+        }
+    }
+
+    // The quota notice replaces the collapsed row. Its ring, name, "used" text and reset time each have a region that clips;
+    // when the row is short, the reset time gives way first, then the name, then the ring, and the used text last.
+    partial void LayoutCompactAlert(CollapsedShape shape, bool alertVisible)
+    {
+        if (!alertVisible || _alert is not { } alert)
+        {
+            // A cleared notice leaves none of this file's regions behind.
+            if (CompactAlert.Children.Count > 0 && CompactAlert.Children[0] is FrameworkElement { Tag: var own } && ReferenceEquals(own, AlertRegionTag)) CompactAlert.Children.Clear();
+            _alertRendered = null; return;
+        }
+        // An unchanged notice that this file built is kept, so opening and closing the panel do not rebuild it.
+        if (_alertRendered is { } done && Equals(done.Shape, shape) && ReferenceEquals(done.Alert, alert)
+            && CompactAlert.Children.Count > 0 && CompactAlert.Children[0] is FrameworkElement { Tag: var tag } && ReferenceEquals(tag, AlertRegionTag)) return;
+        CompactAlert.Children.Clear();
+        _alertRendered = (shape, alert); _compactRendered = shape;
+        double scale = CompactMusicLayout.SafeScale(shape.Scale);
+        double width = CompactContentWidth(shape);
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        double font = Math.Max(1, CompactMusicLayout.Half(11.5 * scale)), line = Math.Max(1, CompactMusicLayout.Whole(16 * scale));
+        var name = UI.Fixed(alert.Name, font, line, UI.Primary, FontWeights.SemiBold); name.ToolTip = alert.Name;
+        // The name keeps its 76 DIP cap with an ellipsis; below that, its region cuts it.
+        name.MaxWidth = CompactMusicLayout.Whole(76 * scale);
+        var used = UI.Fixed(Loc.T($"{alert.Label}已用 {alert.Used:0}%", $"{alert.Label}{alert.Used:0}% used"), font, line, UI.Secondary);
+        string shortReset = UI.ShortReset(alert.ResetAt);
+        var reset = shortReset.Length > 0 ? UI.Fixed(Loc.T(shortReset + "重置", shortReset.StartsWith("in ", StringComparison.Ordinal) ? "resets " + shortReset : shortReset), font, line, UI.Tertiary) : null;
+        double Natural(FrameworkElement element)
+        {
+            element.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            return Math.Ceiling(element.DesiredSize.Width * dpi - .001) / dpi;
+        }
+        double nameWidth = Natural(name), usedWidth = Natural(used), resetWidth = reset is null ? 0 : Natural(reset);
+        var layout = CompactAlertLayout.Calculate(width, scale, nameWidth, usedWidth, resetWidth);
+        double row = Math.Max(layout.RingSize, layout.LineHeight);
+        var ring = UI.Ring(alert.Used, alert.Entry.Theme, layout.RingSize, layout.RingThickness);
+        if (layout.RingWidth > 0) CompactAlert.Children.Add(CompactRegion(ring, layout.RingWidth, layout.RingSize, layout.RingSize, row, RegionAnchor.Left, dpi));
+        if (layout.NameWidth > 0) CompactAlert.Children.Add(CompactRegion(name, layout.NameWidth, Math.Min(nameWidth, name.MaxWidth), line, row, RegionAnchor.Left, dpi));
+        if (layout.TextWidth > 0) CompactAlert.Children.Add(CompactRegion(used, layout.TextWidth, usedWidth, line, row, RegionAnchor.Left, dpi));
+        if (reset is not null && layout.ResetWidth > 0) CompactAlert.Children.Add(CompactRegion(reset, layout.ResetWidth, resetWidth, line, row, RegionAnchor.Left, dpi, layout.Gap));
+        foreach (FrameworkElement region in CompactAlert.Children) region.Tag = AlertRegionTag;
+    }
+
+    private enum RegionAnchor { Left, Center, Right }
+    // Rounded down to whole device pixels, so regions never add up to more than the row.
+    private static double SnapDown(double value, double dpi) => double.IsFinite(value) && value > 0 && dpi > 0 ? Math.Floor(value * dpi + .001) / dpi : 0;
+    private static double Snap(double value, double dpi) => double.IsFinite(value) && dpi > 0 ? Math.Round(value * dpi, MidpointRounding.AwayFromZero) / dpi : 0;
+
+    // A region of the given width holding one element, centred vertically in the row. The element keeps its size and is
+    // anchored to one side (after a leading gap, if any); a region narrower than that cuts the other side off.
+    // Text below the cut is set to ClearType again: the clip would otherwise turn it grayscale, and it lies over the opaque black surface.
+    private static FrameworkElement CompactRegion(FrameworkElement child, double width, double childWidth, double childHeight, double row, RegionAnchor anchor, double dpi, double leading = 0)
+    {
+        double w = SnapDown(width, dpi), cw = Math.Max(0, double.IsFinite(childWidth) ? childWidth : 0), ch = Math.Max(0, double.IsFinite(childHeight) ? childHeight : 0);
+        double left = anchor switch { RegionAnchor.Right => w - cw, RegionAnchor.Center => (w - cw) / 2, _ => Math.Min(leading, w) };
+        var region = new Canvas { Width = w, Height = row, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+        child.Width = cw; child.HorizontalAlignment = HorizontalAlignment.Left; child.VerticalAlignment = VerticalAlignment.Top;
+        Canvas.SetLeft(child, Snap(left, dpi)); Canvas.SetTop(child, Snap((row - ch) / 2, dpi));
+        region.ClipToBounds = left < 0 || left + cw > w + .001;
+        if (region.ClipToBounds && child is TextBlock) RenderOptions.SetClearTypeHint(child, ClearTypeHint.Enabled);
+        region.Children.Add(child);
+        return region;
+    }
+}
