@@ -102,7 +102,8 @@ public partial class MainWindow
         ModelToolbar.Children.Clear(); UsageContent.Children.Clear();
         ApplicationPages.Children.Clear(); ApplicationPages.Visibility = Visibility.Collapsed;
         double panelHeight = ContentCanvas.Height;
-        ToolbarRow.Height = new GridLength(ToolbarFor(panelHeight));
+        // Until a layout is fitted (or without one: no apps, model details) the header uses the inset the content will most likely get.
+        ApplyHeader(PanelHeader.For(ToolbarFor(panelHeight), _details ? (panelHeight < 170 ? 14 : 20) : EdgeInset + Layout.For(panelHeight < 150 ? Tier.Tiny : Tier.Default).ColumnPad));
         ClockLabel.Visibility = _details ? Visibility.Collapsed : Visibility.Visible;
         ModelToolbar.Visibility = _details ? Visibility.Visible : Visibility.Collapsed;
 
@@ -191,7 +192,8 @@ public partial class MainWindow
         var (layout, inline, wide) = Fit(count, slots, columnWidth, ContentCanvas.Height);
         int first = _applicationPage * pageSize;
         columns = columns.Skip(first).Take(pageSize).ToList(); views = views.Skip(first).Take(pageSize).ToList();
-        ToolbarRow.Height = new GridLength(layout.Toolbar);
+        // The quotas start EdgeInset + ColumnPad from the panel edge; the header lines up with them.
+        ApplyHeader(PanelHeader.For(layout.Toolbar, EdgeInset + layout.ColumnPad));
         UsageContent.Margin = new Thickness(EdgeInset, 0, EdgeInset, layout.Bottom);
         // Spare height is always split evenly above and below the quotas, so resizing moves them smoothly
         // instead of pinning them under the title until a threshold is crossed.

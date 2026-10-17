@@ -111,6 +111,28 @@ public partial class MainWindow
         ApplySettings(animatePage: changed && _expanded && !_preview);
     }
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
+    // The header shared by both pages (see PanelHeader). Its row holds the page's top margin, so the clock, the switch and the
+    // right group are centred on one line, and the switch and the gear line up with the page's content edges. Toolbar's own
+    // height replaces its binding to the row: the row may be one DIP taller, and the controls are centred in the even part.
+    // Only layout values change, and setting an unchanged value does nothing.
+    private PanelHeader _header = PanelHeader.For(36, 20);
+    private void ApplyHeader(PanelHeader header)
+    {
+        _header = header;
+        ToolbarRow.Height = new GridLength(header.Row);
+        Toolbar.Height = header.Height;
+        PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
+        foreach (var button in new[] { AIUsageButton, MusicPageButton })
+        {
+            button.Height = header.ButtonHeight;
+            // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
+            button.ApplyTemplate();
+            if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelHeader.ButtonRadius);
+        }
+        SettingsButton.Height = header.SettingsHeight;
+        if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, header.RightMargin, 0);
+        ApplicationPages.Margin = new Thickness(header.Side + (Settings.MusicPage ? 72 : 36), 0, 0, 0);
+    }
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
@@ -123,7 +145,7 @@ public partial class MainWindow
         MusicPageButton.Background = UI.Brush(IsMusicPage ? UI.FillSelected : "Transparent");
         AIUsageButton.Foreground = UI.Brush(!IsMusicPage ? UI.Primary : UI.Secondary);
         MusicPageButton.Foreground = UI.Brush(IsMusicPage ? UI.Primary : UI.Secondary);
-        ApplicationPages.Margin = new Thickness(Settings.MusicPage ? 82 : 46, 0, 0, 0);
+        ApplicationPages.Margin = new Thickness(_header.Side + (Settings.MusicPage ? 72 : 36), 0, 0, 0);
         // With the entry switched on the source menu has one more row. Without a source that row stands alone in the button.
         bool entry = FullControlEntryShown, alone = entry && _mediaTrack is null;
         MediaSourceButton.Visibility = IsMusicPage && (_mediaTrack is not null || entry) ? Visibility.Visible : Visibility.Collapsed;
@@ -295,7 +317,7 @@ public partial class MainWindow
         var layout = MusicLayout.Calculate(w, h, hasLyrics, track?.HasTimeline == true, message.Length > 0, logMode, transport: !showSmtcHint);
         CurrentMusicLayout = layout;
         var c = layout.Metrics;
-        ToolbarRow.Height = new GridLength(c.Toolbar);
+        ApplyHeader(PanelHeader.Music(c));
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
         string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
@@ -305,7 +327,7 @@ public partial class MainWindow
         foreach (var child in MusicContent.Children.Cast<UIElement>().Where(child => child != _musicControls).ToArray())
             MusicContent.Children.Remove(child);
         _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _lyricCurrent = null; _lyricPrevious = null; _lyricNext = null; _musicMessage = null; _musicInfo = null;
-        MusicContent.Margin = new Thickness(c.Side, c.Top, c.Side, c.Bottom);
+        MusicContent.Margin = new Thickness(c.Side, 0, c.Side, c.Bottom);
         if (track is null)
         {
             MusicContent.Children.Clear(); _musicControls = null; _musicFullControl = null; _musicSmtcHint = null; _musicControlButtons.Clear();
