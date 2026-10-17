@@ -67,7 +67,7 @@ public partial class MainWindow : Window
     private CompactAlertInfo? _alert;
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
-    public bool IsSuppressed => !_preview && Settings.Behavior(_context) == WindowBehavior.Hide;
+    public bool IsSuppressed => !_preview && (Settings.Behavior(_context) == WindowBehavior.Hide || HiddenByUser);
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     public string? LastRefreshError { get; private set; }
 
@@ -316,14 +316,17 @@ public partial class MainWindow : Window
         }
         _levelsSeeded = true;
         // Levels are still tracked while notices are off, so switching them back on does not replay an earlier rise.
-        if (risen is not null && Settings.QuotaAlerts) ShowAlert(risen);
+        if (risen is not null && Settings.QuotaAlerts && !IsSuppressed) ShowAlert(risen);
     }
 
     internal void ShowAlert(AppEntry entry, string label, double used, DateTimeOffset? resetAt)
         => ShowAlert(new CompactAlertInfo(entry, entry.Name, label + " ", used, resetAt));
     internal void ClearAlert() { _alertTimer.Stop(); _alert = null; RenderCompact(); }
+    // No alert while the panel is suppressed (full-screen rule or hidden by the user): it would not be seen, and it must not
+    // appear later when the panel shows again.
     private void ShowAlert(CompactAlertInfo alert)
     {
+        if (IsSuppressed) return;
         _alert = alert; _alertTimer.Stop(); _alertTimer.Start();
         RenderCompact();
         if (!_expanded && !IsSuppressed) SetExpanded(false);
@@ -339,9 +342,11 @@ public partial class MainWindow : Window
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
+        bool wasExpanded = _expanded;
         _expanded = expanded;
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
+        if (wasExpanded && !expanded) HotkeyPanelCollapsed();
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;
@@ -487,6 +492,12 @@ public partial class MainWindow : Window
             // Inside means over the panel itself or the collapsed hover area (InsideOpenPanel); HoverZone's bounds would also
             // count its top margin above a lowered panel.
             bool inside = Island.IsMouseOver || InsideOpenPanel(cursor);
+            // The expand hotkey's pin holds the panel open until the pointer is inside once. If that first entry is seen here
+            // rather than by Island_MouseEnter (for example in the hover area beside the panel), record it, so leaving later closes
+            // the panel as usual. An entry by MouseEnter already went through PointerChanged, which released the pin.
+            bool wasPinned = IsHotkeyPinned;
+            if (HotkeyPinned(inside)) return;
+            if (wasPinned && inside && !_pointerInside) { PointerChanged(true); return; }
             if (_pointerInside && !inside) PointerChanged(false);
             else if (!_pointerInside && inside && _leave.IsEnabled) PointerChanged(true);
             return;
@@ -497,6 +508,7 @@ public partial class MainWindow : Window
     internal void PointerChanged(bool inside)
     {
         _pointerInside = inside; UpdateQuotaCarousel();
+        if (inside) ReleaseHotkeyPin();
         if (inside)
         {
             _popupReturnArea = null;
@@ -511,6 +523,7 @@ public partial class MainWindow : Window
     }
     internal void CheckPointerExit(Point screenPoint)
     {
+        if (IsHotkeyPinned) { _leave.Stop(); return; }
         if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) { _leave.Stop(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.
