@@ -35,7 +35,7 @@ public partial class MainWindow
             _ => new(tier, 12, 15, 10.5, 10, 10, 9.5, 9.5, 18, 13, 4, 2, 3, 8, 28, 0, 0, 10, false, false)
         };
         // Totals row: a fixed caption column keeps the token figures of both rows on one vertical line.
-        // Wide enough for "今日" and "7 天", or for "Today" and "7 days".
+        // Wide enough for "今日" and "七日", or for "Today" and "Week".
         public double CaptionWidth => Math.Ceiling(Foot * (Loc.IsEnglish ? 3.7 : 2.7));
         // A single column wider than 480 DIP lays its quotas side by side with larger numbers.
         public Layout Wide() => this with
@@ -284,7 +284,10 @@ public partial class MainWindow
         {
             var footer = new StackPanel();
             footer.Children.Add(new Border { Height = 1, Background = UI.Brush(UI.Hairline), Margin = new Thickness(0, layout.FootTop, 0, layout.FootBottom) });
-            var today = TotalRow(entry, usage, Loc.T("今日", "Today"), 1, layout, inline); var week = TotalRow(entry, usage, Loc.T("7 天", "7 days"), 7, layout, inline);
+            string todayLabel = Loc.T("今日", "Today"), weekLabel = Loc.T("七日", "Week");
+            // Both captions take the wider one's width, so they start and end on the same vertical lines.
+            double captionWidth = Math.Max(JustifiedText.NaturalWidth(todayLabel, layout.Foot), JustifiedText.NaturalWidth(weekLabel, layout.Foot));
+            var today = TotalRow(entry, usage, todayLabel, 1, layout, captionWidth, inline); var week = TotalRow(entry, usage, weekLabel, 7, layout, captionWidth, inline);
             if (inline)
             {
                 // Side by side, each period is one tight group: today at the left edge, the week at the right edge.
@@ -417,7 +420,7 @@ public partial class MainWindow
     private static string MetricLabel(UsageMetric metric) => metric.Kind == MetricKind.Text ? metric.Label : UI.QuotaLabel(new Quota(metric.Label, 0, null, metric.Window));
 
     // Stacked: caption | tokens ... cost, so both rows line up. Grouped (side by side): caption, tokens and cost close together.
-    private FrameworkElement TotalRow(AppEntry entry, ProviderSnapshot snapshot, string label, int days, Layout layout, bool grouped = false)
+    private FrameworkElement TotalRow(AppEntry entry, ProviderSnapshot snapshot, string label, int days, Layout layout, double captionWidth, bool grouped = false)
     {
         var entries = Entries(snapshot, days);
         var row = new Grid { Height = layout.FootRow };
@@ -425,9 +428,10 @@ public partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = grouped ? GridLength.Auto : new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-        // Captions end on one vertical line, so "今日" and "7 天" stack cleanly and both figures start at the same distance.
-        // The English caption is written "7days" without a space, as the user chose.
-        var caption = UI.Centered(Loc.IsEnglish ? label.Replace(" ", "") : label, layout.Foot, UI.Tertiary); caption.Margin = new Thickness(0, 0, 8, 0); caption.HorizontalAlignment = HorizontalAlignment.Right; row.Children.Add(caption);
+        // Captions end on one vertical line, so "今日" and "七日" stack cleanly and both figures start at the same distance.
+        var caption = new JustifiedText(label, layout.Foot, UI.Tertiary, captionWidth)
+        { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        row.Children.Add(caption);
         // Each row prices its records once; the figure and its tooltip share the result.
         long total = entries.Sum(x => x.Total);
         var cost = snapshot.UsageAvailable ? _app.Prices.Summarize(entries) : null;
@@ -435,9 +439,15 @@ public partial class MainWindow
             : UI.CenteredSymbol("—", layout.Foot, UI.Secondary);
         tokens.HorizontalAlignment = HorizontalAlignment.Left;
         tokens.ToolTip = ProviderCatalog.UsageTip(snapshot.Id) + "\n" + (snapshot.UsageAvailable ? Loc.T($"{label} Token · {total:N0}", $"{label} tokens · {total:N0}") : snapshot.UsageNote); Grid.SetColumn(tokens, 1); row.Children.Add(tokens);
-        FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Cost(cost!), layout.Foot, UI.Primary, FontWeights.SemiBold)
+        FrameworkElement price = snapshot.UsageAvailable ? UI.Centered(UI.Amount(cost!), layout.Foot, UI.Primary, FontWeights.SemiBold)
             : UI.CenteredSymbol("—", layout.Foot, UI.Tertiary, FontWeights.SemiBold);
         price.Margin = new Thickness(grouped ? 12 : 8, 0, 0, 0); price.ToolTip = snapshot.UsageAvailable ? UI.CostNote(cost!, _app.Prices) : snapshot.UsageNote; Grid.SetColumn(price, 2); row.Children.Add(price);
+        // The "+" for unpriced records hangs in the arrow column, so the amounts of both rows still end on one vertical line.
+        if (cost is { Unpriced: > 0 })
+        {
+            var plus = UI.Centered("+", layout.Foot, UI.Primary, FontWeights.SemiBold);
+            plus.HorizontalAlignment = HorizontalAlignment.Left; plus.ToolTip = price.ToolTip; Grid.SetColumn(plus, 3); row.Children.Add(plus);
+        }
         var arrow = UI.CenteredSymbol("›", layout.Foot + 1, UI.Tertiary); arrow.HorizontalAlignment = HorizontalAlignment.Right;
         Grid.SetColumn(arrow, 3); row.Children.Add(arrow);
         var link = DetailLink(row, Loc.T($"查看 {entry.Name} {label}明细", $"Show {entry.Name} {label.ToLowerInvariant()} details"), () => OpenModelDetails(snapshot.Id, days));
