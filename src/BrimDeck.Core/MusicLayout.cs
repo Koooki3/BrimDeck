@@ -1,69 +1,96 @@
 namespace BrimDeck.Core;
 
-public sealed record MusicTier(double Toolbar, double Top, double Bottom, double Side, double Gap, double Radius,
-    double MinColumn, double Nudge, double Title, double TitleLine, double Artist, double ArtistLine,
-    double Lyric, double LyricLine, double LyricSide, double Time, double ProgressRow, double Bar, double BarHover,
-    double Play, double Skip, double Mode, double ControlGap, double MiddleGap, double ProgressGap, double Lift, double Equalizer)
+// Type sizes and spacing of the music page. Each value is given at the three size presets and at the largest panel
+// (density 0, 1, 2 and 3) and runs linearly between them, so a panel between two presets gets sizes between theirs.
+// Bottom is the margin below the transport glyphs and equals Side, so the page has the same inset on three sides.
+public sealed record MusicMetrics(double Toolbar, double Top, double Bottom, double Side, double Gap, double MinColumn,
+    double Title, double TitleLine, double Artist, double ArtistLine, double Lyric, double LyricLine, double MiddleGap,
+    double Time, double TimeLine, double SeekRow, double Bar, double BarHover, double SectionGap, double ControlsGap,
+    double Play, double Skip, double Mode, double Equalizer)
 {
-    public static MusicTier Compact { get; } = new(28, 6, 14, 16, 12, 8, 220, .06, 16, 22, 12, 16, 11.5, 18, 10.5, 10.5, 16, 3, 6, 24, 18, 14, 20, 6, 4, 2, 12);
-    public static MusicTier Standard { get; } = new(36, 8, 20, 20, 14, 10, 240, .03, 20, 26, 13, 16, 12, 18, 11, 11.5, 18, 4, 8, 32, 24, 18, 28, 8, 8, 4, 16);
-    public static MusicTier Spacious { get; } = new(40, 10, 24, 24, 18, 12, 260, 0, 26, 32, 16, 22, 14, 20, 12.5, 12, 20, 4, 8, 40, 30, 22, 36, 12, 10, 6, 20);
-    // Above the spacious preset (300 tall) the text grows with the panel height, capped at 4/3 for 400.
-    // Lyric line spacing grows faster than the glyphs so the previous and next lines drift away from the current one.
-    public MusicTier Scaled(double factor)
+    public static MusicMetrics At(double density)
     {
-        static double Half(double value) => Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2;
-        double spread = 1 + 1.6 * (factor - 1);
-        return this with
+        double d = Math.Clamp(density, 0, 3);
+        int i = Math.Min(2, (int)d);
+        double Value(double compact, double standard, double spacious, double largest)
         {
-            Title = Half(Title * factor), TitleLine = Math.Round(TitleLine * factor), Artist = Half(Artist * factor), ArtistLine = Math.Round(ArtistLine * factor),
-            Lyric = Half(Lyric * factor), LyricLine = Math.Round(LyricLine * spread), LyricSide = Half(LyricSide * factor), Equalizer = Math.Round(Equalizer * factor)
-        };
+            double[] values = [compact, standard, spacious, largest];
+            return values[i] + (values[i + 1] - values[i]) * (d - i);
+        }
+        double Whole(double compact, double standard, double spacious, double largest) => Math.Round(Value(compact, standard, spacious, largest), MidpointRounding.AwayFromZero);
+        double Half(double compact, double standard, double spacious, double largest) => Math.Round(Value(compact, standard, spacious, largest) * 2, MidpointRounding.AwayFromZero) / 2;
+        double side = Whole(16, 20, 24, 28);
+        return new(
+            Toolbar: Whole(28, 36, 40, 40), Top: Whole(4, 8, 10, 12), Bottom: side, Side: side,
+            Gap: Whole(18, 24, 30, 36), MinColumn: Whole(200, 220, 260, 300),
+            Title: Half(15.5, 19, 25, 31), TitleLine: Whole(21, 25, 32, 40), Artist: Half(12, 13, 15.5, 19), ArtistLine: Whole(16, 18, 21, 26),
+            Lyric: Half(12, 12.5, 14, 16.5), LyricLine: Whole(16, 19, 23, 28), MiddleGap: Whole(4, 8, 12, 16),
+            Time: Half(10, 11, 11.5, 12.5), TimeLine: Whole(12, 15, 16, 18), SeekRow: Whole(12, 16, 18, 20), Bar: Half(3, 4, 4, 5), BarHover: Whole(6, 8, 8, 10),
+            SectionGap: Whole(6, 10, 14, 18), ControlsGap: Whole(2, 6, 8, 10),
+            Play: Whole(24, 30, 38, 44), Skip: Whole(18, 22, 28, 32), Mode: Whole(14, 17, 21, 24), Equalizer: Whole(12, 15, 19, 23));
     }
 }
 
-public sealed record MusicLayout(MusicTier Tier, double BodyY, double BodyHeight, double Cover, double CoverY,
-    double ColumnX, double ColumnWidth, bool MergeTitle, double HeaderHeight, double MiddleHeight, int LyricLines,
-    bool ShowMessage, double SlotY, double SlotHeight, double ControlsY, double TripletX, double TripletWidth,
-    double ModeX, double Nudge, double ProgressY, double ProgressHeight, bool ShowFullControl, double FullControlRoom = 0)
+// The music page has two parts. The upper part holds the cover with the title, artist and lyrics beside it; the lower
+// part holds the progress bar with the times below its ends, then the transport buttons. Everything shares one left
+// and one right edge: the cover, the bar and the elapsed time start at the left; the text, the bar and the duration end
+// at the right. Positions are relative to the page body, the panel without its toolbar and margins.
+public sealed record MusicLayout(MusicMetrics Metrics, double Density, double BodyWidth, double BodyHeight, double Cover, double CoverY, double CoverRadius,
+    double TextX, double TextWidth, bool MergeTitle, double HeaderHeight, double MiddleHeight, int LyricLines, bool ShowMessage,
+    double ProgressY, double ProgressHeight, double TimesY, double ControlsY, double ControlGap, double TripletX, double TripletWidth,
+    double ModeX, bool ShowFullControl, double FullControlRoom)
 {
-    // The entry label shortens step by step. The last step is 21.8 DIP in Microsoft YaHei at the largest
-    // (12) type; with 6 padding and a 1 border on each side it needs 36, which the narrowest row still has.
+    // The entry label shortens step by step to the room right of the transport.
     // In English the second step keeps the meaning in two words; "En…" in Segoe UI is narrower than "启…".
     public static string[] FullControlLabels => Loc.IsEnglish ? ["Enable full control", "Full control", "Enable…", "En…"] : ["启用完整控制", "启用完整…", "启用…", "启…"];
-    public const double FullControlGap = 8, FullControlChrome = 14, FullControlMinimum = 36;
-    public static MusicLayout Calculate(double width, double height, bool lyrics, bool timeline, bool mode, bool message = false, bool logMode = false, double messageHeight = 0, bool transport = true)
+    // The chrome is 6 padding and a 1 border on each side. The minimum holds the shortest label at the largest (13) type.
+    public const double FullControlGap = 8, FullControlChrome = 14, FullControlMinimum = 38;
+    // Height sets the density, from the smallest preset (0) to the largest panel (3). Width caps it: the narrowest
+    // panel goes no further than the standard preset, and the cap reaches the largest density at the spacious width,
+    // so a tall, narrow panel does not get type its title column cannot hold.
+    public static double DensityFor(double width, double height)
     {
-        var tier = height < 180 ? MusicTier.Compact : height < 290 ? MusicTier.Standard : MusicTier.Spacious;
-        bool small = tier == MusicTier.Compact, large = tier == MusicTier.Spacious;
-        var c = large && height > 300 ? tier.Scaled(Math.Min(height / 300, 4.0 / 3)) : tier;
-        double right = width - c.Side, bodyY = c.Toolbar + c.Top, bodyH = height - bodyY - c.Bottom;
-        double cover = Math.Max(48, Math.Min(bodyH, width - 2 * c.Side - c.Gap - c.MinColumn));
-        double coverY = bodyY + Math.Floor((bodyH - cover) / 2), colX = c.Side + cover + c.Gap, colW = right - colX;
-        double progressH = timeline ? c.ProgressRow : 0, footerH = c.Lift + c.Play + (timeline ? c.ProgressGap + progressH : 0);
-        // The transport glyphs occupy 3..21 of a 24-unit square. Leave a small
-        // optical inset above the body bottom, keeping timeline/lyric space fixed.
-        double controlsY = bodyY + bodyH - c.Play * 7 / 8 - 2;
-        double progressY = bodyY + bodyH - footerH;
-        double roomSeparate = bodyH - footerH - c.MiddleGap - c.TitleLine - c.ArtistLine;
-        double hintHeight = messageHeight > 0 ? messageHeight : c.LyricLine;
-        bool merge = lyrics && (small || roomSeparate < c.LyricLine) || message && !small && roomSeparate < hintHeight;
-        double headH = c.TitleLine + (merge ? 0 : c.ArtistLine), middleH = bodyH - footerH - c.MiddleGap - headH;
-        int lines = !lyrics ? 0 : !small && middleH >= 3 * c.LyricLine + 2 ? 3 : middleH >= c.LyricLine ? 1 : 0;
-        bool showMessage = message && !small && middleH >= hintHeight;
-        double slotH = showMessage ? hintHeight : lines * c.LyricLine, slotY = bodyY + headH + Math.Floor((middleH - slotH) / 2);
-        double tripletW = c.Skip * 2 + c.Play + 2 * c.ControlGap, modeExt = c.Mode + c.ControlGap, center = colX + colW / 2;
-        double nudge = Math.Max(0, Math.Floor(Math.Min(colW * c.Nudge, (center - width / 2) * .7) + .5));
-        double extension = mode && !large ? modeExt : 0;
-        double tripletX = Math.Floor(center - nudge - (tripletW + extension) / 2 + .5) + extension, modeX = tripletX - modeExt;
-        if (mode && modeX < colX) { modeX = colX; tripletX = Math.Max(tripletX, modeX + c.Mode + 20); }
+        var (compact, standard, spacious) = (MusicSizes.For(PanelSize.Compact), MusicSizes.For(PanelSize.Standard), MusicSizes.For(PanelSize.Spacious));
+        double byHeight = Math.Clamp(height <= standard.Height ? (height - compact.Height) / (standard.Height - compact.Height)
+            : 1 + (height - standard.Height) / (spacious.Height - standard.Height), 0, 3);
+        double byWidth = Math.Clamp(1 + 2 * (width - standard.Width) / (spacious.Width - standard.Width), 1, 3);
+        return Math.Min(byHeight, byWidth);
+    }
+    public static MusicLayout Calculate(double width, double height, bool lyrics, bool timeline, bool message = false, bool logMode = false, bool transport = true)
+    {
+        double density = DensityFor(width, height);
+        var c = MusicMetrics.At(density);
+        double bodyW = width - 2 * c.Side, bodyH = height - c.Toolbar - c.Top - c.Bottom;
+        // The transport glyphs occupy 3..21 of a 24-unit square; their ink ends at the body bottom.
+        double controlsY = Math.Round(bodyH - c.Play * 7 / 8), inkTop = controlsY + c.Play / 8;
+        // The times sit just below the bar, clear of it while the hovered bar is thicker.
+        double timesY = Math.Round(inkTop - c.ControlsGap - c.TimeLine);
+        double progressY = Math.Round(timesY - c.BarHover / 2 - 2 - c.SeekRow / 2), barTop = progressY + (c.SeekRow - c.Bar) / 2;
+        double upper = Math.Floor((timeline ? barTop : inkTop) - c.SectionGap);
+        double cover = Math.Max(40, Math.Min(upper, bodyW - c.Gap - c.MinColumn));
+        double coverY = Math.Floor((upper - cover) / 2), textX = cover + c.Gap, textW = bodyW - textX;
+        // The text beside the cover is as tall as the cover. Title and artist take a line each unless the lyrics or the
+        // message would then have no line left. Below them sit the current lyric, then the next one, then the one before.
+        double separate = c.TitleLine + c.ArtistLine;
+        double Room(double header) => cover - header - c.MiddleGap;
+        bool below = lyrics || message;
+        bool merge = below ? Room(separate) < c.LyricLine : cover < separate;
+        double headH = merge ? c.TitleLine : separate, room = Room(headH);
+        int lines = !lyrics ? 0 : (int)Math.Clamp(Math.Floor(room / c.LyricLine), 0, 3);
+        bool showMessage = message && room >= c.LyricLine;
+        // The play button sits at the centre of the panel, with previous and next spread out with the panel's width
+        // rather than packed beside it. The mode button is left of previous, with the same gap as between the others.
+        double gap = Math.Round(Math.Clamp(bodyW * .14, c.Play * 1.2, c.Play * 2.6));
+        double tripletW = c.Skip * 2 + c.Play + 2 * gap;
+        double tripletX = Math.Floor((bodyW - tripletW) / 2 + .5), modeX = tripletX - gap - c.Mode;
         // Netease without full control offers the entry at the right end of the transport row. The entry
         // never moves the transport; the window shortens its label to the room right of the buttons.
-        double fullControlRoom = !logMode ? 0 : transport ? right - (tripletX + tripletW) - FullControlGap : colW;
+        double fullControlRoom = !logMode ? 0 : transport ? bodyW - (tripletX + tripletW) - FullControlGap : bodyW;
         bool enable = fullControlRoom >= FullControlMinimum;
         if (!enable) fullControlRoom = 0;
-        return new(c, bodyY, bodyH, cover, coverY, colX, colW, merge, headH, middleH, lines, showMessage, slotY, slotH,
-            controlsY, tripletX, tripletW, modeX, nudge, progressY, progressH, enable, fullControlRoom);
+        double radius = Math.Clamp(Math.Round(cover * .08), 5, 16);
+        return new(c, density, bodyW, bodyH, cover, coverY, radius, textX, textW, merge, headH, cover - headH, lines, showMessage,
+            timeline ? progressY : 0, timeline ? c.SeekRow : 0, timesY, controlsY, gap, tripletX, tripletW, modeX, enable, fullControlRoom);
     }
 }
 

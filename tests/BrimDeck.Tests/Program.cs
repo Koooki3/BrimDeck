@@ -18,7 +18,12 @@ try
     await MusicTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
+    DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
+    CollapsedHoverTests.Run(Check);
+    HotkeyTests.Run(Check);
+    CollapsedGeometryTests.Run(root, Check);
+    PanelHeaderTests.Run(Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
     await AppUpdateTests.Run(root, Check);
@@ -383,6 +388,17 @@ try
     Check("Cursor token categories are disjoint", eventItem!.Total == 1050);
     Check("Cursor API cost cents converted", pricing.Estimate(eventItem!) == .0345131m);
     Check("Reported cost is not marked as an estimate", pricing.Summarize([eventItem!]) is { Reported: 1, Estimated: 0, IsEstimate: false });
+    TokenEntry Charged(int i, long input, long output, long write, long read, decimal perInput = 2, decimal perOutput = 6) =>
+        new($"cursor:{i}", now, "grok-bot-default", input, read, write, 0, output, Math.Round((input * perInput + output * perOutput + write * 2 + read * .5m) / 1_000_000m, 7));
+    var charged = new[] { Charged(1, 4, 215, 5954, 0), Charged(2, 120, 3000, 800, 90_000), Charged(3, 7, 40, 0, 12_000), Charged(4, 2000, 900, 15_000, 400_000), Charged(5, 1, 1, 1, 1), Charged(6, 50, 7000, 300, 1_000_000), Charged(7, 900, 20, 10, 5) };
+    Check("Prices behind API amounts are recovered", Pricing.FromReported(charged) is { Status: RecoveryStatus.Recovered, Records: 7 } recovery &&
+        recovery.Prices == new TokenPrices(.000002m, .000006m, .0000005m, .000002m, null));
+    Check("Too few records are reported with their count", Pricing.FromReported(charged[..5]) is { Status: RecoveryStatus.TooFewRecords, Prices: null, Records: 5, Needed: 7 });
+    Check("A category without tokens has no recovered price", Pricing.FromReported(charged.Select(t => t with { CacheWrite = 0, ReportedCostUsd = t.ReportedCostUsd - t.CacheWrite * 2 / 1_000_000m })).Prices is { CacheWrite: null, CacheRead: .0000005m });
+    Check("Amounts that fixed prices cannot reproduce are reported as inconsistent",
+        Pricing.FromReported(charged.Select((t, i) => i == 3 ? Charged(4, 2000, 900, 15_000, 400_000, 4, 12) : t)) is { Status: RecoveryStatus.Inconsistent, Prices: null });
+    Check("Repeated records cannot determine each price", Pricing.FromReported(Enumerable.Range(1, 8).Select(i => Charged(i, 10, 20, 30, 40))) is { Status: RecoveryStatus.Undetermined, Prices: null });
+    Check("Estimated records give no recovered prices", Pricing.FromReported(charged.Select(t => t with { ReportedCostUsd = null })) is { Status: RecoveryStatus.TooFewRecords, Records: 0 });
 
     var entry = new TokenEntry("test", now, "claude-fable-5-1", 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000);
     Check("Cache read and both cache durations priced", pricing.Estimate(entry) == 92.75m);

@@ -54,6 +54,8 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 - 窗口最大化时默认切换为指示条，全屏游戏或视频播放时默认隐藏，避免误触展开。
 
+- 连接多台显示器时，可以让 BrimDeck 跟随主显示器，也可以任选其中一台或几台，每台各显示一个；鼠标停在哪一个上，就只展开哪一个。
+
 ### AI 用量
 
 <img src="docs/zh-CN/images/usage.png" width="100%" alt="AI 用量页：Claude、Codex、Cursor、Antigravity 四列配额">

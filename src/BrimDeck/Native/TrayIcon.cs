@@ -14,11 +14,13 @@ public sealed class TrayIcon : IDisposable
     private readonly HwndSource _source;
     private readonly Action _settings;
     private readonly Action _exit;
+    private readonly Action? _toggleHidden;
+    private readonly Func<bool>? _hidden;
     private NOTIFYICONDATA _data;
     private readonly uint _taskbarCreated = RegisterWindowMessage("TaskbarCreated");
-    public TrayIcon(Window owner, Action settings, Action exit)
+    public TrayIcon(Window owner, Action settings, Action exit, Action? toggleHidden = null, Func<bool>? hidden = null)
     {
-        _settings = settings; _exit = exit;
+        _settings = settings; _exit = exit; _toggleHidden = toggleHidden; _hidden = hidden;
         var hwnd = new WindowInteropHelper(owner).Handle;
         _source = HwndSource.FromHwnd(hwnd); _source.AddHook(Hook);
         _data = new NOTIFYICONDATA { Size = Marshal.SizeOf<NOTIFYICONDATA>(), Window = hwnd, Id = 1, Flags = 1 | 2 | 4, CallbackMessage = Callback,
@@ -60,14 +62,14 @@ public sealed class TrayIcon : IDisposable
         if (mouseMessage == 0x205)
         {
             SetForegroundWindow(hwnd);
-            var menu = CreateMenu(_settings, _exit);
+            var menu = CreateMenu(_settings, _exit, _toggleHidden, _hidden?.Invoke() ?? false);
             menu.Placement = PlacementMode.MousePoint;
             menu.IsOpen = true;
         }
         return IntPtr.Zero;
     }
     // Shared with the UI smoke run, which renders the menu without a tray.
-    internal static ContextMenu CreateMenu(Action settings, Action exit)
+    internal static ContextMenu CreateMenu(Action settings, Action exit, Action? toggleHidden = null, bool hidden = false)
     {
         var menu = new ContextMenu();
         // Tray menus belong to the shell, so they follow the system's app theme rather than the settings window's palette.
@@ -79,6 +81,7 @@ public sealed class TrayIcon : IDisposable
             menu.Resources["MenuHover"] = new SolidColorBrush(Color.FromRgb(0xE9, 0xE9, 0xE9));
             menu.Resources["MenuRule"] = new SolidColorBrush(Color.FromRgb(0xE1, 0xE1, 0xE1));
         }
+        if (toggleHidden is not null) { var show = new MenuItem { Header = hidden ? Loc.T("显示面板", "Show panel") : Loc.T("隐藏面板", "Hide panel") }; show.Click += (_, _) => toggleHidden(); menu.Items.Add(show); }
         var open = new MenuItem { Header = Loc.T("设置", "Settings") }; open.Click += (_, _) => settings(); menu.Items.Add(open);
         menu.Items.Add(new Separator());
         var quit = new MenuItem { Header = Loc.T("退出", "Exit") }; quit.Click += (_, _) => exit(); menu.Items.Add(quit);

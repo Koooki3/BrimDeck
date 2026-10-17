@@ -21,8 +21,9 @@ public partial class MainWindow
         var spacious = MusicSizes.For(PanelSize.Spacious);
         // The presets are interpolation anchors, not buckets. The narrower
         // dimension limits typography for wide/short and narrow/tall panels.
+        // The compact and standard music presets share their width; a width up to it counts as standard.
         static double Step(double value, double small, double middle, double large) => Math.Clamp(
-            value <= middle ? (value - small) / (middle - small) : 1 + (value - middle) / (large - middle), 0, 3);
+            value <= middle ? (middle > small ? (value - small) / (middle - small) : 1) : 1 + (value - middle) / (large - middle), 0, 3);
         double widthStep = Step(ContentCanvas.Width, compact.Width, standard.Width, spacious.Width);
         double heightStep = Step(ContentCanvas.Height, compact.Height, standard.Height, spacious.Height);
         double density = Math.Min(widthStep, heightStep), font = 10.5 + density, gap = 3 + 1.5 * density;

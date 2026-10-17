@@ -501,7 +501,8 @@ internal sealed class MediaSessions : IDisposable
         End = snapshot.Duration ?? TimeSpan.Zero, ReportedPosition = snapshot.Position ?? TimeSpan.Zero, PositionAt = snapshot.PositionAt ?? DateTimeOffset.UtcNow,
         SongId = snapshot.SongId ?? "", EmbeddedLyrics = snapshot.SyncedLyrics ?? "", CurrentLyric = snapshot.CurrentLyric, CurrentLyricStart = snapshot.CurrentLyricStart,
         CanToggle = snapshot.CanToggle, CanPrevious = snapshot.CanPrevious, CanNext = snapshot.CanNext, CanSeek = snapshot.CanSeek,
-        CanShuffle = snapshot.CanShuffle, CanRepeat = snapshot.CanRepeat, Shuffle = snapshot.Shuffle == true, Repeat = snapshot.Repeat ?? MediaRepeat.None
+        CanShuffle = snapshot.CanShuffle, CanRepeat = snapshot.CanRepeat, Shuffle = snapshot.Shuffle == true, Repeat = snapshot.Repeat ?? MediaRepeat.None,
+        CanLike = snapshot.CanLike, Liked = snapshot.CanLike && snapshot.Liked
     };
     private const int CoverPixels = 512;
     internal static BitmapSource? DecodeCover(byte[]? bytes)
@@ -530,7 +531,8 @@ internal sealed class MediaSessions : IDisposable
         if (!_routes.TryGetValue(id, out var route)) return false;
         var current = Tracks.FirstOrDefault(t => t.Id == id);
         if (current is null || command == MediaCommand.Previous && !current.CanPrevious || command == MediaCommand.Next && !current.CanNext ||
-            command == MediaCommand.PlayPause && !current.CanToggle || command == MediaCommand.Shuffle && !current.CanShuffle || command == MediaCommand.Repeat && !current.CanRepeat) return false;
+            command == MediaCommand.PlayPause && !current.CanToggle || command == MediaCommand.Shuffle && !current.CanShuffle || command == MediaCommand.Repeat && !current.CanRepeat ||
+            command == MediaCommand.Like && !current.CanLike) return false;
         var state = current.State;
         try
         {
@@ -569,6 +571,8 @@ internal sealed class MediaSessions : IDisposable
         var info = session.GetPlaybackInfo(); var controls = info.Controls;
         return command switch
         {
+            // The system media session has no command for liking a song.
+            MediaCommand.Like => false,
             MediaCommand.Previous => controls.IsPreviousEnabled && await session.TrySkipPreviousAsync(),
             MediaCommand.Next => controls.IsNextEnabled && await session.TrySkipNextAsync(),
             MediaCommand.Shuffle => controls.IsShuffleEnabled && await session.TryChangeShuffleActiveAsync(info.IsShuffleActive != true),

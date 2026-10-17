@@ -18,12 +18,14 @@ public sealed partial class SettingsWindow
         if (help is null) return label;
         var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         heading.Children.Add(label);
+        var icon = Stroke("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1", 14, 14, TextTertiary);
+        // Measured ink: the circle's center sat 1 DIP above the center of the label's glyphs.
+        icon.RenderTransform = new TranslateTransform(0, 1);
         var info = new Border
         {
             Width = 22, Height = 24, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent,
             VerticalAlignment = VerticalAlignment.Center, Focusable = true, Cursor = Cursors.Help,
-            Child = Stroke("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1", 14, 14, TextTertiary),
-            FocusVisualStyle = (Style)FindResource("SettingsHelpFocus")
+            Child = icon, FocusVisualStyle = (Style)FindResource("SettingsHelpFocus")
         };
         AttachSettingHelp(info, title, help);
         heading.Children.Add(info);

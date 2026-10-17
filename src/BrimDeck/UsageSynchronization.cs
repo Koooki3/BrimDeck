@@ -15,10 +15,13 @@ public partial class MainWindow
     private PromptTimer? _syncRingTimer;
     private bool _syncCountdown;
     internal bool AutomaticSyncEnabled => Settings.QuotaWanted && Settings.UsageAutoSync;
+    // The panel that reads the data; the panels of other monitors show its sync state.
+    private MainWindow Lead => _lead ?? this;
+    private bool Refreshing => Lead._refreshing;
 
     private void ApplySyncSchedule()
     {
-        if (IsLoaded && AutomaticSyncEnabled) { if (!_refresh.IsEnabled) { _refresh.Start(); _syncCycleStart = DateTime.UtcNow; } }
+        if (_lead is null && IsLoaded && AutomaticSyncEnabled) { if (!_refresh.IsEnabled) { _refresh.Start(); _syncCycleStart = DateTime.UtcNow; } }
         else _refresh.Stop();
     }
 
@@ -54,14 +57,14 @@ public partial class MainWindow
         SyncButton.Visibility = Settings.UsagePage && !IsMusicPage ? Visibility.Visible : Visibility.Collapsed;
         SyncButton.Foreground = UI.Brush(paused ? "#F2777F" : UI.Secondary);
         SyncSlash.Visibility = paused ? Visibility.Visible : Visibility.Collapsed;
-        var tip = _details ? _refreshing ? Loc.T("正在同步用量与模型消耗…", "Syncing usage and model consumption…") : Loc.T("立即同步用量与模型消耗", "Sync usage and model consumption now")
+        var tip = _details ? Refreshing ? Loc.T("正在同步用量与模型消耗…", "Syncing usage and model consumption…") : Loc.T("立即同步用量与模型消耗", "Sync usage and model consumption now")
             : Settings.UsageAutoSync ? Loc.T("每 60 秒自动同步一次，点击关闭同步", "Syncs automatically every 60 seconds. Click to turn syncing off.")
             : Loc.T("同步已关闭，点击开启", "Syncing is off. Click to turn it on.");
         if (SyncButton.ToolTip is System.Windows.Controls.ToolTip shown) shown.Content = tip; else SyncButton.ToolTip = UI.LeftwardToolTip(tip);
         AutomationProperties.SetName(SyncButton, _details ? tip : Settings.UsageAutoSync ? Loc.T("关闭自动同步", "Turn off automatic sync") : Loc.T("开启自动同步", "Turn on automatic sync"));
 
         bool onScreen = _expanded && !IsMusicPage && Settings.UsagePage && !IsSuppressed;
-        _syncCountdown = !_details && Settings.UsageAutoSync && _refresh.IsEnabled;
+        _syncCountdown = !_details && Settings.UsageAutoSync && Lead._refresh.IsEnabled;
         SyncTrack.Visibility = SyncProgress.Visibility = _syncCountdown ? Visibility.Visible : Visibility.Collapsed;
         // Inside the ring the arrows shrink to 13 DIP; the stroke stays 1.24 DIP like the standalone icon.
         SyncGlyph.Width = SyncGlyph.Height = _syncCountdown ? 13 : 18;
@@ -73,7 +76,7 @@ public partial class MainWindow
 
         // A manual read on the details page spins until it ends; an automatic sync turns the arrows once.
         bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
-        string spin = !onScreen || !animations || !_refreshing ? "" : _details ? "details" : _syncCountdown ? "once" : "";
+        string spin = !onScreen || !animations || !Refreshing ? "" : _details ? "details" : _syncCountdown ? "once" : "";
         if (_syncSpin == spin) return;
         _syncSpin = spin;
         SyncRotation.BeginAnimation(RotateTransform.AngleProperty, spin.Length == 0 ? null : new DoubleAnimation
@@ -86,7 +89,7 @@ public partial class MainWindow
     private void UpdateSyncRing()
     {
         if (!_syncCountdown) { SyncProgress.Data = null; return; }
-        double fraction = _refreshing ? 1 : Math.Clamp((DateTime.UtcNow - _syncCycleStart).TotalSeconds / _refresh.Interval.TotalSeconds, 0, 1);
+        double fraction = Refreshing ? 1 : Math.Clamp((DateTime.UtcNow - Lead._syncCycleStart).TotalSeconds / Lead._refresh.Interval.TotalSeconds, 0, 1);
         SyncProgress.Data = RingArc(fraction);
     }
 
