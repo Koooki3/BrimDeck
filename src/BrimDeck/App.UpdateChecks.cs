@@ -16,7 +16,7 @@ public partial class App
         SystemEvents.PowerModeChanged += PowerModeChanged;
         Updates.Changed += UpdateNoticeChanged;
         _updateEvents = true;
-        _noticeVersion = Updates.NoticeVersion; Deck.UpdateNotice();
+        _noticeVersion = Updates.NoticeVersion; foreach (var deck in Decks) deck.UpdateNotice();
     }
 
     private void StopBackgroundUpdates()
@@ -52,6 +52,6 @@ public partial class App
     {
         if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(UpdateNoticeChanged); return; }
         if (Updates.NoticeVersion == _noticeVersion) return;
-        _noticeVersion = Updates.NoticeVersion; Deck.UpdateNotice();
+        _noticeVersion = Updates.NoticeVersion; foreach (var deck in Decks) deck.UpdateNotice();
     }
 }

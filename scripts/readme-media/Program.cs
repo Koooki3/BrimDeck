@@ -123,7 +123,7 @@ internal sealed class Renderer(App app, string output, string language, string[]
         _cover = Cover();
         (_track, _other) = Tracks();
         _deck.SetSnapshots(Snapshots());
-        Program.Call(_deck, "ApplyMediaUpdate", [typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource)], _track, new List<MediaTrack> { _track, _other }, _cover);
+        Program.Call(_deck, "ApplyMediaUpdate", [typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource), typeof(bool)], _track, new List<MediaTrack> { _track, _other }, _cover, false);
         Program.SetField(_deck, "_trackNoticeUntil", default(DateTimeOffset));
         _deck.ApplySettings();
         await Settle();
@@ -425,14 +425,14 @@ internal sealed class Renderer(App app, string output, string language, string[]
         };
         foreach (var (name, track) in variants)
         {
-            Program.Call(_deck, "ApplyMediaUpdate", [typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource)], track, new List<MediaTrack> { track }, _cover);
+            Program.Call(_deck, "ApplyMediaUpdate", [typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource), typeof(bool)], track, new List<MediaTrack> { track }, _cover, false);
             foreach (var (width, height) in new[] { (440d, 140d), (760d, 300d) })
             {
                 _settings.MusicWidth = width; _settings.MusicHeight = height; Refresh();
                 await Save($"music-{name}-{width}x{height}", 1.5);
             }
         }
-        Program.Call(_deck, "ApplyMediaUpdate", [typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource)], _track, new List<MediaTrack> { _track, _other }, _cover);
+        Program.Call(_deck, "ApplyMediaUpdate", [typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource), typeof(bool)], _track, new List<MediaTrack> { _track, _other }, _cover, false);
         _settings.MusicWidth = 440; _settings.MusicHeight = 200; Refresh();
         SelectPage(DeckPage.Usage);
     }

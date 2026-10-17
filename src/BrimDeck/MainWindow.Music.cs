@@ -29,13 +29,12 @@ public partial class MainWindow
     }
     private DeckPage _page;
     private double _pageWidth = 760;
-    private MediaSessions? _media;
+    private MediaSessions? _media => _app.Media;
     private MediaTrack? _mediaTrack;
     private IReadOnlyList<MediaTrack> _mediaTracks = [];
     private string? _pinnedMedia;
     private BitmapSource? _mediaCover;
     private Brush _musicAccent = UI.Brush(UI.Secondary);
-    private readonly LyricsService _lyricsService = new();
     private Lyrics _lyrics = Lyrics.Empty;
     private CancellationTokenSource? _lyricsRequest;
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
@@ -72,11 +71,14 @@ public partial class MainWindow
         _sourceMenuWatch = new(Dispatcher, TickSourceMenu) { Interval = TimeSpan.FromMilliseconds(40) };
         _musicTick = new(Dispatcher, TickMusic) { Interval = TimeSpan.FromMilliseconds(33) };
         IsVisibleChanged += (_, _) => UpdateMusicTimer();
+        _app.MediaChanged += MediaChanged;
     }
     private void StartMusic()
     {
         _musicStarted = true;
         ApplyMusicSettings();
+        // A panel opened while music plays takes the current song without announcing it as a new one.
+        if (_media is { } media) { _pinnedMedia = media.Pinned; ApplyMediaUpdate(media.Current, media.Tracks, media.Cover, notice: false); }
     }
     private void ApplyMusicSettings()
     {
@@ -84,11 +86,8 @@ public partial class MainWindow
         if (!Settings.MusicPage && _page == DeckPage.Music) _page = DeckPage.Usage;
         if (!Settings.UsagePage && Settings.MusicPage) _page = DeckPage.Music;
         if (!Settings.UsagePage || IsMusicPage) _details = false;
-        if (_musicStarted && Settings.MediaWanted && _media is null)
-        { _media = new MediaSessions(Dispatcher); _media.Changed += MediaChanged; _ = _media.StartAsync(); }
-        if (!Settings.MediaWanted && _media is not null)
-        { _media.Changed -= MediaChanged; _media.Dispose(); _media = null; _mediaTrack = null; _mediaCover = null; _mediaTracks = []; }
-        if (!Settings.MediaWanted) _seekPreview.Observe(null, DateTimeOffset.UtcNow);
+        if (_musicStarted) _app.StartMedia();
+        if (!Settings.MediaWanted) { _mediaTrack = null; _mediaCover = null; _mediaTracks = []; _seekPreview.Observe(null, DateTimeOffset.UtcNow); }
         UpdateLyrics();
         _musicRenderKey = "";
     }
@@ -143,7 +142,7 @@ public partial class MainWindow
         _pinnedMedia = _media.Pinned;
         ApplyMediaUpdate(_media.Current, _media.Tracks, _media.Cover);
     }
-    private void ApplyMediaUpdate(MediaTrack? track, IReadOnlyList<MediaTrack> tracks, BitmapSource? cover)
+    private void ApplyMediaUpdate(MediaTrack? track, IReadOnlyList<MediaTrack> tracks, BitmapSource? cover, bool notice = true)
     {
         bool changedSong = _mediaTrack?.Id != track?.Id || _mediaTrack is not null && track is not null && !SameMediaSong(_mediaTrack, track);
         bool lyricsChanged = changedSong || _mediaTrack?.SongKey != track?.SongKey || _mediaTrack?.SongId != track?.SongId || _mediaTrack?.EmbeddedLyrics != track?.EmbeddedLyrics;
@@ -157,7 +156,7 @@ public partial class MainWindow
         {
             _seeking = false; _seekTrack = null;
             // A notice still on screen switches to the new title instead of giving way to the summary until playback starts.
-            if (_mediaTrack is not null && Settings.MusicTrackNotice) _trackNotice.Arm(now); else _trackNotice.Disarm();
+            if (_mediaTrack is not null && Settings.MusicTrackNotice && notice) _trackNotice.Arm(now); else _trackNotice.Disarm();
         }
         if (_trackNotice.Observe(_mediaTrack, now)) _trackNoticeUntil = now.AddSeconds(4);
         if (lyricsChanged) UpdateLyrics();
@@ -188,7 +187,7 @@ public partial class MainWindow
         var request = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _lyricsRequest = request;
         try
         {
-            var lyrics = await _lyricsService.FindAsync(requested, true, request.Token);
+            var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
             if (request.IsCancellationRequested || _lyricsKey != key) return;
             _lyrics = lyrics; _musicRenderKey = "";
             if (IsMusicPage) RenderMusic(); RenderCompact();
@@ -716,7 +715,7 @@ public partial class MainWindow
     private void UpdateMusicTimer()
     {
         bool musicVisible = MusicPresentationVisible;
-        _media?.SetPresentationActive(musicVisible);
+        _app.PresentMedia(this, musicVisible);
         bool progressVisible = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && _mediaTrack is { HasTimeline: true, State: not MediaState.Stopped };
         bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
         // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours.
@@ -744,7 +743,7 @@ public partial class MainWindow
         bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
         bool playing = animations && MusicAudioActive;
         bool musicVisible = MusicPresentationVisible;
-        _media?.SetPresentationActive(musicVisible);
+        _app.PresentMedia(this, musicVisible);
         float peak = musicVisible ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the flowing bars; the session peak is the fallback.
         bool flowing = musicVisible && _media?.FlowLevels(_flowLevels) == true;
@@ -753,5 +752,5 @@ public partial class MainWindow
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _media?.Dispose(); _lyricsService.Dispose(); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.PresentMedia(this, false); }
 }

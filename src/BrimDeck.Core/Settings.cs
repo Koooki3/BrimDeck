@@ -8,6 +8,10 @@ namespace BrimDeck.Core;
 public enum CompactStyle { Notch, Capsule, Line }
 public enum WindowBehavior { Normal, Line, Hide }
 public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
+// The monitors that show the panel. Chosen uses DisplayMonitors and falls back to the primary monitor while none of them is connected.
+public enum DisplayPlacement { Primary, Chosen }
+// A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named.
+public sealed record ChosenDisplay(string Id, string Name);
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop or web) signed in with; DeepSeek uses a key entered by hand.
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
@@ -192,6 +196,9 @@ public sealed class DeckSettings
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
+    public DisplayPlacement Display { get; set; }
+    // Kept while Display is Primary, so that choosing displays again restores them.
+    public List<ChosenDisplay> DisplayMonitors { get; set; } = [];
     public bool UsagePage { get; set; } = true;
     public bool UsageAutoSync { get; set; } = true;
     // The settings window's size when last closed, in DIPs, and whether it was maximized. Empty until it is closed once;
@@ -251,6 +258,7 @@ public sealed class DeckSettings
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
+        copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         return copy;
     }
     public void Normalize()
@@ -288,6 +296,10 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
+        if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
+        DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
+            .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
+        if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
     }
 }
 

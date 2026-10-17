@@ -203,10 +203,10 @@ public partial class MainWindow
         var point = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
         var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
         point = transform.Transform(point);
-        // The primary monitor's work area in this window's DIPs, the same units as the point above. SystemParameters.WorkArea
-        // uses the scale the session started with, which differs after the primary's scale changes.
-        var (_, primaryWork, _) = Native.WindowsHost.PrimaryScreen();
-        var work = new Rect(transform.Transform(primaryWork.TopLeft), transform.Transform(primaryWork.BottomRight));
+        // The work area of the panel's monitor in this window's DIPs, the same units as the point above. SystemParameters.WorkArea
+        // is the primary monitor's, at the scale the session started with.
+        var (_, panelWork, _) = Native.WindowsHost.MonitorScreen(MonitorHandle) ?? Native.WindowsHost.PrimaryScreen();
+        var work = new Rect(transform.Transform(panelWork.TopLeft), transform.Transform(panelWork.BottomRight));
         popup.Left = Math.Clamp(point.X - popup.Width, work.Left, Math.Max(work.Left, work.Right - popup.Width)); popup.Top = point.Y + 3;
         popup.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { popup.Close(); SetExpanded(false); e.Handled = true; } };
         // Closing an active owned window also raises Deactivated. Do not close it
@@ -388,7 +388,7 @@ public partial class MainWindow
         Grid.SetRow(scroll, 1); panel.Children.Add(scroll);
         if (result.Rows.Count == 0)
         {
-            var message = UI.Centered(incomplete ? _refreshing ? Loc.T("正在读取所选时段…", "Reading the selected period…") : Loc.T("所选应用的用量明细暂不可用", "Usage details for the selected apps are not available yet")
+            var message = UI.Centered(incomplete ? Refreshing ? Loc.T("正在读取所选时段…", "Reading the selected period…") : Loc.T("所选应用的用量明细暂不可用", "Usage details for the selected apps are not available yet")
                 : Loc.T("所选时段暂无用量记录", "No usage records in the selected period"), 12, UI.Tertiary);
             message.HorizontalAlignment = HorizontalAlignment.Center; message.VerticalAlignment = VerticalAlignment.Center; Grid.SetRow(message, 1); panel.Children.Add(message);
         }

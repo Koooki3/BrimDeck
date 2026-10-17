@@ -28,7 +28,13 @@ public partial class MainWindow : Window
     // Checks run every 40 ms near the surface. Farther away the interval grows with the distance, assuming the cursor
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
     private const double TrackNear = 40, TrackFar = 160, ApproachSpeed = 10;
-    private readonly WindowsHost _host = new();
+    private readonly WindowsHost _host;
+    // Null for the main panel. The panels of other monitors take their usage data from it instead of reading their own.
+    private readonly MainWindow? _lead;
+    private bool _retiring;
+    // The monitor this panel sits on; App assigns it. Without one, or while it is not connected, the primary monitor.
+    internal DisplayInfo? Display { get; set; }
+    private IntPtr MonitorHandle => Display is { } display && WindowsHost.MonitorScreen(display.Handle) is not null ? display.Handle : WindowsHost.PrimaryMonitor();
     // Animated in place so the indicator style can fade its surface in and out instead of switching brushes.
     private readonly SolidColorBrush _surface = new(Colors.Black);
     private const double CapsuleGap = 5;
@@ -57,9 +63,10 @@ public partial class MainWindow : Window
 
     private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt);
 
-    public MainWindow(App app)
+    public MainWindow(App app, MainWindow? lead = null)
     {
-        _app = app;
+        _app = app; _lead = lead;
+        _host = new WindowsHost(() => MonitorHandle);
         _hover = new(Dispatcher, () => { _hover!.Stop(); if (!IsSuppressed && _pointerInside) SetExpanded(true); });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
         _pointerTrack = new(Dispatcher, TrackPointer) { Interval = TimeSpan.FromMilliseconds(TrackNear) };
@@ -74,40 +81,45 @@ public partial class MainWindow : Window
         InitializeMusic();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
-        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); _app.CheckUpdatesIfDue(); };
+        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
         _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(); };
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false)); };
         Loaded += async (_, _) =>
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
-            _context = WindowsHost.DetectContext(); ApplySettings();
+            _context = WindowsHost.DetectContext(MonitorHandle);
+            if (_lead is { } lead) { Snapshots = lead.Snapshots; _updatedAt = lead._updatedAt; DetectThresholds(); UpdateNotice(); }
+            ApplySettings();
             _trackPointer = true; UpdatePointerTracking();
-            ScheduleClock(); _clock.Start(); StartMusic(); await RefreshAutomaticallyAsync();
+            ScheduleClock(); _clock.Start(); StartMusic();
+            if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
-        Closing += (_, e) => { if (!_app.Exiting) { e.Cancel = true; SetExpanded(false); } };
+        Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
         Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseRightButtonUp += (_, e) => { if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetExpanded(false); e.Handled = true; } };
-        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
-        Closed += (_, _) => Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged;
-        // A scale change moves the window to a rectangle Windows suggests, and a taskbar change (auto-hide, size) alters the
-        // work area without a display change; both centre the island again.
-        // WPF also raises DpiChanged, with equal old and new values, after the window is moved or resized; reacting to
-        // those would move the window again and loop.
-        DpiChanged += (_, e) => { if (e.OldDpi.DpiScaleX != e.NewDpi.DpiScaleX) DisplayChanged(null, EventArgs.Empty); };
+        // A scale change moves the window to a rectangle Windows suggests; the island is centred again.
+        // DpiChanged is a bubbling event: every Image raises it when its own DPI changes. Once the window has moved to a
+        // monitor with another scale, each image the panel rebuilds while it is laid out reports a change, and laying out
+        // again on those would never stop. Only the window's own change counts.
+        DpiChanged += (_, e) => { if (ReferenceEquals(e.OriginalSource, this) && e.OldDpi.DpiScaleX != e.NewDpi.DpiScaleX) Dispatcher.BeginInvoke(ApplySettings); };
+        // WM_DISPLAYCHANGE reaches the window after Windows has moved it into the new layout; SystemEvents reports the change
+        // before that, when the window still has its old position. A taskbar change (auto-hide, size) alters the work area
+        // without a display change.
         SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook((IntPtr _, int message, IntPtr wParam, IntPtr _, ref bool _) =>
         {
-            const int SettingChange = 0x001A, SetWorkArea = 0x002F;
-            if (message == SettingChange && wParam == SetWorkArea) DisplayChanged(null, EventArgs.Empty);
+            const int DisplayChange = 0x007E, SettingChange = 0x001A, SetWorkArea = 0x002F;
+            if (message == DisplayChange || message == SettingChange && wParam == SetWorkArea) _app.DisplaysChanged();
             return IntPtr.Zero;
         });
         Closed += (_, _) => DisposeMusic();
     }
 
-    private void DisplayChanged(object? sender, EventArgs args) => Dispatcher.BeginInvoke(ApplySettings);
+    // Closes a panel whose monitor no longer shows one.
+    internal void Retire() { _retiring = true; SetExpanded(false, true); Close(); }
     private void ScheduleClock() => _clock.Interval = ClockDelay(DateTime.Now);
     internal static TimeSpan ClockDelay(DateTime now) => TimeSpan.FromMilliseconds(60_000 - now.Second * 1000 - now.Millisecond + 50);
     // Hidden or previewing, the surface cannot be hovered, so the checks stop instead of returning early 25 times a second.
@@ -129,7 +141,7 @@ public partial class MainWindow : Window
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
-        var (bounds, work, scale) = WindowsHost.PrimaryScreen();
+        var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
         double usageWidth = Math.Max(240, Math.Min(Math.Max(Settings.Width, Settings.MinimumWidth), work.Width / scale - 24));
         double musicWidth = Math.Max(240, Math.Min(Settings.MusicWidth, work.Width / scale - 24));
         _pageWidth = IsMusicPage ? musicWidth : usageWidth;
@@ -139,12 +151,7 @@ public partial class MainWindow : Window
         Width = bothPages ? Math.Max(usageWidth, musicWidth) : _pageWidth;
         double hostHeight = bothPages ? Math.Max(Settings.Height, Settings.MusicHeight) : IsMusicPage ? Settings.MusicHeight : Settings.Height;
         Height = Math.Max(140, Math.Min(hostHeight + 16, work.Height / scale - 16));
-        // Sizes above are DIPs as they will be on the primary monitor. WPF turns Left and Top into pixels with the DPI of
-        // the monitor the window is on now, which differs while it arrives from another monitor or the primary's scale
-        // has just changed; the DPI change that follows applies the settings again with matching values.
-        double current = PresentationSource.FromVisual(this) is null ? scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
-        Left = (bounds.Left + bounds.Width / 2) / current - Width / 2;
-        Top = bounds.Top / current;
+        Place(bounds, scale);
         UpdateClock();
         RenderCompact();
         if (IsSuppressed)
@@ -158,6 +165,17 @@ public partial class MainWindow : Window
         }
         UpdatePointerTracking();
         RenderUsage();
+    }
+    // Sizes are DIPs as they will be on the target monitor, and WPF turns Left and Top into pixels with the DPI the window
+    // has now. A window on a monitor with another scale is therefore first moved onto the target in one step, which gives
+    // it the target's DPI; setting Left and then Top could pass it over a third monitor on the way.
+    private void Place(Rect bounds, double scale)
+    {
+        if (PresentationSource.FromVisual(this) is not null && VisualTreeHelper.GetDpi(this).DpiScaleX is var old && old != scale)
+            WindowsHost.MoveTo(this, (int)(bounds.Left + Math.Max(0, (bounds.Width - Width * old) / 2)), (int)bounds.Top);
+        double current = PresentationSource.FromVisual(this) is null ? scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
+        Left = (bounds.Left + bounds.Width / 2) / current - Width / 2;
+        Top = bounds.Top / current;
     }
     // The toolbar's fixed buttons are declared in XAML; their names follow the interface language.
     private void ApplyLanguage()
@@ -250,6 +268,9 @@ public partial class MainWindow : Window
     public void SetExpanded(bool expanded, bool instant = false)
     {
         if (expanded && IsSuppressed) return;
+        // Only the panel under the pointer is open; the others close at once and give up the Escape key.
+        if (expanded && !_preview)
+            foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
         _expanded = expanded;
         _escapeDismissal?.SetEnabled(expanded && !_preview);
@@ -401,23 +422,27 @@ public partial class MainWindow : Window
         await Task.WhenAll(prices, usage);
         return await usage;
     }
+    // Only the main panel reads; every panel shows the result. The history goes back as far as any panel's model details need.
     public async Task RefreshAsync(bool queueIfBusy = true)
     {
+        if (_lead is { } lead) { await lead.RefreshAsync(queueIfBusy); return; }
         // Timer requests reuse the current read. Changed settings or a wider
         // date range still require one follow-up, and automatic requests must not clear it.
         if (_refreshing) { if (queueIfBusy) _refreshRequested = true; return; }
         _refreshing = true; LastRefreshError = null;
-        RenderSyncButton();
+        var decks = _app.Decks.ToList();
+        foreach (var deck in decks) deck.RenderSyncButton();
         try
         {
-            var result = await LoadSnapshotsAsync(_historyStart);
-            SetSnapshots(result);
+            var result = await LoadSnapshotsAsync(decks.Min(deck => deck._historyStart));
+            foreach (var deck in _app.Decks) deck.SetSnapshots(result);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { LastRefreshError = ex.GetType().Name + "\n" + ex.StackTrace; }
         finally
         {
-            _refreshing = false; RestartSyncCycle(); RenderUsage();
+            _refreshing = false; RestartSyncCycle();
+            foreach (var deck in _app.Decks) deck.RenderUsage();
             if (_refreshRequested)
             {
                 _refreshRequested = false; _ = RefreshAsync();

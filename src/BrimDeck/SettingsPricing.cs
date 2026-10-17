@@ -39,7 +39,7 @@ public sealed partial class SettingsWindow
         refresh.Click+=async(_,_)=>
         {
             refresh.IsEnabled=false;refresh.Content=Loc.T("正在更新…", "Updating…");
-            try {await _app.Prices.RefreshAsync(true,_app.Lifetime.Token);_app.Deck.RenderUsage();RefreshPriceRows();}
+            try {await _app.Prices.RefreshAsync(true,_app.Lifetime.Token);foreach(var deck in _app.Decks)deck.RenderUsage();RefreshPriceRows();}
             catch(OperationCanceledException) { }
             finally {refresh.IsEnabled=true;refresh.Content=Loc.T("更新价格", "Update prices");}
         };
@@ -169,7 +169,7 @@ public sealed partial class SettingsWindow
             if(!adding&&model!.Prices==next){error.Visibility=Visibility.Collapsed;return true;}
             if(!_app.Prices.TrySetManual(id.Text,next,!adding,out var message)){error.Text=message;error.Visibility=Visibility.Visible;return false;}
             if(!adding)model=model! with {Prices=next,Tiers=[]};
-            error.Visibility=Visibility.Collapsed;_app.Deck.RenderUsage();RefreshPriceRows();return true;
+            error.Visibility=Visibility.Collapsed;foreach(var deck in _app.Decks)deck.RenderUsage();RefreshPriceRows();return true;
         }
         // Existing rows commit valid edits on focus loss. Creating a new identity is explicit.
         if(!adding)foreach(var field in fields.Values)field.LostKeyboardFocus+=(_,_)=>Commit();
