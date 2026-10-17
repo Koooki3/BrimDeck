@@ -389,6 +389,17 @@
       </Grid>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- The page area: the scroll bar's column is always reserved, so a page that starts or stops scrolling keeps its width.
+       The settings window gives this column back from its right margin, so the bar sits in that margin. -->
+  <Style x:Key="SettingsPageScrollViewer" TargetType="ScrollViewer" BasedOn="{StaticResource SettingsScrollViewer}">
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer">
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/></Grid.ColumnDefinitions>
+        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" Margin="{TemplateBinding Padding}"/>
+        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Style="{StaticResource SettingsScrollBar}" Margin="4,0,0,0" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"/>
+      </Grid>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style x:Key="SettingsPriceTable" TargetType="DataGrid">
     <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/><Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
     <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/><Setter Property="BorderThickness" Value="0"/>

@@ -159,7 +159,8 @@ public sealed partial class SettingsWindow : Window
         _status.Margin = new Thickness(4, 4, 4, 14); _status.FontSize = 12; DockPanel.SetDock(_status, Dock.Top); main.Children.Add(_status);
         _content.Margin = new Thickness(4);
         // Only the controls inside take focus; a focusable scroll area would draw the system outline around the whole page.
-        _scroll = new ScrollViewer { Style = (Style)FindResource("SettingsScrollViewer"), Content = _content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0,0,4,0), Focusable = false }; main.Children.Add(_scroll);
+        // The page's scroll bar always keeps its 16 DIP column, taken from the right margin, so no page changes width when it starts scrolling.
+        _scroll = new ScrollViewer { Style = (Style)FindResource("SettingsPageScrollViewer"), Content = _content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0,0,4,0), Margin = new Thickness(0,0,-16,0), Focusable = false }; main.Children.Add(_scroll);
         var caption = new DockPanel { Height = 40, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(18, 0, 6, 0), LastChildFill = false }; Grid.SetColumn(caption, 1); outer.Children.Add(caption);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(buttons, Dock.Right); caption.Children.Add(buttons);
         buttons.Children.Add(WindowButton("minimize", Loc.T("最小化", "Minimize"), () => SystemCommands.MinimizeWindow(this)));
