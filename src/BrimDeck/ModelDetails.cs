@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using BrimDeck.Core;
@@ -228,6 +229,62 @@ public partial class MainWindow
             $"Input {entries.Sum(t => t.Input):N0}\nCache write {entries.Sum(t => t.CacheWrite + t.CacheWriteHour):N0}\nCache read {entries.Sum(t => t.CacheRead):N0}\nOutput {entries.Sum(t => t.Output):N0}\nTotal tokens {entries.Sum(t => t.Total):N0}");
     }
 
+    // Every record in a row shares one model name and application, so the first record finds the row's prices.
+    // A price table: one column per prompt-size tier, so standard and long-context prices sit side by side.
+    private FrameworkElement PriceBreakdown(ModelUsageRow record)
+    {
+        var grid = new Grid();
+        void Cell(string text, int row, int column, string? color = null, bool right = false, int span = 1, Thickness margin = default)
+        {
+            var block = new TextBlock { Text = text, TextAlignment = right ? TextAlignment.Right : TextAlignment.Left, Margin = margin };
+            if (color is not null) block.Foreground = UI.Brush(color);
+            Typography.SetNumeralAlignment(block, FontNumeralAlignment.Tabular);
+            while (grid.RowDefinitions.Count <= row) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(block, row); Grid.SetColumn(block, column); Grid.SetColumnSpan(block, span); grid.Children.Add(block);
+        }
+        // When every cost comes from the API, only the prices recovered from those amounts are the ones actually charged;
+        // catalog prices would describe a cost that was never calculated.
+        var recovery = record.Entries.All(t => t.ReportedCostUsd is not null) ? Pricing.FromReported(record.Entries) : null;
+        var derived = recovery?.Prices;
+        var model = recovery is null ? _app.Prices.Match(record.Entries[0]) : null;
+        var tiers = model?.Tiers.Where(t => t.MinimumPromptTokens > 0).ToArray() ?? [];
+        var columns = derived is not null ? [derived] : model is null ? [] : tiers.Select(t => t.Prices).Prepend(model.Tiers.LastOrDefault(t => t.MinimumPromptTokens <= 0)?.Prices ?? model.Prices)
+            .Select(prices => _app.Prices.Effective(model, prices)).ToArray();
+        for (int i = 0; i <= columns.Length; i++) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        int span = columns.Length + 1, line = 0;
+        Cell($"{AppPresets.Name(record.Provider)} · {record.Model}", line++, 0, span: span, margin: new Thickness(0, 0, 0, 3));
+        if (tiers.Length > 0)
+            for (int i = 0; i < columns.Length; i++)
+                Cell(i == 0 ? $"< {UI.Number(tiers[0].MinimumPromptTokens)}" : i < tiers.Length ? $"{UI.Number(tiers[i - 1].MinimumPromptTokens)}–{UI.Number(tiers[i].MinimumPromptTokens)}"
+                    : $"≥ {UI.Number(tiers[i - 1].MinimumPromptTokens)}", line, i + 1, UI.Secondary, true, margin: new Thickness(16, 0, 0, 0));
+        if (tiers.Length > 0) line++;
+        (string Label, Func<TokenPrices, decimal?> Price)[] kinds =
+        [
+            (Loc.T("输入", "Input"), p => p.Input), (Loc.T("输出", "Output"), p => p.Output), (Loc.T("缓存写入", "Cache write"), p => p.CacheWrite),
+            (Loc.T("缓存写入（1 小时）", "Cache write (1 hour)"), p => p.CacheWriteHour == p.CacheWrite ? null : p.CacheWriteHour), (Loc.T("缓存读取", "Cache read"), p => p.CacheRead),
+        ];
+        foreach (var (label, price) in kinds.Where(kind => columns.Any(prices => kind.Price(prices) is not null)))
+        {
+            Cell(label, line, 0, UI.Secondary);
+            for (int i = 0; i < columns.Length; i++)
+                Cell(price(columns[i]) is { } value ? "$" + (value * 1_000_000m).ToString("0.00####", System.Globalization.CultureInfo.InvariantCulture) : "—",
+                    line, i + 1, right: true, margin: new Thickness(16, 0, 0, 0));
+            line++;
+        }
+        string note = recovery switch
+        {
+            { Status: RecoveryStatus.Recovered } => Loc.T("USD / 百万 Token · 根据接口金额推算", "USD per million tokens · worked out from the API amounts"),
+            { Status: RecoveryStatus.TooFewRecords, Records: var count } => Loc.T($"所选时段只有 {count} 条记录，不足以推算单价",
+                $"The selected period has only {Loc.Count(count, "record", "records")}, too few to work out the prices"),
+            { Status: RecoveryStatus.Undetermined } => Loc.T("所选时段的记录不足以确定各项单价", "The records in the selected period cannot determine each price"),
+            { Status: RecoveryStatus.Inconsistent } => Loc.T("各条记录的金额不符合固定单价，无法推算单价", "The amounts of the records do not fit fixed prices, so the prices cannot be worked out"),
+            _ => model is null ? Loc.T("未找到该模型的单价", "No unit price was found for this model")
+                : tiers.Length > 0 ? Loc.T("USD / 百万 Token · 按单次请求的输入量分档", "USD per million tokens · tiered by the input of each request") : Loc.T("USD / 百万 Token", "USD per million tokens"),
+        };
+        Cell(note, line, 0, UI.Secondary, span: span, margin: new Thickness(0, columns.Length == 0 ? 0 : 3, 0, 0));
+        return grid;
+    }
+
     private void RenderModels(IReadOnlyList<ProviderSnapshot> snapshots)
     {
         var result = ModelUsage.Filter(snapshots, _modelApps, ModelRange);
@@ -241,6 +298,16 @@ public partial class MainWindow
             return expanded ? [UI.Number(entries.Sum(t => t.Input)), UI.Number(entries.Sum(t => t.CacheWrite + t.CacheWriteHour)),
                 UI.Number(entries.Sum(t => t.CacheRead)), UI.Number(entries.Sum(t => t.Output)), UI.Number(entries.Sum(t => t.Total)), UI.Cost(entries, _app.Prices)]
                 : [UI.Number(entries.Sum(t => t.Total)), UI.Cost(entries, _app.Prices)];
+        }
+        // A figure cell's tooltip gives that cell's exact value. The narrow table has no breakdown columns, so its total keeps the breakdown.
+        // Only the total's cost has a tooltip, with the price update time.
+        string?[] Tips(IEnumerable<TokenEntry> source, bool total)
+        {
+            var entries = source.ToList();
+            var cost = total ? UI.CostNote(entries, _app.Prices) : null;
+            return expanded ? [entries.Sum(t => t.Input).ToString("N0"), entries.Sum(t => t.CacheWrite + t.CacheWriteHour).ToString("N0"),
+                entries.Sum(t => t.CacheRead).ToString("N0"), entries.Sum(t => t.Output).ToString("N0"), entries.Sum(t => t.Total).ToString("N0"), cost]
+                : [TokenBreakdown(entries), cost];
         }
         var totals = Values(result.Entries);
         bool incomplete = result.IncompleteProviders.Count > 0;
@@ -300,9 +367,13 @@ public partial class MainWindow
         {
             var record = result.Rows[i];
             var row = Row(AppPresets.Name(record.Provider), record.Model, values[i], false, false, record.Provider);
-            var tip = $"{AppPresets.Name(record.Provider)} · {record.Model}\n{TokenBreakdown(record.Entries)}\n{UI.CostNote(record.Entries, _app.Prices)}";
-            // The breakdown sits on the figure cells only, so hovering the app or model name shows no tooltip.
-            foreach (var text in row.Children.OfType<TextBlock>().Where(text => Grid.GetColumn(text) >= 4)) text.ToolTip = tip;
+            var tips = Tips(record.Entries, false);
+            // The model name shows the unit prices; the app name shows no tooltip.
+            foreach (var text in row.Children.OfType<TextBlock>())
+            {
+                int column = Grid.GetColumn(text) / 2;
+                text.ToolTip = column == 1 ? PriceBreakdown(record) : column >= 2 ? tips[column - 2] : (object?)null;
+            }
             var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush("#0DFFFFFF"), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
             item.MouseEnter += (_, _) => item.Background = UI.Brush("#0AFFFFFF"); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
             list.Children.Add(item);
@@ -324,10 +395,18 @@ public partial class MainWindow
         string selected = _modelApps.SetEquals(Settings.StatisticsProviders) ? Loc.T("全部", "All") : _modelApps.Count == 1 ? AppPresets.Name(_modelApps.Single()) : Loc.T($"{_modelApps.Count} 个应用", Loc.Count(_modelApps.Count, "app", "apps"));
         string summary = $"{selected} · {ModelPeriodLabel} · " + Loc.T($"{result.Rows.Count} 项", Loc.Count(result.Rows.Count, "item", "items"));
         var totalRow = Row(incomplete ? Loc.T("已知合计", "Known total") : Loc.T("合计", "Total"), summary, totals, false, true);
-        string totalTip = $"{summary}\n{ModelRange.Start:yyyy-MM-dd}" + Loc.T(" 至 ", " to ") + $"{ModelRange.End:yyyy-MM-dd}\n{TokenBreakdown(result.Entries)}\n{UI.CostNote(result.Entries, _app.Prices)}";
-        if (incomplete) totalTip += Loc.T("\n部分明细尚未读取完整：", "\nSome details are not fully read yet: ") + string.Join(Loc.T("、", ", "), result.IncompleteProviders.Select(AppPresets.Name));
+        string missing = incomplete ? Loc.T("部分明细尚未读取完整：", "Some details are not fully read yet: ") + string.Join(Loc.T("、", ", "), result.IncompleteProviders.Select(AppPresets.Name)) : "";
+        // The label cells explain only an incomplete total; otherwise the visible summary says it all.
+        string? totalTip = incomplete ? missing : null;
+        // Figures shown as "—" are not known yet, so their tooltips say why instead of giving a count of zero.
+        var totalTips = incomplete && result.Entries.Count == 0 ? totals.Select(_ => (string?)missing).ToArray() : Tips(result.Entries, true);
+        if (incomplete && result.Entries.Count > 0) totalTips[^1] = totalTips[^1] is { } note ? note + "\n" + missing : missing;
         totalRow.ToolTip = totalTip;
-        foreach (var cell in totalRow.Children.OfType<FrameworkElement>()) cell.ToolTip = totalTip;
+        foreach (var cell in totalRow.Children.OfType<FrameworkElement>())
+        {
+            int column = Grid.GetColumn(cell) / 2;
+            cell.ToolTip = column >= 2 ? totalTips[column - 2] : totalTip;
+        }
         var footer = new Border { Child = totalRow, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(0, 1, 0, 0) };
         Grid.SetRow(footer, 2); panel.Children.Add(footer); UsageContent.Children.Add(panel);
     }

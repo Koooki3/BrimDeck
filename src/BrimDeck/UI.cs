@@ -98,16 +98,18 @@ internal static class UI
     { >= 1_000_000_000 => (number / 1_000_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "B", >= 1_000_000 => (number / 1_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "M", >= 1000 => (number / 1000d).ToString("0.#", CultureInfo.InvariantCulture) + "K", _ => number.ToString("N0") };
     public static string Cost(IEnumerable<TokenEntry> entries, Pricing pricing) => Cost(pricing.Summarize(entries));
     public static string Cost(CostSummary cost) => "$" + cost.Amount.ToString("N2", CultureInfo.InvariantCulture) + (cost.Unpriced > 0 ? " +" : "");
-    public static string CostNote(IEnumerable<TokenEntry> entries, Pricing pricing) => CostNote(pricing.Summarize(entries), pricing);
-    public static string CostNote(CostSummary cost, Pricing pricing)
+    public static string? CostNote(IEnumerable<TokenEntry> entries, Pricing pricing) => CostNote(pricing.Summarize(entries), pricing);
+    // Null when there is nothing to add to the amount itself, so the cost shows no tooltip.
+    public static string? CostNote(CostSummary cost, Pricing pricing)
     {
         if (!cost.HasValue && cost.Unpriced == 0) return Loc.T("无用量记录", "No usage records");
         if (!cost.HasValue && cost.Unpriced > 0) return pricing.LastError ?? Loc.T("未匹配到完整价格", "Prices could not be matched for every record");
-        var note = cost.IsEstimate ? Loc.T("按模型单价计算 · USD", "Estimated from model prices · USD") : Loc.T("接口金额 · USD", "Amount from the API · USD");
-        if (cost.IsEstimate && pricing.UpdatedAt is { } time) note += Loc.T($"\n价格更新 {time.LocalDateTime:MM-dd HH:mm}", $"\nPrices updated {time.LocalDateTime:MM-dd HH:mm}");
-        if (cost.IsEstimate && (pricing.IsStale || pricing.LastError is not null)) note += Loc.T(" · 缓存", " · cached");
-        if (cost.Unpriced > 0) note += Loc.T($"\n{cost.Unpriced} 条记录未计价", "\n" + Loc.Count(cost.Unpriced, "record has", "records have") + " no price");
-        return note;
+        var lines = new List<string>();
+        if (cost.IsEstimate && pricing.UpdatedAt is { } time)
+            lines.Add(Loc.T($"价格更新 {time.LocalDateTime:MM-dd HH:mm}", $"Prices updated {time.LocalDateTime:MM-dd HH:mm}") +
+                (pricing.IsStale || pricing.LastError is not null ? Loc.T(" · 缓存", " · cached") : ""));
+        if (cost.Unpriced > 0) lines.Add(Loc.T($"{cost.Unpriced} 条记录未计价", Loc.Count(cost.Unpriced, "record has", "records have") + " no price"));
+        return lines.Count == 0 ? null : string.Join("\n", lines);
     }
     public static string Reset(DateTimeOffset? date)
     {
