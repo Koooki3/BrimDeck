@@ -15,6 +15,7 @@ internal static class MusicTests
             && MusicPlaybackModes.Next(modes with { Repeat = MediaRepeat.None }) == MusicPlaybackMode.List);
         check("Repeat-only sources omit shuffle", MusicPlaybackModes.Supported(modes with { CanShuffle = false }).SequenceEqual([MusicPlaybackMode.List, MusicPlaybackMode.Track, MusicPlaybackMode.Order]));
         check("Sources without modes omit the mode control", MusicPlaybackModes.Supported(new MediaTrack()).Count == 0);
+        PageLayout(check);
         var narrow = CompactMusicLayout.Calculate(115, true, 4, true);
         check("A narrow compact row keeps one rotating ring beside a scrolling lyric", narrow.VisibleRings == 1 && narrow.ScrollRings && narrow.RingSize == 10 && narrow.TextWidth == 43);
         var capsule = CompactMusicLayout.Calculate(91.3, true, 4, true);
@@ -56,6 +57,48 @@ internal static class MusicTests
         var firstVersion = await versionedService.FindAsync(track with { Source = "NetEase", SongId = "netease:2692035029" }, true, default);
         check("A NetEase lyric still at its first version is requested in full", firstVersion.At(1.5).Current == "first" && versioned.Requested.All(u => !u.Contains("lv=1")));
         await QqLyricsTests.Run(check);
+    }
+    private static void PageLayout(Action<string, bool> check)
+    {
+        MusicLayout At(PanelSize size) { var (w, h) = MusicSizes.For(size); return MusicLayout.Calculate(w, h, true, true); }
+        var compact = At(PanelSize.Compact); var standard = At(PanelSize.Standard); var spacious = At(PanelSize.Spacious);
+        check("The presets are densities 0, 1 and 2, the largest panel 3", compact.Density == 0 && standard.Density == 1 && spacious.Density == 2
+            && MusicLayout.Calculate(1200, 400, true, true).Density == 3);
+        check("The compact preset puts the artist on the title line to keep a lyric line", compact.MergeTitle && compact.LyricLines == 1);
+        check("The standard preset gives the artist its own line above one lyric line", !standard.MergeTitle && standard.LyricLines == 1);
+        check("The spacious preset shows the lines before and after the current lyric", !spacious.MergeTitle && spacious.LyricLines == 3);
+        check("Without lyrics the artist keeps its own line at the compact preset", !MusicLayout.Calculate(440, 140, false, true).MergeTitle);
+        check("A tall, narrow panel stays one step above the narrow preset", MusicLayout.DensityFor(440, 400) == 1);
+        check("Without a timeline the cover takes the progress row's room",
+            MusicLayout.Calculate(440, 200, true, false).Cover > standard.Cover && MusicLayout.Calculate(440, 200, true, false).ProgressHeight == 0);
+        check("The standard music preset is 440 wide, as wide as the compact one", MusicSizes.For(PanelSize.Standard) == (440, 200)
+            && new DeckSettings().MusicWidth == 440 && new DeckSettings().MusicHeight == 200);
+        check("The bottom margin below the transport equals the side margin", standard.Metrics.Bottom == standard.Metrics.Side && spacious.Metrics.Bottom == spacious.Metrics.Side);
+        var failures = new List<string>(); double title = 0;
+        for (double h = 140; h <= 400; h += 2)
+        {
+            var growing = MusicLayout.Calculate(1200, h, true, true).Metrics;
+            if (growing.Title < title) failures.Add($"title shrinks at {h}");
+            title = growing.Title;
+            for (double w = 440; w <= 1200; w += 20)
+                foreach (bool timeline in new[] { true, false })
+                foreach (bool lyrics in new[] { true, false })
+                {
+                    var l = MusicLayout.Calculate(w, h, lyrics, timeline, logMode: true); var c = l.Metrics;
+                    string at = $"{w}x{h} timeline={timeline} lyrics={lyrics}";
+                    double barTop = l.ProgressY + (c.SeekRow - c.Bar) / 2, inkTop = l.ControlsY + c.Play / 8;
+                    double upperBottom = (timeline ? barTop : inkTop) - c.SectionGap;
+                    if (l.Cover < 40 || l.CoverY < 0 || l.CoverY + l.Cover > upperBottom + .5) failures.Add("cover " + at);
+                    if (l.TextX + l.TextWidth != l.BodyWidth || l.TextWidth < c.MinColumn) failures.Add("text column " + at);
+                    if (l.HeaderHeight + (l.LyricLines > 0 ? c.MiddleGap + l.LyricLines * c.LyricLine : 0) > l.Cover) failures.Add("text height " + at);
+                    if (lyrics && l.LyricLines == 0) failures.Add("no lyric line " + at);
+                    if (Math.Abs(l.ControlsY + c.Play * 7 / 8 - l.BodyHeight) > .5) failures.Add("transport bottom " + at);
+                    if (timeline && (l.TimesY < l.ProgressY + (c.SeekRow + c.BarHover) / 2 || l.TimesY + c.TimeLine + c.ControlsGap > inkTop + .5)) failures.Add("times " + at);
+                    if (l.ModeX < 0 || l.ModeX + c.Mode + 16 > l.TripletX || l.TripletX + l.TripletWidth > l.BodyWidth || Math.Abs(l.TripletX + l.TripletWidth / 2 - l.BodyWidth / 2) > .5) failures.Add("transport " + at);
+                    if (!l.ShowFullControl) failures.Add("full control entry " + at);
+                }
+        }
+        check("The music page fits every size from 440x140 to 1200x400" + (failures.Count > 0 ? ": " + string.Join("; ", failures.Take(5)) : ""), failures.Count == 0);
     }
     // NetEase's lyric endpoint answers lv=<held version> with an empty lyric unless its own version is newer.
     private sealed class NeteaseLyricHandler : HttpMessageHandler

@@ -155,7 +155,7 @@ public sealed class DeckSettings
     public string Language { get; set; } = Loc.English;
     public CompactStyle Style { get; set; } = CompactStyle.Notch;
     public bool MusicPage { get; set; } = true;
-    public double MusicWidth { get; set; } = 520;
+    public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
     // The notch and the capsule each keep their own choices; the indicator only offers the playback progress.
     public bool NotchSummary { get; set; } = true;
@@ -268,7 +268,7 @@ public sealed class DeckSettings
         Width = double.IsFinite(Width) ? Math.Clamp(Width, 440, 1200) : 760;
         Width = Math.Max(Width, MinimumWidth);
         Height = double.IsFinite(Height) ? Math.Clamp(Height, 140, 400) : 240;
-        MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, 440, 1200) : 520;
+        MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, 440, 1200) : 440;
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, 140, 400) : 200;
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;

@@ -96,5 +96,5 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 public static class MusicSizes
 {
     public static (double Width, double Height) For(PanelSize size) => size switch
-    { PanelSize.Compact => (440, 140), PanelSize.Spacious => (760, 300), _ => (520, 200) };
+    { PanelSize.Compact => (440, 140), PanelSize.Spacious => (760, 300), _ => (440, 200) };
 }

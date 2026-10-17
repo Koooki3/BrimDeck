@@ -99,6 +99,9 @@ internal sealed class Renderer(App app, string output, string language, string[]
         Program.SetProperty(app, "Prices", new Pricing(folder, offline));
         Program.SetProperty(app, "Secrets", new ProviderSecrets(folder));
         Program.SetProperty(app, "Usage", new UsageService(new NoDesktop(), DataLocations.Resolve(folder, folder, folder, folder, folder, folder), offline));
+        // The toolbar reads the update notice on every render.
+        var backend = Type.GetType("BrimDeck.Updates.GitHubUpdates, BrimDeck")!.GetMethod("Create", [typeof(string)])!.Invoke(null, [folder]);
+        Program.SetProperty(app, "Updates", new AppUpdates((IAppUpdateBackend)backend!, folder));
 
         _deck = new MainWindow(app) { Opacity = 0, IsHitTestVisible = false };
         Program.SetProperty(app, "Deck", _deck);
@@ -127,11 +130,11 @@ internal sealed class Renderer(App app, string output, string language, string[]
 
         if (Wants("stills")) await Stills();
         if (Wants("hero")) await Hero();
-        var backend = Type.GetType("BrimDeck.Updates.GitHubUpdates, BrimDeck")!.GetMethod("Create", [typeof(string)])!.Invoke(null, [folder]);
-        Program.SetProperty(app, "Updates", new AppUpdates((IAppUpdateBackend)backend!, folder));
         // The "配额与统计" page: one row per application with its sources, name and colours.
         // Not used by the README at present; rendered only when asked for by name.
         if (scenes.Contains("settings")) await SettingsPage("settings", 3);
+        // The music page at its presets and at the ends of its size range; for checking layout changes, not for the README.
+        if (scenes.Contains("music-sizes")) await MusicSizes();
         Directory.Delete(folder, true);
     }
 
@@ -140,7 +143,7 @@ internal sealed class Renderer(App app, string output, string language, string[]
         var settings = new DeckSettings
         {
             Language = language, Style = CompactStyle.Notch, UsagePage = true, MusicPage = true, Width = 760, Height = 240,
-            MusicWidth = 520, MusicHeight = 200, OpenDelay = 0, CloseDelay = 3_600_000, AnimationDuration = 360, Animations = true,
+            MusicWidth = 440, MusicHeight = 200, OpenDelay = 0, CloseDelay = 3_600_000, AnimationDuration = 360, Animations = true,
             Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal,
             MusicTrackNotice = false, QuotaAlerts = true, UsageAutoSync = true, MusicText = CompactMusicText.None,
             Apps =
@@ -401,6 +404,37 @@ internal sealed class Renderer(App app, string output, string language, string[]
         _marks["usagePanel"] = new { width = _settings.Width, height = _settings.Height };
         File.WriteAllText(Path.Combine(folder, "frames.json"), JsonSerializer.Serialize(new { frames = list, marks = _marks }, new JsonSerializerOptions { WriteIndented = true }));
         _settings.AnimationDuration = 360;
+    }
+
+    private async Task MusicSizes()
+    {
+        (double Width, double Height)[] sizes = [(440, 140), (440, 170), (440, 200), (520, 200), (540, 250), (600, 240), (760, 300), (900, 350), (1200, 400), (440, 400), (1200, 140)];
+        SelectPage(DeckPage.Music);
+        _deck.SetExpanded(true, true);
+        foreach (var (width, height) in sizes)
+        {
+            _settings.MusicWidth = width; _settings.MusicHeight = height; Refresh();
+            await Save($"music-{width}x{height}", 1.5);
+        }
+        // NetEase read from its log, with and without SMTC, and a song without lyrics or a timeline.
+        var log = _track with { Id = "demo:log", IsNeteaseLog = true, CanShuffle = false, CanRepeat = false, CanSeek = false };
+        var variants = new (string Name, MediaTrack Track)[]
+        {
+            ("entry", log), ("hint", log with { CanToggle = false, CanPrevious = false, CanNext = false }),
+            ("plain", _track with { Id = "demo:plain", EmbeddedLyrics = "", PositionKnown = false })
+        };
+        foreach (var (name, track) in variants)
+        {
+            Program.Call(_deck, "ApplyMediaUpdate", [typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource)], track, new List<MediaTrack> { track }, _cover);
+            foreach (var (width, height) in new[] { (440d, 140d), (760d, 300d) })
+            {
+                _settings.MusicWidth = width; _settings.MusicHeight = height; Refresh();
+                await Save($"music-{name}-{width}x{height}", 1.5);
+            }
+        }
+        Program.Call(_deck, "ApplyMediaUpdate", [typeof(MediaTrack), typeof(IReadOnlyList<MediaTrack>), typeof(BitmapSource)], _track, new List<MediaTrack> { _track, _other }, _cover);
+        _settings.MusicWidth = 440; _settings.MusicHeight = 200; Refresh();
+        SelectPage(DeckPage.Usage);
     }
 
     // The settings window is built without being shown: its content is taken out, laid out at the default size and
