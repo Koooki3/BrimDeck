@@ -206,6 +206,8 @@ public partial class MainWindow
         _media?.Pin(_pinnedMedia);
         RenderPageSwitch();
     }
+    // NetEase Cloud Music's own red for a liked song.
+    private const string LikedColor = "#EC4141";
     internal static string FullControlEntryLabel => Loc.T("网易云音乐 · 完整控制", "NetEase Cloud Music · Full control");
     // Alone in the toolbar the entry has at most 150 DIP; the full English name would lose "Full control" to the ellipsis.
     internal static string FullControlButtonLabel => Loc.T("网易云音乐 · 完整控制", "NetEase full control");
@@ -294,7 +296,7 @@ public partial class MainWindow
         var c = layout.Tier;
         ToolbarRow.Height = new GridLength(c.Toolbar);
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.HasTimeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         // Keep the transport layer attached: replacing a hovered button restarts
@@ -413,7 +415,7 @@ public partial class MainWindow
         controls.Width = layout.ColumnWidth; controls.Height = c.Play;
         controls.Margin = new Thickness(layout.ColumnX - c.Side, layout.ControlsY - layout.BodyY, 0, 0);
         var visibleControls = new HashSet<MediaCommand>();
-        void Add(MediaCommand id, string name, string glyph, double size, double x, bool enabled, Func<Task> command, bool mode = false, bool single = false)
+        void Add(MediaCommand id, string name, string glyph, double size, double x, bool enabled, Func<Task> command, bool mode = false, bool single = false, string? color = null)
         {
             visibleControls.Add(id);
             if (!_musicControlButtons.TryGetValue(id, out var slot))
@@ -423,10 +425,10 @@ public partial class MainWindow
                 slot = (created, ""); controls.Children.Add(created);
             }
             var button = slot.Button;
-            string iconKey = $"{glyph}|{size}|{mode}|{single}";
+            string iconKey = $"{glyph}|{size}|{mode}|{single}|{color}";
             if (slot.Icon != iconKey)
             {
-                UIElement icon = MusicVisuals.Icon(glyph, size, UI.Brush(mode ? UI.Secondary : UI.Primary));
+                UIElement icon = MusicVisuals.Icon(glyph, size, UI.Brush(color ?? (mode ? UI.Secondary : UI.Primary)));
                 if (single)
                 {
                     var container = new Grid { Width = size, Height = size }; container.Children.Add(icon);
@@ -493,6 +495,11 @@ public partial class MainWindow
             Add(MediaCommand.Previous, Loc.T("上一首", "Previous"), "previous", c.Skip, gx, track.CanPrevious, () => RunMediaCommand(track, MediaCommand.Previous)); gx += c.Skip + c.ControlGap;
             Add(MediaCommand.PlayPause, track.State == MediaState.Playing ? Loc.T("暂停", "Pause") : Loc.T("播放", "Play"), track.State == MediaState.Playing ? "pause" : "play", c.Play, gx, track.CanToggle, () => RunMediaCommand(track, MediaCommand.PlayPause)); gx += c.Play + c.ControlGap;
             Add(MediaCommand.Next, Loc.T("下一首", "Next"), "next", c.Skip, gx, track.CanNext, () => RunMediaCommand(track, MediaCommand.Next));
+            // The heart mirrors the mode button: right of next, as far from it as the mode button is from previous. Only
+            // full control offers it, and the full-control entry, which shares this side, appears only without full control.
+            if (track.CanLike)
+                Add(MediaCommand.Like, track.Liked ? Loc.T("取消喜欢", "Unlike") : Loc.T("喜欢", "Like"), track.Liked ? "liked" : "like", c.Mode,
+                    layout.TripletX + layout.TripletWidth + (layout.TripletX - layout.ModeX - c.Mode), true, () => RunMediaCommand(track, MediaCommand.Like), mode: true, color: track.Liked ? LikedColor : null);
             if (layout.ShowFullControl)
                 foreach (var label in MusicLayout.FullControlLabels)
                     if ((entryWidth = EntryWidth(label)) <= layout.FullControlRoom) { entryLabel = label; break; }

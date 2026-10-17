@@ -2,7 +2,8 @@ namespace BrimDeck.Core;
 
 public enum MediaState { Stopped, Paused, Playing, Unknown }
 public enum MediaRepeat { None, Track, List }
-public enum MediaCommand { PlayPause, Previous, Next, Shuffle, Repeat }
+// Like adds the current song to the player's own liked songs, or removes it.
+public enum MediaCommand { PlayPause, Previous, Next, Shuffle, Repeat, Like }
 public sealed record MediaTrack
 {
     public string Id { get; init; } = "";
@@ -29,6 +30,9 @@ public sealed record MediaTrack
     public bool CanRepeat { get; init; }
     public bool Shuffle { get; init; }
     public MediaRepeat Repeat { get; init; }
+    // Only a player connection that both reports and changes the liked state offers it; Liked is meaningful only with CanLike.
+    public bool CanLike { get; init; }
+    public bool Liked { get; init; }
     public TimeSpan Start { get; init; }
     public TimeSpan End { get; init; }
     public TimeSpan MinSeek { get; init; }

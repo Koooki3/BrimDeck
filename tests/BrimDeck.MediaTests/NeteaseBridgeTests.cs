@@ -41,7 +41,7 @@ internal static class NeteaseBridgeTests
             check(pushes.at(-1).positionMs===57000,'initial paused position reads current-track storage only');
             result=run();
             check(listeners.playprogress.length===1 && subscribers.length===1,'reconnect does not add duplicate subscriptions');
-            const cmd=__brimDeckMusicV1.command;
+            const cmd=__brimDeckMusicV2.command;
             check(cmd({command:'seek',seconds:80,songId:'42'}).dispatched && actions.at(-1).type==='playing/setPlayingPosition' && actions.at(-1).payload.duration===80,'seek dispatch uses seconds');
             const before=actions.length;
             check(!cmd({command:'seek',seconds:80,songId:'43'}).dispatched && actions.length===before,'stale-song seek rejected before dispatch');
@@ -66,12 +66,12 @@ internal static class NeteaseBridgeTests
             check(pushes.at(-1).positionMs===80000,'old track event cannot corrupt current progress');
             p.resourceTrackId=43;p.resourceName='Next';subscribers[0]();
             check(pushes.at(-1).positionMs===null && pushes.at(-1).songId==='43','track change clears old time anchor');
-            __brimDeckMusicV1.detach('__brimDeckMediaPush');const previous=pushes.length;
+            __brimDeckMusicV2.detach('__brimDeckMediaPush');const previous=pushes.length;
             listeners.seek[0]({playId:'43_audio',position:30,code:0});
             check(pushes.length===previous,'detached bridge sends no events');
             let activePushes=0,stalePushes=0;
             globalThis.activeClient=()=>activePushes++; globalThis.crashedClient=()=>stalePushes++;
-            const bridge=__brimDeckMusicV1;
+            const bridge=__brimDeckMusicV2;
             bridge.attach('activeClient');bridge.attach('crashedClient');
             const staleCount=stalePushes;
             clock+=60000;bridge.keepalive('activeClient');clock+=40000;bridge.keepalive('activeClient');
@@ -101,5 +101,36 @@ internal static class NeteaseBridgeTests
             q.resourceTrackId='77'; q.resourceName='Restored'; subscribers[0]();
             """);
         restored.Execute("check(pushes.at(-1).positionMs===39000 && pushes.at(-1).songId==='77','saved paused position is read once the restored track id arrives');");
+
+        // Liking uses the client's own liked songs and toggle; a bridge left by an earlier BrimDeck stops pushing.
+        var liking = Page();
+        liking.Execute("""
+            const actions=[], pushes=[], subscribers=[], released=[];
+            const s={playing:{resourceTrackId:'42',resourceName:'Song',resourceType:'track',resourceArtists:[{name:'Artist'}],curTrack:{duration:200000,album:{name:'Album'}},playingState:2,playingMode:'playCycle'},
+              'async:hostResource':{likeTracksMap:{'42':true}},host:{uid:7},app:{isOnline:true}};
+            const store={getState:()=>s,subscribe:f=>{subscribers.push(f);return()=>{}},dispatch:a=>actions.push(a)};
+            const loader={c:{one:{exports:{a:{getStore:()=>store.getState(),getDispatch:()=>store.dispatch,app:{_store:store}}}}}};
+            globalThis.performance={now:()=>2000}; Date.now=()=>1;
+            globalThis.__brimDeckMediaPush=x=>pushes.push(JSON.parse(x));
+            globalThis.__brimDeckMediaPush_0123456789abcdef0123456789abcdef=()=>{};
+            globalThis.__brimDeckMusicV1={version:1,detach:name=>released.push(name)};
+            globalThis.webpackJsonp={push:entry=>{ for(const module of Object.values(entry[1])) module({}, {}, loader); }};
+            const result=run();
+            check(result.ready && result.snapshot.canLike && result.snapshot.liked,'a liked song is read from the client liked songs');
+            check(released.includes('__brimDeckMediaPush') && released.includes('__brimDeckMediaPush_0123456789abcdef0123456789abcdef'),'an earlier bridge releases its clients');
+            check(__brimDeckMusicV2.version===2 && __brimDeckMusicV1.version===1,'the new bridge installs beside the earlier one');
+            const cmd=__brimDeckMusicV2.command;
+            check(cmd({command:'like',songId:'42'}).dispatched && actions.at(-1).type==='async:hostResource/setLikeCurPlayingTrack','like dispatches the client toggle for the current song');
+            const count=actions.length;
+            check(!cmd({command:'like',songId:'41'}).dispatched && actions.length===count,'like for a song that is no longer playing is rejected');
+            s['async:hostResource'].likeTracksMap={}; subscribers[0]();
+            check(pushes.at(-1).canLike && pushes.at(-1).liked===false,'a song unliked in the client is pushed');
+            s.app.isOnline=false; subscribers[0]();
+            check(!pushes.at(-1).canLike && !cmd({command:'like',songId:'42'}).dispatched,'an offline client cannot like');
+            s.app.isOnline=true; s.host={}; subscribers[0]();
+            check(!pushes.at(-1).canLike,'a signed-out client cannot like');
+            s.host={uid:7}; s.playing.resourceType='voice'; subscribers[0]();
+            check(!pushes.at(-1).canLike,'podcast episodes are not liked as songs');
+            """);
     }
 }

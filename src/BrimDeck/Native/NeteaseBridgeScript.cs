@@ -2,6 +2,9 @@ namespace BrimDeck.Native;
 
 internal sealed partial class NeteaseCdpConnection
 {
+    // The page keeps a bridge until the player restarts, so a bridge with new abilities needs a new name; the script
+    // below installs and looks for this one.
+    internal const string BridgeObject = "__brimDeckMusicV2";
     internal const string BridgeScript = """
     (() => {
       const binding = '__brimDeckMediaPush';
@@ -36,8 +39,8 @@ internal sealed partial class NeteaseCdpConnection
         bridge.leaseVersion = 1;
         return bridge;
       };
-      const existing = window.__brimDeckMusicV1;
-      if (existing && existing.version === 1) return withLeases(existing).attach(binding);
+      const existing = window.__brimDeckMusicV2;
+      if (existing && existing.version === 2) return withLeases(existing).attach(binding);
       // Startup still changes window visibility and restores playback asynchronously.
       if (typeof window._enterAppTime === 'number') return { ready: false };
       let loader = window.__brimDeckMusicLoaderV1;
@@ -59,13 +62,18 @@ internal sealed partial class NeteaseCdpConnection
       const storage = exports.map(e => e.b).find(e => e && e.lastPlaying && typeof e.lastPlaying.get === 'function');
       if (!store || typeof store.getState !== 'function' || typeof store.subscribe !== 'function' || typeof store.dispatch !== 'function') return { ready: false };
       if (!store.getState().playing) return { ready: false };
+      // A bridge from an earlier BrimDeck keeps its native subscriptions, which have no removal; its clients are
+      // released so that it stops pushing.
+      const older = window.__brimDeckMusicV1;
+      if (older && typeof older.detach === 'function')
+        for (const name of Object.getOwnPropertyNames(window)) if (/^__brimDeckMediaPush(_[a-f0-9]{32})?$/.test(name)) older.detach(name);
       const outputs = new Set();
       let position = null, positionTrack = '', latest = null, lastWire = '', lastProgress = 0;
       const modes = ['playOrder', 'playCycle', 'playOneCycle', 'playRandom'];
       const clean = value => typeof value === 'string' ? value.slice(0, 2048) : '';
       const songId = p => String((p.trackFileType === 'local' && p.onlineResourceId) || p.resourceTrackId || p.curPlaying?.resourceId || '');
       const info = () => {
-        const p = store.getState().playing, t = p.curTrack || p.curPlaying?.track || {}, id = songId(p);
+        const s = store.getState(), p = s.playing, t = p.curTrack || p.curPlaying?.track || {}, id = songId(p);
         const rawDuration = t.duration ?? t.dt;
         const duration = Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : null;
         const title = clean(p.resourceName || t.name);
@@ -73,7 +81,10 @@ internal sealed partial class NeteaseCdpConnection
         const artist = (p.resourceArtists || t.artists || t.ar || []).map(a => clean(a.name)).filter(Boolean).join(' / ');
         const album = t.album || t.al || {};
         const state = p.playingState === 2 ? 'playing' : p.playingState === 1 ? 'paused' : 'unknown';
-        return { title, artist, album: clean(album.albumName || album.name), songId: /^\d+$/.test(id) ? id : '',
+        // The client's own liked songs, keyed by song id. Liking needs a signed-in, online client; podcasts are not songs.
+        const likes = s['async:hostResource']?.likeTracksMap;
+        const canLike = !!title && p.resourceType === 'track' && /^\d+$/.test(id) && !!likes && typeof likes === 'object' && !!s.host?.uid && s.app?.isOnline === true;
+        return { title, artist, album: clean(album.albumName || album.name), songId: /^\d+$/.test(id) ? id : '', canLike, liked: canLike && likes[id] === true,
           coverUrl: clean(p.resourceCoverUrl || album.picUrl), durationMs: duration, positionMs: position,
           state, mode: modes.includes(p.playingMode) ? p.playingMode : '',
           previousRestricted: p.playingMode === 'playFm', canControl: !!title, canSeek: !!title && !!duration, canMode: modes.includes(p.playingMode) };
@@ -126,7 +137,7 @@ internal sealed partial class NeteaseCdpConnection
         player.subscribePlayStatus({ type: 'playstate', callback: onState });
       }
       const bridge = {
-        version: 1,
+        version: 2,
         attach(name) {
           if (outputs.size >= 64 && !outputs.has(name)) return { ready: false };
           outputs.add(name); lastWire = ''; publish(false); return { ready: true, snapshot: latest };
@@ -148,6 +159,12 @@ internal sealed partial class NeteaseCdpConnection
               if (String(request.songId) !== s.songId || !Number.isFinite(request.seconds) || request.seconds < 0 || !s.durationMs || request.seconds * 1000 > s.durationMs) return { dispatched: false };
               type = 'playing/setPlayingPosition'; payload = { duration: request.seconds }; break;
             }
+            case 'like': {
+              // The same action as the client's own liking hotkey and mini player heart: it toggles the current song.
+              const s = info();
+              if (!s.canLike || String(request.songId) !== s.songId) return { dispatched: false };
+              type = 'async:hostResource/setLikeCurPlayingTrack'; break;
+            }
             case 'mode':
               if (!modes.includes(p.playingMode) || !modes.includes(request.mode)) return { dispatched: false };
               type = 'playing/switchPlayingMode'; payload = { playingMode: request.mode, triggerScene: 'sysTray' }; break;
@@ -164,7 +181,7 @@ internal sealed partial class NeteaseCdpConnection
           return { dispatched: true };
         }
       };
-      window.__brimDeckMusicV1 = withLeases(bridge);
+      window.__brimDeckMusicV2 = withLeases(bridge);
       restoreSaved();
       return bridge.attach(binding);
     })()

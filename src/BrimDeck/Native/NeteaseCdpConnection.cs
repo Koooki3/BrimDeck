@@ -52,7 +52,7 @@ internal sealed partial class NeteaseCdpConnection(NeteaseProcess process) : IMe
                 Volatile.Write(ref _snapshot, process.IsAlive() && previous is not null ? previous with
                 {
                     State = MediaState.Unknown, Position = null, TimelinePending = true,
-                    CanToggle = false, CanPrevious = false, CanNext = false, CanSeek = false, CanShuffle = false, CanRepeat = false
+                    CanToggle = false, CanPrevious = false, CanNext = false, CanSeek = false, CanShuffle = false, CanRepeat = false, CanLike = false
                 } : null);
                 Notify();
                 if (wasReady) deadline = DateTimeOffset.UtcNow.AddSeconds(15);
@@ -99,7 +99,7 @@ internal sealed partial class NeteaseCdpConnection(NeteaseProcess process) : IMe
                     if (await Task.WhenAny(receiving, delay).ConfigureAwait(false) == receiving) { heartbeat.Cancel(); break; }
                     await delay.ConfigureAwait(false);
                     if (!OwnsPort(process)) throw new IOException("Player generation changed.");
-                    var lease = await EvaluateAsync($"window.__brimDeckMusicV1 && window.__brimDeckMusicV1.keepalive('{_binding}')", token).ConfigureAwait(false);
+                    var lease = await EvaluateAsync($"window.{BridgeObject} && window.{BridgeObject}.keepalive('{_binding}')", token).ConfigureAwait(false);
                     if (!Result(lease, out var alive) || alive.ValueKind != JsonValueKind.True) throw new IOException("Playback page reloaded.");
                 }
                 await receiving.ConfigureAwait(false);
@@ -206,12 +206,16 @@ internal sealed partial class NeteaseCdpConnection(NeteaseProcess process) : IMe
             SongId: id.Length > 0 && id.All(char.IsAsciiDigit) ? "netease:" + id : null,
             CoverUrl: NeteaseLog.SafeCover(Text(data, "coverUrl")), PositionAt: now, TimelinePending: position is null,
             CanShuffle: modes, CanRepeat: modes, Shuffle: mode == "playRandom",
-            Repeat: mode switch { "playCycle" => MediaRepeat.List, "playOneCycle" => MediaRepeat.Track, _ => MediaRepeat.None });
+            Repeat: mode switch { "playCycle" => MediaRepeat.List, "playOneCycle" => MediaRepeat.Track, _ => MediaRepeat.None },
+            CanLike: Boolean(data, "canLike"), Liked: Boolean(data, "liked"));
     }
-    public Task<DesktopCommandResult> CommandAsync(MediaCommand command, MediaState state) => SendCommandAsync(new
-    {
-        command = command switch { MediaCommand.PlayPause => "toggle", MediaCommand.Previous => "previous", MediaCommand.Next => "next", MediaCommand.Shuffle => "shuffle", MediaCommand.Repeat => "repeat", _ => "" }
-    });
+    // Liking names the song, so a click that arrives after a skip cannot change the next song.
+    public Task<DesktopCommandResult> CommandAsync(MediaCommand command, MediaState state) => command == MediaCommand.Like
+        ? Snapshot is { CanLike: true, SongId: { } id } ? SendCommandAsync(new { command = "like", songId = id["netease:".Length..] }) : Task.FromResult(DesktopCommandResult.Unavailable)
+        : SendCommandAsync(new
+        {
+            command = command switch { MediaCommand.PlayPause => "toggle", MediaCommand.Previous => "previous", MediaCommand.Next => "next", MediaCommand.Shuffle => "shuffle", MediaCommand.Repeat => "repeat", _ => "" }
+        });
     public Task<DesktopCommandResult> SetPlaybackModeAsync(MusicPlaybackMode mode) => SendCommandAsync(new
     {
         command = "mode", mode = mode switch { MusicPlaybackMode.List => "playCycle", MusicPlaybackMode.Track => "playOneCycle", MusicPlaybackMode.Shuffle => "playRandom", _ => "playOrder" }
@@ -225,7 +229,7 @@ internal sealed partial class NeteaseCdpConnection(NeteaseProcess process) : IMe
         bool dispatched = false;
         try
         {
-            string expression = "window.__brimDeckMusicV1.command(" + JsonSerializer.Serialize(command) + ")";
+            string expression = $"window.{BridgeObject}.command(" + JsonSerializer.Serialize(command) + ")";
             var reply = await EvaluateAsync(expression, _stop.Token, () => dispatched = true).ConfigureAwait(false);
             return Result(reply, out var result) && result.ValueKind == JsonValueKind.Object && result.TryGetProperty("dispatched", out var sent)
                 ? sent.ValueKind == JsonValueKind.True ? DesktopCommandResult.Sent : DesktopCommandResult.Unavailable
