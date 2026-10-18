@@ -26,8 +26,15 @@ public static class CollapsedLimits
     // The notch's bottom corners and the curved shoulders that join it to the screen edge keep these sizes at every
     // width and height.
     public const double NotchCorner = 12, NotchShoulder = 16;
-    // The panel opened from a lowered capsule reaches this far above the capsule's vertical centre (see CollapsedGeometry.PanelTop).
-    public const double CapsulePanelReach = 24;
+    // A panel that floats below a lowered capsule (see CollapsedGeometry.Panel) is this much taller than its page: the space
+    // is added above the header, so the switch sits 10 DIPs below the top edge instead of 4 and the header's icons 12, close
+    // to the 14 DIPs between the last row and the bottom edge. (12 DIPs, with the icons 18 below the edge, looked too open.)
+    public const double FloatingHeaderExtra = 6;
+    // The floating panel's top edge lies this far above the capsule's vertical centre: the extra space plus half of a 32 DIP
+    // header row. A 32 DIP header is then centred on the capsule's centreline, and at the default height (32) the panel's
+    // bottom edge lies where the page alone would end below the capsule's top. It does not depend on the page, so switching
+    // pages never moves the top edge.
+    public const double CapsulePanelReach = FloatingHeaderExtra + 16;
 }
 
 // The collapsed surface as it is drawn on one monitor.
@@ -38,6 +45,11 @@ public static class CollapsedLimits
 // BottomRadius and TopRadius: corner radii; Shoulder: the notch's shoulder radius (0 for the other styles).
 public sealed record CollapsedShape(CompactStyle Style, DipRect Surface, double Scale, double Inset, double ContentWidth,
     double BottomRadius, double TopRadius, double Shoulder);
+
+// Where an open panel sits: Top in DIPs from the top of the monitor, and HeaderExtra, the space added above the header of a
+// panel that floats below a lowered capsule (0 when the panel hangs from the screen or work-area edge). The panel is the
+// page's height plus HeaderExtra tall.
+public readonly record struct PanelPlacement(double Top, double HeaderExtra);
 
 // Turns the collapsed-style settings into a shape on a given monitor. The saved values are never changed here: a monitor that
 // is too small for them only narrows what is drawn on it.
@@ -107,22 +119,31 @@ public static class CollapsedGeometry
     public static (double Min, double Max) CapsuleTopRange(double height, DipRect work)
         => TopRange(Finite(height), Finite(work.Height), double.PositiveInfinity);
 
-    // Where the open panel starts, in DIPs from the top of the monitor (work is relative to the monitor).
+    // Where the open panel starts, in DIPs from the top of the monitor (work is relative to the monitor), and how much taller
+    // than its page it is (HeaderExtra, added above the header).
     // Notch and line: the screen edge (0). Capsule within the hover bridge (CollapsedHover.HasBridge): the top of the work area,
-    // which is the screen edge unless the taskbar is at the top. Capsule lowered beyond the bridge: CapsulePanelLift(height)
-    // above the capsule's top. Either way the capsule's panel never starts above the work area, and it moves up as far as
-    // needed to keep a panel of this height inside the work area. bottomLimit, when given, is a lower bottom edge for the
-    // panel than the work area's (the window keeps room below it).
-    public static double PanelTop(CollapsedShape shape, DipRect work, double pageHeight, double bottomLimit = double.PositiveInfinity)
+    // which is the screen edge unless the taskbar is at the top. In these cases the panel hangs from that edge and HeaderExtra is 0.
+    // Capsule lowered beyond the bridge: the panel floats, FloatingHeaderExtra taller than its page, with its top edge
+    // CapsulePanelLift(height) above the capsule's top (6 at the default height), so the bottom edge lies where the page alone
+    // would end below the capsule's top. A floating panel moves up as far as needed to stay inside the work area; when that
+    // brings it to the work area's top, it hangs from there as above instead. bottomLimit, when given, is a lower bottom edge for
+    // the panel than the work area's (the window keeps room below it).
+    public static PanelPlacement Panel(CollapsedShape shape, DipRect work, double pageHeight, double bottomLimit = double.PositiveInfinity)
     {
-        if (shape.Style != CompactStyle.Capsule || !double.IsFinite(work.Y) || !double.IsFinite(work.Height)) return 0;
+        if (shape.Style != CompactStyle.Capsule || !double.IsFinite(work.Y) || !double.IsFinite(work.Height)) return new(0, 0);
         double top = Math.Max(0, work.Y), bottom = top + Finite(work.Height);
         if (!double.IsNaN(bottomLimit)) bottom = Math.Min(bottom, bottomLimit);
-        double wanted = CollapsedHover.HasBridge(CompactStyle.Capsule, shape.Surface, work.Y) ? top : shape.Surface.Y - CapsulePanelLift(shape.Surface.Height);
-        return Math.Clamp(wanted, top, Math.Max(top, bottom - Finite(pageHeight)));
+        if (CollapsedHover.HasBridge(CompactStyle.Capsule, shape.Surface, work.Y)) return new(top, 0);
+        double extra = CollapsedLimits.FloatingHeaderExtra;
+        double floating = Math.Clamp(shape.Surface.Y - CapsulePanelLift(shape.Surface.Height), top, Math.Max(top, bottom - Finite(pageHeight) - extra));
+        return floating > top ? new(floating, extra) : new(top, 0);
     }
 
-    // How far the panel opened from a lowered capsule starts above the capsule's top: max(0, 24 - H / 2), 8 at the default height.
+    // The top edge alone; see Panel.
+    public static double PanelTop(CollapsedShape shape, DipRect work, double pageHeight, double bottomLimit = double.PositiveInfinity)
+        => Panel(shape, work, pageHeight, bottomLimit).Top;
+
+    // How far a floating panel starts above the capsule's top: max(0, 22 - H / 2), 6 at the default height.
     public static double CapsulePanelLift(double capsuleHeight) => Math.Max(0, CollapsedLimits.CapsulePanelReach - Finite(capsuleHeight) / 2);
 
     // The same for the line (at most 16).

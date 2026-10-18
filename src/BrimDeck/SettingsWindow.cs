@@ -743,6 +743,8 @@ public sealed partial class SettingsWindow : Window
                 var header = TextLine(group, 10.5, TextTertiary); header.Margin = new Thickness(10, 4, 10, 3); items.Children.Add(header);
             }
             var item = MenuEntry(Label(id), "", true, id == selected);
+            // Each option carries the same note as the selector shows once it is chosen.
+            item.ToolTip = quota ? ProviderCatalog.QuotaTip(id) : ProviderCatalog.UsageTip(id);
             if (id == selected) current = item;
             item.Click += (_, _) =>
             {

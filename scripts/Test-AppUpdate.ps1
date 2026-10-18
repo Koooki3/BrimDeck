@@ -68,10 +68,10 @@ try {
     Assert ($entry.DisplayName -eq $appName -and $entry.DisplayVersion -eq '0.1.0') 'installer registers the app for Settings > Apps and Control Panel'
     Assert (InstalledAt) 'a folder with Chinese characters, a space and a trailing \ gets the app folder name appended'
     Assert ($entry.UninstallString -eq "`"$installPath\unins000.exe`" /SILENT /UI") 'Settings > Apps runs the uninstaller with its own confirmation dialog'
-    Assert ((Test-Path -LiteralPath $desktopShortcut) -and !(Test-Path -LiteralPath $startMenuShortcut)) 'a first install creates the desktop shortcut but not the Start menu shortcut'
+    Assert ((Test-Path -LiteralPath $desktopShortcut) -and (Test-Path -LiteralPath $startMenuShortcut)) 'a first install creates the desktop and Start menu shortcuts'
 
-    # The user deletes the desktop shortcut and adds a Start menu shortcut after installing.
-    [IO.File]::Copy($desktopShortcut, $startMenuShortcut)
+    # The user deletes both shortcuts after installing.
+    [IO.File]::Delete($startMenuShortcut)
     [IO.File]::Delete($desktopShortcut)
     # A fresh account, such as a CI runner, may have no Run key yet; the app creates it the same way.
     if (!(Test-Path $runKey)) { New-Item -Path $runKey | Out-Null }
@@ -94,7 +94,7 @@ try {
     Assert ($entry.DisplayVersion -eq '0.1.1' -and (InstalledAt)) 'update keeps a single registration in the same folder'
     Assert ($entry.UninstallString -eq "`"$installPath\unins000.exe`" /SILENT /UI" -and !(Test-Path -LiteralPath "$installPath\unins001.exe")) 'the new uninstaller replaces the old one'
     Assert (!(Test-Path -LiteralPath $staleFile)) 'update removes the old version before installing the new one'
-    Assert ((Test-Path -LiteralPath $startMenuShortcut) -and !(Test-Path -LiteralPath $desktopShortcut)) 'update keeps the shortcuts that existed before it (Start menu present, desktop absent)'
+    Assert ((Test-Path -LiteralPath $startMenuShortcut) -and !(Test-Path -LiteralPath $desktopShortcut)) 'update restores the Start menu shortcut and keeps a deleted desktop shortcut deleted'
     Assert ($null -ne (Get-ItemProperty -Path $runKey -Name $runValue -ErrorAction SilentlyContinue)) 'update keeps the startup entry'
 
     Uninstall @()

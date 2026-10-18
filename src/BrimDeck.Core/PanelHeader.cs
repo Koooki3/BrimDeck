@@ -36,6 +36,16 @@ public sealed record PanelHeader(double Row, double Height, double Side, double 
 
     public static PanelHeader Music(MusicMetrics metrics) => For(metrics.Toolbar + metrics.Top, metrics.Side);
 
+    // The music page's header with the usage page's controls: the same band (Height), switch, buttons, settings button and
+    // switch top, so the switch, the clock and the right group keep their distance from the panel's top edge when the page
+    // changes. Row stays the music page's own row, where its content starts: a taller row leaves its extra height below the
+    // controls. Side and RightMargin stay the music page's, so the switch and the gear keep lining up with its content.
+    public PanelHeader WithControlsOf(PanelHeader usage) => this with
+    {
+        Height = usage.Height, SwitchHeight = usage.SwitchHeight, ButtonHeight = usage.ButtonHeight, SwitchTop = usage.SwitchTop,
+        SettingsHeight = usage.SettingsHeight
+    };
+
     // The space between a rounded rectangle and the outline of a panel corner of the given radius, for a rectangle x and y
     // from the panel's edges with corners of radius r. A negative value means the panel clips the rectangle.
     public static double CornerGap(double radius, double x, double y, double r)

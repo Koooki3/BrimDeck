@@ -4,7 +4,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
 {
     // ZCode resolves its data directory as ZCODE_HOME, otherwise %USERPROFILE%\.zcode.
     public string ZCodeHome { get; init; } = "";
-    // DeepSeek Harness resolves its data directory as DSH_HOME, otherwise %USERPROFILE%\.dsh; the desktop app and the web app share it.
+    // DeepSeek Harness resolves its data directory as DSH_HOME, otherwise %USERPROFILE%\.dsh; the desktop app and the local web app share it.
     public string DshHome { get; init; } = "";
     // Conversation databases of Antigravity 2.x and the Antigravity CLI.
     public IReadOnlyList<string> AntigravityConversations { get; init; } = [];
