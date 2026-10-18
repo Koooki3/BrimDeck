@@ -11,9 +11,12 @@ BrimDeck 是 Windows 11 上的灵动岛，在屏幕顶部集中显示 AI 编程�
 平时收起在屏幕顶部，只在需要时展开。<br>
 Windows 原生应用，使用 C# 与 WPF 开发，注重性能与流畅度。
 
-[![下载](https://img.shields.io/badge/下载-Windows%2011%20x64-0A84FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
-[![许可证](https://img.shields.io/badge/许可证-Apache%202.0-555?style=flat-square)](LICENSE)
-![界面语言](https://img.shields.io/badge/界面-简体中文%20%7C%20English-555?style=flat-square)
+[![下载](https://img.shields.io/badge/下载-Windows%2011%20x64-9CB9FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
+[![最新版本](https://img.shields.io/github/v/release/MoFeng2223/BrimDeck?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=98DBB0)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
+[![许可证](https://img.shields.io/badge/许可证-Apache%202.0-E5A385?style=flat-square)](LICENSE)
+![界面语言](https://img.shields.io/badge/界面-简体中文%20%7C%20English-B9A8FF?style=flat-square)
+
+<p><a href="#功能">功能</a> · <a href="#安装">安装</a> · <a href="#快速开始">快速开始</a> · <a href="#隐私">隐私</a> · <a href="#常见问题">常见问题</a> · <a href="#参与开发">参与开发</a> · <a href="README.md">English</a></p>
 
 <img src="docs/zh-CN/images/hero.png" width="100%" alt="BrimDeck 从屏幕顶部的刘海展开为 AI 用量面板，再切换到音乐页，最后收起">
 
@@ -38,7 +41,7 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
   <tr>
     <td align="center"><img src="docs/zh-CN/images/compact-notch.png" width="279" alt="刘海"><br>刘海（默认）</td>
     <td align="center"><img src="docs/zh-CN/images/compact-capsule.png" width="258" alt="胶囊"><br>胶囊</td>
-    <td align="center"><img src="docs/zh-CN/images/compact-line.png" width="130" alt="指示条"><br>指示条</td>
+    <td align="center"><img src="docs/zh-CN/images/compact-line.png" width="128" alt="指示条"><br>指示条</td>
   </tr>
 </table>
 
@@ -46,15 +49,17 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
   <img src="docs/zh-CN/images/compact-notch-lyrics.png" width="279" alt="刘海中显示歌词">
 
-- 刘海与胶囊还可以在右侧显示时间，提供九种样式，可以选择颜色，并可切换 12 小时制或 24 小时制。
+- 刘海与胶囊可以显示时间，与配额环或音乐一起显示时位于右侧，单独显示时居中；可以自定义配色。
 
-- 配额使用率达到 70% 或 90% 时，收起形态自动加宽并显示提醒 5 秒。
+  <img src="docs/zh-CN/images/compact-clock.png" width="567" alt="刘海中的时间：简约、数码管、衬线样式位于配额环右侧，单独显示时居中">
 
-  <img src="docs/zh-CN/images/compact-alert.png" width="337" alt="配额提醒：Claude 5 小时已用 91%">
+- 某个工具的配额使用率升到预警（70%）或告警（90%）时，收起形态会显示提醒 5 秒；可在设置中关闭。
+
+  <img src="docs/zh-CN/images/compact-alert.png" width="388" alt="配额提醒：Claude 5 小时已用 91%">
+
+- 刘海、胶囊和指示条的尺寸与位置可在设置中调整。
 
 - 窗口最大化时默认切换为指示条，全屏游戏或视频播放时默认隐藏，避免误触展开。
-
-- 连接多台显示器时，可以让 BrimDeck 跟随主显示器，也可以任选其中一台或几台，每台各显示一个；鼠标停在哪一个上，就只展开哪一个。
 
 ### AI 用量
 
@@ -70,7 +75,7 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 ### 音乐
 
-<img src="docs/zh-CN/images/music.png" width="72%" alt="音乐页：封面、歌名、歌词、进度条和播放控制">
+<img src="docs/zh-CN/images/music.png" width="63%" alt="音乐页：封面、歌名、歌词、进度条和播放控制">
 
 - 显示歌曲信息、同步歌词与播放进度，支持播放控制、播放模式切换，以及受支持播放器的进度调节。
 - 支持同时接入多个播放器，可手动切换或固定显示其中一个。
@@ -90,7 +95,7 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 1. 安装并启动 BrimDeck 后，面板会出现在主显示器顶部中央，默认显示 Claude 和 Codex。
 2. 将鼠标移到面板上即可展开，移开鼠标或按 Esc 收起。
-3. 点击展开面板右上角的设置按钮，即可添加工具或调整设置；也可右键点击面板，或通过系统托盘图标的右键菜单进入设置。
+3. 点击展开面板右上角的设置按钮，即可添加工具或调整设置；也可在展开的面板上点击右键，或双击系统托盘图标、通过托盘图标的右键菜单进入设置。
 
 ## 卸载
 
