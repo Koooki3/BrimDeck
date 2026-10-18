@@ -22,7 +22,7 @@ public static class ProviderCatalog
         ProviderId.Codex => Loc.T("Codex 桌面版 + Codex CLI", "Codex desktop app + Codex CLI"),
         ProviderId.Antigravity => Loc.T("Antigravity 桌面版 + Antigravity CLI", "Antigravity desktop app + Antigravity CLI"),
         ProviderId.ZCode => Loc.T("ZCode 桌面应用", "ZCode desktop app"),
-        ProviderId.Dsh => Loc.T("DeepSeek Harness 桌面版 + 网页版", "DeepSeek Harness desktop app + web app"),
+        ProviderId.Dsh => Loc.T("DeepSeek Harness 桌面版 + 本地 Web 版", "DeepSeek Harness desktop app + local web app"),
         ProviderId.Cursor => Loc.T("Cursor 账户用量，包含其他设备", "Cursor account usage, including other devices"),
         _ => Name(id)
     };
@@ -31,8 +31,8 @@ public static class ProviderCatalog
     {
         ProviderId.Antigravity => Loc.T("额度读取自 Antigravity 桌面版，需要桌面版正在运行；不读取 Antigravity CLI",
             "The quota is read from the Antigravity desktop app, which must be running; Antigravity CLI is not read"),
-        ProviderId.Dsh => Loc.T("DeepSeek Harness 桌面版或网页版登录的 DeepSeek 账户余额；未登录账户时使用其中保存的 API 密钥",
-            "The balance of the DeepSeek account that the DeepSeek Harness desktop or web app signed in with; without a signed-in account, the API key saved there is used"),
+        ProviderId.Dsh => Loc.T("DeepSeek Harness 桌面版或本地 Web 版登录的 DeepSeek 账户余额；未登录账户时使用其中保存的 API 密钥",
+            "The balance of the DeepSeek account that the DeepSeek Harness desktop app or local web app signed in with; without a signed-in account, the API key saved there is used"),
         ProviderId.GrokBot => Loc.T("只显示 Grok Bot 桌面版登录账户的每周额度",
             "Only the weekly allowance of the account signed in to the Grok Bot desktop app is shown"),
         _ => ""

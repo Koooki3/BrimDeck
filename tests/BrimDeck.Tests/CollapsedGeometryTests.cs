@@ -70,28 +70,48 @@ internal static class CollapsedGeometryTests
         var nearBottom = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 4000 }, CompactStyle.Capsule, monitor, work);
         check("The open panel hangs from the screen edge unless the capsule is lowered beyond the bridge",
             CollapsedGeometry.PanelTop(notch, work, 200) == 0 && CollapsedGeometry.PanelTop(line, work, 200) == 0 && CollapsedGeometry.PanelTop(capsule, work, 200) == 0
-            && CollapsedGeometry.PanelTop(near, topBar, 200) == 48 && CollapsedGeometry.PanelTop(lowered, work, 200) == 32);
+            && CollapsedGeometry.PanelTop(near, topBar, 200) == 48 && CollapsedGeometry.PanelTop(lowered, work, 200) == 34);
         var topBarNear = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 5 }, CompactStyle.Capsule, monitor, topBar);
         var topBarLowered = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 52 }, CompactStyle.Capsule, monitor, topBar);
-        check("Top taskbar: a capsule at y 53 opens at the work-area top (48); one at y 100 opens 8 DIPs above it (92)",
+        check("Top taskbar: a capsule at y 53 opens at the work-area top (48); one at y 100 floats 6 DIPs above it (94)",
             topBarNear.Surface.Y == 53 && CollapsedGeometry.PanelTop(topBarNear, topBar, 200) == 48
-            && topBarLowered.Surface.Y == 100 && CollapsedGeometry.PanelTop(topBarLowered, topBar, 200) == 92);
+            && topBarLowered.Surface.Y == 100 && CollapsedGeometry.PanelTop(topBarLowered, topBar, 200) == 94);
         var tallLowered = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 100, CapsuleHeight = 48 }, CompactStyle.Capsule, monitor, work);
         var tallerLowered = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 100, CapsuleHeight = 64 }, CompactStyle.Capsule, monitor, work);
         var shortLowered = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 100, CapsuleHeight = 24 }, CompactStyle.Capsule, monitor, work);
-        check("The lift above a lowered capsule is max(0, 24 - H/2)", CollapsedGeometry.PanelTop(tallLowered, work, 200) == 100
-            && CollapsedGeometry.PanelTop(tallerLowered, work, 200) == 100 && CollapsedGeometry.PanelTop(shortLowered, work, 200) == 88
-            && CollapsedGeometry.CapsulePanelLift(32) == 8 && CollapsedGeometry.CapsulePanelLift(48) == 0 && CollapsedGeometry.CapsulePanelLift(double.NaN) == 24);
-        // Settings cannot produce this (the lift is at most 12, below the 20 DIP bridge), so the shape is built by hand.
-        var thinLowered = new CollapsedShape(CompactStyle.Capsule, new DipRect(800, 48 + 21, 196, 4), 0.125, 2, 192, 2, 2, 0);
-        check("A lift that would rise above the work area stops at its top", CollapsedGeometry.PanelTop(thinLowered, topBar, 200) == 48);
+        check("The lift above a lowered capsule is max(0, 22 - H/2)", CollapsedGeometry.PanelTop(tallLowered, work, 200) == 100
+            && CollapsedGeometry.PanelTop(tallerLowered, work, 200) == 100 && CollapsedGeometry.PanelTop(shortLowered, work, 200) == 90
+            && CollapsedGeometry.CapsulePanelLift(32) == 6 && CollapsedGeometry.CapsulePanelLift(40) == 2 && CollapsedGeometry.CapsulePanelLift(48) == 0
+            && CollapsedGeometry.CapsulePanelLift(double.NaN) == 22);
+        // A 32 DIP header row, 6 DIPs below the top edge of the floating panel, is centred on the capsule's centreline.
+        check("A floating panel's 32 DIP header is centred on the capsule",
+            new[] { lowered, topBarLowered, shortLowered }.All(raised => CollapsedGeometry.Panel(raised, raised == topBarLowered ? topBar : work, 200) is var placed
+                && placed.HeaderExtra == CollapsedLimits.FloatingHeaderExtra && placed.Top + placed.HeaderExtra + 16 == raised.Surface.Y + raised.Surface.Height / 2));
+        // The user's case: capsule 32 high at 384 on a 1392 DIP work area, a 220 DIP page: 226 tall from 378 to 604.
+        var userWork = new DipRect(0, 0, 2560, 1392);
+        var user = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 384 }, CompactStyle.Capsule, new DipRect(0, 0, 2560, 1440), userWork);
+        check("A floating panel grows upward by 6: its bottom edge stays where the page alone would end below the capsule's top",
+            CollapsedGeometry.Panel(user, userWork, 220, 1392) == new PanelPlacement(378, 6) && 378 + 6 + 220 == 604 && 604 == user.Surface.Y + 220
+            && CollapsedGeometry.Panel(user, userWork, 200, 1392).Top == 378);
+        check("Hanging panels add nothing above the header", CollapsedGeometry.Panel(capsule, work, 200) == new PanelPlacement(0, 0)
+            && CollapsedGeometry.Panel(notch, work, 200) == new PanelPlacement(0, 0) && CollapsedGeometry.Panel(line, work, 200) == new PanelPlacement(0, 0)
+            && CollapsedGeometry.Panel(near, topBar, 200) == new PanelPlacement(48, 0) && CollapsedGeometry.Panel(topBarNear, topBar, 200) == new PanelPlacement(48, 0));
+        // The lift (at most 10) is smaller than the bridge (20), so just beyond the bridge the panel still floats below the work area's top.
+        check("Just beyond the bridge the panel floats, its top below the work area's top",
+            CollapsedGeometry.Panel(CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 21 }, CompactStyle.Capsule, monitor, work), work, 200) == new PanelPlacement(15, 6)
+            && CollapsedGeometry.Panel(CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 21, CapsuleHeight = 24 }, CompactStyle.Capsule, monitor, work), work, 200) == new PanelPlacement(11, 6)
+            && CollapsedGeometry.Panel(CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 21 }, CompactStyle.Capsule, monitor, topBar), topBar, 200) == new PanelPlacement(63, 6));
+        // Settings cannot produce this (the lift is at most 10, below the 20 DIP bridge), so the shape is built by hand.
+        var thinLowered = new CollapsedShape(CompactStyle.Capsule, new DipRect(800, 48 + 21, 196, 2), 0.0625, 1, 194, 1, 1, 0);
+        check("A lift that would rise above the work area hangs the panel from its top without the extra space",
+            CollapsedGeometry.Panel(thinLowered, topBar, 200) == new PanelPlacement(48, 0));
         var noTopBar = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 20 }, CompactStyle.Capsule, monitor, work);
         check("Without a top taskbar a capsule near the edge still opens from the screen edge; notch and line are unchanged",
             CollapsedGeometry.PanelTop(noTopBar, work, 200) == 0 && CollapsedGeometry.PanelTop(capsule, work, 200) == 0
             && CollapsedGeometry.PanelTop(CollapsedGeometry.Resolve(defaults, CompactStyle.Notch, monitor, topBar), topBar, 200) == 0
             && CollapsedGeometry.PanelTop(CollapsedGeometry.Resolve(defaults, CompactStyle.Line, monitor, topBar), topBar, 200) == 0);
         check("A panel below a capsule near the bottom moves up to stay in the work area and still covers the capsule",
-            CollapsedGeometry.PanelTop(nearBottom, work, 200) == 832 && 832 <= nearBottom.Surface.Y && 832 + 200 >= nearBottom.Surface.Bottom
+            CollapsedGeometry.Panel(nearBottom, work, 200) == new PanelPlacement(826, 6) && 826 <= nearBottom.Surface.Y && 826 + 6 + 200 >= nearBottom.Surface.Bottom
             && CollapsedGeometry.PanelTop(nearBottom, new DipRect(0, 0, 400, 150), 400) == 0
             && CollapsedGeometry.PanelTop(CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 4000 }, CompactStyle.Capsule, monitor, topBar), topBar, 2000) == 48
             && CollapsedGeometry.PanelTop(nearBottom, new DipRect(double.NaN, double.NaN, 0, 0), 200) == 0);
@@ -99,9 +119,20 @@ internal static class CollapsedGeometryTests
         var fullHeight = new DipRect(0, 0, 1920, 1080);
         var bottomed = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 4000 }, CompactStyle.Capsule, monitor, fullHeight);
         check("A bottom limit moves the panel up instead of shortening it",
-            CollapsedGeometry.PanelTop(bottomed, fullHeight, 400) == 680 && CollapsedGeometry.PanelTop(bottomed, fullHeight, 400, 1080 - 12) == 668
-            && CollapsedGeometry.PanelTop(bottomed, fullHeight, 400, 1080 - 12) + 400 <= 1068 && CollapsedGeometry.PanelTop(nearBottom, work, 200, 1080 - 12) == 832
-            && CollapsedGeometry.PanelTop(bottomed, fullHeight, 2000, 1068) == 0 && CollapsedGeometry.PanelTop(bottomed, fullHeight, 400, double.NaN) == 680);
+            CollapsedGeometry.PanelTop(bottomed, fullHeight, 400) == 674 && CollapsedGeometry.PanelTop(bottomed, fullHeight, 400, 1080 - 12) == 662
+            && CollapsedGeometry.PanelTop(bottomed, fullHeight, 400, 1080 - 12) + 6 + 400 <= 1068 && CollapsedGeometry.PanelTop(nearBottom, work, 200, 1080 - 12) == 826
+            && CollapsedGeometry.PanelTop(bottomed, fullHeight, 2000, 1068) == 0 && CollapsedGeometry.PanelTop(bottomed, fullHeight, 400, double.NaN) == 674);
+        check("A floating panel too tall to fit below the work area's top with the extra space hangs from that top instead",
+            CollapsedGeometry.Panel(bottomed, fullHeight, 1063, 1068) == new PanelPlacement(0, 0) && CollapsedGeometry.Panel(bottomed, fullHeight, 1055) == new PanelPlacement(19, 6)
+            && CollapsedGeometry.Panel(bottomed, fullHeight, 1075) == new PanelPlacement(0, 0));
+        // The window passes the work area's bottom as the limit (MainWindow.PanelBottom), with no room kept below it, so with no
+        // taskbar at the bottom a capsule pulled all the way down is still covered; with a bottom taskbar the panel ends at it.
+        var bottomTaskbar = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 4000 }, CompactStyle.Capsule, monitor, work);
+        check("A capsule pulled to the bottom of the work area is fully covered by its panel, with or without a bottom taskbar",
+            CollapsedGeometry.Panel(bottomed, fullHeight, 220, fullHeight.Bottom) == new PanelPlacement(854, 6) && 854 + 6 + 220 == bottomed.Surface.Bottom
+            && bottomed.Surface.Bottom == 1080
+            && CollapsedGeometry.Panel(bottomTaskbar, work, 220, work.Bottom) == new PanelPlacement(806, 6) && 806 + 6 + 220 == bottomTaskbar.Surface.Bottom
+            && bottomTaskbar.Surface.Bottom == 1032);
 
         var tall = CollapsedGeometry.Resolve(new DeckSettings { NotchHeight = 64, CapsuleHeight = 48 }, CompactStyle.Notch, monitor, work);
         var tallCapsule = CollapsedGeometry.Resolve(new DeckSettings { CapsuleHeight = 48 }, CompactStyle.Capsule, monitor, work);

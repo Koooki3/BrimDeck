@@ -16,7 +16,7 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | Grok Bot | ✓ | | Sign in to the Grok Bot desktop app on this PC |
 | Antigravity | ✓ | ✓ | The Antigravity desktop app must be running for its quota to be read |
 | ZCode | ✓ | ✓ | Sign in to ZCode on this PC |
-| DeepSeek Harness | ✓ | ✓ | Sign in to a DeepSeek account in the DeepSeek Harness desktop or web app, or save an API key there |
+| DeepSeek Harness | ✓ | ✓ | Sign in to a DeepSeek account in the DeepSeek Harness desktop app or local web app, or save an API key there |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
 | New API, Sub2API relay sites | ✓ | | Enter the site address and key in settings |
@@ -41,10 +41,10 @@ A Grok Bot row shows only the weekly allowance of the account signed in to the G
 
 ## DeepSeek Harness
 
-The DeepSeek Harness desktop app and web app (`npx @deepseek-ai/dsh web`) share one data folder, so signing in to either is enough.
+The DeepSeek Harness desktop app and local web app (`npx @deepseek-ai/dsh web`) share one data folder, so signing in to either is enough.
 
 - **Quota**: when a DeepSeek account is signed in to DeepSeek Harness, shows that account's balance, granted balance and total cost, the same figures as the DeepSeek platform's web console, all for the whole account. Without a signed-in account, the API key saved on the DeepSeek Harness Models page is used, and only the balance and the granted balance can be shown. If the sign-in expires, sign in again in DeepSeek Harness.
-- **Tokens and cost**: read from the DeepSeek Harness session records on this PC, covering the desktop app and the web app. Costs are estimated from model prices; models missing from the price list are not priced, and you can add their prices in settings.
+- **Tokens and cost**: read from the DeepSeek Harness session records on this PC, covering the desktop app and the local web app. Costs are estimated from model prices; models missing from the price list are not priced, and you can add their prices in settings.
 
 ## Sources entered by hand
 

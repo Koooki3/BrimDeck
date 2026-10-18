@@ -8,7 +8,7 @@ namespace BrimDeck.Core;
 // its Models page. Either may be empty. Values are held in memory only.
 public sealed record DshAccount(string Token, string ApiKey);
 
-// DeepSeek Harness (the desktop app and the web app started with `npx @deepseek-ai/dsh web`) keeps its data in DSH_HOME,
+// DeepSeek Harness (the desktop app and the local web app started with `npx @deepseek-ai/dsh web`) keeps its data in DSH_HOME,
 // otherwise %USERPROFILE%\.dsh. Its credentials are the YAML document .credentials.yaml:
 //   version: 1
 //   refs:    { DEEPSEEK_API_KEY: <key> }

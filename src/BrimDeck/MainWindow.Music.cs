@@ -28,7 +28,7 @@ public partial class MainWindow
         EventManager.RegisterClassHandler(typeof(FrameworkContentElement), ToolTipService.ToolTipOpeningEvent, new ToolTipEventHandler(Suppress), true);
     }
     private DeckPage _page;
-    private double _pageWidth = 760;
+    private double _pageWidth = 760, _usageWidth = 760;
     private MediaSessions? _media => _app.Media;
     private MediaTrack? _mediaTrack;
     private IReadOnlyList<MediaTrack> _mediaTracks = [];
@@ -113,8 +113,10 @@ public partial class MainWindow
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
     // The header shared by both pages (see PanelHeader). Its row holds the page's top margin, so the clock, the switch and the
     // right group are centred on one line, and the switch and the gear line up with the page's content edges. Toolbar's own
-    // height replaces its binding to the row: the row may be one DIP taller, and the controls are centred in the even part.
-    // Only layout values change, and setting an unchanged value does nothing.
+    // height replaces its binding to the row: the music page takes the usage page's controls (PanelHeader.WithControlsOf), so
+    // its band can be shorter than its row, with the rest below the controls; the row may also be one DIP taller, and the
+    // controls are centred in the even part. Toolbar lies outside ContentCanvas's rows, so a band taller than the row is not
+    // clipped. Only layout values change, and setting an unchanged value does nothing.
     private PanelHeader _header = PanelHeader.For(36, 20);
     private void ApplyHeader(PanelHeader header)
     {
@@ -317,7 +319,8 @@ public partial class MainWindow
         var layout = MusicLayout.Calculate(w, h, hasLyrics, track?.HasTimeline == true, message.Length > 0, logMode, transport: !showSmtcHint);
         CurrentMusicLayout = layout;
         var c = layout.Metrics;
-        ApplyHeader(PanelHeader.Music(c));
+        // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
+        ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(UsageHeader(_usageWidth, UsagePageHeight)) : PanelHeader.Music(c));
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
         string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }

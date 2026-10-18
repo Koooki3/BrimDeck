@@ -66,8 +66,13 @@ public partial class MainWindow
         bool onScreen = _expanded && !IsMusicPage && Settings.UsagePage && !IsSuppressed;
         _syncCountdown = !_details && Settings.UsageAutoSync && Lead._refresh.IsEnabled;
         SyncTrack.Visibility = SyncProgress.Visibility = _syncCountdown ? Visibility.Visible : Visibility.Collapsed;
-        // Inside the ring the arrows shrink to 13 DIP; the stroke stays 1.24 DIP like the standalone icon.
-        SyncGlyph.Width = SyncGlyph.Height = _syncCountdown ? 13 : 18;
+        // Inside the ring the arrows shrink to 13 DIP; the stroke stays 1.24 DIP like the standalone icon. The arrows keep the ring's
+        // 24 DIP box and are scaled about its centre: a smaller box centred by layout starts at (24 - 13) / 2 = 5.5 DIP, and layout
+        // rounding then moves it up to half a device pixel off the ring's centre (the 18 DIP box too, at some scales such as 150 %).
+        double glyph = (_syncCountdown ? 13 : 18) / 24d;
+        SyncGlyph.Width = SyncGlyph.Height = 24; SyncGlyph.RenderTransformOrigin = new Point(.5, .5);
+        if (SyncGlyph.RenderTransform is ScaleTransform { IsFrozen: false } scale) scale.ScaleX = scale.ScaleY = glyph;
+        else SyncGlyph.RenderTransform = new ScaleTransform(glyph, glyph);
         SyncArrows.StrokeThickness = _syncCountdown ? 1.65 * 18 / 13 : 1.65;
         UpdateSyncRing();
         var ringTimer = _syncRingTimer ??= new PromptTimer(Dispatcher, UpdateSyncRing) { Interval = TimeSpan.FromSeconds(1) };

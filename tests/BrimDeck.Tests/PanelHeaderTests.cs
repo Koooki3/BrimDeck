@@ -48,7 +48,42 @@ internal static class PanelHeaderTests
             return switchGap >= h.SwitchTop && gearGap >= Math.Min(gearTop, 4) && hoverGap >= 1;
         }
         check("Under a rounded top corner the header keeps clear of the curve at every size", headers.All(Clear));
+        // A panel floating below a lowered capsule adds CollapsedLimits.FloatingHeaderExtra above the same header row, so the
+        // controls keep their size tier and only move further from the curve; the switch then sits 8 DIPs or more below the edge.
+        bool ClearFloating(PanelHeader h)
+        {
+            double R = PanelHeader.PanelRadius, extra = CollapsedLimits.FloatingHeaderExtra, switchTop = h.SwitchTop + extra;
+            double gearTop = (h.Height - PanelHeader.GearSize) / 2 + extra;
+            return PanelHeader.CornerGap(R, h.Side, switchTop, PanelHeader.SwitchRadius) >= Math.Min(switchTop, h.Side)
+                && PanelHeader.CornerGap(R, h.Side, gearTop, PanelHeader.GearSize / 2) >= 4
+                && PanelHeader.CornerGap(R, h.RightMargin, (h.Height - h.SettingsHeight) / 2 + extra, PanelHeader.SettingsRadius) >= 1 && switchTop >= 8;
+        }
+        check("A floating panel's header keeps clear of the curve at every size, with the switch at least 8 DIPs below the edge", headers.All(ClearFloating));
+        check("The usage page's 32 DIP header in a floating panel has its switch 10 DIPs below the edge",
+            PanelHeader.For(32, 16) is { SwitchTop: 4, Side: 16 } && PanelHeader.For(32, 16).SwitchTop + CollapsedLimits.FloatingHeaderExtra == 10);
         check("The previous header (switch at (10, 4)) was 2.6 DIPs from the curve, which the check rejects",
             Math.Abs(PanelHeader.CornerGap(24, 10, 4, 8) - 2.58) < .01 && PanelHeader.CornerGap(24, 10, 0, 8) < 0);
+
+        // The usage page keeps its own header (78d0a03: settings 28x24 with a 6 DIP corner; ba20473: switch 28, or 24 in a row below
+        // 36). The music page takes the usage page's controls, so they keep their distance from the panel's top edge when the page
+        // changes; it keeps its own row (where its content starts), side inset and right margin.
+        var usageHeaders = usage.Select(e => PanelHeader.For(e.Row, e.Side)).ToList();
+        var musicHeaders = Enumerable.Range(0, 301).Select(i => PanelHeader.Music(MusicMetrics.At(i / 100d))).ToList();
+        static (double, double, double, double, double) Controls(PanelHeader h) => (h.Height, h.SwitchHeight, h.ButtonHeight, h.SwitchTop, h.SettingsHeight);
+        check("With the usage page's controls, every music header puts the switch, the clock and the right group where the usage page does",
+            usageHeaders.All(u => musicHeaders.All(m => Controls(m.WithControlsOf(u)) == Controls(u))));
+        check("The music page keeps its row, side and right margin with the usage page's controls",
+            usageHeaders.All(u => musicHeaders.All(m => m.WithControlsOf(u) is var w && w.Row == m.Row && w.Side == m.Side && w.RightMargin == m.RightMargin)));
+        var user = PanelHeader.For(32, 16);
+        var userMusic = PanelHeader.Music(MusicMetrics.At(1)).WithControlsOf(user);
+        check("The user's usage header (32 row) keeps its 24 DIP switch at 4, 20 DIP buttons and 24 DIP settings",
+            user is { Height: 32, SwitchHeight: 24, ButtonHeight: 20, SwitchTop: 4, SettingsHeight: 24 });
+        check("The user's music header (density 1, 44 row) takes the same controls; its content still starts at 44, its extra 12 DIPs below the band",
+            Controls(userMusic) == Controls(user) && userMusic.Row == 44 && userMusic.Row - userMusic.Height == 12);
+        check("Floating, both pages' switches sit 10 DIPs below the edge (4 hanging)",
+            userMusic.SwitchTop + CollapsedLimits.FloatingHeaderExtra == 10 && user.SwitchTop + CollapsedLimits.FloatingHeaderExtra == 10 && userMusic.SwitchTop == 4);
+        var mixed = usageHeaders.SelectMany(u => musicHeaders.Select(m => m.WithControlsOf(u))).ToList();
+        check("Under a rounded top corner the music header with the usage page's controls keeps clear of the curve, hanging and floating",
+            mixed.All(Clear) && mixed.All(ClearFloating));
     }
 }
