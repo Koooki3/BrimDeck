@@ -220,7 +220,7 @@ internal sealed class Renderer(App app, string output, string language, string[]
         {
             Id = "demo:netease", Source = "网易云音乐", Title = Loc.T("晚风邮局", "Evening Post"), Artist = Loc.T("纸灯乐队", "Paper Lanterns"),
             Album = Loc.T("海边来信", "Letters from the Shore"), EmbeddedLyrics = lyrics, State = MediaState.Playing,
-            CanToggle = true, CanPrevious = true, CanNext = true, CanSeek = true, CanShuffle = true, CanRepeat = true, Repeat = MediaRepeat.List,
+            CanToggle = true, CanPrevious = true, CanNext = true, CanSeek = true, CanShuffle = true, CanRepeat = true, Repeat = MediaRepeat.List, CanLike = true, Liked = true,
             Start = TimeSpan.Zero, End = TimeSpan.FromSeconds(232), MaxSeek = TimeSpan.FromSeconds(232),
             ReportedPosition = TimeSpan.FromSeconds(83), PositionAt = utc, Rate = 1
         };
@@ -349,12 +349,35 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Save("compact-line", scale);
 
         _settings.Style = CompactStyle.Notch; Refresh();
+        await QuotaAlert(scale);
+        await ClockStyles();
+    }
+
+    // The quota notice replaces the collapsed row and is cut off when the row is too short (the reset time goes first), so it
+    // is shown on a notch just wide enough for the whole notice plus a 12 DIP margin, with the same invented data.
+    private async Task QuotaAlert(double scale)
+    {
         var claude = _settings.Apps[0];
-        Program.Call(_deck, "ShowAlert", [typeof(AppEntry), typeof(string), typeof(double), typeof(DateTimeOffset?)],
-            claude, Loc.T("5 小时", "5-hour"), 91.0, (DateTimeOffset?)_now.AddHours(2).AddMinutes(13).AddSeconds(30));
-        await Settle();
+        var alert = (System.Windows.Controls.Panel)_deck.FindName("CompactAlert")!;
+        async Task Show(double width)
+        {
+            _settings.NotchWidth = width; Refresh();
+            Program.Call(_deck, "ShowAlert", [typeof(AppEntry), typeof(string), typeof(double), typeof(DateTimeOffset?)],
+                claude, Loc.T("5 小时", "5-hour"), 91.0, (DateTimeOffset?)_now.AddHours(2).AddMinutes(13).AddSeconds(30));
+            await Settle();
+        }
+        double fit = 0;
+        for (double width = CollapsedLimits.NotchWidthDefault; width <= CollapsedLimits.NotchWidthMax && fit == 0; width += 2)
+        {
+            await Show(width);
+            var regions = alert.Children.OfType<FrameworkElement>().ToList();
+            if (regions.Count == 4 && regions.All(region => !region.ClipToBounds)) fit = width;
+        }
+        if (fit == 0) throw new InvalidOperationException("No notch width shows the whole quota notice.");
+        await Show(fit + 12);
         await Save("compact-alert", scale);
         Program.Call(_deck, "ClearAlert", []);
+        _settings.NotchWidth = CollapsedLimits.NotchWidthDefault; Refresh();
         await Settle();
     }
 
@@ -406,6 +429,42 @@ internal sealed class Renderer(App app, string output, string language, string[]
         _settings.AnimationDuration = 360;
     }
 
+    // Collapsed notches showing the clock at a fixed invented date and time (2026-09-27 15:25): three styles in different
+    // preset colors beside the quota rings, and one shown alone, centred. compose.py arranges them in a labelled grid as
+    // compact-clock.png.
+    private async Task ClockStyles()
+    {
+        const double scale = 2;
+        var face = Type.GetType("BrimDeck.ClockFace, BrimDeck")!;
+        var time = new DateTime(2026, 9, 27, 15, 25, 0);
+        (ClockStyle Style, ClockColor Color, bool Alone)[] samples =
+        [
+            (ClockStyle.Minimal, ClockColor.White, false), (ClockStyle.Segment, ClockColor.Lime, false),
+            (ClockStyle.Serif, ClockColor.Amber, false), (ClockStyle.Neon, ClockColor.Pink, true)
+        ];
+        _deck.SetExpanded(false, true);
+        _settings.Style = CompactStyle.Notch; _settings.NotchClock = true; _settings.NotchMusic = false;
+        var list = new List<object>();
+        for (int i = 0; i < samples.Length; i++)
+        {
+            var (style, color, alone) = samples[i];
+            // Alone means no quota rings and no music, so the clock is centred.
+            _settings.ClockStyle = style; _settings.ClockColor = color; _settings.NotchSummary = !alone; Refresh();
+            await Settle();
+            if (Program.Field(_deck, "_compactClock") is { } clock) Program.SetProperty(clock, "Time", time);
+            await Settle();
+            var name = $"clock-{i}";
+            Write(Capture(scale), Path.Combine(output, name + ".png"));
+            string title = alone ? Loc.T("单独显示", "Shown alone") : (string)face.GetMethod("Title")!.Invoke(null, [style])!;
+            list.Add(new { file = name + ".png", style = style.ToString(), alone, title });
+        }
+        File.WriteAllText(Path.Combine(output, "clocks.json"), JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine("compact-clock");
+        _settings.NotchClock = false; _settings.NotchMusic = true; _settings.NotchSummary = true;
+        _settings.ClockStyle = default; _settings.ClockColor = ClockColor.White; Refresh();
+        await Settle();
+    }
+
     private async Task MusicSizes()
     {
         (double Width, double Height)[] sizes = [(440, 140), (440, 170), (440, 200), (520, 200), (540, 250), (600, 240), (760, 300), (900, 350), (1200, 400), (440, 400), (1200, 140)];
@@ -417,7 +476,7 @@ internal sealed class Renderer(App app, string output, string language, string[]
             await Save($"music-{width}x{height}", 1.5);
         }
         // NetEase read from its log, with and without SMTC, and a song without lyrics or a timeline.
-        var log = _track with { Id = "demo:log", IsNeteaseLog = true, CanShuffle = false, CanRepeat = false, CanSeek = false };
+        var log = _track with { Id = "demo:log", IsNeteaseLog = true, CanShuffle = false, CanRepeat = false, CanSeek = false, CanLike = false, Liked = false };
         var variants = new (string Name, MediaTrack Track)[]
         {
             ("entry", log), ("hint", log with { CanToggle = false, CanPrevious = false, CanNext = false }),

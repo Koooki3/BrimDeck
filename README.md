@@ -11,9 +11,12 @@ BrimDeck is a Dynamic Island for Windows 11 that brings your AI coding tool quot
 It stays collapsed at the top of the screen and opens only when you need it.<br>
 A native Windows app built with C# and WPF, designed for performance and smoothness.
 
-[![Download](https://img.shields.io/badge/Download-Windows%2011%20x64-0A84FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
-[![License](https://img.shields.io/badge/License-Apache%202.0-555?style=flat-square)](LICENSE)
-![Interface languages](https://img.shields.io/badge/Interface-English%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-555?style=flat-square)
+[![Download](https://img.shields.io/badge/Download-Windows%2011%20x64-9CB9FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/MoFeng2223/BrimDeck?style=flat-square&label=Latest&color=98DBB0)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
+[![License](https://img.shields.io/badge/License-Apache%202.0-E5A385?style=flat-square)](LICENSE)
+![Interface languages](https://img.shields.io/badge/Interface-English%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-B9A8FF?style=flat-square)
+
+<p><a href="#features">Features</a> · <a href="#install">Install</a> · <a href="#quick-start">Quick start</a> · <a href="#privacy">Privacy</a> · <a href="#faq">FAQ</a> · <a href="#contributing">Contributing</a> · <a href="README.zh-CN.md">简体中文</a></p>
 
 <img src="docs/en-US/images/hero.png" width="100%" alt="BrimDeck opens from the notch at the top of the screen into the AI usage panel, switches to the music page, then collapses">
 
@@ -38,7 +41,7 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
   <tr>
     <td align="center"><img src="docs/en-US/images/compact-notch.png" width="279" alt="Notch"><br>Notch (default)</td>
     <td align="center"><img src="docs/en-US/images/compact-capsule.png" width="258" alt="Capsule"><br>Capsule</td>
-    <td align="center"><img src="docs/en-US/images/compact-line.png" width="130" alt="Indicator"><br>Indicator</td>
+    <td align="center"><img src="docs/en-US/images/compact-line.png" width="128" alt="Indicator"><br>Indicator</td>
   </tr>
 </table>
 
@@ -46,15 +49,17 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
   <img src="docs/en-US/images/compact-notch-lyrics.png" width="279" alt="Notch showing a lyric line">
 
-- Notch and Capsule can also show the time at their right end, in one of nine styles, in a color of your choice, and in 12- or 24-hour format.
+- The notch and capsule can show the time. It sits on the right when shown with the quota rings or music, and is centered when shown alone; its colors can be customized.
 
-- When a quota reaches 70% or 90%, the collapsed view widens and shows a notice for 5 seconds.
+  <img src="docs/en-US/images/compact-clock.png" width="567" alt="Clock in the notch: Simple, Seven segment and Serif styles beside the quota rings, and the clock shown alone, centered">
 
-  <img src="docs/en-US/images/compact-alert.png" width="337" alt="Quota notice: Claude 5-hour 91% used">
+- When a tool's quota usage rises to the warning (70%) or critical (90%) level, the collapsed view shows a notice for 5 seconds. You can turn this off in settings.
+
+  <img src="docs/en-US/images/compact-alert.png" width="390" alt="Quota notice: Claude 5-hour 91% used">
+
+- The size and position of the Notch, Capsule and Indicator can be adjusted in settings.
 
 - By default it turns into the Indicator when a window is maximized, and hides during full-screen games or video so it never opens by accident.
-
-- With several displays, BrimDeck can follow the primary display, or show on any displays you choose, one on each; only the one under the pointer expands.
 
 ### AI usage
 
@@ -70,7 +75,7 @@ You can choose the quota providers and set the quota and usage source of each co
 
 ### Music
 
-<img src="docs/en-US/images/music.png" width="72%" alt="Music page: cover, title, lyrics, progress bar and playback controls">
+<img src="docs/en-US/images/music.png" width="63%" alt="Music page: cover, title, lyrics, progress bar and playback controls">
 
 - Shows song information, synced lyrics and playback progress, with playback controls, playback mode switching and seeking in supported players.
 - Works with several players at once; switch between them or pin one.
@@ -90,7 +95,7 @@ When a new version is available, you are notified when you open the settings; it
 
 1. After you install and start BrimDeck, the panel appears at the top center of the primary display, showing Claude and Codex by default.
 2. Move the pointer over the panel to open it; move away or press Esc to close it.
-3. Select the settings button at the top right of the open panel to add tools or change settings. You can also right-click the panel, or right-click the tray icon.
+3. Select the settings button at the top right of the open panel to add tools or change settings. You can also right-click the open panel, double-click the tray icon, or right-click the tray icon.
 
 ## Uninstall
 

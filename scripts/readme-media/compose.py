@@ -12,7 +12,7 @@ import math
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 FPS = 30
 
@@ -183,6 +183,38 @@ def still(render, out, name, margin=(48, 0, 48, 48), scale=2, radius=12):
     rounded(canvas, round(radius * scale)).save(out / f"{name}.png", optimize=True)
 
 
+def clock_grid(render, out, name="compact-clock", columns=2, scale=2, margin=(36, 0, 36, 30), radius=10, gap=10):
+    """Clock samples in a grid. Each cell is framed exactly like compact-notch.png, so at the same README scale
+    (width x 0.45) its notch shows at the same size; a small label sits in the bottom padding."""
+    data = json.loads((render / "clocks.json").read_text(encoding="utf-8"))
+    font = None
+    for face in (r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\segoeui.ttf"):
+        try:
+            font = ImageFont.truetype(face, round(10.5 * scale))
+            break
+        except OSError:
+            pass
+    font = font or ImageFont.load_default()
+    cells = []
+    for item in data:
+        image = Image.open(render / item["file"]).convert("RGBA")
+        x0, y0, x1, y1 = image.getbbox()
+        left, top, right, bottom = (round(m * scale) for m in margin)
+        box = (x0 - left, 0, x1 + right, y1 + bottom)
+        cell = wallpaper(box[2] - box[0], box[3] - box[1])
+        cell.alpha_composite(image, (-box[0], -box[1]))
+        draw = ImageDraw.Draw(cell)
+        draw.text((cell.width / 2, cell.height - bottom / 2), item["title"], font=font, fill=(64, 68, 82, 255), anchor="mm")
+        cells.append(rounded(cell, round(radius * scale)))
+    w, h = max(c.width for c in cells), max(c.height for c in cells)
+    g = round(gap * scale)
+    rows = (len(cells) + columns - 1) // columns
+    sheet = Image.new("RGBA", (columns * w + (columns - 1) * g, rows * h + (rows - 1) * g), (0, 0, 0, 0))
+    for i, cell in enumerate(cells):
+        sheet.alpha_composite(cell, ((i % columns) * (w + g) + (w - cell.width) // 2, (i // columns) * (h + g)))
+    sheet.save(out / f"{name}.png", optimize=True)
+
+
 def window_shot(render, out, name, scale=1.5, margin=40, radius=8):
     """A captured window with Windows 11 corners and shadow, on the wallpaper."""
     image = rounded(Image.open(render / f"{name}.png").convert("RGBA"), round(radius * scale))
@@ -202,6 +234,8 @@ def main():
         still(render, out, name)
     for name in ["compact-notch", "compact-notch-lyrics", "compact-capsule", "compact-line", "compact-alert"]:
         still(render, out, name, margin=(36, 0, 36, 30), radius=10)
+    if (render / "clocks.json").exists():
+        clock_grid(render, out)
     if (render / "settings.png").exists():
         window_shot(render, out, "settings")
     icon = Image.open(Path(__file__).resolve().parents[2] / "src" / "BrimDeck" / "Assets" / "BrimDeck.ico")
