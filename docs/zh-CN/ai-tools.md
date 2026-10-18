@@ -16,7 +16,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | Grok Bot | ✓ | | 在本机登录 Grok Bot 桌面版 |
 | Antigravity | ✓ | ✓ | 读取配额时需要 Antigravity 桌面版正在运行 |
 | ZCode | ✓ | ✓ | 在本机登录 ZCode |
-| DeepSeek Harness | ✓ | ✓ | 在 DeepSeek Harness 桌面版或网页版中登录 DeepSeek 账户，或在其中保存 API 密钥 |
+| DeepSeek Harness | ✓ | ✓ | 在 DeepSeek Harness 桌面版或本地 Web 版中登录 DeepSeek 账户，或在其中保存 API 密钥 |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
 | New API、Sub2API 中转站 | ✓ | | 在设置中填写站点地址和密钥 |
@@ -41,10 +41,10 @@ Grok Bot 一行只显示 Grok Bot 桌面版登录账户的每周额度：已用�
 
 ## DeepSeek Harness
 
-DeepSeek Harness 桌面版与网页版（`npx @deepseek-ai/dsh web`）共用同一个数据目录，两者任选其一登录即可。
+DeepSeek Harness 桌面版与本地 Web 版（`npx @deepseek-ai/dsh web`）共用同一个数据目录，两者任选其一登录即可。
 
 - **配额**：在 DeepSeek Harness 中登录了 DeepSeek 账户时，显示该账户的余额、赠送余额与累计消费金额，与 DeepSeek 开放平台网页显示的数字一致，均按整个账户计算。未登录账户时，使用在 DeepSeek Harness 模型页面保存的 API 密钥，只能显示余额与赠送余额。登录失效时，请在 DeepSeek Harness 中重新登录。
-- **Token 用量与费用**：读取本机的 DeepSeek Harness 会话记录，包含桌面版与网页版。费用按模型单价估算；单价表中没有的模型不计算费用，可以在设置中手动添加单价。
+- **Token 用量与费用**：读取本机的 DeepSeek Harness 会话记录，包含桌面版与本地 Web 版。费用按模型单价估算；单价表中没有的模型不计算费用，可以在设置中手动添加单价。
 
 ## 手动填写的来源
 
