@@ -2,7 +2,7 @@
 ; The other defines exist so scripts/Test-AppUpdate.ps1 can install an isolated copy under its own identity.
 ;
 ; Install:   install mode (current user / all users) -> folder -> Install -> finished page with
-;            "create desktop shortcut", "create Start menu shortcut" and "run BrimDeck".
+;            "create desktop shortcut" and "run BrimDeck". The Start menu shortcut is always created.
 ; Update:    the installed version is uninstalled first (keeping data), then the new one is installed.
 ; Uninstall: one dialog with an unchecked "delete user data" box -> uninstall -> "uninstalled" message.
 
@@ -104,7 +104,6 @@ cht.LanguageID=$0404
 ExitFirstTitle=请先退出 {#AppName}
 ExitFirstText={#AppName} 正在运行。请右键点击任务栏通知区域中的 {#AppName} 图标，选择“退出”，然后点击“重试”。
 DesktopShortcut=创建桌面快捷方式
-StartMenuShortcut=创建开始菜单快捷方式
 OldVersionNotRemoved=无法卸载已安装的旧版本 {#AppName}（代码 %1）。请在 Windows 设置的“应用”中卸载后，重新运行安装程序。
 UninstallTitle=卸载 {#AppName}
 UninstallQuestion=确定要卸载 {#AppName} 吗？
@@ -114,7 +113,6 @@ Uninstalled={#AppName} 已卸载。
 en.ExitFirstTitle=Quit {#AppName} first
 en.ExitFirstText={#AppName} is running. Right-click the {#AppName} icon in the notification area of the taskbar, choose "Exit", then click "Retry".
 en.DesktopShortcut=Create a desktop shortcut
-en.StartMenuShortcut=Create a Start menu shortcut
 en.OldVersionNotRemoved=The installed version of {#AppName} could not be uninstalled (code %1). Uninstall it from Apps in Windows Settings, then run Setup again.
 en.UninstallTitle=Uninstall {#AppName}
 en.UninstallQuestion=Do you want to uninstall {#AppName}?
@@ -125,8 +123,9 @@ en.Uninstalled={#AppName} was uninstalled.
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Both shortcuts are created during installation so the uninstaller tracks them. The finished page removes the
-; ones the user unchecks (FinishShortcuts).
+; Both shortcuts are created during installation so the uninstaller tracks and deletes them. The Start menu shortcut
+; (All apps, not pinned) is always kept, so an update also restores it; the finished page removes the desktop
+; shortcut when the user unchecks it (FinishShortcuts).
 [Icons]
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#MainExe}"; AppUserModelID: "{#AppUserModelId}"
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#MainExe}"; AppUserModelID: "{#AppUserModelId}"
@@ -137,8 +136,8 @@ Filename: "{app}\{#MainExe}"; Flags: nowait runasoriginaluser; Check: RelaunchRe
 
 [Code]
 var
-  DesktopShortcut, StartMenuShortcut: Boolean;
-  DesktopCheck, StartMenuCheck, LaunchCheck: TNewCheckBox;
+  DesktopShortcut: Boolean;
+  DesktopCheck, LaunchCheck: TNewCheckBox;
   DeleteUserData: Boolean;
 
 function HasParam(const Name: String): Boolean;
@@ -195,13 +194,12 @@ end;
 
 // ----- Setup -----
 
-// A first install defaults to a desktop shortcut and no Start menu shortcut. When a version is already installed,
-// PrepareToInstall replaces these with the shortcuts that exist at that moment.
+// A first install defaults to a desktop shortcut. When a version is already installed, PrepareToInstall replaces this
+// with whether the desktop shortcut exists at that moment.
 function InitializeSetup: Boolean;
 begin
   Result := EnsureAppClosed(WizardSilent);
   DesktopShortcut := True;
-  StartMenuShortcut := False;
 end;
 
 function AddCheck(const Caption: String; Checked: Boolean): TNewCheckBox;
@@ -215,7 +213,6 @@ end;
 procedure InitializeWizard;
 begin
   DesktopCheck := AddCheck(CustomMessage('DesktopShortcut'), DesktopShortcut);
-  StartMenuCheck := AddCheck(CustomMessage('StartMenuShortcut'), StartMenuShortcut);
   LaunchCheck := AddCheck(ExpandConstant('{cm:LaunchProgram,{#AppName}}'), True);
 end;
 
@@ -230,8 +227,7 @@ begin
   begin
     Top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(16);
     DesktopCheck.SetBounds(WizardForm.FinishedLabel.Left, Top, WizardForm.FinishedLabel.Width, ScaleY(22));
-    StartMenuCheck.SetBounds(WizardForm.FinishedLabel.Left, Top + ScaleY(28), WizardForm.FinishedLabel.Width, ScaleY(22));
-    LaunchCheck.SetBounds(WizardForm.FinishedLabel.Left, Top + ScaleY(56), WizardForm.FinishedLabel.Width, ScaleY(22));
+    LaunchCheck.SetBounds(WizardForm.FinishedLabel.Left, Top + ScaleY(28), WizardForm.FinishedLabel.Width, ScaleY(22));
   end;
 end;
 
@@ -284,15 +280,12 @@ begin
     Log('No installed version found.');
     Exit;
   end;
-  // The uninstaller below deletes both shortcuts, including ones the user has kept, so record which exist now and
-  // restore exactly those in FinishShortcuts. A shortcut the user deleted stays deleted.
+  // The uninstaller below deletes both shortcuts. The new installation creates them again; record whether the desktop
+  // shortcut exists now so FinishShortcuts keeps it only then. A deleted desktop shortcut stays deleted, while the Start
+  // menu shortcut is always restored.
   DesktopShortcut := FileExists(ExpandConstant('{autodesktop}\{#AppName}.lnk'));
-  StartMenuShortcut := FileExists(ExpandConstant('{autoprograms}\{#AppName}.lnk'));
   if not WizardSilent then
-  begin
     DesktopCheck.Checked := DesktopShortcut;
-    StartMenuCheck.Checked := StartMenuShortcut;
-  end;
   Uninstaller := QuotedPath(Uninstaller);
   if not FileExists(Uninstaller) then
   begin
@@ -315,21 +308,16 @@ begin
   end;
 end;
 
-// Keeps the checked shortcuts and starts BrimDeck when requested.
-// Silent installs (in-app updates) keep the shortcuts that existed before the update.
+// Keeps the desktop shortcut when checked and starts BrimDeck when requested. The Start menu shortcut always stays.
+// Silent installs (in-app updates) keep the desktop shortcut only if it existed before the update.
 procedure FinishShortcuts;
 var
   ResultCode: Integer;
 begin
   if not WizardSilent then
-  begin
     DesktopShortcut := DesktopCheck.Checked;
-    StartMenuShortcut := StartMenuCheck.Checked;
-  end;
   if not DesktopShortcut then
     DeleteFile(ExpandConstant('{autodesktop}\{#AppName}.lnk'));
-  if not StartMenuShortcut then
-    DeleteFile(ExpandConstant('{autoprograms}\{#AppName}.lnk'));
   if not WizardSilent and LaunchCheck.Checked then
     ExecAsOriginalUser(ExpandConstant('{app}\{#MainExe}'), '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
 end;
