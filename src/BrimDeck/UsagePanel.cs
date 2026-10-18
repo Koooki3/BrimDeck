@@ -52,6 +52,34 @@ public partial class MainWindow
 
     private static double ToolbarFor(double panelHeight) => panelHeight < 150 ? 28 : panelHeight >= 290 ? 40 : 36;
 
+    // Until a layout is fitted (or without one: no apps, model details) the header uses the inset the content will most likely get.
+    private PanelHeader UnfittedHeader(double panelHeight) =>
+        PanelHeader.For(ToolbarFor(panelHeight), _details ? (panelHeight < 170 ? 14 : 20) : EdgeInset + Layout.For(panelHeight < 150 ? Tier.Tiny : Tier.Default).ColumnPad);
+
+    // The header the usage page gives a page of this size with the current apps and data, as RenderUsage applies it. The music
+    // page takes its controls from it (PanelHeader.WithControlsOf), so they stay in place when the page changes.
+    private PanelHeader UsageHeader(double width, double height)
+    {
+        if (_details || !Settings.UsagePage || Settings.EnabledApps.Count == 0) return UnfittedHeader(height);
+        var columns = DashboardUsage.Columns(Settings, Snapshots);
+        if (columns.Count == 0) return UnfittedHeader(height);
+        var fit = FitColumns(columns, width, height);
+        return PanelHeader.For(fit.Layout.Toolbar, EdgeInset + fit.Layout.ColumnPad);
+    }
+
+    // The layout is fitted to everything the panel can show, not to the page on screen, so switching application pages or
+    // quota pages never changes column widths, sizes or spacing. Each page contains at most two quotas, regardless of the
+    // panel's height.
+    private (Layout Layout, bool Inline, bool Wide, int Count, double ColumnWidth, List<QuotaView> Views) FitColumns(IReadOnlyList<DashboardColumn> columns, double width, double height)
+    {
+        int pageSize = Math.Max(1, (int)((width - 40) / AppPresets.MinimumColumnWidth));
+        int count = Math.Min(columns.Count, pageSize);
+        double columnWidth = (width - EdgeInset * 2) / count;
+        var views = columns.Select(x => Quotas(x.Entry, x.Quota)).ToList();
+        var (layout, inline, wide) = Fit(count, views.Max(view => view.Slots), columnWidth, height);
+        return (layout, inline, wide, count, columnWidth, views);
+    }
+
     private static (Layout Layout, bool Inline, bool Wide) Fit(int count, int slots, double columnWidth, double panelHeight)
     {
         bool wide = count == 1 && columnWidth >= 480 && slots <= 2;
@@ -102,8 +130,7 @@ public partial class MainWindow
         ModelToolbar.Children.Clear(); UsageContent.Children.Clear();
         ApplicationPages.Children.Clear(); ApplicationPages.Visibility = Visibility.Collapsed;
         double panelHeight = ContentCanvas.Height;
-        // Until a layout is fitted (or without one: no apps, model details) the header uses the inset the content will most likely get.
-        ApplyHeader(PanelHeader.For(ToolbarFor(panelHeight), _details ? (panelHeight < 170 ? 14 : 20) : EdgeInset + Layout.For(panelHeight < 150 ? Tier.Tiny : Tier.Default).ColumnPad));
+        ApplyHeader(UnfittedHeader(panelHeight));
         ClockLabel.Visibility = _details ? Visibility.Collapsed : Visibility.Visible;
         ModelToolbar.Visibility = _details ? Visibility.Visible : Visibility.Collapsed;
 
@@ -181,15 +208,8 @@ public partial class MainWindow
             controls.Children.Add(PageButton("›", Loc.T("下一页应用", "Next apps"), 1));
             ApplicationPages.Children.Add(controls); ApplicationPages.Visibility = Visibility.Visible;
         }
-        // The layout is fitted to everything the panel can show, not to the page on screen, so switching application
-        // pages or quota pages never changes column widths, sizes or spacing. A short last page leaves its
-        // remaining columns empty.
-        int count = Math.Min(columns.Count, pageSize);
-        double columnWidth = (ContentCanvas.Width - EdgeInset * 2) / count;
-        // Each page contains at most two quotas, regardless of the panel's height.
-        var views = columns.Select(x => Quotas(x.Entry, x.Quota)).ToList();
-        int slots = views.Max(view => view.Slots);
-        var (layout, inline, wide) = Fit(count, slots, columnWidth, ContentCanvas.Height);
+        // See FitColumns. A short last page leaves its remaining columns empty.
+        var (layout, inline, wide, count, columnWidth, views) = FitColumns(columns, ContentCanvas.Width, ContentCanvas.Height);
         int first = _applicationPage * pageSize;
         columns = columns.Skip(first).Take(pageSize).ToList(); views = views.Skip(first).Take(pageSize).ToList();
         // The quotas start EdgeInset + ColumnPad from the panel edge; the header lines up with them.

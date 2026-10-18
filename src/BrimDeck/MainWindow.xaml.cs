@@ -157,7 +157,7 @@ public partial class MainWindow : Window
         UpdateCollapsedGeometry(bounds, work, scale);
         double usageWidth = Math.Max(240, Math.Min(Math.Max(Settings.Width, Settings.MinimumWidth), work.Width / scale - 24));
         double musicWidth = Math.Max(240, Math.Min(Settings.MusicWidth, work.Width / scale - 24));
-        _pageWidth = IsMusicPage ? musicWidth : usageWidth;
+        _pageWidth = IsMusicPage ? musicWidth : usageWidth; _usageWidth = usageWidth;
         // Keep the layered HWND large enough for either enabled page. Resizing it in separate
         // width/height/position steps presents intermediate surfaces; only Island should animate.
         bool bothPages = Settings.UsagePage && Settings.MusicPage;
@@ -165,10 +165,11 @@ public partial class MainWindow : Window
         Width = Math.Max(bothPages ? Math.Max(usageWidth, musicWidth) : _pageWidth, Collapsed.Surface.Width);
         double hostHeight = bothPages ? Math.Max(Settings.Height, Settings.MusicHeight) : IsMusicPage ? Settings.MusicHeight : Settings.Height;
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
-        // just above a lowered capsule; see CollapsedGeometry.PanelTop), so the window reaches the panel's bottom; it always holds the collapsed surface and its shadow, and never passes the
+        // just above a lowered capsule; see CollapsedGeometry.Panel), so the window reaches the panel's bottom; it always holds the collapsed surface and its shadow, and never passes the
         // bottom of the monitor. Its transparent parts let clicks through.
-        double panelTop = PanelTopFor(hostHeight);
-        double panelSpace = panelTop > 0 ? panelTop + hostHeight + 12 : Math.Min(hostHeight + 16, WorkDip.Bottom - 16);
+        var hostPanel = PanelFor(hostHeight);
+        double panelTop = hostPanel.Top;
+        double panelSpace = panelTop > 0 ? panelTop + hostPanel.HeaderExtra + hostHeight + 12 : Math.Min(hostHeight + 16, WorkDip.Bottom - 16);
         Height = Math.Max(1, Math.Min(MonitorBoundsDip.Height, Math.Max(Math.Max(140, panelSpace), Collapsed.Surface.Bottom + 24)));
         Place(bounds, scale);
         UpdateClock();
@@ -234,11 +235,23 @@ public partial class MainWindow : Window
         };
         return (-offsetMax, offsetMax, topMin, topMax, widthMin, widthMax);
     }
-    // Where an open panel of the given height starts, in DIPs from the top of the monitor; see CollapsedGeometry.PanelTop.
-    private double PanelTopFor(double pageHeight) => CollapsedGeometry.PanelTop(Collapsed, WorkDip, pageHeight, PanelBottom);
-    // The lowest bottom edge of a panel below a lowered capsule: the work area's bottom, and 12 DIPs above the monitor's bottom,
-    // which the window (at most the monitor's height) keeps below the panel.
-    private double PanelBottom => Math.Min(WorkDip.Bottom, MonitorBoundsDip.Height - 12);
+    // Where an open panel for a page of the given height starts, in DIPs from the top of the monitor, and the space a floating
+    // panel adds above its header; see CollapsedGeometry.Panel.
+    // The height a page that wants this height gets in the window. A panel hanging from the screen edge keeps 12 DIPs of the
+    // window below it. One that starts lower has no shadow to keep room for, so it may reach the bottom of the window, which
+    // can be the bottom of the monitor.
+    private double PageHeight(double wanted, PanelPlacement panel)
+    {
+        double height = Math.Max(0, Math.Min(wanted, Height - (panel.Top > 0 ? 0 : 12) - panel.Top - panel.HeaderExtra));
+        return panel.Top > 0 ? Math.Max(0, Math.Min(height, PanelBottom - panel.Top - panel.HeaderExtra)) : height;
+    }
+    // The usage page's height in the current window, while the music page is shown too.
+    private double UsagePageHeight => PageHeight(Settings.Height, PanelFor(Settings.Height));
+    private PanelPlacement PanelFor(double pageHeight) => CollapsedGeometry.Panel(Collapsed, WorkDip, pageHeight, PanelBottom);
+    // The lowest bottom edge of a panel below a lowered capsule: the work area's bottom, even when that is the monitor's bottom
+    // (no taskbar there), so a capsule pulled all the way down is still covered by its panel. The window may then end at the
+    // monitor's bottom with no room below the panel; SetExpanded does not reserve any for a panel that starts below the top.
+    private double PanelBottom => WorkDip.Bottom;
     // While open, the pointer is inside over the panel or over the collapsed surface's hover area, which can be wider than the
     // panel (a wide notch or capsule) or reach the screen edge above it.
     private bool InsideOpenPanel(Point screenPoint) => ScreenBounds(Island).Contains(screenPoint) || CompactHoverScreenRect().Contains(screenPoint);
@@ -352,11 +365,12 @@ public partial class MainWindow : Window
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
         double wantedHeight = IsMusicPage ? Settings.MusicHeight : Settings.Height;
-        double panelTop = PanelTopFor(wantedHeight);
-        double pageHeight = Math.Max(0, Math.Min(wantedHeight, Height - 12 - panelTop));
-        if (panelTop > 0) pageHeight = Math.Max(0, Math.Min(pageHeight, PanelBottom - panelTop));
+        var panel = PanelFor(wantedHeight);
+        double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
+        double pageHeight = PageHeight(wantedHeight, panel);
         double width = expanded ? _pageWidth : shape.Surface.Width;
-        double height = expanded ? pageHeight : shape.Surface.Height;
+        // A floating panel is taller than its page by headerExtra, the space above its header.
+        double height = expanded ? pageHeight + headerExtra : shape.Surface.Height;
         // Every compact style opens into the same panel, hanging from the screen edge or, below a lowered capsule, rounded all round.
         double panelRadius = PanelHeader.PanelRadius;
         var radius = expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)
@@ -368,6 +382,9 @@ public partial class MainWindow : Window
         ApplyCollapsedLayout();
         Island.BorderThickness = new Thickness(0);
         ExpandedContent.Height = pageHeight;
+        // The page and its header start headerExtra below the panel's top edge. The header row keeps its own height, so its
+        // controls keep their size tier. Collapsing keeps the offset the content had, so it fades out without moving.
+        if (expanded) ExpandedContent.Margin = new Thickness(0, headerExtra, 0, 0);
         // Lay out in device-independent pixels. Column typography adapts to its available space.
         ContentCanvas.Width = _pageWidth;
         ContentCanvas.Height = ExpandedContent.Height;
