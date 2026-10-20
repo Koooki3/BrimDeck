@@ -292,9 +292,9 @@ public partial class MainWindow : Window
     // The toolbar's fixed buttons are declared in XAML; their names follow the interface language.
     private void ApplyLanguage()
     {
-        System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 鐢ㄩ噺", "AI usage"));
-        System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("闊充箰", "Music"));
-        System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("璁剧疆", "Settings"));
+        System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
+        System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
+        System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
     public void Preview(bool enabled, bool expanded = true)
     { _preview = enabled; _previewExpanded = enabled && expanded; if (enabled) _pageSwitchHold.Stop(); ApplySettings(); SetExpanded(enabled && expanded, true); }
@@ -629,7 +629,7 @@ public sealed class CornerRadiusAnimation : AnimationTimeline
     }
 }
 
-// Cubic B茅zier easing with CSS semantics, so the surface follows the same curve as the approved mock-up.
+// Cubic Bézier easing with CSS semantics, so the surface follows the same curve as the approved mock-up.
 public sealed class BezierEase : EasingFunctionBase
 {
     private readonly double _x1, _y1, _x2, _y2;

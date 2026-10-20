@@ -75,6 +75,34 @@ internal static class DashboardUsageTests
         var snapshots = await service.RefreshAsync(settings);
         check("Mixed duplicate columns fetch both underlying sources only once", snapshots.Count == 2 && handler.Requests.Count == 2
             && handler.Requests.Distinct().Count() == 2 && snapshots.All(s => s.LiveQuota));
+
+        // WSL statistics join the local ones, and a WSL file system that does not answer in time only costs its own share.
+        string Line(string id, int input) => JsonSerializer.Serialize(new { timestamp = DateTimeOffset.Now.AddMinutes(-3), type = "assistant", message = new { id, model = "claude-sonnet-4-6", usage = new { input_tokens = input, output_tokens = 0 } } });
+        Directory.CreateDirectory(Path.Combine(locations.ClaudeHome, "projects"));
+        File.WriteAllLines(Path.Combine(locations.ClaudeHome, "projects", "local.jsonl"), [Line("local-message", 100)]);
+        var wslClaude = Path.Combine(directory, "wsl", ".claude"); Directory.CreateDirectory(Path.Combine(wslClaude, "projects"));
+        File.WriteAllLines(Path.Combine(wslClaude, "projects", "wsl.jsonl"), [Line("wsl-message", 20), Line("local-message", 100)]);
+        var wslSettings = settings.Copy(); wslSettings.IncludeWsl = true;
+        using (var wslService = new UsageService(new SourceDesktop(), locations, client, null, null, () => [new WslHome("Test", wslClaude, "")]))
+        {
+            var withWsl = (await wslService.RefreshAsync(wslSettings)).Single(s => s.Id == ProviderId.Claude);
+            check("WSL statistics are added to the local ones without counting a shared entry twice", withWsl.Entries.Sum(entry => entry.Total) == 120);
+            var withoutWsl = (await wslService.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Claude);
+            check("WSL statistics are left out while the option is off", withoutWsl.Entries.Sum(entry => entry.Total) == 100);
+        }
+        using var release = new ManualResetEventSlim();
+        using (var stuck = new UsageService(new SourceDesktop(), locations, client, null, null, () => { release.Wait(TimeSpan.FromSeconds(20)); return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromMilliseconds(1000)))
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var all = await stuck.RefreshAsync(wslSettings);
+            var claude = all.Single(s => s.Id == ProviderId.Claude);
+            check("A WSL read that does not answer is skipped and the other sources still refresh",
+                clock.Elapsed < TimeSpan.FromSeconds(5) && claude.Entries.Sum(entry => entry.Total) == 100 && !claude.UsageComplete && all.Single(s => s.Id == ProviderId.Codex).LiveQuota);
+            clock.Restart();
+            var again = (await stuck.RefreshAsync(wslSettings)).Single(s => s.Id == ProviderId.Claude);
+            check("A stuck WSL read is not waited for again every round", clock.Elapsed < TimeSpan.FromMilliseconds(700) && again.Entries.Sum(entry => entry.Total) == 100);
+            release.Set();
+        }
     }
 
     private sealed class SourceDesktop : IDesktopSources

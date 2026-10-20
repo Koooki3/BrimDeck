@@ -16,7 +16,7 @@ public interface IDesktopSources
     IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) => null;
 }
 
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null) : IDisposable
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -30,9 +30,15 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly DataLocations _locations = locations ?? DataLocations.Detect();
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.Now);
     private readonly LogReader _logs = new();
-    // WSL home folders are searched again every few minutes: listing them touches the distributions' file systems.
+    // WSL is read away from the refresh itself: its file system is reached over the network share, with synchronous calls that
+    // cannot be cancelled and that stall while a distribution starts, stops or hangs. A read that does not finish in time
+    // is skipped for that round, and no new one starts until it has ended.
+    private readonly Dictionary<ProviderId, LogReader> _wslLogs = new() { [ProviderId.Claude] = new(), [ProviderId.Codex] = new() };
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<ProviderId, WslRead> _wslReads = [];
+    private readonly object _wslGate = new();
+    // Home folders are searched again every few minutes: listing them touches the distributions' file systems.
     private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
-    private IReadOnlyList<string> _wslClaude = [], _wslCodex = [];
+    private bool _includeWsl;
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
     private readonly SemaphoreSlim _gate = new(1);
@@ -47,7 +53,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             // Each underlying source is read once, even when several columns reuse it.
             var required = settings.RequiredProviders;
-            UpdateWsl(settings.IncludeWsl);
+            _includeWsl = settings.IncludeWsl;
             // The Claude and Grok Bot account APIs are asked only for rows that read online; rows that do not share one local snapshot.
             bool claudeOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && app.QuotaOnline);
             bool claudeLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && ProviderCatalog.ReadsLocalQuota(app));
@@ -85,13 +91,48 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
     }
 
-    private void UpdateWsl(bool include)
+    private IReadOnlyList<WslHome> WslHomes(DateTimeOffset now)
     {
-        if (!include) { _wsl = null; _wslClaude = _wslCodex = []; return; }
-        var now = _clock();
-        if (_wsl is not { } found || now - found.Time > TimeSpan.FromMinutes(3) || now < found.Time) _wsl = found = (now, wsl is null ? WslLocations.Discover() : wsl());
-        _wslClaude = found.Homes.Where(home => home.Claude.Length > 0).Select(home => home.Claude).ToList();
-        _wslCodex = found.Homes.Where(home => home.Codex.Length > 0).Select(home => home.Codex).ToList();
+        lock (_wslGate)
+        {
+            if (_wsl is not { } found || now - found.Time > TimeSpan.FromMinutes(3) || now < found.Time) _wsl = found = (now, wsl is null ? WslLocations.Discover() : wsl());
+            return found.Homes;
+        }
+    }
+
+    private sealed class WslRead(Task<ProviderSnapshot?> task) { public readonly Task<ProviderSnapshot?> Task = task; public bool TimedOut; }
+
+    // Adds the token statistics found in WSL to the local ones. Entries seen on both sides count once.
+    private async Task AddWslAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTime start, CancellationToken ct)
+    {
+        var id = snapshot.Id;
+        void Skipped() { snapshot.UsageNote += Loc.T(" · WSL 读取超时，本轮仅显示本机数据", " · Reading WSL timed out; this round shows this PC only"); snapshot.UsageComplete = false; }
+        var read = _wslReads.GetOrAdd(id, _ => new(Task.FromResult<ProviderSnapshot?>(null)));
+        // A read that already ran out of time and is still stuck is not waited for again: every round would cost the full wait.
+        if (read.TimedOut && !read.Task.IsCompleted) { Skipped(); return; }
+        if (read.Task.IsCompleted)
+            _wslReads[id] = read = new(Task.Run(() =>
+            {
+                var roots = WslHomes(now).Select(home => id == ProviderId.Codex ? home.Codex : home.Claude).Where(root => root.Length > 0).ToList();
+                return roots.Count == 0 ? null : _wslLogs[id].Read(id, roots, now, start, "WSL");
+            }, CancellationToken.None));
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var finished = await Task.WhenAny(read.Task, Task.Delay(wslTimeout ?? TimeSpan.FromSeconds(8), wait.Token));
+        wait.Cancel();
+        ct.ThrowIfCancellationRequested();
+        if (finished != read.Task) { read.TimedOut = true; Skipped(); return; }
+        ProviderSnapshot? result;
+        try { result = await read.Task; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { snapshot.UsageComplete = false; return; }
+        if (result is null) return;
+        bool localAvailable = snapshot.UsageAvailable;
+        var merged = new Dictionary<string, TokenEntry>();
+        foreach (var entry in snapshot.Entries.Concat(result.Entries))
+            if (!merged.TryGetValue(entry.Key, out var old) || entry.Total >= old.Total) merged[entry.Key] = entry;
+        snapshot.Entries = merged.Values.OrderBy(entry => entry.Time).ToList();
+        snapshot.UsageAvailable |= result.UsageAvailable;
+        snapshot.UsageComplete &= result.UsageComplete;
+        if (result.UsageAvailable) snapshot.UsageNote = (localAvailable ? snapshot.UsageNote + " · " : "") + result.UsageNote;
     }
 
     private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct)
@@ -100,8 +141,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         // The reader owns a cache and is accessed serially before the first asynchronous request.
         var snapshot = id is ProviderId.Claude or ProviderId.Codex
-            ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime, id == ProviderId.Codex ? _wslCodex : _wslClaude) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
+            ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         if (id == ProviderId.Claude) ReadClaudeProfile(snapshot);
+        if (_includeWsl && id is ProviderId.Claude or ProviderId.Codex) await AddWslAsync(snapshot, now, start.LocalDateTime, ct);
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
         if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
@@ -208,12 +250,15 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         Exception? failure = null;
         Exception? lastFailure = null;
         ClaudeCredential? login = null;
+        Task<string>? loginPlan = null;
         async Task<bool> TryCredential(ClaudeCredential credential)
         {
             ct.ThrowIfCancellationRequested();
             lastFailure = null;
             if (string.IsNullOrWhiteSpace(credential.Token) || !attempted.Add(credential.Token)) return false;
             login = credential;
+            // The plan is asked at the same time as the quota, so a slow or unreachable network costs one wait, not two.
+            var planRequest = loginPlan = ReadClaudePlanAsync(credential.Token, ct);
             try
             {
                 using var request = Bearer(HttpMethod.Get, "https://api.anthropic.com/api/oauth/usage", credential.Token);
@@ -223,7 +268,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 if (quotas.Count == 0) throw new InvalidDataException();
                 // Publish only a complete successful result, all from the same login.
                 snapshot.Quotas = quotas;
-                var live = await ReadClaudePlanAsync(credential.Token, ct);
+                var live = await planRequest;
                 if (live.Length > 0) { snapshot.Plan = live; snapshot.PlanSource = Loc.T("Claude 账户", "Claude account"); }
                 else
                 {
@@ -287,7 +332,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     // account endpoint, which a rate-limited quota request does not block, and otherwise taken from the local records.
                     if (login is not null)
                     {
-                        var live = await ReadClaudePlanAsync(login.Token, ct);
+                        var live = loginPlan is null ? "" : await loginPlan;
                         var plan = live.Length > 0 ? live : PlanParser.ReconcileClaude(login.Plan, snapshot.Plan);
                         var source = live.Length > 0 ? Loc.T("Claude 账户", "Claude account")
                             : plan == snapshot.Plan && snapshot.PlanSource.Length > 0 ? snapshot.PlanSource : login.Source + Loc.T(" 登录记录", " sign-in record");

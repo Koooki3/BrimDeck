@@ -555,7 +555,7 @@ public sealed partial class SettingsWindow : Window
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
                     s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=defaults.ClockGradient;s.Clock24Hour=defaults.Clock24Hour;CopyCollapsedSize(s,defaults);s.HideHotkey=defaults.HideHotkey;break;
                 case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;break;
-                case 3:s.QuotaAlerts=defaults.QuotaAlerts;s.Apps=defaults.Apps;break;
+                case 3:s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;break;
                 case 5:s.MusicText=defaults.MusicText;s.MusicCoverColor=defaults.MusicCoverColor;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;break;
             }

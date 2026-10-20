@@ -527,8 +527,8 @@ try
     var wslHomes = WslLocations.Homes("Test", wslRoot);
     Check("WSL homes list only users with Claude or Codex records", wslHomes.Count == 1 && wslHomes[0].Claude == wslClaude && wslHomes[0].Codex.EndsWith(".codex"));
     File.WriteAllLines(Path.Combine(wslClaude, "projects", "wsl.jsonl"), [JsonSerializer.Serialize(new { timestamp = now.AddMinutes(-2), type = "assistant", message = new { id = "wsl-message", model = "claude-sonnet-4-6", usage = new { input_tokens = 7, output_tokens = 3 } } })]);
-    var withWsl = logs.Read(ProviderId.Claude, claudeRoot, now, null, [wslHomes[0].Claude]);
-    Check("WSL records are counted beside this PC's", withWsl.Entries.Count == 2 && withWsl.Entries.Sum(x => x.Total) == claude.Entries.Sum(x => x.Total) + 10);
+    var withWsl = logs.Read(ProviderId.Claude, [wslHomes[0].Claude], now, null, "WSL");
+    Check("WSL records are read from their own folders", withWsl.Entries.Count == 1 && withWsl.Entries.Single().Total == 10 && withWsl.UsageNote.StartsWith("WSL"));
     Check("WSL records are left out unless asked for", logs.Read(ProviderId.Claude, claudeRoot, now).Entries.Count == 1);
     // The parsed Claude entry: input 100, cache read 200, cache write 20, one-hour cache write 10, output 40.
     using (var claudePricing = new Pricing(Path.Combine(root, "claude-prices")))
