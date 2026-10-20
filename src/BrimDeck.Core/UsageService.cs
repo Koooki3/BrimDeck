@@ -283,8 +283,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             {
                 if (Freshest(now) is { } local)
                 {
-                    // The plan comes from the login record and stays known while the interface is unavailable.
-                    if (local.Plan.Length == 0 && login is { Plan.Length: > 0 }) _claudeRetained = local = local with { Plan = login.Plan, PlanSource = login.Source + Loc.T(" 登录记录", " sign-in record") };
+                    // The plan stays known while the quota interface is unavailable (rate limited, for one): it is asked from the
+                    // account endpoint, which a rate-limited quota request does not block, and otherwise taken from the local records.
+                    if (login is not null)
+                    {
+                        var live = await ReadClaudePlanAsync(login.Token, ct);
+                        var plan = live.Length > 0 ? live : PlanParser.ReconcileClaude(login.Plan, snapshot.Plan);
+                        var source = live.Length > 0 ? Loc.T("Claude 账户", "Claude account")
+                            : plan == snapshot.Plan && snapshot.PlanSource.Length > 0 ? snapshot.PlanSource : login.Source + Loc.T(" 登录记录", " sign-in record");
+                        if (plan.Length > 0) _claudeRetained = local = local with { Plan = plan, PlanSource = source };
+                    }
                     Retain(snapshot, local, failure, now); return;
                 }
             }

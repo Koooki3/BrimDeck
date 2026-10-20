@@ -242,6 +242,10 @@ try
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
         Check("Transient failure keeps the last account quotas with their time", result.LiveQuota && result.Quotas.Count == 2 && result.QuotaTime == previousTime && quotaHandler.Requests.Count == 2);
+        quotaHandler.Profile = """{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_20x"}}""";
+        result = (await Refresh(onlyClaude)).Single();
+        Check("Plan follows the account endpoint while the quota request fails", result.Quotas.Count == 2 && result.Plan == "Max 20x");
+        quotaHandler.Profile = null; quotaHandler.Requests.Clear();
         var polled = true;
         for (int cycle = 1; cycle <= 4; cycle++)
         {
