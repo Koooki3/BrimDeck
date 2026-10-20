@@ -178,13 +178,29 @@ public partial class MainWindow : Window
         Place(bounds, scale);
         UpdateClock();
         RenderCompact();
+        // Hiding and showing (a full-screen rule) fades the panel in step with the other animations
+        // when a context change asks for it; every other change stays immediate.
+        int fade = animatePage && wasVisible && !_preview && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
         if (IsSuppressed)
         {
-            _hover.Stop(); _leave.Stop(); _pointerInside = false; SetExpanded(false, true); Hide();
+            _hover.Stop(); _leave.Stop(); _pointerInside = false;
+            if (fade > 0 && IsVisible)
+            {
+                SetExpanded(false);
+                var away = new DoubleAnimation(0, TimeSpan.FromMilliseconds(fade * .7)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+                away.Completed += (_, _) => { if (IsSuppressed) { BeginAnimation(OpacityProperty, null); Opacity = 1; Hide(); } };
+                BeginAnimation(OpacityProperty, away, HandoffBehavior.SnapshotAndReplace);
+            }
+            else { SetExpanded(false, true); BeginAnimation(OpacityProperty, null); Opacity = 1; Hide(); }
         }
         else
         {
+            bool appearing = !IsVisible && animatePage && !_preview && Settings.Animations && SystemParameters.ClientAreaAnimation && Settings.AnimationDuration > 0;
+            if (appearing) { BeginAnimation(OpacityProperty, null); Opacity = 0; }
             if (!IsVisible) Show();
+            if (appearing || Opacity < 1 && animatePage)
+                BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(Settings.AnimationDuration * .7)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } }, HandoffBehavior.SnapshotAndReplace);
+            else { BeginAnimation(OpacityProperty, null); Opacity = 1; }
             SetExpanded(_expanded, !animatePage || !wasVisible);
         }
         UpdatePointerTracking();
@@ -276,9 +292,9 @@ public partial class MainWindow : Window
     // The toolbar's fixed buttons are declared in XAML; their names follow the interface language.
     private void ApplyLanguage()
     {
-        System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
-        System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
-        System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
+        System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 鐢ㄩ噺", "AI usage"));
+        System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("闊充箰", "Music"));
+        System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("璁剧疆", "Settings"));
     }
     public void Preview(bool enabled, bool expanded = true)
     { _preview = enabled; _previewExpanded = enabled && expanded; if (enabled) _pageSwitchHold.Stop(); ApplySettings(); SetExpanded(enabled && expanded, true); }
@@ -613,7 +629,7 @@ public sealed class CornerRadiusAnimation : AnimationTimeline
     }
 }
 
-// Cubic Bézier easing with CSS semantics, so the surface follows the same curve as the approved mock-up.
+// Cubic B茅zier easing with CSS semantics, so the surface follows the same curve as the approved mock-up.
 public sealed class BezierEase : EasingFunctionBase
 {
     private readonly double _x1, _y1, _x2, _y2;
