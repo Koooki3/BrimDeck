@@ -30,12 +30,14 @@ internal sealed class ClockFace : FrameworkElement
     // One color fills the face; more are spread evenly across it from left to right.
     public ClockFace(ClockStyle style, bool h24, Color[] colors, DateTime time, double scale = 1)
     {
-        _style = style; _h24 = h24; _colors = colors.Length > 0 ? colors : [White]; _time = time;
+        _style = style; _h24 = h24; _colors = colors.Length > 0 ? colors : [ThemeWhite]; _time = time;
         _scale = CompactMusicLayout.SafeScale(scale);
         Height = FaceHeight * _scale; IsHitTestVisible = false;
         var glow = _colors[_colors.Length / 2];
-        if (style == ClockStyle.Neon) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = 9 * _scale, Opacity = .85 };
-        else if (style == ClockStyle.Segment) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = 5 * _scale, Opacity = .6 };
+        // A glow lights up a dark surface; on a light one it only smears the digits, so it stays a faint halo there.
+        bool dark = PanelTheme.Current.IsDark;
+        if (style == ClockStyle.Neon) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = (dark ? 9 : 4) * _scale, Opacity = dark ? .85 : .3 };
+        else if (style == ClockStyle.Segment) Effect = new DropShadowEffect { Color = glow, ShadowDepth = 0, BlurRadius = (dark ? 5 : 3) * _scale, Opacity = dark ? .6 : .2 };
     }
 
     public static string Title(ClockStyle style) => style switch
@@ -44,19 +46,18 @@ internal sealed class ClockFace : FrameworkElement
         ClockStyle.Segment => Loc.T("数码管", "Seven segment"), ClockStyle.Neon => Loc.T("霓虹", "Neon"), ClockStyle.Serif => Loc.T("衬线", "Serif"),
         ClockStyle.Wide => Loc.T("宽体", "Wide"), ClockStyle.Condensed => Loc.T("窄体", "Condensed"), _ => Loc.T("简约", "Simple")
     };
-    // The cover color is used when a song with a cover is playing; otherwise the clock is white.
-    public static Color[] Palette(DeckSettings settings, Color? cover) => settings.ClockColor switch
+    // The cover color is used when a song with a cover is playing; otherwise the clock takes the theme's clock color, which
+    // "white" stands for. Every color is drawn as the theme can read it on its surface (see PanelTheme.Readable).
+    public static Color[] Palette(DeckSettings settings, Color? cover) => (settings.ClockColor switch
     {
         ClockColor.Gradient => settings.ClockGradient.Select(Parse).ToArray(),
         ClockColor.Custom => [Parse(settings.ClockCustomColor)],
-        ClockColor.Cover => [cover ?? White],
+        ClockColor.Cover => [cover ?? ThemeWhite],
         var preset => [Preset(preset)]
-    };
-    public static Color Preset(ClockColor color) => color switch
-    {
-        ClockColor.Amber => Color.FromRgb(0xFF, 0x9F, 0x43), ClockColor.Cyan => Color.FromRgb(0x5C, 0xE1, 0xE6),
-        ClockColor.Pink => Color.FromRgb(0xFF, 0x8F, 0xB1), ClockColor.Lime => Color.FromRgb(0xE4, 0xFF, 0x6A), _ => White
-    };
+    }).Select(color => PanelTheme.Readable(color, PanelThemes.TextContrast)).ToArray();
+    private static Color ThemeWhite => PanelTheme.ColorOf("clock");
+    // Amber, cyan, pink and lime are the panel theme's own versions of those colors; "white" is the theme's clock color.
+    public static Color Preset(ClockColor color) => PanelTheme.ToColor(PanelTheme.Current.ClockPreset(color));
     public static Color Parse(string color) => (Color)ColorConverter.ConvertFromString(color);
     // A swatch for colors at evenly spaced stops; the diagonal shows every stop on a round swatch.
     public static Brush Fill(IReadOnlyList<Color> colors, bool diagonal = true)

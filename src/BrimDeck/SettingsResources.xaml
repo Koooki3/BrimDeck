@@ -173,12 +173,12 @@
   <Style x:Key="SettingsTileFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
     <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1.5" CornerRadius="13" Margin="-3"/>
   </ControlTemplate></Setter.Value></Setter></Style>
-  <!-- A clock style: the face on the black of the collapsed surface, with a check at the top right once chosen. -->
+  <!-- A clock style: the face on the panel theme's surface, with a check at the top right once chosen. -->
   <Style x:Key="SettingsClockTile" TargetType="RadioButton">
     <Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource SettingsTileFocus}"/>
     <Setter Property="Height" Value="72"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-      <Border x:Name="Chrome" CornerRadius="10" Background="#111114" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="2">
+      <Border x:Name="Chrome" CornerRadius="10" Background="{DynamicResource PanelSurface}" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="2">
         <Grid>
           <ContentPresenter x:Name="Preview" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           <Border x:Name="Selection" Width="16" Height="16" CornerRadius="8" Background="{DynamicResource SettingsAccent}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0" Visibility="Hidden">

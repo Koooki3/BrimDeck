@@ -7,6 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Built-in panel themes and the custom-theme template; see PanelThemes. -->
+    <!-- Fixed resource names: a built-in theme's id is its file name (PanelThemes.BuiltInIndex). -->
+    <EmbeddedResource Include="Themes\*.json" LogicalName="BrimDeck.Core.Themes.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Templates\theme-template.json" LogicalName="BrimDeck.Core.Templates.theme-template.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Jint" Version="4.16.3" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>

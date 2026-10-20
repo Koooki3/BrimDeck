@@ -15,17 +15,23 @@ internal static class UI
     // The panel sets Latin text and digits in Segoe UI Variable and falls back to YaHei for Chinese.
     public static readonly FontFamily PanelFont = new("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
     public static readonly FontFamily DisplayFont = new("Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI");
-    public const string Accent = "#0A84FF";
-    // Text and structure on the pure black surface: three label levels by opacity, hairlines by opacity.
-    public const string Primary = "#F5F5F7", Secondary = "#9EEBEBF5", Tertiary = "#61EBEBF5";
-    public const string Hairline = "#17FFFFFF", Track = "#1FFFFFFF", Fill = "#12FFFFFF", FillSelected = "#24FFFFFF", Outline = "#24FFFFFF";
+    // Text and structure on the panel's surface, from the panel theme (see PanelTheme): three label levels, hairlines and fills.
+    public static string Accent => PanelTheme.Hex("accent");
+    public static string Primary => PanelTheme.Hex("textPrimary");
+    public static string Secondary => PanelTheme.Hex("textSecondary");
+    public static string Tertiary => PanelTheme.Hex("textTertiary");
+    public static string Hairline => PanelTheme.Hex("hairline");
+    public static string Track => PanelTheme.Hex("track");
+    public static string Fill => PanelTheme.Hex("fill");
+    public static string FillSelected => PanelTheme.Hex("fillSelected");
+    public static string Outline => PanelTheme.Hex("outline");
     // Panels are rebuilt on every refresh with hundreds of brushes; one frozen brush per color is shared instead.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Brush> Brushes = new(StringComparer.OrdinalIgnoreCase);
     public static Brush Brush(string color) => Brushes.GetOrAdd(color, static text =>
     {
         var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(text)); brush.Freeze(); return brush;
     });
-    public static string ColorFor(ProviderId id) => AppPresets.ThemeColor(id);
+    public static string ColorFor(ProviderId id) => PanelTheme.DefaultAppColor(id);
     public static TextBlock Text(string text, double size = 13, string color = "#E6E8EF", FontWeight? weight = null)
         => new() { Text = text, FontFamily = TextFont, FontSize = size, Foreground = Brush(color), FontWeight = weight ?? FontWeights.Normal, TextWrapping = TextWrapping.Wrap };
     public static TextBlock Line(string text, double size = 13, string color = "#E6E6E9", FontWeight? weight = null)
@@ -75,10 +81,10 @@ internal static class UI
         return button;
     }
     // A progress ring: a faint track with a colored arc that starts at the top and runs counterclockwise.
-    public static Grid Ring(double percent, string color, double size, double thickness)
+    public static Grid Ring(double percent, string color, double size, double thickness, string? track = null)
     {
         var ring = new Grid { Width = size, Height = size };
-        ring.Children.Add(new Ellipse { Stroke = Brush("#29FFFFFF"), StrokeThickness = thickness });
+        ring.Children.Add(new Ellipse { Stroke = Brush(track ?? PanelTheme.Hex("ringTrack")), StrokeThickness = thickness });
         double fraction = Math.Clamp(percent / 100, 0, 1);
         if (fraction >= .999) ring.Children.Add(new Ellipse { Stroke = Brush(color), StrokeThickness = thickness });
         else if (fraction > 0)

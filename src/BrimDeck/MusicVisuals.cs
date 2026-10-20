@@ -34,16 +34,19 @@ internal static class MusicVisuals
     }
     internal static Border Cover(BitmapSource? image, double size, double radius, bool outlined = false)
     {
-        var content = new Grid { Background = UI.Brush("#0FFFFFFF") };
+        var content = new Grid { Background = UI.Brush(PanelTheme.Hex("coverPlaceholder")) };
         if (image is not null) content.Children.Add(new Image { Source = image, Stretch = Stretch.UniformToFill });
         else content.Children.Add(Icon("music", size * .34));
-        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush("#14FFFFFF"), StrokeThickness = 1, RadiusX = radius, RadiusY = radius, Margin = new Thickness(.5), IsHitTestVisible = false });
+        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush(PanelTheme.Hex("coverOutline")), StrokeThickness = 1, RadiusX = radius, RadiusY = radius, Margin = new Thickness(.5), IsHitTestVisible = false });
         content.Clip = new RectangleGeometry(new Rect(0, 0, size, size), radius, radius);
         return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(radius), Child = content };
     }
-    internal static Brush Accent(BitmapSource? source)
+    // The color taken from the cover, or the theme's equalizer color when there is no cover or it gives none.
+    internal static Brush Accent(BitmapSource? source) => Accent(source, out _);
+    internal static Brush Accent(BitmapSource? source, out Color? cover)
     {
-        if (source is null) return UI.Brush("#9EFFFFFF");
+        cover = null;
+        if (source is null) return UI.Brush(PanelTheme.Hex("equalizer"));
         try
         {
             var scaled = new TransformedBitmap(source, new ScaleTransform(16d / source.PixelWidth, 16d / source.PixelHeight));
@@ -57,21 +60,23 @@ internal static class MusicVisuals
                 double w = Math.Max(.12, (max - min) / 255d) * pixels[i + 3] / 255d;
                 b += pixels[i] * w; g += pixels[i + 1] * w; r += pixels[i + 2] * w; weight += w;
             }
-            if (weight == 0) return UI.Brush("#9EFFFFFF");
+            if (weight == 0) return UI.Brush(PanelTheme.Hex("equalizer"));
             r /= weight * 255; g /= weight * 255; b /= weight * 255;
             double maxChannel = Math.Max(r, Math.Max(g, b)), minChannel = Math.Min(r, Math.Min(g, b));
             double light = (maxChannel + minChannel) / 2, delta = maxChannel - minChannel;
             double saturation = delta == 0 ? 0 : delta / (1 - Math.Abs(2 * light - 1));
             double hue = delta == 0 ? 0 : maxChannel == r ? ((g - b) / delta + (g < b ? 6 : 0)) / 6
                 : maxChannel == g ? ((b - r) / delta + 2) / 6 : ((r - g) / delta + 4) / 6;
-            saturation = Math.Max(.35, saturation); light = Math.Clamp(light, .62, .78);
+            bool dark = PanelTheme.Current.IsDark;
+            saturation = Math.Max(.35, saturation); light = dark ? Math.Clamp(light, .62, .78) : Math.Clamp(light, .30, .42);
             double chroma = (1 - Math.Abs(2 * light - 1)) * saturation, x = chroma * (1 - Math.Abs(hue * 6 % 2 - 1)), m = light - chroma / 2;
             (r, g, b) = (hue * 6) switch
             { < 1 => (chroma, x, 0d), < 2 => (x, chroma, 0d), < 3 => (0d, chroma, x), < 4 => (0d, x, chroma), < 5 => (x, 0d, chroma), _ => (chroma, 0d, x) };
             r += m; g += m; b += m;
-            return new SolidColorBrush(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255)));
+            var accent = PanelTheme.Readable(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255)));
+            var brush = new SolidColorBrush(accent); brush.Freeze(); cover = accent; return brush;
         }
-        catch (Exception) { return UI.Brush("#9EFFFFFF"); }
+        catch (Exception) { return UI.Brush(PanelTheme.Hex("equalizer")); }
     }
     // Coordinates from the element's own width. A relative brush spans everything the element draws,
     // including rings scrolled out of view, so its fades would follow the content instead of the edges.
@@ -171,6 +176,8 @@ internal sealed class MusicMarquee : FrameworkElement
     // Width of the edge fade, and the scroll speed in DIP per second.
     internal const double Edge = 6, Speed = 24;
     private readonly TranslateTransform _shift = new();
+    // The ink fade's brush moves against the text, so its fades stay at the element's edges while the text glides.
+    private readonly TranslateTransform _unshift = new();
     // An edge fades only while text is hidden beyond it: none on the left before the text moves,
     // none on the right once its end is in view. The first and last characters rest unfaded.
     private readonly GradientStop _left = new(Colors.White, 0), _right = new(Colors.White, 1);
@@ -218,6 +225,22 @@ internal sealed class MusicMarquee : FrameworkElement
         }
     }
     private readonly Color? _backdrop;
+    // Over a surface with a gradient or scan lines no single color can paint the fades, so the text itself fades: its brush is
+    // the foreground with transparent ends. The text is still drawn by the child, with no opacity mask and no intermediate
+    // layer, which a mask would need on every frame of the scroll.
+    private readonly bool _inkFade;
+    public bool InkFade
+    {
+        get => _inkFade;
+        init
+        {
+            if (!value || _glyphs is not null) return;
+            _inkFade = true;
+            _glyphs = new Glyphs(this); RenderOptions.SetClearTypeHint(_glyphs, ClearTypeHint.Enabled);
+            AddVisualChild(_glyphs); ClipToBounds = true;
+        }
+    }
+    private Brush? _ink;
     private readonly Glyphs? _glyphs;
     private Brush? _fade;
     private UIElement Painter => _glyphs ?? (UIElement)this;
@@ -230,7 +253,7 @@ internal sealed class MusicMarquee : FrameworkElement
     protected override Size MeasureOverride(Size availableSize) { _glyphs?.Measure(availableSize); return default; }
     protected override Size ArrangeOverride(Size finalSize) { _glyphs?.Arrange(new Rect(finalSize)); return finalSize; }
     private FormattedText Formatted => _formatted ??= new(Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-        Typeface, FontSize, Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        Typeface, FontSize, _ink ?? Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
     public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
     private void ResetText() { _formatted = null; ResetAnimation(); Painter.InvalidateVisual(); }
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
@@ -240,6 +263,7 @@ internal sealed class MusicMarquee : FrameworkElement
     {
         _scroll?.Controller?.Remove(); _scroll = null; _running = false;
         _shift.ApplyAnimationClock(TranslateTransform.XProperty, null); _shift.X = 0;
+        _unshift.ApplyAnimationClock(TranslateTransform.XProperty, null); _unshift.X = 0;
         _left.ApplyAnimationClock(GradientStop.OffsetProperty, null); _left.Offset = 0;
         _right.ApplyAnimationClock(GradientStop.OffsetProperty, null); _right.Offset = 1 - EdgeStop;
     }
@@ -262,12 +286,15 @@ internal sealed class MusicMarquee : FrameworkElement
                 new LinearDoubleKeyFrame(edge, At(1.5 + ramp)), new DiscreteDoubleKeyFrame(edge, At(3 + travel))));
             cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(1 - edge, At(0)), new DiscreteDoubleKeyFrame(1 - edge, At(1.5 + travel - ramp)),
                 new LinearDoubleKeyFrame(1, At(1.5 + travel)), new DiscreteDoubleKeyFrame(1, At(3 + travel))));
+            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new DiscreteDoubleKeyFrame(0, At(1.5)),
+                new LinearDoubleKeyFrame(_overflow, At(1.5 + travel)), new DiscreteDoubleKeyFrame(_overflow, At(3 + travel))));
             // Animate the retained drawing at WPF's render cadence. A background
             // DispatcherTimer can be delayed by input and must not drive text motion.
             _scroll = (ClockGroup)cycle.CreateClock(true);
             _shift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_scroll.Children[0]);
             _left.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_scroll.Children[1]);
             _right.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_scroll.Children[2]);
+            _unshift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_scroll.Children[3]);
             _running = true;
         }
         if (_scroll is not null && _running != running)
@@ -295,11 +322,24 @@ internal sealed class MusicMarquee : FrameworkElement
         if (_fadeWidth != fadeWidth)
         {
             _fadeWidth = fadeWidth;
-            // Coordinates from this element's own width, like MusicVisuals.Fade.
-            var edge = _backdrop ?? Colors.Transparent;
-            var fade = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(edge, 0), _left, _right, new(edge, 1) },
-                new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute } : null;
-            if (_glyphs is null) OpacityMask = fade; else _fade = fade;
+            if (_inkFade)
+            {
+                // The text's own brush fades at the ends (see InkFade).
+                var ink = (Foreground as SolidColorBrush)?.Color ?? Colors.White;
+                _left.Color = _right.Color = ink;
+                var clear = Color.FromArgb(0, ink.R, ink.G, ink.B);
+                _ink = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(clear, 0), _left, _right, new(clear, 1) },
+                    new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute, Transform = _unshift } : null;
+                _formatted = null; text = Formatted;
+            }
+            else
+            {
+                // Coordinates from this element's own width, like MusicVisuals.Fade.
+                var edge = _backdrop ?? Colors.Transparent;
+                var fade = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(edge, 0), _left, _right, new(edge, 1) },
+                    new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute } : null;
+                if (_glyphs is null) OpacityMask = fade; else _fade = fade;
+            }
         }
         if (_overflow != overflow) { _overflow = overflow; ResetAnimation(); }
         // Cover the whole box, as the carousel's background does, so the mask layer's edge is not the text's edge.

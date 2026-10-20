@@ -61,6 +61,8 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 - By default it turns into the Indicator when a window is maximized, and hides during full-screen games or video so it never opens by accident.
 
+- The Notch, Capsule, notices and the expanded panel follow a panel theme: System, Dark or Light, built-in open-source themes such as One Dark Pro, GitHub, Dracula and Night Owl, or a custom theme made with the [theme guide](docs/en-US/themes.md). Text and figures stay readable in every theme.
+
 ### AI usage
 
 <img src="docs/en-US/images/usage.png" width="100%" alt="AI usage page: quotas of Claude, Codex, Cursor and Antigravity in four columns">

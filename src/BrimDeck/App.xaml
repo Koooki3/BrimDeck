@@ -1,6 +1,33 @@
 <Application x:Class="BrimDeck.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" ShutdownMode="OnExplicitShutdown">
   <Application.Resources>
+    <ResourceDictionary>
+    <ResourceDictionary.MergedDictionaries>
+      <!-- The panel theme's colors, the dark theme's until PanelTheme publishes the theme in use: it replaces this whole dictionary,
+           and panel styles refer to these brushes with DynamicResource. Panel brushes defined directly below would never change. -->
+      <ResourceDictionary>
+        <SolidColorBrush x:Key="PanelSurface" Color="#000000"/>
+        <SolidColorBrush x:Key="PanelPrimary" Color="#F5F5F7"/>
+        <SolidColorBrush x:Key="PanelSecondary" Color="#9EEBEBF5"/>
+        <SolidColorBrush x:Key="PanelTertiary" Color="#61EBEBF5"/>
+        <SolidColorBrush x:Key="PanelAccent" Color="#0A84FF"/>
+        <SolidColorBrush x:Key="PanelTrack" Color="#1FFFFFFF"/>
+        <SolidColorBrush x:Key="PanelRingTrack" Color="#29FFFFFF"/>
+        <SolidColorBrush x:Key="PanelFill" Color="#12FFFFFF"/>
+        <SolidColorBrush x:Key="PanelFillSelected" Color="#24FFFFFF"/>
+        <SolidColorBrush x:Key="PanelHover" Color="#18FFFFFF"/>
+        <SolidColorBrush x:Key="PanelPressed" Color="#24FFFFFF"/>
+        <SolidColorBrush x:Key="PanelPopup" Color="#1A1A1D"/>
+        <SolidColorBrush x:Key="PanelPopupBorder" Color="#24FFFFFF"/>
+        <SolidColorBrush x:Key="PanelScrollThumb" Color="#515665"/>
+        <SolidColorBrush x:Key="PanelSwitchFill" Color="#0FFFFFFF"/>
+        <SolidColorBrush x:Key="PanelSeekRail" Color="#2EFFFFFF"/>
+        <SolidColorBrush x:Key="PanelToolTip" Color="#1F1F23"/>
+        <SolidColorBrush x:Key="PanelToolTipBorder" Color="#38FFFFFF"/>
+        <SolidColorBrush x:Key="PanelBubble" Color="#2A2A2E"/>
+        <SolidColorBrush x:Key="PanelBubbleBorder" Color="#1AFFFFFF"/>
+      </ResourceDictionary>
+    </ResourceDictionary.MergedDictionaries>
     <FontFamily x:Key="AppTextFont">Microsoft YaHei</FontFamily>
     <SolidColorBrush x:Key="BackgroundBrush" Color="#141416"/>
     <Style TargetType="Window">
@@ -13,19 +40,19 @@
     <!-- Keyboard focus on the panel and its pop-ups: the music controls' blue, drawn on the control's own edge
          so the island's rounded clip never cuts it. WPF shows it only while moving focus with the keyboard. -->
     <Style x:Key="PanelKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-      <Border BorderBrush="#0A84FF" BorderThickness="1" CornerRadius="5"/>
+      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="5"/>
     </ControlTemplate></Setter.Value></Setter></Style>
     <Style x:Key="PanelWideKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-      <Border BorderBrush="#0A84FF" BorderThickness="1" CornerRadius="8"/>
+      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="8"/>
     </ControlTemplate></Setter.Value></Setter></Style>
     <!-- For a control whose own border already turns blue when selected: the outline stands 2 DIP outside it. -->
     <Style x:Key="PanelOutsetKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-      <Border BorderBrush="#0A84FF" BorderThickness="1" CornerRadius="10" Margin="-2"/>
+      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="10" Margin="-2"/>
     </ControlTemplate></Setter.Value></Setter></Style>
     <CornerRadius x:Key="SegmentCorner">5</CornerRadius>
     <!-- One segment of a joined switch on the panel: the selected segment carries Tag="Selected". -->
     <Style x:Key="SegmentButton" TargetType="Button">
-      <Setter Property="Foreground" Value="#9EEBEBF5"/>
+      <Setter Property="Foreground" Value="{DynamicResource PanelSecondary}"/>
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="FontFamily" Value="{StaticResource AppTextFont}"/>
       <Setter Property="Padding" Value="10,0"/>
@@ -38,8 +65,8 @@
             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
           <ControlTemplate.Triggers>
-            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="#F5F5F7"/></Trigger>
-            <Trigger Property="Tag" Value="Selected"><Setter TargetName="Chrome" Property="Background" Value="#24FFFFFF"/><Setter Property="Foreground" Value="#F5F5F7"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/></Trigger>
+            <Trigger Property="Tag" Value="Selected"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource PanelFillSelected}"/><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -48,7 +75,7 @@
     <!-- A standalone toolbar action in the segment look: 6 DIP corner and a gray hover, like the other toolbar buttons. -->
     <Style x:Key="ToolbarActionButton" TargetType="Button" BasedOn="{StaticResource SegmentButton}">
       <Style.Resources><CornerRadius x:Key="SegmentCorner">6</CornerRadius></Style.Resources>
-      <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#18FFFFFF"/></Trigger></Style.Triggers>
+      <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource PanelHover}"/></Trigger></Style.Triggers>
     </Style>
     <Style TargetType="Button">
       <Setter Property="Foreground" Value="#DCDEE7"/><Setter Property="Background" Value="#252730"/>
@@ -109,7 +136,7 @@
         <ControlTemplate TargetType="ScrollBar">
           <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="Vertical" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}" ViewportSize="{TemplateBinding ViewportSize}">
             <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
-            <Track.Thumb><Thumb MinHeight="22"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="#515665" CornerRadius="3" Margin="1,2"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+            <Track.Thumb><Thumb MinHeight="22"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="{DynamicResource PanelScrollThumb}" CornerRadius="3" Margin="1,2"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
             <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
           </Track>
         </ControlTemplate>
@@ -136,9 +163,9 @@
     <Style x:Key="BrimDeckToolTip" TargetType="ToolTip">
       <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"/>
       <Setter Property="FontSize" Value="11.5"/>
-      <Setter Property="Foreground" Value="#F0F0F3"/>
-      <Setter Property="Background" Value="#1F1F23"/>
-      <Setter Property="BorderBrush" Value="#38FFFFFF"/>
+      <Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/>
+      <Setter Property="Background" Value="{DynamicResource PanelToolTip}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource PanelToolTipBorder}"/>
       <Setter Property="Padding" Value="9,5"/>
       <Setter Property="MaxWidth" Value="380"/>
       <Setter Property="HasDropShadow" Value="False"/>
@@ -191,5 +218,6 @@
       <Setter Property="OverridesDefaultStyle" Value="True"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Separator"><Border Height="1" Background="{DynamicResource MenuRule}" Margin="4,3"/></ControlTemplate></Setter.Value></Setter>
     </Style>
+    </ResourceDictionary>
   </Application.Resources>
 </Application>

@@ -64,6 +64,9 @@ public partial class App : Application
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
         Store = new SettingsStore(folder); Settings = Store.Load();
         UseLanguage();
+        PanelTheme.Use(Settings);
+        // "跟随系统" follows the Windows app theme while BrimDeck runs.
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         // The language a first start takes from Windows is kept, even if the display language changes later.
         if (Store.IsFirstStart) FlushSettings();
         try
@@ -158,10 +161,32 @@ public partial class App : Application
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
+        PanelTheme.Use(settings);
         AssignDisplays();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         QueueSave();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
+    }
+    private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (Dispatcher.HasShutdownStarted) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (Exiting) return;
+            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId) ApplyPanelTheme(systemChanged: true);
+            // The theme page's "System" card shows the Windows mode whichever theme is chosen.
+            else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
+        });
+    }
+    // Makes the chosen panel theme current (reading the theme folder again when asked) and repaints every panel if it changed.
+    // When Windows switches "system" between dark and light, a preset clock gradient carries over as it does when a theme is chosen.
+    internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false)
+    {
+        var previous = PanelTheme.Current;
+        if (!PanelTheme.Use(Settings, reload, systemChanged)) return;
+        if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
+        foreach (var deck in Decks.ToList()) deck.ApplySettings();
+        if (!reload) _settingsWindow?.PanelThemeChanged();
     }
     // A panel reports display changes (monitors added or removed, the primary changed, a work area or scale changed).
     // Each panel receives the same messages, so they are handled once, after Windows has moved the windows to the new layout.
@@ -225,7 +250,7 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); StopBackgroundUpdates(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         Media?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);

@@ -30,6 +30,12 @@ public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom
 public static class ClockColors
 {
     public const string DefaultCustom = "#B9A8FF";
+    // The clock colors a panel theme may give its own shade (see PanelPalette.ClockPreset), and their names in theme files.
+    public static readonly IReadOnlyList<ClockColor> Swatches = [ClockColor.Amber, ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime];
+    public static string Key(ClockColor color) => color.ToString().ToLowerInvariant();
+    // The built-in colors of the amber, cyan, pink and lime swatches; a panel theme can replace them (PanelPalette.ClockPreset).
+    public static string Preset(ClockColor color) => color switch
+    { ClockColor.Amber => "#FF9F43", ClockColor.Cyan => "#5CE1E6", ClockColor.Pink => "#FF8FB1", ClockColor.Lime => "#E4FF6A", _ => "#F5F5F7" };
     // Every gradient has three colors: start, middle and end.
     public static readonly string[] Sunset = ["#FFB38A", "#FF7EB3", "#B69CFF"];
     public static IReadOnlyList<(string Name, string[] Stops)> Gradients =>
@@ -66,6 +72,7 @@ public sealed class AppEntry
     public string ThemeColor { get; set; } = "";
     public string WarningColor { get; set; } = "";
     public string CriticalColor { get; set; } = "";
+    // The chosen color or the application's preset, before any panel theme; the panel draws PanelTheme.AppTheme and friends.
     [JsonIgnore] public string Theme => ThemeColor.Length > 0 ? ThemeColor : AppPresets.ThemeColor(QuotaSource);
     [JsonIgnore] public string Warning => WarningColor.Length > 0 ? WarningColor : AppPresets.WarningColor;
     [JsonIgnore] public string Critical => CriticalColor.Length > 0 ? CriticalColor : AppPresets.CriticalColor;
@@ -109,8 +116,6 @@ public static class AppPresets
       ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
     // Sources entered by hand share one purple by default.
     public const string ManualColor = "#CC9EED";
-    public static string QuotaColor(AppEntry entry, double usedPercent)
-        => usedPercent >= CriticalPercent ? entry.Critical : usedPercent >= WarningPercent ? entry.Warning : entry.Theme;
     public static int Level(double usedPercent) => usedPercent >= CriticalPercent ? 2 : usedPercent >= WarningPercent ? 1 : 0;
     public static bool IsColor(string value) => Regex.IsMatch(value, "^#[0-9A-Fa-f]{6}$");
     public static string NormalizeColor(string? value)
@@ -154,6 +159,9 @@ public sealed class DeckSettings
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
     public SettingsTheme Theme { get; set; } = SettingsTheme.System;
+    // The panel's color theme (see PanelThemes): "system", "dark", "light", a built-in theme or a theme file's id.
+    // The dark default is the original look. An id whose file is missing is kept and shown as the dark theme meanwhile.
+    public string PanelTheme { get; set; } = PanelThemes.Dark;
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
@@ -309,6 +317,7 @@ public sealed class DeckSettings
         CloseDelay = Math.Clamp(CloseDelay, 0, 2000);
         AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
+        PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
         Language = Loc.Normalize(Language);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;

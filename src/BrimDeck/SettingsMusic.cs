@@ -61,7 +61,7 @@ public sealed partial class SettingsWindow
     {
         SectionTitle(Loc.T("收起时", "When collapsed"));
         Group(MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) }, v => Change(s => s.MusicText = v)),
-            MusicChoice(Loc.T("律动条颜色", "Equalizer color"), S.MusicCoverColor, new[] { (true, Loc.T("封面主色", "Cover color")), (false, Loc.T("白色", "White")) }, v => Change(s => s.MusicCoverColor = v)),
+            MusicChoice(Loc.T("律动条颜色", "Equalizer color"), S.MusicCoverColor, new[] { (true, Loc.T("封面主色", "Cover color")), (false, Loc.T("主题默认色", "Theme default")) }, v => Change(s => s.MusicCoverColor = v)),
             Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)));
         SectionTitle(Loc.T("展开时", "When expanded"));
         Group(Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage));

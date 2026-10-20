@@ -61,6 +61,8 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 - 窗口最大化时默认切换为指示条，全屏游戏或视频播放时默认隐藏，避免误触展开。
 
+- 刘海、胶囊、提示与展开面板支持面板主题：跟随系统、深色、浅色，内置 One Dark Pro、GitHub、Dracula、Night Owl 等开源主题，也可以按[主题制作指南](docs/zh-CN/themes.md)制作自定义主题；任何主题下文字与数据都会保持清晰可读。
+
 ### AI 用量
 
 <img src="docs/zh-CN/images/usage.png" width="100%" alt="AI 用量页：Claude、Codex、Cursor、Antigravity 四列配额">
