@@ -90,6 +90,16 @@ internal static class DashboardUsageTests
             var withoutWsl = (await wslService.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Claude);
             check("WSL statistics are left out while the option is off", withoutWsl.Entries.Sum(entry => entry.Total) == 100);
         }
+        // The WSL read runs beside the network requests of the same refresh, so the round takes the longer of the two, not both.
+        handler.DelayMs = 800;
+        using (var overlapping = new UsageService(new SourceDesktop(), locations, client, null, null, () => { Thread.Sleep(800); return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromSeconds(5)))
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var round = await overlapping.RefreshAsync(wslSettings);
+            check("The WSL read overlaps the network requests", clock.Elapsed < TimeSpan.FromMilliseconds(1500) &&
+                round.Single(s => s.Id == ProviderId.Claude).Entries.Sum(entry => entry.Total) == 120);
+        }
+        handler.DelayMs = 0;
         using var release = new ManualResetEventSlim();
         using (var stuck = new UsageService(new SourceDesktop(), locations, client, null, null, () => { release.Wait(TimeSpan.FromSeconds(20)); return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromMilliseconds(1000)))
         {
@@ -115,11 +125,13 @@ internal static class DashboardUsageTests
     private sealed class SourceHandler : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public int DelayMs { get; set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (DelayMs > 0) await Task.Delay(DelayMs, cancellationToken);
             var destination = request.RequestUri!.AbsoluteUri;
             // The plan lookup is optional and answered with 404 here; it is not one of the quota sources counted below.
-            if (destination == "https://api.anthropic.com/api/oauth/profile") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            if (destination == "https://api.anthropic.com/api/oauth/profile") return new HttpResponseMessage(HttpStatusCode.NotFound);
             Requests.Add(destination);
             var json = destination switch
             {
@@ -127,7 +139,7 @@ internal static class DashboardUsageTests
                 "https://chatgpt.com/backend-api/wham/usage" => """{"rate_limit":{"primary_window":{"used_percent":22,"limit_window_seconds":18000}}}""",
                 _ => throw new InvalidOperationException("Unexpected destination")
             };
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) });
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) };
         }
     }
 }

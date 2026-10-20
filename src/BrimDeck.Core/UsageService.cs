@@ -100,24 +100,40 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
     }
 
-    private sealed class WslRead(Task<ProviderSnapshot?> task) { public readonly Task<ProviderSnapshot?> Task = task; public bool TimedOut; }
+    private sealed class WslRead(Task<ProviderSnapshot?> task, string localNote, bool localAvailable)
+    {
+        public readonly Task<ProviderSnapshot?> Task = task;
+        public readonly System.Diagnostics.Stopwatch Elapsed = System.Diagnostics.Stopwatch.StartNew();
+        // The snapshot's note and availability before WSL joins it, so the WSL part is placed right after them.
+        public readonly string LocalNote = localNote;
+        public readonly bool LocalAvailable = localAvailable;
+        public bool TimedOut;
+    }
 
-    // Adds the token statistics found in WSL to the local ones. Entries seen on both sides count once.
-    private async Task AddWslAsync(ProviderSnapshot snapshot, DateTimeOffset now, DateTime start, CancellationToken ct)
+    // Starts reading the WSL statistics in the background, right after the local ones, so that the wait overlaps the network
+    // requests of the same refresh instead of adding to them. A read that has not ended yet (it ran out of time, or its
+    // round was cancelled) is never started a second time: the reader is not meant for two reads at once.
+    private WslRead StartWsl(ProviderSnapshot snapshot, DateTimeOffset now, DateTime start)
     {
         var id = snapshot.Id;
+        var read = _wslReads.GetOrAdd(id, _ => new(Task.FromResult<ProviderSnapshot?>(null), "", false));
+        if (!read.Task.IsCompleted) return _wslReads[id] = new(read.Task, snapshot.UsageNote, snapshot.UsageAvailable) { TimedOut = read.TimedOut };
+        return _wslReads[id] = new(Task.Run(() =>
+        {
+            var roots = WslHomes(now).Select(home => id == ProviderId.Codex ? home.Codex : home.Claude).Where(root => root.Length > 0).ToList();
+            return roots.Count == 0 ? null : _wslLogs[id].Read(id, roots, now, start, "WSL");
+        }, CancellationToken.None), snapshot.UsageNote, snapshot.UsageAvailable);
+    }
+
+    // Adds the WSL token statistics to the local ones once the rest of the refresh is done. Entries seen on both sides count once.
+    // Only the time the read has not yet had is waited for; after that the round shows this PC only.
+    private async Task MergeWslAsync(ProviderSnapshot snapshot, WslRead read, CancellationToken ct)
+    {
         void Skipped() { snapshot.UsageNote += Loc.T(" · WSL 读取超时，本轮仅显示本机数据", " · Reading WSL timed out; this round shows this PC only"); snapshot.UsageComplete = false; }
-        var read = _wslReads.GetOrAdd(id, _ => new(Task.FromResult<ProviderSnapshot?>(null)));
-        // A read that already ran out of time and is still stuck is not waited for again: every round would cost the full wait.
         if (read.TimedOut && !read.Task.IsCompleted) { Skipped(); return; }
-        if (read.Task.IsCompleted)
-            _wslReads[id] = read = new(Task.Run(() =>
-            {
-                var roots = WslHomes(now).Select(home => id == ProviderId.Codex ? home.Codex : home.Claude).Where(root => root.Length > 0).ToList();
-                return roots.Count == 0 ? null : _wslLogs[id].Read(id, roots, now, start, "WSL");
-            }, CancellationToken.None));
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var finished = await Task.WhenAny(read.Task, Task.Delay(wslTimeout ?? TimeSpan.FromSeconds(8), wait.Token));
+        var remaining = (wslTimeout ?? TimeSpan.FromSeconds(8)) - read.Elapsed.Elapsed;
+        var finished = await Task.WhenAny(read.Task, Task.Delay(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero, wait.Token));
         wait.Cancel();
         ct.ThrowIfCancellationRequested();
         if (finished != read.Task) { read.TimedOut = true; Skipped(); return; }
@@ -125,14 +141,15 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         try { result = await read.Task; }
         catch (Exception ex) when (ex is not OperationCanceledException) { snapshot.UsageComplete = false; return; }
         if (result is null) return;
-        bool localAvailable = snapshot.UsageAvailable;
         var merged = new Dictionary<string, TokenEntry>();
         foreach (var entry in snapshot.Entries.Concat(result.Entries))
             if (!merged.TryGetValue(entry.Key, out var old) || entry.Total >= old.Total) merged[entry.Key] = entry;
         snapshot.Entries = merged.Values.OrderBy(entry => entry.Time).ToList();
         snapshot.UsageAvailable |= result.UsageAvailable;
         snapshot.UsageComplete &= result.UsageComplete;
-        if (result.UsageAvailable) snapshot.UsageNote = (localAvailable ? snapshot.UsageNote + " · " : "") + result.UsageNote;
+        if (!result.UsageAvailable) return;
+        var tail = snapshot.UsageNote.StartsWith(read.LocalNote, StringComparison.Ordinal) ? snapshot.UsageNote[read.LocalNote.Length..] : "";
+        snapshot.UsageNote = (read.LocalAvailable ? read.LocalNote + " · " : "") + result.UsageNote + tail;
     }
 
     private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct)
@@ -143,7 +160,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var snapshot = id is ProviderId.Claude or ProviderId.Codex
             ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         if (id == ProviderId.Claude) ReadClaudeProfile(snapshot);
-        if (_includeWsl && id is ProviderId.Claude or ProviderId.Codex) await AddWslAsync(snapshot, now, start.LocalDateTime, ct);
+        var wslRead = _includeWsl && id is ProviderId.Claude or ProviderId.Codex ? StartWsl(snapshot, now, start.LocalDateTime) : null;
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
         if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
@@ -210,6 +227,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         { snapshot.StatusLabel = Loc.T("检测失败", "Detection failed"); snapshot.Status = Loc.T("本地服务检测失败，稍后重试", "Detecting the local service failed. Retrying later."); }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or FormatException)
         { snapshot.StatusLabel = Loc.T("读取失败", "Read failed"); snapshot.Status = Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later."); }
+        if (wslRead is not null) await MergeWslAsync(snapshot, wslRead, ct);
         if (!snapshot.LiveQuota && snapshot.Quotas.Count > 0) snapshot.Source = Loc.T("本地配额快照 · 可能已过时", "Local quota snapshot · may be outdated");
         return snapshot;
     }
