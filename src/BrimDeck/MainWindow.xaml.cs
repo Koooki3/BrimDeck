@@ -94,7 +94,7 @@ public partial class MainWindow : Window
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
-        _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(); };
+        _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false)); };
         Loaded += async (_, _) =>
         {
@@ -147,8 +147,12 @@ public partial class MainWindow : Window
         ClockLabel.Text = now.ToString("HH:mm");
         if (_compactClock is not null) _compactClock.Time = now;
     }
-    public void ApplySettings() => ApplySettings(false);    private void ApplySettings(bool animatePage)
+    public void ApplySettings() => ApplySettings(false);
+    // animatePage also animates the collapsed shape, which is how a screen-context change (maximized window, full screen)
+    // moves between the notch, the capsule and the indicator.
+    private void ApplySettings(bool animatePage)
     {
+        bool wasVisible = IsVisible;
         ApplyLanguage();
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
@@ -174,14 +178,30 @@ public partial class MainWindow : Window
         Place(bounds, scale);
         UpdateClock();
         RenderCompact();
+        // Hiding and showing (a full-screen rule) fades the panel in step with the other animations
+        // when a context change asks for it; every other change stays immediate.
+        int fade = animatePage && wasVisible && !_preview && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
         if (IsSuppressed)
         {
-            _hover.Stop(); _leave.Stop(); _pointerInside = false; SetExpanded(false, true); Hide();
+            _hover.Stop(); _leave.Stop(); _pointerInside = false;
+            if (fade > 0 && IsVisible)
+            {
+                SetExpanded(false);
+                var away = new DoubleAnimation(0, TimeSpan.FromMilliseconds(fade * .7)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+                away.Completed += (_, _) => { if (IsSuppressed) { BeginAnimation(OpacityProperty, null); Opacity = 1; Hide(); } };
+                BeginAnimation(OpacityProperty, away, HandoffBehavior.SnapshotAndReplace);
+            }
+            else { SetExpanded(false, true); BeginAnimation(OpacityProperty, null); Opacity = 1; Hide(); }
         }
         else
         {
+            bool appearing = !IsVisible && animatePage && !_preview && Settings.Animations && SystemParameters.ClientAreaAnimation && Settings.AnimationDuration > 0;
+            if (appearing) { BeginAnimation(OpacityProperty, null); Opacity = 0; }
             if (!IsVisible) Show();
-            SetExpanded(_expanded, !animatePage);
+            if (appearing || Opacity < 1 && animatePage)
+                BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(Settings.AnimationDuration * .7)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } }, HandoffBehavior.SnapshotAndReplace);
+            else { BeginAnimation(OpacityProperty, null); Opacity = 1; }
+            SetExpanded(_expanded, !animatePage || !wasVisible);
         }
         UpdatePointerTracking();
         RenderUsage();
@@ -261,6 +281,8 @@ public partial class MainWindow : Window
     partial void LayoutCompactAlert(CollapsedShape shape, bool alertVisible);
     private void ApplyCollapsedLayout()
     {
+        // While the content fades out into the indicator it keeps the size it had, instead of being squeezed by the new shape.
+        if (Collapsed.Style == CompactStyle.Line && Compact.Visibility == Visibility.Visible && Compact.Opacity > 0 && !_expanded && IsVisible) return;
         // Compact content keeps its final width while the surface moves, so nothing drifts with the shrinking edges.
         Compact.Width = Collapsed.ContentWidth;
         Compact.Height = Math.Max(0, 26 * Collapsed.Scale);
@@ -391,7 +413,9 @@ public partial class MainWindow : Window
         int duration = !instant && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
-        Compact.Visibility = line ? Visibility.Hidden : Visibility.Visible;
+        // The indicator has no content: it fades out with the other tracks and is hidden once gone.
+        if (!line) Compact.Visibility = Visibility.Visible;
+        else if (duration == 0) Compact.Visibility = Visibility.Hidden;
         // Collapsed, the hover strip covers the box MainWindow.Hover.cs gives (Stage coordinates; HoverZone starts at the island's
         // left edge). Open, it stretches across the island and shrinks to nothing, as the NaN box asks.
         var box = HoverExtensionBox(expanded);
@@ -408,7 +432,7 @@ public partial class MainWindow : Window
         // quickly, and the content fades in once the surface is about two thirds open. The fractions follow the approved mock-up.
         Track content = expanded ? new(.25, .9) : new(0, .30);
         Track surface = expanded ? new(0, .8) : new(.12, line ? .92 : 1);
-        Track compact = expanded ? new(0, .15) : new(.62, 1);
+        Track compact = expanded ? new(0, .15) : line ? new(0, .35) : new(.62, 1);
         Track shadow = expanded ? new(0, .3) : new(.5, 1);
         Track rim = expanded ? new(.2, .5) : new(.5, .8);
         Track tint = expanded ? new(0, .12) : new(.68, 1);
@@ -446,9 +470,10 @@ public partial class MainWindow : Window
             Island.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(0, gap, 0, 0), EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
             Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = radius, EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
         }
-        Animate(Compact, OpacityProperty, expanded ? 0 : 1, duration, compact, easeOut);
-        Animate(CompactScale, ScaleTransform.ScaleXProperty, expanded ? .85 : 1, duration, compact, expanded ? easeInOut : easeOut);
-        Animate(CompactScale, ScaleTransform.ScaleYProperty, expanded ? .85 : 1, duration, compact, expanded ? easeInOut : easeOut);
+        bool compactGone = expanded || line;
+        Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
+        Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
+        Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
         Animate(IslandShadow, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);

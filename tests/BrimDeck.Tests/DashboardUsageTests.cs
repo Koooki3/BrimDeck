@@ -75,6 +75,44 @@ internal static class DashboardUsageTests
         var snapshots = await service.RefreshAsync(settings);
         check("Mixed duplicate columns fetch both underlying sources only once", snapshots.Count == 2 && handler.Requests.Count == 2
             && handler.Requests.Distinct().Count() == 2 && snapshots.All(s => s.LiveQuota));
+
+        // WSL statistics join the local ones, and a WSL file system that does not answer in time only costs its own share.
+        string Line(string id, int input) => JsonSerializer.Serialize(new { timestamp = DateTimeOffset.Now.AddMinutes(-3), type = "assistant", message = new { id, model = "claude-sonnet-4-6", usage = new { input_tokens = input, output_tokens = 0 } } });
+        Directory.CreateDirectory(Path.Combine(locations.ClaudeHome, "projects"));
+        File.WriteAllLines(Path.Combine(locations.ClaudeHome, "projects", "local.jsonl"), [Line("local-message", 100)]);
+        var wslClaude = Path.Combine(directory, "wsl", ".claude"); Directory.CreateDirectory(Path.Combine(wslClaude, "projects"));
+        File.WriteAllLines(Path.Combine(wslClaude, "projects", "wsl.jsonl"), [Line("wsl-message", 20), Line("local-message", 100)]);
+        var wslSettings = settings.Copy(); wslSettings.IncludeWsl = true;
+        using (var wslService = new UsageService(new SourceDesktop(), locations, client, null, null, () => [new WslHome("Test", wslClaude, "")]))
+        {
+            var withWsl = (await wslService.RefreshAsync(wslSettings)).Single(s => s.Id == ProviderId.Claude);
+            check("WSL statistics are added to the local ones without counting a shared entry twice", withWsl.Entries.Sum(entry => entry.Total) == 120);
+            var withoutWsl = (await wslService.RefreshAsync(settings)).Single(s => s.Id == ProviderId.Claude);
+            check("WSL statistics are left out while the option is off", withoutWsl.Entries.Sum(entry => entry.Total) == 100);
+        }
+        // The WSL read runs beside the network requests of the same refresh, so the round takes the longer of the two, not both.
+        handler.DelayMs = 800;
+        using (var overlapping = new UsageService(new SourceDesktop(), locations, client, null, null, () => { Thread.Sleep(800); return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromSeconds(5)))
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var round = await overlapping.RefreshAsync(wslSettings);
+            check("The WSL read overlaps the network requests", clock.Elapsed < TimeSpan.FromMilliseconds(1500) &&
+                round.Single(s => s.Id == ProviderId.Claude).Entries.Sum(entry => entry.Total) == 120);
+        }
+        handler.DelayMs = 0;
+        using var release = new ManualResetEventSlim();
+        using (var stuck = new UsageService(new SourceDesktop(), locations, client, null, null, () => { release.Wait(TimeSpan.FromSeconds(20)); return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromMilliseconds(1000)))
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var all = await stuck.RefreshAsync(wslSettings);
+            var claude = all.Single(s => s.Id == ProviderId.Claude);
+            check("A WSL read that does not answer is skipped and the other sources still refresh",
+                clock.Elapsed < TimeSpan.FromSeconds(5) && claude.Entries.Sum(entry => entry.Total) == 100 && !claude.UsageComplete && all.Single(s => s.Id == ProviderId.Codex).LiveQuota);
+            clock.Restart();
+            var again = (await stuck.RefreshAsync(wslSettings)).Single(s => s.Id == ProviderId.Claude);
+            check("A stuck WSL read is not waited for again every round", clock.Elapsed < TimeSpan.FromMilliseconds(700) && again.Entries.Sum(entry => entry.Total) == 100);
+            release.Set();
+        }
     }
 
     private sealed class SourceDesktop : IDesktopSources
@@ -87,9 +125,13 @@ internal static class DashboardUsageTests
     private sealed class SourceHandler : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public int DelayMs { get; set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (DelayMs > 0) await Task.Delay(DelayMs, cancellationToken);
             var destination = request.RequestUri!.AbsoluteUri;
+            // The plan lookup is optional and answered with 404 here; it is not one of the quota sources counted below.
+            if (destination == "https://api.anthropic.com/api/oauth/profile") return new HttpResponseMessage(HttpStatusCode.NotFound);
             Requests.Add(destination);
             var json = destination switch
             {
@@ -97,7 +139,7 @@ internal static class DashboardUsageTests
                 "https://chatgpt.com/backend-api/wham/usage" => """{"rate_limit":{"primary_window":{"used_percent":22,"limit_window_seconds":18000}}}""",
                 _ => throw new InvalidOperationException("Unexpected destination")
             };
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) });
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) };
         }
     }
 }
