@@ -150,6 +150,21 @@ try
     Directory.CreateDirectory(classicProfile); Directory.CreateDirectory(storeProfile);
     Directory.CreateDirectory(Path.Combine(locations.Local, "Packages", "Unrelated_testfamily", "LocalCache", "Roaming", "Claude"));
     Check("Classic and Store Claude profiles discovered automatically", locations.ClaudeDesktopProfiles().Count == 2 && locations.ClaudeDesktopProfiles().Contains(storeProfile));
+    var movedProfile = Path.Combine(locations.Local, "Claude-Data", "claude_testfamily");
+    Directory.CreateDirectory(movedProfile);
+    Directory.CreateDirectory(Path.Combine(locations.Local, "Claude-Data", "claude_unwritten"));
+    File.WriteAllText(Path.Combine(locations.Local, "Claude-Data", "README.txt"), "");
+    File.WriteAllText(Path.Combine(movedProfile, "config.json"), "{}");
+    Check("Claude profile moved to Claude-Data is discovered and read first, without folders the app has not written",
+        locations.ClaudeDesktopProfiles() is { Count: 3 } withMoved && withMoved[0] == movedProfile);
+    File.WriteAllText(Path.Combine(storeProfile, ".user-data-left.claude_testfamily"), "");
+    Check("A profile folder the desktop app moved away from is no longer used",
+        locations.ClaudeDesktopProfiles() is { Count: 2 } afterMove && !afterMove.Contains(storeProfile) && afterMove[0] == movedProfile);
+    File.WriteAllText(Path.Combine(storeProfile, "config.json"), "{}");
+    File.SetLastWriteTimeUtc(Path.Combine(storeProfile, "config.json"), DateTime.UtcNow.AddDays(-1));
+    Check("A marked folder that another install still keeps its config in remains a profile",
+        locations.ClaudeDesktopProfiles() is { Count: 3 } shared && shared.Contains(storeProfile) && shared[0] == movedProfile);
+    File.Delete(Path.Combine(storeProfile, "config.json"));
     var oldSettings = SettingsMigrations.Read("""{"Width":890,"Claude":false,"CodexHome":"obsolete","ClaudeHome":"obsolete","CursorDatabase":"obsolete","OnlineQuota":false}""");
     oldSettings.Normalize();
     var migrated = JsonSerializer.Serialize(oldSettings);
