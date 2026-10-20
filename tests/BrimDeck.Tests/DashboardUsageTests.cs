@@ -90,6 +90,8 @@ internal static class DashboardUsageTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var destination = request.RequestUri!.AbsoluteUri;
+            // The plan lookup is optional and answered with 404 here; it is not one of the quota sources counted below.
+            if (destination == "https://api.anthropic.com/api/oauth/profile") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             Requests.Add(destination);
             var json = destination switch
             {

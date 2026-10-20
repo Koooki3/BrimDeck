@@ -16,7 +16,7 @@ public interface IDesktopSources
     IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) => null;
 }
 
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null) : IDisposable
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -30,6 +30,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly DataLocations _locations = locations ?? DataLocations.Detect();
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.Now);
     private readonly LogReader _logs = new();
+    // WSL home folders are searched again every few minutes: listing them touches the distributions' file systems.
+    private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
+    private IReadOnlyList<string> _wslClaude = [], _wslCodex = [];
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
     private readonly SemaphoreSlim _gate = new(1);
@@ -44,6 +47,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             // Each underlying source is read once, even when several columns reuse it.
             var required = settings.RequiredProviders;
+            UpdateWsl(settings.IncludeWsl);
             // The Claude and Grok Bot account APIs are asked only for rows that read online; rows that do not share one local snapshot.
             bool claudeOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && app.QuotaOnline);
             bool claudeLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && ProviderCatalog.ReadsLocalQuota(app));
@@ -81,13 +85,22 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
     }
 
+    private void UpdateWsl(bool include)
+    {
+        if (!include) { _wsl = null; _wslClaude = _wslCodex = []; return; }
+        var now = _clock();
+        if (_wsl is not { } found || now - found.Time > TimeSpan.FromMinutes(3) || now < found.Time) _wsl = found = (now, wsl is null ? WslLocations.Discover() : wsl());
+        _wslClaude = found.Homes.Where(home => home.Claude.Length > 0).Select(home => home.Claude).ToList();
+        _wslCodex = found.Homes.Where(home => home.Codex.Length > 0).Select(home => home.Codex).ToList();
+    }
+
     private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct)
     {
         var now = _clock();
         var start = new DateTimeOffset(usageStart?.Date ?? now.LocalDateTime.Date.AddDays(-29));
         // The reader owns a cache and is accessed serially before the first asynchronous request.
         var snapshot = id is ProviderId.Claude or ProviderId.Codex
-            ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
+            ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime, id == ProviderId.Codex ? _wslCodex : _wslClaude) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         if (id == ProviderId.Claude) ReadClaudeProfile(snapshot);
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
@@ -174,6 +187,21 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { }
     }
 
+    // Null-safe: the account endpoint needs the profile scope, which not every sign-in has, so a failure only means the plan
+    // is taken from the local records instead.
+    private async Task<string> ReadClaudePlanAsync(string token, CancellationToken ct)
+    {
+        try
+        {
+            using var request = Bearer(HttpMethod.Get, "https://api.anthropic.com/api/oauth/profile", token);
+            request.Headers.TryAddWithoutValidation("anthropic-beta", "oauth-2025-04-20");
+            using var doc = await SendAsync(_http, request, ct);
+            return PlanParser.ClaudeOrganization(doc.RootElement);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or OperationCanceledException or IOException or InvalidDataException or JsonException or FormatException)
+        { return ""; }
+    }
+
     private async Task ReadClaudeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
         var attempted = new HashSet<string>(StringComparer.Ordinal);
@@ -195,8 +223,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 if (quotas.Count == 0) throw new InvalidDataException();
                 // Publish only a complete successful result, all from the same login.
                 snapshot.Quotas = quotas;
-                snapshot.Plan = credential.Plan;
-                snapshot.PlanSource = credential.Plan.Length > 0 ? credential.Source + Loc.T(" 登录记录", " sign-in record") : "";
+                var live = await ReadClaudePlanAsync(credential.Token, ct);
+                if (live.Length > 0) { snapshot.Plan = live; snapshot.PlanSource = Loc.T("Claude 账户", "Claude account"); }
+                else
+                {
+                    var plan = PlanParser.ReconcileClaude(credential.Plan, snapshot.Plan);
+                    // The local account record already filled Plan and PlanSource; a sign-in record only describes its own plan.
+                    if (plan == credential.Plan || snapshot.PlanSource.Length == 0)
+                        snapshot.PlanSource = plan.Length > 0 ? credential.Source + Loc.T(" 登录记录", " sign-in record") : "";
+                    snapshot.Plan = plan;
+                }
                 Connected(snapshot, credential.Source + Loc.T(" · 账户配额", " · account quota"), now);
                 snapshot.UsageNote += ClaudeUsageNote;
                 _claudeRetained = new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList());
