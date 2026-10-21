@@ -71,6 +71,8 @@
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/></Trigger>
             <Trigger Property="Tag" Value="Selected"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource PanelFillSelected}"/><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+            <!-- Chosen in a strip whose fill glides between its segments (MainWindow.Segmented): the text only. -->
+            <Trigger Property="Tag" Value="Chosen"><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>

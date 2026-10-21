@@ -4,7 +4,8 @@ using System.Windows.Input;
 
 namespace BrimDeck;
 
-// Hover and press feedback that fades in and out (Soft.Quick) instead of switching in one frame. A button style sets
+// Hover and press feedback that fades in and out as the system monitor's does (Soft.Hover on Soft.Follow) instead of
+// switching in one frame. A button style sets
 // Feedback.Fade; its template has a "HoverLayer" and may have a "PressLayer", both transparent at rest, beneath the content,
 // or, for a bare icon (PanelGlyphButton), a "Glyph" whose opacity carries the feedback instead.
 // The press layer lies over the hover layer, which stays lit while pressed, so the two never dip in between. The state is
@@ -39,14 +40,13 @@ internal static class Feedback
         if (sender is not ButtonBase { Template: { } template } button) return;
         bool enabled = button.IsEnabled, animate = Soft.Enabled && button.IsVisible;
         bool over = enabled && button.IsMouseOver, pressed = enabled && button.IsPressed;
-        // What answers the pointer on the button is quick; what lingers after it has left trails off.
-        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate, over);
-        Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate, over);
-        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate, over);
+        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate);
+        Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate);
+        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate);
     }
     private const double GlyphRest = .78, GlyphPressed = .6;
 
-    private static void Show(UIElement? layer, double target, bool animate, bool quick)
+    private static void Show(UIElement? layer, double target, bool animate)
     {
         if (layer is null) return;
         double from = layer.Opacity;
@@ -54,6 +54,6 @@ internal static class Feedback
         layer.BeginAnimation(UIElement.OpacityProperty, null);
         layer.Opacity = target;
         if (animate) layer.BeginAnimation(UIElement.OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(from, target,
-            TimeSpan.FromMilliseconds(quick ? 90 : Soft.Quick + 60)) { EasingFunction = Soft.Out, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
+            TimeSpan.FromMilliseconds(Soft.Hover)) { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
     }
 }

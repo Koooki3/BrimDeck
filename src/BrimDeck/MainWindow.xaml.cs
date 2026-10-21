@@ -484,21 +484,30 @@ public partial class MainWindow : Window
         // and out, so the change of size reads as one soft move rather than a jump.
         // Booting (MainWindow.Lifecycle.cs), the surface swells from a dot into the collapsed shape: a longer move on the opening
         // spring, the compact content arriving once the shape has nearly settled.
-        bool reshaping = expanded && wasExpanded, booting = _booting && !expanded && duration > 0;
-        _booting = false;
+        // A new collapsed style chosen in the settings (MorphShape), the surface changes from one form into the other over the
+        // whole of a longer move on the monitor's curve; the compact content steps out at once and comes back in its new layout
+        // once the form has nearly settled.
+        bool reshaping = expanded && wasExpanded, booting = _booting && !expanded && duration > 0, morphing = _morphingShape && !expanded && duration > 0;
+        _booting = false; _morphingShape = false;
         if (reshaping) duration = (int)(duration * 1.25);
         if (booting) duration = (int)(duration * BootStretch);
+        if (morphing) duration = (int)(duration * 1.3);
         // The opening spring is most of the way there within a fifth of the move, so the content follows soon after it.
         Track content = expanded ? new(.12, .8) : new(0, .30);
-        Track surface = reshaping ? new(0, 1) : booting ? new(BootDot, 1) : expanded ? new(0, 1) : new(.12, line ? .92 : 1);
-        Track compact = booting ? new(.5, 1) : expanded ? new(0, .15) : line ? new(0, .35) : new(.62, 1);
-        Track shadow = booting ? new(.35, 1) : expanded ? new(0, .3) : new(.5, 1);
-        Track rim = expanded ? new(.2, .5) : new(.5, .8);
-        Track tint = expanded ? new(0, .12) : new(.68, 1);
+        Track surface = reshaping || morphing ? new(0, 1) : booting ? new(BootDot, 1) : expanded ? new(0, 1) : new(.12, line ? .92 : 1);
+        Track compact = booting ? new(.5, 1) : expanded ? new(0, .15) : line ? new(0, morphing ? .25 : .35) : morphing ? new(.55, 1) : new(.62, 1);
+        Track shadow = booting ? new(.35, 1) : expanded ? new(0, .3) : morphing ? new(.2, .9) : new(.5, 1);
+        Track rim = expanded ? new(.2, .5) : morphing ? new(.2, .7) : new(.5, .8);
+        Track tint = expanded ? new(0, .12) : morphing ? new(.2, .8) : new(.68, 1);
+        if (morphing && !line && Compact.Visibility == Visibility.Visible && Compact.Opacity > .5)
+        {
+            SetImmediate(Compact, OpacityProperty, 0d);
+            SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, .9); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, .9);
+        }
         // Opening, the size and place spring past their end by under 2 percent of the move and settle back; the corners never
         // bounce (a radius would pass zero). A panel that has no room in the window for that give opens on the plain curve.
         bool bounce = (booting || expanded && !reshaping) && duration > 0 && HasRoomToBounce(width, height, left, gap);
-        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Settle;
+        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Settle;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);

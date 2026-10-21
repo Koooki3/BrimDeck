@@ -116,6 +116,11 @@ public static class Curves
     private static double Sample(double t, double a1, double a2) => ((1 - 3 * a2 + 3 * a1) * t + (3 * a2 - 6 * a1)) * t * t + 3 * a1 * t;
     private static double Slope(double t, double a1, double a2) => 3 * (1 - 3 * a2 + 3 * a1) * t * t + 2 * (3 * a2 - 6 * a1) * t + 3 * a1;
 
+    // The system monitor's own move (Eased) from rest to rest: it leaves at one and a half times its average speed and lands
+    // with no speed left, never passing its end. The panel's content, its selections and its hover feedback follow it, so the
+    // whole panel moves as the monitor page does.
+    public static double Follow(double x) => x <= 0 ? 0 : x >= 1 ? 1 : 1.5 * x - .5 * x * x * x;
+
     // A spring thrown toward its target, fitted into the move: it leaves at speed (half way there after a tenth of the move),
     // passes the target by under 2 percent a little after the middle, and has settled by the end (the last few thousandths are
     // taken at once). This is the island's own gesture: a quick attack and a soft landing with a slight give, for what opens or

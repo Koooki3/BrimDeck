@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 
 namespace BrimDeck;
 
@@ -11,17 +12,15 @@ internal enum Handover
 {
     // At once, as when nothing about the page's form changed (a reading, the clock).
     None,
-    // The old content fades away above the new, which is in place at once: a quota page or a filter changed. What did not
-    // change stays still.
+    // The same page with other figures (a quota page, a filter, a period): as the monitor page changes a reading in place, the
+    // old content goes at once and the new comes up from faint, so old and new figures never overlap.
     Dissolve,
     // The page changed its form (a drag crossed a size step, an app was added): the old layout drops away quickly while the new
     // one fades in, so two layouts of different type sizes overlap only briefly.
     Morph,
     // Deeper and back: the old content leaves toward the side it is left for while the new comes in from the other side, as
     // pages of the page switch do (model details, application pages).
-    Forward, Back,
-    // Another song: the old titles drift up and fade while the new ones rise into place.
-    Swap
+    Forward, Back
 }
 
 // The usage and media pages are rebuilt rather than updated, so a change of form used to replace everything in one frame. Hold
@@ -32,7 +31,7 @@ internal enum Handover
 // of the page it leaves (Capture, Send): the pages keep their own elements, and the monitor page keeps its view across switches.
 internal sealed class PageHandover
 {
-    private const double Travel = 16, Rise = 8;
+    private const double Travel = 16, Faint = .3;
     private readonly Grid _layer;
     private readonly TranslateTransform _layerShift = new();
     private readonly List<UIElement> _held = [];
@@ -84,6 +83,13 @@ internal sealed class PageHandover
         Begin([picture], new Thickness(0, margin.Top, 0, 0), content, motion);
     }
 
+    // The rebuilt content waiting for its arrival to start; it is held out of sight until then.
+    private FrameworkElement? _holding;
+
+    // The hand-over starts once the rebuilt page has been laid out and drawn: building it takes a frame or two, and a move
+    // started at once lost its first part to them and jumped. Until then the old content stays as it was and the new one out
+    // of sight. Timing and curve are the system monitor's (Soft.Follow): what leaves goes in about a fifth of a second, what
+    // arrives takes the monitor's move.
     private void Begin(List<UIElement> leaving, Thickness margin, FrameworkElement content, Handover motion)
     {
         Drop();
@@ -92,23 +98,46 @@ internal sealed class PageHandover
         foreach (var child in leaving) _layer.Children.Add(child);
         var shift = content.RenderTransform as TranslateTransform;
         if (shift is null || shift.IsFrozen) content.RenderTransform = shift = new TranslateTransform();
-        int leave = motion switch { Handover.Dissolve => Soft.Quick + 20, Handover.Morph => 120, Handover.Swap => 200, _ => 150 };
-        int arrive = motion switch { Handover.Morph => 200, Handover.Swap => 320, _ => 300 };
-        var away = Soft.Fade(1, 0, leave, motion == Handover.Morph ? Soft.Out : Soft.InOut);
-        away.Completed += (_, _) => { if (_version == version) Drop(); };
-        _layer.BeginAnimation(UIElement.OpacityProperty, away);
-        if (motion == Handover.Dissolve) return;
-        if (motion == Handover.Morph) { content.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, arrive)); return; }
-        bool sideways = motion is Handover.Forward or Handover.Back;
-        double direction = motion == Handover.Back ? -1 : 1;
-        var axis = sideways ? TranslateTransform.XProperty : TranslateTransform.YProperty;
-        _layerShift.BeginAnimation(axis, Soft.Fade(0, sideways ? -direction * Travel : -Rise * .75, leave, Soft.InOut));
-        content.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, arrive));
-        shift.BeginAnimation(axis, Arrival(sideways ? direction * Travel : Rise, 0, arrive));
+        bool arrives = motion != Handover.Dissolve;
+        if (motion == Handover.Dissolve)
+        {
+            // Nothing leaves; the rebuilt content brightens from faint once it has been laid out.
+            _layer.Children.Clear();
+            _holding = content; content.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(Faint, Faint, TimeSpan.Zero));
+        }
+        else if (arrives) { _holding = content; content.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 0, TimeSpan.Zero)); }
+        content.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            if (_version != version) return;
+            _holding = null;
+            int leave = motion == Handover.Morph ? Soft.Hover : 200;
+            int arrive = motion == Handover.Morph ? Soft.Short : Soft.Move;
+            if (motion == Handover.Dissolve) { content.BeginAnimation(UIElement.OpacityProperty, Arrival(Faint, 1, Soft.Short)); return; }
+            var away = Soft.Fade(1, 0, leave, Soft.Follow);
+            away.Completed += (_, _) => { if (_version == version) EndLeave(); };
+            _layer.BeginAnimation(UIElement.OpacityProperty, away);
+            if (!arrives) return;
+            content.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, arrive));
+            if (motion == Handover.Morph) return;
+            double direction = motion == Handover.Back ? -1 : 1;
+            _layerShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(0, -direction * Travel, leave, Soft.Follow));
+            shift.BeginAnimation(TranslateTransform.XProperty, Arrival(direction * Travel, 0, arrive));
+        });
     }
 
-    // Ends a hand-over at once: the old elements go and the page is in place.
+    // Ends a hand-over at once: the old elements go and the page is in place, also when its arrival had not started yet.
     public void Drop()
+    {
+        if (_holding is { } held)
+        {
+            held.BeginAnimation(UIElement.OpacityProperty, null);
+            _holding = null;
+        }
+        EndLeave();
+    }
+
+    // The old elements have gone; an arrival under way carries on.
+    private void EndLeave()
     {
         _version++;
         _layer.BeginAnimation(UIElement.OpacityProperty, null); _layer.Opacity = 1;
@@ -117,24 +146,26 @@ internal sealed class PageHandover
         _layer.Children.Clear();
     }
 
-    // Brings a toolbar part that the rebuild showed in with the content.
+    // Brings a toolbar part that the rebuild showed in with the content: held out of sight with it, and arriving with it once
+    // the page has been laid out (Begin).
     public static void Arrive(UIElement element, Handover motion)
     {
         if (motion is not (Handover.Forward or Handover.Back) || element.Visibility != Visibility.Visible || !Soft.Enabled) return;
-        element.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, Soft.Short));
+        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 0, TimeSpan.Zero));
+        element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => element.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, Soft.Choose)));
     }
 
     // An arrival returns the property to its value when it ends, so nothing is left animated.
     private static DoubleAnimation Arrival(double from, double to, int milliseconds)
     {
-        var animation = Soft.Fade(from, to, milliseconds);
+        var animation = Soft.Fade(from, to, milliseconds, Soft.Follow);
         animation.FillBehavior = FillBehavior.Stop;
         return animation;
     }
 
     // Moves an element that the rebuild keeps (a transport button) to its new place: it glides from where it is now, or is set
     // at once. The property keeps the new value; the glide only covers the way there.
-    public static void Glide(UIElement element, DependencyProperty property, double to, bool animate, int milliseconds = Soft.Short)
+    public static void Glide(UIElement element, DependencyProperty property, double to, bool animate, int milliseconds = Soft.Choose)
     {
         double from = (double)element.GetValue(property);
         element.BeginAnimation(property, null);

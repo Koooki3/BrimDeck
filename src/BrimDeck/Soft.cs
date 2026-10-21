@@ -18,12 +18,15 @@ internal static class Soft
     public static readonly IEasingFunction InOut = Frozen(new BezierEase(.45, 0, .25, 1));
     // The collapsing surface: a slow start, then it settles.
     public static readonly IEasingFunction Settle = Frozen(new BezierEase(.45, 0, .12, 1));
+    // The system monitor's move (Curves.Follow): content that moves or swaps, selections that glide, hover feedback.
+    public static readonly IEasingFunction Follow = Frozen(new FollowEase());
     // The opening surface: a fast attack that passes its size by under 2 percent and settles back (Curves.Bounce).
     public static readonly IEasingFunction Bounce = Frozen(new BounceEase());
 
     // Hover and press feedback, and what leaves; small things that appear or swap. Values that follow readings take
-    // BrimDeck.Core.Eased.Seconds, and the panel itself the duration chosen in the settings.
-    public const int Quick = 160, Short = 240;
+    // BrimDeck.Core.Eased.Seconds, and the panel itself the duration chosen in the settings. Hover is the monitor's (Eased.Hover),
+    // a glide between choices the monitor's sort pill (Choose), content that moves in or out the monitor's readings (Move).
+    public const int Quick = 160, Short = 240, Hover = (int)(Eased.Hover * 1000), Choose = (int)(Eased.Seconds * 750), Move = (int)(Eased.Seconds * 1000);
 
     // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects".
     public static bool Enabled => SystemParameters.ClientAreaAnimation && (Application.Current as App)?.Settings.Animations != false;
@@ -44,6 +47,18 @@ internal static class Soft
         shift.BeginAnimation(TranslateTransform.YProperty, fall);
     }
 
+    // The way back: it fades as it rises the same few DIPs, a little quicker, as the monitor page's card leaves. done runs once
+    // it has gone.
+    public static void Leave(UIElement element, Action done, double rise = 4)
+    {
+        var fade = Fade(element.Opacity, 0, Quick, InOut);
+        fade.Completed += (_, _) => done();
+        element.BeginAnimation(UIElement.OpacityProperty, fade);
+        if (element.RenderTransform is not (null or MatrixTransform { Matrix.IsIdentity: true } or TranslateTransform { IsFrozen: false })) return;
+        if (element.RenderTransform is not TranslateTransform shift) element.RenderTransform = shift = new TranslateTransform();
+        shift.BeginAnimation(TranslateTransform.YProperty, Fade(shift.Y, -rise, Quick, InOut));
+    }
+
     private static IEasingFunction Frozen(Freezable ease) { ease.Freeze(); return (IEasingFunction)ease; }
 }
 
@@ -56,6 +71,14 @@ public sealed class BezierEase : EasingFunctionBase
     public BezierEase(double x1, double y1, double x2, double y2) { _x1 = x1; _y1 = y1; _x2 = x2; _y2 = y2; EasingMode = EasingMode.EaseIn; }
     protected override Freezable CreateInstanceCore() => new BezierEase(_x1, _y1, _x2, _y2);
     protected override double EaseInCore(double normalizedTime) => Curves.Bezier(_x1, _y1, _x2, _y2, normalizedTime);
+}
+
+// Curves.Follow as a WPF easing; see BezierEase for the mode.
+public sealed class FollowEase : EasingFunctionBase
+{
+    public FollowEase() { EasingMode = EasingMode.EaseIn; }
+    protected override Freezable CreateInstanceCore() => new FollowEase();
+    protected override double EaseInCore(double normalizedTime) => Curves.Follow(normalizedTime);
 }
 
 // Curves.Bounce as a WPF easing; see BezierEase for the mode.

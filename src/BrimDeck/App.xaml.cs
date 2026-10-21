@@ -160,6 +160,8 @@ public partial class App : Application
         bool dataChanged = settings.IncludeWsl != Settings.IncludeWsl || !settings.RequiredProviders.SetEquals(Settings.RequiredProviders) ||
             !settings.EnabledApps.Select(e => e.ConfigurationKey).ToHashSet().SetEquals(Settings.EnabledApps.Select(e => e.ConfigurationKey));
         bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
+        // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
+        bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
         ApplyHotkeys();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
@@ -167,7 +169,7 @@ public partial class App : Application
         if (languageChanged) UseLanguage();
         PanelTheme.Use(settings);
         AssignDisplays();
-        foreach (var deck in Decks.ToList()) deck.ApplySettings();
+        foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
         QueueSave();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
     }

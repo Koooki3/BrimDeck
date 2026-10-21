@@ -113,6 +113,17 @@ public partial class MainWindow
     }
     private Action? _whenGone;
 
+    // A new collapsed style from the settings (notch, capsule or line): the surface changes into the new form instead of
+    // switching (see SetExpanded). The panel stays as it is when it is open or hidden.
+    private bool _morphingShape;
+    internal void MorphShape()
+    {
+        // A preview from the settings window morphs too: the style chips sit on the page that previews the collapsed size.
+        _morphingShape = !_expanded && !_poweringOff && IsVisible && Soft.Enabled && Settings.AnimationDuration > 0 && !_bootWaiting;
+        ApplySettings(true);
+        _morphingShape = false;
+    }
+
     // After a power-off that hid the panel (or was overtaken by the panel being wanted again): the surface gets back its shape and
     // opacity out of sight, and a panel that is still meant to show boots again.
     private void RestoreAfterPowerOff()

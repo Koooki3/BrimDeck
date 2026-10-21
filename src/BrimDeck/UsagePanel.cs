@@ -131,6 +131,23 @@ public partial class MainWindow
     // The form the usage page was last laid out in: its size tier and arrangement, model details or the empty page. A rebuild
     // that changes it while the page is on screen (a drag across a size step, an app added) morphs into the new form.
     private string _usageForm = "";
+    // What the quota columns were last built from: their form and the data, page and settings they show, not the panel's exact
+    // size. As the monitor page is built once per layout step and stretches within it, a render with the same key keeps the
+    // page instead of building it again: a drag that stays within a size step, a return from another page, the sync button.
+    private UsageBuild? _usageBuilt;
+    private PanelHeader _usageHeaderBuilt = PanelHeader.For(36, 20);
+    private sealed record UsageBuild(string Form, object Snapshots, object Settings, int ApplicationPage, string QuotaPages, int Theme, string Language, long Minute);
+
+    private UsageBuild? ColumnsBuild()
+    {
+        if (_details || !Settings.UsagePage || Settings.EnabledApps.Count == 0) return null;
+        var columns = DashboardUsage.Columns(Settings, Snapshots);
+        if (columns.Count == 0) return null;
+        var fit = FitColumns(columns, ContentCanvas.Width, ContentCanvas.Height);
+        return new UsageBuild($"{fit.Layout.Tier}|{fit.Layout.Footer}|{fit.Inline}|{fit.Wide}|{fit.Count}", Snapshots, Settings, _applicationPage,
+            string.Join(",", _quotaPages.OrderBy(page => page.Key).Select(page => $"{page.Key:N}:{page.Value}")), PanelTheme.Generation, Loc.Language,
+            DateTime.Now.Ticks / TimeSpan.TicksPerMinute);
+    }
 
     public void RenderUsage()
     {
@@ -143,10 +160,20 @@ public partial class MainWindow
         if (!Settings.UsagePage) _details = false;
         RefreshStatus();
         if (_detailPopup is not null) return;
+        var build = ColumnsBuild();
+        if (build is not null && build == _usageBuilt && _usageHandover == Handover.None && UsageContent.Children.Count > 0)
+        {
+            // The page as it was built; another page may have taken the header meanwhile.
+            ApplyHeader(_usageHeaderBuilt);
+            ClockLabel.Visibility = Visibility.Visible; ModelToolbar.Visibility = Visibility.Collapsed;
+            ApplicationPages.Visibility = ApplicationPages.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            return;
+        }
         var motion = _usageHandover; _usageHandover = Handover.None;
         string form = _usageForm;
         _handover.Hold(UsageContent);
         RenderUsagePage();
+        _usageBuilt = build; _usageHeaderBuilt = _header;
         if (motion == Handover.None && form.Length > 0 && form != _usageForm) motion = Handover.Morph;
         if (!shown) motion = Handover.None;
         _handover.Release(UsageContent, motion);
@@ -185,8 +212,10 @@ public partial class MainWindow
         else RenderColumns(DashboardUsage.Columns(Settings, Snapshots));
     }
 
-    // A joined switch: one rounded strip, the selected segment filled. Buttons carry accessible names.
-    internal static Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX, bool centerText = false)
+    // A joined switch: one rounded strip, the selected segment filled. Buttons carry accessible names. With a glide key the fill
+    // is one piece under the strip that glides to the chosen segment, as the monitor page's sort pill does; the strip is built
+    // again on every choice, so where the fill was is kept by the key and the new strip's fill starts there.
+    internal static Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX, bool centerText = false, string? glide = null)
     {
         var strip = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var item in items)
@@ -194,13 +223,39 @@ public partial class MainWindow
             var text = centerText ? UI.Centered(item.Text, fontSize, UI.Secondary) : UI.Fixed(item.Text, fontSize, lineHeight, UI.Secondary);
             text.ClearValue(TextBlock.ForegroundProperty); text.ClearValue(TextBlock.FontWeightProperty);
             var button = new Button { Style = (Style)Application.Current.FindResource("SegmentButton"), Content = text, Height = lineHeight, FontSize = fontSize,
-                Padding = new Thickness(padX, 0, padX, 0), Tag = item.Active ? "Selected" : null, ToolTip = item.Tip };
-            button.Click += (_, _) => item.Select();
+                Padding = new Thickness(padX, 0, padX, 0), Tag = item.Active ? glide is null ? "Selected" : "Chosen" : null, ToolTip = item.Tip };
+            button.Click += (_, _) =>
+            {
+                // The strip that replaces this one glides from here (see below).
+                if (glide is not null && SegmentFills.TryGetValue(glide, out var at)) SegmentFills[glide] = at with { At = Environment.TickCount64 };
+                item.Select();
+            };
             AutomationProperties.SetName(button, item.Name);
             strip.Children.Add(button);
         }
-        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        var shift = new TranslateTransform();
+        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(5), HorizontalAlignment = HorizontalAlignment.Left,
+            IsHitTestVisible = false, RenderTransform = shift, Visibility = Visibility.Hidden };
+        var host = new Grid { Children = { fill, strip } };
+        int chosen = items.ToList().FindIndex(item => item.Active);
+        strip.Loaded += (_, _) =>
+        {
+            if (chosen < 0 || chosen >= strip.Children.Count || strip.Children[chosen] is not FrameworkElement button || button.ActualWidth <= 0) return;
+            double x = button.TranslatePoint(new Point(), host).X, width = button.ActualWidth;
+            fill.Height = button.ActualHeight; fill.Visibility = Visibility.Visible;
+            // Only a strip that replaces one just chosen in glides; one shown afresh (model details opened again) starts in place.
+            bool slide = SegmentFills.TryGetValue(glide, out var was) && Environment.TickCount64 - was.At < 1500 && Soft.Enabled && strip.IsVisible && Math.Abs(was.X - x) > .5;
+            SegmentFills[glide] = (x, width, 0);
+            shift.X = x; fill.Width = width;
+            if (!slide) return;
+            shift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(was.X, x, Soft.Choose, Soft.Follow));
+            fill.BeginAnimation(FrameworkElement.WidthProperty, Soft.Fade(was.Width, width, Soft.Choose, Soft.Follow));
+        };
+        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
     }
+    // Where each gliding strip's fill was last, by its key.
+    private static readonly Dictionary<string, (double X, double Width, long At)> SegmentFills = [];
 
     private QuotaView Quotas(AppEntry entry, ProviderSnapshot snapshot)
     {
@@ -284,6 +339,9 @@ public partial class MainWindow
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
         }
         name.MaxWidth = Math.Max(20, innerWidth - occupied);
+        // The page stretches within its size step instead of being built again (RenderUsage), so the name gives way to the plan
+        // as the column's width changes.
+        head.SizeChanged += (_, e) => name.MaxWidth = Math.Max(20, e.NewSize.Width - occupied);
         column.Children.Add(head);
 
         FrameworkElement body;
@@ -307,6 +365,13 @@ public partial class MainWindow
                     block.Width = Math.Max(0, innerWidth / cells - 18);
                     row.Children.Add(block);
                 }
+                // As the column stretches, the blocks keep a full page's share of it.
+                column.SizeChanged += (_, e) =>
+                {
+                    // The column lies inside its surface's padding already.
+                    double width = Math.Max(0, e.NewSize.Width / cells - 18);
+                    foreach (FrameworkElement block in row.Children) block.Width = width;
+                };
                 body = row;
             }
             else
@@ -439,11 +504,7 @@ public partial class MainWindow
             right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
         block.Children.Add(numbers);
-        var track = new Grid(); Grid.SetRow(track, 4);
-        track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(.0001, used), GridUnitType.Star) });
-        track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(.0001, 100 - used), GridUnitType.Star) });
-        var background = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(layout.Track / 2) }; Grid.SetColumnSpan(background, 2); track.Children.Add(background);
-        if (used > 0) track.Children.Add(new Border { Background = UI.Brush(color), CornerRadius = new CornerRadius(layout.Track / 2) });
+        var track = new QuotaBar($"{entry.InstanceId:N}:{quota.Id}", used / 100, color); Grid.SetRow(track, 4);
         block.Children.Add(track);
         return block;
     }

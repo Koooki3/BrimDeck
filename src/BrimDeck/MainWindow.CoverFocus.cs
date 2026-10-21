@@ -20,8 +20,8 @@ public partial class MainWindow
         {
             pressed = down;
             bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
-            MusicControlButton.Animate(press, ScaleTransform.ScaleXProperty, down ? .94 : 1, animate, 100);
-            MusicControlButton.Animate(press, ScaleTransform.ScaleYProperty, down ? .94 : 1, animate, 100);
+            MusicControlButton.Animate(press, ScaleTransform.ScaleXProperty, down ? .94 : 1, animate, Soft.Hover);
+            MusicControlButton.Animate(press, ScaleTransform.ScaleYProperty, down ? .94 : 1, animate, Soft.Hover);
         }
         art.MouseLeftButtonDown += (_, e) =>
         {
