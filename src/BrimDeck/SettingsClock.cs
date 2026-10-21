@@ -119,7 +119,7 @@ public sealed partial class SettingsWindow
     {
         ClockColor.Amber => Loc.T("琥珀", "Amber"), ClockColor.Cyan => Loc.T("青色", "Cyan"), ClockColor.Pink => Loc.T("粉色", "Pink"),
         ClockColor.Lime => Loc.T("柠檬绿", "Lime"), ClockColor.Gradient => Loc.T("渐变", "Gradient"), ClockColor.Cover => Loc.T("跟随封面", "Cover color"),
-        ClockColor.Custom => Loc.T("自定义颜色", "Custom color"), _ => Loc.T("白色", "White")
+        ClockColor.Custom => Loc.T("自定义颜色", "Custom color"), _ => Loc.T("主题默认色", "Theme default")
     };
     // The cover swatch shows a sample cover color under its note.
     private Brush ColorSwatchFill(ClockColor color) => color switch
@@ -127,7 +127,8 @@ public sealed partial class SettingsWindow
         ClockColor.Gradient => ClockFace.Fill(S.ClockGradient.Select(ClockFace.Parse).ToList()),
         ClockColor.Custom => ClockFace.Fill([ClockFace.Parse(S.ClockCustomColor)]),
         ClockColor.Cover => ClockFace.Fill([Color.FromRgb(0xE0, 0xA4, 0x8C)]),
-        _ => ClockFace.Fill([ClockFace.Preset(color)])
+        // As the panel draws them on the current theme's surface.
+        _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color), PanelThemes.TextContrast)])
     };
     // A pencil over the custom color marks it as editable, dark on light colors and light on dark ones.
     private static FrameworkElement Pencil(Color under)
@@ -166,8 +167,10 @@ public sealed partial class SettingsWindow
             updating = false;
             changed(); RefreshClockTiles();
         }
-        foreach (var (name, colors) in ClockColors.Gradients)
+        // The current panel theme's presets; switching themes carries a chosen preset over to the new theme's (ApplyMatching).
+        foreach (var themed in PanelTheme.Current.ClockGradients)
         {
+            string name = themed.DisplayName; string[] colors = [.. themed.Stops];
             var preset = new RadioButton { Style = (Style)FindResource("SettingsClockSwatch"), GroupName = "ClockGradient" + compact, ToolTip = name,
                 Background = ClockFace.Fill(colors.Select(ClockFace.Parse).ToList()), Margin = new Thickness(line.Children.Count == 0 ? 0 : 6, 0, 0, 0),
                 IsChecked = colors.SequenceEqual(S.ClockGradient, StringComparer.OrdinalIgnoreCase) };
@@ -182,7 +185,9 @@ public sealed partial class SettingsWindow
             int index = i;
             var stop = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(S.ClockGradient[i]), ToolTip = names[i], Margin = new Thickness(i == 0 ? 0 : 4, 0, 0, 0) };
             AutomationProperties.SetName(stop, Loc.T("渐变", "Gradient ") + names[i]);
-            AttachClockPicker(stop, () => S.ClockGradient[index], ClockColors.Sunset[index], value => { Change(s => s.ClockGradient[index] = value); Refresh(); });
+            // "默认" restores this stop of the theme's first preset gradient.
+            var fallback = PanelTheme.Current.ClockGradients[0].Stops[index];
+            AttachClockPicker(stop, () => S.ClockGradient[index], fallback, value => { Change(s => s.ClockGradient[index] = value); Refresh(); });
             stops.Add(stop); line.Children.Add(stop);
         }
         host.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider) });

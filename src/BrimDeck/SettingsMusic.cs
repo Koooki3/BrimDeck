@@ -38,7 +38,7 @@ public sealed partial class SettingsWindow
         host.ClipToBounds = true; outgoing.IsHitTestVisible = false; host.Children.Add(incoming);
         var leave = outgoing.RenderTransform as TranslateTransform ?? new TranslateTransform(); outgoing.RenderTransform = leave;
         var enter = new TranslateTransform(direction * width, 0); incoming.RenderTransform = enter;
-        DoubleAnimation Slide(double to) => new(to, TimeSpan.FromMilliseconds(300)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        DoubleAnimation Slide(double to) => new(to, TimeSpan.FromMilliseconds(300)) { EasingFunction = Soft.Out };
         var leaveMotion = Slide(-direction * width); leaveMotion.Completed += (_, _) => host.Children.Remove(outgoing);
         var enterMotion = Slide(0); enterMotion.Completed += (_, _) => { if (host.Children.Count == 1) host.ClipToBounds = false; };
         leave.BeginAnimation(TranslateTransform.XProperty, leaveMotion); enter.BeginAnimation(TranslateTransform.XProperty, enterMotion);
@@ -54,14 +54,17 @@ public sealed partial class SettingsWindow
         bool notch = style == CompactStyle.Notch;
         Group(Toggle(Loc.T("配额环", "Quota rings"), S.ShowsSummary(style), v => Change(s => { if (notch) s.NotchSummary = v; else s.CapsuleSummary = v; })),
             Toggle(Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style), v => Change(s => { if (notch) s.NotchMusic = v; else s.CapsuleMusic = v; })),
-            ClockRow(style));
+            ClockRow(style),
+            Toggle(Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), v => Change(s => { if (notch) s.NotchMonitor = v; else s.CapsuleMonitor = v; }),
+                help: Loc.T("在收起的刘海或胶囊中显示 CPU、内存、GPU 与网速。显示哪些读数在“系统监控 › 显示与读数”中设置。",
+                    "Shows CPU, memory, GPU and network speed in the collapsed notch or capsule. Which readings are shown is set in \"System monitor › Display and readings\".")));
     }
     // Settings every player shares: colors, cover and text.
     private void MusicStyle()
     {
         SectionTitle(Loc.T("收起时", "When collapsed"));
         Group(MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) }, v => Change(s => s.MusicText = v)),
-            MusicChoice(Loc.T("律动条颜色", "Equalizer color"), S.MusicCoverColor, new[] { (true, Loc.T("封面主色", "Cover color")), (false, Loc.T("白色", "White")) }, v => Change(s => s.MusicCoverColor = v)),
+            MusicChoice(Loc.T("律动条颜色", "Equalizer color"), S.MusicCoverColor, new[] { (true, Loc.T("封面主色", "Cover color")), (false, Loc.T("主题默认色", "Theme default")) }, v => Change(s => s.MusicCoverColor = v)),
             Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)));
         SectionTitle(Loc.T("展开时", "When expanded"));
         Group(Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage));

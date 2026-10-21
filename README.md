@@ -61,6 +61,8 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 - By default it turns into the Indicator when a window is maximized, and hides during full-screen games or video so it never opens by accident.
 
+- The Notch, Capsule, notices and the expanded panel follow a panel theme: System, Dark or Light, built-in open-source themes such as One Dark Pro, GitHub, Dracula and Night Owl, or a custom theme made with the [theme guide](docs/en-US/themes.md). Text and figures stay readable in every theme.
+
 ### AI usage
 
 <img src="docs/en-US/images/usage.png" width="100%" alt="AI usage page: quotas of Claude, Codex, Cursor and Antigravity in four columns">
@@ -72,6 +74,17 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 - Token and cost details are available for each model, filtered by tool and date range.
 
 You can choose the quota providers and set the quota and usage source of each column separately. See [Supported tools](docs/en-US/ai-tools.md).
+
+### System monitor
+
+- The processor's usage large, with the last minute as a soft line beside it, and one column per logical processor, performance cores and efficiency cores in their own colors, each with a tick for its current frequency (point at a column for its figures); the GPU shows small beside them. Click it to show the GPU large instead: a column per engine (3D, copy, video decode and encode…), its dedicated memory and name on hover, and the processor small.
+- Memory in use, cached and committed, and download and upload speed over the physical network adapters with the last minute as a line.
+- The busiest apps by CPU or memory, with the processes of one program folded into one row, compact or detailed, in two columns on a wide panel; the list does not reshuffle when two apps trade places by a point. Click an app for its card.
+- Drag the open panel's bottom edge, sides or corners to resize it, on every page (AI usage, system monitor and media); the layout follows step by step. The grips reach a little beyond the edges, handles appear as the pointer nears them, and the edge under the pointer lights in the theme's accent; the size follows the pointer on a soft spring.
+- The notch and the capsule can show the readings too: ftop's strip of core columns, CPU, memory, GPU and network, three ring gauges, or readings of your choice, next to the quota rings and the music. They widen to fit; drag either end to set the width yourself (the line shown beside a maximized window too), double-click an end to let them fit again.
+- Follows the panel theme by default, taking its colors from the theme in use; ftop's Sea, Graphite and Warm schemes are also offered, in their light or dark variant to suit the theme. The system is read only while the page or the readings are shown, and processes only while the page is open.
+
+The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT License), a system monitor for macOS.
 
 ### Music
 
@@ -124,3 +137,5 @@ You are welcome to report problems, suggest features or ask for more tools and p
 ## License
 
 BrimDeck is licensed under the [Apache License 2.0](LICENSE). Third-party licenses are listed in [ThirdPartyNotices.txt](src/BrimDeck/ThirdPartyNotices.txt).
+
+The system monitor page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq, licensed under the MIT License; thanks to its author.

@@ -93,7 +93,7 @@ public sealed partial class SettingsWindow
         long version = _appRowMotionVersions[row];
         var motion = new DoubleAnimation(start, target, TimeSpan.FromMilliseconds(S.AnimationDuration))
         {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            EasingFunction = Soft.Out
         };
         motion.Completed += (_, _) =>
         {

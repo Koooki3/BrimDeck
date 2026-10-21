@@ -29,7 +29,10 @@ public sealed partial class SettingsWindow : Window
     private readonly TextBlock _status = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
-        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck")];
+        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings")];
+    // The order of the pages in the navigation; the theme page (ThemePage) is listed with the appearance pages, and the system
+    // monitor's page (MonitorSettingsPage) has its own group after music, before About.
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -108,7 +111,7 @@ public sealed partial class SettingsWindow : Window
         _app.Prices.Changed += PricesChanged;
         _app.Updates.Changed += UpdatesChanged;
         SizeChanged += (_, _) => { if (_priceTable is not null) _priceTable.Height = Math.Max(220, ActualHeight - PriceTableReserve); };
-        Closed += (_, _) => { EndAppDrag(false, false); _updateOpenGeneration++; _app.Updates.Changed -= UpdatesChanged; SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _app.Prices.Changed -= PricesChanged; if (!_app.Exiting) { _app.Deck.Preview(false); _app.FlushSettings(); } };
+        Closed += (_, _) => { WatchThemeFolder(false); EndAppDrag(false, false); _updateOpenGeneration++; _app.Updates.Changed -= UpdatesChanged; SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _app.Prices.Changed -= PricesChanged; if (!_app.Exiting) { _app.Deck.Preview(false); _app.FlushSettings(); } };
         StateChanged += (_, _) =>
         {
             UpdateCaption();
@@ -302,6 +305,7 @@ public sealed partial class SettingsWindow : Window
         if (page < 0 || page >= _pages.Length) return;
         RememberFocus();
         if (page != _page) { _expandedSource = null; _openSizes.Clear(); }
+        if (page != ThemePage) WatchThemeFolder(false);
         _sourceTestCancellation?.Cancel();
         EndAppDrag(false, false);
         _appRowMotionVersions.Clear();
@@ -311,11 +315,11 @@ public sealed partial class SettingsWindow : Window
         // Rebuilding the same page after a change keeps the reader where they were; only switching pages starts at the top.
         double keep = page == _page ? Math.Max(_scroll.VerticalOffset, _keptOffset) : 0; _keptOffset = 0;
         _page = page; _navigation.Children.Clear(); _content.Children.Clear(); _aboutUpdateView = null; _scroll.ScrollToTop();
-        for (int i = 0; i < _pages.Length; i++)
+        foreach (int i in PageOrder)
         {
-            if (i is 0 or 3 or 5 or 7)
+            if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage)
             {
-                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
+                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
                 group.Margin = new Thickness(12, i == 0 ? 0 : 24, 0, 8); _navigation.Children.Add(group);
             }
             int target=i; bool selected=page==i;
@@ -328,12 +332,12 @@ public sealed partial class SettingsWindow : Window
         }
         // The About page is titled by the wordmark itself, so the name does not appear twice.
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
-        if (page is < 4 or 5 or 6)
+        if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage)
         {
             var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),ResetPage); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
-        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; }
+        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; }
         if (_content.Children[^1] is Border lastGroup) lastGroup.Margin = new Thickness(lastGroup.Margin.Left, lastGroup.Margin.Top, lastGroup.Margin.Right, 0);
         // Apply the offset before the frame is drawn, so the rebuilt page never shows its top for a frame.
         if (keep > 0) { _scroll.UpdateLayout(); _scroll.ScrollToVerticalOffset(keep); _scroll.UpdateLayout(); }
@@ -349,6 +353,8 @@ public sealed partial class SettingsWindow : Window
         3 => "M 1,1 H 6 V 6 H 1 Z M 10,1 H 15 V 6 H 10 Z M 1,10 H 6 V 15 H 1 Z M 10,10 H 15 V 15 H 10 Z",
         4 => "M 1,2 H 15 V 14 H 1 Z M 1,6 H 15 M 1,10 H 15 M 6,2 V 14",
         6 => "M 1,2 H 15 V 14 H 1 Z M 6.5,5.5 L 11,8 L 6.5,10.5 Z",
+        MonitorSettingsPage => "M 1,9 H 4 L 6,4 L 9,13 L 11,7 L 12,9 H 15",
+        ThemePage => "M 8,1 C 4,1 1,4 1,8 C 1,12 4,15 8,15 C 9.4,15 9.6,13.6 8.8,12.8 C 8,12 8.6,10.5 10,10.5 H 12 C 13.7,10.5 15,9.2 15,7.5 C 15,4 12,1 8,1 Z M 4.6,8 V 8.1 M 6,4.8 V 4.9 M 9.6,4.4 V 4.5 M 12,6.8 V 6.9",
         5 => "M 6,12.5 V 3 L 14,1.5 V 11 M 6,12.5 A 2,2 0 1 1 2,12.5 A 2,2 0 1 1 6,12.5 M 14,11 A 2,2 0 1 1 10,11 A 2,2 0 1 1 14,11",
         _ => "M 8,1 A 7,7 0 1 1 7.99,1 M 8,7 V 12 M 8,4 V 4.2"
     },16,16,color);
@@ -380,6 +386,10 @@ public sealed partial class SettingsWindow : Window
         };
         Group(Row(Loc.T("主题", "Theme"),SegmentBorder(themes)),Row(Loc.T("语言", "Language"),language));
         DisplayChoice(); Interaction(); WindowRules();
+        SectionTitle(Loc.T("资源占用", "Resources"));
+        Group(Toggle(Loc.T("空闲时释放内存", "Free memory when idle"), S.TrimMemoryWhenIdle, value => Change(s => s.TrimMemoryWhenIdle = value),
+            help: Loc.T("面板收起并空闲 45 秒后，整理并归还暂时不用的内存，任务管理器中的内存占用会明显降低。代价是下次展开时要把这部分内存重新调入，可能有轻微卡顿，内存紧张时更明显。",
+                "After the panel has been collapsed and idle for 45 seconds, memory not in use is compacted and returned, which lowers the memory shown in Task Manager considerably. The cost: the next time the panel opens, that memory is read back in, which can cause a slight stutter, more so when memory is short.")));
     }
     // Either the primary display, or any set of displays, each with its own switch. A chosen display that is not
     // connected keeps its switch, marked, so that it can be removed. The last switch that is on cannot be turned off.
@@ -468,6 +478,7 @@ public sealed partial class SettingsWindow : Window
         {
             starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page"))];
             if (S.UsagePage) starts.Add((DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage")));
+            if (S.MonitorPage) starts.Add((DefaultDeckPage.Monitor, Loc.T("系统监控", "System monitor")));
             if (S.MusicPage) starts.Add((DefaultDeckPage.Music, Loc.T("音乐", "Music")));
             filling = true;
             start.ItemsSource = starts.Select(option => option.Label).ToList();
@@ -476,8 +487,10 @@ public sealed partial class SettingsWindow : Window
         }
         FillStarts();
         start.SelectionChanged += (_, _) => { if (!filling && start.SelectedIndex >= 0) Change(s => s.DefaultPage = starts[start.SelectedIndex].Value); };
-        SectionTitle(Loc.T("显示的页面", "Pages shown"));
+        SectionTitle(Loc.T("显示的页面", "Pages shown"), help: () => Loc.T("除了在下面设置宽度与高度，也可以把鼠标移到展开面板的左右两边、底边或底角，直接拖动调整大小。",
+            "Besides setting the width and height below, you can point at the expanded panel's sides, bottom edge or bottom corners and drag them to resize it."));
         Group(SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), DeckPage.Usage, S.UsagePage, value => { Change(s => s.UsagePage = value); FillStarts(); }, Collect(UsageSizes)),
+            SizeRow(Loc.T("显示系统监控", "Show system monitor"), Loc.T("系统监控", "system monitor"), DeckPage.Monitor, S.MonitorPage, value => { Change(s => s.MonitorPage = value); FillStarts(); }, Collect(MonitorSizeControls)),
             SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), DeckPage.Music, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls)));
         // Settings that apply across the expanded pages rather than to one of them.
         SectionTitle(Loc.T("通用", "General"));
@@ -514,7 +527,8 @@ public sealed partial class SettingsWindow : Window
     {
         Target.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(0, 20, 0, 0) });
         // Labels inside an open row are set lighter than the row's own title.
-        var row = Row(Loc.T("快捷尺寸", "Quick sizes"), SegmentBorder(sizes)); if (row.Children[0] is StackPanel { Children: [TextBlock label, ..] }) label.FontWeight = FontWeights.Normal;
+        var row = Row(Loc.T("快捷尺寸", "Quick sizes"), SegmentBorder(sizes));
+        if (row.Children[0] is StackPanel { Children: [TextBlock label, ..] }) label.FontWeight = FontWeights.Normal;
         Target.Children.Add(row);
     }
     private void UsageSizes()
@@ -551,13 +565,21 @@ public sealed partial class SettingsWindow : Window
         {
             switch(_page)
             {
-                case 0:s.LaunchAtStartup=false;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.Display=defaults.Display;s.DisplayMonitors=[];break;
+                case 0:s.LaunchAtStartup=false;s.TrimMemoryWhenIdle=defaults.TrimMemoryWhenIdle;s.Theme=defaults.Theme;s.Language=Loc.SystemLanguage();s.OpenDelay=defaults.OpenDelay;s.CloseDelay=defaults.CloseDelay;s.Animations=defaults.Animations;s.AnimationDuration=defaults.AnimationDuration;s.Maximized=defaults.Maximized;s.Borderless=defaults.Borderless;s.Exclusive=defaults.Exclusive;s.Display=defaults.Display;s.DisplayMonitors=[];break;
                 case 1:s.Style=defaults.Style;s.NotchSummary=defaults.NotchSummary;s.NotchMusic=defaults.NotchMusic;s.CapsuleSummary=defaults.CapsuleSummary;s.CapsuleMusic=defaults.CapsuleMusic;s.MusicIndicatorProgress=defaults.MusicIndicatorProgress;
-                    s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=defaults.ClockGradient;s.Clock24Hour=defaults.Clock24Hour;CopyCollapsedSize(s,defaults);s.HideHotkey=defaults.HideHotkey;break;
-                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;break;
-                case 3:s.QuotaAlerts=defaults.QuotaAlerts;s.Apps=defaults.Apps;break;
+                    s.NotchClock=defaults.NotchClock;s.CapsuleClock=defaults.CapsuleClock;s.ClockStyle=defaults.ClockStyle;s.ClockColor=defaults.ClockColor;s.ClockCustomColor=defaults.ClockCustomColor;s.ClockGradient=[.. PanelTheme.Current.ClockGradients[0].Stops];s.Clock24Hour=defaults.Clock24Hour;CopyCollapsedSize(s,defaults);s.HideHotkey=defaults.HideHotkey;
+                    s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;
+                    // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
+                    PanelThemes.ApplyClock(PanelTheme.Current,s);break;
+                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;
+                    s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;break;
+                case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
+                    s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;break;
+                case 3:s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;break;
                 case 5:s.MusicText=defaults.MusicText;s.MusicCoverColor=defaults.MusicCoverColor;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;break;
+                // The default theme, with its own colors and suggested clock; the other themes keep what was saved for them.
+                case ThemePage:ChooseTheme(s,defaults.PanelTheme);PanelThemes.ApplyMatching(PanelThemes.Resolve(PanelTheme.Find(defaults.PanelTheme)),s);break;
             }
         });
         if(_page==0)RebuildTheme();else ShowPage(_page);
@@ -565,7 +587,7 @@ public sealed partial class SettingsWindow : Window
 
     // A page that is not shown cannot be previewed, so its sizes are only saved.
     private void Resize(Action<DeckSettings> edit, DeckPage page = DeckPage.Usage)
-    { bool shown = page == DeckPage.Music ? S.MusicPage : S.UsagePage; Change(edit); if (!shown) return; _preview = true; _previewPage = page; _app.Deck.Preview(true); _app.Deck.SelectPage(page, remember: false); }
+    { bool shown = DeckPages.Shown(S, page); Change(edit); if (!shown) return; _preview = true; _previewPage = page; _app.Deck.Preview(true); _app.Deck.SelectPage(page, remember: false); }
 
     private void Interaction()
     {
@@ -603,6 +625,10 @@ public sealed partial class SettingsWindow : Window
         Group(Toggle(Loc.T("预警和告警提示", "Warning and critical notices"), S.QuotaAlerts, v => Change(s => s.QuotaAlerts = v), help:
             Loc.T($"开启后，某个应用的已用比例升到预警（{AppPresets.WarningPercent:0}%）或告警（{AppPresets.CriticalPercent:0}%）时，收起的刘海或胶囊会短暂显示该应用的名称、已用比例和重置时间，约 5 秒后恢复。",
                 $"When on, and an app's used share rises to the warning ({AppPresets.WarningPercent:0}%) or critical ({AppPresets.CriticalPercent:0}%) level, the collapsed notch or capsule briefly shows the app's name, used share and reset time, then returns after about 5 seconds.")));
+        SectionTitle(Loc.T("数据来源", "Data sources"));
+        Group(Toggle(Loc.T("同步 WSL 中的用量统计", "Include usage from WSL"), S.IncludeWsl, v => Change(s => s.IncludeWsl = v), help:
+            Loc.T("开启后，会读取已安装的 WSL 子系统中 Claude Code 和 Codex CLI 的会话记录，并计入 Token 用量与费用统计。读取时会唤醒尚未运行的 WSL 子系统，默认关闭。",
+                "When on, the Claude Code and Codex CLI session records inside installed WSL distributions are read and counted in token usage and cost. Reading wakes a distribution that is not running, so this is off by default.")));
         SectionTitle(Loc.T("应用", "Apps"));
         _appRows = new StackPanel();
         foreach (var entry in S.Apps) _appRows.Children.Add(AppRow(entry));
@@ -686,9 +712,10 @@ public sealed partial class SettingsWindow : Window
         var nameField = AppNameField(entry);
         Grid.SetColumn(nameField, 3); row.Children.Add(nameField);
 
-        var theme = ColorSwatch(name, Loc.T("主题", "theme"), entry.Theme, entry.ThemeColor.Length == 0, value => Change(s => s.Entry(entry.InstanceId)!.ThemeColor = value), owner: entry.InstanceId);
-        var warning = ColorSwatch(name, Loc.T("预警", "warning"), entry.Warning, entry.WarningColor.Length == 0, value => Change(s => s.Entry(entry.InstanceId)!.WarningColor = value), AppPresets.WarningPercent, entry.InstanceId);
-        var critical = ColorSwatch(name, Loc.T("告警", "critical"), entry.Critical, entry.CriticalColor.Length == 0, value => Change(s => s.Entry(entry.InstanceId)!.CriticalColor = value), AppPresets.CriticalPercent, entry.InstanceId);
+        // An unchosen color shows the panel theme's default for this column, which is what the panel draws.
+        var theme = ColorSwatch(name, Loc.T("主题", "theme"), entry.ThemeColor.Length > 0 ? entry.ThemeColor : PanelTheme.AppDefault(entry.QuotaSource), entry.ThemeColor.Length == 0, value => Change(s => s.Entry(entry.InstanceId)!.ThemeColor = value), owner: entry.InstanceId);
+        var warning = ColorSwatch(name, Loc.T("预警", "warning"), entry.WarningColor.Length > 0 ? entry.WarningColor : PanelTheme.WarningDefault, entry.WarningColor.Length == 0, value => Change(s => s.Entry(entry.InstanceId)!.WarningColor = value), AppPresets.WarningPercent, entry.InstanceId);
+        var critical = ColorSwatch(name, Loc.T("告警", "critical"), entry.CriticalColor.Length > 0 ? entry.CriticalColor : PanelTheme.CriticalDefault, entry.CriticalColor.Length == 0, value => Change(s => s.Entry(entry.InstanceId)!.CriticalColor = value), AppPresets.CriticalPercent, entry.InstanceId);
         Grid.SetColumn(theme, 4); row.Children.Add(theme); Grid.SetColumn(warning, 5); row.Children.Add(warning); Grid.SetColumn(critical, 6); row.Children.Add(critical);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.Enabled, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, Loc.T("显示 ", "Show ") + name); AutomationProperties.SetAutomationId(toggle, "enabled-" + entry.InstanceId.ToString("N"));
@@ -836,7 +863,8 @@ public sealed partial class SettingsWindow : Window
 
     private Button ColorSwatch(string app, string label, string color, bool isDefault, Action<string> apply, double? threshold = null, Guid? owner = null)
     {
-        var button = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(color) };
+        // The swatch shows the color as the panel draws it (see PanelTheme.Readable); the picker starts from the color as chosen.
+        var button = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(PanelTheme.Readable(color)) };
         // The column heading explains each color; the swatch itself carries no hover note.
         AutomationProperties.SetName(button, Loc.T($"{app} {label}颜色", $"{app} {label} color")); AutomationProperties.SetHelpText(button, color + (isDefault ? Loc.T("（默认）", " (default)") : ""));
         var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
@@ -874,7 +902,7 @@ public sealed partial class SettingsWindow : Window
         var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), Width = 60, TextAlignment = TextAlignment.Left, VerticalAlignment = VerticalAlignment.Center, MaxLength = 6 };
         AutomationProperties.SetName(input, Loc.T("颜色值", "Color value")); field.Children.Add(input);
         var chip = new Border { Child = field, Height = 28, CornerRadius = new CornerRadius(6), Background = UI.Brush(Inset), BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(1), Padding = new Thickness(9, 0, 9, 0) };
-        input.GotKeyboardFocus += (_, _) => chip.BorderBrush = UI.Brush(UI.Accent); input.LostKeyboardFocus += (_, _) => chip.BorderBrush = Brushes.Transparent;
+        input.GotKeyboardFocus += (_, _) => chip.BorderBrush = (Brush)FindResource("SettingsAccent"); input.LostKeyboardFocus += (_, _) => chip.BorderBrush = Brushes.Transparent;
         entry.Children.Add(chip); panel.Children.Add(entry);
 
         var rings = new List<(Ellipse Ring, string Color)>();
@@ -889,7 +917,8 @@ public sealed partial class SettingsWindow : Window
             ok.IsEnabled = !Same(pending, current);
         }
         void Commit() { if (!Same(pending, current)) choose(pending); }
-        foreach (var color in AppPresets.Palette)
+        // The current panel theme's colors, so a pick from here suits the panel it is shown on.
+        foreach (var color in PanelTheme.Current.Swatches.Select(swatch => swatch.ToString()))
         {
             var swatch = ActionButton("", () => choose(color)); swatch.Padding = new Thickness(0); swatch.Width = 31; swatch.Height = 31;
             var ring = new Ellipse { Width = 20, Height = 20, Fill = UI.Brush(color) }; swatch.Content = ring; rings.Add((ring, color));
@@ -959,11 +988,20 @@ public sealed partial class SettingsWindow : Window
         return panel;
     }
 
-    private void SectionTitle(string title, FrameworkElement? action = null)
+    private void SectionTitle(string title, FrameworkElement? action = null, Func<string>? help = null)
     {
         var row = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
         if (action is not null) { DockPanel.SetDock(action, Dock.Right); action.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(action); }
-        var label = TextLine(title, 11, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(label); Target.Children.Add(row);
+        var label = TextLine(title, 11, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center;
+        if (help is null) row.Children.Add(label);
+        else
+        {
+            // An info icon right after the title, as the settings rows carry theirs.
+            var heading = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
+            heading.Children.Add(label); heading.Children.Add(HelpIcon(title, help, 13));
+            row.Children.Add(heading);
+        }
+        Target.Children.Add(row);
     }
 
     private void Group(params FrameworkElement[] rows)

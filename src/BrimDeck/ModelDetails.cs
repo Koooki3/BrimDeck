@@ -38,7 +38,7 @@ public partial class MainWindow
 
     internal void OpenModelDetails(ProviderId provider, int days)
     {
-        if (IsMusicPage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
+        if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
         _modelApps.Clear(); _modelApps.Add(provider);
         _knownModelApps.Clear(); _knownModelApps.UnionWith(Settings.StatisticsProviders);
         _customRange = null; _days = days; _details = true;
@@ -85,7 +85,7 @@ public partial class MainWindow
         AutomationProperties.SetName(button, name); button.Click += (_, _) => click(); return button;
     }
 
-    private string StatisticsTheme(ProviderId id) => Settings.EnabledApps.FirstOrDefault(app => app.UsageSource == id)?.Theme ?? UI.ColorFor(id);
+    private string StatisticsTheme(ProviderId id) => Settings.EnabledApps.FirstOrDefault(app => app.UsageSource == id) is { } app ? PanelTheme.AppTheme(app) : UI.ColorFor(id);
 
     private FrameworkElement ModelApplicationFilter(IReadOnlyList<ProviderId> apps, int stage)
     {
@@ -190,7 +190,7 @@ public partial class MainWindow
             { ToggleModelApp(app); button.Tag = _modelApps.Contains(app) ? "Selected" : null; }, _modelApps.Contains(app), toolTip: false);
             button.Margin = new Thickness(0, 3, 0, 3); stack.Children.Add(button);
         }
-        popup.Content = new Border { Child = stack, Background = UI.Brush("#1A1A1D"), CornerRadius = new CornerRadius(10), Padding = new Thickness(8), BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1) };
+        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(10), Padding = new Thickness(8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
         ShowModelPopup(popup, ModelToolbar);
     }
 
@@ -374,11 +374,11 @@ public partial class MainWindow
                 int column = Grid.GetColumn(text) / 2;
                 text.ToolTip = column == 1 ? PriceBreakdown(record) : column >= 2 ? tips[column - 2] : (object?)null;
             }
-            var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush("#0DFFFFFF"), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
-            item.MouseEnter += (_, _) => item.Background = UI.Brush("#0AFFFFFF"); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
+            var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush(PanelTheme.Hex("rowDivider")), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
+            item.MouseEnter += (_, _) => item.Background = UI.Brush(PanelTheme.Hex("rowHover")); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
             list.Children.Add(item);
         }
-        // The viewport clip would turn the rows grayscale; they lie over the island's opaque black surface.
+        // The viewport clip would turn the rows grayscale; they lie over the island's opaque surface.
         RenderOptions.SetClearTypeHint(list, ClearTypeHint.Enabled);
         // Focusable so the arrow keys scroll the list; an outline around the whole list would only add noise.
         var scroll = new ScrollViewer { Content = list, Style = (Style)FindResource("ModelScrollViewer"), Focusable = true, FocusVisualStyle = null };

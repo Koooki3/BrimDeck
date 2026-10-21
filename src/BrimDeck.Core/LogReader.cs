@@ -21,7 +21,10 @@ public sealed class LogReader
     // Claude and Codex read different folders; each keeps only the files its latest read visited.
     private readonly Dictionary<ProviderId, Dictionary<string, CacheItem>> _caches = [];
 
-    public ProviderSnapshot Read(ProviderId id, string root, DateTimeOffset now, DateTime? startDate = null)
+    public ProviderSnapshot Read(ProviderId id, string root, DateTimeOffset now, DateTime? startDate = null) => Read(id, [root], now, startDate);
+
+    // roots are data folders of the same tool; place names where they are, for the note shown with the statistics.
+    public ProviderSnapshot Read(ProviderId id, IReadOnlyList<string> roots, DateTimeOffset now, DateTime? startDate = null, string? place = null)
     {
         var result = new ProviderSnapshot(id);
         var cutoff = new DateTimeOffset(startDate?.Date ?? now.LocalDateTime.Date.AddDays(-29));
@@ -33,9 +36,9 @@ public sealed class LogReader
         int count = 0, errors = 0;
         JsonElement latestQuota = default;
         var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
-        foreach (var folder in folders)
+        foreach (var folder in roots.SelectMany(dataRoot => folders.Select(name => Path.Combine(dataRoot, name))))
         {
-            var path = Path.Combine(root, folder);
+            var path = folder;
             if (!Directory.Exists(path)) continue;
             result.UsageAvailable = true;
             foreach (var file in Directory.EnumerateFiles(path, "*.jsonl", options))
@@ -64,7 +67,8 @@ public sealed class LogReader
         }
         foreach (var gone in cache.Keys.Where(file => !visited.Contains(file)).ToList()) cache.Remove(gone);
         result.Entries = entries.Values.OrderBy(x => x.Time).ToList();
-        result.UsageNote = result.UsageAvailable ? Loc.T($"本机 {cutoff.LocalDateTime:yyyy-MM-dd} 起 · {count} 个记录文件", $"This PC since {cutoff.LocalDateTime:yyyy-MM-dd} · " + Loc.Count(count, "record file", "record files"))
+        var where = place ?? Loc.T("本机", "This PC");
+        result.UsageNote = result.UsageAvailable ? Loc.T($"{where} {cutoff.LocalDateTime:yyyy-MM-dd} 起 · {count} 个记录文件", $"{where} since {cutoff.LocalDateTime:yyyy-MM-dd} · " + Loc.Count(count, "record file", "record files"))
             : Loc.T("未找到本机会话记录。", "No local session records were found.");
         result.UsageComplete = errors == 0;
         if (errors > 0) result.UsageNote += Loc.T($" · {errors} 处记录未能读取", " · " + Loc.Count(errors, "record", "records") + " could not be read");

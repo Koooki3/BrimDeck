@@ -28,15 +28,29 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     public IReadOnlyList<string> ClaudeDesktopProfiles()
     {
         var paths = new List<string> { Path.Combine(Roaming, "Claude") };
-        var packages = Path.Combine(Local, "Packages");
-        try
+        void Add(string parent, string pattern, Func<IEnumerable<string>, IEnumerable<string>> profiles)
         {
-            if (Directory.Exists(packages))
-                paths.AddRange(Directory.EnumerateDirectories(packages, "Claude_*")
-                    .Select(package => Path.Combine(package, "LocalCache", "Roaming", "Claude")));
+            try
+            {
+                if (Directory.Exists(parent)) paths.AddRange(profiles(Directory.EnumerateDirectories(parent, pattern)));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        return paths.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase)
+        Add(Path.Combine(Local, "Packages"), "Claude_*", packages => packages.Select(package => Path.Combine(package, "LocalCache", "Roaming", "Claude")));
+        // Newer desktop versions move their data to %LOCALAPPDATA%\Claude-Data\<install>, which also holds a README; a folder
+        // there is a profile once the app has written its config.json.
+        Add(Path.Combine(Local, "Claude-Data"), "*", folders => folders.Where(HasConfig));
+        return paths.Where(path => Directory.Exists(path) && (HasConfig(path) || !Left(path))).Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(path => File.GetLastWriteTimeUtc(Path.Combine(path, "config.json"))).ToList();
+    }
+
+    private static bool HasConfig(string profile) => File.Exists(Path.Combine(profile, "config.json"));
+
+    // After moving to Claude-Data the desktop app leaves a ".user-data-left.<install>" marker in each old folder. The marker names
+    // the install that left, and another install may still use the folder, so a folder that kept its config.json stays a profile.
+    private static bool Left(string profile)
+    {
+        try { return Directory.EnumerateFiles(profile, ".user-data-left.*").Any(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
 }

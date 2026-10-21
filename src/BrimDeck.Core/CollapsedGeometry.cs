@@ -59,15 +59,20 @@ public readonly record struct PanelPlacement(double Top, double HeaderExtra);
 // work area. Every result lies on the monitor, with a width and height of at least 0, for any input.
 public static class CollapsedGeometry
 {
-    public static CollapsedShape Resolve(DeckSettings settings, CompactStyle style, DipRect monitor, DipRect work, double pixelsPerDip = 1)
+    // contentWanted: the width the notch's or capsule's content asks for (0 for none). A surface too short for it grows, as
+    // ftop's strip fits its readings, up to the style's largest width and the monitor; it never shrinks below the saved width.
+    public static CollapsedShape Resolve(DeckSettings settings, CompactStyle style, DipRect monitor, DipRect work, double pixelsPerDip = 1, double contentWanted = 0)
     {
+        double wanted = double.IsFinite(contentWanted) ? Math.Max(0, contentWanted) : 0;
         var (screen, area) = Sanitize(monitor, work);
         switch (style)
         {
             case CompactStyle.Capsule:
             {
-                double width = Math.Min(Value(settings.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault), area.Width);
                 double height = Math.Min(Value(settings.CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault), area.Height);
+                double saved = Value(settings.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
+                double fit = wanted > 0 ? Math.Min(CollapsedLimits.CapsuleWidthMax, wanted + 2 * CollapsedLimits.CapsuleInset * height / CollapsedLimits.BaseHeight) : 0;
+                double width = Math.Min(Math.Max(saved, fit), area.Width);
                 var (topMin, topMax) = TopRange(height, area.Height, double.PositiveInfinity);
                 double top = Math.Clamp(Value(settings.CapsuleTop, CollapsedLimits.CapsuleTopMin, CollapsedLimits.CapsuleTopMax, CollapsedLimits.CapsuleTopDefault), topMin, topMax);
                 double scale = height / CollapsedLimits.BaseHeight, inset = CollapsedLimits.CapsuleInset * scale;
@@ -85,8 +90,12 @@ public static class CollapsedGeometry
             }
             default:
             {
-                double width = Math.Min(Value(settings.NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault), screen.Width);
                 double height = Math.Min(Value(settings.NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault), screen.Height);
+                double saved = Value(settings.NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault);
+                // The content keeps clear of the inset and, on a low notch where they are wider, of the shoulders and corners.
+                double side = Math.Max(CollapsedLimits.NotchInset * height / CollapsedLimits.BaseHeight, CollapsedLimits.NotchShoulder + CollapsedLimits.NotchCorner);
+                double fit = wanted > 0 ? Math.Min(CollapsedLimits.NotchWidthMax, wanted + 2 * side) : 0;
+                double width = Math.Min(Math.Max(saved, fit), screen.Width);
                 double scale = height / CollapsedLimits.BaseHeight, inset = CollapsedLimits.NotchInset * scale;
                 var surface = new DipRect(Place(screen.Width, width, settings.NotchOffsetX), 0, width, height);
                 return new(CompactStyle.Notch, surface, scale, inset, Math.Max(0, width - 2 * inset), CollapsedLimits.NotchCorner, 0, CollapsedLimits.NotchShoulder);

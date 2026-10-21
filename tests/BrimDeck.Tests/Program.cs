@@ -18,12 +18,15 @@ try
     await MusicTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
+    PanelThemeTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
     HotkeyTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
+    SystemMonitorTests.Run(Check);
+    SystemMonitorTests.Store(root, Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
     await AppUpdateTests.Run(root, Check);
@@ -150,6 +153,21 @@ try
     Directory.CreateDirectory(classicProfile); Directory.CreateDirectory(storeProfile);
     Directory.CreateDirectory(Path.Combine(locations.Local, "Packages", "Unrelated_testfamily", "LocalCache", "Roaming", "Claude"));
     Check("Classic and Store Claude profiles discovered automatically", locations.ClaudeDesktopProfiles().Count == 2 && locations.ClaudeDesktopProfiles().Contains(storeProfile));
+    var movedProfile = Path.Combine(locations.Local, "Claude-Data", "claude_testfamily");
+    Directory.CreateDirectory(movedProfile);
+    Directory.CreateDirectory(Path.Combine(locations.Local, "Claude-Data", "claude_unwritten"));
+    File.WriteAllText(Path.Combine(locations.Local, "Claude-Data", "README.txt"), "");
+    File.WriteAllText(Path.Combine(movedProfile, "config.json"), "{}");
+    Check("Claude profile moved to Claude-Data is discovered and read first, without folders the app has not written",
+        locations.ClaudeDesktopProfiles() is { Count: 3 } withMoved && withMoved[0] == movedProfile);
+    File.WriteAllText(Path.Combine(storeProfile, ".user-data-left.claude_testfamily"), "");
+    Check("A profile folder the desktop app moved away from is no longer used",
+        locations.ClaudeDesktopProfiles() is { Count: 2 } afterMove && !afterMove.Contains(storeProfile) && afterMove[0] == movedProfile);
+    File.WriteAllText(Path.Combine(storeProfile, "config.json"), "{}");
+    File.SetLastWriteTimeUtc(Path.Combine(storeProfile, "config.json"), DateTime.UtcNow.AddDays(-1));
+    Check("A marked folder that another install still keeps its config in remains a profile",
+        locations.ClaudeDesktopProfiles() is { Count: 3 } shared && shared.Contains(storeProfile) && shared[0] == movedProfile);
+    File.Delete(Path.Combine(storeProfile, "config.json"));
     var oldSettings = SettingsMigrations.Read("""{"Width":890,"Claude":false,"CodexHome":"obsolete","ClaudeHome":"obsolete","CursorDatabase":"obsolete","OnlineQuota":false}""");
     oldSettings.Normalize();
     var migrated = JsonSerializer.Serialize(oldSettings);
@@ -198,6 +216,17 @@ try
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
         Check("CLI-only installation connects and displays its own plan", result.LiveQuota && result.Plan == "pro" && quotaHandler.Requests.Count == 1);
+        // A token that still carries the old plan must not hide a Max account: the account endpoint is asked first,
+        // and without it the local account record outranks the token's copy.
+        var profilePath = Path.Combine(locations.ClaudeHome, ".claude.json");
+        File.WriteAllText(profilePath, """{"oauthAccount":{"organizationRateLimitTier":"default_claude_max_20x"}}""");
+        result = (await Refresh(onlyClaude)).Single();
+        Check("Local account record outranks a stale sign-in plan", result.LiveQuota && result.Plan == "Max 20x");
+        quotaHandler.Profile = """{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_5x"}}""";
+        result = (await Refresh(onlyClaude)).Single();
+        Check("Account endpoint decides the Claude plan", result.Plan == "Max 5x");
+        quotaHandler.Profile = null; File.Delete(profilePath);
+        Check("Claude organization type names the plan without a tier", PlanParser.ClaudeOrganization(Json("""{"organization":{"organization_type":"claude_pro"}}""")) == "Pro");
         var readCalls = desktopFixture.ReadCalls;
         desktopFixture.ReadFailure = new IOException("Test desktop cache unavailable");
         result = (await Refresh(onlyClaude)).Single();
@@ -231,6 +260,10 @@ try
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
         Check("Transient failure keeps the last account quotas with their time", result.LiveQuota && result.Quotas.Count == 2 && result.QuotaTime == previousTime && quotaHandler.Requests.Count == 2);
+        quotaHandler.Profile = """{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_20x"}}""";
+        result = (await Refresh(onlyClaude)).Single();
+        Check("Plan follows the account endpoint while the quota request fails", result.Quotas.Count == 2 && result.Plan == "Max 20x");
+        quotaHandler.Profile = null; quotaHandler.Requests.Clear();
         var polled = true;
         for (int cycle = 1; cycle <= 4; cycle++)
         {
@@ -505,6 +538,16 @@ try
     var claude = logs.Read(ProviderId.Claude, claudeRoot, now);
     Check("Claude streamed messages use complete counters once", claude.Entries.Count == 1 && claude.Entries.Single().Total == 370);
     Check("Claude 1-hour writes separated", claude.Entries.Single().CacheWriteHour == 10 && claude.Entries.Single().CacheWrite == 20);
+    // A WSL distribution's file system: a user's .claude and .codex folders, and a user without any.
+    var wslRoot = Path.Combine(root, "wsl-distribution");
+    var wslClaude = Path.Combine(wslRoot, "home", "dev", ".claude"); Directory.CreateDirectory(Path.Combine(wslClaude, "projects"));
+    Directory.CreateDirectory(Path.Combine(wslRoot, "home", "dev", ".codex")); Directory.CreateDirectory(Path.Combine(wslRoot, "home", "guest"));
+    var wslHomes = WslLocations.Homes("Test", wslRoot);
+    Check("WSL homes list only users with Claude or Codex records", wslHomes.Count == 1 && wslHomes[0].Claude == wslClaude && wslHomes[0].Codex.EndsWith(".codex"));
+    File.WriteAllLines(Path.Combine(wslClaude, "projects", "wsl.jsonl"), [JsonSerializer.Serialize(new { timestamp = now.AddMinutes(-2), type = "assistant", message = new { id = "wsl-message", model = "claude-sonnet-4-6", usage = new { input_tokens = 7, output_tokens = 3 } } })]);
+    var withWsl = logs.Read(ProviderId.Claude, [wslHomes[0].Claude], now, null, "WSL");
+    Check("WSL records are read from their own folders", withWsl.Entries.Count == 1 && withWsl.Entries.Single().Total == 10 && withWsl.UsageNote.StartsWith("WSL"));
+    Check("WSL records are left out unless asked for", logs.Read(ProviderId.Claude, claudeRoot, now).Entries.Count == 1);
     // The parsed Claude entry: input 100, cache read 200, cache write 20, one-hour cache write 10, output 40.
     using (var claudePricing = new Pricing(Path.Combine(root, "claude-prices")))
     {
@@ -570,8 +613,13 @@ sealed class ClaudeQuotaHandler : HttpMessageHandler
     public int Rejected { get; private set; }
     public List<string> Requests { get; } = [];
     public Func<string, CancellationToken, HttpResponseMessage?>? Override { get; set; }
+    // Body of the account endpoint; without it the endpoint answers 404 and is not counted in Requests.
+    public string? Profile { get; set; }
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        if (request.RequestUri?.AbsoluteUri == "https://api.anthropic.com/api/oauth/profile")
+            return Task.FromResult(Profile is null ? new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
+                : new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(Profile) });
         if (request.RequestUri?.AbsoluteUri != "https://api.anthropic.com/api/oauth/usage" || !request.Headers.Contains("anthropic-beta"))
             throw new InvalidOperationException("Unexpected quota destination or headers");
         var token = request.Headers.Authorization?.Parameter ?? "";

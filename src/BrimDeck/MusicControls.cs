@@ -40,14 +40,14 @@ public sealed class MusicControlButton : Button
         double from = (double)target.GetValue(property);
         target.BeginAnimation(property, null); target.SetValue(property, value);
         if (animate && from != value) target.BeginAnimation(property, new DoubleAnimation(from, value, TimeSpan.FromMilliseconds(milliseconds))
-        { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
+        { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
     }
     private static void Animate(UIElement target, DependencyProperty property, double value, bool animate, int milliseconds)
     {
         double from = (double)target.GetValue(property);
         target.BeginAnimation(property, null); target.SetValue(property, value);
         if (animate && from != value) target.BeginAnimation(property, new DoubleAnimation(from, value, TimeSpan.FromMilliseconds(milliseconds))
-        { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
+        { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
     }
 }
 
@@ -89,9 +89,11 @@ public sealed class MusicSeekSlider : Slider
         double height = active ? HoverHeight : RestHeight, fromHeight = BarHeight;
         BeginAnimation(BarHeightProperty, null); BarHeight = height;
         if (animate && fromHeight != height) BeginAnimation(BarHeightProperty, new DoubleAnimation(fromHeight, height, TimeSpan.FromMilliseconds(150))
-        { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
-        static byte Lighten(byte value) => (byte)Math.Round(value + (255 - value) * .12);
-        var color = active ? Color.FromArgb(Accent.A, Lighten(Accent.R), Lighten(Accent.G), Lighten(Accent.B)) : Accent;
+        { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
+        // On a dark surface the hover color is lighter, on a light one darker, so hovering only ever adds contrast.
+        bool dark = PanelTheme.Current.IsDark;
+        byte Shift(byte value) => (byte)Math.Round(dark ? value + (255 - value) * .12 : value * .88);
+        var color = active ? Color.FromArgb(Accent.A, Shift(Accent.R), Shift(Accent.G), Shift(Accent.B)) : Accent;
         var from = _fill.Color; _fill.BeginAnimation(SolidColorBrush.ColorProperty, null); _fill.Color = color;
         if (animate && from != color) _fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(from, color, TimeSpan.FromMilliseconds(150)) { FillBehavior = FillBehavior.Stop });
         Cursor = IsEnabled ? Cursors.Hand : Cursors.Arrow;

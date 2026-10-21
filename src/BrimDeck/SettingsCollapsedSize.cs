@@ -26,16 +26,19 @@ public sealed partial class SettingsWindow
         public Action Refresh = () => { };
     }
 
+    private static string DragWidthHint => Loc.T("也可以把鼠标移到刘海、胶囊或指示条的左右两端，直接拖动调整；双击两端恢复默认（刘海与胶囊恢复按内容自动加宽）。",
+        "You can also point at either end of the notch, capsule or indicator and drag it. A double click on an end restores the default (the notch and the capsule widen to their content again).");
+
     private void CollapsedSizeOptions(CompactStyle style)
     {
         var reset = KeepPreview(ActionButton(Loc.T("恢复默认尺寸", "Reset to default size"), () => ResetCollapsedSize(style))); reset.FontSize = 11;
         AutomationProperties.SetName(reset, Loc.T("恢复" + StyleName(style) + "的默认尺寸", "Reset " + StyleName(style) + " to default size"));
-        SectionTitle(Loc.T("尺寸与位置 · ", "Size and position · ") + StyleName(style), reset);
+        SectionTitle(Loc.T("尺寸与位置 · ", "Size and position · ") + StyleName(style), reset, () => DragWidthHint);
         switch (style)
         {
             case CompactStyle.Notch:
             {
-                var width = SizeRow(Loc.T("宽度", "Width"), S.NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, 1, v => ChangeCollapsed(s => s.NotchWidth = v));
+                var width = SizeRow(Loc.T("宽度", "Width"), S.NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, 1, v => ChangeCollapsed(s => { s.NotchWidth = v; s.NotchAutoWidth = false; }));
                 var height = SizeRow(Loc.T("高度", "Height"), S.NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, 1, v => ChangeCollapsed(s => s.NotchHeight = v));
                 var offset = SizeRow(Loc.T("水平偏移", "Horizontal offset"), S.NotchOffsetX, 0, 0, 1, v => ChangeCollapsed(s => s.NotchOffsetX = v), centered: true);
                 _refreshCollapsedRanges = () =>
@@ -49,7 +52,7 @@ public sealed partial class SettingsWindow
             }
             case CompactStyle.Capsule:
             {
-                var width = SizeRow(Loc.T("宽度", "Width"), S.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, 1, v => ChangeCollapsed(s => s.CapsuleWidth = v));
+                var width = SizeRow(Loc.T("宽度", "Width"), S.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, 1, v => ChangeCollapsed(s => { s.CapsuleWidth = v; s.CapsuleAutoWidth = false; }));
                 var height = SizeRow(Loc.T("高度", "Height"), S.CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, 1, v => ChangeCollapsed(s => s.CapsuleHeight = v));
                 var top = SizeRow(Loc.T("垂直偏移", "Vertical offset"), S.CapsuleTop, CollapsedLimits.CapsuleTopMin, Math.Max(CollapsedLimits.CapsuleTopMin, S.CapsuleTop), 1, v => ChangeCollapsed(s => s.CapsuleTop = v),
                     help: Loc.T("胶囊距屏幕顶部的距离。不超过 20 DIP 时，展开后的面板将会吸附在屏幕顶端。", "Distance between the capsule and the top of the screen. At 20 DIP or less, the expanded panel snaps to the top of the screen."));
@@ -134,9 +137,9 @@ public sealed partial class SettingsWindow
     private static void CopyCollapsedSize(DeckSettings target, DeckSettings source, CompactStyle? style = null)
     {
         if (style is null or CompactStyle.Notch)
-        { target.NotchWidth = source.NotchWidth; target.NotchHeight = source.NotchHeight; target.NotchOffsetX = source.NotchOffsetX; }
+        { target.NotchWidth = source.NotchWidth; target.NotchHeight = source.NotchHeight; target.NotchOffsetX = source.NotchOffsetX; target.NotchAutoWidth = source.NotchAutoWidth; }
         if (style is null or CompactStyle.Capsule)
-        { target.CapsuleWidth = source.CapsuleWidth; target.CapsuleHeight = source.CapsuleHeight; target.CapsuleOffsetX = source.CapsuleOffsetX; target.CapsuleTop = source.CapsuleTop; }
+        { target.CapsuleWidth = source.CapsuleWidth; target.CapsuleHeight = source.CapsuleHeight; target.CapsuleOffsetX = source.CapsuleOffsetX; target.CapsuleTop = source.CapsuleTop; target.CapsuleAutoWidth = source.CapsuleAutoWidth; }
         if (style is null or CompactStyle.Line)
         { target.LineLength = source.LineLength; target.LineThickness = source.LineThickness; target.LineTop = source.LineTop; target.LineOffsetX = source.LineOffsetX; }
     }

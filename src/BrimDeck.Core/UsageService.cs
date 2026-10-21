@@ -16,7 +16,7 @@ public interface IDesktopSources
     IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) => null;
 }
 
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null) : IDisposable
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -30,6 +30,15 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly DataLocations _locations = locations ?? DataLocations.Detect();
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.Now);
     private readonly LogReader _logs = new();
+    // WSL is read away from the refresh itself: its file system is reached over the network share, with synchronous calls that
+    // cannot be cancelled and that stall while a distribution starts, stops or hangs. A read that does not finish in time
+    // is skipped for that round, and no new one starts until it has ended.
+    private readonly Dictionary<ProviderId, LogReader> _wslLogs = new() { [ProviderId.Claude] = new(), [ProviderId.Codex] = new() };
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<ProviderId, WslRead> _wslReads = [];
+    private readonly object _wslGate = new();
+    // Home folders are searched again every few minutes: listing them touches the distributions' file systems.
+    private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
+    private bool _includeWsl;
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
     private readonly SemaphoreSlim _gate = new(1);
@@ -44,6 +53,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             // Each underlying source is read once, even when several columns reuse it.
             var required = settings.RequiredProviders;
+            _includeWsl = settings.IncludeWsl;
             // The Claude and Grok Bot account APIs are asked only for rows that read online; rows that do not share one local snapshot.
             bool claudeOnline = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && app.QuotaOnline);
             bool claudeLocal = settings.EnabledApps.Any(app => app.QuotaSource == ProviderId.Claude && ProviderCatalog.ReadsLocalQuota(app));
@@ -81,6 +91,67 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
     }
 
+    private IReadOnlyList<WslHome> WslHomes(DateTimeOffset now)
+    {
+        lock (_wslGate)
+        {
+            if (_wsl is not { } found || now - found.Time > TimeSpan.FromMinutes(3) || now < found.Time) _wsl = found = (now, wsl is null ? WslLocations.Discover() : wsl());
+            return found.Homes;
+        }
+    }
+
+    private sealed class WslRead(Task<ProviderSnapshot?> task, string localNote, bool localAvailable)
+    {
+        public readonly Task<ProviderSnapshot?> Task = task;
+        public readonly System.Diagnostics.Stopwatch Elapsed = System.Diagnostics.Stopwatch.StartNew();
+        // The snapshot's note and availability before WSL joins it, so the WSL part is placed right after them.
+        public readonly string LocalNote = localNote;
+        public readonly bool LocalAvailable = localAvailable;
+        public bool TimedOut;
+    }
+
+    // Starts reading the WSL statistics in the background, right after the local ones, so that the wait overlaps the network
+    // requests of the same refresh instead of adding to them. A read that has not ended yet (it ran out of time, or its
+    // round was cancelled) is never started a second time: the reader is not meant for two reads at once.
+    private WslRead StartWsl(ProviderSnapshot snapshot, DateTimeOffset now, DateTime start)
+    {
+        var id = snapshot.Id;
+        var read = _wslReads.GetOrAdd(id, _ => new(Task.FromResult<ProviderSnapshot?>(null), "", false));
+        if (!read.Task.IsCompleted) return _wslReads[id] = new(read.Task, snapshot.UsageNote, snapshot.UsageAvailable) { TimedOut = read.TimedOut };
+        return _wslReads[id] = new(Task.Run(() =>
+        {
+            var roots = WslHomes(now).Select(home => id == ProviderId.Codex ? home.Codex : home.Claude).Where(root => root.Length > 0).ToList();
+            return roots.Count == 0 ? null : _wslLogs[id].Read(id, roots, now, start, "WSL");
+        }, CancellationToken.None), snapshot.UsageNote, snapshot.UsageAvailable);
+    }
+
+    // Adds the WSL token statistics to the local ones once the rest of the refresh is done. Entries seen on both sides count once.
+    // Only the time the read has not yet had is waited for; after that the round shows this PC only.
+    private async Task MergeWslAsync(ProviderSnapshot snapshot, WslRead read, CancellationToken ct)
+    {
+        void Skipped() { snapshot.UsageNote += Loc.T(" · WSL 读取超时，本轮仅显示本机数据", " · Reading WSL timed out; this round shows this PC only"); snapshot.UsageComplete = false; }
+        if (read.TimedOut && !read.Task.IsCompleted) { Skipped(); return; }
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var remaining = (wslTimeout ?? TimeSpan.FromSeconds(8)) - read.Elapsed.Elapsed;
+        var finished = await Task.WhenAny(read.Task, Task.Delay(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero, wait.Token));
+        wait.Cancel();
+        ct.ThrowIfCancellationRequested();
+        if (finished != read.Task) { read.TimedOut = true; Skipped(); return; }
+        ProviderSnapshot? result;
+        try { result = await read.Task; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { snapshot.UsageComplete = false; return; }
+        if (result is null) return;
+        var merged = new Dictionary<string, TokenEntry>();
+        foreach (var entry in snapshot.Entries.Concat(result.Entries))
+            if (!merged.TryGetValue(entry.Key, out var old) || entry.Total >= old.Total) merged[entry.Key] = entry;
+        snapshot.Entries = merged.Values.OrderBy(entry => entry.Time).ToList();
+        snapshot.UsageAvailable |= result.UsageAvailable;
+        snapshot.UsageComplete &= result.UsageComplete;
+        if (!result.UsageAvailable) return;
+        var tail = snapshot.UsageNote.StartsWith(read.LocalNote, StringComparison.Ordinal) ? snapshot.UsageNote[read.LocalNote.Length..] : "";
+        snapshot.UsageNote = (read.LocalAvailable ? read.LocalNote + " · " : "") + result.UsageNote + tail;
+    }
+
     private async Task<ProviderSnapshot> FetchCoreAsync(ProviderId id, DateTime? usageStart, bool claudeOnline, CancellationToken ct)
     {
         var now = _clock();
@@ -89,6 +160,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var snapshot = id is ProviderId.Claude or ProviderId.Codex
             ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
         if (id == ProviderId.Claude) ReadClaudeProfile(snapshot);
+        var wslRead = _includeWsl && id is ProviderId.Claude or ProviderId.Codex ? StartWsl(snapshot, now, start.LocalDateTime) : null;
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
         if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
@@ -155,6 +227,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         { snapshot.StatusLabel = Loc.T("检测失败", "Detection failed"); snapshot.Status = Loc.T("本地服务检测失败，稍后重试", "Detecting the local service failed. Retrying later."); }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or FormatException)
         { snapshot.StatusLabel = Loc.T("读取失败", "Read failed"); snapshot.Status = Loc.T("暂时无法读取数据，稍后重试", "The data cannot be read right now. Retrying later."); }
+        if (wslRead is not null) await MergeWslAsync(snapshot, wslRead, ct);
         if (!snapshot.LiveQuota && snapshot.Quotas.Count > 0) snapshot.Source = Loc.T("本地配额快照 · 可能已过时", "Local quota snapshot · may be outdated");
         return snapshot;
     }
@@ -174,18 +247,36 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { }
     }
 
+    // Null-safe: the account endpoint needs the profile scope, which not every sign-in has, so a failure only means the plan
+    // is taken from the local records instead.
+    private async Task<string> ReadClaudePlanAsync(string token, CancellationToken ct)
+    {
+        try
+        {
+            using var request = Bearer(HttpMethod.Get, "https://api.anthropic.com/api/oauth/profile", token);
+            request.Headers.TryAddWithoutValidation("anthropic-beta", "oauth-2025-04-20");
+            using var doc = await SendAsync(_http, request, ct);
+            return PlanParser.ClaudeOrganization(doc.RootElement);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or OperationCanceledException or IOException or InvalidDataException or JsonException or FormatException)
+        { return ""; }
+    }
+
     private async Task ReadClaudeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
     {
         var attempted = new HashSet<string>(StringComparer.Ordinal);
         Exception? failure = null;
         Exception? lastFailure = null;
         ClaudeCredential? login = null;
+        Task<string>? loginPlan = null;
         async Task<bool> TryCredential(ClaudeCredential credential)
         {
             ct.ThrowIfCancellationRequested();
             lastFailure = null;
             if (string.IsNullOrWhiteSpace(credential.Token) || !attempted.Add(credential.Token)) return false;
             login = credential;
+            // The plan is asked at the same time as the quota, so a slow or unreachable network costs one wait, not two.
+            var planRequest = loginPlan = ReadClaudePlanAsync(credential.Token, ct);
             try
             {
                 using var request = Bearer(HttpMethod.Get, "https://api.anthropic.com/api/oauth/usage", credential.Token);
@@ -195,8 +286,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 if (quotas.Count == 0) throw new InvalidDataException();
                 // Publish only a complete successful result, all from the same login.
                 snapshot.Quotas = quotas;
-                snapshot.Plan = credential.Plan;
-                snapshot.PlanSource = credential.Plan.Length > 0 ? credential.Source + Loc.T(" 登录记录", " sign-in record") : "";
+                var live = await planRequest;
+                if (live.Length > 0) { snapshot.Plan = live; snapshot.PlanSource = Loc.T("Claude 账户", "Claude account"); }
+                else
+                {
+                    var plan = PlanParser.ReconcileClaude(credential.Plan, snapshot.Plan);
+                    // The local account record already filled Plan and PlanSource; a sign-in record only describes its own plan.
+                    if (plan == credential.Plan || snapshot.PlanSource.Length == 0)
+                        snapshot.PlanSource = plan.Length > 0 ? credential.Source + Loc.T(" 登录记录", " sign-in record") : "";
+                    snapshot.Plan = plan;
+                }
                 Connected(snapshot, credential.Source + Loc.T(" · 账户配额", " · account quota"), now);
                 snapshot.UsageNote += ClaudeUsageNote;
                 _claudeRetained = new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList());
@@ -247,8 +346,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             {
                 if (Freshest(now) is { } local)
                 {
-                    // The plan comes from the login record and stays known while the interface is unavailable.
-                    if (local.Plan.Length == 0 && login is { Plan.Length: > 0 }) _claudeRetained = local = local with { Plan = login.Plan, PlanSource = login.Source + Loc.T(" 登录记录", " sign-in record") };
+                    // The plan stays known while the quota interface is unavailable (rate limited, for one): it is asked from the
+                    // account endpoint, which a rate-limited quota request does not block, and otherwise taken from the local records.
+                    if (login is not null)
+                    {
+                        var live = loginPlan is null ? "" : await loginPlan;
+                        var plan = live.Length > 0 ? live : PlanParser.ReconcileClaude(login.Plan, snapshot.Plan);
+                        var source = live.Length > 0 ? Loc.T("Claude 账户", "Claude account")
+                            : plan == snapshot.Plan && snapshot.PlanSource.Length > 0 ? snapshot.PlanSource : login.Source + Loc.T(" 登录记录", " sign-in record");
+                        if (plan.Length > 0) _claudeRetained = local = local with { Plan = plan, PlanSource = source };
+                    }
                     Retain(snapshot, local, failure, now); return;
                 }
             }
