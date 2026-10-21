@@ -69,15 +69,16 @@ public sealed partial class SettingsWindow
         note.TextWrapping = TextWrapping.Wrap; note.Margin = margin; _content.Children.Add(note);
     }
 
-    // Three cards to a row, each the collapsed capsule in that theme. A user's own theme carries a delete button beside its
-    // name, and the custom section ends with the tools tile (tile).
+    // Three cards to a row, each the collapsed capsule in that theme. A user's own theme can be renamed by clicking its name and
+    // carries a delete button on its preview (OwnThemeCard), and the custom section ends with the tools tile (tile).
     private void ThemeCards(IReadOnlyList<(string Id, string Name, PanelThemeInfo Theme)> themes, string chosen, FrameworkElement? tile = null)
     {
         var grid = new UniformGrid { Columns = 3, Margin = new Thickness(-6, 0, -6, 18) };
         foreach (var (id, name, theme) in themes)
         {
+            bool own = theme.Path is not null;
             var card = KeepPreview(new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = ThemePreview(id, theme),
-                Margin = new Thickness(6, 3, 6, 6), Tag = name, GroupName = "PanelTheme", IsChecked = id == chosen });
+                Margin = new Thickness(6, 3, 6, 6), Tag = own ? "" : name, GroupName = "PanelTheme", IsChecked = id == chosen });
             AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + name);
             AutomationProperties.SetAutomationId(card, "panel-theme-" + id);
             card.Checked += (_, _) =>
@@ -92,15 +93,8 @@ public sealed partial class SettingsWindow
                 _themeDetails = Collect(() => ThemeDetails(id, PanelTheme.UserThemes));
                 // A panel's slot cannot take a new child while the old one is still in it, so the old one leaves first.
                 _content.Children.RemoveAt(at); _content.Children.Insert(at, _themeDetails);
-                _renameTheme?.Invoke();
             };
-            if (theme.Path is null) { grid.Children.Add(card); continue; }
-            // In the card's name row, left of the check: the delete button.
-            var cell = new Grid(); cell.Children.Add(card);
-            var delete = DeleteThemeButton(theme); delete.HorizontalAlignment = HorizontalAlignment.Right; delete.VerticalAlignment = VerticalAlignment.Bottom;
-            delete.Margin = new Thickness(0, 0, 6 + 8 + 14 + 6, 6 + 7);
-            cell.Children.Add(delete);
-            grid.Children.Add(cell);
+            grid.Children.Add(own ? OwnThemeCard(card, theme) : card);
         }
         if (tile is not null) grid.Children.Add(tile);
         _content.Children.Add(grid);
@@ -176,10 +170,8 @@ public sealed partial class SettingsWindow
     }
 
     // The custom section, as the review sketched it: the title with a reload button, the theme guide at the right; the user's
-    // themes as cards with a delete button by the name; and a tile of the same size with "New from current theme" and "Open themes
-    // folder", with "Rename" (for the chosen theme, when it is one of the user's) in its name row. Files that cannot be used are
-    // listed under it with their errors.
-    private Action? _renameTheme;
+    // themes as cards, each renamed by clicking its name and deleted from its preview; and a tile of the same size with "New from
+    // current theme" and "Open themes folder". Files that cannot be used are listed under it with their errors.
     private void CustomSection(IReadOnlyList<PanelThemeInfo> users, string chosen)
     {
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
@@ -189,18 +181,20 @@ public sealed partial class SettingsWindow
         var reload = GlyphButton("M 12.5,4.5 A 5.5,5.5 0 1 0 13,9 M 12.5,1.5 V 4.5 H 9.5", 14, 14, Loc.T("重新加载主题文件", "Reload theme files"), () => ShowPage(ThemePage));
         reload.Width = 22; reload.Height = 22; reload.Margin = new Thickness(4, 0, 0, 0); reload.VerticalAlignment = VerticalAlignment.Center;
         reload.HorizontalAlignment = HorizontalAlignment.Left; // the last child fills the rest of the row; the icon stays beside the title
+        // Measured on the rendered row, the arrow's ink centre sat 1.5 DIP above the title's.
+        reload.RenderTransform = new System.Windows.Media.TranslateTransform(0, 1.5);
         head.Children.Add(reload);
         Target.Children.Add(head);
         Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, 12) });
         var own = users.Where(t => t.Usable).ToList();
-        ThemeCards([.. own.Select(t => (t.Id, t.DisplayName, t))], chosen, CustomTile());
+        ThemeCards([.. own.Select(t => (t.Id, t.DisplayName, t))], chosen, CustomTile(own.Count > 0));
         var broken = users.Where(t => !t.Usable).ToList();
         if (broken.Count > 0)
             Group([.. broken.Select(t => (FrameworkElement)Row(t.Path is { } file ? PanelThemes.DisplayFileName(file) : t.Id, Wrapped(Loc.T("无法使用：", "Cannot be used: ") + t.Error, true)))]);
     }
 
-    // The tools tile: the same frame as a card, the two buttons in it, and Rename in the name row.
-    private FrameworkElement CustomTile()
+    // The tools tile: the same frame as a card, the two buttons in it, and how to rename in the name row.
+    private FrameworkElement CustomTile(bool themes)
     {
         var create = ActionButton(Loc.T("以当前主题新建", "New from current theme"), () =>
         {
@@ -238,73 +232,80 @@ public sealed partial class SettingsWindow
         frame.Children.Add(buttons);
         var chrome = new Border { CornerRadius = new CornerRadius(12), BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(1.5), Padding = new Thickness(3), Child = frame };
         var nameRow = new Grid { Height = 30, Margin = new Thickness(8, 4, 8, 0) };
-        nameRow.Children.Add(RenameControl());
+        var hint = TextLine(Loc.T("单击主题名称可重命名", "Click a theme's name to rename it"), 11, TextTertiary);
+        hint.HorizontalAlignment = HorizontalAlignment.Center; hint.VerticalAlignment = VerticalAlignment.Center; hint.TextTrimming = TextTrimming.CharacterEllipsis;
+        if (themes) nameRow.Children.Add(hint);
         var tile = new StackPanel { Margin = new Thickness(6, 3, 6, 6) };
         tile.Children.Add(chrome); tile.Children.Add(nameRow);
         return tile;
     }
 
-    // Rename: for the chosen theme when it is one of the user's. A click turns it into a text box; Enter or leaving it renames the
-    // file's theme (its name only, PanelThemes.RenameFile), Esc leaves it as it was.
-    private FrameworkElement RenameControl()
+    // A user theme's card with what only a user's theme has. Its name (the card's own is left empty) renames the theme when
+    // clicked: a text box takes its place, Enter or leaving it renames the file's theme (its name only, PanelThemes.RenameFile),
+    // Esc keeps the name. Each card renames its own file, so choosing another card meanwhile still renames this one. On the
+    // preview's top right corner, shown while the pointer is on the card or the button has focus, a delete button asks first.
+    private FrameworkElement OwnThemeCard(RadioButton card, PanelThemeInfo theme)
     {
-        var host = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var rename = ActionButton(Loc.T("重命名", "Rename"), () => { });
-        rename.FontSize = 11.5;
-        var box = new TextBox { Width = 160, FontSize = 12, Visibility = Visibility.Collapsed, VerticalContentAlignment = VerticalAlignment.Center };
+        var path = theme.Path!;
+        var cell = new Grid(); cell.Children.Add(card);
+        // The name row is the card's: 30 high under the preview, the check 14 wide at its right; the name keeps clear of the check
+        // on both sides so it stays centred.
+        var row = new Grid { Height = 30, Margin = new Thickness(6 + 8 + 18, 0, 6 + 8 + 18, 6), VerticalAlignment = VerticalAlignment.Bottom };
+        var name = new Button { Content = theme.DisplayName, Style = (Style)FindResource("SettingsCardName"), HorizontalAlignment = HorizontalAlignment.Center,
+            ToolTip = Loc.T("单击重命名", "Click to rename") };
+        // The name looks as the card's own name would: brighter and bolder once chosen or under the pointer.
+        name.SetBinding(ForegroundProperty, new System.Windows.Data.Binding(nameof(Foreground)) { Source = card });
+        name.SetBinding(FontWeightProperty, new System.Windows.Data.Binding(nameof(FontWeight)) { Source = card });
+        name.SetBinding(FontSizeProperty, new System.Windows.Data.Binding(nameof(FontSize)) { Source = card });
+        AutomationProperties.SetName(name, Loc.T("重命名主题 ", "Rename theme ") + theme.DisplayName);
+        var box = new TextBox { Style = (Style)FindResource("SettingsField"), Height = 26, FontSize = 12, Padding = new Thickness(6, 0, 6, 0),
+            TextAlignment = TextAlignment.Center, Visibility = Visibility.Collapsed, MaxLength = 60 };
         AutomationProperties.SetName(box, Loc.T("主题名称", "Theme name"));
-        PanelThemeInfo? Target() => PanelTheme.UserThemes.FirstOrDefault(t => t.Usable && t.Path is not null && t.Id == PanelThemes.NormalizeId(S.PanelTheme));
-        void Refresh()
-        {
-            var theme = Target();
-            rename.IsEnabled = theme is not null;
-            rename.ToolTip = theme is null ? Loc.T("选中一个自定义主题后可重命名。", "Choose one of your themes to rename it.") : Loc.T("重命名“", "Rename \"") + theme.DisplayName + Loc.T("”", "\"");
-        }
         bool editing = false;
         void Finish(bool keep)
         {
             if (!editing) return;
             editing = false;
-            box.Visibility = Visibility.Collapsed; rename.Visibility = Visibility.Visible;
-            var theme = Target();
-            string name = box.Text.Trim();
-            if (!keep || theme is null || name.Length == 0 || name == theme.DisplayName) return;
-            try { PanelThemes.RenameFile(theme.Path!, name); }
+            string text = box.Text.Trim();
+            box.Visibility = Visibility.Collapsed; name.Visibility = Visibility.Visible;
+            if (!keep || text.Length == 0 || text == theme.DisplayName) return;
+            try { PanelThemes.RenameFile(path, text); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { SaveStatus(Loc.T("无法重命名主题：", "Could not rename the theme: ") + ex.Message, true); return; }
-            _themesFresh = false; ShowPage(ThemePage);
+            name.Content = text;
+            // The page is read again once the click that ended the edit (on another card, say) has been handled, not under it.
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { if (IsLoaded && _page == ThemePage) { _themesFresh = false; ShowPage(ThemePage); } });
         }
-        rename.Click += (_, _) =>
+        name.Click += (_, _) =>
         {
-            if (Target() is not { } theme) return;
             editing = true; box.Text = theme.DisplayName;
-            rename.Visibility = Visibility.Collapsed; box.Visibility = Visibility.Visible;
+            name.Visibility = Visibility.Collapsed; box.Visibility = Visibility.Visible;
             box.Focus(); box.SelectAll();
         };
-        box.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) { Finish(true); e.Handled = true; } else if (e.Key == System.Windows.Input.Key.Escape) { Finish(false); e.Handled = true; } };
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == System.Windows.Input.Key.Enter) { Finish(true); card.Focus(); e.Handled = true; }
+            else if (e.Key == System.Windows.Input.Key.Escape) { Finish(false); card.Focus(); e.Handled = true; }
+        };
         box.LostKeyboardFocus += (_, _) => Finish(true);
-        _renameTheme = Refresh; Refresh();
-        host.Children.Add(rename); host.Children.Add(box);
-        return host;
-    }
+        row.Children.Add(name); row.Children.Add(box);
+        cell.Children.Add(row);
 
-    // The delete button by a user theme's name. The first click asks (the cross turns into "Delete?"), a second click within a
-    // few seconds deletes; the file goes to the Recycle Bin.
-    private FrameworkElement DeleteThemeButton(PanelThemeInfo theme)
-    {
-        const string Cross = "M 7,1 A 6,6 0 1 1 6.99,1 M 4.6,4.6 L 9.4,9.4 M 9.4,4.6 L 4.6,9.4";
-        var host = new Grid();
-        var cross = GlyphButton(Cross, 14, 14, Loc.T("删除主题 ", "Delete theme ") + theme.DisplayName, () => { });
-        cross.Width = 20; cross.Height = 20;
-        var confirm = ActionButton(Loc.T("删除？", "Delete?"), () => { });
-        confirm.FontSize = 11; confirm.Foreground = UI.Brush(_palette.Dark ? "#F0A6AA" : "#B12E3A"); confirm.Visibility = Visibility.Collapsed; confirm.Padding = new Thickness(6, 0, 6, 0);
-        AutomationProperties.SetName(confirm, Loc.T("确认删除主题 ", "Confirm deleting theme ") + theme.DisplayName);
-        var disarm = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromSeconds(4) };
-        void Arm(bool on) { cross.Visibility = on ? Visibility.Collapsed : Visibility.Visible; confirm.Visibility = on ? Visibility.Visible : Visibility.Collapsed; if (on) disarm.Start(); else disarm.Stop(); }
-        disarm.Tick += (_, _) => Arm(false);
-        cross.Click += (_, _) => { Arm(true); confirm.Focus(); };
-        confirm.Click += (_, _) => { Arm(false); DeleteOwnTheme(theme); };
-        host.Children.Add(cross); host.Children.Add(confirm);
-        return host;
+        var delete = new Button { Style = (Style)FindResource("SettingsCardDelete"), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 3 + 8, 6 + 8, 0), Opacity = 0, ToolTip = Loc.T("删除主题", "Delete theme") };
+        AutomationProperties.SetName(delete, Loc.T("删除主题 ", "Delete theme ") + theme.DisplayName);
+        void Show() => delete.Opacity = cell.IsMouseOver || delete.IsKeyboardFocused ? 1 : 0;
+        cell.MouseEnter += (_, _) => Show(); cell.MouseLeave += (_, _) => Show();
+        delete.GotKeyboardFocus += (_, _) => Show(); delete.LostKeyboardFocus += (_, _) => Show();
+        delete.Click += (_, _) =>
+        {
+            if (Confirm(Loc.T("删除主题", "Delete theme"),
+                Loc.T($"确定删除“{theme.DisplayName}”吗？主题文件会移到回收站，为它记住的配色也会一并清除。",
+                    $"Delete \"{theme.DisplayName}\"? The theme file goes to the Recycle Bin, and the colors remembered for it are cleared."),
+                Loc.T("删除", "Delete")))
+                DeleteOwnTheme(theme);
+        };
+        cell.Children.Add(delete);
+        return cell;
     }
 
     // A theme in its own folder (theme.json) takes the folder with it; a single file goes alone. The theme in use gives way to

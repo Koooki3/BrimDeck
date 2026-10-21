@@ -27,8 +27,13 @@ internal static class CompactStylePreview
         var screen = new Grid
         {
             Width = Width, Height = Height, Background = dark ? DarkDesktop : LightDesktop, IsHitTestVisible = false,
-            Clip = new RectangleGeometry(new Rect(0, 0, Width, Height), 9, 9)
+            Clip = new RectangleGeometry(new Rect(0, 0, Width, Height), 9, 9), UseLayoutRounding = false, SnapsToDevicePixels = false
         };
+        // Everything here is vector and drawn at the size it is shown, enlarged several times over. The settings window lays text
+        // out for the screen at its own size (TextFormattingMode.Display), which turns the tiny clock into blurred pixels once
+        // scaled; ideal layout keeps it sharp at any size.
+        TextOptions.SetTextFormattingMode(screen, TextFormattingMode.Ideal);
+        TextOptions.SetTextRenderingMode(screen, TextRenderingMode.Grayscale);
         if (style == CompactStyle.Line)
         {
             screen.Children.Add(new Border { Background = UI.Brush(Hex("indicator")), Width = 29, Height = 2.5,
@@ -47,10 +52,11 @@ internal static class CompactStylePreview
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top
             };
             // The surface, its layers, the rim and the shadow or glow come from the palette, as on the real island. A card never
-            // changes, so the blur is kept as a bitmap instead of being drawn again whenever the page scrolls.
+            // changes, so the blur is kept as a bitmap instead of being drawn again whenever the page scrolls: made at the scale the
+            // card is shown at (the focus enlargement, on up to a 200% display), so it is never stretched.
             var glow = new System.Windows.Media.Effects.DropShadowEffect { Direction = 270 };
             PanelTheme.Dress(glow, palette); glow.Freeze();
-            var shadow = Shape(); shadow.Effect = glow; shadow.CacheMode = new BitmapCache { SnapsToDevicePixels = true, RenderAtScale = focus ? Focus : 1 };
+            var shadow = Shape(); shadow.Effect = glow; shadow.CacheMode = new BitmapCache { RenderAtScale = (focus ? Focus : 1) * 2 };
             // Enlarged about the top centre and brought down to the middle of the scene.
             var surface = new Grid();
             if (focus) surface.RenderTransform = new TransformGroup { Children = { new ScaleTransform(Focus, Focus, Width / 2, 0), new TranslateTransform(0, 42) } };

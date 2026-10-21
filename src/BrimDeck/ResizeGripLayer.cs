@@ -127,11 +127,11 @@ internal sealed class ResizeGripLayer : FrameworkElement
         if (bottom > .01) Glow(drawing, new Point(r.X + _radius, r.Bottom), new Point(r.Right - _radius, r.Bottom), 1, bottom);
         if (Math.Min(bottom, left) > .01) Corner(drawing, true, Math.Min(bottom, left));
         if (Math.Min(bottom, right) > .01) Corner(drawing, false, Math.Min(bottom, right));
-        // The handles: one bar for every edge, just outside it, as the collapsed surface's ends have, which grows and takes the
-        // accent color when lit.
-        Handle(drawing, new Point(r.X - HandleGap, middle), true, near, left);
-        Handle(drawing, new Point(r.Right + HandleGap, middle), true, near, right);
-        Handle(drawing, new Point(r.X + r.Width / 2, r.Bottom + HandleGap), false, near, bottom);
+        // The handles: one bar for every edge, just inside it on the panel's own surface, which grows and takes the accent color
+        // when lit. The sides' and the bottom's are the same bar turned, placed on whole pixels so none of them draws softer.
+        Handle(drawing, new Point(r.X + HandleInset, middle), true, near, left);
+        Handle(drawing, new Point(r.Right - HandleInset, middle), true, near, right);
+        Handle(drawing, new Point(r.X + r.Width / 2, r.Bottom - HandleInset), false, near, bottom);
     }
 
     private void CompactHints(DrawingContext drawing, double now)
@@ -143,23 +143,29 @@ internal sealed class ResizeGripLayer : FrameworkElement
             // An end the pointer is at shows a quiet bar; the one under the pointer or being dragged, a bright one.
             double lit = Lit(eased, now), armed = _armed == end ? .45 : 0, a = Math.Max(lit, armed);
             if (a < .01) continue;
+            // The surface is too small to hold a bar, so it stands just outside the end.
             double x = end == ResizeEdges.Left ? r.X - HandleGap : r.Right + HandleGap;
-            Bar(drawing, new Rect(x - HandleWidth / 2, y - height / 2, HandleWidth, height), a, lit);
+            Bar(drawing, Snap(new Rect(x - HandleWidth / 2, y - height / 2, HandleWidth, height)), a, lit);
         }
     }
 
     private static double Lit(Eased eased, double now) => Math.Clamp(eased.At(now), 0, 1);
 
-    // Every handle is the same bar: this thick, this long (longer when lit), this far outside its edge.
-    private const double HandleWidth = 4, HandleLength = 34, HandleGrowth = 14, HandleGap = 7;
+    // Every handle is the same bar: this thick, this long (longer when lit); the panel's this far inside its edge (to the bar's
+    // middle), the collapsed surface's this far outside its ends.
+    private const double HandleWidth = 4, HandleLength = 34, HandleGrowth = 14, HandleInset = 7, HandleGap = 7;
 
     // The theme's accent, unless it would hardly show on the panel's surface (a theme whose accent is its surface color);
     // then its primary text color. Light themes glow less, where a soft glow reads as a smudge, and lean on the line instead.
     private static string Accent => ColorMath.Distance(PanelTheme.Hex("accent"), PanelTheme.Hex("surface")) < 60 ? PanelTheme.Hex("textPrimary") : PanelTheme.Hex("accent");
     private static double GlowStrength => PanelTheme.Current.IsDark ? 1 : .55;
-    // Bars outside the panel sit on whatever is behind the window: a thin rim of the surface color keeps them readable on it.
+    // A thin rim of the surface color keeps a bar apart from what is under it: the panel's content, or whatever is behind the
+    // window beside the collapsed surface.
     private static Pen Rim => _rim is { } rim && rim.Color == PanelTheme.Hex("surface") ? rim.Pen : (_rim = (PanelTheme.Hex("surface"), Frozen(new Pen(UI.Brush(PanelTheme.Hex("surface")), 1)))).Value.Pen;
     private static (string Color, Pen Pen)? _rim;
+
+    // A bar's ends are round across its thickness, whichever way it lies: the bottom handle is the sides' turned, not an ellipse.
+    private static double Round(Rect bar) => Math.Min(bar.Width, bar.Height) / 2;
 
     // A bar with a soft glow: wider, fainter copies behind it.
     private static void Bar(DrawingContext drawing, Rect bar, double opacity, double lit)
@@ -172,29 +178,40 @@ internal sealed class ResizeGripLayer : FrameworkElement
             {
                 var halo = bar; halo.Inflate(i * 1.6, i * 1.6);
                 drawing.PushOpacity(.09 * (4 - i) * GlowStrength);
-                drawing.DrawRoundedRectangle(UI.Brush(Accent), null, halo, halo.Width / 2, halo.Width / 2);
+                drawing.DrawRoundedRectangle(UI.Brush(Accent), null, halo, Round(halo), Round(halo));
                 drawing.Pop();
             }
             drawing.Pop();
         }
         var rim = bar; rim.Inflate(.5, .5);
         drawing.PushOpacity(.55);
-        drawing.DrawRoundedRectangle(null, Rim, rim, rim.Width / 2, rim.Width / 2);
+        drawing.DrawRoundedRectangle(null, Rim, rim, Round(rim), Round(rim));
         drawing.Pop();
-        drawing.DrawRoundedRectangle(UI.Brush(UI.Tertiary), null, bar, bar.Width / 2, bar.Width / 2);
+        drawing.DrawRoundedRectangle(UI.Brush(UI.Tertiary), null, bar, Round(bar), Round(bar));
         drawing.PushOpacity(lit);
-        drawing.DrawRoundedRectangle(UI.Brush(Accent), null, bar, bar.Width / 2, bar.Width / 2);
+        drawing.DrawRoundedRectangle(UI.Brush(Accent), null, bar, Round(bar), Round(bar));
         drawing.Pop();
         drawing.Pop();
     }
 
-    private static void Handle(DrawingContext drawing, Point center, bool vertical, double near, double lit)
+    private void Handle(DrawingContext drawing, Point center, bool vertical, double near, double lit)
     {
         double opacity = Math.Max(near * .6, lit);
         if (opacity < .01) return;
         double length = HandleLength + HandleGrowth * lit;
         var bar = vertical ? new Rect(center.X - HandleWidth / 2, center.Y - length / 2, HandleWidth, length) : new Rect(center.X - length / 2, center.Y - HandleWidth / 2, length, HandleWidth);
-        Bar(drawing, bar, opacity, lit);
+        Bar(drawing, Snap(bar), opacity, lit);
+    }
+
+    // The bar's edges on whole device pixels, its thickness kept the same in every direction.
+    private Rect Snap(Rect bar)
+    {
+        double ppd = MonitorDraw.PixelsPerDip(this);
+        double Px(double dip) => Math.Round(dip * ppd) / ppd;
+        double thick = Math.Max(1, Math.Round(HandleWidth * ppd)) / ppd;
+        return bar.Width <= bar.Height
+            ? new Rect(Px(bar.X + bar.Width / 2 - thick / 2), Px(bar.Y), thick, Px(bar.Height))
+            : new Rect(Px(bar.X), Px(bar.Y + bar.Height / 2 - thick / 2), Px(bar.Width), thick);
     }
 
     // A line along the edge that fades out toward its ends, with a soft glow outside the panel (side: which way is outside).
