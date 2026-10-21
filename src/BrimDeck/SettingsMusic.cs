@@ -54,7 +54,10 @@ public sealed partial class SettingsWindow
         bool notch = style == CompactStyle.Notch;
         Group(Toggle(Loc.T("配额环", "Quota rings"), S.ShowsSummary(style), v => Change(s => { if (notch) s.NotchSummary = v; else s.CapsuleSummary = v; })),
             Toggle(Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style), v => Change(s => { if (notch) s.NotchMusic = v; else s.CapsuleMusic = v; })),
-            ClockRow(style), CompactMonitorRow(style));
+            ClockRow(style),
+            Toggle(Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), v => Change(s => { if (notch) s.NotchMonitor = v; else s.CapsuleMonitor = v; }),
+                help: Loc.T("在收起的刘海或胶囊中显示 CPU、内存、GPU 与网速。显示哪些读数在“系统监控 › 显示与读数”中设置。",
+                    "Shows CPU, memory, GPU and network speed in the collapsed notch or capsule. Which readings are shown is set in \"System monitor › Display and readings\".")));
     }
     // Settings every player shares: colors, cover and text.
     private void MusicStyle()

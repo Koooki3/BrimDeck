@@ -32,10 +32,11 @@ public partial class MainWindow
     private CompactStyle _resizeStyle;
     private TimeSpan _springTime;
     // How far inside the open panel, in DIPs, its handles start to show as the pointer nears an edge; how far outside its grips a
-    // pointer that left the panel still counts as reaching for them, how long the panel then waits before it closes, and how
-    // long at most it keeps waiting while the pointer stays there.
+    // pointer that left the panel still counts as reaching for them, and how long at most the panel keeps waiting while the pointer
+    // stays there (after the collapse delay set by the user, checking every 120 ms); how long the panel stays after a resize that
+    // ended with the pointer outside it.
     private const double HintReach = 44, GripSlack = 36;
-    private const int GripGrace = 420, GripHold = 1500, ResizeLinger = 1200;
+    private const int GripHold = 1500, ResizeLinger = 1200;
     private long _leftAt;
 
     private bool Dragging => _resizeEdge != ResizeEdges.None;

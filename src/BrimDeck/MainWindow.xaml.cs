@@ -620,10 +620,8 @@ public partial class MainWindow : Window
         else
         {
             _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
-            // Leaving just past a resize grip is most likely an overshoot while reaching for it: the panel waits a little longer.
             int delay = Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
             _leftAt = Environment.TickCount64;
-            if (NearGrips(WindowsHost.Cursor())) delay = Math.Max(delay, GripGrace);
             _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(delay); _leave.Start();
         }
     }

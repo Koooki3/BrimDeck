@@ -8,12 +8,14 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The system monitor page's settings, on the expanded panel's settings page under its own heading.
+// The system monitor's own settings page ("系统监控 › 显示与读数"), as AI usage and music have theirs: how the expanded page looks
+// and what the collapsed notch or capsule shows. The page's size stays with the other pages' sizes under "展开外观", and the
+// switches that show the readings in the notch or the capsule stay under "收起外观 › 显示内容", next to the quota rings.
 public sealed partial class SettingsWindow
 {
-    private void MonitorOptions()
+    private void MonitorSettings()
     {
-        SectionTitle(Loc.T("系统监控", "System monitor"));
+        SectionTitle(Loc.T("展开面板", "Expanded panel"));
         // Each scheme is shown by the colors it has on the panel with the panel theme in use.
         var schemes = KeepPreview(new UniformGrid { Columns = 4, Width = 388 });
         foreach (var palette in Enum.GetValues<MonitorPalette>())
@@ -40,46 +42,18 @@ public sealed partial class SettingsWindow
                 help:
                 Loc.T("按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行。面板足够大时显示。",
                     "Lists the apps using the most CPU or memory, with the processes of one program folded into one row. Shown when the panel is large enough."))));
+        CompactMonitorOptions();
     }
 
-    // The readings in the collapsed notch or capsule: a switch with its options under it, opened by its arrow as the clock's.
-    private bool _compactMonitorOpen;
-    private FrameworkElement CompactMonitorRow(CompactStyle style)
+    // What the collapsed notch or capsule shows when its "系统监控" switch is on: full, brief or chosen readings, the chosen ones
+    // as switches shown while Custom is picked; and whether each surface widens to its content.
+    private void CompactMonitorOptions()
     {
-        bool notch = style == CompactStyle.Notch;
-        string title = Loc.T("系统监控", "System monitor");
-        var options = new Border { Background = UI.Brush(Inset), CornerRadius = new CornerRadius(10), Padding = new Thickness(16, 14, 16, 4), Margin = new Thickness(0, 0, 0, 12), Child = CompactMonitorOptions(style) };
-        void Enable(bool on) { options.IsEnabled = on; options.Opacity = on ? 1 : .45; }
-        Enable(S.ShowsMonitor(style));
-        Button arrow = null!;
-        void Show(bool open) { options.Visibility = open ? Visibility.Visible : Visibility.Collapsed; PointArrow(arrow, open); }
-        void Flip() { _compactMonitorOpen = !_compactMonitorOpen; Show(_compactMonitorOpen); }
-        arrow = ChevronButton(Loc.T("系统监控设置", "System monitor settings"), Flip);
-        arrow.Margin = new Thickness(2, 0, 0, 0);
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        heading.Children.Add(SettingLabel(title, () => Loc.T("在收起的刘海或胶囊中显示 CPU、内存、GPU 与网速。显示时每隔一个刷新间隔读取一次系统数据，不读取进程。",
-            "Shows CPU, memory, GPU and network speed in the collapsed notch or capsule. While shown, the system is read once per update interval, without the processes.")));
-        heading.Children.Add(arrow);
-        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.ShowsMonitor(style), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
-        AutomationProperties.SetName(toggle, title);
-        void Turn(bool on) { Change(s => { if (notch) s.NotchMonitor = on; else s.CapsuleMonitor = on; }); Enable(on); }
-        toggle.Checked += (_, _) => Turn(true); toggle.Unchecked += (_, _) => Turn(false);
-        var header = new Grid { MinHeight = 44, Background = Brushes.Transparent };
-        header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(heading); Grid.SetColumn(toggle, 1); header.Children.Add(toggle);
-        header.MouseLeftButtonDown += (_, e) => { Flip(); e.Handled = true; };
-        Show(_compactMonitorOpen);
-        var row = new StackPanel(); row.Children.Add(header); row.Children.Add(options); return row;
-    }
-
-    // Full, brief or chosen readings; the chosen ones as switches, shown while Custom is picked.
-    private FrameworkElement CompactMonitorOptions(CompactStyle style)
-    {
-        var panel = new StackPanel();
-        var items = new UniformGrid { Columns = 2, Margin = new Thickness(0, 4, 0, 0), Visibility = S.CompactMonitor == CompactMonitorMode.Custom ? Visibility.Visible : Visibility.Collapsed };
-        panel.Children.Add(MusicChoice(Loc.T("显示内容", "Content"), S.CompactMonitor,
+        SectionTitle(Loc.T("收起时的读数", "Collapsed readings"));
+        var items = new UniformGrid { Columns = 2, Margin = new Thickness(20, 0, 0, 4), Visibility = S.CompactMonitor == CompactMonitorMode.Custom ? Visibility.Visible : Visibility.Collapsed };
+        var content = MusicChoice(Loc.T("显示内容", "Content"), S.CompactMonitor,
             [(CompactMonitorMode.Full, Loc.T("完整", "Full")), (CompactMonitorMode.Brief, Loc.T("简洁", "Brief")), (CompactMonitorMode.Custom, Loc.T("自选", "Custom"))],
-            mode => { Change(s => s.CompactMonitor = mode); items.Visibility = mode == CompactMonitorMode.Custom ? Visibility.Visible : Visibility.Collapsed; }));
+            mode => { Change(s => s.CompactMonitor = mode); items.Visibility = mode == CompactMonitorMode.Custom ? Visibility.Visible : Visibility.Collapsed; });
         (CompactMonitorItems Item, string Name)[] choices =
         [
             (CompactMonitorItems.Columns, Loc.T("核心柱", "Core columns")), (CompactMonitorItems.Cpu, "CPU"), (CompactMonitorItems.Memory, Loc.T("内存", "Memory")),
@@ -91,16 +65,15 @@ public sealed partial class SettingsWindow
             if (toggle is Border { Child: CheckBox { Content: TextBlock text } }) text.FontWeight = FontWeights.Normal;
             items.Children.Add(toggle);
         }
-        panel.Children.Add(items);
-        bool notch = style == CompactStyle.Notch;
-        var fit = Toggle(Loc.T("按内容自动加宽", "Widen to the content"), S.CompactAutoWidth(style), on => Change(s => s.SetCompactAutoWidth(style, on)),
-            help: Loc.T("内容放不下时自动加宽刘海或胶囊。拖动其左右两端或调整宽度滑块即手动设定宽度（会关闭此项），双击两端恢复。",
-                "Widens the notch or capsule when its content does not fit. Dragging either end or moving the width slider sets the width by hand (and turns this off); a double click on an end turns it back on."));
-        panel.Children.Add(fit);
-        var hint = TextLine(Loc.T("放不下的读数按上传、GPU、下载、核心柱、内存的顺序隐藏，CPU 保留到最后。",
-            "Readings that do not fit give way in turn: upload, GPU, download, the core columns, memory; CPU stays longest."), 11, TextTertiary);
-        hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0, 6, 0, 10); panel.Children.Add(hint);
-        return panel;
+        var chosen = new StackPanel(); chosen.Children.Add(content); chosen.Children.Add(items);
+        string widen = Loc.T("内容放不下时自动加宽。拖动其左右两端或调整宽度滑块即手动设定宽度（会关闭此项），双击两端恢复。",
+            "Widens the surface when its content does not fit. Dragging either end or moving the width slider sets the width by hand (and turns this off); a double click on an end turns it back on.");
+        Group(chosen,
+            Toggle(Loc.T("刘海按内容自动加宽", "Notch widens to the content"), S.NotchAutoWidth, on => Change(s => s.NotchAutoWidth = on), help: widen),
+            Toggle(Loc.T("胶囊按内容自动加宽", "Capsule widens to the content"), S.CapsuleAutoWidth, on => Change(s => s.CapsuleAutoWidth = on), help: widen));
+        Note(Loc.T("读数显示在打开了“系统监控”的刘海或胶囊中（收起外观 › 显示内容）。放不下的读数按上传、GPU、下载、核心柱、内存的顺序隐藏，CPU 保留到最后。",
+            "The readings show in a notch or capsule whose \"System monitor\" switch is on (Collapsed view › Content). Readings that do not fit give way in turn: upload, GPU, download, the core columns, memory; CPU stays longest."),
+            11.5, TextTertiary, new Thickness(0, -16, 0, 20));
     }
 
     private void MonitorSizeControls()

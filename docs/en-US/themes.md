@@ -5,12 +5,12 @@ The Notch, Capsule and Indicator, the quota notice, the expanded panel and its p
 | Kind | Themes |
 | --- | --- |
 | Basics | System, Dark (the default: the original pure black look), Light |
-| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl |
-| Custom | Cyberpunk: Edgerunners (the demo), and the theme files in the themes folder |
+| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Cyberpunk: Edgerunners (the demo) |
+| Custom | The theme files in the themes folder, which can be created, edited and deleted in settings |
 
-Choosing a theme in settings sets the theme, warning and critical colors of every app column back to "Default" (the theme's colors) and switches the clock to the style and color the theme suggests. Both can still be changed in "Quotas and usage" and "Collapsed view" until the next theme is chosen.
+Each theme remembers the theme, warning and critical colors of the app columns and the clock's style and color you change while using it: they are saved when you switch to another theme and come back when you return. A theme chosen for the first time uses its own colors and suggested clock. Restoring defaults in "Quotas and usage" or "Collapsed view" restores the current theme's defaults.
 
-The theme extensions are ported from open-source VS Code themes and use their colors under each theme's MIT License: [One Dark Pro](https://github.com/Binaryify/OneDark-Pro), [GitHub Theme](https://github.com/primer/github-vscode-theme), [Dracula Official](https://github.com/dracula/visual-studio-code) and [Night Owl](https://github.com/sdras/night-owl-vscode-theme). The copyright and license notices of these projects ship with BrimDeck in `ThirdPartyNotices.txt`. Monokai Pro is a commercially licensed theme and is not included.
+The theme extensions are ported from open-source VS Code themes and use their colors under each theme's MIT License: [One Dark Pro](https://github.com/Binaryify/OneDark-Pro), [GitHub Theme](https://github.com/primer/github-vscode-theme), [Dracula Official](https://github.com/dracula/visual-studio-code) and [Night Owl](https://github.com/sdras/night-owl-vscode-theme). The copyright and license notices of these projects ship with BrimDeck in `ThirdPartyNotices.txt`.
 
 ## Theme files
 

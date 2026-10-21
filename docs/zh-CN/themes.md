@@ -5,12 +5,12 @@ BrimDeck 的刘海、胶囊、指示条、配额提示、展开面板及其弹�
 | 类别 | 主题 |
 | --- | --- |
 | 基础 | 跟随系统、深色（默认，即原有的纯黑外观）、浅色 |
-| 主题扩展 | One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl |
-| 自定义 | 赛博朋克：边缘行者（示例），以及主题文件夹中的主题文件 |
+| 主题扩展 | One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl、赛博朋克：边缘行者（示例） |
+| 自定义 | 主题文件夹中的主题文件，可在设置中新建、编辑与删除 |
 
-在设置中选中一个主题时，各应用列的主题、预警、告警颜色会恢复为“默认”（即该主题的配色），时间也会切换为主题推荐的样式与配色；之后仍可在“配额与统计”和“收起外观”中单独修改，直到下次切换主题。
+每个主题会分别记住你在它下面修改的应用列主题、预警、告警颜色和时间的样式与配色：切换到其他主题时保存，切换回来时恢复。第一次选择的主题使用它自己的配色和推荐的时间样式。在“配额与统计”“收起外观”中恢复默认，恢复的是当前主题的默认配色。
 
-主题扩展移植自开源的 VS Code 主题，配色按各自的 MIT 许可证使用：[One Dark Pro](https://github.com/Binaryify/OneDark-Pro)、[GitHub Theme](https://github.com/primer/github-vscode-theme)、[Dracula Official](https://github.com/dracula/visual-studio-code)、[Night Owl](https://github.com/sdras/night-owl-vscode-theme)。各项目的版权与许可声明随程序附在 `ThirdPartyNotices.txt` 中。Monokai Pro 是需要购买许可证的商业主题，没有收录。
+主题扩展移植自开源的 VS Code 主题，配色按各自的 MIT 许可证使用：[One Dark Pro](https://github.com/Binaryify/OneDark-Pro)、[GitHub Theme](https://github.com/primer/github-vscode-theme)、[Dracula Official](https://github.com/dracula/visual-studio-code)、[Night Owl](https://github.com/sdras/night-owl-vscode-theme)。各项目的版权与许可声明随程序附在 `ThirdPartyNotices.txt` 中。
 
 ## 主题文件
 

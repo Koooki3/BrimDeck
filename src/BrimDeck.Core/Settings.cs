@@ -171,6 +171,9 @@ public sealed class DeckSettings
     // The panel's color theme (see PanelThemes): "system", "dark", "light", a built-in theme or a theme file's id.
     // The dark default is the original look. An id whose file is missing is kept and shown as the dark theme meanwhile.
     public string PanelTheme { get; set; } = PanelThemes.Dark;
+    // What the user changed under each panel theme, by theme id (see ThemeChoices); the theme in use keeps its choices in the
+    // ordinary settings, and they are saved here when another theme is chosen.
+    public Dictionary<string, ThemeChoices> ThemeChoices { get; set; } = [];
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
@@ -251,6 +254,9 @@ public sealed class DeckSettings
     // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
     // its own off, so the width set by hand stays.
     public bool NotchAutoWidth { get; set; } = true;
+    // Compacts the heap and trims the working set after the panel has been collapsed and idle for a while (App.Memory.cs). Off
+    // by default: the memory is read back in when the panel next opens, which can stutter.
+    public bool TrimMemoryWhenIdle { get; set; }
     public bool CapsuleAutoWidth { get; set; } = true;
     public CompactMonitorMode CompactMonitor { get; set; }
     public CompactMonitorItems CompactMonitorItems { get; set; } = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Download | CompactMonitorItems.Upload;
@@ -324,10 +330,19 @@ public sealed class DeckSettings
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
+        copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
         return copy;
     }
     public void Normalize()
     {
+        // Saved per-theme choices: one entry per theme id as the panel names it, each with its lists present.
+        ThemeChoices = (ThemeChoices ?? []).Where(pair => pair.Value is not null && pair.Key.Length > 0).GroupBy(pair => PanelThemes.NormalizeId(pair.Key))
+            .ToDictionary(group => group.Key, group =>
+            {
+                var choices = group.Last().Value;
+                choices.Apps ??= []; choices.ClockGradient ??= []; choices.ClockCustomColor ??= ClockColors.DefaultCustom;
+                return choices;
+            });
         var seen = new HashSet<Guid>();
         Apps = Apps.Where(app => app is not null && ProviderCatalog.Sources.Contains(app.QuotaSource)).Take(AppPresets.MaximumApps).ToList();
         foreach (var app in Apps)

@@ -122,7 +122,8 @@ public static partial class PanelThemes
         foreach (var (key, resource) in BuiltInIndex)
         {
             if (key != id) continue;
-            var kind = id is Dark or Light ? PanelThemeKind.Basic : id == Demo ? PanelThemeKind.Custom : PanelThemeKind.Extension;
+            // The demo theme sits with the extensions, so the custom section holds only the user's own themes.
+            var kind = id is Dark or Light ? PanelThemeKind.Basic : PanelThemeKind.Extension;
             return ParsedBuiltIns[id] = new PanelThemeInfo(id, kind, Parse(Resource(resource)), null, null);
         }
         return null;

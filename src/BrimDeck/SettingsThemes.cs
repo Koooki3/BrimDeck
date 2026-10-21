@@ -10,12 +10,14 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The "面板主题" page: the basic themes, the editor themes ported as built-in extensions, and custom themes (the built-in demo and
-// the files in the themes folder). Choosing a card applies it at once and holds the panel open as a preview. While the page is
-// shown, saving a file in the themes folder reloads it, so a theme can be edited with the panel beside it.
+// The "面板主题" page: the basic themes, the built-in extensions, and the user's own themes (the files in the themes folder),
+// which can be opened or deleted here. Each card shows the collapsed capsule in its theme, as the collapsed view's style cards
+// do: a fixed miniature that does not follow later changes to the panel. Choosing a card applies it at once and holds the panel
+// open as a preview; what the user changed under the theme being left is kept for it (ThemeChoices). While the page is shown,
+// saving a file in the themes folder reloads it, so a theme can be edited with the panel beside it.
 public sealed partial class SettingsWindow
 {
-    internal const int ThemePage = 8;
+    internal const int ThemePage = 8, MonitorSettingsPage = 9;
     private FileSystemWatcher? _themeWatcher;
     private DispatcherTimer? _themeReload;
     // The themes folder as last read (file names, sizes and times), so a watcher event that changed nothing reloads nothing.
@@ -38,25 +40,33 @@ public sealed partial class SettingsWindow
         _themesFresh = false;
         var chosen = PanelThemes.NormalizeId(S.PanelTheme);
         var users = PanelTheme.UserThemes;
-        Note(Loc.T("选择主题时，会清除已为各应用选择的主题、预警与告警颜色，改用该主题的配色；时间的样式与颜色也会换成该主题推荐的。之后仍可在“配额与统计”和“收起外观”中单独修改。",
-            "Choosing a theme clears the theme, warning and critical colors chosen for each app, which then take the theme's, and switches the clock's style and color to the theme's. Both can be changed again in \"Quotas and usage\" and \"Collapsed view\"."),
+        Note(Loc.T("每个主题会分别记住你在它下面修改的应用颜色、预警与告警颜色和时间样式，切换回来时恢复；第一次选择的主题使用它自己的配色。",
+            "Each theme remembers the app, warning and critical colors and the clock style you change while using it, and brings them back when you return to it. A theme chosen for the first time uses its own colors."),
             12, TextSecondary, new Thickness(0, -6, 0, 24));
-        SectionTitle(Loc.T("基础", "Basics"));
+        ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
             .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
-        SectionTitle(Loc.T("主题扩展", "Theme extensions"));
-        Note(Loc.T("移植自开源的 VS Code 主题，配色按各自的 MIT 许可证使用。Monokai Pro 为商业授权主题，未收录。",
-            "Ported from open-source VS Code themes; their colors are used under each theme's MIT License. Monokai Pro is commercially licensed and not included."),
-            11.5, TextTertiary, new Thickness(0, -2, 0, 10));
+        ThemeSection(Loc.T("主题扩展", "Theme extensions"));
         ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Extension).Select(Card)], chosen);
-        SectionTitle(Loc.T("自定义", "Custom"));
-        ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Custom).Concat(users.Where(t => t.Usable)).Select(Card)], chosen);
+        ThemeSection(Loc.T("自定义", "Custom"));
+        var own = users.Where(t => t.Usable).ToList();
+        if (own.Count == 0)
+            Note(Loc.T("还没有自定义主题。可以在下方“以当前主题新建”，或把主题文件放进主题文件夹。", "No custom themes yet. Use \"New from current theme\" below, or put a theme file in the themes folder."),
+                12, TextTertiary, new Thickness(0, 0, 0, 18));
+        else ThemeCards([.. own.Select(Card)], chosen);
         _themeDetails = Collect(() => ThemeDetails(chosen, users)); _content.Children.Add(_themeDetails);
         // Miniatures of cards no longer on the page (a theme file renamed or removed) are let go.
         var cards = new[] { PanelThemes.SystemId }.Concat(PanelThemes.BuiltIns.Select(t => t.Id)).Concat(users.Where(t => t.Usable).Select(t => t.Id)).ToHashSet();
         foreach (var key in _themePreviews.Keys.Where(key => !cards.Contains(key.Card) || key.Language != Loc.Language).ToList()) _themePreviews.Remove(key);
         CustomThemeTools(users);
         static (string Id, string Name, PanelThemeInfo Theme) Card(PanelThemeInfo theme) => (theme.Id, theme.DisplayName, theme);
+    }
+
+    // A section title with a divider under it, as the other pages' groups start.
+    private void ThemeSection(string title)
+    {
+        SectionTitle(title);
+        Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, 12) });
     }
 
     private void Note(string text, double size, string color, Thickness margin)
@@ -75,8 +85,6 @@ public sealed partial class SettingsWindow
                 Margin = new Thickness(6, 3, 6, 6), Tag = name, GroupName = "PanelTheme", IsChecked = id == chosen });
             AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + name);
             AutomationProperties.SetAutomationId(card, "panel-theme-" + id);
-            var description = id == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
-            if (description.Length > 0) card.ToolTip = description;
             card.Checked += (_, _) =>
             {
                 if (PanelThemes.NormalizeId(S.PanelTheme) == id) return;
@@ -95,14 +103,11 @@ public sealed partial class SettingsWindow
         _content.Children.Add(grid);
     }
 
-    // A theme and what goes with it: the app colors follow it and the clock takes its suggestion (PanelThemes.ApplyMatching).
-    // Restore defaults on this page goes through here too.
+    // A theme and what goes with it: what the user changed under the theme being left is kept for it, and the theme chosen brings
+    // back what was changed under it, or else its own app colors and suggested clock (PanelThemes.SwitchTheme). Restore defaults
+    // on this page goes through here too.
     private static void ChooseTheme(DeckSettings settings, string id)
-    {
-        var previous = PanelTheme.Current;
-        settings.PanelTheme = id;
-        PanelThemes.ApplyMatching(PanelThemes.Resolve(PanelTheme.Find(id)), settings, previous);
-    }
+        => PanelThemes.SwitchTheme(settings, settings.PanelTheme, PanelTheme.Current, id, PanelThemes.Resolve(PanelTheme.Find(id)));
 
     private FrameworkElement ThemePreview(string card, PanelThemeInfo theme)
     {
@@ -114,7 +119,8 @@ public sealed partial class SettingsWindow
             if (kept.Preview.Parent is ContentControl previous) previous.Content = null;
             return kept.Preview;
         }
-        var preview = PanelThemePreview.Create(palette);
+        // The collapsed capsule with its quota rings and clock, as on the collapsed view's style cards, in this theme's colors.
+        var preview = CompactStylePreview.Create(CompactStyle.Capsule, palette.IsDark, clock: true, palette, focus: true);
         _themePreviews[key] = (palette, preview);
         return preview;
     }
@@ -128,6 +134,8 @@ public sealed partial class SettingsWindow
         var rows = new List<FrameworkElement>();
         string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")") : theme.DisplayName;
         rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
+        string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
+        if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         // A file that carries the chosen id (or is named after it) but cannot be used is there, with its error listed below.
         bool broken = missing && users.Any(t => !t.Usable && (PanelThemes.NormalizeId(t.File.Id) == chosen || t.Path is { } file && PanelThemes.NormalizeId(PanelThemes.FileName(file)) == chosen));
         if (missing)
@@ -138,9 +146,12 @@ public sealed partial class SettingsWindow
         if (kept)
             rows.Add(Row(Loc.T("提示", "Note"), Wrapped(Loc.T("主题文件现在有错误（见下方），面板暂时保留它上次正确的版本；修正并保存后即恢复同步。",
                 "The theme file has an error now (see below). The panel keeps its last good version until the file is fixed and saved."), true)));
-        if (theme.File.Author.Length > 0) rows.Add(Row(Loc.T("作者", "Author"), TextLine(theme.File.Author, 12, TextSecondary)));
-        if (theme.File.License.Length > 0) rows.Add(Row(Loc.T("许可证", "License"), TextLine(theme.File.License, 12, TextSecondary)));
-        if (theme.File.Homepage.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) rows.Add(Row(Loc.T("来源", "Source"), Link(Loc.T("主页 ↗", "Homepage ↗"), theme.File.Homepage)));
+        // A user's own theme file says who made it and where it comes from; the built-in themes' notices are in ThirdPartyNotices.txt.
+        if (!theme.BuiltIn)
+        {
+            if (theme.File.Author.Length > 0) rows.Add(Row(Loc.T("作者", "Author"), TextLine(theme.File.Author, 12, TextSecondary)));
+            if (theme.File.Homepage.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) rows.Add(Row(Loc.T("来源", "Source"), Link(Loc.T("主页 ↗", "Homepage ↗"), theme.File.Homepage)));
+        }
         if (theme.Path is { } path)
         {
             var open = ActionButton(Path.GetFileName(path) + " ↗", () => OpenThemeFile(path)); open.Style = (Style)FindResource("SettingsLink"); open.ToolTip = path;
@@ -175,7 +186,8 @@ public sealed partial class SettingsWindow
                 // The folder as just read, including this new file, so the watcher's report of the write reloads nothing.
                 _themeStamp = ThemeFolderStamp();
                 var id = PanelTheme.UserThemes.FirstOrDefault(t => t.Usable && string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase))?.Id;
-                if (id is not null) Change(s => s.PanelTheme = id);
+                // The new theme copies the current one, so it starts with what was changed under the current one.
+                if (id is not null) Change(s => { var kept = ThemeChoices.From(s); ChooseTheme(s, id); kept.ApplyTo(s); });
                 OpenThemeFile(path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { SaveStatus(Loc.T("无法创建主题文件：", "Could not create the theme file: ") + ex.Message, true); }
@@ -196,9 +208,49 @@ public sealed partial class SettingsWindow
                 "\"New from current theme\" writes every color of the current theme into a commented template file and opens it; save your changes and this page reloads them. Theme files live in the themes folder (*.json, or theme.json in a subfolder); the format and the design steps are in docs/en-US/themes.md.")),
             Row(Loc.T("制作指南", "Guide"), Link(Loc.T("主题制作指南 ↗", "Theme guide ↗"), Updates.GitHubUpdates.RepositoryUrl + Loc.T("/blob/main/docs/zh-CN/themes.md", "/blob/main/docs/en-US/themes.md")))
         };
+        // The user's own themes, each with its file and a delete that asks once more before the file goes to the Recycle Bin.
+        foreach (var own in users.Where(t => t.Usable && t.Path is not null))
+            rows.Add(Row(own.DisplayName, OwnThemeActions(own)));
         foreach (var broken in users.Where(t => !t.Usable))
             rows.Add(Row(broken.Path is { } file ? PanelThemes.DisplayFileName(file) : broken.Id, Wrapped(Loc.T("无法使用：", "Cannot be used: ") + broken.Error, true)));
         Group([.. rows]);
+    }
+
+    private FrameworkElement OwnThemeActions(PanelThemeInfo theme)
+    {
+        var path = theme.Path!;
+        var edit = ActionButton(Loc.T("编辑", "Edit"), () => OpenThemeFile(path)); edit.ToolTip = path;
+        Button remove = null!;
+        bool armed = false;
+        var disarm = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromSeconds(4) };
+        void Arm(bool on) { armed = on; remove.Content = on ? Loc.T("确认删除", "Confirm delete") : Loc.T("删除", "Delete"); if (on) disarm.Start(); else disarm.Stop(); }
+        disarm.Tick += (_, _) => Arm(false);
+        remove = ActionButton(Loc.T("删除", "Delete"), () =>
+        {
+            if (!armed) { Arm(true); return; }
+            Arm(false);
+            DeleteOwnTheme(theme);
+        });
+        AutomationProperties.SetName(remove, Loc.T("删除主题 ", "Delete theme ") + theme.DisplayName);
+        foreach (var button in new[] { edit, remove }) { button.FontSize = 11; button.Margin = new Thickness(6, 0, 0, 0); }
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal }; buttons.Children.Add(edit); buttons.Children.Add(remove);
+        return buttons;
+    }
+
+    // A theme in its own folder (theme.json) takes the folder with it; a single file goes alone. The theme in use gives way to
+    // the dark theme first, and the theme's saved choices go with it.
+    private void DeleteOwnTheme(PanelThemeInfo theme)
+    {
+        var path = theme.Path!;
+        var target = string.Equals(Path.GetFileName(path), "theme.json", StringComparison.OrdinalIgnoreCase) ? Path.GetDirectoryName(path)! : path;
+        if (!Native.RecycleBin.Send(target)) { SaveStatus(Loc.T("无法删除主题文件：", "Could not delete the theme file: ") + target, true); return; }
+        string id = theme.Id;
+        Change(s =>
+        {
+            if (PanelThemes.NormalizeId(s.PanelTheme) == id) ChooseTheme(s, PanelThemes.Dark);
+            PanelThemes.ForgetTheme(s, id);
+        });
+        _themesFresh = false; ShowPage(ThemePage);
     }
 
     private void OpenThemeFile(string path)
@@ -217,7 +269,7 @@ public sealed partial class SettingsWindow
     // The collapsed view (style cards, clock tiles) and the quotas page (default color swatches) show theme colors too.
     internal void PanelThemeChanged(bool onlyThemePage = false)
     {
-        if (!IsLoaded || (onlyThemePage ? _page != ThemePage : _page is not (1 or 3 or ThemePage))) return;
+        if (!IsLoaded || (onlyThemePage ? _page != ThemePage : _page is not (1 or 3 or ThemePage or MonitorSettingsPage))) return;
         _themesFresh = _page == ThemePage; ShowPage(_page);
     }
 

@@ -68,7 +68,28 @@ internal static class PanelThemeTests
         check("The dark theme is the original look", dark.Surface == ThemeColor.Black && dark["textPrimary"].ToString() == "#F5F5F7"
             && dark["textSecondary"].ToString() == "#9EEBEBF5" && dark.AppDefault(ProviderId.Claude)?.ToString() == AppPresets.ThemeColor(ProviderId.Claude) && !dark.HasOverlay && dark.IsDark);
         check("The light theme is light and has its own app colors", !BuiltIn("light").IsDark && BuiltIn("light").AppDefault(ProviderId.DeepSeek)?.ToString() == "#9B51C9");
+        // Each theme keeps what the user changed under it.
+        {
+            var kept = new DeckSettings();
+            var column = kept.Apps[0];
+            column.ThemeColor = "#123456"; column.WarningColor = "#654321"; kept.ClockStyle = ClockStyle.Serif; kept.ClockColor = ClockColor.Cyan;
+            PanelThemes.SwitchTheme(kept, "dark", BuiltIn("dark"), "dracula", BuiltIn("dracula"));
+            check("A theme chosen for the first time starts from its own colors", column.ThemeColor == "" && column.WarningColor == "" && kept.PanelTheme == "dracula");
+            column.ThemeColor = "#ABCDEF"; kept.ClockStyle = ClockStyle.Neon;
+            PanelThemes.SwitchTheme(kept, "dracula", BuiltIn("dracula"), "dark", BuiltIn("dark"));
+            check("Switching back brings the colors and clock changed under that theme back", column.ThemeColor == "#123456" && column.WarningColor == "#654321"
+                && kept.ClockStyle == ClockStyle.Serif && kept.ClockColor == ClockColor.Cyan);
+            kept.Apps.Add(new AppEntry { ThemeColor = "#111111" });
+            PanelThemes.SwitchTheme(kept, "dark", BuiltIn("dark"), "Dracula", BuiltIn("dracula"));
+            check("Each theme's own changes come back with it", column.ThemeColor == "#ABCDEF" && kept.ClockStyle == ClockStyle.Neon);
+            check("An column added later takes the theme's own color under a theme that saved none for it", kept.Apps[^1].ThemeColor == "");
+            var copy = kept.Copy(); copy.ThemeChoices["dark"].Apps.Clear();
+            check("A copy of the settings has its own saved choices", kept.ThemeChoices["dark"].Apps.Count > 0);
+            PanelThemes.ForgetTheme(kept, "DARK");
+            check("A deleted theme takes its saved choices with it", !kept.ThemeChoices.ContainsKey("dark"));
+        }
         var demo = BuiltIn(PanelThemes.Demo);
+        check("The demo theme is listed with the extensions, leaving the custom section to the user", PanelThemes.BuiltIn(PanelThemes.Demo)!.Kind == PanelThemeKind.Extension);
         check("The demo theme carries its effects", demo.HasOverlay && demo.Effects.RimGradient.Count == 3 && demo.Effects.ShadowDepth == 0 && demo.Effects.Scanlines > 0);
         check("System follows the Windows app theme", PanelThemes.Find("system", true, []).Id == "dark" && PanelThemes.Find("SYSTEM", false, []).Id == "light");
         check("An unknown theme shows as dark", PanelThemes.Find("gone", false, []).Id == "dark");
