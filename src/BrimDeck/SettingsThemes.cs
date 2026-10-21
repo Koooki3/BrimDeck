@@ -87,7 +87,8 @@ public sealed partial class SettingsWindow
                 if (PanelThemes.NormalizeId(S.PanelTheme) != id || _themeDetails is null || !_content.Children.Contains(_themeDetails)) { _themesFresh = true; ShowPage(ThemePage); return; }
                 int at = _content.Children.IndexOf(_themeDetails);
                 _themeDetails = Collect(() => ThemeDetails(id, PanelTheme.UserThemes));
-                _content.Children[at] = _themeDetails;
+                // A panel's slot cannot take a new child while the old one is still in it, so the old one leaves first.
+                _content.Children.RemoveAt(at); _content.Children.Insert(at, _themeDetails);
             };
             grid.Children.Add(card);
         }
