@@ -18,13 +18,13 @@ namespace BrimDeck;
 // window, and arms the collapsed surface's end before the pointer reaches it.
 // The surface trails the pointer on a spring (Spring, in Core): it lags a little while dragging, settles with a slight give when the
 // pointer stops, and near a limit the drag meets growing resistance instead of a wall. The size is saved once the spring has come
-// to rest after the button is released. While dragging and settling, the window keeps the largest size either form can take, so
-// each frame resizes only the surface, and the panel neither opens nor closes.
+// to rest after the button is released. The window already has the largest size either form can take (ApplySettings), so each
+// frame resizes only the surface; the window itself never changes, and the panel neither opens nor closes.
 public partial class MainWindow
 {
     private ResizeGripLayer _grips = null!;
     private ResizeEdges _resizeEdge, _hoverEdge;
-    private bool _resizeHost, _resizeCompact, _resizeChanged, _resizeSettling, _springHooked;
+    private bool _resizeCompact, _resizeChanged, _resizeSettling, _springHooked;
     private Point _resizeStart;
     private (double Width, double Height) _resizeFrom;
     private Spring _springWidth, _springHeight;
@@ -41,6 +41,7 @@ public partial class MainWindow
     private bool Dragging => _resizeEdge != ResizeEdges.None;
     // Dragging, or settling after the button was released.
     private bool Resizing => Dragging || _resizeSettling;
+    internal bool IsResizing => Resizing;
     private double MonitorMaxWidth => Math.Max(MonitorMinWidth, Math.Min(1200, WorkDip.Width - 24));
 
     private void InitializeResize()
@@ -183,8 +184,6 @@ public partial class MainWindow
         _resizeEdge = edge; _resizeStart = WindowsHost.Cursor();
         SetHoverEdge(edge);
         _grips.Light(edge, true, SizeLabel(_resizeFrom.Width, _resizeFrom.Height));
-        // The window grows once to the largest size; from here on only the surface changes size.
-        if (!_resizeHost) { _resizeHost = true; ApplySettings(); }
         _grips.CaptureMouse();
     }
 
@@ -274,7 +273,7 @@ public partial class MainWindow
     private void FinishResize()
     {
         bool compact = _resizeCompact;
-        _resizeSettling = false; _resizeHost = false; _resizeCompact = false;
+        _resizeSettling = false; _resizeCompact = false;
         // Saved like any change from the settings window, which applies it to every panel and fits the window again. A press that
         // moved nothing only fits the window again.
         if (_resizeChanged) _app.UpdateSettings(Settings.Copy()); else ApplySettings();

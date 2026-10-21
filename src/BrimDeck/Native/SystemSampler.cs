@@ -38,6 +38,7 @@ internal sealed class SystemSampler : IDisposable
     private const double ProcessSeconds = 1.5;
     private double _processesAt = double.NegativeInfinity;
     private readonly Queue<(double Down, double Up)> _history = new(HistoryLength);
+    private readonly Queue<double> _cpuHistory = new(HistoryLength), _gpuHistory = new(HistoryLength);
 
     public SystemSampler(Dispatcher dispatcher)
     {
@@ -92,7 +93,7 @@ internal sealed class SystemSampler : IDisposable
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _wake.WaitOne(); continue; }
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _wake.WaitOne(); continue; }
                 if (!primed || _primeProcesses)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
@@ -137,11 +138,19 @@ internal sealed class SystemSampler : IDisposable
             if (_history.Count == HistoryLength) _history.Dequeue();
             _history.Enqueue((rates.DownBytesPerSecond, rates.UpBytesPerSecond));
         }
-        return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, _cpu!.Sample(pdh), MemoryProvider.Sample(), network,
-            _gpu!.Sample(pdh), _lastProcesses)
+        var cpu = _cpu!.Sample(pdh); var gpu = _gpu!.Sample(pdh);
+        Remember(_cpuHistory, cpu.OrDefault?.Usage); Remember(_gpuHistory, gpu.OrDefault?.Usage);
+        return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network, gpu, _lastProcesses)
         {
-            DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray()
+            DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
+            CpuHistory = _cpuHistory.ToArray(), GpuHistory = _gpuHistory.ToArray()
         };
+    }
+    private static void Remember(Queue<double> history, double? usage)
+    {
+        if (usage is not { } value) return;
+        if (history.Count == HistoryLength) history.Dequeue();
+        history.Enqueue(Math.Clamp(value, 0, 1));
     }
 
     public void Dispose()

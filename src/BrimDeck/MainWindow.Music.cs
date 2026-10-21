@@ -716,7 +716,7 @@ public partial class MainWindow
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         // The system readings ask for the width of everything chosen and show what fits in the region they get.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactMonitor, Settings.CompactMonitorItems, MonitorThemeColors.For(Settings.MonitorPalette), scale,
-            !media && apps.Count == 0 && text.Length == 0 && clock is null) : null;
+            !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence) : null;
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0); CurrentCompactLayout = layout;
         // With readings on, a row too short for its content grows to it; the new shape builds the row again.
         double wanted = strip is null ? 0 : CompactMusicLayout.NaturalWidth(scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip.PreferredWidth);

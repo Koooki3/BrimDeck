@@ -154,12 +154,12 @@ static class SystemMonitorTests
 
     private static void Layouts(Action<string, bool> check)
     {
-        check("Monitor layout: a standard page lists processes beside the readings", MonitorLayout.For(580, 160, true) is { List: ListPlacement.Side, Processes: true, Metrics: MetricsMode.Lines, ColumnLabels: false });
+        check("Monitor layout: a standard page lists processes beside the readings", MonitorLayout.For(580, 160, true) is { List: ListPlacement.Side, Processes: true, Metrics: MetricsMode.Lines });
         check("Monitor layout: narrow pages drop the list", MonitorLayout.For(440, 160, true) is { List: ListPlacement.None, Processes: false });
-        check("Monitor layout: tall narrow pages stack the list", MonitorLayout.For(440, 360, true) is { List: ListPlacement.Below, ColumnLabels: false, Metrics: MetricsMode.Lines });
+        check("Monitor layout: tall narrow pages stack the list", MonitorLayout.For(440, 360, true) is { List: ListPlacement.Below, Metrics: MetricsMode.Lines });
         check("Monitor layout: short pages put the figures on one line", MonitorLayout.For(560, 100, true) is { Metrics: MetricsMode.Line, CompactMetrics: true, Figure: 16, List: ListPlacement.Side });
         check("Monitor layout: a switched-off list never shows", MonitorLayout.For(1200, 400, false) is { Processes: false });
-        check("Monitor layout: tall pages label the columns", MonitorLayout.For(1200, 300, true) is { ColumnLabels: true, Metrics: MetricsMode.Blocks });
+        check("Monitor layout: tall pages give memory and network their blocks", MonitorLayout.For(1200, 300, true) is { Metrics: MetricsMode.Blocks });
         check("Monitor layout: nonsense sizes", MonitorLayout.For(double.NaN, -5, true) is { Processes: false });
         check("Monitor layout: steps, not sizes, so dragging within a step keeps the page", MonitorLayout.For(600, 220, true) == MonitorLayout.For(780, 240, true) && MonitorLayout.For(600, 220, true) != MonitorLayout.For(600, 260, true));
         check("Monitor list grid: rows fit the height, a wide list has two columns", MonitorLayout.ListGrid(300, 200, 22) == (7, 1) && MonitorLayout.ListGrid(500, 400, 22) == (14, 2));

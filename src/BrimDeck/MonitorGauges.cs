@@ -13,6 +13,7 @@ namespace BrimDeck;
 
 // A badge, a figure with its unit, and a detail after it, on one baseline: "(cpu) 47 % 3.41 GHz". Aligned right, the badge
 // still leads and the whole line ends at the right edge. As a button it lights its badge under the pointer and takes clicks.
+// The main gauge fills the room after its figure with the last minute's trend (Trend), a soft line in its own color.
 internal sealed class FigureGauge : FrameworkElement
 {
     private readonly MonitorGlyph _glyph;
@@ -23,6 +24,11 @@ internal sealed class FigureGauge : FrameworkElement
     private bool _hasShare, _pressed;
     private string _number = "—", _unit = "", _detail = "", _tip = "";
     private readonly DrawingCache<(string, string, string, double, double, double)> _text = new();
+    private readonly DrawingCache<(IReadOnlyList<double>, double, double)> _trend = new();
+    private IReadOnlyList<double> _history = [];
+
+    // The last minute of readings, 0 to 1, drawn after the figure; empty draws nothing.
+    public IReadOnlyList<double> Trend { set { if (!ReferenceEquals(value, _history)) { _history = value; InvalidateVisual(); } } }
     public event Action? Clicked;
 
     public FigureGauge(MonitorGlyph glyph, string color, double figure, double small, bool right = false, string? button = null)
@@ -67,6 +73,15 @@ internal sealed class FigureGauge : FrameworkElement
         MonitorDraw.Badge(drawing, center, badge, _glyph, _color, _hasShare ? _share.At(now) : null);
         // The figures change once per reading; while the arc moves they are placed as they were drawn.
         double start = x + badge + gap;
+        if (_history.Count >= 3 && !_right)
+        {
+            // From after the figures (and any detail) to the right edge, half the line's height, centred on it.
+            double end = start + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0) + gap * 1.5;
+            var area = new Rect(end, Math.Round(h * .2), Math.Max(0, w - end - 6), Math.Round(h * .6));
+            if (area.Width >= 48 && _detail.Length == 0)
+                MonitorDraw.Place(drawing, area.TopLeft, _trend.Get((_history, area.Width, area.Height), context =>
+                    MonitorDraw.Sparkline(context, new Rect(0, 0, area.Width, area.Height), _history, 1, _color, .14, 1.3)));
+        }
         drawing.DrawDrawing(_text.Get((_number, _unit, _detail, w, h, ppd), context =>
         {
             double x = start;
@@ -260,8 +275,9 @@ internal sealed class BlockGauge : FrameworkElement
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) { base.OnMouseLeftButtonUp(e); e.Handled = true; Clicked?.Invoke(); }
 }
 
-// Memory: the badge with its arc, the figure, the level in words, and a bar of the memory in use and, lighter, the file cache;
-// below, the committed memory against its limit. Short of room (compact), the figure and the bar share one line.
+// Memory: the badge with its arc and the figure, then a bar of the memory in use and, lighter, the file cache, its color the
+// level; under it a thin line, the committed memory against its limit. The words and the other figures are in the tooltip.
+// Short of room (compact), the figure and the bar share one line.
 internal sealed class MemoryBlock : FrameworkElement
 {
     private readonly MonitorColors _colors;
@@ -269,12 +285,11 @@ internal sealed class MemoryBlock : FrameworkElement
     private readonly double _body, _caption;
     private Eased _used, _cached, _commit;
     private MemorySample? _memory;
-    private string _reason = "";
 
     public MemoryBlock(MonitorColors colors, bool compact, double body, double caption)
     {
         _colors = colors; _compact = compact; _body = body; _caption = caption;
-        Height = compact ? Math.Ceiling(body * 1.7) : Math.Ceiling(body * 1.7 + 6 + 5 + 6 + caption * 1.4);
+        Height = compact ? Math.Ceiling(body * 1.7) : Math.Ceiling(body * 1.7 + 6 + 5 + 5 + 3);
     }
 
     public void Set(Reading<MemorySample> reading, bool motion)
@@ -284,10 +299,10 @@ internal sealed class MemoryBlock : FrameworkElement
         {
             moving |= _used.Set(memory.UsedFraction, motion); moving |= _cached.Set(memory.CachedFraction, motion); moving |= _commit.Set(memory.CommitFraction, motion);
             _memory = memory;
-            ToolTip = Loc.T("物理内存 ", "Physical memory ") + MonitorFormat.Percent(memory.UsedFraction) + "% · " + Loc.T("缓存 ", "Cached ") + MonitorFormat.Gigabytes(memory.Cached)
-                + " GB · " + Loc.T("已提交 ", "Committed ") + MonitorFormat.Gigabytes(memory.CommitUsed) + " / " + MonitorFormat.Gigabytes(memory.CommitLimit) + " GB";
+            ToolTip = Loc.T("物理内存 ", "Physical memory ") + MonitorFormat.Percent(memory.UsedFraction) + "% · " + Level(memory.Level) + "\n" + Loc.T("缓存 ", "Cached ") + MonitorFormat.Gigabytes(memory.Cached)
+                + " GB\n" + Loc.T("已提交 ", "Committed ") + MonitorFormat.Gigabytes(memory.CommitUsed) + " / " + MonitorFormat.Gigabytes(memory.CommitLimit) + " GB" + Loc.T("（下方细线）", " (the thin line)");
         }
-        else { _memory = null; _reason = reading.Reason; ToolTip = Loc.T("暂无读数：", "No reading: ") + reading.Reason; }
+        else { _memory = null; ToolTip = Loc.T("暂无读数：", "No reading: ") + reading.Reason; }
         if (moving) Motion.Start(this, now => { InvalidateVisual(); return _used.Moving(now) || _cached.Moving(now) || _commit.Moving(now); }); else InvalidateVisual();
     }
 
@@ -317,31 +332,16 @@ internal sealed class MemoryBlock : FrameworkElement
             if (end - start > 16) Bar(drawing, new Rect(start, Math.Round(line / 2 - 2), end - start, 4), color, now);
             return;
         }
-        if (_memory is { } level)
-        {
-            var word = MonitorDraw.Text(Level(level.Level), _caption, color, ppd);
-            MonitorDraw.Baseline(drawing, word, w - word.WidthIncludingTrailingWhitespace, baseline);
-        }
         double barTop = line + 6;
         Bar(drawing, new Rect(0, barTop, w, 5), color, now);
-        double captionBaseline = Math.Round(barTop + 5 + 6 + _caption);
-        if (_memory is { } commit)
+        // The commit charge as a thin line under the bar, as ftop draws swap.
+        if (_memory is not null)
         {
-            var label = MonitorDraw.Text(Loc.T("已提交", "Committed"), _caption, UI.Tertiary, ppd);
-            var value = MonitorDraw.Text(MonitorFormat.Gigabytes(commit.CommitUsed) + " / " + MonitorFormat.GigabytesCompact(commit.CommitLimit) + " GB", _caption, UI.Secondary, ppd);
-            MonitorDraw.Baseline(drawing, label, 0, captionBaseline);
-            MonitorDraw.Baseline(drawing, value, label.WidthIncludingTrailingWhitespace + 5, captionBaseline);
-            // The commit charge as a thin bar to the right, as ftop draws swap.
-            double left = label.WidthIncludingTrailingWhitespace + 5 + value.WidthIncludingTrailingWhitespace + 12;
-            if (w - left > 24)
-            {
-                var r = new Rect(left, captionBaseline - _caption * .45, w - left, 3);
-                drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, r, 1.5, 1.5);
-                double share = Math.Clamp(_commit.At(now), 0, 1);
-                if (share > 0) drawing.DrawRoundedRectangle(UI.Brush(UI.Secondary), null, new Rect(r.X, r.Y, Math.Max(3, r.Width * share), 3), 1.5, 1.5);
-            }
+            var r = new Rect(0, barTop + 5 + 5, w, 2);
+            drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, r, 1, 1);
+            double share = Math.Clamp(_commit.At(now), 0, 1);
+            if (share > 0) drawing.DrawRoundedRectangle(UI.Brush(UI.Secondary), null, new Rect(r.X, r.Y, Math.Max(2, r.Width * share), 2), 1, 1);
         }
-        else if (_reason.Length > 0) MonitorDraw.Baseline(drawing, MonitorDraw.Trimmed(_reason, _caption, UI.Tertiary, w, ppd), 0, captionBaseline);
     }
 
     // The memory in use, then the cache in the same color, lighter, then the free rest.
@@ -413,38 +413,7 @@ internal sealed class NetworkBlock : FrameworkElement
     // The readings as a smooth line over a faint fill, newest at the right; scaled to the highest reading, at least 64 KB/s, so
     // an idle connection draws a flat line at the bottom rather than noise.
     private static void Sparkline(DrawingContext drawing, Rect area, IReadOnlyList<double> history, string color)
-    {
-        int count = history.Count;
-        double top = Math.Max(64_000, history.Max()), step = area.Width / (SystemSamplerHistory - 1);
-        var points = new Point[count];
-        for (int i = 0; i < count; i++)
-            points[i] = new Point(area.Right - (count - 1 - i) * step, area.Bottom - 1 - Math.Clamp(history[i] / top, 0, 1) * (area.Height - 2));
-        var stroke = new StreamGeometry();
-        var fill = new StreamGeometry();
-        using (var context = stroke.Open()) Curve(context, points, false, area.Bottom);
-        using (var context = fill.Open()) Curve(context, points, true, area.Bottom);
-        stroke.Freeze(); fill.Freeze();
-        drawing.DrawGeometry(UI.Brush(MonitorDraw.Faint(color, .16)), null, fill);
-        var pen = new Pen(UI.Brush(color), 1.4) { LineJoin = PenLineJoin.Round, StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-        pen.Freeze();
-        drawing.DrawGeometry(null, pen, stroke);
-    }
-    private const int SystemSamplerHistory = Native.SystemSampler.HistoryLength;
+        => MonitorDraw.Sparkline(drawing, area, history, Math.Max(64_000, history.Max()), color, .16);
 
-    // Catmull-Rom through the points, as cubic Béziers; closed down to the bottom for the fill.
-    private static void Curve(StreamGeometryContext context, Point[] p, bool closed, double bottom)
-    {
-        context.BeginFigure(closed ? new Point(p[0].X, bottom) : p[0], closed, closed);
-        if (closed) context.LineTo(p[0], false, false);
-        for (int i = 0; i < p.Length - 1; i++)
-        {
-            Point a = p[Math.Max(0, i - 1)], b = p[i], c = p[i + 1], d = p[Math.Min(p.Length - 1, i + 2)];
-            var c1 = new Point(b.X + (c.X - a.X) / 6, b.Y + (c.Y - a.Y) / 6);
-            var c2 = new Point(c.X - (d.X - b.X) / 6, c.Y - (d.Y - b.Y) / 6);
-            // A curve may not overshoot the bottom of its area.
-            c1.Y = Math.Min(c1.Y, bottom); c2.Y = Math.Min(c2.Y, bottom);
-            context.BezierTo(c1, c2, c, true, true);
-        }
-        if (closed) context.LineTo(new Point(p[^1].X, bottom), false, false);
-    }
+
 }

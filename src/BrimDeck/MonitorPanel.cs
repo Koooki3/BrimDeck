@@ -12,6 +12,8 @@ public partial class MainWindow
     private MonitorView? _monitorView;
     private string _monitorKey = "";
     private MonitorStrip? _compactStrip;
+    // Which readings the collapsed row shows and how far each has come in or gone out, kept while the row is built again.
+    private readonly StripPresence _stripPresence = new();
     private bool _monitorShowing, _stripShowing, _monitorFade;
 
     private void InitializeMonitor()

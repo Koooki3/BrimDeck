@@ -16,7 +16,7 @@ namespace BrimDeck;
 // reorders the rows the same way. The rows keep their order while the pointer is over the list (hold). The highlight under the
 // pointer glides from row to row and fades in and out, the chosen sort's pill slides, a pressed row gives a little, and a click
 // opens its card.
-// Compact rows show the sorted figure; detailed rows show CPU, memory and how many processes the app has.
+// Compact rows show the sorted figure; detailed rows show CPU and memory. The rest is on the app's card.
 internal sealed class ProcessListView : FrameworkElement
 {
     private const double ColumnGap = 18;
@@ -180,8 +180,8 @@ internal sealed class ProcessListView : FrameworkElement
 
     private void Header(DrawingContext drawing, double w, double ppd)
     {
+        // The sort pills name the list; the rows speak for themselves.
         double line = MonitorLayout.ListHead - 6, baseline = Math.Round(line / 2 + _layout.Caption * .38);
-        MonitorDraw.Baseline(drawing, MonitorDraw.Text(Loc.T("进程", "Processes"), _layout.Caption, UI.Secondary, ppd, strong: true), 0, baseline);
         // Two pills at the right: CPU and memory, the chosen one filled.
         string[] names = ["CPU", Loc.T("内存", "Memory")];
         var texts = names.Select(name => MonitorDraw.Text(name, _layout.Caption, UI.Secondary, ppd)).ToArray();
@@ -239,15 +239,7 @@ internal sealed class ProcessListView : FrameworkElement
         }
         if (detailed)
         {
-            if (sample.Members.Count > 1)
-            {
-                // How many processes the app has, as a small chip.
-                var count = MonitorDraw.Text("×" + sample.Members.Count, _layout.Caption, UI.Secondary, ppd);
-                var chip = new Rect(right - count.Width - 8, Math.Round(r.Y + (r.Height - _layout.Caption * 1.5) / 2), count.Width + 8, Math.Round(_layout.Caption * 1.5));
-                drawing.DrawRoundedRectangle(UI.Brush(UI.Fill), null, chip, chip.Height / 2, chip.Height / 2);
-                drawing.DrawText(count, new Point(chip.X + 4, chip.Y + (chip.Height - count.Height) / 2));
-            }
-            right -= Math.Ceiling(_layout.Caption * 3.6);
+            // How many processes an app has is on its card.
             Figure(memory, _sort == ProcessSort.Memory, Math.Ceiling(_layout.Body * 4.3));
             Figure(cpu, _sort == ProcessSort.Cpu, Math.Ceiling(_layout.Body * 4));
         }

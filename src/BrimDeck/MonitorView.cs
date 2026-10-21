@@ -78,7 +78,8 @@ internal sealed class MonitorView : Grid
         graphs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(mini) });
         if (cpuMain)
         {
-            _cpuGraph = new ColumnGraph(26, layout.Caption, layout.ColumnLabels);
+            // The cores carry no figures: the fill is the load, the tick the clock, and pointing at a core gives both.
+            _cpuGraph = new ColumnGraph(26, layout.Caption, labels: false);
             _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu);
             _gpuBlock.Clicked += () => mainChanged(MonitorMain.Gpu);
             SetColumn(_gpuBlock, 2); graphs.Children.Add(_cpuGraph); graphs.Children.Add(_gpuBlock);
@@ -146,11 +147,10 @@ internal sealed class MonitorView : Grid
         if (snapshot.Cpu.TryGet(out var cpu))
         {
             string frequency = cpu.FrequencyMhz.TryGet(out var mhz) ? MonitorFormat.Gigahertz(mhz) + " GHz" : "";
-            _cpuGauge.Set(cpu.Usage, MonitorFormat.Percent(cpu.Usage), "%", cpuMain ? frequency : "",
+            _cpuGauge.Set(cpu.Usage, MonitorFormat.Percent(cpu.Usage), "%", "",
                 "CPU " + MonitorFormat.Percent(cpu.Usage) + "%" + (frequency.Length > 0 ? " · " + frequency : "") + Loc.T($" · {cpu.Cores.Count} 个逻辑处理器", $" · {cpu.Cores.Count} logical processors"), motion);
             int groups = Math.Max(1, cpu.GroupCount);
-            _cpuGraph.Set(cpu.Cores.Select(core => new GraphColumn(core.Usage, cpuMain ? core.FrequencyFraction : null, _colors.Core(core.Group, groups), core.Group, Describe(core),
-                MonitorFormat.Percent(core.Usage), core.FrequencyMhz.TryGet(out var f) ? MonitorFormat.Gigahertz(f) : null)).ToList(), motion);
+            _cpuGraph.Set(cpu.Cores.Select(core => new GraphColumn(core.Usage, cpuMain ? core.FrequencyFraction : null, _colors.Core(core.Group, groups), core.Group, Describe(core))).ToList(), motion);
         }
         else { _cpuGauge.Set(null, "—", "", "", Loc.T("暂无读数：", "No reading: ") + snapshot.Cpu.Reason, motion); _cpuGraph.Set([], motion); }
 
@@ -158,13 +158,13 @@ internal sealed class MonitorView : Grid
         {
             string memory = gpu.DedicatedBytes.TryGet(out var used)
                 ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Gigabytes(used) + (gpu.DedicatedTotal is { } total ? " / " + MonitorFormat.GigabytesCompact(total) : "") + " GB" : "";
-            string detail = string.Join(" · ", new[] { memory, gpu.Name ?? "" }.Where(part => part.Length > 0));
             string tip = (gpu.Name ?? "GPU") + " · " + MonitorFormat.Percent(gpu.Usage) + "%" + (memory.Length > 0 ? " · " + memory : "")
                 + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "");
-            _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", cpuMain ? "" : detail, tip, motion);
+            // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure.
+            _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", "", tip, motion);
             _gpuBlock?.Set(gpu.Usage, gpu.DedicatedFraction, tip, motion);
             _gpuGraph?.Set(gpu.Engines.Select(engine => new GraphColumn(engine.Usage, null, _colors.Gpu, 0,
-                GpuEngines.Label(engine.Kind) + " · " + MonitorFormat.Percent(engine.Usage) + "%", MonitorFormat.Percent(engine.Usage), GpuEngines.Short(engine.Kind))).ToList(), motion);
+                GpuEngines.Label(engine.Kind) + " · " + MonitorFormat.Percent(engine.Usage) + "%", GpuEngines.Short(engine.Kind))).ToList(), motion);
         }
         else
         {
@@ -174,6 +174,8 @@ internal sealed class MonitorView : Grid
             _gpuGraph?.Set([], motion);
         }
 
+        // The main gauge carries the last minute's usage in the room after its figure.
+        (cpuMain ? _cpuGauge : _gpuGauge).Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
         _memory.Set(snapshot.Memory, motion);
         _network.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
         _list?.Set(snapshot.Processes, _cores, motion);

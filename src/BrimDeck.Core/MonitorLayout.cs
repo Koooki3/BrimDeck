@@ -54,9 +54,9 @@ public enum MetricsMode { Line, Lines, Blocks }
 // large one shows more rather than bigger type. Sizes are DIPs of the page's content area, below its header.
 // The ladder has steps only: within a step the page stretches (the list's share, its rows and columns, the graph's height), so
 // resizing the panel by dragging rebuilds the page only where it crosses a step.
-// Metrics: how much room memory and network take (MetricsMode). ColumnLabels: each core column carries its figure underneath,
-// as on ftop's large panel.
-public sealed record MonitorLayout(double Figure, double Body, double Caption, MetricsMode Metrics, ListPlacement List, double RowHeight, bool ColumnLabels)
+// Metrics: how much room memory and network take (MetricsMode). The core columns carry no figures at any size: pointing at one
+// gives them, so the page stays light to read.
+public sealed record MonitorLayout(double Figure, double Body, double Caption, MetricsMode Metrics, ListPlacement List, double RowHeight)
 {
     public bool CompactMetrics => Metrics == MetricsMode.Line;
     public bool Processes => List != ListPlacement.None;
@@ -84,8 +84,7 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
         // The core columns need height to read; memory and network give theirs first. Readings above a list have its fixed height.
         double readings = list == ListPlacement.Below ? StackedReadings : height;
         var metrics = readings < 150 ? MetricsMode.Line : readings < 250 ? MetricsMode.Lines : MetricsMode.Blocks;
-        bool labels = height >= 270 && list != ListPlacement.Below;
-        return new(figure, body, caption, metrics, list, row, labels);
+        return new(figure, body, caption, metrics, list, row);
     }
 
     // The rows and columns a list of this size shows.

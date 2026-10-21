@@ -166,14 +166,15 @@ public partial class MainWindow : Window
         UpdateCollapsedGeometry(bounds, work, scale);
         double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
         _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
-        // Keep the layered HWND large enough for every shown page. Resizing it in separate
-        // width/height/position steps presents intermediate surfaces; only Island should animate.
+        // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
+        // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
+        // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is
+        // every shown page, the monitor page at the largest size a drag can give it, and the collapsed surface at the widest
+        // any form can be, with room on either side for the resize grips just outside them (ResizeGrips). Only Island animates.
         var largest = DeckPages.Largest(Settings);
-        // While the monitor page is resized by dragging, the window holds the largest page it can become (see MonitorResize).
-        if (_resizeHost) largest = (Math.Max(largest.Width, 1200), Math.Max(largest.Height, 400));
-        // The window also holds the collapsed surface at any width; Place moves it so that the island lies inside it. Room on
-        // either side holds the resize grips just outside the panel and the surface (ResizeGrips).
-        Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Fit(largest.Width), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
+        if (DeckPages.Shown(Settings, DeckPage.Monitor)) largest = (Math.Max(largest.Width, MonitorMaxWidth), Math.Max(largest.Height, MonitorMaxHeight));
+        double widestSurface = Math.Max(Math.Max(CollapsedLimits.NotchWidthMax, CollapsedLimits.CapsuleWidthMax), CollapsedLimits.LineLengthMax);
+        Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Math.Max(Fit(largest.Width), widestSurface), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
         double hostHeight = largest.Height;
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
         // just above a lowered capsule; see CollapsedGeometry.Panel), so the window reaches the panel's bottom; it always holds the collapsed surface and its shadow, and never passes the
@@ -429,7 +430,7 @@ public partial class MainWindow : Window
         _expanded = expanded;
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
-        if (wasExpanded && !expanded) HotkeyPanelCollapsed();
+        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); _app.RequestTrim(); }
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;
@@ -661,7 +662,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { LastRefreshError = ex.GetType().Name + "\n" + ex.StackTrace; }
         finally
         {
-            _refreshing = false; RestartSyncCycle();
+            _refreshing = false; RestartSyncCycle(); _app.RequestTrim();
             foreach (var deck in _app.Decks) deck.RenderUsage();
             if (_refreshRequested)
             {

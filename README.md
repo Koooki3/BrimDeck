@@ -77,7 +77,7 @@ You can choose the quota providers and set the quota and usage source of each co
 
 ### System monitor
 
-- One column per logical processor, performance cores and efficiency cores in their own colors, each with a tick for its current frequency; the GPU shows small beside them. Click it to show the GPU large instead: a column per engine (3D, copy, video decode and encode…) with its dedicated memory and name, and the processor small.
+- The processor's usage large, with the last minute as a soft line beside it, and one column per logical processor, performance cores and efficiency cores in their own colors, each with a tick for its current frequency (point at a column for its figures); the GPU shows small beside them. Click it to show the GPU large instead: a column per engine (3D, copy, video decode and encode…), its dedicated memory and name on hover, and the processor small.
 - Memory in use, cached and committed, and download and upload speed over the physical network adapters with the last minute as a line.
 - The busiest apps by CPU or memory, with the processes of one program folded into one row, compact or detailed, in two columns on a wide panel; the list does not reshuffle when two apps trade places by a point. Click an app for its card.
 - Drag the open page's bottom edge, sides or corners to resize it; the layout follows step by step. The grips reach a little beyond the edges, handles appear as the pointer nears them, and the edge under the pointer lights in the theme's accent; the size follows the pointer on a soft spring.

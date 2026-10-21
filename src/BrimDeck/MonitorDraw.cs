@@ -95,6 +95,53 @@ internal static class MonitorDraw
     }
 
     public static double PixelsPerDip(Visual visual) => VisualTreeHelper.GetDpi(visual).PixelsPerDip;
+
+    // A cached drawing, drawn at its origin, placed at a point.
+    public static void Place(DrawingContext drawing, Point at, Drawing cached)
+    {
+        drawing.PushTransform(new TranslateTransform(at.X, at.Y));
+        drawing.DrawDrawing(cached);
+        drawing.Pop();
+    }
+
+    // The last minute of readings as a smooth line over a faint fill, newest at the right edge of the area, each reading's place
+    // fixed (SystemSampler.HistoryLength places across the area) so the line moves along as readings come. top is the reading
+    // that reaches the top of the area. Colors come from the monitor's palette, so the line suits every theme.
+    public static void Sparkline(DrawingContext drawing, Rect area, IReadOnlyList<double> history, double top, string color, double fill, double stroke = 1.4)
+    {
+        int count = history.Count;
+        if (count < 3 || area.Width < 8 || area.Height < 4 || !(top > 0)) return;
+        double step = area.Width / (Native.SystemSampler.HistoryLength - 1);
+        var points = new Point[count];
+        for (int i = 0; i < count; i++)
+            points[i] = new Point(area.Right - (count - 1 - i) * step, area.Bottom - 1 - Math.Clamp(history[i] / top, 0, 1) * (area.Height - 2));
+        var line = new StreamGeometry();
+        var under = new StreamGeometry();
+        using (var context = line.Open()) Curve(context, points, false, area.Bottom);
+        using (var context = under.Open()) Curve(context, points, true, area.Bottom);
+        line.Freeze(); under.Freeze();
+        if (fill > 0) drawing.DrawGeometry(UI.Brush(Faint(color, fill)), null, under);
+        var pen = new Pen(UI.Brush(color), stroke) { LineJoin = PenLineJoin.Round, StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        pen.Freeze();
+        drawing.DrawGeometry(null, pen, line);
+    }
+
+    // Catmull-Rom through the points, as cubic Béziers; closed down to the bottom for the fill.
+    private static void Curve(StreamGeometryContext context, Point[] p, bool closed, double bottom)
+    {
+        context.BeginFigure(closed ? new Point(p[0].X, bottom) : p[0], closed, closed);
+        if (closed) context.LineTo(p[0], false, false);
+        for (int i = 0; i < p.Length - 1; i++)
+        {
+            Point a = p[Math.Max(0, i - 1)], b = p[i], c = p[i + 1], d = p[Math.Min(p.Length - 1, i + 2)];
+            var c1 = new Point(b.X + (c.X - a.X) / 6, b.Y + (c.Y - a.Y) / 6);
+            var c2 = new Point(c.X - (d.X - b.X) / 6, c.Y - (d.Y - b.Y) / 6);
+            // A curve may not overshoot the bottom of its area.
+            c1.Y = Math.Min(c1.Y, bottom); c2.Y = Math.Min(c2.Y, bottom);
+            context.BezierTo(c1, c2, c, true, true);
+        }
+        if (closed) context.LineTo(new Point(p[^1].X, bottom), false, false);
+    }
 }
 
 // A drawing kept until what it shows changes. Text is the costly part of a redraw (each DrawText lays its glyphs out again), and

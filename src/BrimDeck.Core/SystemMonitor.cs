@@ -149,11 +149,14 @@ public sealed record ProcessList(IReadOnlyList<ProcessSample> Top, IReadOnlyList
 }
 
 // DownHistory and UpHistory are the last network readings, oldest first, bytes per second; empty until there are two.
+// CpuHistory and GpuHistory are the last processor and graphics usage readings in the same way, 0 to 1.
 public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors, Reading<CpuSample> Cpu, Reading<MemorySample> Memory,
     Reading<NetworkSample> Network, Reading<GpuSample> Gpu, Reading<ProcessList> Processes)
 {
     public IReadOnlyList<double> DownHistory { get; init; } = [];
     public IReadOnlyList<double> UpHistory { get; init; } = [];
+    public IReadOnlyList<double> CpuHistory { get; init; } = [];
+    public IReadOnlyList<double> GpuHistory { get; init; } = [];
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,
         Reading<CpuSample>.Unavailable(reason), Reading<MemorySample>.Unavailable(reason), Reading<NetworkSample>.Unavailable(reason),
         Reading<GpuSample>.Unavailable(reason), Reading<ProcessList>.Unavailable(reason));
