@@ -221,6 +221,15 @@ static class SystemMonitorTests
     {
         var settings = new DeckSettings();
         check("Pages: monitor sits between usage and music", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Monitor, DeckPage.Music]));
+        var sized = new DeckSettings();
+        DeckPages.SetSize(sized, DeckPage.Music, 700, 300); DeckPages.SetSize(sized, DeckPage.Monitor, 800, 320); DeckPages.SetSize(sized, DeckPage.Usage, 900, 260);
+        check("Pages: a drag sets the size of the page it is on and of no other",
+            DeckPages.Size(sized, DeckPage.Music) == (700, 300) && DeckPages.Size(sized, DeckPage.Monitor) == (800, 320) && DeckPages.Size(sized, DeckPage.Usage) == (900, 260));
+        DeckPages.SetSize(sized, DeckPage.Music, 5000, 10); DeckPages.SetSize(sized, DeckPage.Usage, 10, 5000);
+        check("Pages: a size set by a drag stays within the page's limits",
+            DeckPages.Size(sized, DeckPage.Music) == (DeckPages.MaxWidth, DeckPages.MinHeight) && DeckPages.Size(sized, DeckPage.Usage) == (DeckPages.Limits(sized, DeckPage.Usage).MinWidth, DeckPages.MaxHeight));
+        check("Pages: the usage page is never narrower than its columns need",
+            DeckPages.Limits(sized, DeckPage.Usage).MinWidth == Math.Max(DeckPages.MinWidth, sized.MinimumWidth) && DeckPages.Limits(sized, DeckPage.Music).MinWidth == DeckPages.MinWidth);
         check("Pages: a shown page resolves to itself", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Monitor);
         settings.UsagePage = false;
         check("Pages: a hidden page falls back to the first shown one", DeckPages.Resolve(settings, DeckPage.Usage) == DeckPage.Monitor);

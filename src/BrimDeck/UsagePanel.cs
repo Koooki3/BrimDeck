@@ -16,7 +16,9 @@ public partial class MainWindow
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
 
-    private enum Tier { Roomy, Default, Dense, Compact, Tiny }
+    // Grand is for a panel dragged tall: the same page with larger figures and more air, so the room is used rather than left
+    // empty above and below the quotas.
+    private enum Tier { Grand, Roomy, Default, Dense, Compact, Tiny }
     internal sealed record SegmentItem(string Text, string Name, bool Active, Action Select, string? Tip = null);
     // Slots is the most quotas any page of this app shows, so switching pages keeps the same layout.
     private sealed record QuotaView(List<UsageMetric> Quotas, int Pages, int Page, int Slots);
@@ -28,6 +30,7 @@ public partial class MainWindow
         // Small panels prioritize quotas; the bottom inset keeps the final row off the edge.
         public static Layout For(Tier tier) => tier switch
         {
+            Tier.Grand => new(tier, 20, 40, 15, 13, 14.5, 12.5, 12, 32, 20, 26, 8, 8, 24, 40, 10, 8, 20, true, true),
             Tier.Roomy => new(tier, 18, 30, 14, 12.5, 14, 12, 12, 28, 18, 16, 6, 6, 20, 40, 8, 7, 18, true, true),
             Tier.Default => new(tier, 15, 20, 12, 11, 12, 10.5, 10.5, 24, 16, 10, 4, 4, 14, 36, 8, 7, 16, true, true),
             Tier.Dense => new(tier, 14, 18, 11.5, 10.5, 11, 10.5, 10.5, 22, 15, 8, 3, 4, 10, 36, 6, 5, 14, true, true),
@@ -85,12 +88,12 @@ public partial class MainWindow
         bool wide = count == 1 && columnWidth >= 480 && slots <= 2;
         // Width limits the tier first; extra height only enlarges columns that are wide enough for it.
         var byWidth = columnWidth >= 220 ? Tier.Default : columnWidth >= 170 ? Tier.Dense : Tier.Compact;
-        var start = panelHeight < 150 ? Tier.Tiny : panelHeight >= 290 && columnWidth >= 260 ? Tier.Roomy : byWidth;
+        var start = panelHeight < 150 ? Tier.Tiny : panelHeight >= 350 && columnWidth >= 340 ? Tier.Grand : panelHeight >= 290 && columnWidth >= 260 ? Tier.Roomy : byWidth;
         for (var tier = start; tier <= Tier.Tiny; tier++)
         {
             var layout = Layout.For(tier); if (wide) layout = layout.Wide();
             // Totals sit side by side only when a column is wide enough for both groups at that tier's size.
-            bool inline = columnWidth >= (tier == Tier.Roomy ? 400 : tier == Tier.Default ? 340 : 300) && count <= 2;
+            bool inline = columnWidth >= (tier == Tier.Grand ? 440 : tier == Tier.Roomy ? 400 : tier == Tier.Default ? 340 : 300) && count <= 2;
             double available = panelHeight - layout.Toolbar - layout.Bottom - ColumnTopInset;
             // Narrow columns pick a small tier for their width alone; they keep the totals whenever the height still has room.
             var candidates = panelHeight < 200 ? [layout with { Footer = false }]

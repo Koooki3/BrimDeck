@@ -338,13 +338,13 @@ public sealed class DeckSettings
             }
             app.Normalize();
         }
-        Width = double.IsFinite(Width) ? Math.Clamp(Width, 440, 1200) : 760;
+        Width = double.IsFinite(Width) ? Math.Clamp(Width, DeckPages.MinWidth, DeckPages.MaxWidth) : 760;
         Width = Math.Max(Width, MinimumWidth);
-        Height = double.IsFinite(Height) ? Math.Clamp(Height, 140, 400) : 240;
-        MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, 440, 1200) : 440;
-        MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, 140, 400) : 200;
-        MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, 440, 1200) : MonitorSizes.Default.Width;
-        MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, 140, 400) : MonitorSizes.Default.Height;
+        Height = double.IsFinite(Height) ? Math.Clamp(Height, DeckPages.MinHeight, DeckPages.MaxHeight) : 240;
+        MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 440;
+        MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
+        MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
+        MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;

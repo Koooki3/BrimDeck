@@ -101,19 +101,53 @@ public partial class MainWindow
         var wanted = DeckPages.Opening(Settings.DefaultPage) ?? _page;
         if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: false);
     }
+    // The page the open panel is moving to while the old page leaves; null when no switch is under way.
+    private DeckPage? _switchingTo;
+    // A page leaves a little toward the side it is left for, then the next one comes in from the other side while the panel
+    // takes its size: a short fade out, then a longer, softer fade in (Soft).
+    private const int PageLeave = 150, PageArrive = 320;
+    private const double PageTravel = 14;
     internal void SelectPage(DeckPage page, bool remember = true)
     {
         if (!DeckPages.Shown(Settings, page)) return;
-        bool changed = _page != page;
+        bool changed = _page != page && _switchingTo != page || _switchingTo is { } going && going != page;
         if (changed) CloseSourceMenu();
         if (changed && _expanded && !_preview)
         {
             // Start before resizing: the shrinking surface can immediately fire MouseLeave.
             _hover.Stop(); _leave.Stop(); _pageSwitchHold.Stop(); _pageSwitchHold.Start();
         }
-        _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = "";
         if (remember) { Settings.LastPage = page; _app.QueueSave(); }
-        ApplySettings(animatePage: changed && _expanded && !_preview);
+        bool animate = changed && _expanded && !_preview && Settings.Animations && SystemParameters.ClientAreaAnimation;
+        if (!animate && _switchingTo is null) { ShowPage(page, animatePage: changed && _expanded && !_preview); return; }
+        // A page already on its way out: the newest choice is the one shown when it has gone.
+        bool leaving = _switchingTo is not null;
+        _switchingTo = page;
+        if (leaving) return;
+        int direction = Math.Sign(DeckPages.Order.ToList().IndexOf(page) - DeckPages.Order.ToList().IndexOf(_page));
+        var away = Soft.Fade(ContentCanvas.Opacity, 0, PageLeave, Soft.InOut);
+        away.Completed += (_, _) =>
+        {
+            if (_switchingTo is not { } target) return;
+            _switchingTo = null;
+            ShowPage(target, animatePage: _expanded && !_preview);
+            if (!_expanded || _preview) { SettlePage(); return; }
+            ContentCanvas.BeginAnimation(OpacityProperty, Soft.Fade(0, 1, PageArrive));
+            PageShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(direction * PageTravel, 0, PageArrive));
+        };
+        ContentCanvas.BeginAnimation(OpacityProperty, away);
+        PageShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(PageShift.X, -direction * PageTravel, PageLeave, Soft.InOut));
+    }
+    private void ShowPage(DeckPage page, bool animatePage)
+    {
+        _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = "";
+        ApplySettings(animatePage);
+    }
+    // The page in place, as it is when no switch is under way.
+    private void SettlePage()
+    {
+        ContentCanvas.BeginAnimation(OpacityProperty, null); ContentCanvas.Opacity = 1;
+        PageShift.BeginAnimation(TranslateTransform.XProperty, null); PageShift.X = 0;
     }
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
     private void MonitorPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Monitor);
@@ -365,12 +399,17 @@ public partial class MainWindow
         AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover")); upper.Children.Add(art);
         AttachCoverFocus(art);
         var right = new Grid(); Grid.SetColumn(right, 2); upper.Children.Add(right);
-        right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.HeaderHeight) });
-        right.RowDefinitions.Add(new RowDefinition());
+        bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
+        int lyricLines = playerLyrics ? Math.Min(1, layout.LyricLines) : layout.LyricLines;
+        // With nothing under the titles (no lyrics, no message), the titles sit centred beside the cover instead of at its top,
+        // so a tall panel does not leave the space under them empty.
+        bool alone = !(hasLyrics && lyricLines > 0) && !layout.ShowMessage;
+        right.RowDefinitions.Add(new RowDefinition { Height = alone ? new GridLength(1, GridUnitType.Star) : new GridLength(layout.HeaderHeight) });
+        right.RowDefinitions.Add(new RowDefinition { Height = alone ? GridLength.Auto : new GridLength(1, GridUnitType.Star) });
         double equalizerWidth = Math.Max(27, Math.Round(c.Equalizer * 1.7));
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(equalizerWidth + 16) });
-        var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
+        var titles = new StackPanel { VerticalAlignment = alone ? VerticalAlignment.Center : VerticalAlignment.Top };
         var title = UI.Fixed(track.Title, c.Title, c.TitleLine, UI.Primary, FontWeights.SemiBold);
         AutomationProperties.SetName(title, Loc.T("歌名 ", "Title ") + track.Title); titles.Children.Add(title);
         if (layout.MergeTitle)
@@ -386,12 +425,10 @@ public partial class MainWindow
         }
         header.Children.Add(titles);
         _musicEqualizer = new MusicEqualizer { Width = equalizerWidth, Height = c.Equalizer, Color = _musicAccent, HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, (c.TitleLine - c.Equalizer) / 2, 0, 0) };
+            VerticalAlignment = alone ? VerticalAlignment.Center : VerticalAlignment.Top, Margin = new Thickness(0, alone ? 0 : (c.TitleLine - c.Equalizer) / 2, 0, 0) };
         Grid.SetColumn(_musicEqualizer, 1); header.Children.Add(_musicEqualizer); right.Children.Add(header);
 
         var middle = new Grid(); Grid.SetRow(middle, 1); right.Children.Add(middle); _musicInfo = middle;
-        bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
-        int lyricLines = playerLyrics ? Math.Min(1, layout.LyricLines) : layout.LyricLines;
         if (hasLyrics && lyricLines > 0 && synchronized)
         {
             var lyrics = new StackPanel { VerticalAlignment = VerticalAlignment.Center };

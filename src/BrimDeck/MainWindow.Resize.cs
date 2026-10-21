@@ -7,8 +7,9 @@ using BrimDeck.Native;
 namespace BrimDeck;
 
 // Resizing by dragging, one gesture for both forms, as ftop's panel resizes and its strip fits:
-// - Open on the system monitor page, the bottom edge changes the page's height, a side edge its width (both sides move, so the
-//   panel stays centred on the collapsed surface) and a bottom corner both. The page follows through its layout steps.
+// - Open, on any page (AI usage, system monitor, media), the bottom edge changes the page's height, a side edge its width (both
+//   sides move, so the panel stays centred on the collapsed surface) and a bottom corner both. Each page keeps its own size
+//   and lays itself out for it as it changes.
 // - Collapsed, either end of the notch, the capsule or the line changes its width. Pointing at an end shows the resize cursor
 //   instead of opening the panel. The content reflows as the width changes: the readings, the rings and the lyric take what
 //   fits. A width set this way is kept, so the surface no longer widens to its content; a double click on an end gives that
@@ -30,19 +31,26 @@ public partial class MainWindow
     private Spring _springWidth, _springHeight;
     private CompactStyle _resizeStyle;
     private TimeSpan _springTime;
-    private const double MonitorMinWidth = 440, MonitorMinHeight = 140, MonitorMaxHeight = 400;
     // How far inside the open panel, in DIPs, its handles start to show as the pointer nears an edge; how far outside its grips a
     // pointer that left the panel still counts as reaching for them, how long the panel then waits before it closes, and how
     // long at most it keeps waiting while the pointer stays there.
     private const double HintReach = 44, GripSlack = 36;
-    private const int GripGrace = 420, GripHold = 1500;
+    private const int GripGrace = 420, GripHold = 1500, ResizeLinger = 1200;
     private long _leftAt;
 
     private bool Dragging => _resizeEdge != ResizeEdges.None;
     // Dragging, or settling after the button was released.
     private bool Resizing => Dragging || _resizeSettling;
     internal bool IsResizing => Resizing;
-    private double MonitorMaxWidth => Math.Max(MonitorMinWidth, Math.Min(1200, WorkDip.Width - 24));
+    // The page being resized, and when its content was last laid out again during the drag.
+    private DeckPage _resizePage;
+    private long _resizeRendered;
+    // The widest a page can be on this monitor, and the limits of the page being resized.
+    private double PageMaxWidth => Math.Max(DeckPages.MinWidth, Math.Min(DeckPages.MaxWidth, WorkDip.Width - 24));
+    private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimits
+    {
+        get { var (minWidth, _, minHeight, maxHeight) = DeckPages.Limits(Settings, _resizePage); return (minWidth, Math.Max(minWidth, PageMaxWidth), minHeight, maxHeight); }
+    }
 
     private void InitializeResize()
     {
@@ -66,7 +74,7 @@ public partial class MainWindow
 
     // Which form the grips take now: the open monitor page, the collapsed surface, or none (another page, a preview, hidden,
     // a quota alert widening the surface).
-    private bool PanelResizable => _expanded && !_preview && IsMonitorPage && IsVisible && !IsSuppressed;
+    private bool PanelResizable => _expanded && !_preview && IsVisible && !IsSuppressed;
     private bool CompactResizable => !_expanded && !_preview && IsVisible && !IsSuppressed && _alert is null;
 
     // The island's box in the window's coordinates, where the grip layer draws.
@@ -148,8 +156,9 @@ public partial class MainWindow
         else
         {
             double height = _resizeFrom.Height + (_resizeEdge.HasFlag(ResizeEdges.Bottom) ? dy : 0);
-            _springWidth.Target = Spring.Resist(width, MonitorMinWidth, MonitorMaxWidth);
-            _springHeight.Target = Spring.Resist(height, MonitorMinHeight, MonitorMaxHeight);
+            var (minWidth, maxWidth, minHeight, maxHeight) = PageLimits;
+            _springWidth.Target = Spring.Resist(width, minWidth, maxWidth);
+            _springHeight.Target = Spring.Resist(height, minHeight, maxHeight);
         }
         StartSpring();
     }
@@ -172,15 +181,15 @@ public partial class MainWindow
         bool settling = _resizeSettling && _resizeCompact == compact;
         // The other form still settling: its size is saved first.
         if (_resizeSettling && !settling) { StopSpring(); FinishResize(); }
-        if (!compact) _monitorView?.CloseCard();
+        if (!compact) { _monitorView?.CloseCard(); _detailPopup?.Close(); }
         if (settling) _resizeFrom = (_springWidth.Target, _springHeight.Target);
         else
         {
-            _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : (Math.Max(Settings.MonitorWidth, MonitorMinWidth), Settings.MonitorHeight);
+            _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : DeckPages.Size(Settings, CurrentPage);
             _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
             _resizeChanged = false;
         }
-        _resizeCompact = compact; _resizeStyle = style; _resizeSettling = false;
+        _resizeCompact = compact; _resizeStyle = style; _resizePage = CurrentPage; _resizeSettling = false;
         _resizeEdge = edge; _resizeStart = WindowsHost.Cursor();
         SetHoverEdge(edge);
         _grips.Light(edge, true, SizeLabel(_resizeFrom.Width, _resizeFrom.Height));
@@ -220,12 +229,12 @@ public partial class MainWindow
         if (_resizeSettling) FinishResize();
     }
 
-    // Something else opened or closed the panel during the drag or while it settled (a hotkey, a full-screen rule), or turned the
-    // collapsed surface into another form (a maximized window turns it into the line): that wins. The drag ends where it is and
-    // the size reached so far is kept; it is never applied to the other form.
+    // Something else opened or closed the panel during the drag or while it settled (a hotkey, a full-screen rule), turned the
+    // collapsed surface into another form (a maximized window turns it into the line), or switched the page: that wins. The drag
+    // ends where it is and the size reached so far is kept; it is never applied to the other form or page.
     private bool ResizeOvertaken()
     {
-        if (!Resizing || _resizeCompact != _expanded && (!_resizeCompact || EffectiveStyle == _resizeStyle)) return false;
+        if (!Resizing || _resizeCompact != _expanded && (_resizeCompact ? EffectiveStyle == _resizeStyle : CurrentPage == _resizePage)) return false;
         StopSpring();
         _resizeEdge = ResizeEdges.None; _resizeSettling = true;
         if (_grips.IsMouseCaptured) _grips.ReleaseMouseCapture();
@@ -248,14 +257,20 @@ public partial class MainWindow
             _grips.Light(_resizeEdge == ResizeEdges.None ? _hoverEdge : _resizeEdge, true, SizeLabel(Collapsed.Surface.Width, 0));
             return;
         }
-        width = Math.Clamp(width, MonitorMinWidth, MonitorMaxWidth);
-        height = Math.Clamp(height, MonitorMinHeight, MonitorMaxHeight);
-        if (width == Settings.MonitorWidth && height == Settings.MonitorHeight) return;
+        var (minWidth, maxWidth, minHeight, maxHeight) = PageLimits;
+        width = Math.Clamp(width, minWidth, maxWidth);
+        height = Math.Clamp(height, minHeight, maxHeight);
+        if ((width, height) == DeckPages.Size(Settings, _resizePage)) return;
         _resizeChanged = true;
-        Settings.MonitorWidth = width; Settings.MonitorHeight = height;
+        DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width;
+        if (_resizePage == DeckPage.Usage) _usageWidth = width;
         SetExpanded(true, instant: true);
-        RenderMonitor();
+        // The surface follows every frame. The monitor page is built again only where it crosses a layout step, so it follows
+        // too; the usage and media pages are built again whole, about 25 times a second during the drag, and once more when it
+        // ends (FinishResize saves the size, which lays every page out again).
+        if (_resizePage == DeckPage.Monitor) RenderMonitor();
+        else if (Environment.TickCount64 - _resizeRendered >= 40) { _resizeRendered = Environment.TickCount64; RenderUsage(); }
         _grips.Light(_resizeEdge == ResizeEdges.None ? _hoverEdge : _resizeEdge, true, SizeLabel(width, height));
     }
 
@@ -284,6 +299,11 @@ public partial class MainWindow
         var cursor = WindowsHost.Cursor();
         SetHoverEdge(TrackGrips(cursor));
         _grips.Light(_hoverEdge, false, "");
-        if (!compact) PointerChanged(Island.IsMouseOver || InsideOpenPanel(cursor));
+        if (compact) return;
+        if (Island.IsMouseOver || InsideOpenPanel(cursor)) { PointerChanged(true); return; }
+        // A drag that made the panel larger usually ends with the pointer ahead of the edge, past the panel: the panel stays a
+        // moment for the pointer to come back (TrackPointer takes it as an entry), and closes only if it does not.
+        _pointerInside = false; _hover.Stop();
+        _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(ResizeLinger); _leave.Start();
     }
 }

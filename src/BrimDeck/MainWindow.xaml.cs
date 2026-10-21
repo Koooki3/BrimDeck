@@ -169,10 +169,10 @@ public partial class MainWindow : Window
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
         // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is
-        // every shown page, the monitor page at the largest size a drag can give it, and the collapsed surface at the widest
-        // any form can be, with room on either side for the resize grips just outside them (ResizeGrips). Only Island animates.
+        // every page at the largest size a drag can give it, and the collapsed surface at the widest any form can be, with room
+        // on either side for the resize grips just outside them (ResizeGrips). Only Island animates.
         var largest = DeckPages.Largest(Settings);
-        if (DeckPages.Shown(Settings, DeckPage.Monitor)) largest = (Math.Max(largest.Width, MonitorMaxWidth), Math.Max(largest.Height, MonitorMaxHeight));
+        largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight));
         double widestSurface = Math.Max(Math.Max(CollapsedLimits.NotchWidthMax, CollapsedLimits.CapsuleWidthMax), CollapsedLimits.LineLengthMax);
         Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Math.Max(Fit(largest.Width), widestSurface), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
         double hostHeight = largest.Height;
@@ -426,6 +426,8 @@ public partial class MainWindow : Window
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
+        // A page switch cut short by closing the panel leaves nothing behind for the next opening.
+        if (expanded && !_expanded && _switchingTo is null) SettlePage();
         bool wasExpanded = _expanded;
         _expanded = expanded;
         _escapeDismissal?.SetEnabled(expanded && !_preview);
@@ -479,13 +481,17 @@ public partial class MainWindow : Window
         // Collapsing runs in three stages: the content leaves first, the surface settles with a slow start, the compact content lands last.
         // Expanding must feel immediate: the surface grows from the first frame on a fast-out curve, the compact content vanishes
         // quickly, and the content fades in once the surface is about two thirds open. The fractions follow the approved mock-up.
+        // Open already (a page switch, a new page size), the surface reshapes over the whole of a slightly longer time, easing in
+        // and out, so the change of size reads as one soft move rather than a jump.
+        bool reshaping = expanded && wasExpanded;
+        if (reshaping) duration = (int)(duration * 1.25);
         Track content = expanded ? new(.25, .9) : new(0, .30);
-        Track surface = expanded ? new(0, .8) : new(.12, line ? .92 : 1);
+        Track surface = reshaping ? new(0, 1) : expanded ? new(0, .8) : new(.12, line ? .92 : 1);
         Track compact = expanded ? new(0, .15) : line ? new(0, .35) : new(.62, 1);
         Track shadow = expanded ? new(0, .3) : new(.5, 1);
         Track rim = expanded ? new(.2, .5) : new(.5, .8);
         Track tint = expanded ? new(0, .12) : new(.68, 1);
-        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, settle = expanded ? Soft.Out : Soft.Settle;
+        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, settle = reshaping ? Soft.InOut : expanded ? Soft.Out : Soft.Settle;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
         Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);

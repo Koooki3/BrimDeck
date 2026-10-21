@@ -25,6 +25,25 @@ public static class DeckPages
         DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor, _ => null
     };
 
+    // Every page's size lies within these; the usage page is also at least as wide as its columns need (MinimumWidth).
+    public const double MinWidth = 440, MaxWidth = 1200, MinHeight = 140, MaxHeight = 400;
+
+    public static (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) Limits(DeckSettings settings, DeckPage page)
+        => (page == DeckPage.Usage ? Math.Max(MinWidth, settings.MinimumWidth) : MinWidth, MaxWidth, MinHeight, MaxHeight);
+
+    // Sets a page's size, as dragging an edge of the open panel does; the values are kept within the page's limits.
+    public static void SetSize(DeckSettings settings, DeckPage page, double width, double height)
+    {
+        var (minWidth, maxWidth, minHeight, maxHeight) = Limits(settings, page);
+        width = Math.Clamp(width, minWidth, Math.Max(minWidth, maxWidth)); height = Math.Clamp(height, minHeight, maxHeight);
+        switch (page)
+        {
+            case DeckPage.Music: settings.MusicWidth = width; settings.MusicHeight = height; break;
+            case DeckPage.Monitor: settings.MonitorWidth = width; settings.MonitorHeight = height; break;
+            default: settings.Width = width; settings.Height = height; break;
+        }
+    }
+
     public static (double Width, double Height) Size(DeckSettings settings, DeckPage page) => page switch
     {
         DeckPage.Music => (settings.MusicWidth, settings.MusicHeight),
