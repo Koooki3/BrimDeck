@@ -22,6 +22,7 @@ internal sealed class FigureGauge : FrameworkElement
     private Eased _share, _hover = new(0, Eased.Hover);
     private bool _hasShare, _pressed;
     private string _number = "—", _unit = "", _detail = "", _tip = "";
+    private readonly DrawingCache<(string, string, string, double, double, double)> _text = new();
     public event Action? Clicked;
 
     public FigureGauge(MonitorGlyph glyph, string color, double figure, double small, bool right = false, string? button = null)
@@ -64,15 +65,20 @@ internal sealed class FigureGauge : FrameworkElement
             drawing.Pop();
         }
         MonitorDraw.Badge(drawing, center, badge, _glyph, _color, _hasShare ? _share.At(now) : null);
-        x += badge + gap;
-        MonitorDraw.Baseline(drawing, number, x, baseline); x += number.WidthIncludingTrailingWhitespace;
-        if (_unit.Length > 0) { MonitorDraw.Baseline(drawing, unit, x + 2, baseline); x += 2 + unit.WidthIncludingTrailingWhitespace; }
-        if (_detail.Length > 0)
+        // The figures change once per reading; while the arc moves they are placed as they were drawn.
+        double start = x + badge + gap;
+        drawing.DrawDrawing(_text.Get((_number, _unit, _detail, w, h, ppd), context =>
         {
-            // A long detail (an adapter's name) is cut to the room left, with an ellipsis.
-            double room = w - x - gap;
-            if (room > 12) MonitorDraw.Baseline(drawing, detail.WidthIncludingTrailingWhitespace <= room ? detail : MonitorDraw.Trimmed(_detail, _small, UI.Tertiary, room, ppd), x + gap, baseline);
-        }
+            double x = start;
+            MonitorDraw.Baseline(context, number, x, baseline); x += number.WidthIncludingTrailingWhitespace;
+            if (_unit.Length > 0) { MonitorDraw.Baseline(context, unit, x + 2, baseline); x += 2 + unit.WidthIncludingTrailingWhitespace; }
+            if (_detail.Length > 0)
+            {
+                // A long detail (an adapter's name) is cut to the room left, with an ellipsis.
+                double room = w - x - gap;
+                if (room > 12) MonitorDraw.Baseline(context, detail.WidthIncludingTrailingWhitespace <= room ? detail : MonitorDraw.Trimmed(_detail, _small, UI.Tertiary, room, ppd), x + gap, baseline);
+            }
+        }));
     }
 
     protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (_button) Hover(true); }
@@ -107,6 +113,9 @@ internal sealed class ColumnGraph : FrameworkElement
     private bool[] _hasTick = [];
     private readonly ToolTip _tip = new();
     private int _tipIndex = -1;
+    // The tracks and the figures under the columns, drawn again only when the figures or the size change (_labelsVersion).
+    private readonly DrawingCache<(int, double, double, double)> _fixed = new();
+    private int _labelsVersion;
     public event Action? Clicked;
 
     public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null)
@@ -121,6 +130,7 @@ internal sealed class ColumnGraph : FrameworkElement
     {
         bool same = columns.Count == _columns.Count && columns.Select(c => c.Group).SequenceEqual(_columns.Select(c => c.Group));
         if (!same) { _values = new Eased[columns.Count]; _ticks = new Eased[columns.Count]; _hasTick = new bool[columns.Count]; motion = false; }
+        if (!same || _labels && Enumerable.Range(0, columns.Count).Any(i => columns[i].Label != _columns[i].Label || columns[i].Sub != _columns[i].Sub)) _labelsVersion++;
         bool moving = false;
         for (int i = 0; i < columns.Count; i++)
         {
@@ -159,13 +169,12 @@ internal sealed class ColumnGraph : FrameworkElement
         var (xs, column) = Geometry(w);
         if (xs.Length == 0 || h <= 4) return;
         double radius = Math.Min(column / 2, 5);
-        var track = UI.Brush(UI.Fill);
+        drawing.DrawDrawing(_fixed.Get((_labelsVersion, w, ActualHeight, ppd), context => Fixed(context, xs, column, h, radius, ppd)));
         var tick = new Pen(UI.Brush(PanelTheme.Current["textPrimary"].WithAlpha(0xB3).ToString()), Math.Max(1, Math.Min(1.6, column / 6)));
         tick.Freeze();
         for (int i = 0; i < xs.Length; i++)
         {
             var c = _columns[i];
-            drawing.DrawRoundedRectangle(track, null, new Rect(xs[i], 0, column, h), radius, radius);
             double fill = Math.Max(Rest, Math.Clamp(_values[i].At(now), 0, 1) * h);
             drawing.DrawRoundedRectangle(UI.Brush(c.Color), null, new Rect(xs[i], h - fill, column, fill), radius, radius);
             if (_hasTick[i] && column >= 6)
@@ -173,8 +182,18 @@ internal sealed class ColumnGraph : FrameworkElement
                 double y = Math.Round((1 - Math.Clamp(_ticks[i].At(now), 0, 1)) * (h - 2)) + 1, inset = column * .2;
                 drawing.DrawLine(tick, new Point(xs[i] + inset, y), new Point(xs[i] + column - inset, y));
             }
+        }
+    }
+
+    // The tracks, and under each column, where the column is wide enough to hold them, its figure and a second line.
+    private void Fixed(DrawingContext drawing, double[] xs, double column, double h, double radius, double ppd)
+    {
+        var track = UI.Brush(UI.Fill);
+        for (int i = 0; i < xs.Length; i++)
+        {
+            var c = _columns[i];
+            drawing.DrawRoundedRectangle(track, null, new Rect(xs[i], 0, column, h), radius, radius);
             if (!_labels) continue;
-            // The figure under each column, and its second line, where the column is wide enough to hold them.
             if (c.Label is { Length: > 0 } label && MonitorDraw.Text(label, _label, UI.Primary, ppd, strong: true) is var top && top.Width <= column + 4)
                 drawing.DrawText(top, new Point(xs[i] + (column - top.Width) / 2, h + 3));
             if (c.Sub is { Length: > 0 } sub && MonitorDraw.Text(sub, _label - 1.5, UI.Tertiary, ppd) is var bottom && bottom.Width <= column + 6)

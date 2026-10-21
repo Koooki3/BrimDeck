@@ -39,6 +39,8 @@ internal sealed class ProcessListView : FrameworkElement
     // pill's place (0 for CPU, 1 for memory); how far a pressed row gives.
     private Eased _highlightSlot = new(0, Eased.Hover * 1.25), _highlight = new(0, Eased.Hover), _chosen, _press = new(0, Eased.Hover);
     private readonly Eased[] _pillHover = [new(0, Eased.Hover), new(0, Eased.Hover)];
+    // Each row's drawing, kept while its figures and its width stay the same: during a move the rows are only placed again.
+    private readonly Dictionary<string, DrawingCache<(ProcessSample, ProcessSort, bool, double, double, bool, double)>> _rowDrawings = [];
 
     public ProcessListView(MonitorLayout layout, ProcessSort sort, MonitorProcessView view, Action<ProcessSort> sortChanged, Action<bool> hold, Action<ProcessSample, Rect> open)
     {
@@ -92,7 +94,7 @@ internal sealed class ProcessListView : FrameworkElement
                 _motion[id] = fresh;
             }
         }
-        foreach (var gone in _motion.Keys.Where(id => !seen.Contains(id)).ToList()) _motion.Remove(gone);
+        foreach (var gone in _motion.Keys.Where(id => !seen.Contains(id)).ToList()) { _motion.Remove(gone); _rowDrawings.Remove(gone); }
         _rows = ranked;
         if (_hover is not null) moving |= Highlight(_hover, motion);
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
@@ -164,7 +166,13 @@ internal sealed class ProcessListView : FrameworkElement
             if (alpha < .999) drawing.PushOpacity(Math.Clamp(alpha, 0, 1));
             bool pressed = _pressedShown == sample.Id && give > 0;
             if (pressed) drawing.PushTransform(new ScaleTransform(1 - give, 1 - give, r.X + r.Width / 2, r.Y + r.Height / 2));
-            Row(drawing, r, sample, detailed, ppd);
+            if (!_rowDrawings.TryGetValue(sample.Id, out var cache)) _rowDrawings[sample.Id] = cache = new();
+            // The sample (a record) stands for its figures; the sort decides which figure leads.
+            var key = (sample, _sort, detailed, r.Width, r.Height, ProcessIcons.For(sample.Path) is null, ppd);
+            var row = new Rect(0, 0, r.Width, r.Height);
+            drawing.PushTransform(new TranslateTransform(r.X, r.Y));
+            drawing.DrawDrawing(cache.Get(key, context => Row(context, row, sample, detailed, ppd)));
+            drawing.Pop();
             if (pressed) drawing.Pop();
             if (alpha < .999) drawing.Pop();
         }

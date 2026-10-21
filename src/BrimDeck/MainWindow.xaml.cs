@@ -171,8 +171,9 @@ public partial class MainWindow : Window
         var largest = DeckPages.Largest(Settings);
         // While the monitor page is resized by dragging, the window holds the largest page it can become (see MonitorResize).
         if (_resizeHost) largest = (Math.Max(largest.Width, 1200), Math.Max(largest.Height, 400));
-        // The window also holds the collapsed surface at any width; Place moves it so that the island lies inside it.
-        Width = Math.Max(Fit(largest.Width), Collapsed.Surface.Width);
+        // The window also holds the collapsed surface at any width; Place moves it so that the island lies inside it. Room on
+        // either side holds the resize grips just outside the panel and the surface (ResizeGrips).
+        Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Fit(largest.Width), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
         double hostHeight = largest.Height;
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
         // just above a lowered capsule; see CollapsedGeometry.Panel), so the window reaches the panel's bottom; it always holds the collapsed surface and its shadow, and never passes the
@@ -292,7 +293,10 @@ public partial class MainWindow : Window
     private double PanelBottom => WorkDip.Bottom;
     // While open, the pointer is inside over the panel or over the collapsed surface's hover area, which can be wider than the
     // panel (a wide notch or capsule) or reach the screen edge above it.
-    private bool InsideOpenPanel(Point screenPoint) => ScreenBounds(Island).Contains(screenPoint) || CompactHoverScreenRect().Contains(screenPoint);
+    // The open monitor page's grips reach a little outside it (ResizeGrips.PanelArea); they count as the panel.
+    private bool InsideOpenPanel(Point screenPoint) => ScreenBounds(Island).Contains(screenPoint) || CompactHoverScreenRect().Contains(screenPoint)
+        || PanelResizable && PresentationSource.FromVisual(Stage) is not null && Contains(ResizeGrips.PanelArea(IslandBox()), Stage.PointFromScreen(screenPoint));
+    private static bool Contains(DipRect r, Point p) => p.X >= r.X && p.X <= r.Right && p.Y >= r.Y && p.Y <= r.Bottom;
     // Implemented by the compact layout in its own file, if present. Both run on every shape change and every alert change,
     // so they must be safe to call repeatedly with the same values.
     partial void ApplyCompactGeometry(CollapsedShape shape);
@@ -317,6 +321,8 @@ public partial class MainWindow : Window
         // A new scale alone only redraws the scan lines, which are laid out in device pixels.
         bool sameTheme = _themeGeneration == PanelTheme.Generation;
         _themeGeneration = PanelTheme.Generation; _themeDpi = dpi;
+        // The resize hints take the theme's colors when they are drawn.
+        _grips?.InvalidateVisual();
         if (sameTheme) { Island.Pattern = PanelTheme.Scanlines(dpiScale: dpi); return; }
         Foreground = UI.Brush(UI.Primary);
         PanelTheme.Dress(Island, dpiScale: dpi);
@@ -525,6 +531,7 @@ public partial class MainWindow : Window
         else RenderSyncButton();
         UpdateMusicTimer();
         UpdateMonitorDemand();
+        UpdateGrips();
     }
     private static T Timed<T>(T animation, int duration, Track track) where T : AnimationTimeline
     {
@@ -556,7 +563,8 @@ public partial class MainWindow : Window
         var area = CompactHoverScreenRect();
         if (area.IsEmpty) return;
         // The surface's ends resize it (MainWindow.Resize.cs); pointing there does not open the panel.
-        bool inCompact = area.Contains(cursor) && !CompactGripAt(cursor);
+        var grip = TrackGrips(cursor);
+        bool inCompact = area.Contains(cursor) && grip == ResizeEdges.None;
         double dx = Math.Max(0, Math.Max(area.Left - cursor.X, cursor.X - area.Right)), dy = Math.Max(0, Math.Max(area.Top - cursor.Y, cursor.Y - area.Bottom));
         // Whole 20 ms steps, so small movements far away do not reschedule the timer on every check.
         double wait = _expanded ? TrackNear : Math.Clamp(Math.Floor(Math.Sqrt(dx * dx + dy * dy) / ApproachSpeed / 20) * 20, TrackNear, TrackFar);
@@ -605,7 +613,11 @@ public partial class MainWindow : Window
         else
         {
             _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
-            _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay)); _leave.Start();
+            // Leaving just past a resize grip is most likely an overshoot while reaching for it: the panel waits a little longer.
+            int delay = Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
+            _leftAt = Environment.TickCount64;
+            if (NearGrips(WindowsHost.Cursor())) delay = Math.Max(delay, GripGrace);
+            _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(delay); _leave.Start();
         }
     }
     internal void CheckPointerExit(Point screenPoint)
@@ -617,6 +629,8 @@ public partial class MainWindow : Window
         if (_popupReturnArea is { } area && area.Contains(screenPoint)) return;
         // A mouse leave from the panel into the part of the hover area beside or above it is not an exit.
         if (_expanded && InsideOpenPanel(screenPoint)) { PointerChanged(true); return; }
+        // Still just past a resize grip: the pointer is most likely coming back to it. The panel waits, but not for long.
+        if (_expanded && NearGrips(screenPoint) && Environment.TickCount64 - _leftAt < GripHold) { _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(120); _leave.Start(); return; }
         _leave.Stop(); SetExpanded(false);
     }
     private void Settings_Click(object sender, RoutedEventArgs e) { if (_app.Updates.NoticeVersion is not null) _app.OpenUpdateSettings(); else _app.OpenSettings(); }

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 using BrimDeck.Core;
@@ -96,15 +97,36 @@ internal static class MonitorDraw
     public static double PixelsPerDip(Visual visual) => VisualTreeHelper.GetDpi(visual).PixelsPerDip;
 }
 
-// Redraws the elements whose values are easing, while any is, at up to about 60 frames a second. Otherwise it is unhooked and
-// the panel costs nothing between readings.
+// A drawing kept until what it shows changes. Text is the costly part of a redraw (each DrawText lays its glyphs out again), and
+// during a move only the bars and arcs change: the text is drawn once per reading into a frozen drawing, which every frame
+// then places as a whole. The key is a value tuple of what the drawing shows, compared without allocating.
+internal sealed class DrawingCache<TKey> where TKey : struct, IEquatable<TKey>
+{
+    private TKey _key;
+    private DrawingGroup? _drawing;
+
+    public Drawing Get(TKey key, Action<DrawingContext> draw)
+    {
+        if (_drawing is not null && key.Equals(_key)) return _drawing;
+        var group = new DrawingGroup();
+        using (var context = group.Open()) draw(context);
+        group.Freeze();
+        _drawing = group; _key = key;
+        return group;
+    }
+}
+
+// Redraws the elements whose values are easing, while any is, with the display. Otherwise it is unhooked and the panel costs
+// nothing between readings.
 internal static class Motion
 {
     private static readonly List<UIElement> Moving = [];
     private static bool _hooked;
     // Whether hover and press feedback eases; off with the app's animations. Readings say so with each update (motion).
     public static bool Enabled { get; set; } = true;
-    private static TimeSpan _last, _tick;
+    private static TimeSpan _last;
+    private static double _period = 1000 / 60.0;
+    private static int _every = 1;
     private static readonly Dictionary<UIElement, Func<double, bool>> Steps = [];
 
     // step(now) redraws the element and returns whether it still moves.
@@ -113,22 +135,42 @@ internal static class Motion
         Steps[element] = step;
         if (!Moving.Contains(element)) Moving.Add(element);
         if (_hooked) return;
-        _hooked = true; _last = _tick = TimeSpan.Zero; CompositionTarget.Rendering += Tick;
+        _hooked = true; _last = TimeSpan.Zero; (_period, _every) = Pacing(); CompositionTarget.Rendering += Tick;
     }
+
+    // The display's refresh period in milliseconds, from the desktop compositor, and how many of its frames make one of ours.
+    // DWM_TIMING_INFO is packed to the byte and 292 bytes long; only its refresh rate is read (a ratio, after the size).
+    private static (double Period, int Every) Pacing()
+    {
+        const int Size = 292;
+        double hertz = 0;
+        var info = Marshal.AllocHGlobal(Size);
+        try
+        {
+            for (int i = 0; i < Size; i += 4) Marshal.WriteInt32(info, i, 0);
+            Marshal.WriteInt32(info, 0, Size);
+            if (DwmGetCompositionTimingInfo(IntPtr.Zero, info) == 0)
+            {
+                uint numerator = (uint)Marshal.ReadInt32(info, 4), denominator = (uint)Marshal.ReadInt32(info, 8);
+                if (denominator > 0) hertz = numerator / (double)denominator;
+            }
+        }
+        finally { Marshal.FreeHGlobal(info); }
+        if (!(hertz >= 24 && hertz <= 500)) hertz = 60;
+        return (1000 / hertz, hertz > 180 ? 2 : 1);
+    }
+    [DllImport("dwmapi")] private static extern int DwmGetCompositionTimingInfo(IntPtr window, IntPtr info);
 
     private static void Tick(object? sender, EventArgs e)
     {
-        // About 60 frames a second, in whole display frames: every frame at 60 to 90 Hz, every other one at 120 or 144 Hz. That is
-        // twice the old pace and smooth to the eye, at well under half the cost of following a 144 Hz display (every frame redraws
-        // the moving gauges and presents the whole layered window). A frame is drawn when the next one would come later than
-        // 60 a second asks, by more than four tenths of a display frame.
+        // Every display frame, or every other one above 180 Hz. Drawing only every other frame at 144 Hz looked lighter, but a WPF
+        // frame with nothing to draw lets the render loop fall out of step, and the next frame then came a refresh late: three
+        // steps in ten were uneven, against one in sixteen when every frame draws. What a frame draws is kept small instead
+        // (DrawingCache), so following the display costs little. The rhythm counts from the display's own refresh period.
         if (e is RenderingEventArgs args)
         {
             var time = args.RenderingTime;
-            if (time == _tick) return;
-            double frame = Math.Clamp((time - _tick).TotalMilliseconds, 0, 34);
-            _tick = time;
-            if ((time - _last).TotalMilliseconds < 1000 / 60.0 - frame * .6) return;
+            if (_last != TimeSpan.Zero && (time - _last).TotalMilliseconds < _every * _period - _period / 2) return;
             _last = time;
         }
         double now = Eased.Now;

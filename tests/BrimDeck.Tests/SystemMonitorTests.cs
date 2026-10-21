@@ -16,6 +16,7 @@ static class SystemMonitorTests
         Pages(check);
         Colors(check);
         Motion(check);
+        Grips(check);
     }
 
     // A build that does not know a setting (another build of the same version) keeps it when it saves; an older version's
@@ -296,6 +297,43 @@ static class SystemMonitorTests
         check("Below the lower limit too", Spring.Resist(40, 100, 500) > 100 && Spring.Resist(-400, 100, 500) > 100);
         check("Resistance meets the plain drag without a step", Math.Abs(Spring.Resist(464, 100, 500) - 464) < 1e-9 && Math.Abs(Spring.Resist(464.001, 100, 500) - 464.001) < 1e-3);
         check("A range with no room holds its one size", Spring.Resist(300, 200, 200) == 200);
+    }
+
+    // Where a drag resizes the open panel and the collapsed surface.
+    private static void Grips(Action<string, bool> check)
+    {
+        var panel = new DipRect(100, 0, 500, 260);
+        const double header = 36;
+        ResizeEdges At(double x, double y) => ResizeGrips.Panel(x, y, panel, header);
+        check("A side of the panel takes the pointer just inside it", At(595, 120) == ResizeEdges.Right && At(104, 120) == ResizeEdges.Left);
+        check("And just outside it, so a small overshoot still holds the edge", At(610, 120) == ResizeEdges.Right && At(90, 120) == ResizeEdges.Left);
+        check("Beyond the outer reach it does not", At(600 + ResizeGrips.PanelOuter + 1, 120) == ResizeEdges.None);
+        check("The bottom takes the pointer on both sides of it", At(350, 255) == ResizeEdges.Bottom && At(350, 270) == ResizeEdges.Bottom);
+        check("A bottom corner takes both, in a larger square", At(590, 245) == (ResizeEdges.Bottom | ResizeEdges.Right) && At(108, 268) == (ResizeEdges.Bottom | ResizeEdges.Left));
+        check("The middle of the panel is no grip", At(350, 120) == ResizeEdges.None);
+        check("The header row is no grip, so its buttons keep working", At(598, 20) == ResizeEdges.None && At(102, 30) == ResizeEdges.None);
+        check("Above the panel nothing is a grip", At(350, -5) == ResizeEdges.None);
+        var narrow = new DipRect(0, 0, 30, 200);
+        check("A narrow panel keeps a middle that is no grip", ResizeGrips.Panel(15, 100, narrow, 10) == ResizeEdges.None);
+        check("An empty panel has no grips", ResizeGrips.Panel(0, 0, new DipRect(0, 0, 0, 0), 0) == ResizeEdges.None);
+        var strips = ResizeGrips.PanelStrips(panel, header).ToList();
+        check("The grips the panel paints cover every point that grips",
+            new[] { (595.0, 120.0), (610.0, 120.0), (90.0, 120.0), (350.0, 270.0), (590.0, 245.0), (108.0, 268.0) }
+                .All(p => strips.Any(r => p.Item1 >= r.X && p.Item1 <= r.Right && p.Item2 >= r.Y && p.Item2 <= r.Bottom)));
+        var area = ResizeGrips.PanelArea(panel);
+        check("The panel's area includes its grips outside it", area.X == 100 - ResizeGrips.PanelOuter && area.Bottom == 260 + ResizeGrips.PanelOuter && area.Y == 0);
+
+        var capsule = new DipRect(1000, 5, 300, 32);
+        check("An end of the capsule takes the pointer inside and outside it",
+            ResizeGrips.Compact(1295, 20, capsule, false) == ResizeEdges.Right && ResizeGrips.Compact(1310, 20, capsule, false) == ResizeEdges.Right
+            && ResizeGrips.Compact(990, 20, capsule, false) == ResizeEdges.Left && ResizeGrips.Compact(1010, 20, capsule, false) == ResizeEdges.Left);
+        check("The middle of the capsule still opens the panel", ResizeGrips.Compact(1150, 20, capsule, false) == ResizeEdges.None && ResizeGrips.Compact(1030, 20, capsule, false) == ResizeEdges.None);
+        check("Far beside or below the capsule is no grip", ResizeGrips.Compact(1320, 20, capsule, false) == ResizeEdges.None && ResizeGrips.Compact(1295, 60, capsule, false) == ResizeEdges.None);
+        var line = new DipRect(1250, 4, 56, 4);
+        check("The thin line gets room above and below its ends", ResizeGrips.Compact(1310, 14, line, true) == ResizeEdges.Right && ResizeGrips.Compact(1246, 0, line, true) == ResizeEdges.Left);
+        check("A short line keeps a middle that opens the panel", ResizeGrips.Compact(1278, 6, line, true) == ResizeEdges.None);
+        var zone = ResizeGrips.CompactZone(capsule, false, ResizeEdges.Right);
+        check("An end's zone is what grips there", zone.X <= 1295 && zone.Right >= 1310 && zone.Y <= 5 && zone.Bottom >= 37);
     }
 
     private static void Colors(Action<string, bool> check)
