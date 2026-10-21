@@ -270,7 +270,24 @@ public partial class App : Application
     // Before the process ends, the last write must have reached the disk.
     private void FinishWriting() { try { _writing.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException) { } }
     // The settings window records its size before the final save; closing it during shutdown would be too late.
-    public void ExitApplication() { Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings(); FinishWriting(); Shutdown(); }
+    // Every panel powers off first (MainWindow.Lifecycle.cs): the islands narrow into dots and fade, then the process ends. The
+    // settings window goes at once, so the exit answers immediately. A panel that never reports back cannot hold the exit up:
+    // the process ends anyway once the longest power-off would have finished.
+    public void ExitApplication()
+    {
+        if (Exiting) return;
+        Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings();
+        _settingsWindow?.Hide();
+        var decks = Decks.ToList();
+        int waiting = decks.Count;
+        var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Settings.AnimationDuration * 2 + 500) };
+        bool done = false;
+        void End() { if (done) return; done = true; fallback.Stop(); FinishWriting(); Shutdown(); }
+        fallback.Tick += (_, _) => End();
+        fallback.Start();
+        foreach (var deck in decks) deck.PowerOff(() => { if (--waiting <= 0) End(); });
+        if (decks.Count == 0) End();
+    }
     internal void InstallUpdate()
     {
         if (Updates.PrepareRestart(() => { FinishWriting(); Store.Save(Settings); })) ExitApplication();

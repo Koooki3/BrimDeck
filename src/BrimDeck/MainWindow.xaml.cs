@@ -59,6 +59,8 @@ public partial class MainWindow : Window
     private Rect? _popupReturnArea;
     private int _days = 1;
     private bool _details;
+    // Lets the old content of a rebuilt usage or media page leave while the new one arrives.
+    private PageHandover _handover = null!;
     private int _applicationPage;
     private readonly Dictionary<Guid, int> _quotaPages = new();
     private DateTimeOffset? _updatedAt;
@@ -91,6 +93,7 @@ public partial class MainWindow : Window
             if (_expanded && !_preview) PointerChanged(_pointerInside);
         }) { Interval = TimeSpan.FromSeconds(1) };
         InitializeComponent();
+        _handover = new PageHandover(LeavingContent);
         InitializeMusic();
         InitializeMonitor();
         InitializeResize();
@@ -106,6 +109,7 @@ public partial class MainWindow : Window
             _context = WindowsHost.DetectContext(MonitorHandle);
             if (_lead is { } lead) { Snapshots = lead.Snapshots; _updatedAt = lead._updatedAt; DetectThresholds(); UpdateNotice(); }
             ApplySettings();
+            Boot();
             _trackPointer = true; UpdatePointerTracking();
             ScheduleClock(); _clock.Start(); StartMusic();
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
@@ -156,6 +160,8 @@ public partial class MainWindow : Window
     // moves between the notch, the capsule and the indicator.
     private void ApplySettings(bool animatePage)
     {
+        // Powering off holds the panel as it is; RestoreAfterPowerOff applies the settings once it has gone.
+        if (_poweringOff) return;
         bool wasVisible = IsVisible;
         ApplyLanguage();
         ApplyTheme();
@@ -186,30 +192,23 @@ public partial class MainWindow : Window
         Place(bounds, scale);
         UpdateClock();
         RenderCompact();
-        // Hiding and showing (a full-screen rule) fades the panel in step with the other animations
-        // when a context change asks for it; every other change stays immediate.
-        int fade = animatePage && wasVisible && !_preview && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
+        // Hiding and showing (the tray's hide, a full-screen rule) powers the surface off and boots it again (MainWindow.Lifecycle.cs)
+        // when the change asks for animation; every other change stays immediate.
+        bool animate = animatePage && !_preview && Soft.Enabled && Settings.AnimationDuration > 0;
+        // The window's own opacity is no longer animated; a build that faded it may have left it lowered.
+        if (Opacity < 1) { BeginAnimation(OpacityProperty, null); Opacity = 1; }
         if (IsSuppressed)
         {
             _hover.Stop(); _leave.Stop(); _pointerInside = false;
-            if (fade > 0 && IsVisible)
-            {
-                SetExpanded(false);
-                var away = new DoubleAnimation(0, TimeSpan.FromMilliseconds(fade * .7)) { EasingFunction = Soft.Out };
-                away.Completed += (_, _) => { if (IsSuppressed) { BeginAnimation(OpacityProperty, null); Opacity = 1; Hide(); } };
-                BeginAnimation(OpacityProperty, away, HandoffBehavior.SnapshotAndReplace);
-            }
-            else { SetExpanded(false, true); BeginAnimation(OpacityProperty, null); Opacity = 1; Hide(); }
+            if (animate && wasVisible) PowerOff(RestoreAfterPowerOff);
+            else { SetExpanded(false, true); Hide(); }
         }
         else
         {
-            bool appearing = !IsVisible && animatePage && !_preview && Settings.Animations && SystemParameters.ClientAreaAnimation && Settings.AnimationDuration > 0;
-            if (appearing) { BeginAnimation(OpacityProperty, null); Opacity = 0; }
+            bool appearing = !IsVisible && animate;
             if (!IsVisible) Show();
-            if (appearing || Opacity < 1 && animatePage)
-                BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(Settings.AnimationDuration * .7)) { EasingFunction = Soft.Out }, HandoffBehavior.SnapshotAndReplace);
-            else { BeginAnimation(OpacityProperty, null); Opacity = 1; }
             SetExpanded(_expanded, !animatePage || !wasVisible);
+            if (appearing) Boot();
         }
         UpdatePointerTracking();
         RenderUsage();
@@ -421,13 +420,13 @@ public partial class MainWindow : Window
     private readonly record struct Track(double Start, double End);
     public void SetExpanded(bool expanded, bool instant = false)
     {
-        if (expanded && IsSuppressed) return;
+        if (expanded && IsSuppressed || _poweringOff) return;
         // Only the panel under the pointer is open; the others close at once and give up the Escape key.
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
-        // A page switch cut short by closing the panel leaves nothing behind for the next opening.
-        if (expanded && !_expanded && _switchingTo is null) SettlePage();
+        // A hand-over cut short by closing the panel leaves nothing behind for the next opening.
+        if (expanded && !_expanded) _handover.Drop();
         bool wasExpanded = _expanded;
         _expanded = expanded;
         _escapeDismissal?.SetEnabled(expanded && !_preview);
@@ -479,25 +478,34 @@ public partial class MainWindow : Window
         HoverExtension.Visibility = expanded ? Visibility.Visible : Visibility.Hidden;
         double boxTop = double.IsFinite(box.Top) ? box.Top : 0;
         // Collapsing runs in three stages: the content leaves first, the surface settles with a slow start, the compact content lands last.
-        // Expanding must feel immediate: the surface grows from the first frame on a fast-out curve, the compact content vanishes
-        // quickly, and the content fades in once the surface is about two thirds open. The fractions follow the approved mock-up.
+        // Expanding must feel immediate: the surface grows from the first frame on the opening spring, the compact content vanishes
+        // quickly, and the content fades in once the surface is about two thirds open.
         // Open already (a page switch, a new page size), the surface reshapes over the whole of a slightly longer time, easing in
         // and out, so the change of size reads as one soft move rather than a jump.
-        bool reshaping = expanded && wasExpanded;
+        // Booting (MainWindow.Lifecycle.cs), the surface swells from a dot into the collapsed shape: a longer move on the opening
+        // spring, the compact content arriving once the shape has nearly settled.
+        bool reshaping = expanded && wasExpanded, booting = _booting && !expanded && duration > 0;
+        _booting = false;
         if (reshaping) duration = (int)(duration * 1.25);
-        Track content = expanded ? new(.25, .9) : new(0, .30);
-        Track surface = reshaping ? new(0, 1) : expanded ? new(0, .8) : new(.12, line ? .92 : 1);
-        Track compact = expanded ? new(0, .15) : line ? new(0, .35) : new(.62, 1);
-        Track shadow = expanded ? new(0, .3) : new(.5, 1);
+        if (booting) duration = (int)(duration * BootStretch);
+        // The opening spring is most of the way there within a fifth of the move, so the content follows soon after it.
+        Track content = expanded ? new(.12, .8) : new(0, .30);
+        Track surface = reshaping ? new(0, 1) : booting ? new(BootDot, 1) : expanded ? new(0, 1) : new(.12, line ? .92 : 1);
+        Track compact = booting ? new(.5, 1) : expanded ? new(0, .15) : line ? new(0, .35) : new(.62, 1);
+        Track shadow = booting ? new(.35, 1) : expanded ? new(0, .3) : new(.5, 1);
         Track rim = expanded ? new(.2, .5) : new(.5, .8);
         Track tint = expanded ? new(0, .12) : new(.68, 1);
-        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, settle = reshaping ? Soft.InOut : expanded ? Soft.Out : Soft.Settle;
+        // Opening, the size and place spring past their end by under 2 percent of the move and settle back; the corners never
+        // bounce (a radius would pass zero). A panel that has no room in the window for that give opens on the plain curve.
+        bool bounce = (booting || expanded && !reshaping) && duration > 0 && HasRoomToBounce(width, height, left, gap);
+        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Settle;
+        IEasingFunction settle = bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
         Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
         Animate(Island, WidthProperty, width, duration, surface, settle);
         Animate(Island, HeightProperty, height, duration, surface, settle);
-        Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, surface, settle);
+        Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, surface, corners);
         // Compact notch and capsule hover over their full bounding box from the screen edge; the open panel uses its own outline.
         Animate(HoverExtension, HeightProperty, double.IsFinite(box.Height) ? Math.Max(0, box.Height) : 0, duration, surface, settle);
         if (duration == 0)
@@ -521,7 +529,7 @@ public partial class MainWindow : Window
             }
             HoverZone.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(left, 0, 0, 0), EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
             Island.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(0, gap, 0, 0), EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
-            Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = radius, EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
+            Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = radius, EasingFunction = corners }, duration, surface), HandoffBehavior.SnapshotAndReplace);
         }
         bool compactGone = expanded || line;
         Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
@@ -565,7 +573,7 @@ public partial class MainWindow : Window
     { if (_expanded) PointerChanged(false); }
     internal void TrackPointer()
     {
-        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing) return;
+        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing || BootHoldsPointer) return;
         var cursor = WindowsHost.Cursor();
         var area = CompactHoverScreenRect();
         if (area.IsEmpty) return;
@@ -691,27 +699,4 @@ public sealed class CornerRadiusAnimation : AnimationTimeline
         double L(double a, double b) => a + (b - a) * p;
         return new CornerRadius(L(from.TopLeft, To.TopLeft), L(from.TopRight, To.TopRight), L(from.BottomRight, To.BottomRight), L(from.BottomLeft, To.BottomLeft));
     }
-}
-
-// Cubic Bézier easing with CSS semantics, so the surface follows the same curve as the approved mock-up.
-public sealed class BezierEase : EasingFunctionBase
-{
-    private readonly double _x1, _y1, _x2, _y2;
-    public BezierEase(double x1, double y1, double x2, double y2) { _x1 = x1; _y1 = y1; _x2 = x2; _y2 = y2; }
-    protected override Freezable CreateInstanceCore() => new BezierEase(_x1, _y1, _x2, _y2);
-    protected override double EaseInCore(double normalizedTime)
-    {
-        double x = Math.Clamp(normalizedTime, 0, 1), t = x;
-        // Newton steps on the x polynomial; x(t) is monotonic while the control points stay inside [0, 1].
-        for (int i = 0; i < 8; i++)
-        {
-            double slope = 3 * A(_x1, _x2) * t * t + 2 * B(_x1, _x2) * t + 3 * _x1;
-            if (slope < 1e-6) break;
-            t -= (Sample(t, _x1, _x2) - x) / slope;
-        }
-        return Sample(Math.Clamp(t, 0, 1), _y1, _y2);
-    }
-    private static double A(double a1, double a2) => 1 - 3 * a2 + 3 * a1;
-    private static double B(double a1, double a2) => 3 * a2 - 6 * a1;
-    private static double Sample(double t, double a1, double a2) => ((A(a1, a2) * t + B(a1, a2)) * t + 3 * a1) * t;
 }

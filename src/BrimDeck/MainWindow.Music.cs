@@ -101,16 +101,12 @@ public partial class MainWindow
         var wanted = DeckPages.Opening(Settings.DefaultPage) ?? _page;
         if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: false);
     }
-    // The page the open panel is moving to while the old page leaves; null when no switch is under way.
-    private DeckPage? _switchingTo;
-    // A page leaves a little toward the side it is left for, then the next one comes in from the other side while the panel
-    // takes its size: a short fade out, then a longer, softer fade in (Soft).
-    private const int PageLeave = 150, PageArrive = 320;
-    private const double PageTravel = 14;
+    // The page switch moves as one: the page left behind leaves as a picture toward the side it is left for, while the next
+    // page is built at once and comes in from the other side and the panel takes its size (PageHandover).
     internal void SelectPage(DeckPage page, bool remember = true)
     {
         if (!DeckPages.Shown(Settings, page)) return;
-        bool changed = _page != page && _switchingTo != page || _switchingTo is { } going && going != page;
+        bool changed = CurrentPage != page;
         if (changed) CloseSourceMenu();
         if (changed && _expanded && !_preview)
         {
@@ -118,36 +114,19 @@ public partial class MainWindow
             _hover.Stop(); _leave.Stop(); _pageSwitchHold.Stop(); _pageSwitchHold.Start();
         }
         if (remember) { Settings.LastPage = page; _app.QueueSave(); }
-        bool animate = changed && _expanded && !_preview && Settings.Animations && SystemParameters.ClientAreaAnimation;
-        if (!animate && _switchingTo is null) { ShowPage(page, animatePage: changed && _expanded && !_preview); return; }
-        // A page already on its way out: the newest choice is the one shown when it has gone.
-        bool leaving = _switchingTo is not null;
-        _switchingTo = page;
-        if (leaving) return;
-        int direction = Math.Sign(DeckPages.Order.ToList().IndexOf(page) - DeckPages.Order.ToList().IndexOf(_page));
-        var away = Soft.Fade(ContentCanvas.Opacity, 0, PageLeave, Soft.InOut);
-        away.Completed += (_, _) =>
-        {
-            if (_switchingTo is not { } target) return;
-            _switchingTo = null;
-            ShowPage(target, animatePage: _expanded && !_preview);
-            if (!_expanded || _preview) { SettlePage(); return; }
-            ContentCanvas.BeginAnimation(OpacityProperty, Soft.Fade(0, 1, PageArrive));
-            PageShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(direction * PageTravel, 0, PageArrive));
-        };
-        ContentCanvas.BeginAnimation(OpacityProperty, away);
-        PageShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(PageShift.X, -direction * PageTravel, PageLeave, Soft.InOut));
+        bool animate = changed && _expanded && !_preview && Soft.Enabled;
+        var before = CurrentPage;
+        var from = PageContent(before);
+        var picture = animate ? PageHandover.Capture(from) : null;
+        ShowPage(page, animatePage: changed && _expanded && !_preview);
+        bool back = DeckPages.Order.ToList().IndexOf(page) < DeckPages.Order.ToList().IndexOf(before);
+        _handover.Send(picture, from.Margin, PageContent(page), back ? Handover.Back : Handover.Forward);
     }
+    private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, _ => UsageContent };
     private void ShowPage(DeckPage page, bool animatePage)
     {
-        _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = "";
+        _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = ""; _handover.Drop();
         ApplySettings(animatePage);
-    }
-    // The page in place, as it is when no switch is under way.
-    private void SettlePage()
-    {
-        ContentCanvas.BeginAnimation(OpacityProperty, null); ContentCanvas.Opacity = 1;
-        PageShift.BeginAnimation(TranslateTransform.XProperty, null); PageShift.X = 0;
     }
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
     private void MonitorPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Monitor);
@@ -342,8 +321,13 @@ public partial class MainWindow
     internal static string SmtcHintWhy => Loc.T("开启网易云的 SMTC 后，才能在这里控制播放", "Turn on SMTC in NetEase to control playback here");
     // The English hint names the menu items as NetEase Cloud Music's Chinese interface shows them.
     internal static string SmtcHintHow => Loc.T("位置：网易云音乐 › 设置 › 系统 › 开启 SMTC", "Where: NetEase Cloud Music › 设置 › 系统 › 开启 SMTC");
+    // The song and the form (PageHandover) the media page was last built with: a new song swaps in, a new form (lyric lines,
+    // the title merged with the artist, the message or the entry shown) morphs in, as when a drag crosses a size step.
+    private string _musicSong = "", _musicForm = "";
     private void RenderMusic()
     {
+        // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
+        bool shown = MusicContent.IsVisible && _expanded && !_preview;
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
@@ -368,10 +352,16 @@ public partial class MainWindow
         string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
+        string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
+        string form = $"{track is null}|{layout.LyricLines}|{layout.MergeTitle}|{layout.ShowFullControl}|{layout.ShowMessage}|{hasLyrics}|{showSmtcHint}|{track?.HasTimeline}";
+        var motion = !shown ? Handover.None : song != _musicSong ? Handover.Swap : form != _musicForm ? Handover.Morph : Handover.None;
+        _musicSong = song; _musicForm = form;
+        // Transport buttons that stay glide to their new places. While the panel is dragged they follow it frame by frame like
+        // the rest of the page, and glide only when its form changes.
+        bool glide = shown && animate && (!Resizing || motion != Handover.None);
         // Keep the transport layer attached: replacing a hovered button restarts
         // hit testing and its fade-in on every metadata, artwork or lyric update.
-        foreach (var child in MusicContent.Children.Cast<UIElement>().Where(child => child != _musicControls).ToArray())
-            MusicContent.Children.Remove(child);
+        _handover.Hold(MusicContent, keep: _musicControls);
         _musicSeek = null; _musicElapsed = null; _musicDuration = null; _musicEqualizer = null; _lyricCurrent = null; _lyricPrevious = null; _lyricNext = null; _musicMessage = null; _musicInfo = null;
         MusicContent.Margin = new Thickness(c.Side, 0, c.Side, c.Bottom);
         if (track is null)
@@ -384,7 +374,7 @@ public partial class MainWindow
             {
                 var hint = UI.Line(error, 11.5, UI.Tertiary); hint.TextWrapping = TextWrapping.Wrap; hint.TextAlignment = TextAlignment.Center; empty.Children.Add(hint);
             }
-            MusicContent.Children.Add(empty); return;
+            MusicContent.Children.Add(empty); _handover.Release(empty, motion); return;
         }
         var body = new Grid();
         var upper = new Grid { Height = layout.Cover, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, layout.CoverY, 0, 0) };
@@ -520,7 +510,9 @@ public partial class MainWindow
             _musicControlButtons[id] = (button, iconKey);
             button.Width = size + 16; button.Height = size + 16;
             button.IsEnabled = enabled; button.AnimationsEnabled = animate; button.Tag = command;
-            Canvas.SetLeft(button, x - 8); Canvas.SetTop(button, (c.Play - size) / 2 - 8);
+            bool moves = glide && button.IsVisible;
+            PageHandover.Glide(button, Canvas.LeftProperty, x - 8, moves);
+            PageHandover.Glide(button, Canvas.TopProperty, (c.Play - size) / 2 - 8, moves);
             AutomationProperties.SetName(button, name);
         }
         if (modes.Count > 0)
@@ -601,7 +593,7 @@ public partial class MainWindow
             Canvas.SetLeft(enable, layout.BodyWidth - entryWidth); Canvas.SetTop(enable, (c.Play - 26) / 2);
         }
         if (_musicFullControl is not null) _musicFullControl.Visibility = entryLabel is not null ? Visibility.Visible : Visibility.Collapsed;
-        MusicContent.Children.Insert(0, body); UpdateMusicPosition();
+        MusicContent.Children.Insert(0, body); _handover.Release(body, motion); UpdateMusicPosition();
     }
     // The page suppresses tooltips. A title or artist line cut off by its ellipsis still shows its whole text on hover.
     private static void ShowCutText(TextBlock block, string text)

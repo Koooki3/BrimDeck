@@ -839,7 +839,7 @@ public sealed partial class SettingsWindow : Window
     // While the popup is open the button ignores the mouse, so that press only closes the popup and does not open it again.
     private static void TogglePopup(ButtonBase button, Popup popup)
     {
-        popup.Opened += (_, _) => button.IsHitTestVisible = false;
+        popup.Opened += (_, _) => { button.IsHitTestVisible = false; Soft.Enter(popup.Child); };
         popup.Closed += (_, _) => button.IsHitTestVisible = true;
         button.Click += (_, _) => popup.IsOpen = !popup.IsOpen;
     }

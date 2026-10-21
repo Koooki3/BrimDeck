@@ -74,7 +74,8 @@ public partial class MainWindow
             _hover.Stop(); _leave.Stop(); _pointerInside = false; _cursorInCompact = false;
             if (_alert is not null) ClearAlert();
         }
-        ApplySettings();
+        // Hiding powers the surface off and showing boots it (MainWindow.Lifecycle.cs).
+        ApplySettings(true);
     }
 
     private void Rehide(object? sender, EventArgs e)

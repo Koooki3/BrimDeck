@@ -41,6 +41,7 @@ public partial class MainWindow
         if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
         _modelApps.Clear(); _modelApps.Add(provider);
         _knownModelApps.Clear(); _knownModelApps.UnionWith(Settings.StatisticsProviders);
+        _usageHandover = _details ? Handover.Dissolve : Handover.Forward;
         _customRange = null; _days = days; _details = true;
         ResetModelScroll(); RenderUsage();
     }
@@ -50,17 +51,17 @@ public partial class MainWindow
     {
         if (!_modelApps.Contains(provider)) _modelApps.Add(provider);
         else if (_modelApps.Count > 1) _modelApps.Remove(provider);
-        ResetModelScroll(); RenderUsage();
+        _usageHandover = Handover.Dissolve; ResetModelScroll(); RenderUsage();
     }
     internal void SelectModelPeriod(int days)
     {
         _ = UsageDateRange.Recent(days, DateTime.Today);
-        _days = days; _customRange = null; ResetModelScroll(); RenderUsage();
+        _days = days; _customRange = null; _usageHandover = Handover.Dissolve; ResetModelScroll(); RenderUsage();
     }
     internal void SelectModelRange(UsageDateRange range)
     {
         if (range.End > DateTime.Today) throw new ArgumentException(Loc.T("结束日期不能晚于今天。", "The end date cannot be later than today."));
-        _customRange = range; ResetModelScroll();
+        _customRange = range; _usageHandover = Handover.Dissolve; ResetModelScroll();
         var earliest = _historyStart ?? DateTime.Today.AddDays(-29);
         if (range.Start < earliest)
         {
@@ -219,6 +220,7 @@ public partial class MainWindow
             _detailPopup = null; RenderUsage();
             if (_expanded && !IsMouseOver) PointerChanged(false);
         };
+        Soft.Enter(popup.Content as UIElement);
         popup.Show(); popup.Activate();
     }
 

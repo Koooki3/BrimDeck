@@ -143,7 +143,7 @@ public sealed partial class SettingsWindow
     private void AttachClockPicker(ButtonBase target, Func<string> current, string fallback, Action<string> apply)
     {
         var popup = new Popup { PlacementTarget = target, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
-        popup.Opened += (_, _) => target.IsHitTestVisible = false;
+        popup.Opened += (_, _) => { target.IsHitTestVisible = false; Soft.Enter(popup.Child); };
         popup.Closed += (_, _) => target.IsHitTestVisible = true;
         target.Click += (_, _) =>
         {

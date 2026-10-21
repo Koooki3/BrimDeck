@@ -11,7 +11,13 @@ namespace BrimDeck;
 
 public partial class MainWindow
 {
-    internal void ShowModelDetails(bool details) { if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false); _details = details && Settings.UsagePage; RenderUsage(); }
+    internal void ShowModelDetails(bool details)
+    {
+        if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
+        bool wanted = details && Settings.UsagePage;
+        if (wanted != _details) _usageHandover = wanted ? Handover.Forward : Handover.Back;
+        _details = wanted; RenderUsage();
+    }
     internal FrameworkElement ScaledContent => ContentCanvas;
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
@@ -120,15 +126,36 @@ public partial class MainWindow
         SettingsButton.ToolTip = _app.Updates.NoticeVersion is { } version ? Loc.T($"新版本 {version} 可用", $"Version {version} is available") : null;
     }
 
+    // How the next rebuild of the usage page takes over (PageHandover); the action that changes the page's form sets it.
+    private Handover _usageHandover;
+    // The form the usage page was last laid out in: its size tier and arrangement, model details or the empty page. A rebuild
+    // that changes it while the page is on screen (a drag across a size step, an app added) morphs into the new form.
+    private string _usageForm = "";
+
     public void RenderUsage()
     {
         if (UsageContent is null) return;
         if (IsMusicPage) { RenderMusic(); return; }
         if (IsMonitorPage) { RenderMonitor(); return; }
+        // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
+        bool shown = UsageContent.IsVisible && _expanded && !_preview;
         MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
         if (!Settings.UsagePage) _details = false;
         RefreshStatus();
         if (_detailPopup is not null) return;
+        var motion = _usageHandover; _usageHandover = Handover.None;
+        string form = _usageForm;
+        _handover.Hold(UsageContent);
+        RenderUsagePage();
+        if (motion == Handover.None && form.Length > 0 && form != _usageForm) motion = Handover.Morph;
+        if (!shown) motion = Handover.None;
+        _handover.Release(UsageContent, motion);
+        // The application pager is left out: it is what was clicked, under the pointer, when application pages flip.
+        foreach (var part in new UIElement[] { ModelToolbar, PageSwitch, ClockLabel }) PageHandover.Arrive(part, motion);
+    }
+
+    private void RenderUsagePage()
+    {
         if (_modelScroll is { IsLoaded: true }) _modelScrollOffset = _modelScroll.VerticalOffset;
         _modelScroll = null;
         ModelToolbar.Children.Clear(); UsageContent.Children.Clear();
@@ -145,6 +172,7 @@ public partial class MainWindow
         if (_details) RenderModelToolbar(statistics);
         if (apps.Count == 0)
         {
+            _usageForm = "empty";
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             empty.Children.Add(UI.Fixed(Settings.UsagePage ? Loc.T("未选择应用", "No apps selected") : Loc.T("AI 用量已关闭", "AI usage is off"), 14, 20, UI.Secondary));
             var openText = Loc.T("打开设置", "Open settings");
@@ -153,7 +181,7 @@ public partial class MainWindow
             empty.Children.Add(open); UsageContent.Children.Add(empty);
             return;
         }
-        if (_details) RenderModels(DashboardUsage.Statistics(Settings, Snapshots));
+        if (_details) { _usageForm = "details"; RenderModels(DashboardUsage.Statistics(Settings, Snapshots)); }
         else RenderColumns(DashboardUsage.Columns(Settings, Snapshots));
     }
 
@@ -202,7 +230,7 @@ public partial class MainWindow
             var controls = new StackPanel { Orientation = Orientation.Horizontal };
             Button PageButton(string label, string name, int step)
             {
-                var button = ModelAction(label, name, () => { _applicationPage += step; RenderUsage(); }, toolTip: false);
+                var button = ModelAction(label, name, () => { _applicationPage += step; _usageHandover = step > 0 ? Handover.Forward : Handover.Back; RenderUsage(); }, toolTip: false);
                 button.IsEnabled = step < 0 ? _applicationPage > 0 : _applicationPage + 1 < pages;
                 button.Padding = new Thickness(6, 0, 6, 0); return button;
             }
@@ -214,6 +242,7 @@ public partial class MainWindow
         }
         // See FitColumns. A short last page leaves its remaining columns empty.
         var (layout, inline, wide, count, columnWidth, views) = FitColumns(columns, ContentCanvas.Width, ContentCanvas.Height);
+        _usageForm = $"{layout.Tier}|{layout.Footer}|{inline}|{wide}|{count}";
         int first = _applicationPage * pageSize;
         columns = columns.Skip(first).Take(pageSize).ToList(); views = views.Skip(first).Take(pageSize).ToList();
         // The quotas start EdgeInset + ColumnPad from the panel edge; the header lines up with them.
@@ -231,7 +260,7 @@ public partial class MainWindow
     private FrameworkElement Column(AppEntry entry, ProviderSnapshot snapshot, ProviderSnapshot usage, QuotaView view, Layout layout, bool inline, bool wide, bool center, bool separator, double innerWidth)
     {
         bool off = view.Quotas.Count == 0;
-        void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; RenderUsage(); }
+        void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; _usageHandover = Handover.Dissolve; RenderUsage(); }
         var column = new Grid();
         column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.Head) });
         column.RowDefinitions.Add(new RowDefinition());

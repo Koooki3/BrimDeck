@@ -66,6 +66,8 @@ public partial class MainWindow
         {
             if (!ReferenceEquals(MediaSourceButton.ContextMenu, menu)) { menu.IsOpen = false; return; }
             _hover.Stop(); _leave.Stop(); _sourceMenuOutsideAt = null;
+            // The surface inside the menu enters, so the menu's own bounds (which the pointer checks below use) stay put.
+            Soft.Enter(menu.Template?.FindName("Chrome", menu) as UIElement);
             UpdateSourceMenuTitles(Settings.Animations && SystemParameters.ClientAreaAnimation);
             ContentCanvas.SizeChanged += resized;
             menu.UpdateLayout(); _sourceMenuBounds = ScreenBounds(menu);

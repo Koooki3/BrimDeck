@@ -40,12 +40,12 @@
                    HorizontalAlignment="Center" VerticalAlignment="Top" RenderTransformOrigin="0.5,0">
             <Grid.RenderTransform><ScaleTransform x:Name="ContentScale"/></Grid.RenderTransform>
             <Grid x:Name="ContentCanvas" Width="760" Height="240" Margin="0" HorizontalAlignment="Center">
-              <!-- Moves a page out and the next one in when the page switch changes page (MainWindow.SelectPage). -->
-              <Grid.RenderTransform><TranslateTransform x:Name="PageShift"/></Grid.RenderTransform>
               <Grid.RowDefinitions><RowDefinition x:Name="ToolbarRow" Height="36"/><RowDefinition Height="*"/></Grid.RowDefinitions>
               <Grid Grid.Row="1" x:Name="UsageContent" Margin="6,0,6,10"/>
               <Grid Grid.Row="1" x:Name="MonitorContent" Visibility="Collapsed"/>
               <Grid Grid.Row="1" x:Name="MusicContent" Visibility="Collapsed"/>
+              <!-- What a rebuilt usage or media page replaced, while it leaves (PageHandover). -->
+              <Grid Grid.Row="1" x:Name="LeavingContent"/>
             </Grid>
               <!-- Keep the toolbar outside the fixed page layout so neither resize direction clips its controls. -->
               <Grid x:Name="Toolbar" Height="{Binding Height.Value, ElementName=ToolbarRow}" VerticalAlignment="Top">
