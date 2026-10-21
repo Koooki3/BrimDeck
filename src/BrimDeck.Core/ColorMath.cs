@@ -25,4 +25,13 @@ public static class ColorMath
     }
 
     public static string ToHex(byte r, byte g, byte b) => $"#{r:X2}{g:X2}{b:X2}";
+
+    // The color share of the way from one #RRGGBB color to another, per channel.
+    public static string Mix(string from, string to, double share)
+    {
+        static int Channel(string hex, int index) => Convert.ToInt32(hex.Substring(1 + index * 2, 2), 16);
+        share = Math.Clamp(double.IsFinite(share) ? share : 0, 0, 1);
+        byte At(int index) => (byte)Math.Round(Channel(from, index) + (Channel(to, index) - Channel(from, index)) * share);
+        return ToHex(At(0), At(1), At(2));
+    }
 }

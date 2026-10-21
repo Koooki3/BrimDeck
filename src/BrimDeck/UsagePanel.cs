@@ -11,13 +11,13 @@ namespace BrimDeck;
 
 public partial class MainWindow
 {
-    internal void ShowModelDetails(bool details) { if (IsMusicPage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false); _details = details && Settings.UsagePage; RenderUsage(); }
+    internal void ShowModelDetails(bool details) { if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false); _details = details && Settings.UsagePage; RenderUsage(); }
     internal FrameworkElement ScaledContent => ContentCanvas;
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
 
     private enum Tier { Roomy, Default, Dense, Compact, Tiny }
-    private sealed record SegmentItem(string Text, string Name, bool Active, Action Select, string? Tip = null);
+    internal sealed record SegmentItem(string Text, string Name, bool Active, Action Select, string? Tip = null);
     // Slots is the most quotas any page of this app shows, so switching pages keeps the same layout.
     private sealed record QuotaView(List<UsageMetric> Quotas, int Pages, int Page, int Slots);
 
@@ -121,7 +121,8 @@ public partial class MainWindow
     {
         if (UsageContent is null) return;
         if (IsMusicPage) { RenderMusic(); return; }
-        MusicContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
+        if (IsMonitorPage) { RenderMonitor(); return; }
+        MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
         if (!Settings.UsagePage) _details = false;
         RefreshStatus();
         if (_detailPopup is not null) return;
@@ -154,7 +155,7 @@ public partial class MainWindow
     }
 
     // A joined switch: one rounded strip, the selected segment filled. Buttons carry accessible names.
-    private static Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX, bool centerText = false)
+    internal static Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX, bool centerText = false)
     {
         var strip = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var item in items)

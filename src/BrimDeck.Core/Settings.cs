@@ -19,8 +19,9 @@ public sealed record ChosenDisplay(string Id, string Name);
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14 }
 public enum SettingsTheme { System, Light, Dark }
-public enum DeckPage { Usage, Music }
-public enum DefaultDeckPage { Last, Usage, Music }
+// Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
+public enum DeckPage { Usage, Music, Monitor }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor }
 public enum CompactMusicText { None, Title, Lyrics }
 public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed }
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
@@ -147,6 +148,14 @@ public static class PanelSizes
     public static string Name(PanelSize size) => size switch { PanelSize.Compact => Loc.T("紧凑", "Compact"), PanelSize.Spacious => Loc.T("宽敞", "Spacious"), _ => Loc.T("标准", "Standard") };
 }
 
+// The system monitor page's quick sizes. Unlike the usage page's they do not depend on the applications.
+public static class MonitorSizes
+{
+    public static readonly (double Width, double Height) Default = (620, 220);
+    public static (double Width, double Height) For(PanelSize size) => size switch
+    { PanelSize.Compact => (480, 160), PanelSize.Spacious => (860, 320), _ => Default };
+}
+
 public sealed class DeckSettings
 {
     private List<AppEntry>? _apps;
@@ -217,6 +226,15 @@ public sealed class DeckSettings
     // Kept while Display is Primary, so that choosing displays again restores them.
     public List<ChosenDisplay> DisplayMonitors { get; set; } = [];
     public bool UsagePage { get; set; } = true;
+    // The system monitor page; it reads the system only while it is open on screen.
+    public bool MonitorPage { get; set; } = true;
+    public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
+    public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
+    public MonitorPalette MonitorPalette { get; set; }
+    // Seconds between readings: 1 or 2.
+    public int MonitorInterval { get; set; } = 1;
+    public bool MonitorProcesses { get; set; } = true;
+    public ProcessSort MonitorSort { get; set; }
     public bool UsageAutoSync { get; set; } = true;
     // The settings window's size when last closed, in DIPs, and whether it was maximized. Empty until it is closed once;
     // it opens at the default size then. The size is fitted to the screen the window opens on.
@@ -297,6 +315,11 @@ public sealed class DeckSettings
         Height = double.IsFinite(Height) ? Math.Clamp(Height, 140, 400) : 240;
         MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, 440, 1200) : 440;
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, 140, 400) : 200;
+        MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, 440, 1200) : MonitorSizes.Default.Width;
+        MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, 140, 400) : MonitorSizes.Default.Height;
+        if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Sea;
+        MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
+        if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;

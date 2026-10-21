@@ -73,6 +73,15 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 You can choose the quota providers and set the quota and usage source of each column separately. See [Supported tools](docs/en-US/ai-tools.md).
 
+### System monitor
+
+- One column per logical processor, performance cores and efficiency cores in their own colors, each with a tick for its current frequency, and a column for the GPU beside them.
+- Memory in use and committed, download and upload speed over the physical network adapters, GPU usage and dedicated memory.
+- The busiest apps by CPU or memory, with the processes of one program folded into one row; the list does not reshuffle when two apps trade places by a point.
+- Three color schemes (Sea, Graphite, Warm). The system is read only while the page is open, so it costs nothing in the background.
+
+The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT License), a system monitor for macOS.
+
 ### Music
 
 <img src="docs/en-US/images/music.png" width="63%" alt="Music page: cover, title, lyrics, progress bar and playback controls">
@@ -124,3 +133,5 @@ You are welcome to report problems, suggest features or ask for more tools and p
 ## License
 
 BrimDeck is licensed under the [Apache License 2.0](LICENSE). Third-party licenses are listed in [ThirdPartyNotices.txt](src/BrimDeck/ThirdPartyNotices.txt).
+
+The system monitor page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq, licensed under the MIT License; thanks to its author.

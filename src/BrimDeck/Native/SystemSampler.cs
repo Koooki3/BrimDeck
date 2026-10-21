@@ -1,0 +1,565 @@
+﻿using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows.Threading;
+using BrimDeck.Core;
+
+namespace BrimDeck.Native;
+
+// Reads the system for the monitor page on a thread of its own, only while a panel shows the page and for a short while
+// after, so the page costs nothing while it is not looked at. The structure follows ftop's SystemSampler by Nongfsq
+// (https://github.com/Nongfsq/ftop, MIT License; see ThirdPartyNotices.txt): one provider per module keeps the counters
+// it needs for deltas and returns a Reading; nothing here throws; listing processes, the costliest reading, runs every
+// other tick. The readings themselves are the Windows ones Task Manager shows.
+internal sealed class SystemSampler : IDisposable
+{
+    // Reopening the page within this time finds the sampler still running and the readings current.
+    private static readonly TimeSpan Linger = TimeSpan.FromSeconds(10);
+    // After a pause the counters are read once and again after this short window, so the page has figures almost at once.
+    private const int PrimeMilliseconds = 300;
+    private readonly Dispatcher _dispatcher;
+    private readonly DispatcherTimer _linger;
+    private readonly AutoResetEvent _wake = new(false);
+    private Thread? _thread;
+    private volatile bool _wanted, _disposed;
+    private volatile int _intervalMilliseconds = 1000;
+    // The providers belong to the sampling thread, which creates them: adding the performance counters can take tens of
+    // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread.
+    private PdhQuery? _pdh;
+    private CpuProvider? _cpu;
+    private GpuProvider? _gpu;
+    private readonly NetworkProvider _network = new();
+    private readonly ProcessProvider _processes = new();
+    private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
+    // Listing processes, the costliest reading, runs about every two seconds whatever the interval; a two-second window
+    // also steadies the per-process figures.
+    private const double ProcessSeconds = 1.5;
+    private double _processesAt = double.NegativeInfinity;
+
+    public SystemSampler(Dispatcher dispatcher)
+    {
+        _dispatcher = dispatcher;
+        _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = Linger };
+        // Once paused the readings grow old, so they are dropped: a page opened later shows dashes until new ones arrive
+        // instead of old figures as if they were current.
+        _linger.Tick += (_, _) => { _linger.Stop(); _wanted = false; Latest = null; };
+    }
+
+    // The newest readings while the sampler runs; null once it has paused. Raised on the UI thread.
+    public MonitorSnapshot? Latest { get; private set; }
+    public event Action<MonitorSnapshot>? Updated;
+    // While set, rows already in the process lists keep their rank (the pointer is over a list).
+    public bool HoldProcesses { get => _processes.Hold; set => _processes.Hold = value; }
+
+    // Called on the UI thread whenever a panel opens or closes the page.
+    public void SetDemand(bool wanted, int intervalSeconds)
+    {
+        if (_disposed) return;
+        _intervalMilliseconds = Math.Clamp(intervalSeconds, 1, 2) * 1000;
+        if (!wanted) { if (_wanted && !_linger.IsEnabled) _linger.Start(); return; }
+        _linger.Stop();
+        if (_wanted) return;
+        _wanted = true;
+        if (_thread is null)
+        {
+            _thread = new Thread(Run) { IsBackground = true, Name = "BrimDeck system monitor", Priority = ThreadPriority.BelowNormal };
+            // The shell's icon lookup (ProcessIcons) needs a single-threaded apartment.
+            _thread.SetApartmentState(ApartmentState.STA);
+            _thread.Start();
+        }
+        else _wake.Set();
+    }
+
+    private void Run()
+    {
+        // Without performance counters (the library is missing or broken) the processor falls back to the kernel's times
+        // and the GPU reads as unavailable; nothing here may end the process.
+        try { _pdh = new PdhQuery(); }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { Debug.WriteLine(ex); }
+        _cpu = new CpuProvider(_pdh);
+        _gpu = new GpuProvider(_pdh);
+        bool primed = false, first = false;
+        while (!_disposed)
+        {
+            try
+            {
+                if (!_wanted) { primed = false; _wake.WaitOne(); continue; }
+                if (!primed)
+                {
+                    // The counters are read once to start the deltas; the processes again on the first reading, so their
+                    // figures cover the short window and not the whole pause.
+                    Collect(listProcesses: true);
+                    primed = true; first = true;
+                    _wake.WaitOne(PrimeMilliseconds);
+                    continue;
+                }
+                var snapshot = Collect(listProcesses: first);
+                first = false;
+                if (_disposed) break;
+                // A reading taken just as the sampler paused would bring back figures that then grow old.
+                _dispatcher.BeginInvoke(DispatcherPriority.Background, () => { if (_disposed || !_wanted) return; Latest = snapshot; Updated?.Invoke(snapshot); });
+                _wake.WaitOne(_intervalMilliseconds);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // A reading that fails in an unexpected way is skipped; the page keeps its last figures.
+                Debug.WriteLine(ex);
+                _wake.WaitOne(_intervalMilliseconds);
+            }
+        }
+    }
+
+    private MonitorSnapshot Collect(bool listProcesses)
+    {
+        double now = Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+        bool pdh = _pdh?.Collect() == true;
+        if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
+        {
+            _lastProcesses = _processes.Sample(now); _processesAt = now;
+        }
+        return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, _cpu!.Sample(pdh), MemoryProvider.Sample(), _network.Sample(now),
+            _gpu!.Sample(pdh), _lastProcesses);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true; _wanted = false; _linger.Stop();
+        _wake.Set();
+        // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
+        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _processes.Dispose(); _network.Dispose(); _wake.Dispose(); }
+    }
+}
+
+// Why a reading is missing, worded in the interface language when the reading is taken.
+internal static class Why
+{
+    public static string Waiting => Loc.T("等待第二次读数", "waiting for a second reading");
+    public static string NoCounters => Loc.T("系统性能计数器不可用", "the system's performance counters are unavailable");
+    public static string NoFrequency => Loc.T("处理器未报告频率", "the processor reports no frequency");
+    public static string NoMemory => Loc.T("无法读取内存状态", "the memory status could not be read");
+    public static string NoNetwork => Loc.T("无法读取网卡", "the network adapters could not be read");
+    public static string NoAdapter => Loc.T("未找到物理网卡", "no physical network adapter was found");
+    public static string NoGpu => Loc.T("显卡驱动未提供 GPU 计数器", "the graphics driver provides no GPU counters");
+    public static string NoGpuMemory => Loc.T("显卡驱动未报告显存占用", "the graphics driver reports no memory in use");
+    public static string NoProcesses => Loc.T("无法读取进程列表", "the process list could not be read");
+}
+
+// Per logical processor: usage, and the current frequency against the highest seen so far. Usage is the processor
+// utility Task Manager shows on Windows 10 and 11 (busy time scaled by the frequency, capped at 100 %); without
+// performance counters it falls back to busy time from the kernel.
+internal sealed class CpuProvider
+{
+    private const string UtilityPath = @"\Processor Information(*)\% Processor Utility";
+    private const string PerformancePath = @"\Processor Information(*)\% Processor Performance";
+    private const string BasePath = @"\Processor Information(*)\Processor Frequency";
+    private readonly PdhQuery? _pdh;
+    private readonly bool _utility, _frequency;
+    // Whether the utility counter gave readings last time; until it does, or once it stops, the kernel's times stand in.
+    private bool _utilityReads;
+    private readonly Dictionary<(int Group, int Number), (int Group, CoreTier Tier)> _kinds = CpuTopology.Read();
+    private readonly Dictionary<int, double> _highest = [];
+    private (long Idle, long Kernel, long User)[] _previousTimes = [];
+
+    public CpuProvider(PdhQuery? pdh)
+    {
+        _pdh = pdh;
+        _utility = pdh?.Add(UtilityPath) == true;
+        _frequency = pdh?.Add(PerformancePath) == true & pdh?.Add(BasePath) == true;
+    }
+
+    public Reading<CpuSample> Sample(bool pdhCollected)
+    {
+        // The kernel's times are only the fallback; while the utility counter gives readings they are not read at all.
+        var times = _utilityReads ? null : KernelTimes();
+        var timeUsage = new Dictionary<int, double>();
+        if (times is not null)
+        {
+            if (_previousTimes.Length == times.Length)
+                for (int i = 0; i < times.Length; i++) if (MonitorMetrics.Usage(_previousTimes[i], times[i]) is { } usage) timeUsage[i] = usage;
+            _previousTimes = times;
+        }
+        var utility = pdhCollected && _utility ? Processors(_pdh!.Read(UtilityPath)) : [];
+        _utilityReads = utility.Count > 0;
+        IReadOnlyList<(string, double)> performanceValues = pdhCollected && _frequency ? _pdh!.Read(PerformancePath) : [];
+        IReadOnlyList<(string, double)> nominalValues = pdhCollected && _frequency ? _pdh!.Read(BasePath) : [];
+        var (performance, nominal) = (Processors(performanceValues), Processors(nominalValues));
+
+        // The processors in their logical order. The kernel's times cover the first processor group only, so the counters
+        // decide the list when they are there.
+        var processors = utility.Count > 0 ? utility.Keys.OrderBy(key => key).ToList()
+            : Enumerable.Range(0, times?.Length ?? 0).Select(index => (Group: 0, Number: index)).ToList();
+        if (processors.Count == 0 || utility.Count == 0 && timeUsage.Count == 0) return Reading<CpuSample>.Unavailable(Why.Waiting);
+        var counters = new Dictionary<int, int>();
+        var cores = new List<CoreSample>(processors.Count);
+        for (int logical = 0; logical < processors.Count; logical++)
+        {
+            var key = processors[logical];
+            var (group, tier) = _kinds.TryGetValue(key, out var kind) ? kind : (0, CoreTier.Unknown);
+            double usage = utility.TryGetValue(key, out var percent) ? Math.Clamp(percent / 100, 0, 1)
+                : timeUsage.TryGetValue(key.Number, out var busy) && key.Group == 0 ? busy : 0;
+            Reading<double> frequency = Reading<double>.Unavailable(_frequency ? Why.NoFrequency : Why.NoCounters);
+            double? top = null;
+            if (performance.TryGetValue(key, out var share) && nominal.TryGetValue(key, out var baseMhz) && baseMhz > 0)
+            {
+                double mhz = baseMhz * share / 100;
+                frequency = mhz;
+                // Turbo has no reported ceiling; the tick is drawn against the highest frequency this kind of core has reached.
+                _highest[group] = Math.Max(_highest.GetValueOrDefault(group, baseMhz), mhz);
+                top = _highest[group];
+            }
+            int number = counters[group] = counters.GetValueOrDefault(group) + 1;
+            cores.Add(new CoreSample(logical, group, tier, number, usage, frequency, top));
+        }
+        cores.Sort((a, b) => a.Group != b.Group ? a.Group.CompareTo(b.Group) : a.Id.CompareTo(b.Id));
+        var overall = Total(performanceValues) is { } p && Total(nominalValues) is { } n && n > 0 ? Reading<double>.Of(n * p / 100) : Reading<double>.Unavailable(_frequency ? Why.NoFrequency : Why.NoCounters);
+        return new CpuSample(cores, overall);
+    }
+
+    // "0,3" is processor 3 of group 0; "_Total" and "0,_Total" are sums.
+    private static Dictionary<(int Group, int Number), double> Processors(IReadOnlyList<(string Instance, double Value)> values)
+    {
+        var result = new Dictionary<(int, int), double>();
+        foreach (var (instance, value) in values)
+        {
+            int comma = instance.IndexOf(',');
+            if (comma > 0 && int.TryParse(instance.AsSpan(0, comma), out int group) && int.TryParse(instance.AsSpan(comma + 1), out int number))
+                result[(group, number)] = value;
+        }
+        return result;
+    }
+    private static double? Total(IReadOnlyList<(string Instance, double Value)> values)
+        => values.Where(value => value.Instance == "_Total").Select(value => (double?)value.Value).FirstOrDefault();
+
+    // Idle, kernel and user time of each processor of the current group.
+    private static (long, long, long)[]? KernelTimes()
+    {
+        int count = Math.Min(Environment.ProcessorCount, 64);
+        const int Entry = 48;
+        var buffer = Marshal.AllocHGlobal(count * Entry);
+        try
+        {
+            if (NtQuerySystemInformation(8, buffer, count * Entry, out int length) != 0) return null;
+            var times = new (long, long, long)[Math.Min(count, length / Entry)];
+            for (int i = 0; i < times.Length; i++)
+                times[i] = (Marshal.ReadInt64(buffer, i * Entry), Marshal.ReadInt64(buffer, i * Entry + 8), Marshal.ReadInt64(buffer, i * Entry + 16));
+            return times;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+    [DllImport("ntdll.dll")] private static extern int NtQuerySystemInformation(int informationClass, IntPtr buffer, int length, out int returnLength);
+}
+
+// The kind of each logical processor from its efficiency class: a higher class is a faster core. Group 0 holds the
+// fastest kind, as on the page; with one class every core is Unknown.
+internal static class CpuTopology
+{
+    public static Dictionary<(int Group, int Number), (int Group, CoreTier Tier)> Read()
+    {
+        var classes = new Dictionary<(int, int), int>();
+        try
+        {
+            GetSystemCpuSetInformation(IntPtr.Zero, 0, out uint length, IntPtr.Zero, 0);
+            if (length == 0) return [];
+            var buffer = Marshal.AllocHGlobal((int)length);
+            try
+            {
+                if (!GetSystemCpuSetInformation(buffer, length, out length, IntPtr.Zero, 0)) return [];
+                for (int offset = 0; offset + 20 <= length;)
+                {
+                    int size = Marshal.ReadInt32(buffer, offset);
+                    if (size <= 0) break;
+                    // SYSTEM_CPU_SET_INFORMATION: Size, Type, then CpuSet { Id, Group (WORD), LogicalProcessorIndex, CoreIndex,
+                    // LastLevelCacheIndex, NumaNodeIndex, EfficiencyClass, ... }.
+                    if (Marshal.ReadInt32(buffer, offset + 4) == 0)
+                        classes[(Marshal.ReadInt16(buffer, offset + 12), Marshal.ReadByte(buffer, offset + 14))] = Marshal.ReadByte(buffer, offset + 18);
+                    offset += size;
+                }
+            }
+            finally { Marshal.FreeHGlobal(buffer); }
+        }
+        // Without the topology every core is drawn as one kind; it is never worth failing the page for.
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Debug.WriteLine(ex); return []; }
+        var ranks = classes.Values.Distinct().OrderByDescending(value => value).ToList();
+        return classes.ToDictionary(pair => pair.Key, pair =>
+        {
+            int group = ranks.IndexOf(pair.Value);
+            var tier = ranks.Count < 2 ? CoreTier.Unknown : group == 0 ? CoreTier.Performance : group == ranks.Count - 1 ? CoreTier.Efficiency : CoreTier.Unknown;
+            return (group, tier);
+        });
+    }
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetSystemCpuSetInformation(IntPtr information, uint bufferLength, out uint returnedLength, IntPtr process, uint flags);
+}
+
+internal static class MemoryProvider
+{
+    public static Reading<MemorySample> Sample()
+    {
+        var status = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
+        if (!GlobalMemoryStatusEx(ref status)) return Reading<MemorySample>.Unavailable(Why.NoMemory);
+        // TotalPageFile is the commit limit: physical memory plus the page files.
+        return new MemorySample(status.TotalPhys, status.TotalPhys - Math.Min(status.TotalPhys, status.AvailPhys),
+            status.TotalPageFile - Math.Min(status.TotalPageFile, status.AvailPageFile), status.TotalPageFile);
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryStatus
+    {
+        public uint Length, MemoryLoad;
+        public ulong TotalPhys, AvailPhys, TotalPageFile, AvailPageFile, TotalVirtual, AvailVirtual, AvailExtendedVirtual;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalMemoryStatusEx(ref MemoryStatus buffer);
+}
+
+// Download and upload over the physical adapters. Virtual adapters (Hyper-V, VPN, loopback) and filter drivers are left out:
+// their traffic is already counted on the adapter that carries it. Each adapter is followed on its own, so one that comes or
+// goes changes only its own share.
+internal sealed class NetworkProvider : IDisposable
+{
+    // Listing every interface costs about 10 ms with the many filter and virtual interfaces Windows keeps, so the list of
+    // physical adapters is taken now and then and each tick reads only those.
+    private const int Relist = 30;
+    private Dictionary<ulong, (ulong Received, ulong Sent)> _previous = [];
+    private List<ulong> _adapters = [];
+    private int _sinceList = Relist;
+    private double? _time;
+    private readonly IntPtr _row = Marshal.AllocHGlobal(RowSize);
+
+    public Reading<NetworkSample> Sample(double now)
+    {
+        var current = _sinceList++ >= Relist ? List() : Read();
+        if (current is null) return Reading<NetworkSample>.Unavailable(Why.NoNetwork);
+        // No physical adapter is not the same as no traffic.
+        if (current.Count == 0) { _previous = []; _time = null; return Reading<NetworkSample>.Unavailable(Why.NoAdapter); }
+        var previous = _previous; var then = _time;
+        _previous = current; _time = now;
+        if (then is not { } start || now - start <= 0) return Reading<NetworkSample>.Unavailable(Why.Waiting);
+        double seconds = now - start, down = 0, up = 0;
+        foreach (var (luid, (received, sent)) in current)
+        {
+            if (!previous.TryGetValue(luid, out var before)) continue;
+            down += MonitorMetrics.Rate(before.Received, received, seconds) ?? 0;
+            up += MonitorMetrics.Rate(before.Sent, sent, seconds) ?? 0;
+        }
+        return new NetworkSample(down, up);
+    }
+
+    // Every interface, keeping the physical adapters and their counters.
+    private Dictionary<ulong, (ulong, ulong)>? List()
+    {
+        if (GetIfTable2(out var table) != 0) return null;
+        var current = new Dictionary<ulong, (ulong, ulong)>();
+        try
+        {
+            int count = Marshal.ReadInt32(table);
+            for (int i = 0; i < count; i++)
+            {
+                var row = table + 8 + i * RowSize;
+                if (!Physical(row)) continue;
+                current[(ulong)Marshal.ReadInt64(row, 0)] = Counters(row);
+            }
+        }
+        finally { FreeMibTable(table); }
+        _adapters = [.. current.Keys]; _sinceList = 0;
+        return current;
+    }
+
+    // The counters of the adapters found by the last listing. An adapter that went away or changed lists them again.
+    private Dictionary<ulong, (ulong, ulong)>? Read()
+    {
+        var current = new Dictionary<ulong, (ulong, ulong)>(_adapters.Count);
+        foreach (var luid in _adapters)
+        {
+            // GetIfEntry2 finds the row by its LUID when the index is zero.
+            Marshal.WriteInt64(_row, 0, (long)luid); Marshal.WriteInt32(_row, 8, 0);
+            if (GetIfEntry2(_row) != 0 || !Physical(_row)) return List();
+            current[luid] = Counters(_row);
+        }
+        return current;
+    }
+
+    // HardwareInterface is bit 0 of the flags, FilterInterface bit 1; type 24 is the software loopback.
+    private static bool Physical(IntPtr row)
+    {
+        byte flags = Marshal.ReadByte(row, 1152);
+        return (flags & 1) != 0 && (flags & 2) == 0 && Marshal.ReadInt32(row, 1128) != 24;
+    }
+    private static (ulong, ulong) Counters(IntPtr row) => ((ulong)Marshal.ReadInt64(row, 1208), (ulong)Marshal.ReadInt64(row, 1280));
+
+    public void Dispose() => Marshal.FreeHGlobal(_row);
+
+    // MIB_IF_ROW2 on 64-bit Windows: InterfaceLuid at 0, Type at 1128, the status flags at 1152, InOctets at 1208 and
+    // OutOctets at 1280. The table's rows start 8 bytes in, after NumEntries and its padding.
+    private const int RowSize = 1352;
+    [DllImport("iphlpapi.dll")] private static extern int GetIfTable2(out IntPtr table);
+    [DllImport("iphlpapi.dll")] private static extern int GetIfEntry2(IntPtr row);
+    [DllImport("iphlpapi.dll")] private static extern void FreeMibTable(IntPtr memory);
+}
+
+// The graphics engines as Task Manager reads them: per adapter, the busiest engine type with every process's share of it
+// summed. The page shows the busiest adapter and its dedicated memory.
+internal sealed class GpuProvider
+{
+    private const string EnginePath = @"\GPU Engine(*)\Utilization Percentage";
+    private const string MemoryPath = @"\GPU Adapter Memory(*)\Dedicated Usage";
+    private readonly PdhQuery? _pdh;
+    private readonly bool _engines, _memory;
+
+    public GpuProvider(PdhQuery? pdh)
+    {
+        _pdh = pdh;
+        _engines = pdh?.Add(EnginePath) == true;
+        _memory = pdh?.Add(MemoryPath) == true;
+    }
+
+    public Reading<GpuSample> Sample(bool collected)
+    {
+        if (!_engines) return Reading<GpuSample>.Unavailable(_pdh?.IsOpen == true ? Why.NoGpu : Why.NoCounters);
+        if (!collected) return Reading<GpuSample>.Unavailable(Why.NoCounters);
+        var engines = _pdh!.Read(EnginePath);
+        if (engines.Count == 0) return Reading<GpuSample>.Unavailable(Why.Waiting);
+        // pid_1234_luid_0x00000000_0x0000C5E2_phys_0_eng_0_engtype_3D
+        var sums = new Dictionary<(string Adapter, string Type), double>();
+        foreach (var (instance, value) in engines)
+        {
+            if (Adapter(instance) is not { } adapter) continue;
+            int type = instance.IndexOf("engtype_", StringComparison.Ordinal);
+            var key = (adapter, type < 0 ? "" : instance[(type + 8)..]);
+            sums[key] = sums.GetValueOrDefault(key) + value;
+        }
+        if (sums.Count == 0) return Reading<GpuSample>.Unavailable(Why.NoGpu);
+        var busiest = sums.GroupBy(pair => pair.Key.Adapter).Select(group => (Adapter: group.Key, Usage: group.Max(pair => pair.Value)))
+            .OrderByDescending(adapter => adapter.Usage).First();
+        Reading<ulong> dedicated = Reading<ulong>.Unavailable(Why.NoGpuMemory);
+        if (_memory)
+        {
+            // The busiest adapter's memory, or the adapter using the most when its own is not listed.
+            var memory = _pdh!.Read(MemoryPath).Select(item => (Adapter: Adapter(item.Instance), item.Value)).Where(item => item.Adapter is not null).ToList();
+            var match = memory.Where(item => item.Adapter == busiest.Adapter).ToList();
+            double? bytes = match.Count > 0 ? match.Sum(item => item.Value) : memory.Count > 0 ? memory.Max(item => item.Value) : null;
+            if (bytes is { } used) dedicated = (ulong)Math.Max(0, used);
+        }
+        return new GpuSample(Math.Clamp(busiest.Usage / 100, 0, 1), dedicated);
+    }
+
+    // "luid_0x00000000_0x0000C5E2" from an engine or adapter instance name.
+    private static string? Adapter(string instance)
+    {
+        int start = instance.IndexOf("luid_", StringComparison.Ordinal);
+        if (start < 0) return null;
+        int end = instance.IndexOf("_phys", start, StringComparison.Ordinal);
+        return end < 0 ? instance[start..] : instance[start..end];
+    }
+}
+
+// Every process from one kernel call, which covers other users' processes without opening them. Processes of one
+// executable fold into one entry, the way ftop folds an app's helpers into the app. Names and icons are looked up only
+// for the entries that can be shown.
+internal sealed class ProcessProvider : IDisposable
+{
+    // Each list carries a few more rows than the page shows at most, so a row leaving at the bottom has one to replace it.
+    private const int Kept = MonitorLayout.MaximumRows + 2;
+    private const uint InfoLengthMismatch = 0xC0000004;
+    private IntPtr _buffer;
+    private int _capacity;
+    private Dictionary<int, (long Created, long Time)> _previous = [];
+    private double? _time;
+    private readonly SteadyRanking _cpuRanking = SteadyRanking.Cpu(), _memoryRanking = SteadyRanking.Memory();
+    // By executable name: its path and the name the page shows, once found.
+    private readonly Dictionary<string, (string? Path, string Name)> _apps = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<int> _unreadable = [];
+    public volatile bool Hold;
+
+    public Reading<ProcessList> Sample(double now)
+    {
+        if (!Read()) return Reading<ProcessList>.Unavailable(Why.NoProcesses);
+        var current = new Dictionary<int, (long, long)>();
+        var samples = new List<ProcessSample>(512);
+        var then = _time;
+        double seconds = then is { } start ? now - start : 0;
+        for (int offset = 0; ;)
+        {
+            var entry = _buffer + offset;
+            int pid = (int)Marshal.ReadIntPtr(entry, 80);
+            if (pid != 0)
+            {
+                long created = Marshal.ReadInt64(entry, 32), time = Marshal.ReadInt64(entry, 40) + Marshal.ReadInt64(entry, 48);
+                ulong memory = (ulong)Math.Max(0, Marshal.ReadInt64(entry, 8));
+                int length = Marshal.ReadInt16(entry, 56) & 0xFFFF;
+                var image = length > 0 ? Marshal.PtrToStringUni(Marshal.ReadIntPtr(entry, 64), length / 2) : pid == 4 ? "System" : "";
+                current[pid] = (created, time);
+                double cpu = _previous.TryGetValue(pid, out var before) && before.Created == created ? MonitorMetrics.CpuPercent(before.Time, time, seconds) ?? 0 : 0;
+                if (image.Length > 0) samples.Add(new ProcessSample(pid, image, cpu, memory, image.ToLowerInvariant()));
+            }
+            int next = Marshal.ReadInt32(entry);
+            if (next == 0) break;
+            offset += next;
+        }
+        _previous = current; _time = now;
+        _unreadable.IntersectWith(current.Keys);
+        if (then is null) return Reading<ProcessList>.Unavailable(Why.Waiting);
+        double elapsed = seconds;
+        var top = _cpuRanking.Arrange(ProcessSample.Folded(samples, ProcessSort.Cpu), sample => sample.CpuPercent, elapsed, Hold);
+        var byMemory = _memoryRanking.Arrange(ProcessSample.Folded(samples, ProcessSort.Memory), sample => sample.MemoryBytes, elapsed, Hold);
+        return new ProcessList(Named(top.Take(Kept)), Named(byMemory.Take(Kept)));
+    }
+
+    private List<ProcessSample> Named(IEnumerable<ProcessSample> entries) => entries.Select(entry =>
+    {
+        var (path, name) = App(entry);
+        // The icon is read here, off the UI thread: the shell can take long for a program on a slow or network drive.
+        ProcessIcons.Prepare(path);
+        return entry with { Name = name, Path = path };
+    }).ToList();
+
+    // The executable's description (as Task Manager names apps) or its file name without ".exe".
+    private (string? Path, string Name) App(ProcessSample entry)
+    {
+        string image = entry.AppKey ?? entry.Name;
+        if (_apps.TryGetValue(image, out var known) && known.Path is not null) return known;
+        string plain = entry.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? entry.Name[..^4] : entry.Name;
+        string? path = _unreadable.Contains(entry.Pid) ? null : ImagePath(entry.Pid);
+        if (path is null) { _unreadable.Add(entry.Pid); return _apps[image] = known.Name is { } kept ? (null, kept) : (null, plain); }
+        string name = plain;
+        try
+        {
+            var description = FileVersionInfo.GetVersionInfo(path).FileDescription?.Trim();
+            if (!string.IsNullOrEmpty(description) && description.Length <= 40) name = description;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
+        return _apps[image] = (path, name);
+    }
+
+    private static string? ImagePath(int pid)
+    {
+        var process = OpenProcess(0x1000, false, pid);
+        if (process == IntPtr.Zero) return null;
+        try
+        {
+            var text = new char[1024]; int size = text.Length;
+            return QueryFullProcessImageNameW(process, 0, text, ref size) ? new string(text, 0, size) : null;
+        }
+        finally { CloseHandle(process); }
+    }
+
+    private bool Read()
+    {
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            if (_buffer == IntPtr.Zero) { _capacity = 1 << 20; _buffer = Marshal.AllocHGlobal(_capacity); }
+            uint status = (uint)NtQuerySystemInformation(5, _buffer, _capacity, out int needed);
+            if (status == 0) return true;
+            if (status != InfoLengthMismatch) return false;
+            // Processes can start between the calls; leave room for more.
+            Marshal.FreeHGlobal(_buffer);
+            _capacity = Math.Max(_capacity * 2, needed + (256 << 10)); _buffer = Marshal.AllocHGlobal(_capacity);
+        }
+        return false;
+    }
+
+    public void Dispose() { if (_buffer != IntPtr.Zero) { Marshal.FreeHGlobal(_buffer); _buffer = IntPtr.Zero; } }
+
+    [DllImport("ntdll.dll")] private static extern int NtQuerySystemInformation(int informationClass, IntPtr buffer, int length, out int returnLength);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool QueryFullProcessImageNameW(IntPtr process, int flags, char[] name, ref int size);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+}

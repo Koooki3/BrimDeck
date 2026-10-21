@@ -35,6 +35,10 @@ public partial class App : Application
     internal event Action? MediaChanged;
     internal LyricsService Lyrics { get; } = new();
     private readonly HashSet<MainWindow> _presentingMedia = [];
+    // The system monitor page's readings, shared by every panel; created when a panel first shows the page.
+    internal SystemSampler? Monitor { get; private set; }
+    internal event Action<MonitorSnapshot>? MonitorUpdated;
+    private readonly HashSet<MainWindow> _presentingMonitor = [];
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
 
@@ -209,6 +213,14 @@ public partial class App : Application
         if (active) _presentingMedia.Add(deck); else _presentingMedia.Remove(deck);
         Media?.SetPresentationActive(_presentingMedia.Count > 0);
     }
+    // The system is read while any panel shows the monitor page open, and briefly after (see SystemSampler).
+    internal void PresentMonitor(MainWindow deck, bool active)
+    {
+        if (active) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
+        if (Exiting || Monitor is null && !active) return;
+        if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
+        Monitor.SetDemand(_presentingMonitor.Count > 0, Settings.MonitorInterval);
+    }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
     public void FlushSettings()
@@ -226,7 +238,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); StopBackgroundUpdates(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

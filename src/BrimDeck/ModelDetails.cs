@@ -38,7 +38,7 @@ public partial class MainWindow
 
     internal void OpenModelDetails(ProviderId provider, int days)
     {
-        if (IsMusicPage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
+        if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
         _modelApps.Clear(); _modelApps.Add(provider);
         _knownModelApps.Clear(); _knownModelApps.UnionWith(Settings.StatisticsProviders);
         _customRange = null; _days = days; _details = true;

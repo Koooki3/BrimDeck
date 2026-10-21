@@ -90,6 +90,7 @@ public partial class MainWindow : Window
         }) { Interval = TimeSpan.FromSeconds(1) };
         InitializeComponent();
         InitializeMusic();
+        InitializeMonitor();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
@@ -159,15 +160,14 @@ public partial class MainWindow : Window
         ApplyMusicSettings();
         var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
         UpdateCollapsedGeometry(bounds, work, scale);
-        double usageWidth = Math.Max(240, Math.Min(Math.Max(Settings.Width, Settings.MinimumWidth), work.Width / scale - 24));
-        double musicWidth = Math.Max(240, Math.Min(Settings.MusicWidth, work.Width / scale - 24));
-        _pageWidth = IsMusicPage ? musicWidth : usageWidth; _usageWidth = usageWidth;
-        // Keep the layered HWND large enough for either enabled page. Resizing it in separate
+        double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
+        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
+        // Keep the layered HWND large enough for every shown page. Resizing it in separate
         // width/height/position steps presents intermediate surfaces; only Island should animate.
-        bool bothPages = Settings.UsagePage && Settings.MusicPage;
+        var largest = DeckPages.Largest(Settings);
         // The window also holds the collapsed surface at any width; Place moves it so that the island lies inside it.
-        Width = Math.Max(bothPages ? Math.Max(usageWidth, musicWidth) : _pageWidth, Collapsed.Surface.Width);
-        double hostHeight = bothPages ? Math.Max(Settings.Height, Settings.MusicHeight) : IsMusicPage ? Settings.MusicHeight : Settings.Height;
+        Width = Math.Max(Fit(largest.Width), Collapsed.Surface.Width);
+        double hostHeight = largest.Height;
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
         // just above a lowered capsule; see CollapsedGeometry.Panel), so the window reaches the panel's bottom; it always holds the collapsed surface and its shadow, and never passes the
         // bottom of the monitor. Its transparent parts let clicks through.
@@ -293,6 +293,7 @@ public partial class MainWindow : Window
     private void ApplyLanguage()
     {
         System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
+        System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
@@ -386,7 +387,7 @@ public partial class MainWindow : Window
         var shape = Collapsed;
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
-        double wantedHeight = IsMusicPage ? Settings.MusicHeight : Settings.Height;
+        double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
         var panel = PanelFor(wantedHeight);
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);
@@ -483,6 +484,7 @@ public partial class MainWindow : Window
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
         else RenderSyncButton();
         UpdateMusicTimer();
+        UpdateMonitorDemand();
     }
     private static T Timed<T>(T animation, int duration, Track track) where T : AnimationTimeline
     {

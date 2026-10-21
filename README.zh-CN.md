@@ -73,6 +73,15 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 可自定义配额提供商，并分别设置各列的配额与用量统计来源，详见[支持的工具](docs/zh-CN/ai-tools.md)。
 
+### 系统监控
+
+- 每个逻辑处理器一根柱，性能核与能效核分色显示，柱上刻度表示当前频率；旁边一根柱显示 GPU。
+- 内存占用与已提交内存、物理网卡的下载与上传速度、GPU 占用与专用显存。
+- 按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行；两个应用只差一点时列表不会来回跳动。
+- 三套配色（海洋、石墨、暖色）。只在页面打开时读取系统数据，后台不占用资源。
+
+本页参考并改编自 Nongfsq 的 macOS 系统监控 [ftop](https://github.com/Nongfsq/ftop)（MIT 许可证）。
+
 ### 音乐
 
 <img src="docs/zh-CN/images/music.png" width="63%" alt="音乐页：封面、歌名、歌词、进度条和播放控制">
@@ -124,3 +133,5 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 ## 许可证
 
 BrimDeck 采用 [Apache License 2.0](LICENSE)。第三方组件的许可证见 [ThirdPartyNotices.txt](src/BrimDeck/ThirdPartyNotices.txt)。
+
+系统监控页参考并改编自 Nongfsq 的 [ftop](https://github.com/Nongfsq/ftop)，ftop 采用 MIT 许可证，感谢原作者。
