@@ -55,7 +55,7 @@ public partial class MainWindow
         bool paused = !_details && !Settings.UsageAutoSync;
         AIUsageButton.Visibility = Settings.UsagePage && !_details ? Visibility.Visible : Visibility.Collapsed;
         SyncButton.Visibility = Settings.UsagePage && IsUsagePage ? Visibility.Visible : Visibility.Collapsed;
-        SyncButton.Foreground = UI.Brush(paused ? "#F2777F" : UI.Secondary);
+        SyncButton.Foreground = UI.Brush(paused ? PanelTheme.Hex("danger") : UI.Secondary);
         SyncSlash.Visibility = paused ? Visibility.Visible : Visibility.Collapsed;
         var tip = _details ? Refreshing ? Loc.T("正在同步用量与模型消耗…", "Syncing usage and model consumption…") : Loc.T("立即同步用量与模型消耗", "Sync usage and model consumption now")
             : Settings.UsageAutoSync ? Loc.T("每 60 秒自动同步一次，点击关闭同步", "Syncs automatically every 60 seconds. Click to turn syncing off.")

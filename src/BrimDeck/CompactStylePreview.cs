@@ -21,7 +21,8 @@ internal static class CompactStylePreview
         };
         if (style == CompactStyle.Line)
         {
-            screen.Children.Add(new Border { Background = UI.Brush(dark ? "#18212B" : "#8E8E93"), Width = 29, Height = 2.5,
+            // The indicator in the panel theme's color.
+            screen.Children.Add(new Border { Background = UI.Brush(PanelTheme.Hex("indicator")), Width = 29, Height = 2.5,
                 CornerRadius = new CornerRadius(1.25), Margin = new Thickness(0, 4, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top });
         }
@@ -30,15 +31,17 @@ internal static class CompactStylePreview
             bool notch = style == CompactStyle.Notch;
             var island = new IslandBorder
             {
-                Background = Brushes.Black, MaterialOpacity = 1,
+                // The surface, its layers and the rim come from the panel theme, as on the real island.
+                Background = UI.Brush(PanelTheme.Hex("surface")), MaterialOpacity = 1,
                 Width = notch ? 100 : 82, Height = 14, ShoulderRadius = notch ? 6.7 : 0,
                 CornerRadius = notch ? new CornerRadius(0, 0, 5, 5) : new CornerRadius(7),
                 Margin = new Thickness(0, notch ? 0 : 4, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top
             };
+            PanelTheme.Dress(island);
             // The miniature shows the summary rings the real island carries when it is collapsed.
             var detail = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            foreach (var (color, percent) in new[] { ("#E5A385", 47d), ("#98DBB0", 23), ("#9CB9FF", 16), ("#D4D5DF", 37) })
+            foreach (var (color, percent) in new[] { (UI.ColorFor(ProviderId.Claude), 47d), (UI.ColorFor(ProviderId.Codex), 23), (UI.ColorFor(ProviderId.Antigravity), 16), (UI.ColorFor(ProviderId.Cursor), 37) })
             {
                 var ring = UI.Ring(percent, color, 4.6, .9); ring.Margin = new Thickness(0, 0, 3.4, 0); detail.Children.Add(ring);
             }

@@ -6,6 +6,9 @@ namespace BrimDeck;
 
 public sealed class IslandBorder : Border
 {
+    // A faint inner rim keeps the outline readable over wallpapers of the surface's own tone; the pen is twice the rim width
+    // because the layout clip removes the outer half of the stroke.
+    private static readonly Brush DefaultRim = CreateRim();
     public static readonly DependencyProperty ShoulderRadiusProperty = DependencyProperty.Register(
         nameof(ShoulderRadius), typeof(double), typeof(IslandBorder),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsArrange));
@@ -13,9 +16,18 @@ public sealed class IslandBorder : Border
         nameof(MaterialOpacity), typeof(double), typeof(IslandBorder),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender));
 
-    // The surface stays pure black. A faint inner rim keeps the outline readable over dark wallpapers;
-    // the pen is twice the rim width because the layout clip removes the outer half of the stroke.
-    private static readonly Pen Rim = CreateRim();
+    // The theme's layers over the base color: a gradient and a pattern (scan lines). Like the rim they fade with MaterialOpacity,
+    // so the indicator, which has neither, keeps its plain color.
+    public static readonly DependencyProperty GradientProperty = DependencyProperty.Register(
+        nameof(Gradient), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty PatternProperty = DependencyProperty.Register(
+        nameof(Pattern), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty RimBrushProperty = DependencyProperty.Register(
+        nameof(RimBrush), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(DefaultRim, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._rim = null));
+    public static readonly DependencyProperty RimWidthProperty = DependencyProperty.Register(
+        nameof(RimWidth), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._rim = null));
+
+    private Pen? _rim;
     private (Size Size, double Shoulder, CornerRadius Corners)? _outlineKey;
     private Geometry _outline = Geometry.Empty;
 
@@ -33,25 +45,37 @@ public sealed class IslandBorder : Border
         get => (double)GetValue(MaterialOpacityProperty);
         set => SetValue(MaterialOpacityProperty, value);
     }
+    public Brush? Gradient { get => (Brush?)GetValue(GradientProperty); set => SetValue(GradientProperty, value); }
+    public Brush? Pattern { get => (Brush?)GetValue(PatternProperty); set => SetValue(PatternProperty, value); }
+    public Brush RimBrush { get => (Brush)GetValue(RimBrushProperty); set => SetValue(RimBrushProperty, value); }
+    public double RimWidth { get => (double)GetValue(RimWidthProperty); set => SetValue(RimWidthProperty, value); }
 
     protected override void OnRender(DrawingContext drawingContext)
     {
         var outline = Outline();
         drawingContext.DrawGeometry(Background, null, outline);
         if (MaterialOpacity <= 0) return;
-        drawingContext.PushOpacity(Math.Clamp(MaterialOpacity, 0, 1));
-        drawingContext.DrawGeometry(null, Rim, outline);
-        drawingContext.Pop();
+        // Only a fading material needs the opacity layer; fully shown, the layers draw straight onto the surface.
+        bool fading = MaterialOpacity < 1;
+        if (fading) drawingContext.PushOpacity(Math.Clamp(MaterialOpacity, 0, 1));
+        if (Gradient is { } gradient) drawingContext.DrawGeometry(gradient, null, outline);
+        if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
+        if (RimWidth > 0)
+        {
+            if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); _rim.Freeze(); }
+            drawingContext.DrawGeometry(null, _rim, outline);
+        }
+        if (fading) drawingContext.Pop();
     }
 
     // The visible surface owns input; its decorative shadow is a separate, non-interactive sibling.
     protected override Geometry? GetLayoutClip(Size layoutSlotSize) => Outline();
 
-    private static Pen CreateRim()
+    private static Brush CreateRim()
     {
-        var pen = new Pen(new SolidColorBrush(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF)), 2);
-        pen.Freeze();
-        return pen;
+        var brush = new SolidColorBrush(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF));
+        brush.Freeze();
+        return brush;
     }
 
     private Geometry Outline()

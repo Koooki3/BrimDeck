@@ -48,7 +48,9 @@ public partial class MainWindow : Window
     // The window's left edge in DIPs from the monitor's left edge. The window follows the island, so the island and the open
     // panel are placed relative to this.
     private double _windowOffset;
-    internal static readonly Color IndicatorColor = Color.FromRgb(0x8E, 0x8E, 0x93);
+    // The panel theme generation this window's surface and cached content were built for; see ApplyTheme.
+    private int _themeGeneration = -1;
+    private double _themeDpi;
     private VirtualDesktopPresence? _virtualDesktops;
     private EscapeDismissal? _escapeDismissal;
     private bool _expanded, _refreshing, _preview, _refreshRequested, _pointerInside;
@@ -155,6 +157,7 @@ public partial class MainWindow : Window
     {
         bool wasVisible = IsVisible;
         ApplyLanguage();
+        ApplyTheme();
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
@@ -288,6 +291,27 @@ public partial class MainWindow : Window
         Compact.Height = Math.Max(0, 26 * Collapsed.Scale);
         ApplyCompactGeometry(Collapsed);
         LayoutCompactAlert(Collapsed, _alert is not null);
+    }
+    // Brings the surface, its layers, the shadow and every cached piece of content up to the current panel theme. XAML styles
+    // follow the theme by themselves (DynamicResource); what code built with the old colors is built again by the renders that
+    // ApplySettings runs next. Pop-ups are closed rather than repainted.
+    private void ApplyTheme()
+    {
+        double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
+        if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi) return;
+        // A new scale alone only redraws the scan lines, which are laid out in device pixels.
+        bool sameTheme = _themeGeneration == PanelTheme.Generation;
+        _themeGeneration = PanelTheme.Generation; _themeDpi = dpi;
+        if (sameTheme) { Island.Pattern = PanelTheme.Scanlines(dpiScale: dpi); return; }
+        Foreground = UI.Brush(UI.Primary);
+        PanelTheme.Dress(Island, dpiScale: dpi);
+        if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
+        MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
+        SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf(!_expanded && Collapsed.Style == CompactStyle.Line ? "indicator" : "surface"));
+        _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent);
+        _musicRenderKey = ""; _compactRendered = null; _alertRendered = null;
+        if (_detailPopup is { } popup) Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_detailPopup, popup)) popup.Close(); });
+        if (MediaSourceButton.ContextMenu?.IsOpen == true) Dispatcher.BeginInvoke(CloseSourceMenu);
     }
     // The toolbar's fixed buttons are declared in XAML; their names follow the interface language.
     private void ApplyLanguage()
@@ -478,8 +502,9 @@ public partial class MainWindow : Window
         Animate(IslandShadow, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
-        if (duration == 0) SetImmediate(_surface, SolidColorBrush.ColorProperty, indicator ? IndicatorColor : Colors.Black);
-        else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = indicator ? IndicatorColor : Colors.Black, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
+        var tone = PanelTheme.ColorOf(indicator ? "indicator" : "surface");
+        if (duration == 0) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }
         else RenderSyncButton();

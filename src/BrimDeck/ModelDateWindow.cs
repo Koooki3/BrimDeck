@@ -15,7 +15,7 @@ internal sealed class ModelDateWindow : Window
     private DateTime _start, _end, _month;
     private bool _editingEnd;
     private readonly StackPanel _body = new();
-    private readonly TextBlock _error = UI.Line("", 11, "#E78284");
+    private readonly TextBlock _error = UI.Line("", 11, PanelTheme.Hex("danger"));
     internal event Action<UsageDateRange>? Applied;
     internal event Action? Cancelled;
     internal UsageDateRange? SelectedRange => _start <= _end ? new(_start, _end) : null;
@@ -26,14 +26,14 @@ internal sealed class ModelDateWindow : Window
         Title = Loc.T("按时间", "By date"); Width = 246; SizeToContent = SizeToContent.Height; WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize; AllowsTransparency = true; Background = Brushes.Transparent; ShowInTaskbar = false; Topmost = true;
         FontFamily = UI.PanelFont;
-        Content = new Border { Child = _body, Background = UI.Brush("#1A1A1D"), BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(8) };
+        Content = new Border { Child = _body, Background = UI.Brush(PanelTheme.Hex("popup")), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(8) };
         Render();
     }
 
     private Button Control(string label, string name, Action click, bool selected = false)
     {
         var text = UI.Centered(label, 12, UI.Primary); text.ClearValue(TextBlock.ForegroundProperty);
-        var button = new Button { Content = text, Padding = new Thickness(4, 1, 4, 1), Foreground = UI.Brush(UI.Primary),
+        var button = new Button { Content = text, Padding = new Thickness(4, 1, 4, 1), Foreground = UI.Brush(selected ? PanelTheme.Hex("onAccent") : UI.Primary),
             Background = selected ? UI.Brush(UI.Accent) : Brushes.Transparent, BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(1),
             HorizontalContentAlignment = HorizontalAlignment.Center, MinWidth = 0, MinHeight = 24 };
         AutomationProperties.SetName(button, name); button.Click += (_, _) => click(); return button;
@@ -55,7 +55,7 @@ internal sealed class ModelDateWindow : Window
             Grid.SetRow(value, 1); content.Children.Add(value);
             var field = Control("", end ? Loc.T("选择结束日期", "Choose the end date") : Loc.T("选择开始日期", "Choose the start date"), () => { _editingEnd = end; _month = new(date.Year, date.Month, 1); Render(); });
             field.Content = content; field.Padding = new Thickness(7, 2, 7, 2); field.BorderBrush = UI.Brush(_editingEnd == end ? UI.Accent : UI.Outline);
-            field.Background = UI.Brush("#0F0F11"); field.FocusVisualStyle = (Style)FindResource("PanelOutsetKeyboardFocus");
+            field.Background = UI.Brush(PanelTheme.Hex("input")); field.FocusVisualStyle = (Style)FindResource("PanelOutsetKeyboardFocus");
             Grid.SetColumn(field, end ? 2 : 0); fields.Children.Add(field);
         }
         _body.Children.Add(fields);
@@ -76,8 +76,8 @@ internal sealed class ModelDateWindow : Window
             var day = _month.AddDays(i - first);
             var button = Control(day.Day.ToString(CultureInfo.InvariantCulture), day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), () => ChooseDate(day), day == _start || day == _end);
             button.Height = 24; button.Padding = new Thickness(0); button.IsEnabled = day <= DateTime.Today;
-            button.Foreground = UI.Brush(day.Month == _month.Month ? UI.Primary : UI.Tertiary);
-            if (day > _start && day < _end) button.Background = UI.Brush("#382B87FF");
+            if (day != _start && day != _end) button.Foreground = UI.Brush(day.Month == _month.Month ? UI.Primary : UI.Tertiary);
+            if (day > _start && day < _end) button.Background = UI.Brush(PanelTheme.Hex("rangeFill"));
             calendar.Children.Add(button);
         }
         _body.Children.Add(calendar);

@@ -84,7 +84,7 @@ public partial class MainWindow
         double nameWidth = Natural(name), usedWidth = Natural(used), resetWidth = reset is null ? 0 : Natural(reset);
         var layout = CompactAlertLayout.Calculate(width, scale, nameWidth, usedWidth, resetWidth);
         double row = Math.Max(layout.RingSize, layout.LineHeight);
-        var ring = UI.Ring(alert.Used, alert.Entry.Theme, layout.RingSize, layout.RingThickness);
+        var ring = UI.Ring(alert.Used, PanelTheme.AppTheme(alert.Entry), layout.RingSize, layout.RingThickness);
         if (layout.RingWidth > 0) CompactAlert.Children.Add(CompactRegion(ring, layout.RingWidth, layout.RingSize, layout.RingSize, row, RegionAnchor.Left, dpi));
         if (layout.NameWidth > 0) CompactAlert.Children.Add(CompactRegion(name, layout.NameWidth, Math.Min(nameWidth, name.MaxWidth), line, row, RegionAnchor.Left, dpi));
         if (layout.TextWidth > 0) CompactAlert.Children.Add(CompactRegion(used, layout.TextWidth, usedWidth, line, row, RegionAnchor.Left, dpi));
@@ -99,7 +99,7 @@ public partial class MainWindow
 
     // A region of the given width holding one element, centred vertically in the row. The element keeps its size and is
     // anchored to one side (after a leading gap, if any); a region narrower than that cuts the other side off.
-    // Text below the cut is set to ClearType again: the clip would otherwise turn it grayscale, and it lies over the opaque black surface.
+    // Text below the cut is set to ClearType again: the clip would otherwise turn it grayscale, and it lies over the opaque surface.
     private static FrameworkElement CompactRegion(FrameworkElement child, double width, double childWidth, double childHeight, double row, RegionAnchor anchor, double dpi, double leading = 0)
     {
         double w = SnapDown(width, dpi), cw = Math.Max(0, double.IsFinite(childWidth) ? childWidth : 0), ch = Math.Max(0, double.IsFinite(childHeight) ? childHeight : 0);

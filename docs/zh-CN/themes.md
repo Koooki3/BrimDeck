@@ -1,0 +1,131 @@
+# 面板主题制作指南
+
+BrimDeck 的刘海、胶囊、指示条、配额提示、展开面板及其弹出层都由“面板主题”着色。主题在 **设置 › 面板主题** 中选择，分三类：
+
+| 类别 | 主题 |
+| --- | --- |
+| 基础 | 跟随系统、深色（默认，即原有的纯黑外观）、浅色 |
+| 主题扩展 | One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl |
+| 自定义 | 赛博朋克：边缘行者（示例），以及主题文件夹中的主题文件 |
+
+在设置中选中一个主题时，各应用列的主题、预警、告警颜色会恢复为“默认”（即该主题的配色），时间也会切换为主题推荐的样式与配色；之后仍可在“配额与统计”和“收起外观”中单独修改，直到下次切换主题。
+
+主题扩展移植自开源的 VS Code 主题，配色按各自的 MIT 许可证使用：[One Dark Pro](https://github.com/Binaryify/OneDark-Pro)、[GitHub Theme](https://github.com/primer/github-vscode-theme)、[Dracula Official](https://github.com/dracula/visual-studio-code)、[Night Owl](https://github.com/sdras/night-owl-vscode-theme)。各项目的版权与许可声明随程序附在 `ThirdPartyNotices.txt` 中。Monokai Pro 是需要购买许可证的商业主题，没有收录。
+
+## 主题文件
+
+主题像 VS Code 的主题扩展一样，是一个 JSON 文件：
+
+- 主题文件夹：`%LOCALAPPDATA%\BrimDeck\themes`（设置页的“打开主题文件夹”）。
+- 文件夹中的每个 `*.json`，以及每个子文件夹中的 `theme.json`，都是一个主题。
+- 文件中可以写注释（`//`）和结尾逗号；不认识的属性会被忽略。
+- 每个主题都有一个**基础主题**（`base`，默认 `dark`），文件只需写出与基础主题不同的部分。
+
+最简单的主题只有几行：
+
+```json
+{
+  "id": "midnight-teal",
+  "name": "午夜青",
+  "base": "dark",
+  "colors": { "surface": "#04161A", "accent": "#2DD4BF", "clock": "#5EEAD4" }
+}
+```
+
+完整模板见 [`theme-template.json`](../../src/BrimDeck.Core/Templates/theme-template.json)：它列出了全部颜色项、应用颜色和效果，每一项都注明了用途和对比度下限。设置页的 **以当前主题新建** 会把当前主题的全部取值填进这个模板并打开它，保存后设置页会自动重新加载，面板随即更新。
+
+### 颜色项（colors）
+
+颜色写作 `#RRGGBB` 或 `#AARRGGBB`（AA 为不透明度）。括号中是对比度下限，按 WCAG 2 的算法计算。文字三级、`menuDetail`、`accent` 和 `danger` 要在面板底色（含渐变的每个色标）与弹出层底色上都达标；`liked`、`clock`、`equalizer` 只看面板底色；`onAccent` 看强调色，`indicatorProgress` 看指示条。另外，文字也会落在填充色上：`textPrimary` 在 `fillSelected`、`pressed`、`input`、`rangeFill`、`tooltip`、`bubble` 上，`textSecondary` 在 `fill`、`hover` 上，都需要 4.5:1。
+
+| 键 | 用途 |
+| --- | --- |
+| `surface` | 刘海、胶囊和展开面板的底色，总是不透明 |
+| `textPrimary` | 标题、数字（7:1） |
+| `textSecondary` | 标签（4.5:1） |
+| `textTertiary` | 重置时间、备注等辅助文字（3:1） |
+| `accent` / `onAccent` | 键盘焦点、选中的日期 / 其上的文字（3:1） |
+| `danger` | 错误与暂停同步（4.5:1） |
+| `liked` | 已喜欢的歌曲（3:1） |
+| `clock` | 时间颜色选“主题默认色”时的颜色（4.5:1） |
+| `equalizer` | 律动条不跟随封面时的颜色（3:1） |
+| `hairline` `track` `ringTrack` `fill` `fillSelected` `hover` `pressed` `outline` | 分隔线、进度底轨、分段控件、悬停与按下、描边 |
+| `popup` `popupBorder` `input` `rangeFill` | 菜单与弹出层，日期输入框和日期范围 |
+| `coverPlaceholder` `coverOutline` `scrollThumb` | 无封面占位、封面描边、滚动条 |
+| `rim` `shadow` | 表面内侧描线；收起时的阴影（亮色加零偏移即为辉光） |
+| `indicator` `indicatorProgress` | 指示条与其上的播放进度（2:1） |
+| `switchFill` `seekRail` `rowDivider` `rowHover` | 工具栏页面切换底色、播放进度底轨、模型明细的行分隔与悬停 |
+| `menuDetail` | 播放来源菜单中的歌名（3:1） |
+| `tooltip` `tooltipBorder` `bubble` `bubbleBorder` | 面板上的提示框、拖动进度时的时间气泡 |
+
+### 应用颜色（apps）
+
+配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
+
+### 时间（clock）
+
+主题推荐的时间样式与配色。在设置中选中主题时，收起形态的时间会切换为推荐值，之后仍可在“收起外观”中自行修改；各字段与颜色一样逐项继承：只写 `style` 时，颜色沿用基础主题的推荐。
+
+```json
+"clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
+```
+
+`style` 取 `minimal`、`stacked`、`digits`、`dots`、`segment`、`neon`、`serif`、`wide`、`condensed`；`color` 取 `default`（即上面的 `clock` 颜色）、`amber`、`cyan`、`pink`、`lime`、`custom`、`gradient`、`cover`。`palette` 给出本主题下“琥珀、青色、粉色、柠檬绿”四个色块的颜色，`gradients` 给出本主题提供的预设渐变（一到八组，每组正好三个颜色），二者都需在底色上达到 4.5:1。切换主题时，正在使用的预设渐变会换成新主题同一位置的那一组。`custom` 在 `color` 为 `custom` 时使用；`gradient` 必须正好三个颜色，在 `color` 为 `gradient` 时使用。浅色主题下霓虹与数码管的辉光会自动减弱，避免数字发虚。
+
+### 颜色选择器预设色（swatches）
+
+设置中颜色选择器下方的十二个色块。不写时，取本主题的应用颜色、预警告警色和时间颜色（去重，不足时用相邻颜色的中间色补齐）；深色主题保留原来的十二色。此项不继承。
+
+### 效果（effects）
+
+| 键 | 作用 | 范围 |
+| --- | --- | --- |
+| `surfaceGradient` | 从上到下叠在底色上的渐变，2 到 8 个颜色 | |
+| `rimGradient` | 从左到右的描线渐变，替代 `rim` | |
+| `rimWidth` | 描线宽度 | 0–3 |
+| `shadowBlur` `shadowDepth` `shadowOpacity` | 阴影的模糊、下移距离与不透明度 | 0–40、0–12、0–1 |
+| `scanlines` | 横向扫描线，以主要文字色按此不透明度绘制 | 0–0.12 |
+
+## 可读性保证
+
+主题只决定“好不好看”，不会让信息变得难以辨认：
+
+1. 每个带下限的颜色在应用前都会与底色、渐变的每个色标和弹出层比较对比度。
+2. 低于下限的颜色沿原有色相调亮或调暗（取需要改动更小的方向），只调到刚好达标；达标的颜色原样保留。半透明的颜色一旦需要调整，会按叠在底色上的效果改为不透明色。若背景有明有暗、任何亮度都无法全部达标，则采用最差情况最好的亮度（绝不比原色更差），并在设置页标明“无法全部达标”。
+3. 应用颜色、时间颜色、封面取色等用户在别处选择的颜色，也按当前主题的底色做同样的处理，所以浅色主题下浅色系的预警色、柠檬绿时间等仍然清晰。
+4. 设置页的“当前主题 › 可读性调整”会列出每一处调整；无法加载的主题文件会列出原因（JSON 错误、未知颜色项、ID 重复等），不会被选中。
+
+内置主题全部按原样通过这些规则（测试 `PanelThemeTests` 逐项检查）。
+
+## 设计流程
+
+制作一个主题可以按下面五步走，示例主题“赛博朋克：边缘行者”就是这样完成的。
+
+1. **收集参考**：截取作品或品牌的代表画面，记录场景的明暗、主色、点缀色与反复出现的图形元素。
+2. **提炼角色**：把颜色分到面板的角色上——底色（大面积、最暗或最亮）、文字三级、强调色、语义色（预警、告警、错误）、装饰（描线、阴影、渐变、纹理）。
+3. **先定底色与文字**：底色决定一切对比度；文字三级按 7 : 4.5 : 3 拉开。
+4. **再定点缀与应用色**：应用色彼此要能区分，并且在底色上不低于 3:1；预警与告警要符合直觉（黄、红）。
+5. **验证**：在设置页逐一查看收起、展开、提示与弹出层，确认“可读性调整”为空或可以接受；必要时回到第 3 步。
+
+## 示例：赛博朋克：边缘行者
+
+这是一个非官方的同人配色，只使用颜色，不包含作品的任何画面、标志或字体。
+
+**画风分析**。《赛博朋克：边缘行者》由 TRIGGER 制作，延续了 80 年代动画的复古未来感：大块平涂的赛璐璐色、高饱和霓虹，夜之城的夜空偏紫黑，街道被品红与青色招牌照亮；《赛博朋克 2077》标志性的黄色贯穿片头和界面；角色上，露西的发色在青与粉之间渐变，丽贝卡是薄荷绿配粉色；画面中常见扫描线、色差错位和带切角的 HUD 线框，月亮是反复出现的意象。
+
+**角色分配**：
+
+| 来源 | 颜色 | 面板角色 |
+| --- | --- | --- |
+| 夜之城的紫黑夜空 | `#0A0613` → `#1C0B30` | 底色与自上而下的渐变 |
+| 月光 | `#F4F0FF` / `#C9BEEB` / `#8F84BD` | 三级文字（淡紫白） |
+| 青色霓虹、露西的发色 | `#00F0FF` | 强调色、焦点、分段控件与底轨的色调 |
+| 品红霓虹 | `#FF2A6D` | 收起时的辉光、已喜欢、指示条进度 |
+| 赛博朋克黄 | `#FCEE0A` | 时间（数码管样式，像 HUD 读数）、指示条、预警 |
+| 丽贝卡的薄荷绿 | `#3DFFB0` | Codex 列 |
+| 霓虹渐变 | 青 → 紫 → 品红 | 表面描线 |
+| CRT 屏幕 | 4% 扫描线 | 表面纹理 |
+
+**验证**：主要文字在两个渐变色标上的对比度都在 15:1 以上，辅助文字在 5:1 以上；黄色时间与预警在紫黑底上约 15:1；指示条的品红进度在黄色上约 3:1。全部规则一次通过，没有任何自动调整。
+
+完整文件见 [`cyberpunk-edgerunners.json`](../../src/BrimDeck.Core/Themes/cyberpunk-edgerunners.json)，可以作为自己主题的起点：在设置中选中它，再点“以当前主题新建”。

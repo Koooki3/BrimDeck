@@ -90,8 +90,10 @@ public sealed class MusicSeekSlider : Slider
         BeginAnimation(BarHeightProperty, null); BarHeight = height;
         if (animate && fromHeight != height) BeginAnimation(BarHeightProperty, new DoubleAnimation(fromHeight, height, TimeSpan.FromMilliseconds(150))
         { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
-        static byte Lighten(byte value) => (byte)Math.Round(value + (255 - value) * .12);
-        var color = active ? Color.FromArgb(Accent.A, Lighten(Accent.R), Lighten(Accent.G), Lighten(Accent.B)) : Accent;
+        // On a dark surface the hover color is lighter, on a light one darker, so hovering only ever adds contrast.
+        bool dark = PanelTheme.Current.IsDark;
+        byte Shift(byte value) => (byte)Math.Round(dark ? value + (255 - value) * .12 : value * .88);
+        var color = active ? Color.FromArgb(Accent.A, Shift(Accent.R), Shift(Accent.G), Shift(Accent.B)) : Accent;
         var from = _fill.Color; _fill.BeginAnimation(SolidColorBrush.ColorProperty, null); _fill.Color = color;
         if (animate && from != color) _fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(from, color, TimeSpan.FromMilliseconds(150)) { FillBehavior = FillBehavior.Stop });
         Cursor = IsEnabled ? Cursors.Hand : Cursors.Arrow;

@@ -34,7 +34,9 @@ public partial class MainWindow
     private IReadOnlyList<MediaTrack> _mediaTracks = [];
     private string? _pinnedMedia;
     private BitmapSource? _mediaCover;
-    private Brush _musicAccent = UI.Brush(UI.Secondary);
+    private Brush _musicAccent = MusicVisuals.Accent(null);
+    // The color the cover gave, if it gave one; _musicAccent is the theme's equalizer color otherwise.
+    private Color? _coverAccent;
     private Lyrics _lyrics = Lyrics.Empty;
     private CancellationTokenSource? _lyricsRequest;
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
@@ -181,7 +183,7 @@ public partial class MainWindow
         _mediaTrack = track; _mediaTracks = tracks;
         _seekPreview.Observe(track, DateTimeOffset.UtcNow);
         bool coverChanged = _mediaCover != cover;
-        if (coverChanged) { _mediaCover = cover; _musicAccent = MusicVisuals.Accent(_mediaCover); }
+        if (coverChanged) { _mediaCover = cover; _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent); }
         var now = DateTimeOffset.UtcNow;
         if (changedSong)
         {
@@ -238,8 +240,8 @@ public partial class MainWindow
         _media?.Pin(_pinnedMedia);
         RenderPageSwitch();
     }
-    // NetEase Cloud Music's own red for a liked song.
-    private const string LikedColor = "#EC4141";
+    // The heart of a liked song, in the theme's color for it (NetEase Cloud Music's red in the dark theme).
+    private static string LikedColor => PanelTheme.Hex("liked");
     internal static string FullControlEntryLabel => Loc.T("网易云音乐 · 完整控制", "NetEase Cloud Music · Full control");
     // Alone in the toolbar the entry has at most 150 DIP; the full English name would lose "Full control" to the ellipsis.
     internal static string FullControlButtonLabel => Loc.T("网易云音乐 · 完整控制", "NetEase full control");
@@ -276,7 +278,7 @@ public partial class MainWindow
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var source = new TextBlock { Text = Loc.Label(track.Source), FontSize = 12.5, Foreground = UI.Brush(UI.Primary), MaxWidth = 100,
                 TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, 6, 0) };
-            var title = new MusicMarquee { Text = track.Title, FontSize = 12, Foreground = UI.Brush("#80EBEBF5"),
+            var title = new MusicMarquee { Text = track.Title, FontSize = 12, Foreground = UI.Brush(PanelTheme.Hex("menuDetail")),
                 CenterWhenFits = false, IsHitTestVisible = false, Height = 28, Margin = new Thickness(0, 0, 12, 0) };
             var status = new TextBlock { Text = state, FontSize = 11, Foreground = UI.Brush(UI.Tertiary), TextWrapping = TextWrapping.NoWrap };
             foreach (var text in new FrameworkElement[] { source, title, status }) text.VerticalAlignment = VerticalAlignment.Center;
@@ -395,7 +397,7 @@ public partial class MainWindow
             var lyrics = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             // All lines share one size; only the brightness marks the current one.
             if (lyricLines == 3) { _lyricPrevious = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricPrevious); }
-            _lyricCurrent = new MusicMarquee { FontSize = c.Lyric, Height = c.LyricLine, CenterWhenFits = false, Backdrop = Colors.Black };
+            _lyricCurrent = new MusicMarquee { FontSize = c.Lyric, Height = c.LyricLine, CenterWhenFits = false, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
             lyrics.Children.Add(_lyricCurrent); UpdateLyricScrolling();
             if (lyricLines >= 2) { _lyricNext = UI.Fixed("", c.Lyric, c.LyricLine, UI.Tertiary); lyrics.Children.Add(_lyricNext); }
             lyrics.Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible; middle.Children.Add(lyrics);
@@ -406,7 +408,7 @@ public partial class MainWindow
             text.TextWrapping = TextWrapping.Wrap; text.LineHeight = c.LyricLine; text.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
             var lyrics = new ScrollViewer { Content = text, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 VerticalAlignment = VerticalAlignment.Center, Height = lyricLines * c.LyricLine, CanContentScroll = false, Visibility = layout.ShowMessage ? Visibility.Collapsed : Visibility.Visible };
-            // The viewport clip would turn the lyrics grayscale; they lie over the island's opaque black surface.
+            // The viewport clip would turn the lyrics grayscale; they lie over the island's opaque surface.
             RenderOptions.SetClearTypeHint(text, ClearTypeHint.Enabled);
             AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
         }
@@ -465,7 +467,7 @@ public partial class MainWindow
                 slot = (created, ""); controls.Children.Add(created);
             }
             var button = slot.Button;
-            string iconKey = $"{glyph}|{size}|{mode}|{single}|{color}";
+            string iconKey = $"{glyph}|{size}|{mode}|{single}|{color}|{PanelTheme.Generation}";
             if (slot.Icon != iconKey)
             {
                 UIElement icon = MusicVisuals.Icon(glyph, size, UI.Brush(color ?? (mode ? UI.Secondary : UI.Primary)));
@@ -688,8 +690,8 @@ public partial class MainWindow
         if (track.IsQqMusic && _lyrics.Lines.Count == 0 && !_lyrics.Instrumental) return ("", track.CurrentLyric ?? "", "");
         return _lyrics.At(track, DateTimeOffset.UtcNow);
     }
-    // The color taken from the playing song's cover; the fallback brush used without a cover is not opaque.
-    internal Color? CoverColor => _mediaCover is not null && _mediaTrack is { State: not MediaState.Stopped } && _musicAccent is SolidColorBrush { Color.A: 255 } accent ? accent.Color : null;
+    // The color taken from the playing song's cover; null without one, or when the cover gave no color.
+    internal Color? CoverColor => _mediaCover is not null && _mediaTrack is { State: not MediaState.Stopped } ? _coverAccent : null;
     private void RenderCompactMusic()
     {
         // The collapsed shape gives the row's width in DIPs and the height scale; every size below follows from them.
@@ -733,7 +735,7 @@ public partial class MainWindow
         }
         if (media && layout.EqualizerWidth > 0)
         {
-            _compactEqualizer = new MusicEqualizer { Bars = 4, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(UI.Secondary) };
+            _compactEqualizer = new MusicEqualizer { Bars = 4, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
             var region = CompactRegion(_compactEqualizer, layout.EqualizerWidth, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Right, dpi);
             Grid.SetColumn(region, 2); grid.Children.Add(region);
         }
@@ -752,7 +754,7 @@ public partial class MainWindow
                 double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
                 string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
                     : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-                return (used, entry.Theme, tip);
+                return (used, PanelTheme.AppTheme(entry), tip);
             }).ToArray();
             _quotaCarousel = new QuotaCarousel(items, layout, _quotaElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation) { VerticalAlignment = VerticalAlignment.Center }; middle.Children.Add(_quotaCarousel);
         }
@@ -760,7 +762,7 @@ public partial class MainWindow
         {
             // Too narrow for a meaningful stretch of text, the lyric rests at its start, cut at the edge.
             _compactMarquee = new MusicMarquee { Text = text, Width = Math.Max(0, textEnd - textStart), Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
-                ScrollAllowed = layout.TextScrolls, Backdrop = Colors.Black, Margin = new Thickness(_quotaCarousel is not null && middle.Children.Contains(_quotaCarousel) ? textStart - ringEnd : textStart, 0, 0, 0) };
+                ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay, Margin = new Thickness(_quotaCarousel is not null && middle.Children.Contains(_quotaCarousel) ? textStart - ringEnd : textStart, 0, 0, 0) };
             middle.Children.Add(_compactMarquee);
         }
         CompactRings.Children.Add(grid); UpdateMusicTimer();

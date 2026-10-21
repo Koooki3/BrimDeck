@@ -13,11 +13,11 @@ public sealed partial class SettingsWindow
     private void MonitorOptions()
     {
         SectionTitle(Loc.T("系统监控", "System monitor"));
-        // Each scheme is shown by its colors in the settings window's own light or dark theme.
-        var schemes = KeepPreview(new UniformGrid { Columns = 3, Width = 292 });
+        // Each scheme is shown by the colors it has on the panel with the panel theme in use.
+        var schemes = KeepPreview(new UniformGrid { Columns = 4, Width = 388 });
         foreach (var palette in Enum.GetValues<MonitorPalette>())
         {
-            var colors = MonitorColors.For(palette, _palette.Dark);
+            var colors = MonitorThemeColors.For(palette);
             var content = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
             foreach (var color in new[] { colors.Performance, colors.Efficiency, colors.Gpu })
                 content.Children.Add(new Ellipse { Width = 7, Height = 7, Fill = UI.Brush(color), Margin = new Thickness(0, 0, 3, 0), VerticalAlignment = VerticalAlignment.Center });

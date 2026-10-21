@@ -219,6 +219,25 @@ internal sealed class MonitorView : Grid
     }
 }
 
+// A monitor color scheme as the panel draws it on the panel theme in use: ftop's palettes in their light or dark variant by the
+// theme, or the theme's own colors (its accent and its cyan, pink and lime), each moved just far enough to read on the theme's
+// surface. The page is built again when the theme changes (PanelTheme.Generation is part of its key).
+internal static class MonitorThemeColors
+{
+    public static MonitorColors For(MonitorPalette palette)
+    {
+        var theme = PanelTheme.Current;
+        // Opaque "#RRGGBB" as drawn on the theme, which ColorMath needs for the core groups' shades and for telling colors apart.
+        static string Drawn(string color) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color)));
+        if (palette == MonitorPalette.Theme)
+            return MonitorColors.FromTheme(Drawn(theme["accent"].ToString()),
+                [.. new[] { ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Amber }.Select(color => Drawn(theme.ClockPreset(color).ToString()))],
+                Drawn(theme.ClockPreset(ClockColor.Lime).ToString()), Drawn(PanelTheme.WarningDefault), Drawn(PanelTheme.CriticalDefault));
+        var colors = MonitorColors.For(palette, theme.IsDark);
+        return new(Drawn(colors.Performance), Drawn(colors.Efficiency), Drawn(colors.Gpu), Drawn(colors.Normal), Drawn(colors.Warning), Drawn(colors.Critical));
+    }
+}
+
 // One row of the process list: the app's icon, its name, and its CPU and memory, the sorted figure brighter.
 internal sealed class ProcessRow : Grid
 {
@@ -322,8 +341,9 @@ internal sealed class CoreColumns : FrameworkElement
         new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender));
     private double Progress { get => (double)GetValue(ProgressProperty); set => SetValue(ProgressProperty, value); }
     private const double CoreGap = 3, GroupGap = 7, GpuGap = 12, MaxColumn = 26, Rest = 3, MoveMilliseconds = 240;
-    private const string TickColor = "#B3F5F5F7", TrackColor = "#14FFFFFF";
     private readonly MonitorColors _colors;
+    // Behind a column the theme's faintest fill, so the fill carries the shape; the tick in the theme's text color, softened.
+    private readonly Brush _track = UI.Brush(UI.Fill), _tick = UI.Brush(PanelTheme.Current["textPrimary"].WithAlpha(0xB3).ToString());
     private double[] _from = [], _to = [], _tickFrom = [], _tickTo = [];
     private IReadOnlyList<CoreSample> _cores = [];
     private GpuSample? _gpu;
@@ -394,8 +414,8 @@ internal sealed class CoreColumns : FrameworkElement
         var (xs, column) = Geometry(ActualWidth);
         if (xs.Length == 0 || height <= 0) return;
         double p = Progress, radius = Math.Min(column / 2, 4);
-        var track = UI.Brush(TrackColor);
-        var tick = new Pen(UI.Brush(TickColor), Math.Max(1, Math.Min(1.5, column / 6)));
+        var track = _track;
+        var tick = new Pen(_tick, Math.Max(1, Math.Min(1.5, column / 6)));
         tick.Freeze();
         for (int i = 0; i < xs.Length; i++)
         {

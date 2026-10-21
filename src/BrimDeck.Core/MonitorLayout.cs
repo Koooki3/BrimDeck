@@ -1,11 +1,11 @@
 namespace BrimDeck.Core;
 
-// The system monitor page's color schemes, ftop's three palettes by Nongfsq (https://github.com/Nongfsq/ftop, MIT License;
-// see ThirdPartyNotices.txt). Saved as numbers, so new members go at the end.
-public enum MonitorPalette { Sea, Graphite, Warm }
+// The system monitor page's color schemes: ftop's three palettes by Nongfsq (https://github.com/Nongfsq/ftop, MIT License;
+// see ThirdPartyNotices.txt), and Theme, which takes the colors of the panel theme in use (the app resolves it, as only it
+// knows the theme). Saved as numbers, so new members go at the end.
+public enum MonitorPalette { Sea, Graphite, Warm, Theme }
 
-// The colors of one palette in one appearance. The panel is always dark; the settings window shows the scheme in its own
-// light or dark theme, so each palette has both.
+// The colors of one of ftop's palettes on a dark or a light panel theme. Theme has no fixed colors and gives Sea's here.
 public sealed record MonitorColors(string Performance, string Efficiency, string Gpu, string Normal, string Warning, string Critical)
 {
     public static MonitorColors For(MonitorPalette palette, bool dark = true)
@@ -22,13 +22,28 @@ public sealed record MonitorColors(string Performance, string Efficiency, string
         return dark ? new(performance, efficiency, gpu, "#4FD17F", "#F0B54A", "#FF6B5E") : new(performance, efficiency, gpu, "#1C9A50", "#B26A00", "#D23F31");
     }
 
+    // The Theme scheme from a theme's colors (opaque "#RRGGBB"): the accent for the fastest cores, and for the slowest cores and
+    // the GPU the first of the theme's other colors (cyan, pink, lime, amber in that order) that is clearly not a color already
+    // taken, so a theme whose accent is its cyan still tells the kinds of core apart.
+    public static MonitorColors FromTheme(string accent, IReadOnlyList<string> others, string normal, string warning, string critical)
+    {
+        const double Apart = 64;
+        string Pick(params string[] taken) => others.FirstOrDefault(color => taken.All(other => ColorMath.Distance(color, other) >= Apart))
+            ?? others.Where(color => !taken.Contains(color, StringComparer.OrdinalIgnoreCase)).DefaultIfEmpty(taken[^1]).First();
+        string efficiency = Pick(accent), gpu = Pick(accent, efficiency);
+        return new(accent, efficiency, gpu, normal, warning, critical);
+    }
+
     // Core groups run from the performance color to the efficiency color in even steps, so a processor with any number of
     // kinds of core has a color for each.
     public string Core(int group, int groups) => ColorMath.Mix(Performance, Efficiency, groups > 1 ? Math.Clamp(group, 0, groups - 1) / (double)(groups - 1) : 0);
     public string Memory(MemoryLevel level) => level switch { MemoryLevel.Critical => Critical, MemoryLevel.Elevated => Warning, _ => Normal };
 
     public static string Name(MonitorPalette palette) => palette switch
-    { MonitorPalette.Graphite => Loc.T("石墨", "Graphite"), MonitorPalette.Warm => Loc.T("暖色", "Warm"), _ => Loc.T("海洋", "Sea") };
+    {
+        MonitorPalette.Graphite => Loc.T("石墨", "Graphite"), MonitorPalette.Warm => Loc.T("暖色", "Warm"), MonitorPalette.Theme => Loc.T("跟随主题", "Theme"),
+        _ => Loc.T("海洋", "Sea")
+    };
 }
 
 // How the system monitor page fills the space it has, after ftop's layout ladder: a small page keeps the essentials, a

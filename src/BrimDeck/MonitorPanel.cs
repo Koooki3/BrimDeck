@@ -46,7 +46,8 @@ public partial class MainWindow
 
     // What the view is built from. The readings are not part of it: the core columns follow a change in the number of cores.
     private string MonitorKey()
-        => string.Join("|", ContentCanvas.Width, ContentCanvas.Height, _header.Side, _header.Row, Settings.MonitorPalette, Settings.MonitorProcesses, Settings.MonitorSort, Loc.Language);
+        => string.Join("|", ContentCanvas.Width, ContentCanvas.Height, _header.Side, _header.Row, Settings.MonitorPalette, Settings.MonitorProcesses, Settings.MonitorSort, Loc.Language,
+            PanelTheme.Generation);
 
     private void RenderMonitor()
     {
@@ -68,7 +69,7 @@ public partial class MainWindow
             // The list being replaced may have been under the pointer; its leave event never comes.
             if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
             var layout = MonitorLayout.For(width - 2 * side, height - _header.Row - bottom, Settings.MonitorProcesses);
-            _monitorView = new MonitorView(layout, MonitorColors.For(Settings.MonitorPalette), Settings.MonitorSort, SortProcesses,
+            _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings.MonitorPalette), Settings.MonitorSort, SortProcesses,
                 hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; });
             MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
         }

@@ -61,6 +61,8 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 - By default it turns into the Indicator when a window is maximized, and hides during full-screen games or video so it never opens by accident.
 
+- The Notch, Capsule, notices and the expanded panel follow a panel theme: System, Dark or Light, built-in open-source themes such as One Dark Pro, GitHub, Dracula and Night Owl, or a custom theme made with the [theme guide](docs/en-US/themes.md). Text and figures stay readable in every theme.
+
 ### AI usage
 
 <img src="docs/en-US/images/usage.png" width="100%" alt="AI usage page: quotas of Claude, Codex, Cursor and Antigravity in four columns">
@@ -78,7 +80,7 @@ You can choose the quota providers and set the quota and usage source of each co
 - One column per logical processor, performance cores and efficiency cores in their own colors, each with a tick for its current frequency, and a column for the GPU beside them.
 - Memory in use and committed, download and upload speed over the physical network adapters, GPU usage and dedicated memory.
 - The busiest apps by CPU or memory, with the processes of one program folded into one row; the list does not reshuffle when two apps trade places by a point.
-- Three color schemes (Sea, Graphite, Warm). The system is read only while the page is open, so it costs nothing in the background.
+- Follows the panel theme by default, taking its colors from the theme in use; ftop's Sea, Graphite and Warm schemes are also offered, in their light or dark variant to suit the theme. The system is read only while the page is open, so it costs nothing in the background.
 
 The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT License), a system monitor for macOS.
 

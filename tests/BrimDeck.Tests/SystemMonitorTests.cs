@@ -159,7 +159,7 @@ static class SystemMonitorTests
         check("Pages: each page's own size", DeckPages.Size(sizes, DeckPage.Monitor) == (600, 300) && DeckPages.Size(sizes, DeckPage.Music) == (700, 180));
         var saved = new DeckSettings { MonitorWidth = 5000, MonitorHeight = double.NaN, MonitorInterval = 9, MonitorPalette = (MonitorPalette)42, MonitorSort = (ProcessSort)7, LastPage = (DeckPage)9 };
         saved.Normalize();
-        check("Pages: monitor settings are normalized", saved is { MonitorWidth: 1200, MonitorInterval: 2, MonitorPalette: MonitorPalette.Sea, MonitorSort: ProcessSort.Cpu, LastPage: DeckPage.Usage }
+        check("Pages: monitor settings are normalized", saved is { MonitorWidth: 1200, MonitorInterval: 2, MonitorPalette: MonitorPalette.Theme, MonitorSort: ProcessSort.Cpu, LastPage: DeckPage.Usage }
             && saved.MonitorHeight == MonitorSizes.Default.Height);
         check("Pages: enum values stay saved as before", (int)DeckPage.Usage == 0 && (int)DeckPage.Music == 1 && (int)DeckPage.Monitor == 2 && (int)DefaultDeckPage.Monitor == 3);
         check("Pages: monitor quick sizes", MonitorSizes.For(PanelSize.Standard) == MonitorSizes.Default && MonitorSizes.For(PanelSize.Compact).Width < MonitorSizes.For(PanelSize.Spacious).Width);
@@ -172,7 +172,15 @@ static class SystemMonitorTests
         var sea = MonitorColors.For(MonitorPalette.Sea);
         check("Monitor core colors run from performance to efficiency", sea.Core(0, 3) == sea.Performance && sea.Core(2, 3) == sea.Efficiency && sea.Core(0, 1) == sea.Performance && sea.Core(9, 2) == sea.Efficiency);
         check("Monitor palettes differ in light and dark", Enum.GetValues<MonitorPalette>().All(p => MonitorColors.For(p, true) != MonitorColors.For(p, false)));
+        check("Monitor follows the panel theme by default", new DeckSettings().MonitorPalette == MonitorPalette.Theme && MonitorColors.For(MonitorPalette.Theme) == sea);
         check("Monitor memory colors follow the level", sea.Memory(MemoryLevel.Critical) == sea.Critical && sea.Memory(MemoryLevel.Elevated) == sea.Warning && sea.Memory(MemoryLevel.Normal) == sea.Normal);
-        check("Monitor palette names", Enum.GetValues<MonitorPalette>().Select(MonitorColors.Name).Distinct().Count() == 3);
+        var themed = MonitorColors.FromTheme("#0A84FF", ["#5CE1E6", "#FF8FB1", "#E4FF6A", "#FF9F43"], "#E4FF6A", "#FFB000", "#FF4D4D");
+        check("Monitor theme scheme takes the accent, then cyan and pink", themed is { Performance: "#0A84FF", Efficiency: "#5CE1E6", Gpu: "#FF8FB1", Normal: "#E4FF6A" });
+        var cyberpunk = MonitorColors.FromTheme("#00F0FF", ["#00F0FF", "#FF2A6D", "#B6FF3B", "#FF9E3D"], "#B6FF3B", "#FFB000", "#FF4D4D");
+        check("Monitor theme scheme skips a cyan that is the accent", cyberpunk is { Performance: "#00F0FF", Efficiency: "#FF2A6D", Gpu: "#B6FF3B" });
+        var flat = MonitorColors.FromTheme("#808080", ["#808081", "#808082"], "#808080", "#808080", "#808080");
+        check("Monitor theme scheme without distinct colors still gives colors", flat.Efficiency.Length == 7 && flat.Gpu.Length == 7);
+        check("Color distance", ColorMath.Distance("#000000", "#000000") == 0 && Math.Abs(ColorMath.Distance("#000000", "#FFFFFF") - Math.Sqrt(3) * 255) < 1e-9);
+        check("Monitor palette names", Enum.GetValues<MonitorPalette>().Select(MonitorColors.Name).Distinct().Count() == 4);
     }
 }

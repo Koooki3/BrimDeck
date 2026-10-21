@@ -26,12 +26,21 @@ public static class ColorMath
 
     public static string ToHex(byte r, byte g, byte b) => $"#{r:X2}{g:X2}{b:X2}";
 
+    // How far apart two #RRGGBB colors are, as the straight distance between them in RGB (0 to about 441).
+    public static double Distance(string first, string second)
+    {
+        double sum = 0;
+        for (int i = 0; i < 3; i++) { double d = Channel(first, i) - Channel(second, i); sum += d * d; }
+        return Math.Sqrt(sum);
+    }
+
     // The color share of the way from one #RRGGBB color to another, per channel.
     public static string Mix(string from, string to, double share)
     {
-        static int Channel(string hex, int index) => Convert.ToInt32(hex.Substring(1 + index * 2, 2), 16);
         share = Math.Clamp(double.IsFinite(share) ? share : 0, 0, 1);
         byte At(int index) => (byte)Math.Round(Channel(from, index) + (Channel(to, index) - Channel(from, index)) * share);
         return ToHex(At(0), At(1), At(2));
     }
+    // Red, green or blue (index 0, 1, 2) of a #RRGGBB color.
+    private static int Channel(string hex, int index) => Convert.ToInt32(hex.Substring(1 + index * 2, 2), 16);
 }

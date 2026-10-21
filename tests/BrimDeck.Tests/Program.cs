@@ -18,6 +18,7 @@ try
     await MusicTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
+    PanelThemeTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
