@@ -181,8 +181,8 @@ public sealed partial class SettingsWindow
         var reload = GlyphButton("M 12.5,4.5 A 5.5,5.5 0 1 0 13,9 M 12.5,1.5 V 4.5 H 9.5", 14, 14, Loc.T("重新加载主题文件", "Reload theme files"), () => ShowPage(ThemePage));
         reload.Width = 22; reload.Height = 22; reload.Margin = new Thickness(4, 0, 0, 0); reload.VerticalAlignment = VerticalAlignment.Center;
         reload.HorizontalAlignment = HorizontalAlignment.Left; // the last child fills the rest of the row; the icon stays beside the title
-        // Measured on the rendered row, the arrow's ink centre sat 1.5 DIP above the title's.
-        reload.RenderTransform = new System.Windows.Media.TranslateTransform(0, 1.5);
+        // Measured on the rendered row in both settings themes, the arrow's ink centre sat 1 DIP above the title's.
+        reload.RenderTransform = new System.Windows.Media.TranslateTransform(0, 1);
         head.Children.Add(reload);
         Target.Children.Add(head);
         Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, 12) });
