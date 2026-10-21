@@ -45,8 +45,11 @@ public sealed record CpuSample(IReadOnlyList<CoreSample> Cores, Reading<double> 
 // from the commit charge, the memory promised to processes, against its limit (physical memory plus the page file).
 public enum MemoryLevel { Normal, Elevated, Critical }
 
-public sealed record MemorySample(ulong Total, ulong Used, ulong CommitUsed, ulong CommitLimit)
+// Cached is the system file cache (standby and modified pages): filled, but given to any app that asks, so Task Manager counts
+// it as available. The page draws it after the memory in use, lighter.
+public sealed record MemorySample(ulong Total, ulong Used, ulong CommitUsed, ulong CommitLimit, ulong Cached = 0)
 {
+    public double CachedFraction => Total > 0 ? Math.Clamp((double)Math.Min(Cached, Total - Math.Min(Used, Total)) / Total, 0, 1) : 0;
     public double UsedFraction => Total > 0 ? Math.Clamp((double)Used / Total, 0, 1) : 0;
     public double CommitFraction => CommitLimit > 0 ? Math.Clamp((double)CommitUsed / CommitLimit, 0, 1) : 0;
     public MemoryLevel Level => UsedFraction >= .92 || CommitFraction >= .9 ? MemoryLevel.Critical
@@ -55,8 +58,44 @@ public sealed record MemorySample(ulong Total, ulong Used, ulong CommitUsed, ulo
 
 public sealed record NetworkSample(double DownBytesPerSecond, double UpBytesPerSecond);
 
-// The busiest graphics adapter, read as Task Manager reads it: its busiest engine type, the processes' shares summed.
-public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes);
+// One kind of engine of a graphics adapter (3D, Copy, VideoDecode, ...) with the shares of all processes summed, 0..1.
+public sealed record GpuEngine(string Kind, double Usage);
+
+// The busiest graphics adapter, read as Task Manager reads it: its busiest engine type, the processes' shares summed. Engines are
+// its kinds of engine in a fixed order (GpuEngines.Order); Name and DedicatedTotal come from the adapter's description and are
+// null where the system does not give them.
+public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
+{
+    public IReadOnlyList<GpuEngine> Engines { get; init; } = [];
+    public Reading<ulong> SharedBytes { get; init; } = Reading<ulong>.Unavailable("");
+    public string? Name { get; init; }
+    public ulong? DedicatedTotal { get; init; }
+    public double? DedicatedFraction => DedicatedBytes.TryGet(out var used) && DedicatedTotal is { } total && total > 0 ? Math.Clamp((double)used / total, 0, 1) : null;
+}
+
+public static class GpuEngines
+{
+    // The engines worth a column of their own, in the order Task Manager lists them; other kinds follow by name.
+    private static readonly string[] Known = ["3D", "Compute", "Copy", "VideoDecode", "VideoEncode", "VideoProcessing"];
+    // "Compute_0" and "Compute_1" are one kind; the suffix numbers engines of a kind.
+    public static string Kind(string engineType)
+    {
+        int cut = engineType.LastIndexOf('_');
+        return cut > 0 && int.TryParse(engineType.AsSpan(cut + 1), out _) ? engineType[..cut] : engineType;
+    }
+    public static IReadOnlyList<GpuEngine> Order(IEnumerable<GpuEngine> engines) => engines
+        .GroupBy(engine => Kind(engine.Kind), StringComparer.OrdinalIgnoreCase).Select(group => new GpuEngine(group.Key, Math.Clamp(group.Max(e => e.Usage), 0, 1)))
+        .OrderBy(engine => Array.FindIndex(Known, known => known.Equals(engine.Kind, StringComparison.OrdinalIgnoreCase)) is var i and >= 0 ? i : Known.Length)
+        .ThenBy(engine => engine.Kind, StringComparer.OrdinalIgnoreCase).ToList();
+    public static string Label(string kind) => kind switch
+    {
+        "3D" => "3D", "Compute" => Loc.T("计算", "Compute"), "Copy" => Loc.T("复制", "Copy"), "VideoDecode" => Loc.T("视频解码", "Video decode"),
+        "VideoEncode" => Loc.T("视频编码", "Video encode"), "VideoProcessing" => Loc.T("视频处理", "Video processing"), _ => kind
+    };
+    // Two or three letters under a narrow column.
+    public static string Short(string kind) => kind switch
+    { "3D" => "3D", "Compute" => "CMP", "Copy" => "CPY", "VideoDecode" => "DEC", "VideoEncode" => "ENC", "VideoProcessing" => "VP", _ => kind.Length <= 3 ? kind : kind[..3].ToUpperInvariant() };
+}
 
 // A process folded into an app's entry. CpuPercent is percent of one core, like ProcessSample's.
 public sealed record ProcessMember(string Name, double CpuPercent, ulong MemoryBytes);
@@ -109,9 +148,12 @@ public sealed record ProcessList(IReadOnlyList<ProcessSample> Top, IReadOnlyList
     public IReadOnlyList<ProcessSample> Ranked(ProcessSort sort) => sort == ProcessSort.Memory ? ByMemory : Top;
 }
 
+// DownHistory and UpHistory are the last network readings, oldest first, bytes per second; empty until there are two.
 public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors, Reading<CpuSample> Cpu, Reading<MemorySample> Memory,
     Reading<NetworkSample> Network, Reading<GpuSample> Gpu, Reading<ProcessList> Processes)
 {
+    public IReadOnlyList<double> DownHistory { get; init; } = [];
+    public IReadOnlyList<double> UpHistory { get; init; } = [];
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,
         Reading<CpuSample>.Unavailable(reason), Reading<MemorySample>.Unavailable(reason), Reading<NetworkSample>.Unavailable(reason),
         Reading<GpuSample>.Unavailable(reason), Reading<ProcessList>.Unavailable(reason));

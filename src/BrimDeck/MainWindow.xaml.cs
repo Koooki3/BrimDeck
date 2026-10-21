@@ -93,6 +93,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         InitializeMusic();
         InitializeMonitor();
+        InitializeResize();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
@@ -168,6 +169,8 @@ public partial class MainWindow : Window
         // Keep the layered HWND large enough for every shown page. Resizing it in separate
         // width/height/position steps presents intermediate surfaces; only Island should animate.
         var largest = DeckPages.Largest(Settings);
+        // While the monitor page is resized by dragging, the window holds the largest page it can become (see MonitorResize).
+        if (_resizeHost) largest = (Math.Max(largest.Width, 1200), Math.Max(largest.Height, 400));
         // The window also holds the collapsed surface at any width; Place moves it so that the island lies inside it.
         Width = Math.Max(Fit(largest.Width), Collapsed.Surface.Width);
         double hostHeight = largest.Height;
@@ -240,7 +243,19 @@ public partial class MainWindow : Window
         WorkDip = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
         Collapsed = ShapeFor(EffectiveStyle);
     }
-    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip);
+    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, Settings.CompactAutoWidth(style) ? _compactWanted : 0);
+    // The width the collapsed content asks for while it shows system readings; 0 keeps the saved width (see CollapsedGeometry).
+    private double _compactWanted;
+    // The content changed what it asks for: the collapsed surface moves to the new width with its usual animation, and the window
+    // grows first when the surface would be wider than it.
+    private void FitCompactToContent()
+    {
+        var before = Collapsed;
+        UpdateCollapsedGeometry();
+        if (Equals(Collapsed.Surface, before.Surface) || _expanded) return;
+        // A surface that no longer lies within the window (wider, or moved along a screen edge) places the window again.
+        if (Collapsed.Surface.X < _windowOffset || Collapsed.Surface.X + Collapsed.Surface.Width > _windowOffset + Width) ApplySettings(); else SetExpanded(false);
+    }
     // The limits the settings window offers for a collapsed style on this window's monitor, whatever values are saved.
     // OffsetMax is the largest offset either way (OffsetMin = -OffsetMax) for a surface of the given width. TopMin and TopMax
     // are distances from the top of the work area for a capsule of the given height or a line of the given thickness; 0 and 0
@@ -343,12 +358,14 @@ public partial class MainWindow : Window
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
-        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _compactClock = null;
+        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _compactClock = null; _compactStrip = null;
         if (_alert is not null)
         {
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;
             // LayoutCompactAlert (MainWindow.CompactLayout.cs) builds the alert row from _alert and sizes it for the shape.
             ApplyCollapsedLayout();
+            // The notice hides the system readings, which then need none.
+            UpdateMonitorDemand();
             return;
         }
         CompactAlert.Visibility = Visibility.Collapsed; CompactRings.Visibility = Visibility.Visible;
@@ -536,11 +553,12 @@ public partial class MainWindow : Window
     { if (_expanded) PointerChanged(false); }
     internal void TrackPointer()
     {
-        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null) return;
+        if (_preview && _previewExpanded || IsSuppressed || !IsVisible || PresentationSource.FromVisual(Stage) is null || Resizing) return;
         var cursor = WindowsHost.Cursor();
         var area = CompactHoverScreenRect();
         if (area.IsEmpty) return;
-        bool inCompact = area.Contains(cursor);
+        // The surface's ends resize it (MainWindow.Resize.cs); pointing there does not open the panel.
+        bool inCompact = area.Contains(cursor) && !CompactGripAt(cursor);
         double dx = Math.Max(0, Math.Max(area.Left - cursor.X, cursor.X - area.Right)), dy = Math.Max(0, Math.Max(area.Top - cursor.Y, cursor.Y - area.Bottom));
         // Whole 20 ms steps, so small movements far away do not reschedule the timer on every check.
         double wait = _expanded ? TrackNear : Math.Clamp(Math.Floor(Math.Sqrt(dx * dx + dy * dy) / ApproachSpeed / 20) * 20, TrackNear, TrackFar);
@@ -576,6 +594,8 @@ public partial class MainWindow : Window
     }
     internal void PointerChanged(bool inside)
     {
+        // Dragging an edge may take the pointer outside; the panel stays open until the drag ends.
+        if (!inside && Resizing) return;
         _pointerInside = inside; UpdateQuotaCarousel();
         if (inside) ReleaseHotkeyPin();
         if (inside)
@@ -592,7 +612,7 @@ public partial class MainWindow : Window
     }
     internal void CheckPointerExit(Point screenPoint)
     {
-        if (IsHotkeyPinned) { _leave.Stop(); return; }
+        if (IsHotkeyPinned || Resizing) { _leave.Stop(); return; }
         if (_pointerInside || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) { _leave.Stop(); return; }
         // Closing a calendar with either button must leave a path back to the results.
         // Keep checking until the cursor leaves that area; entering the island restores normal hover behavior.

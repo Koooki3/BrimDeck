@@ -38,7 +38,7 @@ public partial class App : Application
     // The system monitor page's readings, shared by every panel; created when a panel first shows the page.
     internal SystemSampler? Monitor { get; private set; }
     internal event Action<MonitorSnapshot>? MonitorUpdated;
-    private readonly HashSet<MainWindow> _presentingMonitor = [];
+    private readonly HashSet<MainWindow> _presentingMonitor = [], _stripMonitor = [];
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
 
@@ -238,31 +238,46 @@ public partial class App : Application
         if (active) _presentingMedia.Add(deck); else _presentingMedia.Remove(deck);
         Media?.SetPresentationActive(_presentingMedia.Count > 0);
     }
-    // The system is read while any panel shows the monitor page open, and briefly after (see SystemSampler).
-    internal void PresentMonitor(MainWindow deck, bool active)
+    // The system is read while any panel shows the monitor page open (and briefly after; see SystemSampler) or shows readings in
+    // its collapsed row. Processes are listed only for an open page.
+    internal void PresentMonitor(MainWindow deck, bool page, bool strip)
     {
-        if (active) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
-        if (Exiting || Monitor is null && !active) return;
+        if (page) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
+        if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
+        bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
+        if (Exiting || Monitor is null && !wanted) return;
         if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
-        Monitor.SetDemand(_presentingMonitor.Count > 0, Settings.MonitorInterval);
+        Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
+    // The settings are turned into text here, where they live, and written on the thread pool: writing the file (and the virus
+    // scan that follows a write) took 60 ms and more, which showed as a stall after every page switch. Writes run one after
+    // another in the order they were asked for, so the newest settings always land last.
+    private Task _writing = Task.CompletedTask;
     public void FlushSettings()
     {
         _save.Stop();
-        try { Store.Save(Settings); _settingsWindow?.SaveStatus(""); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _settingsWindow?.SaveStatus(Loc.T("保存失败，请检查设置目录权限。", "Saving failed. Check the permissions of the settings folder."), true); }
+        string text = Store.Serialize(Settings);
+        _writing = _writing.ContinueWith(_ =>
+        {
+            string? error = null;
+            try { Store.Write(text); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { error = Loc.T("保存失败，请检查设置目录权限。", "Saving failed. Check the permissions of the settings folder."); }
+            Dispatcher.BeginInvoke(() => { if (error is null) _settingsWindow?.SaveStatus(""); else _settingsWindow?.SaveStatus(error, true); });
+        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
+    // Before the process ends, the last write must have reached the disk.
+    private void FinishWriting() { try { _writing.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException) { } }
     // The settings window records its size before the final save; closing it during shutdown would be too late.
-    public void ExitApplication() { Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings(); Shutdown(); }
+    public void ExitApplication() { Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings(); FinishWriting(); Shutdown(); }
     internal void InstallUpdate()
     {
-        if (Updates.PrepareRestart(() => Store.Save(Settings))) ExitApplication();
+        if (Updates.PrepareRestart(() => { FinishWriting(); Store.Save(Settings); })) ExitApplication();
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);

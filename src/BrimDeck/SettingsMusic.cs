@@ -54,7 +54,7 @@ public sealed partial class SettingsWindow
         bool notch = style == CompactStyle.Notch;
         Group(Toggle(Loc.T("配额环", "Quota rings"), S.ShowsSummary(style), v => Change(s => { if (notch) s.NotchSummary = v; else s.CapsuleSummary = v; })),
             Toggle(Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style), v => Change(s => { if (notch) s.NotchMusic = v; else s.CapsuleMusic = v; })),
-            ClockRow(style));
+            ClockRow(style), CompactMonitorRow(style));
     }
     // Settings every player shares: colors, cover and text.
     private void MusicStyle()

@@ -12,8 +12,32 @@ static class SystemMonitorTests
         Ranking(check);
         Formatting(check);
         Layouts(check);
+        Compact(check);
         Pages(check);
         Colors(check);
+    }
+
+    // A build that does not know a setting (another build of the same version) keeps it when it saves; an older version's
+    // unknown settings are left to the migrations. Saving in two steps writes what Save writes.
+    public static void Store(string root, Action<string, bool> check)
+    {
+        var folder = Path.Combine(root, "store-unknown");
+        Directory.CreateDirectory(folder);
+        var file = Path.Combine(folder, "settings.json");
+        File.WriteAllText(file, "{ \"AppVersion\": \"1.1.1\", \"PanelTheme\": \"dracula\", \"Width\": 600 }");
+        var store = new SettingsStore(folder, "1.1.1");
+        var settings = store.Load();
+        store.Save(settings);
+        var saved = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+        check("Settings: a key this build does not know survives a save", saved["PanelTheme"]?.GetValue<string>() == "dracula" && saved["Width"]?.GetValue<double>() == 600);
+        File.WriteAllText(file, "{ \"AppVersion\": \"1.0.0\", \"RetiredSetting\": true }");
+        store = new SettingsStore(folder, "1.1.1");
+        store.Save(store.Load());
+        saved = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+        check("Settings: an older version's unknown key is not carried forward", !saved.ContainsKey("RetiredSetting"));
+        var text = store.Serialize(new DeckSettings { Width = 700 });
+        store.Write(text);
+        check("Settings: Serialize then Write saves the settings", File.ReadAllText(file) == text && new SettingsStore(folder, "1.1.1").Load().Width == 700);
     }
 
     private static void Readings(Action<string, bool> check)
@@ -128,15 +152,67 @@ static class SystemMonitorTests
 
     private static void Layouts(Action<string, bool> check)
     {
-        var standard = MonitorLayout.For(580, 160, true);
-        check("Monitor layout: a standard page lists processes beside the readings", standard is { SideList: true, Processes: true, CompactMetrics: false } && standard.Rows == 6);
-        check("Monitor layout: narrow pages drop the list", MonitorLayout.For(440, 160, true) is { Processes: false, SideList: false, ListWidth: 0 });
-        check("Monitor layout: tall narrow pages stack the list", MonitorLayout.For(440, 360, true) is { SideList: false, Processes: true, Rows: 8 });
-        check("Monitor layout: short pages put the figures on one line", MonitorLayout.For(560, 100, true) is { CompactMetrics: true, Figure: 16 });
+        check("Monitor layout: a standard page lists processes beside the readings", MonitorLayout.For(580, 160, true) is { List: ListPlacement.Side, Processes: true, Metrics: MetricsMode.Lines, ColumnLabels: false });
+        check("Monitor layout: narrow pages drop the list", MonitorLayout.For(440, 160, true) is { List: ListPlacement.None, Processes: false });
+        check("Monitor layout: tall narrow pages stack the list", MonitorLayout.For(440, 360, true) is { List: ListPlacement.Below, ColumnLabels: false, Metrics: MetricsMode.Lines });
+        check("Monitor layout: short pages put the figures on one line", MonitorLayout.For(560, 100, true) is { Metrics: MetricsMode.Line, CompactMetrics: true, Figure: 16, List: ListPlacement.Side });
         check("Monitor layout: a switched-off list never shows", MonitorLayout.For(1200, 400, false) is { Processes: false });
-        check("Monitor layout: rows are capped", MonitorLayout.For(1200, 2000, true).Rows == MonitorLayout.MaximumRows);
-        check("Monitor layout: list width is bounded", MonitorLayout.For(1200, 300, true).ListWidth == 400 && MonitorLayout.For(560, 300, true).ListWidth == 235);
-        check("Monitor layout: nonsense sizes", MonitorLayout.For(double.NaN, -5, true) is { Processes: false, Rows: 0 });
+        check("Monitor layout: tall pages label the columns", MonitorLayout.For(1200, 300, true) is { ColumnLabels: true, Metrics: MetricsMode.Blocks });
+        check("Monitor layout: nonsense sizes", MonitorLayout.For(double.NaN, -5, true) is { Processes: false });
+        check("Monitor layout: steps, not sizes, so dragging within a step keeps the page", MonitorLayout.For(600, 220, true) == MonitorLayout.For(780, 240, true) && MonitorLayout.For(600, 220, true) != MonitorLayout.For(600, 260, true));
+        check("Monitor list grid: rows fit the height, a wide list has two columns", MonitorLayout.ListGrid(300, 200, 22) == (7, 1) && MonitorLayout.ListGrid(500, 400, 22) == (14, 2));
+        check("Monitor list grid: too short for two rows shows none", MonitorLayout.ListGrid(300, 60, 22) == (0, 0) && MonitorLayout.ListGrid(double.NaN, 300, 22) == (0, 0));
+        check("Monitor side list width: its share within bounds, readings keep 260", MonitorLayout.SideListWidth(620) == 260 && MonitorLayout.SideListWidth(1200) == 504 && MonitorLayout.SideListWidth(500) == 220);
+    }
+
+    private static void Compact(Action<string, bool> check)
+    {
+        check("Compact monitor: modes choose the readings", CompactMonitor.Items(CompactMonitorMode.Full, CompactMonitorItems.None) == CompactMonitorItems.All
+            && CompactMonitor.Items(CompactMonitorMode.Brief, CompactMonitorItems.All) == (CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu)
+            && CompactMonitor.Items(CompactMonitorMode.Custom, CompactMonitorItems.None) == CompactMonitorItems.Cpu
+            && CompactMonitor.Items(CompactMonitorMode.Custom, CompactMonitorItems.Memory | CompactMonitorItems.Upload) == (CompactMonitorItems.Memory | CompactMonitorItems.Upload));
+        static double Ten(CompactMonitorItems item) => 10;
+        check("Compact monitor: width of the readings with gaps", CompactMonitor.Width(CompactMonitorItems.All, Ten, 2) == 70 && CompactMonitor.Width(CompactMonitorItems.None, Ten, 2) == 0);
+        check("Compact monitor: everything fits", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 70) == CompactMonitorItems.All);
+        check("Compact monitor: upload leaves first", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 69) == (CompactMonitorItems.All & ~CompactMonitorItems.Upload));
+        check("Compact monitor: CPU and memory stay longest", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 33) == (CompactMonitorItems.Cpu | CompactMonitorItems.Memory));
+        check("Compact monitor: nothing fits", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 5) == CompactMonitorItems.None && CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, double.NaN) == CompactMonitorItems.None);
+        check("Compact rates", MonitorFormat.CompactRate(84_200) == new MonitorFormat.Quantity("84", "K") && MonitorFormat.CompactRate(1_240_000) == new MonitorFormat.Quantity("1.2", "M")
+            && MonitorFormat.CompactRate(120_000_000) == new MonitorFormat.Quantity("120", "M") && MonitorFormat.CompactRate(2_500_000_000) == new MonitorFormat.Quantity("2.5", "G")
+            && MonitorFormat.CompactRate(999_600).Unit == "M");
+        var alone = CompactMusicLayout.Calculate(300, 1, false, 0, false, 0, 120);
+        check("Compact row: readings alone take the row, centred", alone is { MonitorAlone: true, MonitorWidth: 120 });
+        var withRings = CompactMusicLayout.Calculate(300, 1, false, 2, false, 0, 120);
+        check("Compact row: readings after the rings, with a gap", withRings is { MonitorAlone: false, MonitorWidth: 128 } && withRings.MiddleWidth == 172);
+        var tight = CompactMusicLayout.Calculate(100, 1, false, 2, true, 0, 400);
+        check("Compact row: one ring and the shortest lyric stay", tight.MonitorWidth == 70 && tight.MiddleWidth == 30);
+        check("Compact row: no readings, no region", CompactMusicLayout.Calculate(300, 1, true, 2, true, 40).MonitorWidth == 0);
+        bool steady = true;
+        for (double width = 60; width < 400; width++)
+            steady &= Math.Abs(CompactMusicLayout.Calculate(width + 1, 1, true, 3, true, 30, 150).MonitorWidth - CompactMusicLayout.Calculate(width, 1, true, 3, true, 30, 150).MonitorWidth) <= 1 + 1e-9;
+        check("Compact row: a DIP of width moves the readings by at most a DIP", steady);
+        var screen = new DipRect(0, 0, 2560, 1440); var area = new DipRect(0, 0, 2560, 1392);
+        var capsule = new DeckSettings { CapsuleWidth = 196, CapsuleHeight = 32 };
+        check("Compact fit: a capsule grows to its content plus its insets", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 300).Surface.Width == 332);
+        check("Compact fit: never below the saved width", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 50).Surface.Width == 196
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area).Surface.Width == 196);
+        check("Compact fit: up to the largest width and the screen", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 5000).Surface.Width == CollapsedLimits.CapsuleWidthMax
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, new DipRect(0, 0, 500, 400), new DipRect(0, 0, 500, 400), 1, 5000).Surface.Width == 500);
+        check("Compact fit: the notch grows centred, the line keeps its length", CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Notch, screen, area, 1, 400) is { Surface: { Width: 460, X: 1050 } }
+            && CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Line, screen, area, 1, 400).Surface.Width == CollapsedLimits.LineLengthDefault);
+        var clockAndReadings = CompactMusicLayout.Calculate(300, 1, false, 0, false, 40, 120);
+        check("Compact row: beside readings the clock is not alone", clockAndReadings is { ClockAlone: false, MonitorAlone: false } && clockAndReadings.MonitorWidth == 128 && clockAndReadings.ClockWidth == 48);
+        var low = new DeckSettings { NotchHeight = 24 };
+        check("Compact fit: a low notch keeps the content clear of its shoulders", CollapsedGeometry.Resolve(low, CompactStyle.Notch, screen, area, 1, 300).Surface.Width == 356);
+        double natural = CompactMusicLayout.NaturalWidth(1, true, 3, true, 40, 150);
+        var fitted = CompactMusicLayout.Calculate(natural, 1, true, 3, true, 40, 150);
+        check("Compact fit: at its natural width the row shows every reading and every ring", fitted.MonitorWidth == 158 && !fitted.ScrollRings && fitted.TextWidth >= 56);
+        var engines = GpuEngines.Order([new("Copy", .1), new("3D", .4), new("Compute_0", .2), new("Compute_1", .5), new("Foo", .3)]);
+        check("GPU engines: kinds folded and ordered as Task Manager", engines.Select(e => e.Kind).SequenceEqual(["3D", "Compute", "Copy", "Foo"]) && engines[1].Usage == .5);
+        check("GPU engine kinds", GpuEngines.Kind("Compute_1") == "Compute" && GpuEngines.Kind("VideoDecode") == "VideoDecode" && GpuEngines.Kind("Engine_x") == "Engine_x"
+            && GpuEngines.Short("VideoEncode") == "ENC" && GpuEngines.Label("Weird") == "Weird");
+        check("Memory cache share is of what is not in use", new MemorySample(100, 60, 0, 0, 30).CachedFraction == .3 && new MemorySample(100, 60, 0, 0, 70).CachedFraction == .4);
+        check("GPU memory share", new GpuSample(.5, 2UL) { DedicatedTotal = 8 }.DedicatedFraction == .25 && new GpuSample(.5, 2UL).DedicatedFraction is null);
     }
 
     private static void Pages(Action<string, bool> check)

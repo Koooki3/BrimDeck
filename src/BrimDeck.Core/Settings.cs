@@ -243,6 +243,17 @@ public sealed class DeckSettings
     public int MonitorInterval { get; set; } = 1;
     public bool MonitorProcesses { get; set; } = true;
     public ProcessSort MonitorSort { get; set; }
+    public MonitorMain MonitorMain { get; set; }
+    public MonitorProcessView MonitorProcessView { get; set; }
+    // The notch and the capsule each switch the system readings on; what they show is shared.
+    public bool NotchMonitor { get; set; }
+    public bool CapsuleMonitor { get; set; }
+    // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
+    // its own off, so the width set by hand stays.
+    public bool NotchAutoWidth { get; set; } = true;
+    public bool CapsuleAutoWidth { get; set; } = true;
+    public CompactMonitorMode CompactMonitor { get; set; }
+    public CompactMonitorItems CompactMonitorItems { get; set; } = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Download | CompactMonitorItems.Upload;
     public bool UsageAutoSync { get; set; } = true;
     // The settings window's size when last closed, in DIPs, and whether it was maximized. Empty until it is closed once;
     // it opens at the default size then. The size is fitted to the screen the window opens on.
@@ -265,6 +276,12 @@ public sealed class DeckSettings
     public bool ShowsMusic(CompactStyle style) => style switch { CompactStyle.Notch => NotchMusic, CompactStyle.Capsule => CapsuleMusic, _ => false };
     // The indicator is too thin for text, so it never shows the clock.
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
+    // The indicator is too thin for readings, as for the clock.
+    public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
+    public bool CompactAutoWidth(CompactStyle style) => style switch { CompactStyle.Notch => NotchAutoWidth, CompactStyle.Capsule => CapsuleAutoWidth, _ => false };
+    public void SetCompactAutoWidth(CompactStyle style, bool value) { if (style == CompactStyle.Notch) NotchAutoWidth = value; else if (style == CompactStyle.Capsule) CapsuleAutoWidth = value; }
+    // The saved width of the notch or the capsule; the line's length is not set this way.
+    public void SetCompactWidth(CompactStyle style, double width) { if (style == CompactStyle.Notch) NotchWidth = width; else if (style == CompactStyle.Capsule) CapsuleWidth = width; }
     // Media is detected for the expanded music page, the chosen style's music, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
     [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || MusicIndicatorProgress
@@ -328,6 +345,11 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
+        if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
+        if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
+        if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
+        CompactMonitorItems &= CompactMonitorItems.All;
+        if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
@@ -381,6 +403,10 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
     private JsonObject _snapshots = [];
     // The file as saved by a newer version; saving replaces only this version's snapshot in it.
     private JsonObject? _newerFile;
+    // Settings this build does not know, from a file saved by the same version (another build of it, such as one with a feature
+    // not merged yet). They are written back as they were, so running this build never deletes them. An older version's file
+    // goes through SettingsMigrations instead, and its unknown keys are the ones the migrations retire.
+    private JsonObject _unknown = [];
     public string DirectoryPath { get; } = directory;
     public string FilePath => Path.Combine(DirectoryPath, "settings.json");
     // Worded when shown, in the language the loaded settings choose.
@@ -392,7 +418,7 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
     private DeckSettings FirstStart() { IsFirstStart = true; return new() { Language = Loc.SystemLanguage() }; }
     public DeckSettings Load()
     {
-        _snapshots = []; _newerFile = null; IsFirstStart = false; _loadWarning = null;
+        _snapshots = []; _newerFile = null; _unknown = []; IsFirstStart = false; _loadWarning = null;
         try
         {
             if (!File.Exists(FilePath)) return FirstStart();
@@ -418,6 +444,11 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
             // Keep what an older version saved so that returning to it restores its settings. Files saved before
             // versioning cannot be told apart and are not kept.
             if (saved < running && saved > new Version(0, 0, 0)) _snapshots[saved.ToString(3)] = root.DeepClone();
+            if (saved == running)
+            {
+                var known = JsonSerializer.SerializeToNode(new DeckSettings())!.AsObject();
+                _unknown = new JsonObject(root.Where(pair => !known.ContainsKey(pair.Key)).Select(pair => KeyValuePair.Create(pair.Key, pair.Value?.DeepClone())));
+            }
             return SettingsMigrations.Read(root, running, out _);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
@@ -426,11 +457,16 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
             return FirstStart();
         }
     }
-    public void Save(DeckSettings settings)
+    public void Save(DeckSettings settings) => Write(Serialize(settings));
+
+    // The file's text for these settings. It normalizes them and reads this store's state, so it runs where the settings live;
+    // Write may then run on any thread, one call at a time.
+    public string Serialize(DeckSettings settings)
     {
         settings.AppVersion = _appVersion;
         settings.Normalize();
         var own = JsonSerializer.SerializeToNode(settings)!.AsObject();
+        foreach (var (key, value) in _unknown) if (!own.ContainsKey(key)) own[key] = value?.DeepClone();
         JsonObject file;
         if (_newerFile is not null)
         {
@@ -449,9 +485,14 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
                 .Select(pair => KeyValuePair.Create(pair.Key, pair.Value!.DeepClone())).ToList();
             if (kept.Count > 0) file[SnapshotsKey] = new JsonObject(kept!);
         }
+        return file.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    public void Write(string text)
+    {
         Directory.CreateDirectory(DirectoryPath);
         var temporary = FilePath + ".tmp";
-        File.WriteAllText(temporary, file.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(temporary, text);
         File.Move(temporary, FilePath, true);
     }
 }

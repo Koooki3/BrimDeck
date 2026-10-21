@@ -714,18 +714,34 @@ public partial class MainWindow
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         // The clock keeps its own width at the right; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
-        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0); CurrentCompactLayout = layout;
+        // The system readings ask for the width of everything chosen and show what fits in the region they get.
+        var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactMonitor, Settings.CompactMonitorItems, MonitorThemeColors.For(Settings.MonitorPalette), scale,
+            !media && apps.Count == 0 && text.Length == 0 && clock is null) : null;
+        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0); CurrentCompactLayout = layout;
+        // With readings on, a row too short for its content grows to it; the new shape builds the row again.
+        double wanted = strip is null ? 0 : CompactMusicLayout.NaturalWidth(scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip.PreferredWidth);
+        if (Math.Abs(wanted - _compactWanted) > .5) { _compactWanted = wanted; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         double row = layout.RowHeight;
         var grid = new Grid { Width = SnapDown(contentWidth, dpi), Height = row };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.CoverWidth, dpi)) }); grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.MonitorAlone ? 0 : SnapDown(layout.MonitorWidth, dpi)) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.EqualizerWidth, dpi)) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ClockAlone ? 0 : SnapDown(layout.ClockWidth, dpi)) });
+        if (strip is not null && layout.MonitorWidth > 0)
+        {
+            // After the middle, the gap and then the readings, which end at the region's right edge; alone they span the row, centred.
+            double gap = layout.MonitorAlone ? 0 : CompactMusicLayout.Whole(8 * scale);
+            strip.Width = SnapDown(Math.Max(0, layout.MonitorWidth - gap), dpi); strip.Margin = new Thickness(gap, 0, 0, 0);
+            strip.HorizontalAlignment = layout.MonitorAlone ? HorizontalAlignment.Center : HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Center;
+            if (layout.MonitorAlone) Grid.SetColumnSpan(strip, 5); else Grid.SetColumn(strip, 2);
+            grid.Children.Add(strip); _compactStrip = strip;
+        }
         if (clock is not null && layout.ClockWidth > 0)
         {
             var region = CompactRegion(clock, layout.ClockWidth, clock.ReservedWidth, clock.Height, row, layout.ClockAlone ? RegionAnchor.Center : RegionAnchor.Right, dpi);
             region.HorizontalAlignment = layout.ClockAlone ? HorizontalAlignment.Center : HorizontalAlignment.Right;
-            if (layout.ClockAlone) Grid.SetColumnSpan(region, 4); else Grid.SetColumn(region, 3);
+            if (layout.ClockAlone) Grid.SetColumnSpan(region, 5); else Grid.SetColumn(region, 4);
             grid.Children.Add(region); _compactClock = clock;
         }
         if (media && layout.CoverWidth > 0)
@@ -737,12 +753,12 @@ public partial class MainWindow
         {
             _compactEqualizer = new MusicEqualizer { Bars = 4, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
             var region = CompactRegion(_compactEqualizer, layout.EqualizerWidth, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Right, dpi);
-            Grid.SetColumn(region, 2); grid.Children.Add(region);
+            Grid.SetColumn(region, 3); grid.Children.Add(region);
         }
         var middle = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(middle, 1); grid.Children.Add(middle);
         // The rings, the space between and the lyric are snapped cumulatively from the middle's left edge and kept inside its
         // column, so rounding never pushes one region into the next.
-        double middleColumn = Math.Max(0, grid.Width - grid.ColumnDefinitions[0].Width.Value - grid.ColumnDefinitions[2].Width.Value - grid.ColumnDefinitions[3].Width.Value);
+        double middleColumn = Math.Max(0, grid.Width - grid.ColumnDefinitions[0].Width.Value - grid.ColumnDefinitions[2].Width.Value - grid.ColumnDefinitions[3].Width.Value - grid.ColumnDefinitions[4].Width.Value);
         double ringEnd = Math.Min(middleColumn, SnapDown(layout.RingWidth, dpi)), textStart = Math.Min(middleColumn, SnapDown(layout.RingWidth + layout.Between, dpi));
         double textEnd = Math.Min(middleColumn, SnapDown(layout.RingWidth + layout.Between + layout.TextWidth, dpi));
         if (layout.RingWidth > 0 && apps.Count > 0)
@@ -766,6 +782,8 @@ public partial class MainWindow
             middle.Children.Add(_compactMarquee);
         }
         CompactRings.Children.Add(grid); UpdateMusicTimer();
+        // The readings were built with the row; they start or stop the sampler and take the newest reading.
+        _stripShowing = false; UpdateMonitorDemand();
     }
     private void UpdateMusicTimer()
     {

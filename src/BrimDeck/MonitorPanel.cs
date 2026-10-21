@@ -1,53 +1,67 @@
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Input;
+using System.Windows.Media.Animation;
 using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The system monitor page. The sampler (App.Monitor) runs while any panel shows this page open; every panel draws the
-// same readings. The page is built once per size, palette and sort, and each new reading only changes its figures, so a
-// reading a second costs a few text changes and one redraw of the core columns.
+// The system monitor page and the readings in the collapsed row. The sampler (App.Monitor) runs while any panel shows either;
+// every panel draws the same readings. The page is built once per layout step (MonitorLayout), palette, sort, main gauge and
+// theme; within a step it stretches, and each new reading only changes what its parts draw.
 public partial class MainWindow
 {
     private MonitorView? _monitorView;
     private string _monitorKey = "";
+    private MonitorStrip? _compactStrip;
+    private bool _monitorShowing, _stripShowing, _monitorFade;
 
     private void InitializeMonitor()
     {
         IsVisibleChanged += (_, _) => UpdateMonitorDemand();
         _app.MonitorUpdated += MonitorUpdated;
-        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; _app.PresentMonitor(this, false); };
+        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; _app.PresentMonitor(this, false, false); };
     }
 
-    // Asked whenever the panel opens, closes, changes page or is hidden.
+    // Asked whenever the panel opens, closes, changes page or is hidden, and whenever the collapsed row is built.
     private void UpdateMonitorDemand()
     {
-        bool showing = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
-        // A list that is not on screen cannot be under the pointer.
-        if (!showing && _app.Monitor is { } monitor) monitor.HoldProcesses = false;
-        _app.PresentMonitor(this, showing);
-        // The page took no readings while it was closed: it shows the current ones, or dashes once the sampler has paused,
-        // never the figures it showed last time.
-        if (showing && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
-        _monitorShowing = showing;
+        bool page = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
+        bool strip = !_expanded && _compactStrip is not null && IsVisible && !IsSuppressed && _alert is null && EffectiveStyle != CompactStyle.Line;
+        if (!page)
+        {
+            // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
+            if (_monitorShowing && _app.Monitor is { } monitor) monitor.HoldProcesses = false;
+            _monitorView?.CloseCard();
+        }
+        _app.PresentMonitor(this, page, strip);
+        // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
+        // figures they showed last time.
+        if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
+        if (strip && !_stripShowing) _compactStrip?.Update(_app.Monitor?.Latest);
+        _monitorShowing = page; _stripShowing = strip;
     }
-    private bool _monitorShowing;
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
     private bool MonitorMotion => Settings.Animations && SystemParameters.ClientAreaAnimation;
 
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
-        if (!_expanded || !IsMonitorPage || _monitorView is null) return;
+        if (!_expanded) { _compactStrip?.Update(snapshot); return; }
+        if (!IsMonitorPage || _monitorView is null) return;
         if (MonitorKey() != _monitorKey) { RenderMonitor(); return; }
         _monitorView.Update(snapshot, MonitorMotion);
     }
 
-    // What the view is built from. The readings are not part of it: the core columns follow a change in the number of cores.
-    private string MonitorKey()
-        => string.Join("|", ContentCanvas.Width, ContentCanvas.Height, _header.Side, _header.Row, Settings.MonitorPalette, Settings.MonitorProcesses, Settings.MonitorSort, Loc.Language,
-            PanelTheme.Generation);
+    // The page's bottom margin for a page of this height; its sides are the header's inset.
+    private static double MonitorBottom(double height) => height < 170 ? 10 : 16;
+    private MonitorLayout CurrentMonitorLayout()
+    {
+        double height = ContentCanvas.Height;
+        return MonitorLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), Settings.MonitorProcesses);
+    }
+
+    // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
+    private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorProcesses, Settings.MonitorSort,
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation);
 
     private void RenderMonitor()
     {
@@ -56,31 +70,52 @@ public partial class MainWindow
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double width = ContentCanvas.Width, height = ContentCanvas.Height;
         if (!double.IsFinite(width) || !double.IsFinite(height)) return;
-        // The header keeps the usage page's controls, as the music page does, so the switch does not move between pages.
+        // The header keeps the usage page's controls, as the music page does, so the switch does not move between pages. Fitting
+        // the usage page for them is kept until its size, data or settings change: a drag resizes this page many times a second.
         var header = PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
-        ApplyHeader(Settings.UsagePage ? header.WithControlsOf(UsageHeader(_usageWidth, UsagePageHeight)) : header);
-        double side = _header.Side, bottom = height < 170 ? 10 : 16;
-        MonitorContent.Margin = new Thickness(side, 0, side, bottom);
-        var snapshot = _app.Monitor?.Latest ?? WaitingSnapshot;
+        ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
+        MonitorContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
         var key = MonitorKey();
-        if (_monitorView is null || key != _monitorKey || !MonitorContent.Children.Contains(_monitorView))
-        {
-            _monitorKey = key;
-            // The list being replaced may have been under the pointer; its leave event never comes.
-            if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
-            var layout = MonitorLayout.For(width - 2 * side, height - _header.Row - bottom, Settings.MonitorProcesses);
-            _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings.MonitorPalette), Settings.MonitorSort, SortProcesses,
-                hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; });
-            MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
-        }
-        _monitorView.Update(snapshot, motion: false);
+        bool fade = _monitorFade; _monitorFade = false;
+        if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
+        _monitorKey = key;
+        // The list being replaced may have been under the pointer; its leave event never comes.
+        if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
+        _monitorView = new MonitorView(CurrentMonitorLayout(), MonitorThemeColors.For(Settings.MonitorPalette), Settings.MonitorMain, Settings.MonitorSort,
+            Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; });
+        MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
+        _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
+        // A change the user asked for on the page (the main gauge, the sort) arrives with a short fade instead of a cut.
+        if (fade && MonitorMotion)
+            _monitorView.BeginAnimation(OpacityProperty, new DoubleAnimation(.15, 1, TimeSpan.FromMilliseconds(220)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
     }
 
-    // The sort is the same for every panel and is kept with the settings.
+    private (double Width, double Height, IReadOnlyList<ProviderSnapshot> Snapshots, DeckSettings Settings, PanelHeader Header)? _usageHeader;
+    private PanelHeader CachedUsageHeader()
+    {
+        double width = _usageWidth, height = UsagePageHeight;
+        if (_usageHeader is { } known && known.Width == width && known.Height == height && ReferenceEquals(known.Snapshots, Snapshots) && ReferenceEquals(known.Settings, Settings))
+            return known.Header;
+        var header = UsageHeader(width, height);
+        _usageHeader = (width, height, Snapshots, Settings, header);
+        return header;
+    }
+
+    // The sort and the main gauge are the same for every panel and are kept with the settings.
     private void SortProcesses(ProcessSort sort)
     {
         if (Settings.MonitorSort == sort) return;
         Settings.MonitorSort = sort; _app.QueueSave();
-        foreach (var deck in _app.Decks) if (deck._expanded && deck.IsMonitorPage) deck.RenderMonitor();
+        RefreshMonitorPages();
+    }
+    private void SwitchMonitorMain(MonitorMain main)
+    {
+        if (Settings.MonitorMain == main) return;
+        Settings.MonitorMain = main; _app.QueueSave();
+        RefreshMonitorPages();
+    }
+    private void RefreshMonitorPages()
+    {
+        foreach (var deck in _app.Decks) if (deck._expanded && deck.IsMonitorPage) { deck._monitorFade = true; deck.RenderMonitor(); }
     }
 }

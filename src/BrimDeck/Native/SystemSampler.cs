@@ -17,11 +17,13 @@ internal sealed class SystemSampler : IDisposable
     private static readonly TimeSpan Linger = TimeSpan.FromSeconds(10);
     // After a pause the counters are read once and again after this short window, so the page has figures almost at once.
     private const int PrimeMilliseconds = 300;
+    // The network readings the sparklines draw, oldest first: a minute at one reading a second.
+    public const int HistoryLength = 60;
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _linger;
     private readonly AutoResetEvent _wake = new(false);
     private Thread? _thread;
-    private volatile bool _wanted, _disposed;
+    private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses;
     private volatile int _intervalMilliseconds = 1000;
     // The providers belong to the sampling thread, which creates them: adding the performance counters can take tens of
     // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread.
@@ -31,10 +33,11 @@ internal sealed class SystemSampler : IDisposable
     private readonly NetworkProvider _network = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
-    // Listing processes, the costliest reading, runs about every two seconds whatever the interval; a two-second window
-    // also steadies the per-process figures.
+    // Listing processes, the costliest reading, runs about every two seconds whatever the interval, and only while the page is
+    // open: the notch and the capsule show no processes. A two-second window also steadies the per-process figures.
     private const double ProcessSeconds = 1.5;
     private double _processesAt = double.NegativeInfinity;
+    private readonly Queue<(double Down, double Up)> _history = new(HistoryLength);
 
     public SystemSampler(Dispatcher dispatcher)
     {
@@ -51,11 +54,17 @@ internal sealed class SystemSampler : IDisposable
     // While set, rows already in the process lists keep their rank (the pointer is over a list).
     public bool HoldProcesses { get => _processes.Hold; set => _processes.Hold = value; }
 
-    // Called on the UI thread whenever a panel opens or closes the page.
-    public void SetDemand(bool wanted, int intervalSeconds)
+    // Called on the UI thread whenever a panel opens or closes the page or shows or hides the readings in its collapsed row.
+    // processes: the expanded page is open, so the process list is read too.
+    public void SetDemand(bool wanted, int intervalSeconds, bool processes)
     {
         if (_disposed) return;
         _intervalMilliseconds = Math.Clamp(intervalSeconds, 1, 2) * 1000;
+        bool listing = _listProcesses;
+        _listProcesses = wanted && processes;
+        // The page opened while the collapsed row kept the sampler running: the processes are read at once and again shortly,
+        // instead of waiting up to two readings for a list.
+        if (_listProcesses && !listing && _wanted) { _primeProcesses = true; _wake.Set(); }
         if (!wanted) { if (_wanted && !_linger.IsEnabled) _linger.Start(); return; }
         _linger.Stop();
         if (_wanted) return;
@@ -83,12 +92,14 @@ internal sealed class SystemSampler : IDisposable
         {
             try
             {
-                if (!_wanted) { primed = false; _wake.WaitOne(); continue; }
-                if (!primed)
+                if (!_wanted) { primed = false; _history.Clear(); _wake.WaitOne(); continue; }
+                if (!primed || _primeProcesses)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
                     // figures cover the short window and not the whole pause.
-                    Collect(listProcesses: true);
+                    _primeProcesses = false;
+                    if (!primed) Collect(listProcesses: true);
+                    else if (_listProcesses) _processes.Sample(Now());
                     primed = true; first = true;
                     _wake.WaitOne(PrimeMilliseconds);
                     continue;
@@ -109,16 +120,28 @@ internal sealed class SystemSampler : IDisposable
         }
     }
 
+    private static double Now() => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+
     private MonitorSnapshot Collect(bool listProcesses)
     {
-        double now = Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+        double now = Now();
         bool pdh = _pdh?.Collect() == true;
-        if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
+        if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; }
+        else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
         {
             _lastProcesses = _processes.Sample(now); _processesAt = now;
         }
-        return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, _cpu!.Sample(pdh), MemoryProvider.Sample(), _network.Sample(now),
-            _gpu!.Sample(pdh), _lastProcesses);
+        var network = _network.Sample(now);
+        if (network.TryGet(out var rates))
+        {
+            if (_history.Count == HistoryLength) _history.Dequeue();
+            _history.Enqueue((rates.DownBytesPerSecond, rates.UpBytesPerSecond));
+        }
+        return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, _cpu!.Sample(pdh), MemoryProvider.Sample(), network,
+            _gpu!.Sample(pdh), _lastProcesses)
+        {
+            DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray()
+        };
     }
 
     public void Dispose()
@@ -297,9 +320,12 @@ internal static class MemoryProvider
     {
         var status = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
         if (!GlobalMemoryStatusEx(ref status)) return Reading<MemorySample>.Unavailable(Why.NoMemory);
+        // The file cache (standby and modified pages) is free for the taking, so Task Manager counts it as available, not in use.
+        var performance = new PerformanceInformation { Size = (uint)Marshal.SizeOf<PerformanceInformation>() };
+        ulong cached = GetPerformanceInfo(ref performance, performance.Size) ? (ulong)performance.SystemCache * (ulong)performance.PageSize : 0;
         // TotalPageFile is the commit limit: physical memory plus the page files.
         return new MemorySample(status.TotalPhys, status.TotalPhys - Math.Min(status.TotalPhys, status.AvailPhys),
-            status.TotalPageFile - Math.Min(status.TotalPageFile, status.AvailPageFile), status.TotalPageFile);
+            status.TotalPageFile - Math.Min(status.TotalPageFile, status.AvailPageFile), status.TotalPageFile, cached);
     }
     [StructLayout(LayoutKind.Sequential)]
     private struct MemoryStatus
@@ -307,7 +333,15 @@ internal static class MemoryProvider
         public uint Length, MemoryLoad;
         public ulong TotalPhys, AvailPhys, TotalPageFile, AvailPageFile, TotalVirtual, AvailVirtual, AvailExtendedVirtual;
     }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PerformanceInformation
+    {
+        public uint Size;
+        public nuint CommitTotal, CommitLimit, CommitPeak, PhysicalTotal, PhysicalAvailable, SystemCache, KernelTotal, KernelPaged, KernelNonpaged, PageSize;
+        public uint HandleCount, ProcessCount, ThreadCount;
+    }
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalMemoryStatusEx(ref MemoryStatus buffer);
+    [DllImport("kernel32.dll", EntryPoint = "K32GetPerformanceInfo", SetLastError = true)] private static extern bool GetPerformanceInfo(ref PerformanceInformation information, uint size);
 }
 
 // Download and upload over the physical adapters. Virtual adapters (Hyper-V, VPN, loopback) and filter drivers are left out:
@@ -395,20 +429,25 @@ internal sealed class NetworkProvider : IDisposable
     [DllImport("iphlpapi.dll")] private static extern void FreeMibTable(IntPtr memory);
 }
 
-// The graphics engines as Task Manager reads them: per adapter, the busiest engine type with every process's share of it
-// summed. The page shows the busiest adapter and its dedicated memory.
+// The graphics engines as Task Manager reads them: per adapter and kind of engine, every process's share summed; the adapter's
+// usage is its busiest kind. The page shows the busiest adapter: its engines, its dedicated and shared memory, and its name
+// and dedicated memory size from DXGI.
 internal sealed class GpuProvider
 {
     private const string EnginePath = @"\GPU Engine(*)\Utilization Percentage";
     private const string MemoryPath = @"\GPU Adapter Memory(*)\Dedicated Usage";
+    private const string SharedPath = @"\GPU Adapter Memory(*)\Shared Usage";
     private readonly PdhQuery? _pdh;
-    private readonly bool _engines, _memory;
+    private readonly bool _engines, _memory, _shared;
+    // By the "luid_0x…_0x…" key the counters use; read once, as adapters rarely change while BrimDeck runs.
+    private readonly Dictionary<string, (string Name, ulong Dedicated)> _adapters = GpuAdapters.Read();
 
     public GpuProvider(PdhQuery? pdh)
     {
         _pdh = pdh;
         _engines = pdh?.Add(EnginePath) == true;
         _memory = pdh?.Add(MemoryPath) == true;
+        _shared = pdh?.Add(SharedPath) == true;
     }
 
     public Reading<GpuSample> Sample(bool collected)
@@ -429,16 +468,24 @@ internal sealed class GpuProvider
         if (sums.Count == 0) return Reading<GpuSample>.Unavailable(Why.NoGpu);
         var busiest = sums.GroupBy(pair => pair.Key.Adapter).Select(group => (Adapter: group.Key, Usage: group.Max(pair => pair.Value)))
             .OrderByDescending(adapter => adapter.Usage).First();
-        Reading<ulong> dedicated = Reading<ulong>.Unavailable(Why.NoGpuMemory);
-        if (_memory)
+        var kinds = GpuEngines.Order(sums.Where(pair => pair.Key.Adapter == busiest.Adapter && pair.Key.Type.Length > 0)
+            .Select(pair => new GpuEngine(pair.Key.Type, pair.Value / 100)));
+        var info = _adapters.TryGetValue(busiest.Adapter, out var known) ? known : default;
+        return new GpuSample(Math.Clamp(busiest.Usage / 100, 0, 1), AdapterMemory(_memory ? MemoryPath : null, busiest.Adapter))
         {
-            // The busiest adapter's memory, or the adapter using the most when its own is not listed.
-            var memory = _pdh!.Read(MemoryPath).Select(item => (Adapter: Adapter(item.Instance), item.Value)).Where(item => item.Adapter is not null).ToList();
-            var match = memory.Where(item => item.Adapter == busiest.Adapter).ToList();
-            double? bytes = match.Count > 0 ? match.Sum(item => item.Value) : memory.Count > 0 ? memory.Max(item => item.Value) : null;
-            if (bytes is { } used) dedicated = (ulong)Math.Max(0, used);
-        }
-        return new GpuSample(Math.Clamp(busiest.Usage / 100, 0, 1), dedicated);
+            Engines = kinds, SharedBytes = AdapterMemory(_shared ? SharedPath : null, busiest.Adapter),
+            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null
+        };
+    }
+
+    // The adapter's memory counter, or the adapter using the most when its own is not listed.
+    private Reading<ulong> AdapterMemory(string? path, string adapter)
+    {
+        if (path is null) return Reading<ulong>.Unavailable(Why.NoGpuMemory);
+        var memory = _pdh!.Read(path).Select(item => (Adapter: Adapter(item.Instance), item.Value)).Where(item => item.Adapter is not null).ToList();
+        var match = memory.Where(item => item.Adapter == adapter).ToList();
+        double? bytes = match.Count > 0 ? match.Sum(item => item.Value) : memory.Count > 0 ? memory.Max(item => item.Value) : null;
+        return bytes is { } used ? (ulong)Math.Max(0, used) : Reading<ulong>.Unavailable(Why.NoGpuMemory);
     }
 
     // "luid_0x00000000_0x0000C5E2" from an engine or adapter instance name.
@@ -451,13 +498,59 @@ internal sealed class GpuProvider
     }
 }
 
+// The graphics adapters' names and dedicated memory from DXGI, keyed as the performance counters name adapters. A machine
+// without DXGI, or a failure on the way, gives no names; the page then shows "GPU" and no memory size.
+internal static class GpuAdapters
+{
+    public static Dictionary<string, (string Name, ulong Dedicated)> Read()
+    {
+        var adapters = new Dictionary<string, (string, ulong)>(StringComparer.OrdinalIgnoreCase);
+        var iid = new Guid("770aae78-f26f-4dba-a829-253c83d1b387");
+        IntPtr factory = IntPtr.Zero, description = Marshal.AllocHGlobal(512);
+        try
+        {
+            if (CreateDXGIFactory1(ref iid, out factory) < 0 || factory == IntPtr.Zero) return adapters;
+            // IDXGIFactory1::EnumAdapters1 is the 13th method (index 12); IDXGIAdapter1::GetDesc1 the 11th (index 10).
+            var enumerate = Method<EnumAdapters1>(factory, 12);
+            for (uint index = 0; index < 16 && enumerate(factory, index, out var adapter) >= 0 && adapter != IntPtr.Zero; index++)
+            {
+                try
+                {
+                    if (Method<GetDesc1>(adapter, 10)(adapter, description) < 0) continue;
+                    // DXGI_ADAPTER_DESC1: Description[128] WCHAR, four UINT ids, three SIZE_T memory sizes, the LUID, Flags.
+                    uint flags = (uint)Marshal.ReadInt32(description, 304);
+                    if ((flags & 2) != 0) continue; // the software rasterizer
+                    string name = Marshal.PtrToStringUni(description, 128).TrimEnd('\0').Trim();
+                    ulong dedicated = (ulong)Marshal.ReadInt64(description, 272);
+                    uint low = (uint)Marshal.ReadInt32(description, 296), high = (uint)Marshal.ReadInt32(description, 300);
+                    adapters[$"luid_0x{high:X8}_0x{low:X8}"] = (name, dedicated);
+                }
+                finally { Method<Release>(adapter, 2)(adapter); }
+            }
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or COMException or AccessViolationException) { Debug.WriteLine(ex); }
+        finally
+        {
+            if (factory != IntPtr.Zero) Method<Release>(factory, 2)(factory);
+            Marshal.FreeHGlobal(description);
+        }
+        return adapters;
+    }
+    private static T Method<T>(IntPtr instance, int slot) where T : Delegate
+        => Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int EnumAdapters1(IntPtr factory, uint index, out IntPtr adapter);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetDesc1(IntPtr adapter, IntPtr description);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate uint Release(IntPtr instance);
+    [DllImport("dxgi.dll")] private static extern int CreateDXGIFactory1(ref Guid riid, out IntPtr factory);
+}
+
 // Every process from one kernel call, which covers other users' processes without opening them. Processes of one
 // executable fold into one entry, the way ftop folds an app's helpers into the app. Names and icons are looked up only
 // for the entries that can be shown.
 internal sealed class ProcessProvider : IDisposable
 {
     // Each list carries a few more rows than the page shows at most, so a row leaving at the bottom has one to replace it.
-    private const int Kept = MonitorLayout.MaximumRows + 2;
+    private const int Kept = MonitorLayout.MaximumRows * MonitorLayout.MaximumColumns + 2;
     private const uint InfoLengthMismatch = 0xC0000004;
     private IntPtr _buffer;
     private int _capacity;

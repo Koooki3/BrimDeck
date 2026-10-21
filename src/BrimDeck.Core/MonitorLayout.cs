@@ -46,35 +46,57 @@ public sealed record MonitorColors(string Performance, string Efficiency, string
     };
 }
 
+public enum ListPlacement { None, Side, Below }
+// How memory and network are shown: both on one line, one line each, or as blocks with their second lines and sparklines.
+public enum MetricsMode { Line, Lines, Blocks }
+
 // How the system monitor page fills the space it has, after ftop's layout ladder: a small page keeps the essentials, a
 // large one shows more rather than bigger type. Sizes are DIPs of the page's content area, below its header.
-// SideList: the process list takes a column at the right; otherwise, with room, it sits below the readings.
-// CompactMetrics: memory, network and GPU share one line under the core columns instead of a row each.
-public sealed record MonitorLayout(double Figure, double Body, double Caption, bool CompactMetrics, bool SideList, double ListWidth, int Rows, double RowHeight)
+// The ladder has steps only: within a step the page stretches (the list's share, its rows and columns, the graph's height), so
+// resizing the panel by dragging rebuilds the page only where it crosses a step.
+// Metrics: how much room memory and network take (MetricsMode). ColumnLabels: each core column carries its figure underneath,
+// as on ftop's large panel.
+public sealed record MonitorLayout(double Figure, double Body, double Caption, MetricsMode Metrics, ListPlacement List, double RowHeight, bool ColumnLabels)
 {
-    public bool Processes => Rows > 0;
-    // The most rows the list shows, however tall the page.
-    public const int MaximumRows = 14;
+    public bool CompactMetrics => Metrics == MetricsMode.Line;
+    public bool Processes => List != ListPlacement.None;
+    // The most rows one column of the list shows, however tall the page, and the most columns a wide list has.
+    public const int MaximumRows = 14, MaximumColumns = 2;
     // Fewer rows than this are not worth a list.
     public const int MinimumRows = 2;
     // The list's own header: its title and the sort switch.
-    public const double ListHead = 24;
+    public const double ListHead = 26;
     // The readings keep this much height when the list sits below them.
-    public const double StackedReadings = 160;
+    public const double StackedReadings = 170;
+    // A side list takes this share of the width, within these bounds; a list this wide or wider has two columns.
+    public const double ListShare = .42, ListMinimum = 220, ListMaximum = 560, TwoColumns = 470;
 
     public static MonitorLayout For(double width, double height, bool processes)
     {
         width = double.IsFinite(width) ? Math.Max(0, width) : 0;
         height = double.IsFinite(height) ? Math.Max(0, height) : 0;
-        double figure = height < 120 ? 16 : height < 200 ? 20 : 24;
+        double figure = height < 120 ? 16 : height < 200 ? 19 : 23;
         double body = height < 120 ? 11 : 12, caption = height < 120 ? 10 : 10.5;
-        double row = height < 160 ? 18 : 21;
-        bool compact = height < 130;
-        bool side = processes && width >= 560;
-        double list = side ? Math.Clamp(Math.Round(width * .42), 220, 400) : width;
-        double room = side ? height - ListHead : processes && height >= StackedReadings + ListHead + MinimumRows * row ? height - StackedReadings - ListHead : 0;
-        int rows = Math.Clamp((int)Math.Floor(room / row), 0, MaximumRows);
-        if (rows < MinimumRows) { rows = 0; side = false; list = 0; }
-        return new(figure, body, caption, compact, side, list, rows, row);
+        double row = height < 160 ? 19 : 22;
+        var list = !processes ? ListPlacement.None
+            : width >= 560 && height - ListHead >= MinimumRows * row ? ListPlacement.Side
+            : height >= StackedReadings + ListHead + MinimumRows * row ? ListPlacement.Below : ListPlacement.None;
+        // The core columns need height to read; memory and network give theirs first. Readings above a list have its fixed height.
+        double readings = list == ListPlacement.Below ? StackedReadings : height;
+        var metrics = readings < 150 ? MetricsMode.Line : readings < 250 ? MetricsMode.Lines : MetricsMode.Blocks;
+        bool labels = height >= 270 && list != ListPlacement.Below;
+        return new(figure, body, caption, metrics, list, row, labels);
     }
+
+    // The rows and columns a list of this size shows.
+    public static (int Rows, int Columns) ListGrid(double width, double height, double rowHeight)
+    {
+        if (!(rowHeight > 0) || !double.IsFinite(width) || !double.IsFinite(height)) return (0, 0);
+        int rows = Math.Clamp((int)Math.Floor((height - ListHead) / rowHeight), 0, MaximumRows);
+        if (rows < MinimumRows) return (0, 0);
+        return (rows, width >= TwoColumns ? MaximumColumns : 1);
+    }
+
+    // The side list's width in a page of this width: its share, within its bounds, leaving the readings at least 260 DIP.
+    public static double SideListWidth(double width) => Math.Clamp(Math.Round(width * ListShare), ListMinimum, Math.Min(ListMaximum, Math.Max(ListMinimum, width - 260)));
 }
