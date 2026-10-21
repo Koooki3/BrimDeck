@@ -48,17 +48,11 @@ public sealed partial class SettingsWindow
             .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
         ThemeSection(Loc.T("主题扩展", "Theme extensions"));
         ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Extension).Select(Card)], chosen);
-        ThemeSection(Loc.T("自定义", "Custom"));
-        var own = users.Where(t => t.Usable).ToList();
-        if (own.Count == 0)
-            Note(Loc.T("还没有自定义主题。可以在下方“以当前主题新建”，或把主题文件放进主题文件夹。", "No custom themes yet. Use \"New from current theme\" below, or put a theme file in the themes folder."),
-                12, TextTertiary, new Thickness(0, 0, 0, 18));
-        else ThemeCards([.. own.Select(Card)], chosen);
+        CustomSection(users, chosen);
         _themeDetails = Collect(() => ThemeDetails(chosen, users)); _content.Children.Add(_themeDetails);
         // Miniatures of cards no longer on the page (a theme file renamed or removed) are let go.
         var cards = new[] { PanelThemes.SystemId }.Concat(PanelThemes.BuiltIns.Select(t => t.Id)).Concat(users.Where(t => t.Usable).Select(t => t.Id)).ToHashSet();
         foreach (var key in _themePreviews.Keys.Where(key => !cards.Contains(key.Card) || key.Language != Loc.Language).ToList()) _themePreviews.Remove(key);
-        CustomThemeTools(users);
         static (string Id, string Name, PanelThemeInfo Theme) Card(PanelThemeInfo theme) => (theme.Id, theme.DisplayName, theme);
     }
 
@@ -75,8 +69,9 @@ public sealed partial class SettingsWindow
         note.TextWrapping = TextWrapping.Wrap; note.Margin = margin; _content.Children.Add(note);
     }
 
-    // Three cards to a row, each a miniature of the panel in that theme.
-    private void ThemeCards(IReadOnlyList<(string Id, string Name, PanelThemeInfo Theme)> themes, string chosen)
+    // Three cards to a row, each the collapsed capsule in that theme. A user's own theme carries a delete button beside its
+    // name, and the custom section ends with the tools tile (tile).
+    private void ThemeCards(IReadOnlyList<(string Id, string Name, PanelThemeInfo Theme)> themes, string chosen, FrameworkElement? tile = null)
     {
         var grid = new UniformGrid { Columns = 3, Margin = new Thickness(-6, 0, -6, 18) };
         foreach (var (id, name, theme) in themes)
@@ -97,9 +92,17 @@ public sealed partial class SettingsWindow
                 _themeDetails = Collect(() => ThemeDetails(id, PanelTheme.UserThemes));
                 // A panel's slot cannot take a new child while the old one is still in it, so the old one leaves first.
                 _content.Children.RemoveAt(at); _content.Children.Insert(at, _themeDetails);
+                _renameTheme?.Invoke();
             };
-            grid.Children.Add(card);
+            if (theme.Path is null) { grid.Children.Add(card); continue; }
+            // In the card's name row, left of the check: the delete button.
+            var cell = new Grid(); cell.Children.Add(card);
+            var delete = DeleteThemeButton(theme); delete.HorizontalAlignment = HorizontalAlignment.Right; delete.VerticalAlignment = VerticalAlignment.Bottom;
+            delete.Margin = new Thickness(0, 0, 6 + 8 + 14 + 6, 6 + 7);
+            cell.Children.Add(delete);
+            grid.Children.Add(cell);
         }
+        if (tile is not null) grid.Children.Add(tile);
         _content.Children.Add(grid);
     }
 
@@ -172,9 +175,33 @@ public sealed partial class SettingsWindow
         return block;
     }
 
-    private void CustomThemeTools(IReadOnlyList<PanelThemeInfo> users)
+    // The custom section, as the review sketched it: the title with a reload button, the theme guide at the right; the user's
+    // themes as cards with a delete button by the name; and a tile of the same size with "New from current theme" and "Open themes
+    // folder", with "Rename" (for the chosen theme, when it is one of the user's) in its name row. Files that cannot be used are
+    // listed under it with their errors.
+    private Action? _renameTheme;
+    private void CustomSection(IReadOnlyList<PanelThemeInfo> users, string chosen)
     {
-        SectionTitle(Loc.T("制作自定义主题", "Make a custom theme"));
+        var head = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+        var guide = Link(Loc.T("主题制作指南 ↗", "Theme guide ↗"), Updates.GitHubUpdates.RepositoryUrl + Loc.T("/blob/main/docs/zh-CN/themes.md", "/blob/main/docs/en-US/themes.md"));
+        guide.VerticalAlignment = VerticalAlignment.Center; DockPanel.SetDock(guide, Dock.Right); head.Children.Add(guide);
+        var title = TextLine(Loc.T("自定义", "Custom"), 11, TextSecondary); title.VerticalAlignment = VerticalAlignment.Center; head.Children.Add(title);
+        var reload = GlyphButton("M 12.5,4.5 A 5.5,5.5 0 1 0 13,9 M 12.5,1.5 V 4.5 H 9.5", 14, 14, Loc.T("重新加载主题文件", "Reload theme files"), () => ShowPage(ThemePage));
+        reload.Width = 22; reload.Height = 22; reload.Margin = new Thickness(4, 0, 0, 0); reload.VerticalAlignment = VerticalAlignment.Center;
+        reload.HorizontalAlignment = HorizontalAlignment.Left; // the last child fills the rest of the row; the icon stays beside the title
+        head.Children.Add(reload);
+        Target.Children.Add(head);
+        Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, 12) });
+        var own = users.Where(t => t.Usable).ToList();
+        ThemeCards([.. own.Select(t => (t.Id, t.DisplayName, t))], chosen, CustomTile());
+        var broken = users.Where(t => !t.Usable).ToList();
+        if (broken.Count > 0)
+            Group([.. broken.Select(t => (FrameworkElement)Row(t.Path is { } file ? PanelThemes.DisplayFileName(file) : t.Id, Wrapped(Loc.T("无法使用：", "Cannot be used: ") + t.Error, true)))]);
+    }
+
+    // The tools tile: the same frame as a card, the two buttons in it, and Rename in the name row.
+    private FrameworkElement CustomTile()
+    {
         var create = ActionButton(Loc.T("以当前主题新建", "New from current theme"), () =>
         {
             try
@@ -193,48 +220,91 @@ public sealed partial class SettingsWindow
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { SaveStatus(Loc.T("无法创建主题文件：", "Could not create the theme file: ") + ex.Message, true); }
             _themesFresh = true; ShowPage(ThemePage);
         });
+        create.ToolTip = Loc.T("把当前主题的全部颜色写入一个带注释的模板文件并打开它；改好后保存，本页会自动重新加载。",
+            "Writes every color of the current theme into a commented template file and opens it; save your changes and this page reloads them.");
         var folder = ActionButton(Loc.T("打开主题文件夹", "Open themes folder"), () =>
         {
             try { Directory.CreateDirectory(PanelTheme.Folder); Process.Start(new ProcessStartInfo("explorer.exe", "\"" + PanelTheme.Folder + "\"") { UseShellExecute = true }); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception) { SaveStatus(ex.Message, true); }
         });
-        var reload = ActionButton(Loc.T("重新加载", "Reload"), () => ShowPage(ThemePage));
-        foreach (var button in new[] { create, folder, reload }) { button.FontSize = 11; button.Margin = new Thickness(6, 0, 0, 0); }
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal }; buttons.Children.Add(create); buttons.Children.Add(folder); buttons.Children.Add(reload);
-        var rows = new List<FrameworkElement>
-        {
-            Row(Loc.T("主题文件", "Theme files"), buttons, help: () => Loc.T(
-                "“以当前主题新建”会把当前主题的全部颜色写入一个带注释的模板文件并打开它；改好后保存，本页会自动重新加载。主题文件放在主题文件夹中（*.json，或子文件夹中的 theme.json），格式与制作流程见项目文档 docs/zh-CN/themes.md。",
-                "\"New from current theme\" writes every color of the current theme into a commented template file and opens it; save your changes and this page reloads them. Theme files live in the themes folder (*.json, or theme.json in a subfolder); the format and the design steps are in docs/en-US/themes.md.")),
-            Row(Loc.T("制作指南", "Guide"), Link(Loc.T("主题制作指南 ↗", "Theme guide ↗"), Updates.GitHubUpdates.RepositoryUrl + Loc.T("/blob/main/docs/zh-CN/themes.md", "/blob/main/docs/en-US/themes.md")))
-        };
-        // The user's own themes, each with its file and a delete that asks once more before the file goes to the Recycle Bin.
-        foreach (var own in users.Where(t => t.Usable && t.Path is not null))
-            rows.Add(Row(own.DisplayName, OwnThemeActions(own)));
-        foreach (var broken in users.Where(t => !t.Usable))
-            rows.Add(Row(broken.Path is { } file ? PanelThemes.DisplayFileName(file) : broken.Id, Wrapped(Loc.T("无法使用：", "Cannot be used: ") + broken.Error, true)));
-        Group([.. rows]);
+        folder.ToolTip = Loc.T("主题文件放在这里：*.json，或子文件夹中的 theme.json。", "Theme files live here: *.json, or theme.json in a subfolder.");
+        foreach (var button in new[] { create, folder }) { button.FontSize = 11.5; button.HorizontalAlignment = HorizontalAlignment.Center; button.MinWidth = 132; }
+        folder.Margin = new Thickness(0, 10, 0, 0);
+        var buttons = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        buttons.Children.Add(create); buttons.Children.Add(folder);
+        // The frame takes a card's size: the same scene proportions inside the same border and padding.
+        var frame = new Grid();
+        frame.Children.Add(new Viewbox { Child = new Border { Width = 240, Height = 136 }, Stretch = System.Windows.Media.Stretch.Uniform });
+        frame.Children.Add(buttons);
+        var chrome = new Border { CornerRadius = new CornerRadius(12), BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(1.5), Padding = new Thickness(3), Child = frame };
+        var nameRow = new Grid { Height = 30, Margin = new Thickness(8, 4, 8, 0) };
+        nameRow.Children.Add(RenameControl());
+        var tile = new StackPanel { Margin = new Thickness(6, 3, 6, 6) };
+        tile.Children.Add(chrome); tile.Children.Add(nameRow);
+        return tile;
     }
 
-    private FrameworkElement OwnThemeActions(PanelThemeInfo theme)
+    // Rename: for the chosen theme when it is one of the user's. A click turns it into a text box; Enter or leaving it renames the
+    // file's theme (its name only, PanelThemes.RenameFile), Esc leaves it as it was.
+    private FrameworkElement RenameControl()
     {
-        var path = theme.Path!;
-        var edit = ActionButton(Loc.T("编辑", "Edit"), () => OpenThemeFile(path)); edit.ToolTip = path;
-        Button remove = null!;
-        bool armed = false;
-        var disarm = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromSeconds(4) };
-        void Arm(bool on) { armed = on; remove.Content = on ? Loc.T("确认删除", "Confirm delete") : Loc.T("删除", "Delete"); if (on) disarm.Start(); else disarm.Stop(); }
-        disarm.Tick += (_, _) => Arm(false);
-        remove = ActionButton(Loc.T("删除", "Delete"), () =>
+        var host = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var rename = ActionButton(Loc.T("重命名", "Rename"), () => { });
+        rename.FontSize = 11.5;
+        var box = new TextBox { Width = 160, FontSize = 12, Visibility = Visibility.Collapsed, VerticalContentAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(box, Loc.T("主题名称", "Theme name"));
+        PanelThemeInfo? Target() => PanelTheme.UserThemes.FirstOrDefault(t => t.Usable && t.Path is not null && t.Id == PanelThemes.NormalizeId(S.PanelTheme));
+        void Refresh()
         {
-            if (!armed) { Arm(true); return; }
-            Arm(false);
-            DeleteOwnTheme(theme);
-        });
-        AutomationProperties.SetName(remove, Loc.T("删除主题 ", "Delete theme ") + theme.DisplayName);
-        foreach (var button in new[] { edit, remove }) { button.FontSize = 11; button.Margin = new Thickness(6, 0, 0, 0); }
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal }; buttons.Children.Add(edit); buttons.Children.Add(remove);
-        return buttons;
+            var theme = Target();
+            rename.IsEnabled = theme is not null;
+            rename.ToolTip = theme is null ? Loc.T("选中一个自定义主题后可重命名。", "Choose one of your themes to rename it.") : Loc.T("重命名“", "Rename \"") + theme.DisplayName + Loc.T("”", "\"");
+        }
+        bool editing = false;
+        void Finish(bool keep)
+        {
+            if (!editing) return;
+            editing = false;
+            box.Visibility = Visibility.Collapsed; rename.Visibility = Visibility.Visible;
+            var theme = Target();
+            string name = box.Text.Trim();
+            if (!keep || theme is null || name.Length == 0 || name == theme.DisplayName) return;
+            try { PanelThemes.RenameFile(theme.Path!, name); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { SaveStatus(Loc.T("无法重命名主题：", "Could not rename the theme: ") + ex.Message, true); return; }
+            _themesFresh = false; ShowPage(ThemePage);
+        }
+        rename.Click += (_, _) =>
+        {
+            if (Target() is not { } theme) return;
+            editing = true; box.Text = theme.DisplayName;
+            rename.Visibility = Visibility.Collapsed; box.Visibility = Visibility.Visible;
+            box.Focus(); box.SelectAll();
+        };
+        box.KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Enter) { Finish(true); e.Handled = true; } else if (e.Key == System.Windows.Input.Key.Escape) { Finish(false); e.Handled = true; } };
+        box.LostKeyboardFocus += (_, _) => Finish(true);
+        _renameTheme = Refresh; Refresh();
+        host.Children.Add(rename); host.Children.Add(box);
+        return host;
+    }
+
+    // The delete button by a user theme's name. The first click asks (the cross turns into "Delete?"), a second click within a
+    // few seconds deletes; the file goes to the Recycle Bin.
+    private FrameworkElement DeleteThemeButton(PanelThemeInfo theme)
+    {
+        const string Cross = "M 7,1 A 6,6 0 1 1 6.99,1 M 4.6,4.6 L 9.4,9.4 M 9.4,4.6 L 4.6,9.4";
+        var host = new Grid();
+        var cross = GlyphButton(Cross, 14, 14, Loc.T("删除主题 ", "Delete theme ") + theme.DisplayName, () => { });
+        cross.Width = 20; cross.Height = 20;
+        var confirm = ActionButton(Loc.T("删除？", "Delete?"), () => { });
+        confirm.FontSize = 11; confirm.Foreground = UI.Brush(_palette.Dark ? "#F0A6AA" : "#B12E3A"); confirm.Visibility = Visibility.Collapsed; confirm.Padding = new Thickness(6, 0, 6, 0);
+        AutomationProperties.SetName(confirm, Loc.T("确认删除主题 ", "Confirm deleting theme ") + theme.DisplayName);
+        var disarm = new DispatcherTimer(DispatcherPriority.Background, Dispatcher) { Interval = TimeSpan.FromSeconds(4) };
+        void Arm(bool on) { cross.Visibility = on ? Visibility.Collapsed : Visibility.Visible; confirm.Visibility = on ? Visibility.Visible : Visibility.Collapsed; if (on) disarm.Start(); else disarm.Stop(); }
+        disarm.Tick += (_, _) => Arm(false);
+        cross.Click += (_, _) => { Arm(true); confirm.Focus(); };
+        confirm.Click += (_, _) => { Arm(false); DeleteOwnTheme(theme); };
+        host.Children.Add(cross); host.Children.Add(confirm);
+        return host;
     }
 
     // A theme in its own folder (theme.json) takes the folder with it; a single file goes alone. The theme in use gives way to

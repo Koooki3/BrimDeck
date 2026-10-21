@@ -31,8 +31,8 @@ public sealed partial class SettingsWindow : Window
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
         Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings")];
     // The order of the pages in the navigation; the theme page (ThemePage) is listed with the appearance pages, and the system
-    // monitor's page (MonitorSettingsPage) has its own group between AI usage and music, as the panel's pages are ordered.
-    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, MonitorSettingsPage, 5, 6, 7];
+    // monitor's page (MonitorSettingsPage) has its own group after music, before About.
+    private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -487,7 +487,8 @@ public sealed partial class SettingsWindow : Window
         }
         FillStarts();
         start.SelectionChanged += (_, _) => { if (!filling && start.SelectedIndex >= 0) Change(s => s.DefaultPage = starts[start.SelectedIndex].Value); };
-        SectionTitle(Loc.T("显示的页面", "Pages shown"));
+        SectionTitle(Loc.T("显示的页面", "Pages shown"), help: () => Loc.T("除了在下面设置宽度与高度，也可以把鼠标移到展开面板的左右两边、底边或底角，直接拖动调整大小。",
+            "Besides setting the width and height below, you can point at the expanded panel's sides, bottom edge or bottom corners and drag them to resize it."));
         Group(SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), DeckPage.Usage, S.UsagePage, value => { Change(s => s.UsagePage = value); FillStarts(); }, Collect(UsageSizes)),
             SizeRow(Loc.T("显示系统监控", "Show system monitor"), Loc.T("系统监控", "system monitor"), DeckPage.Monitor, S.MonitorPage, value => { Change(s => s.MonitorPage = value); FillStarts(); }, Collect(MonitorSizeControls)),
             SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), DeckPage.Music, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls)));
@@ -526,8 +527,7 @@ public sealed partial class SettingsWindow : Window
     {
         Target.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(0, 20, 0, 0) });
         // Labels inside an open row are set lighter than the row's own title.
-        var row = Row(Loc.T("快捷尺寸", "Quick sizes"), SegmentBorder(sizes), help: () => Loc.T("也可以把鼠标移到展开面板的左右两边、底边或底角，直接拖动调整大小。",
-            "You can also point at the expanded panel's sides, bottom edge or bottom corners and drag them to resize it."));
+        var row = Row(Loc.T("快捷尺寸", "Quick sizes"), SegmentBorder(sizes));
         if (row.Children[0] is StackPanel { Children: [TextBlock label, ..] }) label.FontWeight = FontWeights.Normal;
         Target.Children.Add(row);
     }
@@ -988,11 +988,20 @@ public sealed partial class SettingsWindow : Window
         return panel;
     }
 
-    private void SectionTitle(string title, FrameworkElement? action = null)
+    private void SectionTitle(string title, FrameworkElement? action = null, Func<string>? help = null)
     {
         var row = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
         if (action is not null) { DockPanel.SetDock(action, Dock.Right); action.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(action); }
-        var label = TextLine(title, 11, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(label); Target.Children.Add(row);
+        var label = TextLine(title, 11, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center;
+        if (help is null) row.Children.Add(label);
+        else
+        {
+            // An info icon right after the title, as the settings rows carry theirs.
+            var heading = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
+            heading.Children.Add(label); heading.Children.Add(HelpIcon(title, help, 13));
+            row.Children.Add(heading);
+        }
+        Target.Children.Add(row);
     }
 
     private void Group(params FrameworkElement[] rows)

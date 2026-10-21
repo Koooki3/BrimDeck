@@ -88,6 +88,24 @@ internal static class PanelThemeTests
             PanelThemes.ForgetTheme(kept, "DARK");
             check("A deleted theme takes its saved choices with it", !kept.ThemeChoices.ContainsKey("dark"));
         }
+        // Renaming a theme file changes only its own name.
+        {
+            const string original = """
+                { // my theme
+                  "id": "mine", "name": "我的主题", "nameEn": "My theme",
+                  "clock": { "gradients": [ { "name": "Neon", "stops": [] } ] },
+                  /* "name": "not this" */ "description": "a \"name\" inside" }
+                """;
+            var renamed = PanelThemes.Renamed(original, "夜航");
+            check("Renaming sets the theme's names in both languages", renamed.Contains(""" "name": "夜航" """.Trim()) && renamed.Contains(""" "nameEn": "夜航" """.Trim()) && !renamed.Contains("My theme"));
+            check("Renaming leaves nested names, comments, strings and the id alone",
+                renamed.Contains(""" "name": "Neon" """.Trim()) && renamed.Contains(""" /* "name": "not this" */ """.Trim()) && renamed.Contains(""" a \"name\" inside """.Trim())
+                && renamed.Contains(""" "id": "mine" """.Trim()) && renamed.StartsWith("{ // my theme"));
+            check("A theme file without a name gets one", PanelThemes.Renamed(""" { "id": "x" } """.Trim(), "Named").Contains(""" "name": "Named" """.Trim()));
+            var file = Path.Combine(root, "rename-theme.json"); File.WriteAllText(file, original);
+            PanelThemes.RenameFile(file, "  Blue  ");
+            check("Renaming a file trims the name and writes it back", File.ReadAllText(file).Contains(""" "name": "Blue" """.Trim()));
+        }
         var demo = BuiltIn(PanelThemes.Demo);
         check("The demo theme is listed with the extensions, leaving the custom section to the user", PanelThemes.BuiltIn(PanelThemes.Demo)!.Kind == PanelThemeKind.Extension);
         check("The demo theme carries its effects", demo.HasOverlay && demo.Effects.RimGradient.Count == 3 && demo.Effects.ShadowDepth == 0 && demo.Effects.Scanlines > 0);
