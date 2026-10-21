@@ -8,7 +8,8 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // The system monitor page's gauges. Each draws itself and takes the size its cell gives it, so a new reading redraws it without
-// measuring anything; values ease to each reading over a third of a second (Eased, Motion) and then rest.
+// measuring anything; values ease to each reading in a little under half a second (Eased, Motion) and then rest. Hover and press
+// feedback fades in and out over Soft.Quick in the same way.
 
 // A badge, a figure with its unit, and a detail after it, on one baseline: "(cpu) 47 % 3.41 GHz". Aligned right, the badge
 // still leads and the whole line ends at the right edge. As a button it lights its badge under the pointer and takes clicks.
@@ -18,8 +19,8 @@ internal sealed class FigureGauge : FrameworkElement
     private readonly string _color;
     private readonly double _figure, _small;
     private readonly bool _right, _button;
-    private Eased _share;
-    private bool _hasShare, _hover, _pressed;
+    private Eased _share, _hover = new(0, Eased.Hover);
+    private bool _hasShare, _pressed;
     private string _number = "—", _unit = "", _detail = "", _tip = "";
     public event Action? Clicked;
 
@@ -38,13 +39,14 @@ internal sealed class FigureGauge : FrameworkElement
         if (share is { } value && _share.Set(value, motion)) Motion.Start(this, Step);
         else if (changed || share is not null) InvalidateVisual();
     }
-    private bool Step(double now) { InvalidateVisual(); return _share.Moving(now); }
+    private bool Step(double now) { InvalidateVisual(); return _share.Moving(now) || _hover.Moving(now); }
+    private void Hover(bool on) { if (_hover.Set(on ? 1 : 0, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, Height);
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double ppd = MonitorDraw.PixelsPerDip(this), h = ActualHeight, w = ActualWidth;
+        double ppd = MonitorDraw.PixelsPerDip(this), h = ActualHeight, w = ActualWidth, now = Eased.Now;
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, h));
         double badge = Math.Round(_figure + 3), gap = Math.Round(_figure * .4);
         var number = MonitorDraw.Text(_number, _figure, UI.Primary, ppd, display: true);
@@ -54,8 +56,14 @@ internal sealed class FigureGauge : FrameworkElement
             + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0);
         double x = _right ? Math.Max(0, w - width) : 0, baseline = Math.Round(h / 2 + number.Baseline - number.Height / 2 + _figure * .05);
         var center = new Point(x + badge / 2, h / 2);
-        if (_button && (_hover || _pressed)) drawing.DrawEllipse(UI.Brush(_pressed ? PanelTheme.Hex("pressed") : PanelTheme.Hex("hover")), null, center, badge / 2 + 2, badge / 2 + 2);
-        MonitorDraw.Badge(drawing, center, badge, _glyph, _color, _hasShare ? _share.At(Eased.Now) : null);
+        double hover = _button ? Math.Clamp(_hover.At(now), 0, 1) : 0;
+        if (hover > .01)
+        {
+            drawing.PushOpacity(hover);
+            drawing.DrawEllipse(UI.Brush(_pressed ? PanelTheme.Hex("pressed") : PanelTheme.Hex("hover")), null, center, badge / 2 + 2, badge / 2 + 2);
+            drawing.Pop();
+        }
+        MonitorDraw.Badge(drawing, center, badge, _glyph, _color, _hasShare ? _share.At(now) : null);
         x += badge + gap;
         MonitorDraw.Baseline(drawing, number, x, baseline); x += number.WidthIncludingTrailingWhitespace;
         if (_unit.Length > 0) { MonitorDraw.Baseline(drawing, unit, x + 2, baseline); x += 2 + unit.WidthIncludingTrailingWhitespace; }
@@ -67,8 +75,8 @@ internal sealed class FigureGauge : FrameworkElement
         }
     }
 
-    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (_button) { _hover = true; InvalidateVisual(); } }
-    protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); if (_button) { _hover = _pressed = false; InvalidateVisual(); } }
+    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (_button) Hover(true); }
+    protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); if (_button) { _pressed = false; Hover(false); } }
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
@@ -194,8 +202,8 @@ internal sealed class ColumnGraph : FrameworkElement
 internal sealed class BlockGauge : FrameworkElement
 {
     private readonly string _color;
-    private Eased _value, _tick;
-    private bool _hasTick, _hover;
+    private Eased _value, _tick, _hover = new(0, Eased.Hover);
+    private bool _hasTick;
     public event Action? Clicked;
 
     public BlockGauge(string color, string button) { _color = color; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true; }
@@ -206,8 +214,10 @@ internal sealed class BlockGauge : FrameworkElement
         bool moving = _value.Set(value, motion);
         if (tick is { } t) moving |= _tick.Set(t, motion && _hasTick);
         _hasTick = tick is not null;
-        if (moving) Motion.Start(this, now => { InvalidateVisual(); return _value.Moving(now) || _tick.Moving(now); }); else InvalidateVisual();
+        if (moving) Motion.Start(this, Step); else InvalidateVisual();
     }
+    private bool Step(double now) { InvalidateVisual(); return _value.Moving(now) || _tick.Moving(now) || _hover.Moving(now); }
+    private void Hover(bool on) { if (_hover.Set(on ? 1 : 0, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
 
@@ -215,7 +225,10 @@ internal sealed class BlockGauge : FrameworkElement
     {
         double w = ActualWidth, h = ActualHeight, now = Eased.Now, radius = Math.Min(8, w / 4);
         if (w <= 0 || h <= 0) return;
-        drawing.DrawRoundedRectangle(UI.Brush(_hover ? PanelTheme.Hex("hover") : UI.Fill), null, new Rect(0, 0, w, h), radius, radius);
+        var box = new Rect(0, 0, w, h);
+        drawing.DrawRoundedRectangle(UI.Brush(UI.Fill), null, box, radius, radius);
+        double hover = Math.Clamp(_hover.At(now), 0, 1);
+        if (hover > .01) { drawing.PushOpacity(hover); drawing.DrawRoundedRectangle(UI.Brush(PanelTheme.Hex("hover")), null, box, radius, radius); drawing.Pop(); }
         double fill = Math.Max(3, Math.Clamp(_value.At(now), 0, 1) * h);
         drawing.DrawRoundedRectangle(UI.Brush(_color), null, new Rect(0, h - fill, w, fill), radius, radius);
         if (!_hasTick || w < 10) return;
@@ -223,8 +236,8 @@ internal sealed class BlockGauge : FrameworkElement
         double y = Math.Round((1 - Math.Clamp(_tick.At(now), 0, 1)) * (h - 2)) + 1;
         drawing.DrawLine(pen, new Point(w * .2, y), new Point(w * .8, y));
     }
-    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); _hover = true; InvalidateVisual(); }
-    protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); _hover = false; InvalidateVisual(); }
+    protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); Hover(true); }
+    protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); Hover(false); }
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) { base.OnMouseLeftButtonUp(e); e.Handled = true; Clicked?.Invoke(); }
 }
 

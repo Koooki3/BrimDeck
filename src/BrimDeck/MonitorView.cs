@@ -133,7 +133,7 @@ internal sealed class MonitorView : Grid
         Children.Add(_overlay);
         // A click anywhere outside the card and the list closes it; the click still reaches what it was meant for. On the list the
         // row decides (Open): its own row closes the card, another row opens its own.
-        PreviewMouseLeftButtonDown += (_, e) => { if (_card is not null && !_card.IsMouseOver && _list?.IsMouseOver != true) CloseCard(); };
+        PreviewMouseLeftButtonDown += (_, e) => { if (_card is not null && !_card.IsMouseOver && _list?.IsMouseOver != true) CloseCard(animate: true); };
     }
 
     public bool CardOpen => _card is not null;
@@ -182,7 +182,7 @@ internal sealed class MonitorView : Grid
         if (_card is not null)
         {
             var sample = _processes?.Top.Concat(_processes.ByMemory).FirstOrDefault(s => s.Id == _card.Id);
-            if (sample is null) CloseCard(); else _card.Show(sample, _cores, _layout.Body, _layout.Caption);
+            if (sample is null) CloseCard(animate: true); else _card.Show(sample, _cores, _layout.Body, _layout.Caption);
         }
     }
 
@@ -200,11 +200,11 @@ internal sealed class MonitorView : Grid
     private void Open(ProcessSample sample, Rect row)
     {
         if (_list is null) return;
-        if (_card?.Id == sample.Id) { CloseCard(); return; }
-        CloseCard();
+        if (_card?.Id == sample.Id) { CloseCard(animate: true); return; }
+        CloseCard(animate: true);
         var card = new ProcessCard(_layout.Body, _layout.Caption);
         card.Show(sample, _cores, _layout.Body, _layout.Caption);
-        card.MouseLeftButtonUp += (_, e) => { e.Handled = true; CloseCard(); };
+        card.MouseLeftButtonUp += (_, e) => { e.Handled = true; CloseCard(animate: true); };
         card.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var origin = _list.TranslatePoint(new Point(row.X, row.Y), this);
         double width = card.DesiredSize.Width, height = card.DesiredSize.Height;
@@ -216,9 +216,14 @@ internal sealed class MonitorView : Grid
         card.Appear(_motion);
     }
 
-    public void CloseCard()
+    // Asked by the user (or when the app leaves the list) the card fades away; when the page goes, it simply goes.
+    public void CloseCard(bool animate = false)
     {
-        if (_card is null) return;
-        _overlay.Children.Remove(_card); _overlay.IsHitTestVisible = false; _card = null;
+        if (_card is not { } card) return;
+        _overlay.IsHitTestVisible = false; _card = null;
+        if (animate && _motion) card.Leave(() => _overlay.Children.Remove(card));
+        else _overlay.Children.Remove(card);
     }
+
+    public void SetSort(ProcessSort sort) => _list?.SetSort(sort, _motion);
 }

@@ -76,7 +76,7 @@ public sealed partial class SettingsWindow
         {
             if (!SystemParameters.ClientAreaAnimation || Math.Abs(from - to) < 0.5) { move.BeginAnimation(TranslateTransform.XProperty, null); move.X = to; return; }
             var slide = new System.Windows.Media.Animation.DoubleAnimation(from, to, TimeSpan.FromMilliseconds(200))
-            { EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut } };
+            { EasingFunction = Soft.Out };
             // Hand the final position back to the property so later layout passes can move the highlight again.
             slide.Completed += (_, _) => { if (move.X == to) { move.BeginAnimation(TranslateTransform.XProperty, null); move.X = to; } };
             move.BeginAnimation(TranslateTransform.XProperty, slide);

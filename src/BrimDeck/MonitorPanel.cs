@@ -45,6 +45,7 @@ public partial class MainWindow
 
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
+        Motion.Enabled = MonitorMotion;
         if (!_expanded) { _compactStrip?.Update(snapshot); return; }
         if (!IsMonitorPage || _monitorView is null) return;
         if (MonitorKey() != _monitorKey) { RenderMonitor(); return; }
@@ -60,7 +61,8 @@ public partial class MainWindow
     }
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
-    private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorProcesses, Settings.MonitorSort,
+    // The sort is not part of it: a new sort reorders the list in place.
+    private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorProcesses,
         Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation);
 
     private void RenderMonitor()
@@ -75,6 +77,7 @@ public partial class MainWindow
         var header = PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
         ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
         MonitorContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
+        Motion.Enabled = MonitorMotion;
         var key = MonitorKey();
         bool fade = _monitorFade; _monitorFade = false;
         if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
@@ -85,9 +88,9 @@ public partial class MainWindow
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; });
         MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
-        // A change the user asked for on the page (the main gauge, the sort) arrives with a short fade instead of a cut.
+        // A new main gauge, asked for on the page, arrives with a short fade instead of a cut.
         if (fade && MonitorMotion)
-            _monitorView.BeginAnimation(OpacityProperty, new DoubleAnimation(.15, 1, TimeSpan.FromMilliseconds(220)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            _monitorView.BeginAnimation(OpacityProperty, Soft.Fade(.15, 1, Soft.Short));
     }
 
     private (double Width, double Height, IReadOnlyList<ProviderSnapshot> Snapshots, DeckSettings Settings, PanelHeader Header)? _usageHeader;
@@ -101,12 +104,14 @@ public partial class MainWindow
         return header;
     }
 
-    // The sort and the main gauge are the same for every panel and are kept with the settings.
+    // The sort and the main gauge are the same for every panel and are kept with the settings. A new main gauge rebuilds the page,
+    // which fades in; a new sort only reorders the list.
     private void SortProcesses(ProcessSort sort)
     {
         if (Settings.MonitorSort == sort) return;
         Settings.MonitorSort = sort; _app.QueueSave();
-        RefreshMonitorPages();
+        // Every panel's page, shown or not: a page kept for later is not built again, so it must not keep the old sort.
+        foreach (var deck in _app.Decks) deck._monitorView?.SetSort(sort);
     }
     private void SwitchMonitorMain(MonitorMain main)
     {

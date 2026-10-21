@@ -12,14 +12,16 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // The busiest apps, drawn as one element: a header with the sort switch, then rows in one or two columns. After ftop, a row
-// that changes place by a step or two slides there; one that goes further, or comes new, fades in where it lands. The rows
-// keep their order while the pointer is over the list (hold), a pressed row gives a little, and a click opens its card.
+// that changes place by a step or two slides there; one that goes further, or comes new, fades in where it lands; a new sort
+// reorders the rows the same way. The rows keep their order while the pointer is over the list (hold). The highlight under the
+// pointer glides from row to row and fades in and out, the chosen sort's pill slides, a pressed row gives a little, and a click
+// opens its card.
 // Compact rows show the sorted figure; detailed rows show CPU, memory and how many processes the app has.
 internal sealed class ProcessListView : FrameworkElement
 {
     private const double ColumnGap = 18;
     private readonly MonitorLayout _layout;
-    private readonly ProcessSort _sort;
+    private ProcessSort _sort;
     private readonly MonitorProcessView _view;
     private readonly Action<ProcessSort> _sortChanged;
     private readonly Action<bool> _hold;
@@ -29,13 +31,19 @@ internal sealed class ProcessListView : FrameworkElement
     private string _message = "";
     // Per app: its place as a slot number (eased, so a short move slides) and its opacity (a new or far-moved row fades in).
     private readonly Dictionary<string, (Eased Slot, Eased Alpha)> _motion = [];
-    private string? _hover, _pressed;
+    private string? _hover, _pressed, _pressedShown;
     private int _hoverSort = -1;
     private Rect[] _sortRects = [];
+    private Reading<ProcessList> _reading = Reading<ProcessList>.Unavailable("");
+    // The highlight: its place as a slot (it glides between rows of a column) and its opacity; the pills' hover and the chosen
+    // pill's place (0 for CPU, 1 for memory); how far a pressed row gives.
+    private Eased _highlightSlot = new(0, Eased.Hover * 1.25), _highlight = new(0, Eased.Hover), _chosen, _press = new(0, Eased.Hover);
+    private readonly Eased[] _pillHover = [new(0, Eased.Hover), new(0, Eased.Hover)];
 
     public ProcessListView(MonitorLayout layout, ProcessSort sort, MonitorProcessView view, Action<ProcessSort> sortChanged, Action<bool> hold, Action<ProcessSample, Rect> open)
     {
         _layout = layout; _sort = sort; _view = view; _sortChanged = sortChanged; _hold = hold; _open = open;
+        _chosen = new Eased((int)sort, Eased.Seconds * .75);
         AutomationProperties.SetName(this, Loc.T("进程列表", "Process list"));
         ClipToBounds = true;
     }
@@ -43,8 +51,20 @@ internal sealed class ProcessListView : FrameworkElement
     private (int Rows, int Columns) Grid => MonitorLayout.ListGrid(ActualWidth, ActualHeight, _layout.RowHeight);
     private double ColumnWidth(int columns) => columns <= 1 ? ActualWidth : (ActualWidth - ColumnGap * (columns - 1)) / columns;
 
+    // A new sort from another panel or from this one's pills: the rows reorder as a new reading would, and the pill slides.
+    public void SetSort(ProcessSort sort, bool motion)
+    {
+        if (sort == _sort) return;
+        _sort = sort;
+        _chosen.Set((int)sort, motion);
+        HoverPill(_hoverSort);
+        Set(_reading, _cores, motion);
+        Motion.Start(this, Step);
+    }
+
     public void Set(Reading<ProcessList> reading, int cores, bool motion)
     {
+        _reading = reading;
         _cores = Math.Max(1, cores);
         var (rows, columns) = Grid;
         int capacity = Math.Max(rows * columns, MonitorLayout.MaximumRows * MonitorLayout.MaximumColumns);
@@ -74,9 +94,30 @@ internal sealed class ProcessListView : FrameworkElement
         }
         foreach (var gone in _motion.Keys.Where(id => !seen.Contains(id)).ToList()) _motion.Remove(gone);
         _rows = ranked;
+        if (_hover is not null) moving |= Highlight(_hover, motion);
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
     }
-    private bool Step(double now) { InvalidateVisual(); return _motion.Values.Any(m => m.Slot.Moving(now) || m.Alpha.Moving(now)); }
+    private bool Step(double now)
+    {
+        InvalidateVisual();
+        bool moving = _highlightSlot.Moving(now) || _highlight.Moving(now) || _chosen.Moving(now) || _press.Moving(now) || _pillHover[0].Moving(now) || _pillHover[1].Moving(now)
+            || _motion.Values.Any(m => m.Slot.Moving(now) || m.Alpha.Moving(now));
+        if (!moving && _pressed is null) _pressedShown = null;
+        return moving;
+    }
+
+    // Moves the highlight to a row: it glides within a column and appears in place in another; with no row it fades out.
+    private bool Highlight(string? id, bool motion)
+    {
+        int slot = -1;
+        for (int i = 0; id is not null && i < _rows.Count; i++) if (_rows[i].Id == id) { slot = i; break; }
+        if (slot < 0) return _highlight.Set(0, motion);
+        int rows = Grid.Rows;
+        bool visible = _highlight.Target > .5 || _highlight.Moving(Eased.Now);
+        bool glide = visible && rows > 0 && (int)Math.Round(_highlightSlot.Target) / rows == slot / rows;
+        bool moving = _highlightSlot.Set(slot, motion && glide);
+        return _highlight.Set(1, motion) | moving;
+    }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
 
@@ -105,6 +146,15 @@ internal sealed class ProcessListView : FrameworkElement
         }
         double columnWidth = ColumnWidth(columns);
         bool detailed = Detailed(columnWidth);
+        double highlight = Math.Clamp(_highlight.At(now), 0, 1);
+        if (highlight > .01)
+        {
+            var r = RowRect(_highlightSlot.At(now), rows, columns);
+            drawing.PushOpacity(highlight);
+            drawing.DrawRoundedRectangle(UI.Brush(PanelTheme.Hex("rowHover")), null, new Rect(r.X - 4, r.Y + 1, r.Width + 8, r.Height - 2), 6, 6);
+            drawing.Pop();
+        }
+        double give = Math.Clamp(_press.At(now), 0, 1) * .03;
         for (int i = 0; i < _rows.Count && i < rows * columns; i++)
         {
             var sample = _rows[i];
@@ -112,8 +162,8 @@ internal sealed class ProcessListView : FrameworkElement
             var r = RowRect(slot, rows, columns);
             if (r.Bottom > h + .5) continue;
             if (alpha < .999) drawing.PushOpacity(Math.Clamp(alpha, 0, 1));
-            bool pressed = _pressed == sample.Id;
-            if (pressed) drawing.PushTransform(new ScaleTransform(.97, .97, r.X + r.Width / 2, r.Y + r.Height / 2));
+            bool pressed = _pressedShown == sample.Id && give > 0;
+            if (pressed) drawing.PushTransform(new ScaleTransform(1 - give, 1 - give, r.X + r.Width / 2, r.Y + r.Height / 2));
             Row(drawing, r, sample, detailed, ppd);
             if (pressed) drawing.Pop();
             if (alpha < .999) drawing.Pop();
@@ -138,10 +188,22 @@ internal sealed class ProcessListView : FrameworkElement
         }
         var strip = new Rect(_sortRects[0].X - 1, 0, _sortRects[1].Right - _sortRects[0].X + 2, line);
         drawing.DrawRoundedRectangle(UI.Brush(UI.Fill), null, strip, line / 2, line / 2);
+        double now = Eased.Now, radius = (line - 2) / 2;
         for (int i = 0; i < 2; i++)
         {
-            bool chosen = (int)_sort == i, hover = _hoverSort == i && !chosen;
-            if (chosen || hover) drawing.DrawRoundedRectangle(UI.Brush(chosen ? UI.FillSelected : PanelTheme.Hex("hover")), null, _sortRects[i], (line - 2) / 2, (line - 2) / 2);
+            double hover = Math.Clamp(_pillHover[i].At(now), 0, 1);
+            if (hover <= .01) continue;
+            drawing.PushOpacity(hover);
+            drawing.DrawRoundedRectangle(UI.Brush(PanelTheme.Hex("hover")), null, _sortRects[i], radius, radius);
+            drawing.Pop();
+        }
+        // The chosen pill slides between the two, its width following.
+        double at = Math.Clamp(_chosen.At(now), 0, 1);
+        var pill = new Rect(_sortRects[0].X + (_sortRects[1].X - _sortRects[0].X) * at, 1, _sortRects[0].Width + (_sortRects[1].Width - _sortRects[0].Width) * at, line - 2);
+        drawing.DrawRoundedRectangle(UI.Brush(UI.FillSelected), null, pill, radius, radius);
+        for (int i = 0; i < 2; i++)
+        {
+            bool chosen = (int)_sort == i;
             var text = MonitorDraw.Text(names[i], _layout.Caption, chosen ? UI.Primary : UI.Secondary, ppd, strong: chosen);
             MonitorDraw.Baseline(drawing, text, _sortRects[i].X + pad, baseline);
         }
@@ -149,7 +211,6 @@ internal sealed class ProcessListView : FrameworkElement
 
     private void Row(DrawingContext drawing, Rect r, ProcessSample sample, bool detailed, double ppd)
     {
-        if (_hover == sample.Id) drawing.DrawRoundedRectangle(UI.Brush(PanelTheme.Hex("rowHover")), null, new Rect(r.X - 4, r.Y + 1, r.Width + 8, r.Height - 2), 6, 6);
         double icon = Math.Min(16, r.Height - 5), baseline = Math.Round(r.Y + r.Height / 2 + _layout.Body * .36);
         var iconRect = new Rect(r.X, Math.Round(r.Y + (r.Height - icon) / 2), icon, icon);
         if (ProcessIcons.For(sample.Path) is { } image) drawing.DrawImage(image, iconRect);
@@ -205,7 +266,15 @@ internal sealed class ProcessListView : FrameworkElement
     {
         base.OnMouseLeave(e); _hold(false);
         if (_hover is null && _pressed is null && _hoverSort < 0) return;
-        _hover = _pressed = null; _hoverSort = -1; Cursor = null; InvalidateVisual();
+        _hover = _pressed = null; Cursor = null;
+        HoverPill(-1);
+        _highlight.Set(0, Motion.Enabled); _press.Set(0, Motion.Enabled);
+        Motion.Start(this, Step);
+    }
+    private void HoverPill(int sort)
+    {
+        for (int i = 0; i < 2; i++) _pillHover[i].Set(i == sort && i != (int)_sort ? 1 : 0, Motion.Enabled);
+        _hoverSort = sort;
     }
     protected override void OnMouseMove(MouseEventArgs e)
     {
@@ -215,14 +284,17 @@ internal sealed class ProcessListView : FrameworkElement
         string? hover = sort < 0 ? At(point, out _)?.Id : null;
         Cursor = sort >= 0 || hover is not null ? Cursors.Hand : null;
         if (hover == _hover && sort == _hoverSort) return;
-        _hover = hover; _hoverSort = sort; InvalidateVisual();
+        _hover = hover;
+        HoverPill(sort);
+        Highlight(hover, Motion.Enabled);
+        Motion.Start(this, Step);
     }
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
         var point = e.GetPosition(this);
         if (Array.FindIndex(_sortRects, r => r.Contains(point)) is var sort and >= 0) { e.Handled = true; if (sort != (int)_sort) _sortChanged((ProcessSort)sort); return; }
-        if (At(point, out _) is { } sample) { _pressed = sample.Id; InvalidateVisual(); e.Handled = true; }
+        if (At(point, out _) is { } sample) { _pressed = _pressedShown = sample.Id; _press.Set(1, Motion.Enabled); Motion.Start(this, Step); e.Handled = true; }
     }
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
@@ -230,7 +302,7 @@ internal sealed class ProcessListView : FrameworkElement
         if (_pressed is null) return;
         var sample = At(e.GetPosition(this), out var box);
         bool same = sample?.Id == _pressed;
-        _pressed = null; InvalidateVisual(); e.Handled = true;
+        _pressed = null; _press.Set(0, Motion.Enabled); Motion.Start(this, Step); e.Handled = true;
         if (same && sample is not null) _open(sample, box);
     }
 }
@@ -305,11 +377,22 @@ internal sealed class ProcessCard : Border
     public void Appear(bool motion)
     {
         if (!motion) return;
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(170)) { EasingFunction = ease });
+        BeginAnimation(OpacityProperty, Soft.Fade(0, 1, Soft.Quick));
         var scale = (ScaleTransform)RenderTransform;
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(.92, 1, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(.92, 1, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, Soft.Fade(.94, 1, Soft.Short));
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, Soft.Fade(.94, 1, Soft.Short));
+    }
+
+    // Leaves the way it came, a little quicker; done is called once it is gone.
+    public void Leave(Action done)
+    {
+        IsHitTestVisible = false;
+        var fade = Soft.Fade(Opacity, 0, Soft.Quick, Soft.InOut);
+        fade.Completed += (_, _) => done();
+        BeginAnimation(OpacityProperty, fade);
+        var scale = (ScaleTransform)RenderTransform;
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, Soft.Fade(scale.ScaleX, .96, Soft.Quick, Soft.InOut));
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, Soft.Fade(scale.ScaleY, .96, Soft.Quick, Soft.InOut));
     }
 }
 

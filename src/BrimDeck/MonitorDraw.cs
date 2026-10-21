@@ -96,45 +96,15 @@ internal static class MonitorDraw
     public static double PixelsPerDip(Visual visual) => VisualTreeHelper.GetDpi(visual).PixelsPerDip;
 }
 
-// A value that eases to each new target over a short move, ftop's columns' "follow" made cheap: a move takes a third of a second
-// and the panel rests between readings.
-internal struct Eased
-{
-    public const double Seconds = .32;
-    private double _from, _to, _start;
-    public double Target => _to;
-    public static double Now => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
-
-    public Eased(double value) { _from = _to = value; _start = 0; }
-
-    // Returns whether the value moves.
-    public bool Set(double target, bool motion)
-    {
-        if (!double.IsFinite(target)) target = 0;
-        double now = Now, current = At(now);
-        if (Math.Abs(target - _to) < 1e-6 && !Moving(now)) return false;
-        if (!motion) { _from = _to = target; _start = 0; return false; }
-        _from = current; _to = target; _start = now;
-        return Math.Abs(_from - _to) > 1e-6;
-    }
-
-    public readonly double At(double now)
-    {
-        if (_start <= 0) return _to;
-        double t = Math.Clamp((now - _start) / Seconds, 0, 1);
-        double eased = 1 - Math.Pow(1 - t, 3);
-        return _from + (_to - _from) * eased;
-    }
-    public readonly bool Moving(double now) => _start > 0 && now - _start < Seconds;
-}
-
-// Redraws the elements whose values are easing, while any is, at most about 30 times a second: every frame redraws the whole
-// layered panel, so motion stays brief and light. Otherwise it is unhooked and the panel costs nothing between readings.
+// Redraws the elements whose values are easing, while any is, at up to about 60 frames a second. Otherwise it is unhooked and
+// the panel costs nothing between readings.
 internal static class Motion
 {
     private static readonly List<UIElement> Moving = [];
     private static bool _hooked;
-    private static TimeSpan _last;
+    // Whether hover and press feedback eases; off with the app's animations. Readings say so with each update (motion).
+    public static bool Enabled { get; set; } = true;
+    private static TimeSpan _last, _tick;
     private static readonly Dictionary<UIElement, Func<double, bool>> Steps = [];
 
     // step(now) redraws the element and returns whether it still moves.
@@ -143,15 +113,23 @@ internal static class Motion
         Steps[element] = step;
         if (!Moving.Contains(element)) Moving.Add(element);
         if (_hooked) return;
-        _hooked = true; CompositionTarget.Rendering += Tick;
+        _hooked = true; _last = _tick = TimeSpan.Zero; CompositionTarget.Rendering += Tick;
     }
 
     private static void Tick(object? sender, EventArgs e)
     {
+        // About 60 frames a second, in whole display frames: every frame at 60 to 90 Hz, every other one at 120 or 144 Hz. That is
+        // twice the old pace and smooth to the eye, at well under half the cost of following a 144 Hz display (every frame redraws
+        // the moving gauges and presents the whole layered window). A frame is drawn when the next one would come later than
+        // 60 a second asks, by more than four tenths of a display frame.
         if (e is RenderingEventArgs args)
         {
-            if (args.RenderingTime - _last < TimeSpan.FromMilliseconds(32)) return;
-            _last = args.RenderingTime;
+            var time = args.RenderingTime;
+            if (time == _tick) return;
+            double frame = Math.Clamp((time - _tick).TotalMilliseconds, 0, 34);
+            _tick = time;
+            if ((time - _last).TotalMilliseconds < 1000 / 60.0 - frame * .6) return;
+            _last = time;
         }
         double now = Eased.Now;
         for (int i = Moving.Count - 1; i >= 0; i--)

@@ -15,6 +15,7 @@ static class SystemMonitorTests
         Compact(check);
         Pages(check);
         Colors(check);
+        Motion(check);
     }
 
     // A build that does not know a setting (another build of the same version) keeps it when it saves; an older version's
@@ -239,6 +240,62 @@ static class SystemMonitorTests
             && saved.MonitorHeight == MonitorSizes.Default.Height);
         check("Pages: enum values stay saved as before", (int)DeckPage.Usage == 0 && (int)DeckPage.Music == 1 && (int)DeckPage.Monitor == 2 && (int)DefaultDeckPage.Monitor == 3);
         check("Pages: monitor quick sizes", MonitorSizes.For(PanelSize.Standard) == MonitorSizes.Default && MonitorSizes.For(PanelSize.Compact).Width < MonitorSizes.For(PanelSize.Spacious).Width);
+    }
+
+    // The easing the monitor's gauges follow, and the spring the drag follows.
+    private static void Motion(Action<string, bool> check)
+    {
+        const double t0 = 1000;
+        var eased = new Eased(0);
+        check("A value without motion takes its target at once", !eased.Set(.5, false, t0) && eased.At(t0) == .5);
+        eased = new Eased(0);
+        check("A move starts", eased.Set(1, true, t0) && eased.Moving(t0 + .1));
+        var path = Enumerable.Range(0, 43).Select(i => eased.At(t0 + i * .01)).ToList();
+        check("A move rises steadily and never passes its target", path.Zip(path.Skip(1)).All(p => p.Second >= p.First - 1e-9) && path.All(v => v <= 1 + 1e-9));
+        check("A move starts gently: slower than an ease-out cubic", eased.At(t0 + .042) < 1 - Math.Pow(1 - .1, 3));
+        check("A move ends on its target and rests", Math.Abs(eased.At(t0 + Eased.Seconds) - 1) < 1e-9 && !eased.Moving(t0 + Eased.Seconds + .01));
+
+        // A new target mid-move: the value carries on from where it is, at the speed it has, without a jump.
+        eased = new Eased(0);
+        eased.Set(1, true, t0);
+        double at = eased.At(t0 + .1), speed = eased.Speed(t0 + .1);
+        eased.Set(.2, true, t0 + .1);
+        check("A new target starts from the current value", Math.Abs(eased.At(t0 + .1) - at) < 1e-9);
+        eased = new Eased(0);
+        eased.Set(.5, true, t0);
+        speed = eased.Speed(t0 + .1);
+        eased.Set(1, true, t0 + .1);
+        check("A further target in the same direction keeps the speed the value has", Math.Abs(eased.Speed(t0 + .1) - speed) < 1e-6 || eased.Speed(t0 + .1) > speed);
+        var further = Enumerable.Range(0, 43).Select(i => eased.At(t0 + .1 + i * .01)).ToList();
+        check("Nor does the new move pass its target", further.All(v => v <= 1 + 1e-9));
+
+        eased = new Eased(.5);
+        check("A change too small to see is taken at once", !eased.Set(.502, true, t0) && eased.At(t0) == .502);
+        eased = new Eased(0);
+        check("A target that is not a number counts as zero", !eased.Set(double.NaN, true, t0) && eased.At(t0) == 0);
+        var hover = new Eased(0, Eased.Hover);
+        hover.Set(1, true, t0);
+        check("Hover feedback takes its own, shorter time", !hover.Moving(t0 + Eased.Hover + .001) && hover.Moving(t0 + Eased.Hover - .01));
+
+        var spring = new Spring(100) { Target = 200 };
+        double peak = 100; int frames = 0;
+        while (spring.Step(1 / 144.0) && frames < 1000) { peak = Math.Max(peak, spring.Value); frames++; }
+        check("The spring comes to rest on its target", spring.Value == 200 && spring.Velocity == 0);
+        check("The spring gives a little past its target and settles back", peak > 200 && peak < 210);
+        check("The spring takes its time: neither instant nor sluggish", frames > 144 * .2 && frames < 144 * 1.2);
+        spring = new Spring(100) { Target = 200 };
+        spring.Step(1 / 144.0);
+        double small = spring.Value;
+        spring = new Spring(100) { Target = 200 };
+        spring.Step(5);
+        check("A stalled frame does not throw the spring", double.IsFinite(spring.Value) && Math.Abs(spring.Value - 200) < 120 && small > 100);
+
+        check("Within its range a drag is followed as is", Spring.Resist(300, 100, 500) == 300);
+        check("Past a limit a drag meets growing resistance and never passes it",
+            Spring.Resist(520, 100, 500) < 500 && Spring.Resist(900, 100, 500) < 500 && Spring.Resist(900, 100, 500) > Spring.Resist(520, 100, 500));
+        check("Below the lower limit too", Spring.Resist(40, 100, 500) > 100 && Spring.Resist(-400, 100, 500) > 100);
+        check("Resistance meets the plain drag without a step", Math.Abs(Spring.Resist(464, 100, 500) - 464) < 1e-9 && Math.Abs(Spring.Resist(464.001, 100, 500) - 464.001) < 1e-3);
+        check("A range with no room holds its one size", Spring.Resist(300, 200, 200) == 200);
     }
 
     private static void Colors(Action<string, bool> check)

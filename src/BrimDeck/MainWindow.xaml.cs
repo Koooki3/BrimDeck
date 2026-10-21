@@ -193,7 +193,7 @@ public partial class MainWindow : Window
             if (fade > 0 && IsVisible)
             {
                 SetExpanded(false);
-                var away = new DoubleAnimation(0, TimeSpan.FromMilliseconds(fade * .7)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+                var away = new DoubleAnimation(0, TimeSpan.FromMilliseconds(fade * .7)) { EasingFunction = Soft.Out };
                 away.Completed += (_, _) => { if (IsSuppressed) { BeginAnimation(OpacityProperty, null); Opacity = 1; Hide(); } };
                 BeginAnimation(OpacityProperty, away, HandoffBehavior.SnapshotAndReplace);
             }
@@ -205,7 +205,7 @@ public partial class MainWindow : Window
             if (appearing) { BeginAnimation(OpacityProperty, null); Opacity = 0; }
             if (!IsVisible) Show();
             if (appearing || Opacity < 1 && animatePage)
-                BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(Settings.AnimationDuration * .7)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } }, HandoffBehavior.SnapshotAndReplace);
+                BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(Settings.AnimationDuration * .7)) { EasingFunction = Soft.Out }, HandoffBehavior.SnapshotAndReplace);
             else { BeginAnimation(OpacityProperty, null); Opacity = 1; }
             SetExpanded(_expanded, !animatePage || !wasVisible);
         }
@@ -478,9 +478,7 @@ public partial class MainWindow : Window
         Track shadow = expanded ? new(0, .3) : new(.5, 1);
         Track rim = expanded ? new(.2, .5) : new(.5, .8);
         Track tint = expanded ? new(0, .12) : new(.68, 1);
-        var easeOut = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var easeInOut = new CubicEase { EasingMode = EasingMode.EaseInOut };
-        IEasingFunction settle = expanded ? easeOut : new BezierEase(.45, 0, .12, 1);
+        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, settle = expanded ? Soft.Out : Soft.Settle;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
         Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
