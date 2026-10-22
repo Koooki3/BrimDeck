@@ -693,25 +693,3 @@ public sealed class CornerRadiusAnimation : AnimationTimeline
     }
 }
 
-// Cubic Bézier easing with CSS semantics, so the surface follows the same curve as the approved mock-up.
-public sealed class BezierEase : EasingFunctionBase
-{
-    private readonly double _x1, _y1, _x2, _y2;
-    public BezierEase(double x1, double y1, double x2, double y2) { _x1 = x1; _y1 = y1; _x2 = x2; _y2 = y2; }
-    protected override Freezable CreateInstanceCore() => new BezierEase(_x1, _y1, _x2, _y2);
-    protected override double EaseInCore(double normalizedTime)
-    {
-        double x = Math.Clamp(normalizedTime, 0, 1), t = x;
-        // Newton steps on the x polynomial; x(t) is monotonic while the control points stay inside [0, 1].
-        for (int i = 0; i < 8; i++)
-        {
-            double slope = 3 * A(_x1, _x2) * t * t + 2 * B(_x1, _x2) * t + 3 * _x1;
-            if (slope < 1e-6) break;
-            t -= (Sample(t, _x1, _x2) - x) / slope;
-        }
-        return Sample(Math.Clamp(t, 0, 1), _y1, _y2);
-    }
-    private static double A(double a1, double a2) => 1 - 3 * a2 + 3 * a1;
-    private static double B(double a1, double a2) => 3 * a2 - 6 * a1;
-    private static double Sample(double t, double a1, double a2) => ((A(a1, a2) * t + B(a1, a2)) * t + 3 * a1) * t;
-}
