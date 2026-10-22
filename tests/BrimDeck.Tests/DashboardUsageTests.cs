@@ -91,14 +91,19 @@ internal static class DashboardUsageTests
             check("WSL statistics are left out while the option is off", withoutWsl.Entries.Sum(entry => entry.Total) == 100);
         }
         // The WSL read runs beside the network requests of the same refresh, so the round takes the longer of the two, not both.
-        handler.DelayMs = 800;
-        using (var overlapping = new UsageService(new SourceDesktop(), locations, client, null, null, () => { Thread.Sleep(800); return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromSeconds(5)))
+        // Checked by when each was under way rather than by the round's length: a slow build machine stretches both, and a time
+        // limit failed there although the two did overlap.
+        var timeline = System.Diagnostics.Stopwatch.StartNew();
+        TimeSpan wslStart = default, wslEnd = default;
+        handler.DelayMs = 800; handler.Timeline = timeline;
+        using (var overlapping = new UsageService(new SourceDesktop(), locations, client, null, null,
+            () => { wslStart = timeline.Elapsed; Thread.Sleep(800); wslEnd = timeline.Elapsed; return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromSeconds(5)))
         {
-            var clock = System.Diagnostics.Stopwatch.StartNew();
             var round = await overlapping.RefreshAsync(wslSettings);
-            check("The WSL read overlaps the network requests", clock.Elapsed < TimeSpan.FromMilliseconds(1500) &&
+            check("The WSL read overlaps the network requests", handler.Busy is { } busy && wslStart < busy.End && busy.Start < wslEnd &&
                 round.Single(s => s.Id == ProviderId.Claude).Entries.Sum(entry => entry.Total) == 120);
         }
+        handler.Timeline = null;
         handler.DelayMs = 0;
         using var release = new ManualResetEventSlim();
         using (var stuck = new UsageService(new SourceDesktop(), locations, client, null, null, () => { release.Wait(TimeSpan.FromSeconds(20)); return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromMilliseconds(1000)))
@@ -126,9 +131,17 @@ internal static class DashboardUsageTests
     {
         public List<string> Requests { get; } = [];
         public int DelayMs { get; set; }
+        // While set, the span from the first request's start to the last one's end on this clock (Busy).
+        public System.Diagnostics.Stopwatch? Timeline { get; set; }
+        public (TimeSpan Start, TimeSpan End)? Busy { get; private set; }
+        private readonly object _gate = new();
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            var timeline = Timeline;
+            var start = timeline?.Elapsed;
             if (DelayMs > 0) await Task.Delay(DelayMs, cancellationToken);
+            if (timeline is not null && start is { } began)
+                lock (_gate) Busy = Busy is { } busy ? (busy.Start < began ? busy.Start : began, timeline.Elapsed) : (began, timeline.Elapsed);
             var destination = request.RequestUri!.AbsoluteUri;
             // The plan lookup is optional and answered with 404 here; it is not one of the quota sources counted below.
             if (destination == "https://api.anthropic.com/api/oauth/profile") return new HttpResponseMessage(HttpStatusCode.NotFound);
