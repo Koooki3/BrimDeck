@@ -333,6 +333,43 @@ try
         Check("A newer local sample wins over the stored reading and keeps the reset time still ahead", result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 41 &&
             result.Quotas.Single(q => q.Minutes == 10080).ResetAt is not null && result.QuotaTime > readingTime);
 
+        // The last online reading survives a restart, so a start while rate limited still shows the per-model quotas.
+        var quotaFile = Path.Combine(root, "claude-quota-cache", ClaudeQuotaCache.FileName);
+        string Fable(DateTimeOffset reset) => JsonSerializer.Serialize(new
+        {
+            five_hour = new { utilization = 12, resets_at = reset.AddDays(-3).AddHours(4) },
+            seven_day = new { utilization = 30, resets_at = reset },
+            limits = new[] { new { kind = "weekly_scoped", group = "weekly", percent = 44, resets_at = reset, scope = new { model = new { display_name = "Fable" } } } }
+        });
+        quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.OK) { Content = new StringContent(Fable(usageClock.AddDays(3))) };
+        using (var beforeRestart = new UsageService(desktopFixture, locations, quotaClient, () => usageClock, quotaCache: quotaFile))
+        {
+            var online = (await beforeRestart.RefreshAsync(onlyClaude)).Single();
+            Check("An online Claude reading with a per-model quota is kept on disk", online.Quotas.Any(q => q.Label == "Fable 每周") && File.Exists(quotaFile));
+        }
+        var cacheText = File.ReadAllText(quotaFile);
+        Check("The kept Claude reading holds no sign-in token", !cacheText.Contains("test-code") && !cacheText.Contains("test-desktop") && !cacheText.Contains("accessToken", StringComparison.OrdinalIgnoreCase));
+        quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.TooManyRequests);
+        File.WriteAllText(historyPath, History(usageClock.AddMinutes(10), 41, 8));
+        using (var restarted = new UsageService(desktopFixture, locations, quotaClient, () => usageClock.AddMinutes(5), quotaCache: quotaFile))
+        {
+            var limited = (await restarted.RefreshAsync(onlyClaude)).Single();
+            Check("After a restart, rate limiting still shows the per-model quota read before it", limited.LiveQuota && limited.Quotas.Any(q => q.Label == "Fable 每周" && q.UsedPercent == 44));
+            Check("The desktop app's newer local sample still decides the 5-hour and weekly shares", limited.Quotas.Single(q => q.Minutes == 300).UsedPercent == 41);
+            Check("The status says when the carried-over per-model quotas were read", limited.Status.Contains("按模型的额度为") && limited.Status.Contains(usageClock.LocalDateTime.ToString("HH:mm")));
+            quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.Unauthorized);
+            await restarted.RefreshAsync(onlyClaude);
+            Check("A rejected sign-in removes the kept Claude reading", !File.Exists(quotaFile));
+        }
+        var keptReading = new ClaudeQuotaSnapshot(usageClock, "Max 20x", "Claude 账户", "Claude Code", [new("Fable 每周", 44, usageClock.AddDays(2), 10080), new("5 小时额度", 12, usageClock.AddHours(2), 300)]);
+        var keptText = ClaudeQuotaCache.Serialize(keptReading);
+        Check("A kept Claude reading reads back whole", ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1)) is { Plan: "Max 20x", Quotas.Count: 2 });
+        Check("A quota whose window has reset since is left out", ClaudeQuotaCache.Parse(keptText, usageClock.AddHours(3)) is { Quotas: [{ Label: "Fable 每周" }] });
+        Check("A kept reading older than a week is not used", ClaudeQuotaCache.Parse(keptText, usageClock.AddDays(8)) is null);
+        Check("A kept reading from the future is not used", ClaudeQuotaCache.Parse(keptText, usageClock.AddHours(-1)) is null);
+        Check("A damaged kept reading is ignored", ClaudeQuotaCache.Parse("{ not json", usageClock) is null && ClaudeQuotaCache.Parse("null", usageClock) is null);
+        quotaHandler.Override = null;
+
         var savedRow = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(Only(ProviderId.Claude)))!.AsObject();
         foreach (var app in savedRow["Apps"]!.AsArray()) app!.AsObject().Remove("QuotaOnline");
         Check("Claude rows read online by default, including in files saved before the setting existed",
