@@ -20,7 +20,6 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _refresh = new() { Interval = TimeSpan.FromSeconds(60) };
     // Fires just after each minute boundary, when the clock text and the reset countdowns change.
     private readonly DispatcherTimer _clock = new();
-    private readonly DispatcherTimer _alertTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     // Compact hover follows the cursor position rather than window mouse messages, which reach
     // this per-pixel transparent window unreliably over the nearly invisible strip around the surface.
     private bool _cursorInCompact, _trackPointer;
@@ -93,7 +92,6 @@ public partial class MainWindow : Window
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
-        _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
         _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false)); };
         Loaded += async (_, _) =>
@@ -103,11 +101,12 @@ public partial class MainWindow : Window
             if (_lead is { } lead) { Snapshots = lead.Snapshots; _updatedAt = lead._updatedAt; DetectThresholds(); UpdateNotice(); }
             ApplySettings();
             _trackPointer = true; UpdatePointerTracking();
+            SubscribeNotices();
             ScheduleClock(); _clock.Start(); StartMusic();
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseRightButtonUp += (_, e) => { if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
@@ -127,6 +126,7 @@ public partial class MainWindow : Window
             return IntPtr.Zero;
         });
         Closed += (_, _) => DisposeMusic();
+        Closed += (_, _) => CloseNotices();
     }
 
     // Closes a panel whose monitor no longer shows one.
@@ -159,15 +159,14 @@ public partial class MainWindow : Window
         ApplyMusicSettings();
         var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
         UpdateCollapsedGeometry(bounds, work, scale);
-        double usageWidth = Math.Max(240, Math.Min(Math.Max(Settings.Width, Settings.MinimumWidth), work.Width / scale - 24));
-        double musicWidth = Math.Max(240, Math.Min(Settings.MusicWidth, work.Width / scale - 24));
-        _pageWidth = IsMusicPage ? musicWidth : usageWidth; _usageWidth = usageWidth;
-        // Keep the layered HWND large enough for either enabled page. Resizing it in separate
+        double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
+        _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
+        // Keep the layered HWND large enough for every shown page. Resizing it in separate
         // width/height/position steps presents intermediate surfaces; only Island should animate.
-        bool bothPages = Settings.UsagePage && Settings.MusicPage;
+        var largest = DeckPages.Largest(Settings);
         // The window also holds the collapsed surface at any width; Place moves it so that the island lies inside it.
-        Width = Math.Max(bothPages ? Math.Max(usageWidth, musicWidth) : _pageWidth, Collapsed.Surface.Width);
-        double hostHeight = bothPages ? Math.Max(Settings.Height, Settings.MusicHeight) : IsMusicPage ? Settings.MusicHeight : Settings.Height;
+        Width = Math.Max(Math.Max(Fit(largest.Width), _pageWidth), Collapsed.Surface.Width);
+        double hostHeight = largest.Height;
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
         // just above a lowered capsule; see CollapsedGeometry.Panel), so the window reaches the panel's bottom; it always holds the collapsed surface and its shadow, and never passes the
         // bottom of the monitor. Its transparent parts let clicks through.
@@ -184,6 +183,8 @@ public partial class MainWindow : Window
         if (IsSuppressed)
         {
             _hover.Stop(); _leave.Stop(); _pointerInside = false;
+            // Nothing briefly shows on a hidden panel; what shows ends now, and arriving notices wait in the recent notices.
+            _app.Notices?.DeckHidden(this);
             if (fade > 0 && IsVisible)
             {
                 SetExpanded(false);
@@ -205,6 +206,7 @@ public partial class MainWindow : Window
         }
         UpdatePointerTracking();
         RenderUsage();
+        NoticesLayoutChanged();
     }
     // Sizes are DIPs as they will be on the target monitor, and WPF turns Left and Top into pixels with the DPI the window
     // has now. A window on a monitor with another scale is therefore first moved onto the target in one step, which gives
@@ -294,6 +296,7 @@ public partial class MainWindow : Window
     {
         System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
+        System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("最近通知", "Recent notices"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
     public void Preview(bool enabled, bool expanded = true)
@@ -356,15 +359,32 @@ public partial class MainWindow : Window
 
     internal void ShowAlert(AppEntry entry, string label, double used, DateTimeOffset? resetAt)
         => ShowAlert(new CompactAlertInfo(entry, entry.Name, label + " ", used, resetAt));
-    internal void ClearAlert() { _alertTimer.Stop(); _alert = null; RenderCompact(); }
+    internal void ClearAlert()
+    {
+        if (_alert is { } alert) _app.Notices?.Withdraw(QuotaKey(alert));
+        _alert = null; RenderCompact();
+    }
     // No alert while the panel is suppressed (full-screen rule or hidden by the user): it would not be seen, and it must not
-    // appear later when the panel shows again.
+    // appear later when the panel shows again. The coordinator decides when it shows (NoticeCenter.SubmitQuota) and for how
+    // long; PresentAlert and EndAlert follow it.
     private void ShowAlert(CompactAlertInfo alert)
     {
         if (IsSuppressed) return;
-        _alert = alert; _alertTimer.Stop(); _alertTimer.Start();
+        _app.Notices.SubmitQuota(this, alert, QuotaKey(alert));
+    }
+    private static string QuotaKey(CompactAlertInfo alert) => "quota:" + alert.Entry.InstanceId + ":" + alert.Label;
+    private void PresentAlert(CompactAlertInfo alert)
+    {
+        if (IsSuppressed) return;
+        _alert = alert;
         RenderCompact();
         if (!_expanded && !IsSuppressed) SetExpanded(false);
+    }
+    private void EndAlert(CompactAlertInfo alert)
+    {
+        if (!ReferenceEquals(_alert, alert)) return;
+        _alert = null; RenderCompact();
+        if (!_expanded) SetExpanded(false);
     }
 
     private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
@@ -377,8 +397,11 @@ public partial class MainWindow : Window
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
+        if (expanded) _noticeWindow?.Abort();
         bool wasExpanded = _expanded;
         _expanded = expanded;
+        // The coordinator hears of it after this call: it may start a waiting alert, which lays the island out again.
+        if (wasExpanded != expanded && !_preview) Dispatcher.BeginInvoke(() => _app.Notices?.DeckExpanded(this, _expanded));
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
         if (wasExpanded && !expanded) HotkeyPanelCollapsed();
@@ -386,7 +409,7 @@ public partial class MainWindow : Window
         var shape = Collapsed;
         var style = shape.Style;
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
-        double wantedHeight = IsMusicPage ? Settings.MusicHeight : Settings.Height;
+        double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
         var panel = PanelFor(wantedHeight);
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);
@@ -544,6 +567,9 @@ public partial class MainWindow : Window
             else if (!_pointerInside && inside && _leave.IsEnabled) PointerChanged(true);
             return;
         }
+        // A notice over the island takes the pointer itself (NoticeWindow); the panel only keeps track, so that a notice ending
+        // under a resting pointer does not open the panel.
+        if (NoticeCovering) { _cursorInCompact = inCompact; if (_pointerInside) PointerChanged(false); return; }
         if (inCompact != _cursorInCompact) { _cursorInCompact = inCompact; PointerChanged(inCompact); }
         else if (!inCompact && _pointerInside) PointerChanged(false);
     }

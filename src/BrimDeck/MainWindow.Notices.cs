@@ -1,0 +1,320 @@
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Shapes;
+using BrimDeck.Core;
+using BrimDeck.Core.Notices;
+using BrimDeck.Native;
+
+namespace BrimDeck;
+
+// The panel's part of dynamic notices: its lane in the attention coordinator (notices, quota alerts and track changes take
+// turns on its island), the notice window over its island, and the recent notices page.
+public partial class MainWindow
+{
+    private static readonly TimeSpan TrackNoticeTime = TimeSpan.FromSeconds(4);
+    private const int NoticePageStep = 40;
+    private NoticeWindow? _noticeWindow;
+    private bool _noticesSubscribed, _noticesRenderQueued, _keepPageOnOpen;
+    private string? _expandedNotice;
+    private int _noticeRows = NoticePageStep;
+    // Notices not seen before the page opened; they keep their dot while it stays open.
+    private HashSet<string> _freshNotices = [];
+
+    // The coordinator's name for this panel: the main panel's stays the same when its monitor changes.
+    internal string NoticeLane => _lead is null ? "main" : "display:" + (Display?.Id ?? "");
+    internal long NoticeMonitor => MonitorHandle.ToInt64();
+    internal bool CanShowNotices => IsVisible && !IsSuppressed && !_preview;
+    private bool NoticeCovering => _noticeWindow?.Covering == true;
+
+    private void SubscribeNotices()
+    {
+        if (_noticesSubscribed || _app.Notices is null) return;
+        _noticesSubscribed = true;
+        _app.Notices.Changed += NoticesChanged;
+    }
+
+    private void CloseNotices()
+    {
+        if (_noticesSubscribed) _app.Notices.Changed -= NoticesChanged;
+        _noticesSubscribed = false;
+        _noticeWindow?.Close(); _noticeWindow = null;
+        _app.Notices?.DeckRetired(this);
+    }
+
+    // ----- The coordinator's steps for this panel -----
+
+    internal void AttentionStarted(AttentionItem item)
+    {
+        switch (item.Kind)
+        {
+            case AttentionKind.Notice or AttentionKind.Summary:
+                if (!CanShowNotices) { _app.Notices.Dismiss(this, reportToSource: false); return; }
+                (_noticeWindow ??= new NoticeWindow(this, _app)).Present(item);
+                break;
+            case AttentionKind.Quota when item.Payload is CompactAlertInfo alert:
+                PresentAlert(alert); break;
+            case AttentionKind.Track:
+                _trackNoticeUntil = DateTimeOffset.UtcNow + item.Duration;
+                RenderCompact(); UpdateMusicTimer();
+                break;
+        }
+    }
+
+    internal void AttentionEnded(AttentionItem item)
+    {
+        switch (item.Kind)
+        {
+            case AttentionKind.Notice or AttentionKind.Summary:
+                _noticeWindow?.End(item);
+                // Ended because the panel opened: no exit motion over the opening panel.
+                if (_expanded) _noticeWindow?.Abort();
+                break;
+            case AttentionKind.Quota when item.Payload is CompactAlertInfo alert: EndAlert(alert); break;
+            case AttentionKind.Track:
+                if (_trackNoticeUntil == default) break;
+                _trackNoticeUntil = default; RenderCompact(); UpdateMusicTimer();
+                break;
+        }
+    }
+
+    internal void AttentionUpdated(AttentionItem item)
+    {
+        if (item.IsNotice) _noticeWindow?.Update(item);
+    }
+
+    // While a notice covers the island, the island itself is not drawn (see NoticeWindow.Present and Finish).
+    internal void SetIslandCovered(bool covered)
+    {
+        HoverZone.Opacity = covered ? 0 : 1;
+    }
+
+    // The island moved or changed style, or the theme changed: a shown notice follows.
+    private void NoticesLayoutChanged() => _noticeWindow?.Refresh();
+
+    // The notices hotkey with a notice on this panel: its details take the keyboard.
+    internal bool NoticeKeyboard()
+    {
+        if (_noticeWindow?.Item is null) return false;
+        _noticeWindow.EnterKeyboard();
+        return true;
+    }
+
+    // Opens the panel on the recent notices page, as the expand hotkey opens it: it stays open until the pointer has been in it.
+    internal void OpenNoticesPage()
+    {
+        if (!DeckPages.Shown(Settings, DeckPage.Notices)) return;
+        if (_expanded) { SelectPage(DeckPage.Notices); return; }
+        SelectPage(DeckPage.Notices, remember: false);
+        _keepPageOnOpen = true;
+        try { OpenFromHotkey(); } finally { _keepPageOnOpen = false; }
+        if (_expanded) NoticesPageShown();
+    }
+
+    private void NoticesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Notices);
+
+    // The page is on screen: everything listed counts as seen; what was new keeps its dot until the page closes.
+    private void NoticesPageShown()
+    {
+        _freshNotices = _app.Notices.Hub.Notices.Where(n => !n.Viewed).Select(n => n.Id).ToHashSet();
+        _noticeRows = NoticePageStep;
+        _app.Notices.Hub.MarkAllViewed();
+    }
+
+    private void NoticesChanged()
+    {
+        UpdateNoticeBadge();
+        if (!_expanded || CurrentPage != DeckPage.Notices || _noticesRenderQueued) return;
+        // Several changes in a row (a burst, icons arriving) are drawn once.
+        _noticesRenderQueued = true;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+        {
+            _noticesRenderQueued = false;
+            if (_expanded && CurrentPage == DeckPage.Notices) { _app.Notices.Hub.MarkAllViewed(); RenderNotices(); }
+        });
+    }
+
+    private void UpdateNoticeBadge()
+    {
+        if (_app.Notices is null) return;
+        int count = _app.Notices.Hub.UnviewedCount;
+        NoticesBadge.Visibility = count > 0 && Settings.NoticesEnabled ? Visibility.Visible : Visibility.Collapsed;
+        AutomationProperties.SetName(NoticesPageButton, Loc.T("最近通知", "Recent notices") + (count > 0 ? " · " + NoticeText.Count(count) : ""));
+    }
+
+    // ----- The recent notices page -----
+
+    private void RenderNotices()
+    {
+        SubscribeNotices();
+        RefreshStatus();
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
+        ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
+        ApplyHeader(Settings.UsagePage ? UsageHeader(_usageWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
+        double offset = NoticesContent.Children.OfType<DockPanel>().FirstOrDefault()?.Children.OfType<ScrollViewer>().FirstOrDefault()?.VerticalOffset ?? 0;
+        NoticesContent.Children.Clear();
+        NoticesContent.Margin = new Thickness(_header.Side, 0, _header.Side, 10);
+        var center = _app.Notices;
+        var notices = center.Hub.Notices;
+        var page = new DockPanel();
+        NoticesContent.Children.Add(page);
+        var head = new DockPanel { Margin = new Thickness(0, 2, 0, 6), LastChildFill = true };
+        DockPanel.SetDock(head, Dock.Top); page.Children.Add(head);
+        var tools = new StackPanel { Orientation = Orientation.Horizontal };
+        DockPanel.SetDock(tools, Dock.Right); head.Children.Add(tools);
+        tools.Children.Add(PageButton(center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停 1 小时", "Pause 1 h"),
+            () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); RenderNotices(); }));
+        if (notices.Count > 0) tools.Children.Add(PageButton(Loc.T("清空", "Clear"), () => { center.Clear(); _expandedNotice = null; RenderNotices(); }));
+        head.Children.Add(UI.Fixed(Status(center, notices.Count), 11.5, 22, UI.Tertiary));
+        if (notices.Count == 0) { page.Children.Add(Empty(center)); return; }
+        var list = new StackPanel();
+        var now = DateTimeOffset.UtcNow;
+        foreach (var notice in notices.Take(_noticeRows)) list.Children.Add(Row(notice, now));
+        if (notices.Count > _noticeRows)
+        {
+            var more = PageButton(Loc.T("显示更早的通知", "Show earlier notices"), () => { _noticeRows += NoticePageStep; RenderNotices(); });
+            more.HorizontalAlignment = HorizontalAlignment.Center; more.Margin = new Thickness(0, 6, 0, 2);
+            list.Children.Add(more);
+        }
+        var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly };
+        page.Children.Add(scroll);
+        if (offset > 0) { scroll.UpdateLayout(); scroll.ScrollToVerticalOffset(offset); }
+    }
+
+    private static string Status(NoticeCenter center, int count)
+    {
+        string text = count == 0 ? Loc.T("最近通知", "Recent notices") : Loc.T($"最近通知 · {count} 条", $"Recent notices · {count}");
+        if (center.Paused && center.Settings.NoticesPausedUntil is { } until) text += Loc.T($" · 暂停至 {until.ToLocalTime():HH:mm}", $" · paused until {until.ToLocalTime():HH:mm}");
+        else if (center.Quiet) text += Loc.T(" · 安静中", " · quiet");
+        return text;
+    }
+
+    private FrameworkElement Empty(NoticeCenter center)
+    {
+        var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = Math.Max(200, ContentCanvas.Width - 60) };
+        var bell = new Viewbox { Width = 24, Height = 24, Margin = new Thickness(0, 0, 0, 8), Child = new Path { Data = Geometry.Parse("M12,3 C8.7,3 6.5,5.6 6.5,8.8 V12.6 L4.8,15.6 H19.2 L17.5,12.6 V8.8 C17.5,5.6 15.3,3 12,3 Z M9.6,17.6 A2.4,2.4 0 0 0 14.4,17.6"), Stroke = UI.Brush(UI.Secondary), StrokeThickness = 1.5, Width = 24, Height = 24 } };
+        empty.Children.Add(bell);
+        empty.Children.Add(UI.Fixed(Loc.T("暂无通知", "No notices"), 14, 22, UI.Secondary));
+        string hint = center.WindowsState switch
+        {
+            NoticeSourceState.NeedsAccess => Loc.T("在设置的“灵动提示”中允许读取 Windows 通知。", "Allow access to Windows notifications under Dynamic notices in the settings."),
+            NoticeSourceState.Denied => Loc.T("Windows 已拒绝通知访问，可在系统隐私设置中开启。", "Windows denies access to notifications; it can be allowed in Windows' privacy settings."),
+            _ => Loc.T("应用的新通知会出现在这里，保留 " + Settings.NoticeHistoryHours + " 小时。", "New notices from your apps appear here and are kept for " + Settings.NoticeHistoryHours + " h.")
+        };
+        var line = UI.Line(hint, 11.5, UI.Tertiary); line.TextWrapping = TextWrapping.Wrap; line.TextAlignment = TextAlignment.Center; line.Margin = new Thickness(0, 4, 0, 0);
+        empty.Children.Add(line);
+        return empty;
+    }
+
+    private FrameworkElement Row(Notice notice, DateTimeOffset now)
+    {
+        var center = _app.Notices;
+        bool open = _expandedNotice == notice.Id;
+        var row = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 7, 8, 7), Margin = new Thickness(0, 0, 0, 2), Background = UI.Brush(open ? UI.Fill : "Transparent"), Cursor = Cursors.Hand };
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Child = grid;
+        var plate = NoticePlate(notice, 28);
+        plate.VerticalAlignment = VerticalAlignment.Top; plate.Margin = new Thickness(0, 1, 10, 0);
+        grid.Children.Add(plate);
+        var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
+        Grid.SetColumn(texts, 1); grid.Children.Add(texts);
+        texts.Children.Add(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold));
+        if (notice.Body.Length > 0)
+        {
+            var body = UI.Line(open ? notice.Body : NoticeText.Summary(notice.Body), 11.5, UI.Secondary);
+            body.FontFamily = UI.PanelFont;
+            if (open) { body.TextWrapping = TextWrapping.Wrap; body.TextTrimming = TextTrimming.None; }
+            texts.Children.Add(body);
+        }
+        string meta = notice.AppName + " · " + NoticeText.OriginName(notice.Origin, notice.Distro) + (notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? "" : Loc.T(" · 来源已关闭", " · closed at source"));
+        texts.Children.Add(UI.Fixed(meta, 10.5, 16, UI.Tertiary));
+        if (notice.Progress is { } progress)
+        {
+            var track = new Grid { Height = 3, Margin = new Thickness(0, 4, 0, 0) };
+            track.Children.Add(new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(1.5) });
+            track.Children.Add(new Border { Background = UI.Brush(UI.Accent), CornerRadius = new CornerRadius(1.5), HorizontalAlignment = HorizontalAlignment.Left, Width = Math.Max(3, 200 * progress) });
+            texts.Children.Add(track);
+        }
+        if (open)
+        {
+            var actions = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+            if (center.CanOpen(notice)) actions.Children.Add(PageButton(Loc.T("打开应用", "Open app"), () => _ = OpenFromPage(notice)));
+            if ((notice.Capabilities & NoticeCapabilities.Actions) != 0)
+                foreach (var action in notice.Actions.Where(a => a.Key != "default").Take(3))
+                    actions.Children.Add(PageButton(action.Label, () => { center.Invoke(notice, action.Key); RenderNotices(); }));
+            actions.Children.Add(PageButton(Loc.T("删除", "Delete"), () => { center.Delete(notice); _expandedNotice = null; RenderNotices(); }));
+            texts.Children.Add(actions);
+        }
+        var side = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(8, 1, 0, 0) };
+        Grid.SetColumn(side, 2); grid.Children.Add(side);
+        side.Children.Add(UI.Fixed(NoticeText.Relative(notice.ReceivedAt, now), 10.5, 16, UI.Tertiary));
+        if (_freshNotices.Contains(notice.Id))
+            side.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = UI.Brush("#FF453A"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 4, 2, 0) });
+        row.MouseEnter += (_, _) => { if (!open) row.Background = UI.Brush(UI.Fill); };
+        row.MouseLeave += (_, _) => { if (!open) row.Background = UI.Brush("Transparent"); };
+        row.MouseLeftButtonUp += (_, e) =>
+        {
+            if (e.OriginalSource is DependencyObject source && FindButton(source)) return;
+            _expandedNotice = open ? null : notice.Id; RenderNotices(); e.Handled = true;
+        };
+        AutomationProperties.SetName(row, notice.AppName + ", " + notice.Title + ", " + NoticeText.Relative(notice.ReceivedAt, now));
+        return row;
+    }
+
+    private static bool FindButton(DependencyObject node)
+    {
+        for (var current = node; current is not null; current = current is Visual ? VisualTreeHelper.GetParent(current) : LogicalTreeHelper.GetParent(current))
+            if (current is Button) return true;
+        return false;
+    }
+
+    private async Task OpenFromPage(Notice notice)
+    {
+        if (await _app.Notices.OpenAsync(notice)) { SetExpanded(false); return; }
+        MessageHint(Loc.T("无法打开该应用；它可能不支持从通知启动。", "The application could not be opened; it may not support being started from a notice."));
+    }
+
+    private void MessageHint(string text)
+    {
+        if (NoticesContent.Children.OfType<DockPanel>().FirstOrDefault() is not { } page) return;
+        var hint = UI.Line(text, 11, "#FF8A80"); hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0, 0, 0, 4);
+        DockPanel.SetDock(hint, Dock.Top);
+        page.Children.Insert(1, hint);
+    }
+
+    // The icon as in the arriving notice, on the panel's own plate.
+    private FrameworkElement NoticePlate(Notice notice, double size)
+    {
+        var plate = new Grid { Width = size, Height = size };
+        plate.Children.Add(new Border { CornerRadius = new CornerRadius(size * .28), Background = UI.Brush(UI.Fill) });
+        var image = _app.Notices.Icons.Get(notice.IconRef, out _);
+        if (image is not null) plate.Children.Add(new Image { Source = image, Width = size * .72, Height = size * .72, Stretch = Stretch.Uniform });
+        else
+        {
+            var color = _app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey));
+            var name = notice.AppName.Trim();
+            plate.Children.Add(new TextBlock { Text = name.Length == 0 ? "?" : char.IsSurrogate(name[0]) && name.Length > 1 ? name[..2] : name[..1].ToUpper(Loc.Culture), FontFamily = UI.DisplayFont, FontSize = Math.Round(size * .48), FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(color), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+        }
+        if (NoticeLook.CategoryColor(notice.Category) is { Length: > 0 } mark && notice.Category != NoticeCategory.Task)
+            plate.Children.Add(new Ellipse { Width = 9, Height = 9, Fill = UI.Brush(mark), Stroke = Brushes.Black, StrokeThickness = 1.5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -2, -2) });
+        return plate;
+    }
+
+    // A small flat button of the panel's kind.
+    private static Button PageButton(string text, Action click)
+    {
+        var face = new Border { CornerRadius = new CornerRadius(6), Background = UI.Brush(UI.Fill), Padding = new Thickness(9, 0, 9, 0), Height = 22, Margin = new Thickness(4, 0, 0, 0) };
+        face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 11.5, Foreground = UI.Brush(UI.Secondary), VerticalAlignment = VerticalAlignment.Center };
+        var button = new Button { Content = face, Cursor = Cursors.Hand, FocusVisualStyle = null, Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
+        button.MouseEnter += (_, _) => face.Background = UI.Brush(UI.FillSelected);
+        button.MouseLeave += (_, _) => face.Background = UI.Brush(UI.Fill);
+        button.Click += (_, _) => click();
+        AutomationProperties.SetName(button, text);
+        return button;
+    }
+}

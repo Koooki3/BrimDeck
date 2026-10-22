@@ -59,16 +59,22 @@ public sealed class IslandBorder : Border
         var key = (RenderSize, ShoulderRadius, CornerRadius);
         if (_outlineKey == key) return _outline;
         _outlineKey = key;
-        double w = RenderSize.Width, h = RenderSize.Height;
-        if (w <= 0 || h <= 0) return _outline = Geometry.Empty;
-        double shoulder = Math.Clamp(ShoulderRadius, 0, Math.Min(w / 4, h / 2));
+        return _outline = BuildOutline(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius);
+    }
+
+    // The island's outline for a size, shoulder and corners; dynamic notices draw the same outline, so that they start and end
+    // exactly on the island. Frozen.
+    internal static Geometry BuildOutline(double w, double h, double shoulderRadius, CornerRadius corners)
+    {
+        if (!(w > 0) || !(h > 0)) return Geometry.Empty;
+        double shoulder = Math.Clamp(shoulderRadius, 0, Math.Min(w / 4, h / 2));
         double shoulderDepth = shoulder * (7d / 16);
         double left = shoulder, right = w - shoulder;
         double limit = Math.Min(shoulder > 0 ? h - shoulderDepth : h / 2, (right - left) / 2);
-        double bl = Math.Clamp(CornerRadius.BottomLeft, 0, limit);
-        double br = Math.Clamp(CornerRadius.BottomRight, 0, limit);
-        double tl = Math.Clamp(CornerRadius.TopLeft, 0, Math.Min(w, h) / 2);
-        double tr = Math.Clamp(CornerRadius.TopRight, 0, Math.Min(w, h) / 2);
+        double bl = Math.Clamp(corners.BottomLeft, 0, limit);
+        double br = Math.Clamp(corners.BottomRight, 0, limit);
+        double tl = Math.Clamp(corners.TopLeft, 0, Math.Min(w, h) / 2);
+        double tr = Math.Clamp(corners.TopRight, 0, Math.Min(w, h) / 2);
         const double k = .5522847498307936; // Cubic approximation of a circular quadrant.
         var geometry = new StreamGeometry();
         using (var path = geometry.Open())
@@ -106,6 +112,6 @@ public sealed class IslandBorder : Border
                     new Point(tl, 0), true, true);
         }
         geometry.Freeze();
-        return _outline = geometry;
+        return geometry;
     }
 }

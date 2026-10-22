@@ -11,7 +11,7 @@ namespace BrimDeck;
 
 public partial class MainWindow
 {
-    internal void ShowModelDetails(bool details) { if (IsMusicPage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false); _details = details && Settings.UsagePage; RenderUsage(); }
+    internal void ShowModelDetails(bool details) { if (CurrentPage != DeckPage.Usage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false); _details = details && Settings.UsagePage; RenderUsage(); }
     internal FrameworkElement ScaledContent => ContentCanvas;
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
@@ -120,8 +120,9 @@ public partial class MainWindow
     public void RenderUsage()
     {
         if (UsageContent is null) return;
+        if (CurrentPage == DeckPage.Notices) { RenderNotices(); return; }
         if (IsMusicPage) { RenderMusic(); return; }
-        MusicContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
+        MusicContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
         if (!Settings.UsagePage) _details = false;
         RefreshStatus();
         if (_detailPopup is not null) return;

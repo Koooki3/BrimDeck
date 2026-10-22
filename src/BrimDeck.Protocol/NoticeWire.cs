@@ -1,0 +1,214 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace BrimDeck.Protocol;
+
+// One message of the notice protocol. The same shape travels in both directions and over every link: a sender's notice to
+// BrimDeck, BrimDeck's reply, the WSL agent's status reports, and BrimDeck's requests to the agent (an action the user chose,
+// a notice the user dismissed). Fields that do not apply to a type stay null and are left out of the JSON.
+public sealed class NoticeMessage
+{
+    public int Version { get; set; } = NoticeProtocol.Version;
+    public string Type { get; set; } = NoticeTypes.Notify;
+    // A sender's id for this one message: sending it again with the same id is recognized as a retry.
+    public string? EventId { get; set; }
+    // A stable key chosen by the sender: a later notice with the same key updates the earlier one instead of adding another
+    // (a task's progress, then its result).
+    public string? ReplaceId { get; set; }
+    // The id the source itself gave the notice (a D-Bus notification id), so that later updates and closes find it.
+    public string? NativeId { get; set; }
+    // Set by the WSL agent: "cli" for brim-notify, "dbus" for a desktop notification. BrimDeck takes the link a message
+    // arrives on as its origin; this only tells the two kinds of WSL notices apart.
+    public string? Origin { get; set; }
+    public string? AppName { get; set; }
+    public string? AppId { get; set; }
+    public string? Distro { get; set; }
+    public string? Session { get; set; }
+    // An icon name or a local file path, never a remote address; nothing is downloaded.
+    public string? Icon { get; set; }
+    public string? Title { get; set; }
+    public string? Body { get; set; }
+    // message, task, success, warning, error or info.
+    public string? Category { get; set; }
+    // low, normal or high: a hint. Only the user's rule for the source can raise a notice above normal.
+    public string? Priority { get; set; }
+    // 0 to 1 while a task runs.
+    public double? Progress { get; set; }
+    // The result of "brim-notify run": BrimDeck words the notice in its own language from these.
+    public int? ExitCode { get; set; }
+    public long? DurationMs { get; set; }
+    public string? Command { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
+    public List<NoticeActionInfo>? Actions { get; set; }
+    // Type "action": the chosen action's key.
+    public string? ActionKey { get; set; }
+    // Type "status": the agent's state (see AgentStates) and a technical detail for diagnostics.
+    public string? State { get; set; }
+    public string? Detail { get; set; }
+    // Type "close": why the source closed the notice (the freedesktop reason codes).
+    public int? Reason { get; set; }
+    // Type "reply": the result for the message just received.
+    public string? Result { get; set; }
+}
+
+public sealed class NoticeActionInfo
+{
+    public string Key { get; set; } = "";
+    public string Label { get; set; } = "";
+}
+
+public static class NoticeTypes
+{
+    public const string Notify = "notify", Close = "close", Status = "status", Action = "action", Dismissed = "dismissed", Reply = "reply";
+}
+
+public static class NoticeResults
+{
+    // Accepted: a new notice. Updated: it changed one shown before. Duplicate: a retry of a message already received.
+    // Filtered: received, but the user's rules keep it out (a muted application, notices switched off).
+    // Rejected: malformed or over the limits; Reason says why.
+    public const string Accepted = "accepted", Updated = "updated", Duplicate = "duplicate", Filtered = "filtered", Rejected = "rejected";
+}
+
+public static class AgentStates
+{
+    // Server: the agent is the session's notification service. Monitor: another service shows notices and the agent watches
+    // them. MonitorDenied: another service runs and the bus does not let the agent watch; brim-notify still works.
+    // NoBus: no session bus was found. Error: something else failed; Detail says what.
+    public const string Server = "server", Monitor = "monitor", MonitorDenied = "monitor-denied", NoBus = "no-bus", Error = "error";
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSerializable(typeof(NoticeMessage))]
+[JsonSerializable(typeof(AgentBridgeConfig))]
+public sealed partial class NoticeJson : JsonSerializerContext;
+
+// Written by BrimDeck into a WSL distribution next to the agent, so that brim-notify can reach Windows through the
+// command-line sender while the agent is not running.
+public sealed class AgentBridgeConfig
+{
+    public string? Helper { get; set; }
+    public string? Version { get; set; }
+}
+
+public static class NoticeProtocol
+{
+    public const int Version = 1;
+    // One frame's payload at most; a longer frame is refused and the connection closed.
+    public const int MaxFrame = 64 * 1024;
+    public const int MaxTitle = 256, MaxBody = 4000, MaxActions = 8, MaxField = 256;
+
+    // The pipe is per user and per logon session: one user's senders never reach another session's BrimDeck.
+    // The user's SID is hashed only to keep the name short and free of characters a pipe name cannot hold.
+    public static string PipeName(int sessionId, string userSid)
+        => $"BrimDeck.Notices.{sessionId}.{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(userSid)))[..16]}";
+
+    public static byte[] Serialize(NoticeMessage message) => JsonSerializer.SerializeToUtf8Bytes(message, NoticeJson.Default.NoticeMessage);
+    public static NoticeMessage? Deserialize(ReadOnlySpan<byte> json)
+    {
+        try { return JsonSerializer.Deserialize(json, NoticeJson.Default.NoticeMessage); }
+        catch (JsonException) { return null; }
+    }
+    public static NoticeMessage Reply(string result, string? reason = null, string? id = null)
+        => new() { Type = NoticeTypes.Reply, Result = result, Detail = reason, EventId = id };
+
+    // Checks a message received from outside BrimDeck and trims its texts to the limits. Returns null when it can be used,
+    // or the reason it is refused.
+    public static string? Validate(NoticeMessage message)
+    {
+        if (message.Version < 1 || message.Version > Version) return "unsupported-version";
+        if (message.Type is not (NoticeTypes.Notify or NoticeTypes.Close or NoticeTypes.Status or NoticeTypes.Action or NoticeTypes.Dismissed or NoticeTypes.Reply))
+            return "unknown-type";
+        if (message.Type == NoticeTypes.Notify && string.IsNullOrWhiteSpace(message.Title) && string.IsNullOrWhiteSpace(message.Body) && message.ExitCode is null)
+            return "empty";
+        if (message.Progress is { } progress && !(double.IsFinite(progress) && progress >= 0 && progress <= 1)) return "bad-progress";
+        message.Title = Clip(message.Title, MaxTitle);
+        message.Body = Clip(message.Body, MaxBody);
+        message.EventId = Clip(message.EventId, MaxField);
+        message.ReplaceId = Clip(message.ReplaceId, MaxField);
+        message.NativeId = Clip(message.NativeId, MaxField);
+        message.AppName = Clip(message.AppName, MaxField);
+        message.AppId = Clip(message.AppId, MaxField);
+        message.Distro = Clip(message.Distro, MaxField);
+        message.Session = Clip(message.Session, MaxField);
+        message.Icon = Clip(message.Icon, 1024);
+        message.Command = Clip(message.Command, MaxField);
+        message.Detail = Clip(message.Detail, 1024);
+        if (message.Actions is { } actions)
+            message.Actions = actions.Where(a => a is not null && !string.IsNullOrWhiteSpace(a.Key) && !string.IsNullOrWhiteSpace(a.Label))
+                .Take(MaxActions).Select(a => new NoticeActionInfo { Key = Clip(a.Key, 64)!, Label = Clip(a.Label, 64)! }).ToList();
+        return null;
+    }
+
+    // Removes control characters other than line breaks and tabs, and the bidirectional overrides and isolates, which could
+    // make a text read differently from what it is; cuts at the limit without splitting a surrogate pair.
+    public static string? Clip(string? text, int limit)
+    {
+        if (text is null) return null;
+        var builder = new StringBuilder(Math.Min(text.Length, limit));
+        foreach (char c in text)
+        {
+            if (builder.Length >= limit) break;
+            if (c is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069' or '\u200E' or '\u200F' or '\u061C') continue;
+            if (char.IsControl(c) && c is not ('\n' or '\t')) { if (c == '\r') continue; builder.Append(' '); continue; }
+            builder.Append(c);
+        }
+        if (builder.Length > 0 && char.IsHighSurrogate(builder[^1])) builder.Length--;
+        return builder.ToString();
+    }
+}
+
+// Frames on a stream: a 4-byte little-endian length, then that many bytes of UTF-8 JSON.
+public static class NoticeFrames
+{
+    public static async Task WriteAsync(Stream stream, NoticeMessage message, CancellationToken cancellation = default)
+    {
+        var payload = NoticeProtocol.Serialize(message);
+        if (payload.Length > NoticeProtocol.MaxFrame) throw new InvalidDataException("The message is larger than a frame may be.");
+        var frame = new byte[4 + payload.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(frame, payload.Length);
+        payload.CopyTo(frame, 4);
+        await stream.WriteAsync(frame, cancellation).ConfigureAwait(false);
+        await stream.FlushAsync(cancellation).ConfigureAwait(false);
+    }
+
+    // The next frame's payload, or null at the end of the stream. A frame over the limit, or a stream that ends inside a
+    // frame, throws InvalidDataException.
+    public static async Task<byte[]?> ReadAsync(Stream stream, CancellationToken cancellation = default)
+    {
+        var header = new byte[4];
+        if (!await FillAsync(stream, header, cancellation).ConfigureAwait(false)) return null;
+        int length = BinaryPrimitives.ReadInt32LittleEndian(header);
+        if (length < 0 || length > NoticeProtocol.MaxFrame) throw new InvalidDataException("Frame length " + length + " is outside the limit.");
+        var payload = new byte[length];
+        if (length > 0 && !await FillAsync(stream, payload, cancellation).ConfigureAwait(false)) throw new InvalidDataException("The stream ended inside a frame.");
+        return payload;
+    }
+
+    public static async Task<NoticeMessage?> ReadMessageAsync(Stream stream, CancellationToken cancellation = default)
+    {
+        var payload = await ReadAsync(stream, cancellation).ConfigureAwait(false);
+        if (payload is null) return null;
+        return NoticeProtocol.Deserialize(payload) ?? throw new InvalidDataException("A frame did not hold a notice message.");
+    }
+
+    // True when the buffer was filled; false when the stream ended before its first byte.
+    private static async Task<bool> FillAsync(Stream stream, byte[] buffer, CancellationToken cancellation)
+    {
+        int read = 0;
+        while (read < buffer.Length)
+        {
+            int n = await stream.ReadAsync(buffer.AsMemory(read), cancellation).ConfigureAwait(false);
+            if (n == 0)
+            {
+                if (read == 0) return false;
+                throw new InvalidDataException("The stream ended inside a frame.");
+            }
+            read += n;
+        }
+        return true;
+    }
+}

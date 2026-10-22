@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\BrimDeck.Protocol\BrimDeck.Protocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Jint" Version="4.16.3" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>

@@ -23,6 +23,8 @@ public partial class App : Application
     public ProviderSecrets Secrets { get; private set; } = null!;
     public Pricing Prices { get; private set; } = null!;
     public AppUpdates Updates { get; internal set; } = null!;
+    // Dynamic notices (NoticeCenter): created before the panels, which take their turns on the island through it.
+    internal NoticeCenter Notices { get; private set; } = null!;
     // The main panel. It owns the tray icon, reads the usage data and takes the settings preview; every other chosen
     // monitor gets a panel that shows the same data.
     public MainWindow Deck { get; private set; } = null!;
@@ -77,13 +79,20 @@ public partial class App : Application
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
         Usage = new UsageService(new DesktopSources(), secrets: Secrets);
+        Notices = new NoticeCenter(this);
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
+        Notices.ApplySettings();
         InitializeHotkeys();
         StartBackgroundUpdates();
         _save.Tick += (_, _) => FlushSettings();
-        _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden);
+        _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden)
+        {
+            NoticeEntry = () => !Settings.NoticesEnabled ? null
+                : Notices.Paused ? (Loc.T("恢复通知提醒", "Resume notices"), () => Notices.Pause(null))
+                : (Loc.T("暂停通知提醒 1 小时", "Pause notices for 1 hour"), () => Notices.Pause(TimeSpan.FromHours(1)))
+        };
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(OpenSettings), null, Timeout.Infinite, false);
         if (e.Args.Contains("--settings")) OpenSettings();
@@ -160,6 +169,7 @@ public partial class App : Application
         if (languageChanged) UseLanguage();
         AssignDisplays();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
+        Notices.ApplySettings();
         QueueSave();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
     }
@@ -218,7 +228,7 @@ public partial class App : Application
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _settingsWindow?.SaveStatus(Loc.T("保存失败，请检查设置目录权限。", "Saving failed. Check the permissions of the settings folder."), true); }
     }
     // The settings window records its size before the final save; closing it during shutdown would be too late.
-    public void ExitApplication() { Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings(); Shutdown(); }
+    public void ExitApplication() { Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings(); Notices?.Flush(); Shutdown(); }
     internal void InstallUpdate()
     {
         if (Updates.PrepareRestart(() => Store.Save(Settings))) ExitApplication();
@@ -226,7 +236,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); StopBackgroundUpdates(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Notices?.Dispose(); Media?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

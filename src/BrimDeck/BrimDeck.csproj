@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BrimDeck.Core\BrimDeck.Core.csproj" />
+    <ProjectReference Include="..\BrimDeck.Protocol\BrimDeck.Protocol.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -16,7 +17,9 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <StartupObject>BrimDeck.Program</StartupObject>
-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- 22621 brings FocusSessionManager; every call to an API newer than 19041 checks the Windows version first. -->
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>

@@ -62,7 +62,9 @@ public partial class MainWindow
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
     private TimeSpan _quotaElapsed;
-    internal bool IsMusicPage => _page == DeckPage.Music && Settings.MusicPage;
+    internal bool IsMusicPage => CurrentPage == DeckPage.Music;
+    // The page shown: the chosen one while it is shown, otherwise the first shown page (DeckPages.Resolve).
+    internal DeckPage CurrentPage => DeckPages.Resolve(Settings, _page);
     internal CompactMusicLayout? CurrentCompactLayout { get; private set; }
 
     private void InitializeMusic()
@@ -83,9 +85,8 @@ public partial class MainWindow
     private void ApplyMusicSettings()
     {
         if (!Settings.MusicPage) CloseSourceMenu();
-        if (!Settings.MusicPage && _page == DeckPage.Music) _page = DeckPage.Usage;
-        if (!Settings.UsagePage && Settings.MusicPage) _page = DeckPage.Music;
-        if (!Settings.UsagePage || IsMusicPage) _details = false;
+        _page = DeckPages.Resolve(Settings, _page);
+        if (!Settings.UsagePage || CurrentPage != DeckPage.Usage) _details = false;
         if (_musicStarted) _app.StartMedia();
         if (!Settings.MediaWanted) { _mediaTrack = null; _mediaCover = null; _mediaTracks = []; _seekPreview.Observe(null, DateTimeOffset.UtcNow); }
         UpdateLyrics();
@@ -93,12 +94,14 @@ public partial class MainWindow
     }
     private void ApplyDefaultMusicPage()
     {
-        var wanted = Settings.DefaultPage switch { DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Usage => DeckPage.Usage, _ => _page };
-        if (wanted != _page && (wanted == DeckPage.Music ? Settings.MusicPage : Settings.UsagePage)) SelectPage(wanted, remember: false);
+        // Opened for a page of its own (the recent notices from a notice), the panel keeps that page.
+        if (_keepPageOnOpen) return;
+        var wanted = DeckPages.Opening(Settings.DefaultPage) ?? _page;
+        if (wanted != _page && DeckPages.Shown(Settings, wanted)) SelectPage(wanted, remember: false);
     }
     internal void SelectPage(DeckPage page, bool remember = true)
     {
-        if (page == DeckPage.Music && !Settings.MusicPage || page == DeckPage.Usage && !Settings.UsagePage) return;
+        if (!DeckPages.Shown(Settings, page)) return;
         bool changed = _page != page;
         if (changed) CloseSourceMenu();
         if (changed && _expanded && !_preview)
@@ -109,6 +112,7 @@ public partial class MainWindow
         _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = "";
         if (remember) { Settings.LastPage = page; _app.QueueSave(); }
         ApplySettings(animatePage: changed && _expanded && !_preview);
+        if (page == DeckPage.Notices && _expanded) NoticesPageShown();
     }
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
     // The header shared by both pages (see PanelHeader). Its row holds the page's top margin, so the clock, the switch and the
@@ -124,7 +128,7 @@ public partial class MainWindow
         ToolbarRow.Height = new GridLength(header.Row);
         Toolbar.Height = header.Height;
         PageSwitch.Margin = new Thickness(header.Side, 0, 0, 0);
-        foreach (var button in new[] { AIUsageButton, MusicPageButton })
+        foreach (var button in new[] { AIUsageButton, MusicPageButton, NoticesPageButton })
         {
             button.Height = header.ButtonHeight;
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
@@ -133,21 +137,25 @@ public partial class MainWindow
         }
         SettingsButton.Height = header.SettingsHeight;
         if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, header.RightMargin, 0);
-        ApplicationPages.Margin = new Thickness(header.Side + (Settings.MusicPage ? 72 : 36), 0, 0, 0);
+        ApplicationPages.Margin = new Thickness(header.Side + PageSwitchWidth, 0, 0, 0);
     }
+    // The page switch holds one 36 DIP place per shown page; the application pages follow it.
+    private double PageSwitchWidth => 36 * Math.Max(1, DeckPages.Visible(Settings).Count);
     private void RenderPageSwitch()
     {
         SetValue(SuppressMusicToolTipsProperty, IsMusicPage);
-        foreach (var control in new FrameworkElement[] { AIUsageButton, MusicPageButton, MediaSourceButton, ClockLabel })
+        foreach (var control in new FrameworkElement[] { AIUsageButton, MusicPageButton, NoticesPageButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
-        PageSwitch.Visibility = _details && !IsMusicPage ? Visibility.Collapsed : Visibility.Visible;
-        AIUsageButton.Visibility = Settings.UsagePage ? Visibility.Visible : Visibility.Collapsed;
-        MusicPageButton.Visibility = Settings.MusicPage ? Visibility.Visible : Visibility.Collapsed;
-        AIUsageButton.Background = UI.Brush(!IsMusicPage ? UI.FillSelected : "Transparent");
-        MusicPageButton.Background = UI.Brush(IsMusicPage ? UI.FillSelected : "Transparent");
-        AIUsageButton.Foreground = UI.Brush(!IsMusicPage ? UI.Primary : UI.Secondary);
-        MusicPageButton.Foreground = UI.Brush(IsMusicPage ? UI.Primary : UI.Secondary);
-        ApplicationPages.Margin = new Thickness(_header.Side + (Settings.MusicPage ? 72 : 36), 0, 0, 0);
+        var page = CurrentPage;
+        PageSwitch.Visibility = _details && page == DeckPage.Usage ? Visibility.Collapsed : Visibility.Visible;
+        foreach (var (button, shown) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (NoticesPageButton, DeckPage.Notices) })
+        {
+            button.Visibility = DeckPages.Shown(Settings, shown) ? Visibility.Visible : Visibility.Collapsed;
+            button.Background = UI.Brush(page == shown ? UI.FillSelected : "Transparent");
+            button.Foreground = UI.Brush(page == shown ? UI.Primary : UI.Secondary);
+        }
+        UpdateNoticeBadge();
+        ApplicationPages.Margin = new Thickness(_header.Side + PageSwitchWidth, 0, 0, 0);
         // With the entry switched on the source menu has one more row. Without a source that row stands alone in the button.
         bool entry = FullControlEntryShown, alone = entry && _mediaTrack is null;
         MediaSourceButton.Visibility = IsMusicPage && (_mediaTrack is not null || entry) ? Visibility.Visible : Visibility.Collapsed;
@@ -182,7 +190,8 @@ public partial class MainWindow
             // A notice still on screen switches to the new title instead of giving way to the summary until playback starts.
             if (_mediaTrack is not null && Settings.MusicTrackNotice && notice) _trackNotice.Arm(now); else _trackNotice.Disarm();
         }
-        if (_trackNotice.Observe(_mediaTrack, now)) _trackNoticeUntil = now.AddSeconds(4);
+        // The coordinator lets the title show only when nothing more important does (NoticeCenter.TryTrack).
+        if (_trackNotice.Observe(_mediaTrack, now) && _app.Notices.TryTrack(this, TrackNoticeTime)) _trackNoticeUntil = now + TrackNoticeTime;
         if (lyricsChanged) UpdateLyrics();
         if (changedSong || lyricsChanged || coverChanged || old?.State != _mediaTrack?.State || old?.HasTimeline != _mediaTrack?.HasTimeline) RenderCompact();
         if (IsMusicPage) RenderMusic();
@@ -302,7 +311,7 @@ public partial class MainWindow
     private void RenderMusic()
     {
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         double h = ContentCanvas.Height, w = ContentCanvas.Width;
         var track = _mediaTrack;

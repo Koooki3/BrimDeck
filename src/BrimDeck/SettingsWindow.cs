@@ -29,7 +29,9 @@ public sealed partial class SettingsWindow : Window
     private readonly TextBlock _status = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
-        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck")];
+        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("灵动提示", "Dynamic notices")];
+    // The order of the pages in the navigation: the notices page (NoticesSettingsPage) has its own group before About.
+    private static readonly int[] PageOrder = [0, 1, 2, 3, 4, 5, 6, NoticesSettingsPage, 7];
     private int _page;
     private bool _preview;
     private StackPanel? _appRows;
@@ -311,11 +313,11 @@ public sealed partial class SettingsWindow : Window
         // Rebuilding the same page after a change keeps the reader where they were; only switching pages starts at the top.
         double keep = page == _page ? Math.Max(_scroll.VerticalOffset, _keptOffset) : 0; _keptOffset = 0;
         _page = page; _navigation.Children.Clear(); _content.Children.Clear(); _aboutUpdateView = null; _scroll.ScrollToTop();
-        for (int i = 0; i < _pages.Length; i++)
+        foreach (int i in PageOrder)
         {
-            if (i is 0 or 3 or 5 or 7)
+            if (i is 0 or 3 or 5 or 7 or NoticesSettingsPage)
             {
-                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
+                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), 5 => Loc.T("音乐", "Music"), NoticesSettingsPage => Loc.T("通知", "Notices"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
                 group.Margin = new Thickness(12, i == 0 ? 0 : 24, 0, 8); _navigation.Children.Add(group);
             }
             int target=i; bool selected=page==i;
@@ -328,12 +330,12 @@ public sealed partial class SettingsWindow : Window
         }
         // The About page is titled by the wordmark itself, so the name does not appear twice.
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
-        if (page is < 4 or 5 or 6)
+        if (page is < 4 or 5 or 6 or NoticesSettingsPage)
         {
             var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),ResetPage); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
-        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; }
+        switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case NoticesSettingsPage: NoticesPage(); break; }
         if (_content.Children[^1] is Border lastGroup) lastGroup.Margin = new Thickness(lastGroup.Margin.Left, lastGroup.Margin.Top, lastGroup.Margin.Right, 0);
         // Apply the offset before the frame is drawn, so the rebuilt page never shows its top for a frame.
         if (keep > 0) { _scroll.UpdateLayout(); _scroll.ScrollToVerticalOffset(keep); _scroll.UpdateLayout(); }
@@ -349,6 +351,7 @@ public sealed partial class SettingsWindow : Window
         3 => "M 1,1 H 6 V 6 H 1 Z M 10,1 H 15 V 6 H 10 Z M 1,10 H 6 V 15 H 1 Z M 10,10 H 15 V 15 H 10 Z",
         4 => "M 1,2 H 15 V 14 H 1 Z M 1,6 H 15 M 1,10 H 15 M 6,2 V 14",
         6 => "M 1,2 H 15 V 14 H 1 Z M 6.5,5.5 L 11,8 L 6.5,10.5 Z",
+        NoticesSettingsPage => "M 8,1.5 C 5.6,1.5 4,3.4 4,5.7 V 8.4 L 2.8,10.6 H 13.2 L 12,8.4 V 5.7 C 12,3.4 10.4,1.5 8,1.5 Z M 6.3,12.6 A 1.7,1.7 0 0 0 9.7,12.6",
         5 => "M 6,12.5 V 3 L 14,1.5 V 11 M 6,12.5 A 2,2 0 1 1 2,12.5 A 2,2 0 1 1 6,12.5 M 14,11 A 2,2 0 1 1 10,11 A 2,2 0 1 1 14,11",
         _ => "M 8,1 A 7,7 0 1 1 7.99,1 M 8,7 V 12 M 8,4 V 4.2"
     },16,16,color);
@@ -469,6 +472,7 @@ public sealed partial class SettingsWindow : Window
             starts = [(DefaultDeckPage.Last, Loc.T("上次停留的页面", "Last viewed page"))];
             if (S.UsagePage) starts.Add((DefaultDeckPage.Usage, Loc.T("AI 用量", "AI usage")));
             if (S.MusicPage) starts.Add((DefaultDeckPage.Music, Loc.T("音乐", "Music")));
+            if (DeckPages.Shown(S, DeckPage.Notices)) starts.Add((DefaultDeckPage.Notices, Loc.T("最近通知", "Recent notices")));
             filling = true;
             start.ItemsSource = starts.Select(option => option.Label).ToList();
             start.SelectedIndex = Math.Max(0, starts.FindIndex(option => option.Value == S.DefaultPage));
@@ -479,12 +483,15 @@ public sealed partial class SettingsWindow : Window
         SectionTitle(Loc.T("显示的页面", "Pages shown"));
         Group(SizeRow(Loc.T("显示 AI 用量", "Show AI usage"), Loc.T("AI 用量", "AI usage"), DeckPage.Usage, S.UsagePage, value => { Change(s => s.UsagePage = value); FillStarts(); }, Collect(UsageSizes)),
             SizeRow(Loc.T("显示音乐", "Show music"), Loc.T("音乐", "music"), DeckPage.Music, S.MusicPage, value => { Change(s => s.MusicPage = value); FillStarts(); }, Collect(MusicSizeControls)));
+        // The recent notices page exists while dynamic notices are on.
+        if (S.NoticesEnabled)
+            Group(SizeRow(Loc.T("显示最近通知", "Show recent notices"), Loc.T("最近通知", "recent notices"), DeckPage.Notices, S.NoticesPage, value => { Change(s => s.NoticesPage = value); FillStarts(); }, Collect(NoticeSizeControls)));
         // Settings that apply across the expanded pages rather than to one of them.
         SectionTitle(Loc.T("通用", "General"));
         Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start),
             Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value),
                 help: Loc.T("面板展开时，在面板内任意位置单击右键即可打开设置。", "When the panel is expanded, right-click anywhere inside it to open settings.")),
-            HotkeyRow(false));
+            HotkeyRow(HotkeyKind.Expand));
     }
     private FrameworkElement SizeRow(string title, string name, DeckPage page, bool shown, Action<bool> show, StackPanel sizes)
     {
@@ -558,6 +565,11 @@ public sealed partial class SettingsWindow : Window
                 case 3:s.QuotaAlerts=defaults.QuotaAlerts;s.IncludeWsl=defaults.IncludeWsl;s.Apps=defaults.Apps;break;
                 case 5:s.MusicText=defaults.MusicText;s.MusicCoverColor=defaults.MusicCoverColor;s.MusicTrackNotice=defaults.MusicTrackNotice;s.LyricsEnabled=defaults.LyricsEnabled;break;
                 case 6:s.NeteaseFullControlEntry=defaults.NeteaseFullControlEntry;break;
+                // The switch itself, the chosen sources, the rules per application and where notices are kept stay as they are.
+                case NoticesSettingsPage:s.NoticeTheme=defaults.NoticeTheme;s.NoticeAppearance=defaults.NoticeAppearance;s.NoticeAccentStrength=defaults.NoticeAccentStrength;
+                    s.NoticeDuration=defaults.NoticeDuration;s.NoticeHighDuration=defaults.NoticeHighDuration;s.NoticeHoverDetails=defaults.NoticeHoverDetails;s.NoticeScreen=defaults.NoticeScreen;
+                    s.NoticePrivacy=defaults.NoticePrivacy;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;
+                    s.NoticeHotkey=defaults.NoticeHotkey;s.NoticesPage=defaults.NoticesPage;s.NoticesWidth=defaults.NoticesWidth;s.NoticesHeight=defaults.NoticesHeight;break;
             }
         });
         if(_page==0)RebuildTheme();else ShowPage(_page);
@@ -565,7 +577,7 @@ public sealed partial class SettingsWindow : Window
 
     // A page that is not shown cannot be previewed, so its sizes are only saved.
     private void Resize(Action<DeckSettings> edit, DeckPage page = DeckPage.Usage)
-    { bool shown = page == DeckPage.Music ? S.MusicPage : S.UsagePage; Change(edit); if (!shown) return; _preview = true; _previewPage = page; _app.Deck.Preview(true); _app.Deck.SelectPage(page, remember: false); }
+    { bool shown = DeckPages.Shown(S, page); Change(edit); if (!shown) return; _preview = true; _previewPage = page; _app.Deck.Preview(true); _app.Deck.SelectPage(page, remember: false); }
 
     private void Interaction()
     {
