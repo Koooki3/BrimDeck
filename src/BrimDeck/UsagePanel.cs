@@ -131,6 +131,8 @@ public partial class MainWindow
     // The form the usage page was last laid out in: its size tier and arrangement, model details or the empty page. A rebuild
     // that changes it while the page is on screen (a drag across a size step, an app added) morphs into the new form.
     private string _usageForm = "";
+    // The column whose quota page was just flipped, which alone comes up from faint after the rebuild.
+    private Guid? _flippedColumn;
     // What the quota columns were last built from: their form and the data, page and settings they show, not the panel's exact
     // size. As the monitor page is built once per layout step and stretches within it, a render with the same key keeps the
     // page instead of building it again: a drag that stays within a size step, a return from another page, the sync button.
@@ -159,7 +161,7 @@ public partial class MainWindow
         MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
         if (!Settings.UsagePage) _details = false;
         RefreshStatus();
-        if (_detailPopup is not null) return;
+        if (_detailPopup is not null) { _flippedColumn = null; return; }
         var build = ColumnsBuild();
         if (build is not null && build == _usageBuilt && _usageHandover == Handover.None && UsageContent.Children.Count > 0)
         {
@@ -177,6 +179,10 @@ public partial class MainWindow
         if (motion == Handover.None && form.Length > 0 && form != _usageForm) motion = Handover.Morph;
         if (!shown) motion = Handover.None;
         _handover.Release(UsageContent, motion);
+        if (_flippedColumn is { } flipped && shown && motion == Handover.None)
+            foreach (var column in UsageContent.Children.OfType<Panel>().SelectMany(grid => grid.Children.OfType<Border>()).Where(border => Equals(border.Tag, flipped)))
+                PageHandover.Brighten(column);
+        _flippedColumn = null;
         // The application pager is left out: it is what was clicked, under the pointer, when application pages flip.
         foreach (var part in new UIElement[] { ModelToolbar, PageSwitch, ClockLabel }) PageHandover.Arrive(part, motion);
     }
@@ -315,7 +321,8 @@ public partial class MainWindow
     private FrameworkElement Column(AppEntry entry, ProviderSnapshot snapshot, ProviderSnapshot usage, QuotaView view, Layout layout, bool inline, bool wide, bool center, bool separator, double innerWidth)
     {
         bool off = view.Quotas.Count == 0;
-        void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; _usageHandover = Handover.Dissolve; RenderUsage(); }
+        // Only this column changes: it comes up from faint while the others stay as they are.
+        void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; _flippedColumn = entry.InstanceId; RenderUsage(); }
         var column = new Grid();
         column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.Head) });
         column.RowDefinitions.Add(new RowDefinition());
@@ -359,9 +366,9 @@ public partial class MainWindow
             if (view.Quotas.Count < cells)
             {
                 var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                foreach (var quota in view.Quotas)
+                for (int i = 0; i < view.Quotas.Count; i++)
                 {
-                    var block = QuotaBlock(entry, quota, layout);
+                    var block = QuotaBlock(entry, view.Quotas[i], layout, i);
                     block.Width = Math.Max(0, innerWidth / cells - 18);
                     row.Children.Add(block);
                 }
@@ -379,7 +386,7 @@ public partial class MainWindow
                 var row = new UniformGrid { Rows = 1, Columns = cells, VerticalAlignment = VerticalAlignment.Center };
                 for (int i = 0; i < view.Quotas.Count; i++)
                 {
-                    var block = QuotaBlock(entry, view.Quotas[i], layout);
+                    var block = QuotaBlock(entry, view.Quotas[i], layout, i);
                     block.Margin = new Thickness(i > 0 ? 18 : 0, 0, i < cells - 1 ? 18 : 0, 0);
                     row.Children.Add(block);
                 }
@@ -392,7 +399,7 @@ public partial class MainWindow
             var stack = new StackPanel { VerticalAlignment = center ? VerticalAlignment.Center : VerticalAlignment.Top };
             for (int i = 0; i < view.Quotas.Count; i++)
             {
-                var block = QuotaBlock(entry, view.Quotas[i], layout);
+                var block = QuotaBlock(entry, view.Quotas[i], layout, i);
                 if (i > 0) block.Margin = new Thickness(0, layout.QuotaGap, 0, 0);
                 stack.Children.Add(block);
             }
@@ -448,7 +455,9 @@ public partial class MainWindow
     }
 
     // Three rows per quota: the period name, the used share with its reset countdown, and the track.
-    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout)
+    // slot is the quota's place in its column: a bar keeps its place's last share (QuotaBar), so a new reading eases the same bar
+    // and a quota page flip eases each bar from the quota it replaces, as the monitor page's values move.
+    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot)
     {
         double used = Math.Clamp(quota.UsedPercent ?? 100, 0, 100);
         string color = quota.UsedPercent is null ? PanelTheme.AppTheme(entry) : PanelTheme.QuotaColor(entry, used);
@@ -504,7 +513,7 @@ public partial class MainWindow
             right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
         block.Children.Add(numbers);
-        var track = new QuotaBar($"{entry.InstanceId:N}:{quota.Id}", used / 100, color); Grid.SetRow(track, 4);
+        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", used / 100, color); Grid.SetRow(track, 4);
         block.Children.Add(track);
         return block;
     }

@@ -498,7 +498,9 @@ public partial class MainWindow : Window
         Track compact = booting ? new(.5, 1) : expanded ? new(0, .15) : line ? new(0, morphing ? .25 : .35) : morphing ? new(.55, 1) : new(.62, 1);
         Track shadow = booting ? new(.35, 1) : expanded ? new(0, .3) : morphing ? new(.2, .9) : new(.5, 1);
         Track rim = expanded ? new(.2, .5) : morphing ? new(.2, .7) : new(.5, .8);
-        Track tint = expanded ? new(0, .12) : morphing ? new(.2, .8) : new(.68, 1);
+        // The indicator's color only ever shows at the line's size, never as a larger block: into the indicator it comes once the
+        // surface has nearly narrowed to the line, and out of it (a style morph from the line) it goes at once.
+        Track tint = expanded ? new(0, .12) : indicator ? morphing ? new(.65, 1) : new(.85, 1) : morphing ? new(0, .15) : new(.68, 1);
         if (morphing && !line && Compact.Visibility == Visibility.Visible && Compact.Opacity > .5)
         {
             SetImmediate(Compact, OpacityProperty, 0d);
@@ -548,7 +550,10 @@ public partial class MainWindow : Window
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
         var tone = PanelTheme.ColorOf(indicator ? "indicator" : "surface");
-        if (duration == 0) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
+        // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
+        // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
+        // indicator's color.
+        if (duration == 0 || expanded && line && !wasExpanded) SetImmediate(_surface, SolidColorBrush.ColorProperty, tone);
         else _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = tone, EasingFunction = easeInOut }, duration, tint), HandoffBehavior.SnapshotAndReplace);
         // The panel is rebuilt when data or settings change, never here: a rebuild on the first frame reads as a stall.
         if (expanded) { RefreshStatus(); UpdateMusicPosition(); }

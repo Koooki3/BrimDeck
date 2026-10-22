@@ -150,9 +150,18 @@ internal sealed class PageHandover
     // the page has been laid out (Begin).
     public static void Arrive(UIElement element, Handover motion)
     {
-        if (motion is not (Handover.Forward or Handover.Back) || element.Visibility != Visibility.Visible || !Soft.Enabled) return;
-        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 0, TimeSpan.Zero));
-        element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => element.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, Soft.Choose)));
+        if (motion is not (Handover.Forward or Handover.Back) || element.Visibility != Visibility.Visible) return;
+        HoldThenArrive(element, 0, Soft.Choose);
+    }
+
+    // Brings one rebuilt part up from faint (a column whose quota page flipped), once the page has been laid out.
+    public static void Brighten(UIElement element) => HoldThenArrive(element, Faint, Soft.Short);
+
+    private static void HoldThenArrive(UIElement element, double from, int milliseconds)
+    {
+        if (!Soft.Enabled) return;
+        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(from, from, TimeSpan.Zero));
+        element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => element.BeginAnimation(UIElement.OpacityProperty, Arrival(from, 1, milliseconds)));
     }
 
     // An arrival returns the property to its value when it ends, so nothing is left animated.
