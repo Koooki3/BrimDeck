@@ -68,12 +68,9 @@ internal sealed class PageHandover
         if (!page.IsVisible || width < 1 || height < 1 || PresentationSource.FromVisual(page) is null) return null;
         var dpi = VisualTreeHelper.GetDpi(page);
         var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
-        // Drawn through a brush, so the page's own offset in its parent does not move it within the picture. The brush shows the
-        // page's whole layout box, unscaled: by default a VisualBrush stretches the bounds of what is drawn to fill the rectangle,
-        // so a page whose content does not reach its edges (an empty media or notices page) left as an enlarged picture.
-        var brush = new VisualBrush(page) { Viewbox = new Rect(0, 0, width, height), ViewboxUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
+        // Drawn through a brush, so the page's own offset in its parent does not move it within the picture.
         var drawing = new DrawingVisual();
-        using (var context = drawing.RenderOpen()) context.DrawRectangle(brush, null, new Rect(0, 0, width, height));
+        using (var context = drawing.RenderOpen()) context.DrawRectangle(new VisualBrush(page), null, new Rect(0, 0, width, height));
         picture.Render(drawing);
         picture.Freeze();
         return new Image { Source = picture, Width = width, Height = height, Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
