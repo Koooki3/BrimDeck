@@ -85,9 +85,9 @@ internal static class PopupMotion
         if (!Soft.Enabled || content is null || window is not { IsVisible: true } || width < 1 || height < 1 || PresentationSource.FromVisual(image) is null) { ghost.IsOpen = false; return; }
         var dpi = VisualTreeHelper.GetDpi(image);
         var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
-        // Drawn through a brush, so the content's own offset and its entrance transform are not part of the picture.
+        // Drawn one to one (PageHandover.Exactly), so neither the content's offset nor its entrance transform is part of the picture.
         var drawing = new DrawingVisual();
-        using (var context = drawing.RenderOpen()) context.DrawRectangle(new VisualBrush(content) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top }, null, new Rect(0, 0, width, height));
+        using (var context = drawing.RenderOpen()) context.DrawRectangle(PageHandover.Exactly(content, width, height), null, new Rect(0, 0, width, height));
         picture.Render(drawing);
         picture.Freeze();
         image.Width = width; image.Height = height; image.Source = picture;

@@ -120,9 +120,10 @@ public partial class MainWindow
         var before = CurrentPage;
         var from = PageContent(before);
         var picture = animate ? PageHandover.Capture(from) : null;
+        var place = PageHandover.Place(from);
         ShowPage(page, animatePage: changed && _expanded && !_preview);
         bool back = DeckPages.Order.ToList().IndexOf(page) < DeckPages.Order.ToList().IndexOf(before);
-        _handover.Send(picture, from.Margin, PageContent(page), back ? Handover.Back : Handover.Forward);
+        _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
         if (page == DeckPage.Notices && _expanded) NoticesPageShown();
     }
     private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Notices => NoticesContent, _ => UsageContent };
