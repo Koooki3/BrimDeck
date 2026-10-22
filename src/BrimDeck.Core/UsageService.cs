@@ -16,7 +16,8 @@ public interface IDesktopSources
     IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) => null;
 }
 
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null) : IDisposable
+// quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -42,7 +43,40 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
     private readonly SemaphoreSlim _gate = new(1);
-    private ClaudeQuotaSnapshot? _claudeRetained, _grokBotRetained;
+    private ClaudeQuotaSnapshot? _grokBotRetained;
+    // The last Claude quota read online; until this run reads its own, the previous run's (ClaudeQuotaCache), which is read on
+    // the first refresh that needs it, off the UI thread, rather than while BrimDeck starts.
+    private ClaudeQuotaSnapshot? _claudeRetained;
+    private bool _claudeCacheRead;
+    private ClaudeQuotaSnapshot? ClaudeRetained
+    {
+        get
+        {
+            if (!_claudeCacheRead) { _claudeCacheRead = true; if (quotaCache is not null) _claudeRetained ??= ClaudeQuotaCache.Load(quotaCache, _clock()); }
+            return _claudeRetained;
+        }
+    }
+    // The file is written only when the quotas or the plan changed, not on every refresh that read the same values.
+    private string _claudeSaved = "";
+    private void KeepOnline(ClaudeQuotaSnapshot snapshot)
+    {
+        _claudeRetained = snapshot; _claudeCacheRead = true;
+        if (quotaCache is null) return;
+        var key = string.Join("|", snapshot.Plan, snapshot.PlanSource, snapshot.Source, string.Join(";", snapshot.Quotas));
+        if (key == _claudeSaved) return;
+        _claudeSaved = key;
+        ClaudeQuotaCache.Save(quotaCache, snapshot);
+    }
+    // A sign-in that is gone or rejected keeps no quota, on disk either. A sign-in that could not be read just now only drops
+    // the reading of this run.
+    private void ForgetClaude(bool signedOut = true)
+    {
+        _claudeRetained = null;
+        if (!signedOut || quotaCache is null) return;
+        _claudeCacheRead = true;
+        _claudeSaved = "";
+        ClaudeQuotaCache.Delete(quotaCache);
+    }
     private readonly ConfiguredProviders _configured = new(secrets, http, clock);
     public Task<ProviderTestResult> TestProviderAsync(AppEntry entry, CancellationToken ct = default) => _configured.TestAsync(entry, ct);
 
@@ -298,7 +332,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 }
                 Connected(snapshot, credential.Source + Loc.T(" · 账户配额", " · account quota"), now);
                 snapshot.UsageNote += ClaudeUsageNote;
-                _claudeRetained = new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList());
+                KeepOnline(new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList()));
                 return true;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is
@@ -341,7 +375,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         if (failure is not null)
         {
-            if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) _claudeRetained = null;
+            if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) ForgetClaude();
             else
             {
                 if (Freshest(now) is { } local)
@@ -361,7 +395,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             }
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         }
-        _claudeRetained = null;
+        ForgetClaude(signedOut: !desktopState.ReadFailed && !codeReadFailed);
         snapshot.StatusLabel = desktopState.ReadFailed || codeReadFailed ? Loc.T("读取失败", "Read failed")
             : desktopState.Detected ? Loc.T("等待登录", "Waiting for sign-in") : Loc.T("未连接", "Not connected");
         snapshot.Status = desktopState.ReadFailed ? Loc.T("已发现 Claude 桌面版，暂时无法读取登录信息", "The Claude desktop app was found, but its sign-in cannot be read right now.")
@@ -399,14 +433,15 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     // Null when neither an earlier reading nor a usable sample exists.
     private ClaudeQuotaSnapshot? Freshest(DateTimeOffset now)
     {
-        var kept = _claudeRetained;
+        var kept = ClaudeRetained;
         var sample = ClaudeUsageHistory.Latest(_locations);
         if (sample is not null && sample.Time <= now.AddMinutes(5) && (kept is null || sample.Time > kept.Time))
         {
             DateTimeOffset? Reset(int minutes) => kept?.Quotas.FirstOrDefault(quota => quota.Minutes == minutes)?.ResetAt is { } reset && reset > sample.Time ? reset : null;
             var scoped = kept?.Quotas.Where(q => q.Label is not ("5 小时额度" or "每周额度")).ToList() ?? [];
+            var scopedTime = scoped.Count == 0 ? null : kept!.Local ? kept.ScopedTime : kept.Time;
             kept = new(sample.Time, kept?.Plan ?? "", kept?.PlanSource ?? "", Loc.T("Claude 桌面版 · 本地用量记录", "Claude desktop app · local usage records"),
-                [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080), .. scoped], true);
+                [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080), .. scoped], true, scopedTime);
             _claudeRetained = kept;
         }
         return kept;
@@ -421,6 +456,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var time = kept.Time.LocalDateTime.ToString(kept.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
         var shown = kept.Local ? Loc.T($"显示 Claude 桌面版 {time} 记录的配额", $"showing the quota the Claude desktop app recorded at {time}")
             : Loc.T($"显示 {time} 读取的配额", $"showing the quota read at {time}");
+        // Per-model quotas carried over from an earlier online reading say when they were read.
+        if (kept.Local && kept.ScopedTime is { } scoped && kept.Time - scoped > TimeSpan.FromMinutes(1))
+        {
+            var at = scoped.LocalDateTime.ToString(scoped.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+            shown += Loc.T($"（按模型的额度为 {at} 读取）", $" (per-model quotas read at {at})");
+        }
         snapshot.Status = failure switch
         {
             null => kept.Local ? Loc.T($"已连接，{shown}", $"Connected, {shown}") : Loc.T("已连接", "Connected"),
