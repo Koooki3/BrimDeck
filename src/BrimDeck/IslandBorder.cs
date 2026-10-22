@@ -86,13 +86,17 @@ public sealed class IslandBorder : Border
         double w = RenderSize.Width, h = RenderSize.Height;
         if (w <= 0 || h <= 0) return _outline = Geometry.Empty;
         double shoulder = Math.Clamp(ShoulderRadius, 0, Math.Min(w / 4, h / 2));
+        double tl = Math.Clamp(CornerRadius.TopLeft, 0, Math.Min(w, h) / 2);
+        double tr = Math.Clamp(CornerRadius.TopRight, 0, Math.Min(w, h) / 2);
+        // A shoulder curves out into the screen edge and a top corner curves in, so they cannot share a corner. While one shape
+        // turns into the other, each gives way to the other by its size: the outline passes through a square corner instead
+        // of jumping from one curve to the other when the shoulder reaches zero.
+        (shoulder, tl, tr) = (Math.Max(0, shoulder - Math.Max(tl, tr)), Math.Max(0, tl - shoulder), Math.Max(0, tr - shoulder));
         double shoulderDepth = shoulder * (7d / 16);
         double left = shoulder, right = w - shoulder;
         double limit = Math.Min(shoulder > 0 ? h - shoulderDepth : h / 2, (right - left) / 2);
         double bl = Math.Clamp(CornerRadius.BottomLeft, 0, limit);
         double br = Math.Clamp(CornerRadius.BottomRight, 0, limit);
-        double tl = Math.Clamp(CornerRadius.TopLeft, 0, Math.Min(w, h) / 2);
-        double tr = Math.Clamp(CornerRadius.TopRight, 0, Math.Min(w, h) / 2);
         const double k = .5522847498307936; // Cubic approximation of a circular quadrant.
         var geometry = new StreamGeometry();
         using (var path = geometry.Open())

@@ -520,7 +520,9 @@ public partial class MainWindow : Window
         Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
         Animate(Island, WidthProperty, width, duration, surface, settle);
         Animate(Island, HeightProperty, height, duration, surface, settle);
-        Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? shoulder : shape.Shoulder, duration, surface, corners);
+        double shoulderTo = expanded ? shoulder : shape.Shoulder;
+        var shoulderTrack = ShoulderTrack(surface, Island.ShoulderRadius, shoulderTo);
+        Animate(Island, IslandBorder.ShoulderRadiusProperty, shoulderTo, duration, shoulderTrack, shoulderTrack == surface ? corners : easeInOut);
         // Compact notch and capsule hover over their full bounding box from the screen edge; the open panel uses its own outline.
         Animate(HoverExtension, HeightProperty, double.IsFinite(box.Height) ? Math.Max(0, box.Height) : 0, duration, surface, settle);
         if (duration == 0)
@@ -565,6 +567,16 @@ public partial class MainWindow : Window
         UpdateMusicTimer();
         UpdateMonitorDemand();
         UpdateGrips();
+    }
+    // Shoulders belong only at the screen edge. A surface that loses them (a hanging panel closing into a capsule or a line)
+    // draws them in during the first part of its move, before it leaves the edge; one that gains them grows them in the later
+    // part, once it is there. Between two shapes that both have them (the notch and a hanging panel) they follow the surface.
+    private static Track ShoulderTrack(Track surface, double from, double to)
+    {
+        double span = surface.End - surface.Start;
+        if (from > 0 && to <= 0) return new(surface.Start, surface.Start + span * .4);
+        if (from <= 0 && to > 0) return new(surface.Start + span * .35, surface.End);
+        return surface;
     }
     private static T Timed<T>(T animation, int duration, Track track) where T : AnimationTimeline
     {
