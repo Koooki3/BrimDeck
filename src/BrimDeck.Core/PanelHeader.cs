@@ -15,6 +15,10 @@ public sealed record PanelHeader(double Row, double Height, double Side, double 
 {
     // The open panel's corner radius. Its top corners are rounded whenever it does not start at the monitor's top edge.
     public const double PanelRadius = 24;
+    // A panel that hangs from the monitor's top edge meets it with curved shoulders, as the compact notch does, instead of a
+    // square corner. They lie outside the page, so the panel is this much wider on each side. The size is the notch's, so
+    // the shoulders keep their shape while the notch opens into the panel.
+    public const double PanelShoulder = CollapsedLimits.NotchShoulder;
     // The switch's corners; the buttons inside it are concentric with them.
     public const double SwitchRadius = 8, SwitchPadding = 2, ButtonRadius = SwitchRadius - SwitchPadding;
     // From this inset on, the centre of the switch's corner lies beyond the centre of the panel's rounded corner, so that

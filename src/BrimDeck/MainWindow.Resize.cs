@@ -78,12 +78,14 @@ public partial class MainWindow
     private bool PanelResizable => _expanded && !_preview && IsVisible && !IsSuppressed && !_poweringOff;
     private bool CompactResizable => !_expanded && !_preview && IsVisible && !IsSuppressed && _alert is null && !_poweringOff;
 
-    // The island's box in the window's coordinates, where the grip layer draws.
+    // The island's box in the window's coordinates, where the grip layer draws. Open, it is the panel's page, without the
+    // shoulders that join a hanging panel to the screen edge; collapsed, a notch's shoulders belong to the surface.
     private DipRect IslandBox()
     {
         if (PresentationSource.FromVisual(Island) is null || Island.ActualWidth <= 0) return default;
         var origin = Island.TranslatePoint(new Point(), Stage);
-        return new DipRect(origin.X, origin.Y, Island.ActualWidth, Island.ActualHeight);
+        double shoulder = _expanded ? Math.Clamp(Island.ShoulderRadius, 0, Island.ActualWidth / 4) : 0;
+        return new DipRect(origin.X + shoulder, origin.Y, Island.ActualWidth - 2 * shoulder, Island.ActualHeight);
     }
 
     // Brings the layer up to date with the island; cheap when nothing changed.
