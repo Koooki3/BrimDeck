@@ -9,8 +9,8 @@ namespace BrimDeck;
 public partial class App
 {
     private GlobalHotkeys? _hotkeys;
-    private readonly Dictionary<HotkeyKind, HotkeyStatus> _hotkeyStatus = new() { [HotkeyKind.Hide] = HotkeyStatus.Unset, [HotkeyKind.Expand] = HotkeyStatus.Unset };
-    private string _hideHotkey = "", _expandHotkey = "";
+    private readonly Dictionary<HotkeyKind, HotkeyStatus> _hotkeyStatus = new() { [HotkeyKind.Hide] = HotkeyStatus.Unset, [HotkeyKind.Expand] = HotkeyStatus.Unset, [HotkeyKind.Notices] = HotkeyStatus.Unset };
+    private string _hideHotkey = "", _expandHotkey = "", _noticesHotkey = "";
     private int _hotkeySuspensions;
 
     // Raised on the UI thread after the hotkeys are registered again, with any status change.
@@ -37,13 +37,14 @@ public partial class App
 
     // Registers the hotkeys saved in the settings. Unchanged texts that are already active are left alone; any other one is
     // tried again, so a combination another program has since released becomes active on the next save.
-    public void ApplyHotkeys() => ApplyHotkeys(Settings.HideHotkey, Settings.ExpandHotkey);
-    internal void ApplyHotkeys(string? hide, string? expand)
+    // The notices hotkey is registered only while dynamic notices are on.
+    public void ApplyHotkeys() => ApplyHotkeys(Settings.HideHotkey, Settings.ExpandHotkey, Settings.NoticesEnabled ? Settings.NoticeHotkey : "");
+    internal void ApplyHotkeys(string? hide, string? expand, string? notices = "")
     {
-        hide ??= ""; expand ??= "";
-        bool unchanged = hide == _hideHotkey && expand == _expandHotkey
+        hide ??= ""; expand ??= ""; notices ??= "";
+        bool unchanged = hide == _hideHotkey && expand == _expandHotkey && notices == _noticesHotkey
             && _hotkeyStatus.Values.All(status => status is HotkeyStatus.Active or HotkeyStatus.Unset);
-        _hideHotkey = hide; _expandHotkey = expand;
+        _hideHotkey = hide; _expandHotkey = expand; _noticesHotkey = notices;
         if (unchanged && _hotkeySuspensions == 0 && _hotkeys is not null) return;
         RegisterHotkeys();
     }
@@ -53,7 +54,7 @@ public partial class App
     public void SuspendHotkeys()
     {
         if (_hotkeySuspensions++ > 0 || _hotkeys is null) return;
-        _hotkeys.Unregister(HotkeyKind.Hide); _hotkeys.Unregister(HotkeyKind.Expand);
+        foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys.Unregister(kind);
     }
 
     public void ResumeHotkeys()
@@ -87,11 +88,20 @@ public partial class App
         (Decks.FirstOrDefault(deck => deck.HotkeyMonitor == monitor) ?? Deck).OpenFromHotkey();
     }
 
+    // A notice on screen opens its details for the keyboard; otherwise the panel under the pointer opens on the recent notices.
+    private void NoticesFromHotkey()
+    {
+        if (!Settings.NoticesEnabled) return;
+        foreach (var deck in Decks) if (deck.NoticeKeyboard()) return;
+        var monitor = GlobalHotkeys.CursorMonitor();
+        (Decks.FirstOrDefault(deck => deck.HotkeyMonitor == monitor) ?? Deck).OpenNoticesPage();
+    }
+
     private void RegisterHotkeys()
     {
-        foreach (var kind in new[] { HotkeyKind.Hide, HotkeyKind.Expand })
+        foreach (var kind in Enum.GetValues<HotkeyKind>())
         {
-            var (status, text) = HotkeyText.Plan(kind, _hideHotkey, _expandHotkey, HotkeyGesture.IsKeyName);
+            var (status, text) = HotkeyText.Plan(kind, _hideHotkey, _expandHotkey, _noticesHotkey, HotkeyGesture.IsKeyName);
             _hotkeys?.Unregister(kind);
             if (status is null)
             {
@@ -108,6 +118,7 @@ public partial class App
     {
         if (Exiting) return;
         if (kind == HotkeyKind.Hide) ToggleHidden();
+        else if (kind == HotkeyKind.Notices) NoticesFromHotkey();
         else ToggleExpandFromHotkey();
     }
 }

@@ -1,0 +1,702 @@
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+using BrimDeck.Core;
+using BrimDeck.Core.Notices;
+using BrimDeck.Native;
+
+namespace BrimDeck;
+
+// One panel's dynamic notices. The window lies over the panel's collapsed island and is shown only while a notice is: the
+// notice grows out of the island's exact outline in the island's own theme material, shows the application's icon, title and
+// summary, opens into its details on hover or click, and shrinks back into the island at the end, moving as the island does
+// (Soft.Bounce opening, Soft.Settle closing). Its window is sized once per notice to hold the largest form, so nothing resizes
+// the window while it moves; only the drawn surface is hit-tested, the rest lets clicks through. It never takes focus unless
+// the notices hotkey asks for the keyboard.
+internal sealed class NoticeWindow : Window
+{
+    // Durations at the default animation length (360 ms); the user's length scales them.
+    private const double EnterMs = 300, ExitMs = 200, DetailMs = 320, HoverOpenMs = 250, GlowMargin = 32;
+    private readonly MainWindow _deck;
+    private readonly App _app;
+    private readonly Canvas _stage = new() { Background = null };
+    private readonly NoticeSurface _glow = new() { IsHitTestVisible = false };
+    private readonly NoticeSurface _surface = new() { Cursor = Cursors.Hand, Focusable = false };
+    private readonly Grid _content = new();
+    private readonly Grid _toast = new() { Opacity = 0 }, _detail = new() { Opacity = 0, Visibility = Visibility.Collapsed };
+    private readonly PromptTimer _hoverOpen, _leaveClose;
+    private EscapeDismissal? _escape;
+    private AttentionItem? _item;
+    private NoticeLook _look = NoticeLook.Current();
+    private Color _accent = Colors.White;
+    private NoticeFrame _collapsed = null!, _toastFrame = null!, _detailFrame = null!;
+    private Rect _stageRect;
+    private bool _showingDetail, _keyboard, _arrivedUnderPointer, _leaving, _openFailed;
+    private int _generation;
+
+    public NoticeWindow(MainWindow deck, App app)
+    {
+        _deck = deck; _app = app;
+        WindowStyle = WindowStyle.None; AllowsTransparency = true; Background = Brushes.Transparent; ResizeMode = ResizeMode.NoResize;
+        Topmost = true; ShowActivated = false; ShowInTaskbar = false; Title = "BrimDeck notices"; UseLayoutRounding = true;
+        TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
+        Content = _stage;
+        _stage.Children.Add(_glow); _stage.Children.Add(_surface);
+        _surface.Child = _content;
+        _content.Children.Add(_toast); _content.Children.Add(_detail);
+        // The text sits on the theme's opaque surface, as the island's does, so ClearType stays on for it.
+        RenderOptions.SetClearTypeHint(_content, ClearTypeHint.Enabled);
+        AutomationProperties.SetName(_surface, Loc.T("灵动提示", "Dynamic notice"));
+        AutomationProperties.SetLiveSetting(_toast, AutomationLiveSetting.Polite);
+        _toast.HorizontalAlignment = HorizontalAlignment.Center; _toast.VerticalAlignment = VerticalAlignment.Center;
+        _detail.HorizontalAlignment = HorizontalAlignment.Center; _detail.VerticalAlignment = VerticalAlignment.Top;
+        _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && _surface.IsMouseOver && !_showingDetail) OpenDetail(); }) { Interval = TimeSpan.FromMilliseconds(HoverOpenMs) };
+        _leaveClose = new(Dispatcher, () => { _leaveClose!.Stop(); if (!_surface.IsMouseOver && !_keyboard) LeaveDetail(); });
+        _surface.MouseEnter += (_, _) => PointerEntered();
+        _surface.MouseLeave += (_, _) => PointerLeft();
+        _surface.MouseLeftButtonUp += (_, e) => { if (e.OriginalSource is DependencyObject source && FindAncestor<Button>(source) is not null) return; Clicked(); e.Handled = true; };
+        _surface.MouseRightButtonUp += (_, e) => e.Handled = true;
+        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escape = new EscapeDismissal(this, () => Dismiss(true)); };
+        PreviewKeyDown += KeyPressed;
+        Deactivated += (_, _) => { if (_keyboard) EndKeyboard(); };
+        _app.Notices.Icons.Loaded += IconLoaded;
+        Closed += (_, _) => { _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; };
+    }
+
+    // True while a notice covers the island: the panel then leaves hovering to this window.
+    public bool Covering => _item is not null || IsVisible && !_leaving;
+    public AttentionItem? Item => _item;
+    private DeckSettings Settings => _app.Settings;
+    private NoticeCenter Center => _app.Notices;
+    private bool Indicator => _deck.Collapsed.Style == CompactStyle.Line;
+
+    // ----- Showing, updating and ending -----
+
+    public void Present(AttentionItem item)
+    {
+        bool continuing = IsVisible;
+        _item = item; _leaving = false; _openFailed = false; _generation++;
+        _showingDetail = false; _keyboard = false;
+        Layout();
+        Dress();
+        BuildToast();
+        if (!continuing)
+        {
+            // Starts exactly as the island: its outline, its place and its material. The indicator has no material of its own;
+            // the notice starts in its flat color and takes the theme's surface as it grows.
+            SetFrame(_collapsed, 0);
+            _surface.IslandColor = PanelTheme.ColorOf("indicator");
+            Set(_surface, NoticeSurface.IslandOpacityProperty, Indicator ? 1d : 0d);
+            Set(_toast, OpacityProperty, 0d); Set(_detail, OpacityProperty, 0d); _detail.Visibility = Visibility.Collapsed; _toast.Visibility = Visibility.Visible;
+            Set(_glow, OpacityProperty, 0d);
+            Show();
+            // The notice now stands exactly where the island is; the island underneath is hidden while it does.
+            _deck.SetIslandCovered(true);
+            // Shown on a monitor with another scale, Windows has just given the window that scale; it is placed again in it.
+            Place();
+            NoticeNative.BringToTop(new WindowInteropHelper(this).Handle);
+        }
+        var cursor = CursorInStage();
+        _arrivedUnderPointer = new Rect(_toastFrame.Rect.X - _stageRect.X, _toastFrame.Rect.Y - _stageRect.Y, _toastFrame.Rect.Width, _toastFrame.Rect.Height).Contains(cursor);
+        double duration = Duration(EnterMs);
+        SetFrame(_toastFrame, duration, Soft.Bounce);
+        Animate(_surface, NoticeSurface.IslandOpacityProperty, 0, duration, 0, .5, Soft.Out);
+        Animate(_detail, OpacityProperty, 0, duration * .5, 0, 1, Soft.Out, () => { if (!_showingDetail) _detail.Visibility = Visibility.Collapsed; });
+        _toast.Visibility = Visibility.Visible;
+        Animate(_toast, OpacityProperty, 1, duration, continuing ? .2 : .35, 1, Soft.Out);
+        GlowIn(duration);
+        Announce();
+    }
+
+    // The shown notice changed in place (a task's progress, a burst from the same application).
+    public void Update(AttentionItem item)
+    {
+        if (_item is null) return;
+        _item = item;
+        _toastFrame = Frame(NoticeForm.Toast, ToastSize());
+        BuildToast();
+        if (_showingDetail) ShowDetailFrame(Duration(DetailMs) * .6, Soft.Follow);
+        else SetFrame(_toastFrame, Duration(EnterMs) * .6, Soft.Follow);
+        Announce();
+    }
+
+    // The item ended. Unless another one follows at once (Present), the notice shrinks back into the island and the window hides.
+    public void End(AttentionItem item)
+    {
+        if (!ReferenceEquals(_item, item) && _item?.Key != item.Key) return;
+        _item = null; _leaving = true;
+        _hoverOpen.Stop(); _leaveClose.Stop();
+        if (_keyboard) EndKeyboard();
+        _escape?.SetEnabled(false);
+        int generation = ++_generation;
+        // The island may have changed meanwhile (a window rule turned it into the indicator).
+        _collapsed = NoticeGeometry.Collapsed(_deck.Collapsed);
+        _surface.IslandColor = PanelTheme.ColorOf("indicator");
+        double duration = Duration(ExitMs);
+        Animate(_toast, OpacityProperty, 0, duration, 0, .45, Soft.InOut);
+        Animate(_detail, OpacityProperty, 0, duration, 0, .45, Soft.InOut);
+        Animate(_glow, OpacityProperty, 0, duration, 0, .6, Soft.InOut);
+        if (Indicator) Animate(_surface, NoticeSurface.IslandOpacityProperty, 1, duration, .4, 1, Soft.InOut);
+        SetFrame(_collapsed, duration, Soft.Settle, () => { if (generation == _generation && _item is null) Finish(); });
+    }
+
+    // The panel opens over the island: a notice still on its way out is removed at once, so the panel is never hidden.
+    public void Abort()
+    {
+        if (_item is not null || !IsVisible) return;
+        _generation++;
+        Finish();
+    }
+
+    private void Finish()
+    {
+        _leaving = false; _showingDetail = false;
+        // The notice ended in the island's outline and material: the island shows again in the same frame as the window hides.
+        _deck.SetIslandCovered(false);
+        Hide();
+        // The surface keeps no stale animations, so the next notice starts from the island again.
+        foreach (var property in new[] { Canvas.LeftProperty, Canvas.TopProperty, WidthProperty, HeightProperty })
+        { _surface.BeginAnimation(property, null); _glow.BeginAnimation(property, null); }
+        _toast.Children.Clear(); _detail.Children.Clear();
+    }
+
+    // The icon of the shown notice arrived after it was drawn: the content is drawn again in place, the frame stays.
+    private void IconLoaded(string iconRef)
+    {
+        if (_leaving || Notice?.IconRef != iconRef) return;
+        BuildToast();
+        if (_showingDetail) BuildDetail();
+    }
+
+    // The theme or the island changed while a notice shows: it is laid out and drawn again in place.
+    public void Refresh()
+    {
+        if (_item is null || _leaving) return;
+        Layout();
+        Dress();
+        BuildToast();
+        if (_showingDetail) ShowDetailFrame(Duration(DetailMs) * .5, Soft.Follow);
+        else SetFrame(_toastFrame, Duration(EnterMs) * .5, Soft.Follow);
+    }
+
+    // ----- Geometry -----
+
+    private NoticeFrame Frame(NoticeForm form, Size wanted) => NoticeGeometry.Frame(_deck.Collapsed, _deck.MonitorBoundsDip, _deck.WorkDip, form, wanted.Width, wanted.Height);
+
+    // Sizes the window once for this notice: it holds the island, the toast and the largest details card, with room for the glow.
+    private void Layout()
+    {
+        _collapsed = NoticeGeometry.Collapsed(_deck.Collapsed);
+        _toastFrame = Frame(NoticeForm.Toast, ToastSize());
+        _detailFrame = Frame(NoticeForm.Detail, new Size(NoticeGeometry.DetailMaxWidth, NoticeGeometry.DetailMaxHeight));
+        var union = Rect.Union(Rect.Union(ToRect(_collapsed.Rect), ToRect(_toastFrame.Rect)), ToRect(_detailFrame.Rect));
+        union.Inflate(GlowMargin, GlowMargin);
+        var monitor = _deck.MonitorBoundsDip;
+        union.Intersect(new Rect(0, 0, monitor.Width, monitor.Height));
+        if (union.IsEmpty) union = new Rect(0, 0, 1, 1);
+        if (IsVisible && _stageRect.Contains(union)) union = _stageRect;
+        else if (IsVisible)
+        {
+            // Moving a visible window would make the surface jump; it grows to include both instead.
+            union.Union(_stageRect);
+            ShiftStage(_stageRect, union);
+        }
+        _stageRect = union;
+        Place();
+    }
+
+    // Keeps the surface where it is on screen while the stage's origin moves.
+    private void ShiftStage(Rect from, Rect to)
+    {
+        double dx = from.X - to.X, dy = from.Y - to.Y;
+        foreach (var element in new FrameworkElement[] { _surface, _glow })
+        {
+            double left = Canvas.GetLeft(element), top = Canvas.GetTop(element);
+            Set(element, Canvas.LeftProperty, (double.IsNaN(left) ? 0 : left) + dx);
+            Set(element, Canvas.TopProperty, (double.IsNaN(top) ? 0 : top) + dy);
+        }
+    }
+
+    private static Rect ToRect(DipRect rect) => new(rect.X, rect.Y, Math.Max(0, rect.Width), Math.Max(0, rect.Height));
+
+    private void Place()
+    {
+        var (bounds, _, scale) = WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen();
+        Width = _stageRect.Width; Height = _stageRect.Height;
+        int x = (int)Math.Round(bounds.Left + _stageRect.X * scale), y = (int)Math.Round(bounds.Top + _stageRect.Y * scale);
+        if (PresentationSource.FromVisual(this) is not null && VisualTreeHelper.GetDpi(this).DpiScaleX is var current && Math.Abs(current - scale) > .001)
+            WindowsHost.MoveTo(this, x, y);
+        double dpi = PresentationSource.FromVisual(this) is null ? scale : VisualTreeHelper.GetDpi(this).DpiScaleX;
+        Left = x / dpi; Top = y / dpi;
+    }
+
+    // The cursor relative to the stage, in DIPs.
+    private Point CursorInStage()
+    {
+        var (bounds, _, scale) = WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen();
+        var cursor = WindowsHost.Cursor();
+        return new Point((cursor.X - bounds.Left) / scale - _stageRect.X, (cursor.Y - bounds.Top) / scale - _stageRect.Y);
+    }
+
+    private void SetFrame(NoticeFrame frame, double duration, IEasingFunction? easing = null, Action? completed = null)
+    {
+        easing ??= Soft.Out;
+        double left = frame.Rect.X - _stageRect.X, top = frame.Rect.Y - _stageRect.Y;
+        bool line = Indicator && ReferenceEquals(frame, _collapsed);
+        foreach (var element in new NoticeSurface[] { _surface, _glow })
+        {
+            Animate(element, Canvas.LeftProperty, left, duration, 0, 1, easing);
+            Animate(element, Canvas.TopProperty, top, duration, 0, 1, easing);
+            Animate(element, WidthProperty, Math.Max(0, frame.Rect.Width), duration, 0, 1, easing);
+            Animate(element, HeightProperty, Math.Max(0, frame.Rect.Height), duration, 0, 1, easing, ReferenceEquals(element, _surface) ? completed : null);
+            Animate(element, NoticeSurface.TopRadiusProperty, frame.TopRadius, duration, 0, 1, easing);
+            Animate(element, NoticeSurface.BottomRadiusProperty, line ? frame.Rect.Height / 2 : frame.BottomRadius, duration, 0, 1, easing);
+            Animate(element, NoticeSurface.ShoulderProperty, frame.Shoulder, duration, 0, 1, easing);
+        }
+    }
+
+    // ----- Motion -----
+
+    private double Duration(double baseMs) => Soft.Enabled ? baseMs * Math.Clamp(Settings.AnimationDuration / 360d, .5, 2) : 0;
+
+    private static void Animate(IAnimatable target, DependencyProperty property, double value, double duration, double start, double end, IEasingFunction easing, Action? completed = null)
+    {
+        if (duration <= 0 || !double.IsFinite(value)) { Set(target, property, double.IsFinite(value) ? value : 0d); completed?.Invoke(); return; }
+        var animation = new DoubleAnimation
+        {
+            To = value, EasingFunction = easing,
+            BeginTime = TimeSpan.FromMilliseconds(duration * start), Duration = TimeSpan.FromMilliseconds(Math.Max(1, duration * (end - start)))
+        };
+        if (completed is not null) animation.Completed += (_, _) => completed();
+        target.BeginAnimation(property, animation, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private static void Set(IAnimatable target, DependencyProperty property, object value)
+    {
+        target.BeginAnimation(property, null);
+        ((DependencyObject)target).SetValue(property, value);
+    }
+
+    // The theme as it is now, for the surface and the shadow or glow behind it.
+    private void Dress()
+    {
+        double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
+        _look = NoticeLook.Current(dpi);
+        _surface.Look = _look;
+        // An opaque surface casts its shadow from a copy of its shape behind it. A translucent one (a theme file may make the
+        // surface see-through) would show that copy, so its shadow comes from its outline alone.
+        bool translucent = _look.Surface.A < 255;
+        _glow.FillOverride = translucent ? Brushes.Transparent : null;
+        _glow.MaterialHidden = !translucent;
+        _glow.Look = _look;
+        bool hard = _look.ShadowBlur <= 0;
+        _glow.Effect = _look.ShadowOpacity <= 0 || _look.HighContrast ? null : new DropShadowEffect
+        {
+            Color = _look.Shadow, BlurRadius = hard ? 0 : _look.ShadowBlur, ShadowDepth = _look.ShadowDepth, Direction = 270,
+            Opacity = _look.ShadowOpacity, RenderingBias = RenderingBias.Performance
+        };
+    }
+
+    private void GlowIn(double duration)
+    {
+        if (_look.Glow && duration > 0)
+        {
+            // A theme that glows lights up once as the notice arrives, then keeps its usual glow.
+            var pulse = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(duration * 2.4) };
+            pulse.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(0)));
+            pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromPercent(.35), Soft.Out));
+            pulse.KeyFrames.Add(new EasingDoubleKeyFrame(.7, KeyTime.FromPercent(1), Soft.InOut));
+            _glow.BeginAnimation(OpacityProperty, pulse, HandoffBehavior.SnapshotAndReplace);
+        }
+        else Animate(_glow, OpacityProperty, 1, duration, .3, 1, Soft.Out);
+    }
+
+    // ----- Content -----
+
+    private Notice? Notice => _item?.Payload as Notice;
+    private NoticePrivacy Privacy(Notice notice) => Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
+    private string AccentHex => "#" + _accent.ToString()[3..];
+
+    private (double Padding, double Plate) ToastMetrics(double height)
+    {
+        double plate = Math.Clamp(Math.Round(height - 20), 22, 30);
+        double padding = _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(16, _deck.Collapsed.Shoulder + 14) : Math.Max(8, (height - plate) / 2);
+        return (padding, plate);
+    }
+
+    private Size ToastSize()
+    {
+        var (title, summary) = ToastTexts();
+        double height = summary.Length > 0 ? 52 : 44;
+        if (Indicator) height -= 4;
+        var (padding, plate) = ToastMetrics(height);
+        double text = Math.Max(Measure(title, 12.5, FontWeights.SemiBold), summary.Length > 0 ? Measure(summary, 11.5, FontWeights.Normal) : 0);
+        return new Size(padding * 2 + plate + 10 + text + TrailingWidth(), height);
+    }
+
+    private double TrailingWidth() => _item is { Count: > 1 } ? 30 : Notice?.Progress is not null ? 26 : 12;
+
+    private (string Title, string Summary) ToastTexts()
+    {
+        if (_item is { Kind: AttentionKind.Summary, Payload: int count })
+            return (NoticeText.Count(count), Loc.T("在 BrimDeck 安静期间收到", "Arrived while BrimDeck kept quiet"));
+        if (Notice is not { } notice) return ("", "");
+        var (title, summary) = NoticeText.Presented(notice, Privacy(notice));
+        if (_item is { Count: > 1 } && summary.Length == 0) summary = notice.AppName;
+        return (title, summary);
+    }
+
+    private static double Measure(string text, double size, FontWeight weight)
+    {
+        if (text.Length == 0) return 0;
+        var formatted = new FormattedText(text, Loc.Culture, FlowDirection.LeftToRight, new Typeface(UI.PanelFont, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.White, 1.25);
+        return Math.Ceiling(formatted.WidthIncludingTrailingWhitespace);
+    }
+
+    private void BuildToast()
+    {
+        _toast.Children.Clear(); _toast.ColumnDefinitions.Clear();
+        var size = new Size(_toastFrame.Rect.Width, _toastFrame.Rect.Height);
+        var (padding, plate) = ToastMetrics(size.Height);
+        _toast.Margin = new Thickness(padding, 0, padding, 0);
+        _toast.Width = Math.Max(0, size.Width - padding * 2); _toast.Height = size.Height;
+        _toast.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _toast.ColumnDefinitions.Add(new ColumnDefinition());
+        _toast.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var notice = Notice;
+        _accent = _look.AppColor(notice is null ? PanelTheme.ColorOf("accent") : Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
+        var icon = Plate(notice, plate);
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        _toast.Children.Add(icon);
+        var (title, summary) = ToastTexts();
+        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 6, 0) };
+        texts.Children.Add(Line(title, 12.5, _look.Primary, FontWeights.SemiBold));
+        if (summary.Length > 0) texts.Children.Add(Line(summary, 11.5, _look.Secondary, FontWeights.Normal));
+        Grid.SetColumn(texts, 1); _toast.Children.Add(texts);
+        AutomationProperties.SetName(_toast, summary.Length > 0 ? title + ", " + summary : title);
+        var trailing = Trailing(notice);
+        if (trailing is not null) { Grid.SetColumn(trailing, 2); _toast.Children.Add(trailing); }
+    }
+
+    // The count of notices this one stands for, a task's progress ring, or a dot in the application's color.
+    private FrameworkElement? Trailing(Notice? notice)
+    {
+        if (_item is { Count: > 1 } item)
+        {
+            var chip = new Border { MinWidth = 22, Height = 18, CornerRadius = new CornerRadius(9), Background = UI.Brush(_look.Fill), Padding = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+            chip.Child = new TextBlock { Text = item.Count > 99 ? "99+" : item.Count.ToString(Loc.Culture), FontFamily = UI.PanelFont, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(chip, NoticeText.Count(item.Count));
+            return chip;
+        }
+        if (notice?.Progress is { } progress)
+        {
+            var ring = UI.Ring(progress * 100, AccentHex, 18, 2.2);
+            ring.VerticalAlignment = VerticalAlignment.Center;
+            AutomationProperties.SetName(ring, Loc.T($"进度 {progress:P0}", $"Progress {progress:P0}"));
+            return ring;
+        }
+        if (notice is null) return null;
+        return new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(AccentHex), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0), IsHitTestVisible = false };
+    }
+
+    private static TextBlock Line(string text, double size, string color, FontWeight weight) => new()
+    {
+        Text = text, FontFamily = UI.PanelFont, FontSize = size, FontWeight = weight, Foreground = UI.Brush(color),
+        TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap
+    };
+
+    // The application's icon on a small plate in the theme's fill, which keeps white and transparent icons readable.
+    private FrameworkElement Plate(Notice? notice, double size)
+    {
+        var plate = new Grid { Width = size, Height = size };
+        plate.Children.Add(new Border { CornerRadius = new CornerRadius(size * .28), Background = UI.Brush(_look.Fill) });
+        BitmapSource? image = _item?.Kind == AttentionKind.Summary ? null : Center.Icons.Get(notice?.IconRef, out _);
+        if (image is not null)
+        {
+            var picture = new Image { Source = image, Width = size * .72, Height = size * .72, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            RenderOptions.SetBitmapScalingMode(picture, BitmapScalingMode.HighQuality);
+            plate.Children.Add(picture);
+        }
+        else plate.Children.Add(Fallback(notice, size));
+        if (notice is not null && _look.StatusColor(notice.Category) is { Length: > 0 } mark && notice.Category != NoticeCategory.Task)
+        {
+            double dot = Math.Round(size * .36);
+            plate.Children.Add(new Ellipse { Width = dot, Height = dot, Fill = UI.Brush(mark), Stroke = new SolidColorBrush(_look.Surface), StrokeThickness = 1.5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -dot * .25, -dot * .25) });
+        }
+        AutomationProperties.SetName(plate, notice?.AppName ?? "BrimDeck");
+        return plate;
+    }
+
+    // Without an icon: the application's first letter in its color, or a bell for a summary.
+    private FrameworkElement Fallback(Notice? notice, double size)
+    {
+        if (notice is null)
+            return new Viewbox { Width = size * .56, Height = size * .56, Child = new Path { Data = Geometry.Parse("M12,3 C8.7,3 6.5,5.6 6.5,8.8 V12.6 L4.8,15.6 H19.2 L17.5,12.6 V8.8 C17.5,5.6 15.3,3 12,3 Z M9.6,17.6 A2.4,2.4 0 0 0 14.4,17.6"), Stroke = UI.Brush(_look.Primary), StrokeThickness = 1.6, Width = 24, Height = 24 } };
+        var letter = notice.AppName.Trim() is { Length: > 0 } name ? char.IsSurrogate(name[0]) && name.Length > 1 ? name[..2] : name[..1].ToUpper(Loc.Culture) : "?";
+        return new TextBlock { Text = letter, FontFamily = UI.DisplayFont, FontSize = Math.Round(size * .5), FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(AccentHex), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+    }
+
+    // ----- Details -----
+
+    private Size DetailSize()
+    {
+        if (_detail.Children.Count == 0) return new Size(400, NoticeGeometry.DetailMinHeight);
+        // Measured at the width the card will have (a narrow monitor can make it narrower than it asks for); the desired height
+        // includes the margins that pad the card.
+        double width = Frame(NoticeForm.Detail, new Size(400, NoticeGeometry.DetailMinHeight)).Rect.Width, padding = DetailPadding();
+        _detail.Width = width - padding * 2; _detail.Height = double.NaN;
+        _detail.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return new Size(width, _detail.DesiredSize.Height);
+    }
+
+    private double DetailPadding() => _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(18, _deck.Collapsed.Shoulder + 14) : 18;
+    private const double DetailTop = 14, DetailBottom = 16;
+
+    private void BuildDetail()
+    {
+        _detail.Children.Clear();
+        double padding = DetailPadding();
+        _detail.Margin = new Thickness(padding, DetailTop, padding, DetailBottom);
+        var notice = Notice;
+        var stack = new StackPanel();
+        _detail.Children.Add(stack);
+        // Header: icon, application, where it came from and when, and the close button.
+        var header = new Grid();
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition());
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(Plate(notice, 32));
+        var who = new StackPanel { Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        who.Children.Add(Line(notice?.AppName ?? "BrimDeck", 12.5, _look.Primary, FontWeights.SemiBold));
+        string meta = notice is null ? Loc.T("最近通知", "Recent notices")
+            : NoticeText.OriginName(notice.Origin, notice.Distro) + " · " + NoticeText.Relative(notice.ReceivedAt, DateTimeOffset.UtcNow) + (notice.Category is not NoticeCategory.Message ? " · " + NoticeText.CategoryName(notice.Category) : "");
+        who.Children.Add(Line(meta, 11, _look.Tertiary, FontWeights.Normal));
+        Grid.SetColumn(who, 1); header.Children.Add(who);
+        var close = GlyphButton("", Loc.T("关闭提示", "Close notice"), () => Dismiss(true));
+        Grid.SetColumn(close, 2); header.Children.Add(close);
+        stack.Children.Add(header);
+        if (_item is { Kind: AttentionKind.Summary, Payload: int count })
+        {
+            stack.Children.Add(Wrapped(NoticeText.Count(count), 14, _look.Primary, FontWeights.SemiBold, new Thickness(0, 12, 0, 0)));
+            stack.Children.Add(Wrapped(Loc.T("BrimDeck 暂停或安静期间收到的通知都在最近通知中。", "Notices that arrived while BrimDeck was paused or quiet are in the recent notices."), 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0, 4, 0, 0)));
+        }
+        else if (notice is not null)
+        {
+            if (notice.Title.Length > 0) stack.Children.Add(Wrapped(notice.Title, 14, _look.Primary, FontWeights.SemiBold, new Thickness(0, 12, 0, 0), maxLines: 3));
+            if (notice.Body.Length > 0)
+            {
+                var body = Wrapped(notice.Body, 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0));
+                stack.Children.Add(new ScrollViewer { Content = body, MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 4, 0, 0), Focusable = false });
+            }
+            if (notice.Progress is { } progress)
+            {
+                var track = new Grid { Height = 4, Margin = new Thickness(0, 10, 0, 0) };
+                track.Children.Add(new Border { Background = UI.Brush(PanelTheme.Hex("track")), CornerRadius = new CornerRadius(2) });
+                track.Children.Add(new Border { Background = UI.Brush(AccentHex), CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left, Width = Math.Max(4, (_detail.Width is var w && double.IsFinite(w) ? w : 364) * progress) });
+                AutomationProperties.SetName(track, Loc.T($"进度 {progress:P0}", $"Progress {progress:P0}"));
+                stack.Children.Add(track);
+            }
+            if (!notice.SourcePresent) stack.Children.Add(Wrapped(Loc.T("来源已关闭这条通知。", "The source has closed this notice."), 11, _look.Tertiary, FontWeights.Normal, new Thickness(0, 8, 0, 0)));
+            if (_openFailed) stack.Children.Add(Wrapped(Loc.T("无法打开该应用；它可能不支持从通知启动。", "The application could not be opened; it may not support being started from a notice."), 11, _look.Danger, FontWeights.Normal, new Thickness(0, 8, 0, 0)));
+        }
+        // Actions: only what can be done for this source.
+        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        actions.Children.Add(TextButton(Loc.T("查看全部", "View all"), ViewAll, primary: false));
+        if (notice is not null && (notice.Capabilities & NoticeCapabilities.Actions) != 0)
+            foreach (var action in notice.Actions.Where(a => a.Key != "default").Take(3))
+                actions.Children.Add(TextButton(action.Label, () => { if (Center.Invoke(notice, action.Key)) Dismiss(false); }, primary: false));
+        if (notice is not null && Center.CanOpen(notice)) actions.Children.Add(TextButton(Loc.T("打开应用", "Open app"), () => _ = OpenAsync(notice), primary: true));
+        stack.Children.Add(actions);
+    }
+
+    // Builds the details for the current item and moves the surface to their frame. The content keeps the final size while
+    // the surface moves, so the text never rewraps during the morph; the surface's outline reveals it.
+    private void ShowDetailFrame(double duration, IEasingFunction easing)
+    {
+        BuildDetail();
+        _detailFrame = Frame(NoticeForm.Detail, DetailSize());
+        double padding = DetailPadding();
+        _detail.Width = Math.Max(0, _detailFrame.Rect.Width - padding * 2);
+        _detail.Height = Math.Max(0, _detailFrame.Rect.Height - DetailTop - DetailBottom);
+        SetFrame(_detailFrame, duration, easing);
+    }
+
+    private static TextBlock Wrapped(string text, double size, string color, FontWeight weight, Thickness margin, int maxLines = 0)
+    {
+        var block = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = size, FontWeight = weight, Foreground = UI.Brush(color), TextWrapping = TextWrapping.Wrap, Margin = margin, LineHeight = Math.Round(size * 1.4) };
+        if (maxLines > 0) { block.MaxHeight = block.LineHeight * maxLines; block.TextTrimming = TextTrimming.CharacterEllipsis; }
+        return block;
+    }
+
+    private Button GlyphButton(string glyph, string name, Action click)
+    {
+        var button = TextButton("", click, primary: false, flat: true);
+        ((Border)button.Content).Child = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 11, Foreground = UI.Brush(_look.Secondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        ((Border)button.Content).Padding = new Thickness(0);
+        button.Width = 32; button.Height = 32; button.Margin = new Thickness(0); button.VerticalAlignment = VerticalAlignment.Top;
+        AutomationProperties.SetName(button, name); button.ToolTip = name;
+        return button;
+    }
+
+    // A button in the theme's fill, hover and pressed colors, or its accent for the main action; at least 32 DIPs high.
+    private Button TextButton(string text, Action click, bool primary, bool flat = false)
+    {
+        string rest = primary ? _look.Accent : flat ? "Transparent" : _look.Fill;
+        var face = new Border { CornerRadius = new CornerRadius(8), Background = UI.Brush(rest), Padding = new Thickness(12, 0, 12, 0), MinHeight = 32, BorderBrush = UI.Brush(_look.Accent) };
+        face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal, Foreground = UI.Brush(primary ? _look.OnAccent : _look.Primary), VerticalAlignment = VerticalAlignment.Center };
+        var button = new Button { Content = face, Margin = new Thickness(8, 0, 0, 0), MinHeight = 32, Cursor = Cursors.Hand, FocusVisualStyle = null,
+            Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
+        button.MouseEnter += (_, _) => { if (!primary) face.Background = UI.Brush(_look.Hover); else face.Opacity = .88; };
+        button.MouseLeave += (_, _) => { face.Background = UI.Brush(rest); face.Opacity = 1; };
+        button.PreviewMouseLeftButtonDown += (_, _) => { if (!primary) face.Background = UI.Brush(_look.Pressed); };
+        button.GotKeyboardFocus += (_, _) => face.BorderThickness = new Thickness(1.5);
+        button.LostKeyboardFocus += (_, _) => face.BorderThickness = new Thickness(0);
+        button.Click += (_, _) => click();
+        AutomationProperties.SetName(button, text);
+        return button;
+    }
+
+    private void OpenDetail()
+    {
+        if (_item is null || _showingDetail) return;
+        _showingDetail = true;
+        _hoverOpen.Stop();
+        Center.Hold(_deck, true);
+        if (Notice is { } notice) Center.Hub.MarkViewed(notice.Id);
+        _detail.Visibility = Visibility.Visible;
+        double duration = Duration(DetailMs);
+        ShowDetailFrame(duration, Soft.Bounce);
+        Animate(_toast, OpacityProperty, 0, duration, 0, .3, Soft.InOut, () => { if (_showingDetail) _toast.Visibility = Visibility.Hidden; });
+        Animate(_detail, OpacityProperty, 1, duration, .35, 1, Soft.Out);
+        _escape?.SetEnabled(!_keyboard);
+    }
+
+    // Back from the details to the arriving notice, which then runs out its remaining time.
+    private void LeaveDetail()
+    {
+        if (!_showingDetail || _item is null) return;
+        _showingDetail = false;
+        _toast.Visibility = Visibility.Visible;
+        _toastFrame = Frame(NoticeForm.Toast, ToastSize());
+        BuildToast();
+        double duration = Duration(DetailMs) * .8;
+        SetFrame(_toastFrame, duration, Soft.Settle);
+        Animate(_detail, OpacityProperty, 0, duration, 0, .3, Soft.InOut, () => { if (!_showingDetail) _detail.Visibility = Visibility.Collapsed; });
+        Animate(_toast, OpacityProperty, 1, duration, .4, 1, Soft.Out);
+        _escape?.SetEnabled(false);
+        if (!_surface.IsMouseOver) Center.Hold(_deck, false);
+    }
+
+    private async Task OpenAsync(Notice notice)
+    {
+        if (await Center.OpenAsync(notice)) { Dismiss(false); return; }
+        _openFailed = true;
+        if (_showingDetail && ReferenceEquals(Notice, notice)) ShowDetailFrame(Duration(DetailMs) * .5, Soft.Follow);
+    }
+
+    private void ViewAll()
+    {
+        var deck = _deck;
+        Dismiss(false);
+        deck.OpenNoticesPage();
+    }
+
+    private void Dismiss(bool byUser)
+    {
+        if (_item is null) return;
+        Center.Dismiss(_deck, reportToSource: byUser);
+    }
+
+    // ----- Pointer and keyboard -----
+
+    private void PointerEntered()
+    {
+        _leaveClose.Stop();
+        if (_item is null || _leaving) return;
+        // A notice that arrives under a resting pointer does not open by itself: the pointer has to leave and come back, or click.
+        if (_arrivedUnderPointer) return;
+        Center.Hold(_deck, true);
+        _escape?.SetEnabled(true);
+        if (!_showingDetail && Settings.NoticeHoverDetails) _hoverOpen.Start();
+    }
+
+    private void PointerLeft()
+    {
+        _hoverOpen.Stop();
+        _arrivedUnderPointer = false;
+        if (_item is null) return;
+        if (_showingDetail && !_keyboard)
+        {
+            _leaveClose.Interval = TimeSpan.FromMilliseconds(Math.Max(300, Settings.CloseDelay));
+            _leaveClose.Start();
+            return;
+        }
+        if (!_keyboard) { _escape?.SetEnabled(false); Center.Hold(_deck, false); }
+    }
+
+    private void Clicked()
+    {
+        if (_item is null || _leaving) return;
+        _arrivedUnderPointer = false;
+        if (_item.Kind == AttentionKind.Summary) { ViewAll(); return; }
+        if (!_showingDetail) OpenDetail();
+    }
+
+    // The notices hotkey: details open and the keyboard moves through the buttons; Escape closes.
+    public void EnterKeyboard()
+    {
+        if (_item is null) return;
+        _keyboard = true;
+        if (!_showingDetail) OpenDetail();
+        Center.Hold(_deck, true);
+        _escape?.SetEnabled(false);
+        NoticeNative.SetActivatable(new WindowInteropHelper(this).Handle, true);
+        Activate();
+        Dispatcher.BeginInvoke(() => FirstButton(_detail)?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void EndKeyboard()
+    {
+        _keyboard = false;
+        NoticeNative.SetActivatable(new WindowInteropHelper(this).Handle, false);
+        if (_item is not null && !_surface.IsMouseOver) { LeaveDetail(); Center.Hold(_deck, false); }
+    }
+
+    private void KeyPressed(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape) { Dismiss(true); e.Handled = true; }
+    }
+
+    private static Button? FirstButton(DependencyObject root)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is Button { IsVisible: true } button) return button;
+            if (FirstButton(child) is { } found) return found;
+        }
+        return null;
+    }
+
+    private static T? FindAncestor<T>(DependencyObject node) where T : DependencyObject
+    {
+        for (var current = node; current is not null; current = current is Visual ? VisualTreeHelper.GetParent(current) : LogicalTreeHelper.GetParent(current))
+            if (current is T match) return match;
+        return null;
+    }
+
+    // Screen readers hear the new notice once, politely, without the window taking focus.
+    private void Announce()
+    {
+        if (!AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged)) return;
+        (UIElementAutomationPeer.FromElement(_toast) ?? UIElementAutomationPeer.CreatePeerForElement(_toast))?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+    }
+}

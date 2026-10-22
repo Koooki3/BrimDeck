@@ -1,0 +1,303 @@
+namespace BrimDeck.Core.Notices;
+
+// What may briefly take the collapsed island: an arriving notice, a summary of notices that arrived while BrimDeck kept
+// quiet, a quota alert, or a track change.
+public enum AttentionKind { Notice, Summary, Quota, Track }
+
+public sealed class AttentionItem
+{
+    public required string Lane { get; init; }
+    public required AttentionKind Kind { get; init; }
+    // The same key names the same item: submitting it again updates it in place.
+    public required string Key { get; set; }
+    // Notices of one application share a group, so that a burst from it is shown as one notice with a count.
+    public string Group { get; init; } = "";
+    public NoticePriority Priority { get; init; } = NoticePriority.Normal;
+    public TimeSpan Duration { get; init; }
+    public object? Payload { get; set; }
+    // How many notices this one stands for: 1, or more after a burst from one application merged into it.
+    public int Count { get; set; } = 1;
+    // An update that should keep the item on screen a little longer, such as a task's progress.
+    public bool Refresh { get; init; }
+    internal DateTimeOffset SubmittedAt { get; set; }
+    internal DateTimeOffset LastMerge { get; set; }
+    internal TimeSpan Remaining { get; set; }
+    // Lower comes first: high priority notices, then other notices and summaries, then quota alerts, then track changes.
+    // The user's own interaction (rank 1 in the design) is not an item: it holds the lane instead.
+    public int Rank => Kind switch
+    {
+        AttentionKind.Notice or AttentionKind.Summary => Priority == NoticePriority.High ? 2 : 3,
+        AttentionKind.Quota => 4, _ => 5
+    };
+    // A track change is only worth showing as it happens; everything else can wait its turn.
+    public bool Queueable => Kind != AttentionKind.Track;
+    public bool IsNotice => Kind is AttentionKind.Notice or AttentionKind.Summary;
+}
+
+// One step for a lane's presenter: an item ended, started or changed. A lane is one panel (one monitor).
+public readonly record struct AttentionChange(string Lane, AttentionItem? Ended, AttentionItem? Started, AttentionItem? Updated);
+
+// Decides what each panel's collapsed island briefly shows. One item shows at a time per lane, for its duration; others wait
+// in rank order. A higher-ranked item takes over unless the user is interacting with the current one (Hold). Notices are
+// limited to RateLimit shows per RateWindow; a notice that has waited longer than Staleness is not shown at all (it stays in
+// the recent notices). While suppressed (locked, paused, in a focus session) nothing shows and arriving notices are only
+// counted, so that one summary can follow. The coordinator keeps no timer: the caller ticks it at NextDeadline.
+public sealed class AttentionCoordinator
+{
+    public static readonly TimeSpan AggregationWindow = TimeSpan.FromMilliseconds(800);
+    public static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(10);
+    public const int RateLimit = 3;
+    public static readonly TimeSpan Staleness = TimeSpan.FromSeconds(30);
+    // A resumed or refreshed item stays at least this long, so it does not vanish the moment the pointer leaves.
+    public static readonly TimeSpan MinimumRemaining = TimeSpan.FromMilliseconds(1500);
+
+    private sealed class Lane
+    {
+        public AttentionItem? Current;
+        public DateTimeOffset Ends;
+        public bool Held, Busy;
+        public readonly List<AttentionItem> Queue = [];
+    }
+
+    private readonly Dictionary<string, Lane> _lanes = new(StringComparer.Ordinal);
+    private readonly List<DateTimeOffset> _noticeShows = [];
+
+    public bool Suppressed { get; private set; }
+    // Notices that arrived while suppressed, for the summary shown afterwards.
+    public int SuppressedCount { get; private set; }
+
+    public AttentionItem? Current(string lane) => _lanes.TryGetValue(lane, out var state) ? state.Current : null;
+    public bool IsHeld(string lane) => _lanes.TryGetValue(lane, out var state) && state.Held;
+    public IReadOnlyList<AttentionItem> Queued(string lane) => _lanes.TryGetValue(lane, out var state) ? state.Queue : [];
+
+    private Lane Get(string lane) { if (!_lanes.TryGetValue(lane, out var state)) _lanes[lane] = state = new Lane(); return state; }
+
+    public IReadOnlyList<AttentionChange> Submit(AttentionItem item, DateTimeOffset now)
+    {
+        var changes = new List<AttentionChange>();
+        if (Suppressed) { if (item.Kind == AttentionKind.Notice) SuppressedCount++; return changes; }
+        var lane = Get(item.Lane);
+        if (lane.Current is { } current && current.Key == item.Key)
+        {
+            current.Payload = item.Payload;
+            if (item.Refresh && !lane.Held && lane.Ends - now < MinimumRemaining) lane.Ends = now + MinimumRemaining;
+            changes.Add(new(item.Lane, null, null, current));
+            return changes;
+        }
+        if (lane.Queue.FirstOrDefault(q => q.Key == item.Key) is { } waiting) { waiting.Payload = item.Payload; return changes; }
+        if (item.Kind == AttentionKind.Notice && item.Group.Length > 0)
+        {
+            // A burst from one application becomes one notice that counts the others and shows the latest.
+            if (lane.Current is { Kind: AttentionKind.Notice } shown && shown.Group == item.Group && now - shown.LastMerge <= AggregationWindow)
+            {
+                Merge(shown, item, now);
+                if (!lane.Held && lane.Ends - now < MinimumRemaining) lane.Ends = now + MinimumRemaining;
+                changes.Add(new(item.Lane, null, null, shown));
+                return changes;
+            }
+            if (lane.Queue.FirstOrDefault(q => q.Kind == AttentionKind.Notice && q.Group == item.Group && now - q.LastMerge <= AggregationWindow) is { } queued)
+            { Merge(queued, item, now); return changes; }
+        }
+        item.SubmittedAt = now; item.LastMerge = now; item.Remaining = item.Duration;
+        if (lane.Busy)
+        {
+            // The open panel shows notices on its own page; a quota alert waits for the panel to close.
+            if (item.Kind == AttentionKind.Quota) Enqueue(lane, item);
+            return changes;
+        }
+        if (lane.Current is null)
+        {
+            if (CanStart(item, now)) Start(lane, item, now, changes);
+            else if (item.Queueable) Enqueue(lane, item);
+            return changes;
+        }
+        if (!lane.Held && item.Rank < lane.Current.Rank && CanStart(item, now))
+        {
+            End(lane, now, changes, requeue: true);
+            Start(lane, item, now, changes);
+            return changes;
+        }
+        if (item.Queueable) Enqueue(lane, item);
+        return changes;
+    }
+
+    // Ends items whose time is up, drops stale waiting ones and starts the next. Call at NextDeadline (or any time later).
+    public IReadOnlyList<AttentionChange> Tick(DateTimeOffset now)
+    {
+        var changes = new List<AttentionChange>();
+        _noticeShows.RemoveAll(time => now - time >= RateWindow);
+        foreach (var (name, lane) in _lanes)
+        {
+            if (lane.Current is not null && !lane.Held && now >= lane.Ends) End(lane, now, changes, requeue: false);
+            lane.Queue.RemoveAll(item => Stale(item, now));
+            if (lane.Current is null && !lane.Busy) StartNext(lane, now, changes);
+        }
+        return changes;
+    }
+
+    // The earliest time Tick has something to do, or null while nothing is pending.
+    public DateTimeOffset? NextDeadline(DateTimeOffset now)
+    {
+        DateTimeOffset? next = null;
+        void Consider(DateTimeOffset time) { if (next is null || time < next) next = time; }
+        foreach (var lane in _lanes.Values)
+        {
+            if (lane.Current is not null && !lane.Held) Consider(lane.Ends);
+            if (lane.Current is null && !lane.Busy && lane.Queue.Count > 0)
+            {
+                // Waiting only for the rate limit: wake when the oldest show leaves the window.
+                if (lane.Queue.Any(item => !item.IsNotice) || _noticeShows.Count < RateLimit) Consider(now);
+                else if (_noticeShows.Count > 0) Consider(_noticeShows.Min() + RateWindow);
+            }
+            foreach (var item in lane.Queue) if (StaleAfter(item) is { } limit) Consider(item.SubmittedAt + limit);
+        }
+        return next;
+    }
+
+    // While the user hovers the item, has opened its details or works it from the keyboard, its time stands still and
+    // nothing takes its place. Released, it keeps what was left, at least MinimumRemaining.
+    public IReadOnlyList<AttentionChange> Hold(string laneName, bool held, DateTimeOffset now)
+    {
+        var changes = new List<AttentionChange>();
+        var lane = Get(laneName);
+        if (lane.Held == held) return changes;
+        lane.Held = held;
+        if (lane.Current is { } current)
+        {
+            if (held) current.Remaining = Positive(lane.Ends - now);
+            else lane.Ends = now + (current.Remaining > MinimumRemaining ? current.Remaining : MinimumRemaining);
+        }
+        if (!held && lane.Current is null && !lane.Busy) StartNext(lane, now, changes);
+        return changes;
+    }
+
+    // The lane's panel is open. Its notices are on the panel's notices page; what was showing ends (a quota alert waits).
+    public IReadOnlyList<AttentionChange> SetBusy(string laneName, bool busy, DateTimeOffset now)
+    {
+        var changes = new List<AttentionChange>();
+        var lane = Get(laneName);
+        if (lane.Busy == busy) return changes;
+        lane.Busy = busy;
+        if (busy)
+        {
+            lane.Held = false;
+            if (lane.Current is not null) End(lane, now, changes, requeue: lane.Current.Kind == AttentionKind.Quota);
+            lane.Queue.RemoveAll(item => item.Kind != AttentionKind.Quota);
+        }
+        else StartNext(lane, now, changes);
+        return changes;
+    }
+
+    // Ends the current item at the user's request (close button, Escape). It is not shown again.
+    public IReadOnlyList<AttentionChange> Dismiss(string laneName, DateTimeOffset now)
+    {
+        var changes = new List<AttentionChange>();
+        if (!_lanes.TryGetValue(laneName, out var lane) || lane.Current is null) return changes;
+        lane.Held = false;
+        End(lane, now, changes, requeue: false);
+        if (!lane.Busy) StartNext(lane, now, changes);
+        return changes;
+    }
+
+    // Removes one waiting or shown item, for example a notice the user deleted from the recent list.
+    public IReadOnlyList<AttentionChange> Withdraw(string key, DateTimeOffset now)
+    {
+        var changes = new List<AttentionChange>();
+        foreach (var lane in _lanes.Values)
+        {
+            lane.Queue.RemoveAll(item => item.Key == key);
+            if (lane.Current?.Key == key) { lane.Held = false; End(lane, now, changes, requeue: false); if (!lane.Busy) StartNext(lane, now, changes); }
+        }
+        return changes;
+    }
+
+    // Suppressed: everything showing ends and nothing waits. Ending suppression returns the number of notices that arrived
+    // meanwhile, for the caller to show one summary; the count starts again from zero.
+    public IReadOnlyList<AttentionChange> SetSuppressed(bool suppressed, DateTimeOffset now, out int arrived)
+    {
+        arrived = 0;
+        var changes = new List<AttentionChange>();
+        if (Suppressed == suppressed) return changes;
+        Suppressed = suppressed;
+        if (suppressed)
+        {
+            SuppressedCount = 0;
+            foreach (var lane in _lanes.Values)
+            {
+                lane.Held = false;
+                if (lane.Current is not null) End(lane, now, changes, requeue: false);
+                // Notices that were waiting count toward the summary; nothing else is kept.
+                SuppressedCount += lane.Queue.Where(item => item.Kind == AttentionKind.Notice).Sum(item => item.Count);
+                lane.Queue.Clear();
+            }
+        }
+        else { arrived = SuppressedCount; SuppressedCount = 0; }
+        return changes;
+    }
+
+    // A panel closed for good (its monitor was removed). Its items are dropped without being shown elsewhere.
+    public void RemoveLane(string laneName) => _lanes.Remove(laneName);
+
+    private static void Merge(AttentionItem target, AttentionItem item, DateTimeOffset now)
+    {
+        target.Key = item.Key; target.Payload = item.Payload; target.Count += item.Count; target.LastMerge = now;
+    }
+
+    private static void Enqueue(Lane lane, AttentionItem item)
+    {
+        int index = lane.Queue.FindIndex(queued => queued.Rank > item.Rank);
+        if (index < 0) lane.Queue.Add(item); else lane.Queue.Insert(index, item);
+    }
+
+    private bool CanStart(AttentionItem item, DateTimeOffset now)
+    {
+        if (!item.IsNotice) return true;
+        _noticeShows.RemoveAll(time => now - time >= RateWindow);
+        return _noticeShows.Count < RateLimit;
+    }
+
+    private void Start(Lane lane, AttentionItem item, DateTimeOffset now, List<AttentionChange> changes)
+    {
+        lane.Current = item;
+        lane.Ends = now + Positive(item.Remaining > TimeSpan.Zero ? item.Remaining : item.Duration);
+        if (item.IsNotice) _noticeShows.Add(now);
+        changes.Add(new(item.Lane, null, item, null));
+    }
+
+    private static void End(Lane lane, DateTimeOffset now, List<AttentionChange> changes, bool requeue)
+    {
+        var item = lane.Current!;
+        lane.Current = null; lane.Held = false;
+        changes.Add(new(item.Lane, item, null, null));
+        if (!requeue || !item.Queueable) return;
+        item.Remaining = Positive(lane.Ends - now);
+        // Taken over with time left: it resumes later with that time, ahead of others of its rank.
+        if (item.Remaining >= TimeSpan.FromSeconds(1))
+        {
+            int index = lane.Queue.FindIndex(queued => queued.Rank >= item.Rank);
+            if (index < 0) lane.Queue.Add(item); else lane.Queue.Insert(index, item);
+        }
+    }
+
+    private void StartNext(Lane lane, DateTimeOffset now, List<AttentionChange> changes)
+    {
+        lane.Queue.RemoveAll(item => Stale(item, now));
+        foreach (var item in lane.Queue)
+        {
+            if (!CanStart(item, now)) continue;
+            lane.Queue.Remove(item);
+            Start(lane, item, now, changes);
+            return;
+        }
+    }
+
+    // Normal notices and quota alerts are not shown after waiting this long; high priority notices and summaries wait as long as needed.
+    private static TimeSpan? StaleAfter(AttentionItem item) => item.Kind switch
+    {
+        AttentionKind.Notice when item.Priority != NoticePriority.High => Staleness,
+        AttentionKind.Quota => Staleness,
+        _ => null
+    };
+    private static bool Stale(AttentionItem item, DateTimeOffset now) => StaleAfter(item) is { } limit && now - item.SubmittedAt > limit;
+    private static TimeSpan Positive(TimeSpan span) => span > TimeSpan.Zero ? span : TimeSpan.Zero;
+}

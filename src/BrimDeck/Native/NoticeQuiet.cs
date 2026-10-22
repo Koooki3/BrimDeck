@@ -1,0 +1,104 @@
+using System.Runtime.InteropServices;
+using Microsoft.Win32;
+
+namespace BrimDeck.Native;
+
+// When Windows asks for quiet: the session is locked or switched to another user, a focus session runs, or presentation
+// mode (or the first-run quiet time) is on. A focus session is what FocusSessionManager reports; Windows' separate "do not
+// disturb" switch has no public API and is not detected. Changed is raised on the UI thread for the lock and the focus session;
+// presentation mode is only read when asked (SHQueryUserNotificationState is cheap).
+internal sealed class NoticeQuiet : IDisposable
+{
+    private readonly System.Windows.Threading.Dispatcher _dispatcher;
+    private Windows.UI.Shell.FocusSessionManager? _focus;
+    public bool Locked { get; private set; }
+    public event Action? Changed;
+
+    public NoticeQuiet(System.Windows.Threading.Dispatcher dispatcher)
+    {
+        _dispatcher = dispatcher;
+        SystemEvents.SessionSwitch += SessionSwitch;
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621))
+        {
+            try
+            {
+                if (Windows.UI.Shell.FocusSessionManager.IsSupported)
+                {
+                    _focus = Windows.UI.Shell.FocusSessionManager.GetDefault();
+                    _focus.IsFocusActiveChanged += FocusChanged;
+                }
+            }
+            catch (Exception ex) when (ex is COMException or TypeLoadException or InvalidCastException or UnauthorizedAccessException) { _focus = null; }
+        }
+    }
+
+    public bool FocusSupported => _focus is not null;
+
+    public bool FocusActive
+    {
+        get
+        {
+            if (_focus is not { } focus || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)) return false;
+            try { return focus.IsFocusActive; } catch (COMException) { return false; }
+        }
+    }
+
+    // Presentation mode, or the quiet hours after Windows was set up.
+    public static bool PresentationOrQuietTime()
+    {
+        const int Presentation = 4, QuietTime = 6;
+        return SHQueryUserNotificationState(out int state) == 0 && state is Presentation or QuietTime;
+    }
+
+    private void SessionSwitch(object sender, SessionSwitchEventArgs e)
+    {
+        bool? locked = e.Reason switch
+        {
+            SessionSwitchReason.SessionLock or SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect => true,
+            SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect => false,
+            _ => null
+        };
+        if (locked is not { } value) return;
+        _dispatcher.BeginInvoke(() => { if (Locked == value) return; Locked = value; Changed?.Invoke(); });
+    }
+
+    private void FocusChanged(Windows.UI.Shell.FocusSessionManager sender, object args) => _dispatcher.BeginInvoke(() => Changed?.Invoke());
+
+    public void Dispose()
+    {
+        SystemEvents.SessionSwitch -= SessionSwitch;
+        if (_focus is { } focus && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621))
+            try { focus.IsFocusActiveChanged -= FocusChanged; } catch (COMException) { }
+        _focus = null;
+    }
+
+    [DllImport("shell32")] private static extern int SHQueryUserNotificationState(out int state);
+}
+
+// Window and monitor calls the notices need besides WindowsHost's.
+internal static class NoticeNative
+{
+    // The monitor of the foreground window, or zero when there is none.
+    public static IntPtr ForegroundMonitor()
+    {
+        var window = GetForegroundWindow();
+        return window == IntPtr.Zero ? IntPtr.Zero : MonitorFromWindow(window, 0);
+    }
+
+    // Puts a window above the other always-on-top windows (the panel among them) without activating it.
+    public static void BringToTop(IntPtr window) => SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+
+    // The notice window normally never activates (WS_EX_NOACTIVATE); the notices hotkey lets it take the keyboard.
+    public static void SetActivatable(IntPtr window, bool activatable)
+    {
+        const long NoActivate = 0x08000000;
+        long style = GetWindowLongPtr(window, -20).ToInt64();
+        SetWindowLongPtr(window, -20, new IntPtr(activatable ? style & ~NoActivate : style | NoActivate));
+    }
+
+    [DllImport("user32")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32")] private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+    [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+    [DllImport("user32", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
+}
