@@ -180,6 +180,31 @@ internal static class NoticeCoreTests
         update.Submit(Item("u", AttentionKind.Notice, "task", "T"), T0);
         var refreshed = update.Submit(Item("u", AttentionKind.Notice, "task", "T", refresh: true), T0.AddSeconds(5.5));
         check("An update to the shown notice refreshes it in place and keeps it a moment longer", refreshed.Single().Updated?.Key == "task" && update.NextDeadline(T0.AddSeconds(5.5)) == T0.AddSeconds(7));
+        // Switching notices off or clearing the list cancels what shows and everything waiting; nothing waiting starts.
+        var cancel = new AttentionCoordinator();
+        cancel.Submit(Item("c", AttentionKind.Notice, "n1", "a"), T0);
+        cancel.Submit(Item("c", AttentionKind.Notice, "n2", "b", NoticePriority.High), T0.AddSeconds(1));
+        cancel.Submit(Item("c", AttentionKind.Notice, "n3", "c"), T0.AddSeconds(2));
+        cancel.Submit(Item("c", AttentionKind.Quota, "q"), T0.AddSeconds(2));
+        var cancelled = cancel.Remove(item => item.IsNotice, T0.AddSeconds(3));
+        check("Removing notices cancels the shown one and all waiting ones at once", cancelled.All(c => c.Started?.IsNotice != true)
+            && cancel.Queued("c").All(i => !i.IsNotice) && cancel.Current("c")?.Kind is null or AttentionKind.Quota);
+        // The last check refuses items that may no longer show; the next allowed one starts instead.
+        var gated = new AttentionCoordinator();
+        var deleted = new HashSet<string> { "g2" };
+        gated.CanShow = item => !deleted.Contains(item.Key);
+        gated.Submit(Item("g", AttentionKind.Notice, "g1", "a", seconds: 2), T0);
+        gated.Submit(Item("g", AttentionKind.Notice, "g2", "b", seconds: 2), T0.AddSeconds(1));
+        gated.Submit(Item("g", AttentionKind.Notice, "g3", "c", seconds: 2), T0.AddSeconds(1.5));
+        gated.Tick(T0.AddSeconds(2.5));
+        check("An item refused by the last check is skipped", gated.Current("g")?.Key == "g3" && gated.Queued("g").Count == 0);
+        // Queues are bounded for every priority, and high priority notices stop waiting after a while.
+        var flood = new AttentionCoordinator();
+        flood.Submit(Item("f", AttentionKind.Notice, "first", "x", NoticePriority.High, seconds: 3600), T0);
+        for (int i = 0; i < 2000; i++) flood.Submit(Item("f", AttentionKind.Notice, "h" + i, "g" + i, NoticePriority.High), T0.AddMilliseconds(i));
+        check("The waiting queue never grows past its limit", flood.Queued("f").Count == AttentionCoordinator.QueueLimit);
+        flood.Dismiss("f", T0.AddHours(8));
+        check("High priority notices that waited for hours are no longer shown", flood.Current("f") is null && flood.Queued("f").Count == 0);
         update.RemoveLane("u");
         check("A removed lane is forgotten", update.Current("u") is null && update.NextDeadline(T0) is null);
     }

@@ -6,7 +6,7 @@ When a notification arrives, the notch, capsule or indicator grows out of its pl
 
 Settings › Notices › Dynamic notices › Turn on dynamic notices (off by default). Then:
 
-- The open panel gains a "Recent notices" page (bell icon, with a red dot while there are notices you have not seen). It lists the notices kept, where each can be expanded, opened in its application or deleted; notices can be paused or cleared.
+- The open panel gains a "Recent notices" page (bell icon, with a red dot while there are notices you have not seen; a notice that popped up but that you did not hover, open or see on the page still counts as unseen). It lists the notices kept, where each can be expanded, opened in its application or deleted; notices can be paused or cleared.
 - Notices take the [panel theme](themes.md): they share the surface, gradient, scan lines, rim, shadow or glow and text colors of the notch, capsule, indicator and open panel. A glowing theme flashes once as a notice arrives. An application's color only marks a small dot, the progress ring and its initial, adjusted to read clearly on the theme.
 
 ## Sources
@@ -21,7 +21,7 @@ Settings › Notices › Dynamic notices › Turn on dynamic notices (off by def
 
 As an ordinary desktop program BrimDeck gets no change events from Windows, so it **polls**: every 2.5 seconds it checks for a new notification (about 2.5 ms of CPU) and reads the whole list every 15 seconds; a new notice usually appears within 0.2–2.6 seconds. Measured idle cost: about 0.36% of one core.
 
-With the **identity package** registered it switches to **event mode**, with practically no idle cost. `identity\Register-NoticeIdentity.ps1` in BrimDeck's folder registers, for the current user, a package that holds only a manifest and uses the install folder as its external location: nothing is copied or moved and no administrator rights are needed. Windows registers such an unsigned package only in Developer Mode; without it, keep polling — everything works the same. Uninstalling BrimDeck removes the registration; upgrading keeps it.
+With the **identity package** registered it switches to **event mode**, with practically no idle cost. `identity\Register-NoticeIdentity.ps1` in BrimDeck's folder registers, for the current user, a package that holds only a manifest and uses the install folder as its external location: nothing is copied or moved and no administrator rights are needed. Windows registers such an unsigned package only in Developer Mode; without it, keep polling — everything works the same. Uninstalling BrimDeck removes the registration of the user who uninstalls it; upgrading keeps it. Other Windows users of the same PC who registered it run `Register-NoticeIdentity.ps1 -Remove` themselves (Windows does not let an ordinary account remove another user's package).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "<BrimDeck folder>\identity\Register-NoticeIdentity.ps1"
@@ -34,8 +34,8 @@ If Windows has not yet decided whether BrimDeck may read notifications, the sett
 When you switch a distribution on under "WSL (off by default)", BrimDeck:
 
 - copies its notice agent to `~/.local/share/brimdeck/brimdeck-agent` of the distribution's default user, with `bridge.json` and a version stamp;
-- adds `~/.local/bin/brim-notify` (a file of that name not written by BrimDeck is left alone);
-- starts the agent through `wsl.exe` only while the distribution **already runs**. A distribution is never started for notices, WSL's configuration is not changed and the system's `notify-send` is not replaced.
+- adds `~/.local/bin/brim-notify`. It is updated only while its content is exactly what BrimDeck wrote; any other file of that name, or a symbolic link, is left alone and shown as a conflict in the settings (then use `~/.local/share/brimdeck/brimdeck-agent notify`). Every file is written to a new temporary file and renamed into place, so nothing is written through a link;
+- starts the agent through `wsl.exe` only while the distribution **already runs**. A distribution is never started for notices, WSL's configuration is not changed and the system's `notify-send` is not replaced. WSL 1 and WSL 2 distributions both work.
 
 The agent adapts to the session bus:
 
@@ -74,7 +74,8 @@ Exit codes: 0 delivered (or kept quiet by your rules), 1 usage error, 2 refused,
 
 ## Privacy
 
-- Recent notices are kept for 24 hours, at most 500, encrypted on this PC with Windows' per-user data protection (DPAPI). Keeping them can be switched off (memory only: then no application icons are kept on disk either), and the period and folder changed; they can be cleared at any time.
+- Recent notices are kept for 24 hours, at most 500, encrypted with Windows' per-user data protection (DPAPI) in the `notices` folder of BrimDeck's install folder (opened to the current user only; `%LOCALAPPDATA%\BrimDeck\notices` when the install folder cannot be written to). Keeping them can be switched off (memory only: then no application icons are kept on disk either), and the period and folder changed; they can be cleared at any time, or automatically on exit, daily or weekly.
+- Deleting or clearing removes BrimDeck's own records only and tells no source. Only closing a notice (its close button or Esc) reports a WSL desktop notification as dismissed by the user, as closing a desktop notification bubble does. Switching notices off or clearing also cancels what shows and everything waiting to show.
 - Raw notification content, attachments and pictures are never saved. Icons come only from Windows or local files; nothing is downloaded. Network paths, links and shortcuts as icons are refused.
 - The diagnostic log `notices.log` holds only error types, codes and code locations, never titles or bodies.
 - The local channel accepts only the current user on this PC (a named pipe that refuses network access). A notice's content is only ever shown as text: it is never run and its links are never opened.

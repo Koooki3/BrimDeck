@@ -30,7 +30,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 | `claude-quota.json` | The last Claude quota read online (shares, reset times and the plan name), so per-model quotas such as Fable still show after a restart while the account API is rate limited; no sign-in token, not used once older than 7 days, deleted when the sign-in is rejected or removed |
 | `update-prompt.txt`, `updates\` | The last version you were told about, and downloaded installers |
 | `crash.log` | Error records; cleared when it exceeds 1 MB |
-| `notices\notices.dat`, `notices\icons\` | With dynamic notices on and kept: the recent notices (24 hours and at most 500 by default), encrypted for the current user with Windows encryption; application icons (from Windows, no notice content). The folder can be changed in settings |
+| `notices\notices.dat`, `notices\icons\` | With dynamic notices on and kept: the recent notices (24 hours and at most 500 by default), encrypted for the current user with Windows encryption; application icons (from Windows, no notice content). **Kept by default in the `notices` folder of BrimDeck's install folder** (opened to the current user only), and here only when the install folder cannot be written to; the folder can be changed in settings, and uninstalling with "Delete user data" removes it |
 | `notices.log` | Dynamic notices' error records: error types, codes and code locations only, never titles or bodies; rotated past 256 KB |
 
 ## Network and security

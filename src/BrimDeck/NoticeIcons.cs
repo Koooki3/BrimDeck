@@ -16,7 +16,9 @@ namespace BrimDeck;
 // arrives later.
 internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher, Func<string, Task<byte[]?>> windowsLogo, Func<string, bool> distributionRunning)
 {
-    private const int Capacity = 96;
+    // Enough for the rows the notices page lists at once and the apps in the settings; an icon let go of is read again when
+    // asked for, and only its own plate is filled then (MainWindow.NoticeIconLoaded), so nothing loops.
+    private const int Capacity = 160;
     private readonly Dictionary<string, (BitmapSource? Image, Color? Accent)> _cache = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _order = new();
     private readonly HashSet<string> _loading = new(StringComparer.Ordinal);

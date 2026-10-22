@@ -124,7 +124,7 @@ public sealed partial class SettingsWindow
     private static (string, bool) WslStatus(NoticeCenter center, string name)
     {
         if (!center.WslStates.TryGetValue(name, out var state)) return (Loc.T("未开启", "Off"), false);
-        return state.State switch
+        var (text, warning) = state.State switch
         {
             WslAgentState.NotRunning => (Loc.T("发行版未运行；它运行后自动接入。", "The distribution is not running; it connects once it runs."), false),
             WslAgentState.NotPackaged => (Loc.T("此版本没有附带 WSL 代理。", "This build does not include the WSL agent."), true),
@@ -137,6 +137,9 @@ public sealed partial class SettingsWindow
             WslAgentState.Failed => (Loc.T("连接失败，稍后重试", "Connection failed; trying again later") + (state.Detail.Length > 0 ? "（" + state.Detail + "）" : ""), true),
             _ => (Loc.T("未开启", "Off"), false)
         };
+        if (!state.Conflict) return (text, warning);
+        return (text + Loc.T(" ~/.local/bin/brim-notify 是你自己的文件，BrimDeck 未改动它；可改用 ~/.local/share/brimdeck/brimdeck-agent notify。",
+            " ~/.local/bin/brim-notify is your own file and was left as it is; use ~/.local/share/brimdeck/brimdeck-agent notify instead."), true);
     }
 
     // An explanation set between a section's title and its rows.
@@ -239,7 +242,13 @@ public sealed partial class SettingsWindow
             SelectedIndex = Math.Max(0, Array.IndexOf(hours, S.NoticeHistoryHours) is var index && index >= 0 ? index : 3) };
         AutomationProperties.SetName(retention, Loc.T("保留时间", "Keep for"));
         retention.SelectionChanged += (_, _) => { if (retention.SelectedIndex >= 0) Change(s => s.NoticeHistoryHours = hours[retention.SelectedIndex]); };
-        string folder = S.NoticeHistoryFolder.Length > 0 ? S.NoticeHistoryFolder : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "notices");
+        string folder = NoticeCenter.HistoryFolder(S);
+        var autoClear = new ComboBox { Width = 120, Style = (Style)FindResource("SettingsCombo"),
+            ItemsSource = new[] { Loc.T("不自动清空", "Never"), Loc.T("每次退出时", "On exit"), Loc.T("每天", "Daily"), Loc.T("每周", "Weekly") },
+            SelectedIndex = (int)S.NoticeAutoClear };
+        AutomationProperties.SetName(autoClear, Loc.T("定期清空", "Clear automatically"));
+        // Choosing a schedule starts its count now, so switching it on never clears at once.
+        autoClear.SelectionChanged += (_, _) => { if (autoClear.SelectedIndex >= 0) Change(s => { s.NoticeAutoClear = (NoticeAutoClear)autoClear.SelectedIndex; s.NoticeLastCleared = DateTimeOffset.UtcNow; }); };
         var where = TextLine(folder, 11, TextTertiary); where.TextTrimming = TextTrimming.CharacterEllipsis; where.ToolTip = folder;
         var folderButtons = new StackPanel { Orientation = Orientation.Horizontal };
         folderButtons.Children.Add(ActionButton(Loc.T("更改…", "Change…"), () =>
@@ -259,6 +268,7 @@ public sealed partial class SettingsWindow
                 help: Loc.T("保存时使用 Windows 为当前用户提供的加密，最多 500 条；关闭后只保留在内存中，重启即清空。不保存原始通知内容、附件或头像，诊断日志不记录标题和正文。",
                     "Saved with the encryption Windows provides for the current user, at most 500 notices; when off they are kept in memory only and are gone after a restart. Raw notification content, attachments and pictures are never saved, and diagnostic logs never contain titles or bodies.")),
             Row(Loc.T("保留时间", "Keep for"), retention),
+            Row(Loc.T("定期清空", "Clear automatically"), autoClear, TextLine(Loc.T("在保留时间之外，按所选频率清空整个最近通知列表。", "Besides the retention, empties the whole recent list on the chosen schedule."), 11, TextTertiary)),
             Row(Loc.T("保存位置", "Location"), folderButtons, where),
             Row(Loc.T("最近通知", "Recent notices"), clear, TextLine(Loc.T($"{center.Hub.Notices.Count} 条 · 只清除 BrimDeck 中的记录，Windows 通知中心不受影响。", $"{center.Hub.Notices.Count} kept · clears BrimDeck's list only; Windows' notification center is not affected."), 11, TextTertiary))
         };

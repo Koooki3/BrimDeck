@@ -446,7 +446,11 @@ begin
     RemoveNoticeIdentity;
   end
   else if (CurUninstallStep = usPostUninstall) and DeleteUserData and not HasParam('/UPGRADE') then
-    DelTree(ExpandConstant('{#DataDir}'), True, True, True)
+  begin
+    DelTree(ExpandConstant('{#DataDir}'), True, True, True);
+    // The recent notices are kept in the install folder by default (NoticeStorage); they are user data too.
+    DelTree(ExpandConstant('{app}\notices'), True, True, True);
+  end
   else if (CurUninstallStep = usDone) and HasParam('/UI') then
     MsgBox(CustomMessage('Uninstalled'), mbInformation, MB_OK);
 end;

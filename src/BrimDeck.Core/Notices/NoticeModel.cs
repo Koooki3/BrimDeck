@@ -11,6 +11,9 @@ public enum NoticePriority { Low, Normal, High }
 // How much an arriving notice shows: icon, title and summary; icon and title; or the application's icon and name only.
 public enum NoticePrivacy { Full, TitleOnly, AppOnly }
 
+// Clears the whole recent list on a schedule, besides dropping each notice once it is older than the retention.
+public enum NoticeAutoClear { Off, OnExit, Daily, Weekly }
+
 // What BrimDeck can do with a notice's source, by what the source offers. Nothing is shown that cannot be done.
 [Flags]
 public enum NoticeCapabilities

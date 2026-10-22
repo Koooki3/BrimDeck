@@ -58,6 +58,10 @@ internal sealed class WindowsNoticeSource : IDisposable
     public event Action<NoticeInput>? Received;
     public event Action<string>? Removed;
     public event Action? StateChanged;
+    // A full reading has been compared with the list and its notices handed over (Received and Removed come first). It
+    // carries the number of the last Refresh the reading covers.
+    public event Action<int>? Synced;
+    private int _refreshes;
 
     public static UserNotificationListenerAccessStatus AccessStatus()
     {
@@ -98,11 +102,14 @@ internal sealed class WindowsNoticeSource : IDisposable
         Wake();
     }
 
-    // Reads the list again soon, for example after access was granted.
-    public void Refresh(bool baseline = false)
+    // Reads the list again soon, for example after access was granted. Returns the request's number: a Synced with this number
+    // or more comes from a reading that started after it.
+    public int Refresh(bool baseline = false)
     {
-        lock (_gate) { _dirty = true; if (baseline) _baseline = true; }
+        int number;
+        lock (_gate) { _dirty = true; if (baseline) _baseline = true; number = ++_refreshes; }
         Wake();
+        return number;
     }
 
     private void Wake() { try { _wake.Release(); } catch (Exception ex) when (ex is SemaphoreFullException or ObjectDisposedException) { } }
@@ -182,13 +189,14 @@ internal sealed class WindowsNoticeSource : IDisposable
             catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException) { run.Events = false; }
         }
         SetState(run.Events ? NoticeSourceState.Events : NoticeSourceState.Polling, "", run);
-        lock (_gate) _dirty = false;
+        int covers;
+        lock (_gate) { _dirty = false; covers = _refreshes; }
         run.LastFull = now;
         var list = await run.Listener.GetNotificationsAsync(NotificationKinds.Toast).AsTask(token);
-        Sync(list, run);
+        Sync(list, run, covers);
     }
 
-    private void Sync(IReadOnlyList<UserNotification> list, Run run)
+    private void Sync(IReadOnlyList<UserNotification> list, Run run, int covers)
     {
         var added = new List<NoticeInput>();
         var removed = new List<string>();
@@ -220,6 +228,7 @@ internal sealed class WindowsNoticeSource : IDisposable
         // Oldest first, so that the newest ends up on top of the recent notices.
         foreach (var input in added.OrderBy(i => i.CreatedAt)) Received?.Invoke(input);
         foreach (var key in removed) Removed?.Invoke(key);
+        Synced?.Invoke(covers);
     }
 
     private NoticeInput? Read(UserNotification notification, uint id)

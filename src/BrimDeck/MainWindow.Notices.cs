@@ -34,11 +34,12 @@ public partial class MainWindow
         if (_noticesSubscribed || _app.Notices is null) return;
         _noticesSubscribed = true;
         _app.Notices.Changed += NoticesChanged;
+        _app.Notices.Icons.Loaded += NoticeIconLoaded;
     }
 
     private void CloseNotices()
     {
-        if (_noticesSubscribed) _app.Notices.Changed -= NoticesChanged;
+        if (_noticesSubscribed) { _app.Notices.Changed -= NoticesChanged; _app.Notices.Icons.Loaded -= NoticeIconLoaded; }
         _noticesSubscribed = false;
         _noticeWindow?.Close(); _noticeWindow = null;
         _app.Notices?.DeckRetired(this);
@@ -158,6 +159,7 @@ public partial class MainWindow
         ApplyHeader(Settings.UsagePage ? UsageHeader(_usageWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
         double offset = NoticesContent.Children.OfType<DockPanel>().FirstOrDefault()?.Children.OfType<ScrollViewer>().FirstOrDefault()?.VerticalOffset ?? 0;
         NoticesContent.Children.Clear();
+        _waitingPlates.Clear();
         NoticesContent.Margin = new Thickness(_header.Side, 0, _header.Side, 10);
         var center = _app.Notices;
         var notices = center.Hub.Notices;
@@ -290,10 +292,33 @@ public partial class MainWindow
         page.Children.Insert(1, hint);
     }
 
+    // Plates on the notices page still waiting for their icon. An icon that arrives fills only its own plates: rebuilding the
+    // page for it would ask again for icons the cache let go of, whose arrival would rebuild it again.
+    private readonly Dictionary<string, List<(Grid Plate, Notice Notice)>> _waitingPlates = new(StringComparer.Ordinal);
+
+    private void NoticeIconLoaded(string iconRef)
+    {
+        if (!_waitingPlates.Remove(iconRef, out var plates)) return;
+        foreach (var (plate, notice) in plates) FillPlate(plate, notice);
+    }
+
     // The icon as in the arriving notice, on the panel's own plate.
     private FrameworkElement NoticePlate(Notice notice, double size)
     {
         var plate = new Grid { Width = size, Height = size };
+        if (!FillPlate(plate, notice) && notice.IconRef is { } iconRef)
+        {
+            if (!_waitingPlates.TryGetValue(iconRef, out var plates)) _waitingPlates[iconRef] = plates = [];
+            plates.Add((plate, notice));
+        }
+        return plate;
+    }
+
+    // True when the plate shows the icon; false when it shows the initial (the icon may still arrive).
+    private bool FillPlate(Grid plate, Notice notice)
+    {
+        double size = plate.Width;
+        plate.Children.Clear();
         plate.Children.Add(new Border { CornerRadius = new CornerRadius(size * .28), Background = UI.Brush(UI.Fill) });
         var image = _app.Notices.Icons.Get(notice.IconRef, out _);
         if (image is not null) plate.Children.Add(new Image { Source = image, Width = size * .72, Height = size * .72, Stretch = Stretch.Uniform });
@@ -305,7 +330,7 @@ public partial class MainWindow
         }
         if (NoticeLook.Current().StatusColor(notice.Category) is { Length: > 0 } mark && notice.Category != NoticeCategory.Task)
             plate.Children.Add(new Ellipse { Width = 9, Height = 9, Fill = UI.Brush(mark), Stroke = UI.Brush(PanelTheme.Hex("surface")), StrokeThickness = 1.5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -2, -2) });
-        return plate;
+        return image is not null;
     }
 
     // A small flat button of the panel's kind.

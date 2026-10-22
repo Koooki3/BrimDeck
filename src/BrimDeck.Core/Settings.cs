@@ -291,8 +291,11 @@ public sealed class DeckSettings
     public DateTimeOffset? NoticesPausedUntil { get; set; }
     public bool NoticeHistory { get; set; } = true;
     public int NoticeHistoryHours { get; set; } = 24;
-    // Where the encrypted recent notices are kept; empty for the data folder.
+    // Where the encrypted recent notices are kept; empty for the default (a folder in BrimDeck's install folder).
     public string NoticeHistoryFolder { get; set; } = "";
+    public NoticeAutoClear NoticeAutoClear { get; set; }
+    // When the schedule last cleared the list (or started counting); null before it ever has.
+    public DateTimeOffset? NoticeLastCleared { get; set; }
     public string NoticeHotkey { get; set; } = "";
     public bool NoticesPage { get; set; } = true;
     public double NoticesWidth { get; set; } = 460;
@@ -439,6 +442,7 @@ public sealed class DeckSettings
         NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
         if (!Enum.IsDefined(NoticePrivacy)) NoticePrivacy = NoticePrivacy.Full;
+        if (!Enum.IsDefined(NoticeAutoClear)) NoticeAutoClear = NoticeAutoClear.Off;
         NoticeDuration = Math.Clamp(NoticeDuration, 2, 30);
         NoticeHighDuration = Math.Clamp(NoticeHighDuration, 2, 60);
         NoticeHistoryHours = Math.Clamp(NoticeHistoryHours, 1, 24 * 7);

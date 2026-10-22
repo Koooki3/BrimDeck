@@ -49,6 +49,10 @@ public sealed class AttentionCoordinator
     public static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(10);
     public const int RateLimit = 3;
     public static readonly TimeSpan Staleness = TimeSpan.FromSeconds(30);
+    // High priority notices wait longer, but not for ever: after this they stay in the recent notices only.
+    public static readonly TimeSpan HighStaleness = TimeSpan.FromMinutes(5);
+    // Items one lane keeps waiting; beyond it the least important and oldest leave the queue (a notice stays in the recent list).
+    public const int QueueLimit = 32;
     // A resumed or refreshed item stays at least this long, so it does not vanish the moment the pointer leaves.
     public static readonly TimeSpan MinimumRemaining = TimeSpan.FromMilliseconds(1500);
 
@@ -64,6 +68,9 @@ public sealed class AttentionCoordinator
     private readonly List<DateTimeOffset> _noticeShows = [];
 
     public bool Suppressed { get; private set; }
+    // The last word before anything starts: an item it refuses is dropped instead (notices switched off, a notice deleted
+    // from the recent list meanwhile). Null lets everything through.
+    public Func<AttentionItem, bool>? CanShow { get; set; }
     // Notices that arrived while suppressed, for the summary shown afterwards.
     public int SuppressedCount { get; private set; }
 
@@ -202,13 +209,17 @@ public sealed class AttentionCoordinator
     }
 
     // Removes one waiting or shown item, for example a notice the user deleted from the recent list.
-    public IReadOnlyList<AttentionChange> Withdraw(string key, DateTimeOffset now)
+    public IReadOnlyList<AttentionChange> Withdraw(string key, DateTimeOffset now) => Remove(item => item.Key == key, now);
+
+    // Removes every waiting or shown item that matches, in all lanes, before anything else may start: switching notices off or
+    // clearing the recent list cancels all that waits as well as what shows. Nothing removed is counted for a summary.
+    public IReadOnlyList<AttentionChange> Remove(Func<AttentionItem, bool> match, DateTimeOffset now)
     {
         var changes = new List<AttentionChange>();
         foreach (var lane in _lanes.Values)
         {
-            lane.Queue.RemoveAll(item => item.Key == key);
-            if (lane.Current?.Key == key) { lane.Held = false; End(lane, now, changes, requeue: false); if (!lane.Busy) StartNext(lane, now, changes); }
+            lane.Queue.RemoveAll(item => match(item));
+            if (lane.Current is { } current && match(current)) { lane.Held = false; End(lane, now, changes, requeue: false); if (!lane.Busy) StartNext(lane, now, changes); }
         }
         return changes;
     }
@@ -249,6 +260,13 @@ public sealed class AttentionCoordinator
     {
         int index = lane.Queue.FindIndex(queued => queued.Rank > item.Rank);
         if (index < 0) lane.Queue.Add(item); else lane.Queue.Insert(index, item);
+        // Full: an item of the least important rank leaves, the one that has waited longest.
+        while (lane.Queue.Count > QueueLimit)
+        {
+            int worst = lane.Queue.Max(queued => queued.Rank);
+            var oldest = lane.Queue.Where(queued => queued.Rank == worst).MinBy(queued => queued.SubmittedAt)!;
+            lane.Queue.Remove(oldest);
+        }
     }
 
     private bool CanStart(AttentionItem item, DateTimeOffset now)
@@ -260,6 +278,8 @@ public sealed class AttentionCoordinator
 
     private void Start(Lane lane, AttentionItem item, DateTimeOffset now, List<AttentionChange> changes)
     {
+        // Refused at the last moment: the next one that may show takes its turn (StartNext only offers items CanShow allows).
+        if (CanShow?.Invoke(item) == false) { StartNext(lane, now, changes); return; }
         lane.Current = item;
         item.StartedAt = now;
         lane.Ends = now + Positive(item.Remaining > TimeSpan.Zero ? item.Remaining : item.Duration);
@@ -284,7 +304,7 @@ public sealed class AttentionCoordinator
 
     private void StartNext(Lane lane, DateTimeOffset now, List<AttentionChange> changes)
     {
-        lane.Queue.RemoveAll(item => Stale(item, now));
+        lane.Queue.RemoveAll(item => Stale(item, now) || CanShow?.Invoke(item) == false);
         foreach (var item in lane.Queue)
         {
             if (!CanStart(item, now)) continue;
@@ -294,10 +314,11 @@ public sealed class AttentionCoordinator
         }
     }
 
-    // Normal notices and quota alerts are not shown after waiting this long; high priority notices and summaries wait as long as needed.
+    // How long an item may wait before it is no longer worth showing: normal notices and quota alerts briefly, high priority
+    // notices longer. A summary of notices held back waits as long as needed (there is only ever one).
     private static TimeSpan? StaleAfter(AttentionItem item) => item.Kind switch
     {
-        AttentionKind.Notice when item.Priority != NoticePriority.High => Staleness,
+        AttentionKind.Notice => item.Priority == NoticePriority.High ? HighStaleness : Staleness,
         AttentionKind.Quota => Staleness,
         _ => null
     };

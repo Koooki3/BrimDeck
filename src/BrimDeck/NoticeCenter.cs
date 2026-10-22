@@ -21,6 +21,11 @@ internal sealed class NoticeCenter : IDisposable
     private readonly DispatcherTimer _maintenance = new() { Interval = TimeSpan.FromMinutes(10) };
     // While notices are held back, checks every 15 seconds whether presentation mode or the pause has ended (neither raises an event).
     private readonly DispatcherTimer _quietCheck = new() { Interval = TimeSpan.FromSeconds(15) };
+    // Ending a quiet spell waits for the Windows source to read its list once more (at most this long), so notices that
+    // arrived meanwhile but were not read yet join the summary instead of popping up one by one afterwards.
+    private readonly DispatcherTimer _resumeLimit = new() { Interval = TimeSpan.FromSeconds(4) };
+    private bool _resuming;
+    private int _resumeReading;
     private readonly WindowsNoticeSource _windows = new();
     private readonly WslNoticeBridge _wsl = new();
     private readonly NoticeQuiet _quiet;
@@ -41,7 +46,7 @@ internal sealed class NoticeCenter : IDisposable
     public NoticeHistoryState HistoryState { get; private set; } = NoticeHistoryState.Empty;
     public NoticeSourceState WindowsState => _enabled && Settings.NoticeWindowsSource ? _windows.State : NoticeSourceState.Off;
     public string? PipeError => _pipe?.Error;
-    public IReadOnlyDictionary<string, (WslAgentState State, string Detail)> WslStates => _wsl.States;
+    public IReadOnlyDictionary<string, (WslAgentState State, string Detail, bool Conflict)> WslStates => _wsl.States;
     public bool Enabled => _enabled;
     public bool Quiet { get; private set; }
     public bool FocusSupported => _quiet.FocusSupported;
@@ -58,15 +63,19 @@ internal sealed class NoticeCenter : IDisposable
         _quiet.Changed += UpdateQuiet;
         _attentionTimer = new PromptTimer(_dispatcher, () => { _attentionTimer!.Stop(); _attentionAt = null; Apply(Attention.Tick(DateTimeOffset.UtcNow)); });
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); _ = SaveAsync(); };
-        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); UpdateQuiet(); };
+        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); AutoClear(); UpdateQuiet(); };
         _quietCheck.Tick += (_, _) => UpdateQuiet();
-        Hub.Changed += () => Changed?.Invoke();
+        _resumeLimit.Tick += (_, _) => FinishResume(int.MaxValue);
+        Attention.CanShow = CanShow;
+        // A notice gone from the recent list (deleted, cleared, pruned by age or count) no longer waits to be shown.
+        Hub.Changed += () => { DropMissing(); Changed?.Invoke(); };
         Hub.Persist += QueueSave;
-        Icons.Loaded += _ => Changed?.Invoke();
         // A reading still under way when notices or the source were switched off arrives late; it is dropped.
         _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && Settings.NoticeWindowsSource) Receive(input); });
         _windows.Removed += key => _dispatcher.BeginInvoke(() => Hub.SourceRemoved(key));
         _windows.StateChanged += () => _dispatcher.BeginInvoke(() => Changed?.Invoke());
+        // Raised after the notices of a reading were handed over, so they are queued on the dispatcher before this.
+        _windows.Synced += covers => _dispatcher.BeginInvoke(() => FinishResume(covers));
         _wsl.Received += (distro, message) => _dispatcher.BeginInvoke(() => FromAgent(distro, message));
         _wsl.StateChanged += () => _dispatcher.BeginInvoke(() => Changed?.Invoke());
     }
@@ -85,15 +94,17 @@ internal sealed class NoticeCenter : IDisposable
             _windows.Stop(); _wsl.Apply([]);
             _pipe?.Dispose(); _pipe = null;
             _maintenance.Stop(); _quietCheck.Stop();
-            // Whatever shows now ends; quota alerts and track changes keep working through the coordinator.
+            // Whatever shows ends and nothing waiting shows later; quota alerts and track changes keep working through the
+            // coordinator.
+            EndResume();
             if (Attention.Suppressed) Apply(Attention.SetSuppressed(false, DateTimeOffset.UtcNow, out _));
-            foreach (var deck in _app.Decks.ToList())
-                if (Attention.Current(deck.NoticeLane) is { IsNotice: true }) Apply(Attention.Dismiss(deck.NoticeLane, DateTimeOffset.UtcNow));
+            Apply(Attention.Remove(item => item.IsNotice, DateTimeOffset.UtcNow));
             Quiet = false;
             Changed?.Invoke();
             return;
         }
         LoadHistory();
+        AutoClear();
         if (_pipe is null) { _pipe = new NoticePipeServer(HandlePipeAsync) { Failed = Log }; _pipe.Start(); }
         if (settings.NoticeWindowsSource) _windows.Start(); else _windows.Stop();
         _wsl.Apply(settings.NoticeWslDistros);
@@ -217,11 +228,9 @@ internal sealed class NoticeCenter : IDisposable
             var deck = _app.Decks.FirstOrDefault(d => d.NoticeLane == change.Lane);
             if (deck is null) continue;
             if (change.Ended is { } ended) deck.AttentionEnded(ended);
-            if (change.Started is { } started)
-            {
-                deck.AttentionStarted(started);
-                if (started.Payload is Notice notice) Hub.MarkViewed(notice.Id);
-            }
+            // Shown is not seen: a notice counts as viewed only once its details open, the pointer rests on it or its page
+            // lists it (the user may be away while it shows).
+            if (change.Started is { } started) deck.AttentionStarted(started);
             if (change.Updated is { } updated) deck.AttentionUpdated(updated);
         }
         Schedule();
@@ -255,14 +264,38 @@ internal sealed class NoticeCenter : IDisposable
     public void Hold(MainWindow deck, bool held) => Apply(Attention.Hold(deck.NoticeLane, held, DateTimeOffset.UtcNow));
     public void DeckExpanded(MainWindow deck, bool expanded) => Apply(Attention.SetBusy(deck.NoticeLane, expanded, DateTimeOffset.UtcNow));
     public void DeckRetired(MainWindow deck) { Attention.RemoveLane(deck.NoticeLane); Schedule(); }
-    // A panel stopped being able to show anything (hidden by the user or a full-screen rule): what it shows ends.
+    // A panel stopped being able to show anything (hidden by the user or a full-screen rule): what it shows ends, and its
+    // waiting notices are not shown later (they stay in the recent list; CanShow refuses them while the panel is hidden).
     public void DeckHidden(MainWindow deck)
     {
-        if (Attention.Current(deck.NoticeLane) is not null) Apply(Attention.Dismiss(deck.NoticeLane, DateTimeOffset.UtcNow));
+        string lane = deck.NoticeLane;
+        Apply(Attention.Remove(item => item.Lane == lane && item.IsNotice, DateTimeOffset.UtcNow));
+        if (Attention.Current(lane) is not null) Apply(Attention.Dismiss(lane, DateTimeOffset.UtcNow));
     }
 
-    // Closes what the panel shows (close button, Escape). Only BrimDeck's own presentation closes; Windows' notification
-    // center keeps the notice. A WSL notice whose agent is the notification service is reported as dismissed.
+    // The coordinator's last check before anything starts (see AttentionCoordinator.CanShow).
+    private bool CanShow(AttentionItem item)
+    {
+        if (!item.IsNotice) return true;
+        if (!_enabled) return false;
+        if (item.Payload is Notice notice && Hub.Find(notice.Id) is null) return false;
+        return _app.Decks.FirstOrDefault(d => d.NoticeLane == item.Lane) is { CanShowNotices: true };
+    }
+
+    private void DropMissing()
+    {
+        bool Missing(AttentionItem item) => item.Payload is Notice notice && Hub.Find(notice.Id) is null;
+        foreach (var deck in _app.Decks)
+            if (Attention.Current(deck.NoticeLane) is { } current && Missing(current) || Attention.Queued(deck.NoticeLane).Any(Missing))
+            {
+                Apply(Attention.Remove(Missing, DateTimeOffset.UtcNow));
+                return;
+            }
+    }
+
+    // Closes what the panel shows (close button, Escape); the next waiting notice may follow. Only BrimDeck's own presentation
+    // closes; Windows' notification center keeps the notice. Closing it by hand is the one explicit act that also closes it at
+    // a WSL source whose agent is the notification service (as closing a desktop notification bubble does).
     public void Dismiss(MainWindow deck, bool reportToSource)
     {
         var current = Attention.Current(deck.NoticeLane);
@@ -300,13 +333,25 @@ internal sealed class NoticeCenter : IDisposable
         return true;
     }
 
-    public void Delete(Notice notice) { ReportDismissed(notice); Withdraw(notice.Id); Hub.Delete(notice.Id); }
-    // Clears BrimDeck's recent notices; Windows' notification center is left as it is.
+    // The scheduled clearing (NoticeAutoClear): daily or weekly from the last time; choosing a schedule starts its count.
+    private void AutoClear()
+    {
+        TimeSpan? every = Settings.NoticeAutoClear switch { NoticeAutoClear.Daily => TimeSpan.FromDays(1), NoticeAutoClear.Weekly => TimeSpan.FromDays(7), _ => null };
+        if (every is not { } span) return;
+        var now = DateTimeOffset.UtcNow;
+        if (Settings.NoticeLastCleared is not { } last || last > now) { _app.Settings.NoticeLastCleared = now; _app.QueueSave(); return; }
+        if (now - last < span) return;
+        _app.Settings.NoticeLastCleared = now; _app.QueueSave();
+        Clear();
+    }
+
+    // Deleting and clearing touch BrimDeck's own records only: no source is told, so no application stops reminding because
+    // its notice left BrimDeck's list (Windows' notification center and WSL applications keep theirs).
+    public void Delete(Notice notice) { Withdraw(notice.Id); Hub.Delete(notice.Id); }
+    // Clears the recent notices together with everything shown or waiting, so nothing deleted shows afterwards.
     public void Clear()
     {
-        foreach (var notice in Hub.Notices.ToList()) ReportDismissed(notice);
-        foreach (var deck in _app.Decks.ToList())
-            if (Attention.Current(deck.NoticeLane) is { IsNotice: true }) Apply(Attention.Dismiss(deck.NoticeLane, DateTimeOffset.UtcNow));
+        Apply(Attention.Remove(item => item.IsNotice, DateTimeOffset.UtcNow));
         Hub.Clear();
     }
 
@@ -346,11 +391,35 @@ internal sealed class NoticeCenter : IDisposable
         if (quiet) { if (!_quietCheck.IsEnabled) _quietCheck.Start(); } else _quietCheck.Stop();
         if (quiet == Quiet) return;
         Quiet = quiet;
-        var now = DateTimeOffset.UtcNow;
-        Apply(Attention.SetSuppressed(quiet, now, out int arrived));
-        if (!quiet && arrived > 0 && Lane() is { } lane)
-            Apply(Attention.Submit(new AttentionItem { Lane = lane, Kind = AttentionKind.Summary, Key = "summary:" + now.Ticks, Payload = arrived, Duration = TimeSpan.FromSeconds(Settings.NoticeDuration) }, now));
+        if (quiet) { EndResume(); Apply(Attention.SetSuppressed(true, DateTimeOffset.UtcNow, out _)); }
+        else if (Settings.NoticeWindowsSource && _windows.State is NoticeSourceState.Polling or NoticeSourceState.Events)
+        {
+            // Still held back until the Windows list has been read again (FinishResume).
+            _resuming = true;
+            _resumeLimit.Stop(); _resumeLimit.Start();
+            _resumeReading = _windows.Refresh();
+        }
+        else Resume();
         Changed?.Invoke();
+    }
+
+    // Called with the refresh a finished reading covers; one that started before the resume asked does not count.
+    private void FinishResume(int covers)
+    {
+        if (!_resuming || covers < _resumeReading) return;
+        EndResume();
+        if (_enabled && !Quiet) Resume();
+    }
+
+    private void EndResume() { _resuming = false; _resumeLimit.Stop(); }
+
+    // Shows again, starting with one summary of what arrived while held back.
+    private void Resume()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Apply(Attention.SetSuppressed(false, now, out int arrived));
+        if (arrived > 0 && Lane() is { } lane)
+            Apply(Attention.Submit(new AttentionItem { Lane = lane, Kind = AttentionKind.Summary, Key = "summary:" + now.Ticks, Payload = arrived, Duration = TimeSpan.FromSeconds(Settings.NoticeDuration) }, now));
     }
 
     // ----- Diagnostics -----
@@ -371,13 +440,14 @@ internal sealed class NoticeCenter : IDisposable
 
     // ----- History -----
 
-    private string HistoryFolder(DeckSettings settings) => settings.NoticeHistoryFolder.Length > 0 ? settings.NoticeHistoryFolder
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "notices");
+    // The chosen folder, or the default one in BrimDeck's install folder (NoticeStorage).
+    public static string HistoryFolder(DeckSettings settings) => settings.NoticeHistoryFolder.Length > 0 ? settings.NoticeHistoryFolder : NoticeStorage.DefaultFolder;
 
     private void UseHistoryFolder(DeckSettings settings)
     {
         string folder = HistoryFolder(settings);
         _keepHistory = settings.NoticeHistory;
+        if (settings.NoticesEnabled && settings.NoticeHistory) NoticeStorage.Prepare(folder);
         // Application icons are kept beside the saved notices only while notices are kept: memory only leaves nothing on disk.
         Icons.Folder = settings.NoticeHistory ? folder : "";
         if (_history?.DirectoryPath == folder)
@@ -396,6 +466,8 @@ internal sealed class NoticeCenter : IDisposable
         if (_historyLoaded || _history is null) return;
         _historyLoaded = true;
         if (!Settings.NoticeHistory) { _history.Delete(); return; }
+        // The first time, notices an earlier version kept in the old default folder (%LOCALAPPDATA%) move to the default one.
+        if (Settings.NoticeHistoryFolder.Length == 0) NoticeStorage.MoveLegacy(_history.DirectoryPath);
         HistoryState = _history.Load(out var notices, out var apps);
         if (HistoryState == NoticeHistoryState.Loaded) Hub.Load(notices, apps, DateTimeOffset.UtcNow);
     }
@@ -444,8 +516,10 @@ internal sealed class NoticeCenter : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        // "Clear on exit": the list is emptied before the last save, so nothing of it is left on disk.
+        if (_enabled && Settings.NoticeAutoClear == NoticeAutoClear.OnExit) Hub.Clear();
         Flush();
-        _attentionTimer.Stop(); _saveTimer.Stop(); _maintenance.Stop(); _quietCheck.Stop();
+        _attentionTimer.Stop(); _saveTimer.Stop(); _maintenance.Stop(); _quietCheck.Stop(); _resumeLimit.Stop();
         _windows.Dispose(); _wsl.Dispose(); _pipe?.Dispose(); _quiet.Dispose();
     }
 }
