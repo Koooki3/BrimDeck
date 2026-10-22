@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
@@ -40,10 +41,18 @@ internal sealed class PageHandover
 
     public PageHandover(Grid layer) { _layer = layer; _layer.RenderTransform = _layerShift; _layer.IsHitTestVisible = false; }
 
+    // Where a page's content lies in the layer, which spans the page's rows: its margins, with the top counted from the top of
+    // the first row. Taken before the rebuild or switch lays the rows out again.
+    public static Thickness Place(FrameworkElement content)
+    {
+        var slot = LayoutInformation.GetLayoutSlot(content);
+        return new Thickness(content.Margin.Left, slot.Top + content.Margin.Top, content.Margin.Right, content.Margin.Bottom);
+    }
+
     public void Hold(Panel content, UIElement? keep = null)
     {
         _held.Clear();
-        _margin = content.Margin;
+        _margin = Place(content);
         for (int i = content.Children.Count - 1; i >= 0; i--)
         {
             var child = content.Children[i];
@@ -68,19 +77,30 @@ internal sealed class PageHandover
         if (!page.IsVisible || width < 1 || height < 1 || PresentationSource.FromVisual(page) is null) return null;
         var dpi = VisualTreeHelper.GetDpi(page);
         var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
-        // Drawn through a brush, so the page's own offset in its parent does not move it within the picture.
         var drawing = new DrawingVisual();
-        using (var context = drawing.RenderOpen()) context.DrawRectangle(new VisualBrush(page), null, new Rect(0, 0, width, height));
+        using (var context = drawing.RenderOpen()) context.DrawRectangle(Exactly(page, width, height), null, new Rect(0, 0, width, height));
         picture.Render(drawing);
         picture.Freeze();
         return new Image { Source = picture, Width = width, Height = height, Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
     }
 
-    // Lets a captured page leave while content arrives. The picture keeps the page's top margin and is centred as the page was.
-    public void Send(UIElement? picture, Thickness margin, FrameworkElement content, Handover motion)
+    // A brush that draws an element's own area one to one, for pictures of it. The view box is the element's area, not the
+    // default bounds of what it draws, which a brush stretches to fill: a page drawing less than its area (the media page's one
+    // centred line, a short list) left as an enlarged picture of itself. A visual brush draws the element where it lies in its
+    // parent, offset included, so the area starts at that offset; from (0, 0) the picture's content came out lower by the
+    // page's top (the header row) and leaving pages were seen to drop.
+    public static VisualBrush Exactly(Visual element, double width, double height)
+    {
+        var offset = VisualTreeHelper.GetOffset(element);
+        return new(element) { Viewbox = new Rect(offset.X, offset.Y, width, height), ViewboxUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
+    }
+
+    // Lets a captured page leave while content arrives. The picture keeps the place the page had (Place, taken before the
+    // switch) and is centred as the page was.
+    public void Send(UIElement? picture, Thickness place, FrameworkElement content, Handover motion)
     {
         if (picture is null || motion == Handover.None || !Soft.Enabled) return;
-        Begin([picture], new Thickness(0, margin.Top, 0, 0), content, motion);
+        Begin([picture], new Thickness(0, place.Top, 0, 0), content, motion);
     }
 
     // The rebuilt content waiting for its arrival to start; it is held out of sight until then.
