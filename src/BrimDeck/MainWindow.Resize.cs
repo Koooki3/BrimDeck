@@ -267,11 +267,16 @@ public partial class MainWindow
         _pageWidth = width;
         if (_resizePage == DeckPage.Usage) _usageWidth = width;
         SetExpanded(true, instant: true);
-        // The surface follows every frame. The monitor page is built again only where it crosses a layout step, so it follows
-        // too; the usage and media pages are built again whole, about 25 times a second during the drag, and once more when it
-        // ends (FinishResize saves the size, which lays every page out again).
+        // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
+        // layout step and stretch in between, so they follow too; the model details and the media page are built again whole,
+        // about 25 times a second during the drag, and once more when it ends (FinishResize saves the size).
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
-        else if (Environment.TickCount64 - _resizeRendered >= 40) { _resizeRendered = Environment.TickCount64; RenderUsage(); }
+        else if (Environment.TickCount64 - _resizeRendered >= 40)
+        {
+            _resizeRendered = Environment.TickCount64;
+            // Columns that stay within their size step stretch; nothing else in the panel changes meanwhile.
+            if (_resizePage != DeckPage.Usage || _details || ColumnsBuild() != _usageBuilt) RenderUsage();
+        }
         _grips.Light(_resizeEdge == ResizeEdges.None ? _hoverEdge : _resizeEdge, true, SizeLabel(width, height));
     }
 

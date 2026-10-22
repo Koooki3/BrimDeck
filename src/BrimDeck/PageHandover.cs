@@ -1,0 +1,185 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+
+namespace BrimDeck;
+
+// How a rebuilt page takes over from the one it replaces.
+internal enum Handover
+{
+    // At once, as when nothing about the page's form changed (a reading, the clock).
+    None,
+    // The same page with other figures (a quota page, a filter, a period): as the monitor page changes a reading in place, the
+    // old content goes at once and the new comes up from faint, so old and new figures never overlap.
+    Dissolve,
+    // The page changed its form (a drag crossed a size step, an app was added): the old layout drops away quickly while the new
+    // one fades in, so two layouts of different type sizes overlap only briefly.
+    Morph,
+    // Deeper and back: the old content leaves toward the side it is left for while the new comes in from the other side, as
+    // pages of the page switch do (model details, application pages).
+    Forward, Back
+}
+
+// The usage and media pages are rebuilt rather than updated, so a change of form used to replace everything in one frame. Hold
+// takes the page's elements before a rebuild; Release then lets them leave on a layer above the page (LeavingContent, laid out with
+// the margin the page had) while the rebuilt content arrives, or drops them at once when the rebuild changed nothing that shows.
+// A rebuild during a hand-over that is still under way keeps that hand-over going and drops only its own old elements, so a
+// panel dragged across a size step does not cut its hand-over short 25 times a second. The page switch hands over a picture
+// of the page it leaves (Capture, Send): the pages keep their own elements, and the monitor page keeps its view across switches.
+internal sealed class PageHandover
+{
+    private const double Travel = 16, Faint = .3;
+    private readonly Grid _layer;
+    private readonly TranslateTransform _layerShift = new();
+    private readonly List<UIElement> _held = [];
+    private Thickness _margin;
+    private int _version;
+
+    public PageHandover(Grid layer) { _layer = layer; _layer.RenderTransform = _layerShift; _layer.IsHitTestVisible = false; }
+
+    public void Hold(Panel content, UIElement? keep = null)
+    {
+        _held.Clear();
+        _margin = content.Margin;
+        for (int i = content.Children.Count - 1; i >= 0; i--)
+        {
+            var child = content.Children[i];
+            if (child == keep) continue;
+            content.Children.RemoveAt(i);
+            _held.Insert(0, child);
+        }
+    }
+
+    public void Release(FrameworkElement content, Handover motion)
+    {
+        if (_held.Count == 0 || motion == Handover.None || !Soft.Enabled) { _held.Clear(); return; }
+        var leaving = _held.ToList();
+        _held.Clear();
+        Begin(leaving, _margin, content, motion);
+    }
+
+    // A picture of a page as it is on screen, to leave in its place; null for a page that is not laid out.
+    public static Image? Capture(FrameworkElement page)
+    {
+        double width = page.ActualWidth, height = page.ActualHeight;
+        if (!page.IsVisible || width < 1 || height < 1 || PresentationSource.FromVisual(page) is null) return null;
+        var dpi = VisualTreeHelper.GetDpi(page);
+        var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        // Drawn through a brush, so the page's own offset in its parent does not move it within the picture.
+        var drawing = new DrawingVisual();
+        using (var context = drawing.RenderOpen()) context.DrawRectangle(new VisualBrush(page), null, new Rect(0, 0, width, height));
+        picture.Render(drawing);
+        picture.Freeze();
+        return new Image { Source = picture, Width = width, Height = height, Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
+    }
+
+    // Lets a captured page leave while content arrives. The picture keeps the page's top margin and is centred as the page was.
+    public void Send(UIElement? picture, Thickness margin, FrameworkElement content, Handover motion)
+    {
+        if (picture is null || motion == Handover.None || !Soft.Enabled) return;
+        Begin([picture], new Thickness(0, margin.Top, 0, 0), content, motion);
+    }
+
+    // The rebuilt content waiting for its arrival to start; it is held out of sight until then.
+    private FrameworkElement? _holding;
+
+    // The hand-over starts once the rebuilt page has been laid out and drawn: building it takes a frame or two, and a move
+    // started at once lost its first part to them and jumped. Until then the old content stays as it was and the new one out
+    // of sight. Timing and curve are the system monitor's (Soft.Follow): what leaves goes in about a fifth of a second, what
+    // arrives takes the monitor's move.
+    private void Begin(List<UIElement> leaving, Thickness margin, FrameworkElement content, Handover motion)
+    {
+        Drop();
+        int version = _version;
+        _layer.Margin = margin;
+        foreach (var child in leaving) _layer.Children.Add(child);
+        var shift = content.RenderTransform as TranslateTransform;
+        if (shift is null || shift.IsFrozen) content.RenderTransform = shift = new TranslateTransform();
+        bool arrives = motion != Handover.Dissolve;
+        if (motion == Handover.Dissolve)
+        {
+            // Nothing leaves; the rebuilt content brightens from faint once it has been laid out.
+            _layer.Children.Clear();
+            _holding = content; content.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(Faint, Faint, TimeSpan.Zero));
+        }
+        else if (arrives) { _holding = content; content.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 0, TimeSpan.Zero)); }
+        content.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            if (_version != version) return;
+            _holding = null;
+            int leave = motion == Handover.Morph ? Soft.Hover : 200;
+            int arrive = motion == Handover.Morph ? Soft.Short : Soft.Move;
+            if (motion == Handover.Dissolve) { content.BeginAnimation(UIElement.OpacityProperty, Arrival(Faint, 1, Soft.Short)); return; }
+            var away = Soft.Fade(1, 0, leave, Soft.Follow);
+            away.Completed += (_, _) => { if (_version == version) EndLeave(); };
+            _layer.BeginAnimation(UIElement.OpacityProperty, away);
+            if (!arrives) return;
+            content.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, arrive));
+            if (motion == Handover.Morph) return;
+            double direction = motion == Handover.Back ? -1 : 1;
+            _layerShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(0, -direction * Travel, leave, Soft.Follow));
+            shift.BeginAnimation(TranslateTransform.XProperty, Arrival(direction * Travel, 0, arrive));
+        });
+    }
+
+    // Ends a hand-over at once: the old elements go and the page is in place, also when its arrival had not started yet.
+    public void Drop()
+    {
+        if (_holding is { } held)
+        {
+            held.BeginAnimation(UIElement.OpacityProperty, null);
+            _holding = null;
+        }
+        EndLeave();
+    }
+
+    // The old elements have gone; an arrival under way carries on.
+    private void EndLeave()
+    {
+        _version++;
+        _layer.BeginAnimation(UIElement.OpacityProperty, null); _layer.Opacity = 1;
+        _layerShift.BeginAnimation(TranslateTransform.XProperty, null); _layerShift.BeginAnimation(TranslateTransform.YProperty, null);
+        _layerShift.X = _layerShift.Y = 0;
+        _layer.Children.Clear();
+    }
+
+    // Brings a toolbar part that the rebuild showed in with the content: held out of sight with it, and arriving with it once
+    // the page has been laid out (Begin).
+    public static void Arrive(UIElement element, Handover motion)
+    {
+        if (motion is not (Handover.Forward or Handover.Back) || element.Visibility != Visibility.Visible) return;
+        HoldThenArrive(element, 0, Soft.Choose);
+    }
+
+    // Brings one rebuilt part up from faint (a column whose quota page flipped), once the page has been laid out.
+    public static void Brighten(UIElement element) => HoldThenArrive(element, Faint, Soft.Short);
+
+    private static void HoldThenArrive(UIElement element, double from, int milliseconds)
+    {
+        if (!Soft.Enabled) return;
+        element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(from, from, TimeSpan.Zero));
+        element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => element.BeginAnimation(UIElement.OpacityProperty, Arrival(from, 1, milliseconds)));
+    }
+
+    // An arrival returns the property to its value when it ends, so nothing is left animated.
+    private static DoubleAnimation Arrival(double from, double to, int milliseconds)
+    {
+        var animation = Soft.Fade(from, to, milliseconds, Soft.Follow);
+        animation.FillBehavior = FillBehavior.Stop;
+        return animation;
+    }
+
+    // Moves an element that the rebuild keeps (a transport button) to its new place: it glides from where it is now, or is set
+    // at once. The property keeps the new value; the glide only covers the way there.
+    public static void Glide(UIElement element, DependencyProperty property, double to, bool animate, int milliseconds = Soft.Choose)
+    {
+        double from = (double)element.GetValue(property);
+        element.BeginAnimation(property, null);
+        element.SetValue(property, to);
+        if (!animate || !double.IsFinite(from) || Math.Abs(from - to) < .5) return;
+        element.BeginAnimation(property, Arrival(from, to, milliseconds));
+    }
+}
