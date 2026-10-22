@@ -78,7 +78,7 @@ public sealed partial class SettingsWindow
                 NoticeSourceState.NeedsAccess => (Loc.T("需要授权：点击“允许访问”，Windows 会询问是否允许 BrimDeck 读取通知。", "Needs access: click \"Allow access\" and Windows asks whether BrimDeck may read notifications."), true),
                 NoticeSourceState.Denied => (Loc.T("Windows 拒绝了访问。可在“设置 › 隐私和安全性 › 通知”中允许应用访问通知。", "Windows denies access. Allow apps to access notifications in Settings › Privacy & security › Notifications."), true),
                 NoticeSourceState.Events => (Loc.T("正在接收（事件模式）", "Receiving (event mode)"), false),
-                NoticeSourceState.Polling => (Loc.T("正在接收（轮询模式：每 2 秒检查新通知，每 10 秒完整同步一次）", "Receiving (polling mode: checks for new notices every 2 s and reads the whole list every 10 s)"), false),
+                NoticeSourceState.Polling => (Loc.T("正在接收（轮询模式：每 2.5 秒检查新通知，每 15 秒完整读取一次）", "Receiving (polling mode: checks for new notices every 2.5 s and reads the whole list every 15 s)"), false),
                 _ => (Loc.T("读取失败，稍后重试。", "Reading failed; trying again shortly."), true)
             };
         });

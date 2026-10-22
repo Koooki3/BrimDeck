@@ -28,6 +28,7 @@ public sealed partial class SettingsWindow : Window
     private readonly StackPanel _content = new();
     private readonly TextBlock _status = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
     private ScrollViewer _scroll = null!;
+    private ScrollViewer? _navigationScroll;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
         Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("灵动提示", "Dynamic notices")];
     // The order of the pages in the navigation; the theme page (ThemePage) is listed with the appearance pages, and the system
@@ -146,7 +147,7 @@ public sealed partial class SettingsWindow : Window
         Background = UI.Brush(Surface); Foreground = UI.Brush(TextPrimary); FontFamily = UI.PanelFont;
         // Detach reused panels before rebuilding the window's theme-specific surfaces.
         _navigation.Children.Clear(); _content.Children.Clear();
-        if (_navigation.Parent is Panel oldNavigation) oldNavigation.Children.Remove(_navigation);
+        if (_navigation.Parent is ScrollViewer oldNavigation) oldNavigation.Content = null;
         if (_scroll is not null) _scroll.Content = null;
         if (_status.Parent is Panel oldStatus) oldStatus.Children.Remove(_status);
         var outer = new Grid { Background = UI.Brush(Surface) };
@@ -154,7 +155,11 @@ public sealed partial class SettingsWindow : Window
         var sidebar = new Grid { Background = UI.Brush(Sidebar) };
         sidebar.RowDefinitions.Add(new RowDefinition { Height = new GridLength(100) }); sidebar.RowDefinitions.Add(new RowDefinition());
         sidebar.Children.Add(Brand(24, new Thickness(24, 0, 22, 0)));
-        _navigation.Margin = new Thickness(12, 0, 12, 0); Grid.SetRow(_navigation, 1); sidebar.Children.Add(_navigation);
+        // The list of pages scrolls once it is taller than the window, so the last pages (About) stay reachable in a short window.
+        _navigation.Margin = new Thickness(12, 0, 12, 12);
+        _navigationScroll = new ScrollViewer { Style = (Style)FindResource("SettingsScrollViewer"), Content = _navigation, Focusable = false,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        Grid.SetRow(_navigationScroll, 1); sidebar.Children.Add(_navigationScroll);
         outer.Children.Add(sidebar); outer.Children.Add(new Border { Width = 1, Background = UI.Brush(Divider), HorizontalAlignment = HorizontalAlignment.Right });
         // The scroll area clips at its edges, so the content keeps a 4 DIP inset inside it for keyboard focus outlines
         // that extend past a control; the outer margins give those 4 DIP back and the page stays where it was.
@@ -329,6 +334,8 @@ public sealed partial class SettingsWindow : Window
             if (i == 7) { _updateBadge = UpdateBadge(); row.Children.Add(_updateBadge); }
             var button=new Button { Style=(Style)FindResource("SettingsNav"),Content=row,Margin=new Thickness(0,0,0,4),Tag=selected ? "Selected" : null };
             button.Click+=(_,_)=>ShowPage(target); AutomationProperties.SetName(button,_pages[i]); _navigation.Children.Add(button);
+            // The rebuilt list keeps its scroll position; a page opened from elsewhere (the tray, a link) is brought into view.
+            if (selected) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => { if (button.IsLoaded) button.BringIntoView(); });
         }
         // The About page is titled by the wordmark itself, so the name does not appear twice.
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
