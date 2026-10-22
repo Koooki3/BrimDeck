@@ -22,14 +22,17 @@ public enum NoticeSourceState
 
 // The notifications Windows keeps for the current user (UserNotificationListener). Without package identity Windows does not
 // raise its change event for BrimDeck, so the list is read on a timer: every ProbeInterval only the id after the newest one
-// is looked up, which costs a fifth of reading the whole list, and the whole list is read every FullInterval and whenever
-// the probe finds a new notice. The first reading after starting, waking or being granted access is a baseline: notices
-// already there are not shown again.
+// is looked up (about 2.5 ms of CPU, a fifth of reading the whole list), and the whole list is read every FullInterval and
+// whenever the probe finds a new notice. The probe needs the newest id Windows has given out: notifications removed before
+// BrimDeck started can leave that ahead of the newest one still listed, so until a full reading has seen a notice arrive, the
+// list is read every UnknownInterval instead. Access is checked before every full reading, the only one that can conclude that a
+// notice was removed. The first reading after starting, waking or being granted access is a baseline: notices already there
+// are not shown again.
 // Events are raised on a worker thread.
 internal sealed class WindowsNoticeSource : IDisposable
 {
     public const string OwnAppId = "BrimDeck.Desktop";
-    public static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(2), FullInterval = TimeSpan.FromSeconds(10),
+    public static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(2.5), FullInterval = TimeSpan.FromSeconds(15),
         UnknownInterval = TimeSpan.FromSeconds(3), EventSafetyInterval = TimeSpan.FromSeconds(60), QuietInterval = TimeSpan.FromSeconds(30);
     private readonly object _gate = new();
     private readonly Dictionary<uint, string> _known = [];
@@ -39,6 +42,8 @@ internal sealed class WindowsNoticeSource : IDisposable
     private Task _loop = Task.CompletedTask;
     private uint _newest;
     private bool _baseline = true, _events, _dirty, _quiet;
+    // A full reading has seen a notice arrive, so _newest is the newest id Windows has given out and the probe can rely on it.
+    private bool _confirmed;
     private DateTimeOffset _lastFull = DateTimeOffset.MinValue;
     private readonly SemaphoreSlim _wake = new(0, 1);
 
@@ -66,7 +71,7 @@ internal sealed class WindowsNoticeSource : IDisposable
     {
         if (_run is not null) return;
         _run = new CancellationTokenSource();
-        lock (_gate) { _baseline = true; _known.Clear(); _newest = 0; }
+        lock (_gate) { _baseline = true; _known.Clear(); _newest = 0; _confirmed = false; }
         SystemEvents.PowerModeChanged += PowerModeChanged;
         var token = _run.Token;
         _loop = Task.Run(() => LoopAsync(token), token);
@@ -128,11 +133,26 @@ internal sealed class WindowsNoticeSource : IDisposable
 
     private async Task StepAsync(CancellationToken token)
     {
+        var now = DateTimeOffset.UtcNow;
+        bool full, quiet;
+        uint newest;
+        bool confirmed;
+        lock (_gate) { full = _dirty || _baseline; quiet = _quiet; newest = _newest; confirmed = _confirmed; }
+        var interval = quiet ? QuietInterval : _events ? EventSafetyInterval : !confirmed ? UnknownInterval : FullInterval;
+        if (!full && now - _lastFull >= interval) full = true;
+        // The next id is taken by the next notice for this user, so finding it means something arrived. Without access the
+        // lookup finds nothing, and the next full reading reports the change of access.
+        if (!full && _listener is not null && !_events && !quiet && newest > 0)
+        {
+            try { if (_listener.GetNotification(newest + 1) is not null) full = true; }
+            catch (Exception ex) when (ex is COMException or UnauthorizedAccessException) { full = true; }
+        }
+        if (!full && _listener is not null) return;
         // A revoked permission makes the list read as empty; that must not look like every notice being removed.
         var access = AccessStatus();
         if (access != UserNotificationListenerAccessStatus.Allowed)
         {
-            lock (_gate) { _baseline = true; _known.Clear(); _newest = 0; }
+            lock (_gate) { _baseline = true; _known.Clear(); _newest = 0; _confirmed = false; }
             if (_listener is { } old && _events) { try { old.NotificationChanged -= Changed; } catch (Exception ex) when (ex is COMException or InvalidOperationException) { } _events = false; }
             _listener = null;
             SetState(access == UserNotificationListenerAccessStatus.Unspecified ? NoticeSourceState.NeedsAccess : NoticeSourceState.Denied, "");
@@ -144,18 +164,9 @@ internal sealed class WindowsNoticeSource : IDisposable
             // Only a process with package identity gets the change event; without it subscribing fails (0x80070490).
             try { _listener.NotificationChanged += Changed; _events = true; }
             catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException) { _events = false; }
-            lock (_gate) _dirty = true;
         }
         SetState(_events ? NoticeSourceState.Events : NoticeSourceState.Polling, "");
-        var now = DateTimeOffset.UtcNow;
-        bool full, quiet;
-        uint newest;
-        lock (_gate) { full = _dirty || _baseline; quiet = _quiet; newest = _newest; _dirty = false; }
-        var interval = quiet ? QuietInterval : _events ? EventSafetyInterval : newest == 0 ? UnknownInterval : FullInterval;
-        if (!full && now - _lastFull >= interval) full = true;
-        // The next id is taken by the next notice for this user, so finding it means something arrived.
-        if (!full && !_events && !quiet && newest > 0 && _listener.GetNotification(newest + 1) is not null) full = true;
-        if (!full) return;
+        lock (_gate) _dirty = false;
         _lastFull = now;
         var list = await _listener.GetNotificationsAsync(NotificationKinds.Toast).AsTask(token);
         Sync(list);
@@ -178,6 +189,7 @@ internal sealed class WindowsNoticeSource : IDisposable
                 // One unreadable notification is skipped without affecting the others.
                 var input = Read(notification, id);
                 _known[id] = input?.InstanceKey ?? "";
+                if (!_baseline) _confirmed = true;
                 if (input is not null && !_baseline) added.Add(input);
             }
             foreach (var gone in _known.Keys.Where(id => !present.Contains(id)).ToList())

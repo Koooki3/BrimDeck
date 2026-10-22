@@ -40,6 +40,9 @@ internal sealed class NoticeWindow : Window
     private NoticeFrame _collapsed = null!, _toastFrame = null!, _detailFrame = null!;
     private Rect _stageRect;
     private bool _showingDetail, _keyboard, _arrivedUnderPointer, _leaving, _openFailed;
+    private TextBlock? _announced;
+    // The details' row of actions; the keyboard starts on its last button, the main action.
+    private Panel? _actions;
     private int _generation;
 
     public NoticeWindow(MainWindow deck, App app)
@@ -55,7 +58,6 @@ internal sealed class NoticeWindow : Window
         // The text sits on the theme's opaque surface, as the island's does, so ClearType stays on for it.
         RenderOptions.SetClearTypeHint(_content, ClearTypeHint.Enabled);
         AutomationProperties.SetName(_surface, Loc.T("灵动提示", "Dynamic notice"));
-        AutomationProperties.SetLiveSetting(_toast, AutomationLiveSetting.Polite);
         _toast.HorizontalAlignment = HorizontalAlignment.Center; _toast.VerticalAlignment = VerticalAlignment.Center;
         _detail.HorizontalAlignment = HorizontalAlignment.Center; _detail.VerticalAlignment = VerticalAlignment.Top;
         _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && _surface.IsMouseOver && !_showingDetail) OpenDetail(); }) { Interval = TimeSpan.FromMilliseconds(HoverOpenMs) };
@@ -121,10 +123,16 @@ internal sealed class NoticeWindow : Window
     {
         if (_item is null) return;
         _item = item;
-        _toastFrame = Frame(NoticeForm.Toast, ToastSize());
+        var wanted = ToastSize();
+        // While it shows, the notice only grows: text that changes length does not make it pulse in and out.
+        var frame = Frame(NoticeForm.Toast, new Size(Math.Max(wanted.Width, _toastFrame.Rect.Width), Math.Max(wanted.Height, _toastFrame.Rect.Height)));
+        // A burst updates the text many times a second; the surface only moves when its size changes, so an unchanged frame
+        // does not start the morph again (it would redraw the window at full frame rate for the whole burst).
+        bool moved = frame != _toastFrame;
+        _toastFrame = frame;
         BuildToast();
         if (_showingDetail) ShowDetailFrame(Duration(DetailMs) * .6, Soft.Follow);
-        else SetFrame(_toastFrame, Duration(EnterMs) * .6, Soft.Follow);
+        else if (moved) SetFrame(_toastFrame, Duration(EnterMs) * .6, Soft.Follow);
         Announce();
     }
 
@@ -339,7 +347,8 @@ internal sealed class NoticeWindow : Window
         if (Indicator) height -= 4;
         var (padding, plate) = ToastMetrics(height);
         double text = Math.Max(Measure(title, 12.5, FontWeights.SemiBold), summary.Length > 0 ? Measure(summary, 11.5, FontWeights.Normal) : 0);
-        return new Size(padding * 2 + plate + 10 + text + TrailingWidth(), height);
+        // In 16 DIP steps, so that titles of nearly the same length give the same width.
+        return new Size(Math.Ceiling((padding * 2 + plate + 10 + text + TrailingWidth()) / 16) * 16, height);
     }
 
     private double TrailingWidth() => _item is { Count: > 1 } ? 30 : Notice?.Progress is not null ? 26 : 12;
@@ -378,10 +387,13 @@ internal sealed class NoticeWindow : Window
         _toast.Children.Add(icon);
         var (title, summary) = ToastTexts();
         var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 6, 0) };
-        texts.Children.Add(Line(title, 12.5, _look.Primary, FontWeights.SemiBold));
+        // The title carries the whole notice for screen readers and is the live region they announce.
+        _announced = Line(title, 12.5, _look.Primary, FontWeights.SemiBold);
+        AutomationProperties.SetName(_announced, (notice?.AppName is { Length: > 0 } app ? app + ": " : "") + (summary.Length > 0 ? title + ", " + summary : title));
+        AutomationProperties.SetLiveSetting(_announced, AutomationLiveSetting.Polite);
+        texts.Children.Add(_announced);
         if (summary.Length > 0) texts.Children.Add(Line(summary, 11.5, _look.Secondary, FontWeights.Normal));
         Grid.SetColumn(texts, 1); _toast.Children.Add(texts);
-        AutomationProperties.SetName(_toast, summary.Length > 0 ? title + ", " + summary : title);
         var trailing = Trailing(notice);
         if (trailing is not null) { Grid.SetColumn(trailing, 2); _toast.Children.Add(trailing); }
     }
@@ -515,6 +527,7 @@ internal sealed class NoticeWindow : Window
                 actions.Children.Add(TextButton(action.Label, () => { if (Center.Invoke(notice, action.Key)) Dismiss(false); }, primary: false));
         if (notice is not null && Center.CanOpen(notice)) actions.Children.Add(TextButton(Loc.T("打开应用", "Open app"), () => _ = OpenAsync(notice), primary: true));
         stack.Children.Add(actions);
+        _actions = actions;
     }
 
     // Builds the details for the current item and moves the surface to their frame. The content keeps the final size while
@@ -660,7 +673,7 @@ internal sealed class NoticeWindow : Window
         _escape?.SetEnabled(false);
         NoticeNative.SetActivatable(new WindowInteropHelper(this).Handle, true);
         Activate();
-        Dispatcher.BeginInvoke(() => FirstButton(_detail)?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
+        Dispatcher.BeginInvoke(() => (_actions?.Children.OfType<Button>().LastOrDefault() ?? FirstButton(_detail))?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
 
     private void EndKeyboard()
@@ -696,7 +709,7 @@ internal sealed class NoticeWindow : Window
     // Screen readers hear the new notice once, politely, without the window taking focus.
     private void Announce()
     {
-        if (!AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged)) return;
-        (UIElementAutomationPeer.FromElement(_toast) ?? UIElementAutomationPeer.CreatePeerForElement(_toast))?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        if (_announced is null || !AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged)) return;
+        (UIElementAutomationPeer.FromElement(_announced) ?? UIElementAutomationPeer.CreatePeerForElement(_announced))?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }
 }

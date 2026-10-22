@@ -30,6 +30,8 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 | `claude-quota.json` | The last Claude quota read online (shares, reset times and the plan name), so per-model quotas such as Fable still show after a restart while the account API is rate limited; no sign-in token, not used once older than 7 days, deleted when the sign-in is rejected or removed |
 | `update-prompt.txt`, `updates\` | The last version you were told about, and downloaded installers |
 | `crash.log` | Error records; cleared when it exceeds 1 MB |
+| `notices\notices.dat`, `notices\icons\` | With dynamic notices on and kept: the recent notices (24 hours and at most 500 by default), encrypted for the current user with Windows encryption; application icons (from Windows, no notice content). The folder can be changed in settings |
+| `notices.log` | Dynamic notices' error records: error types, codes and code locations only, never titles or bodies; rotated past 256 KB |
 
 ## Network and security
 
@@ -37,6 +39,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 - Sign-in tokens are used only in memory and never written to disk; the sign-in caches of the Claude and Grok Bot desktop apps are decrypted in memory with Windows encryption for the current user.
 - Custom scripts run in a sandbox with no access to files, processes or .NET objects; see the limits in [Supported tools](ai-tools.md#custom-script).
 - The sound behind the equalizer is analyzed only in memory and never saved.
+- Dynamic notices (off by default) read only the current user's Windows notifications and use no network; the local channel accepts only the current user on this PC. WSL notices are off by default; an agent is installed in a distribution only once you switch it on. See [Dynamic notices](notices.md#privacy).
 
 ## NetEase Cloud Music full control
 

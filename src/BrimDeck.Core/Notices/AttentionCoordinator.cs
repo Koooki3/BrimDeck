@@ -21,6 +21,7 @@ public sealed class AttentionItem
     public bool Refresh { get; init; }
     internal DateTimeOffset SubmittedAt { get; set; }
     internal DateTimeOffset LastMerge { get; set; }
+    internal DateTimeOffset StartedAt { get; set; }
     internal TimeSpan Remaining { get; set; }
     // Lower comes first: high priority notices, then other notices and summaries, then quota alerts, then track changes.
     // The user's own interaction (rank 1 in the design) is not an item: it holds the lane instead.
@@ -91,7 +92,8 @@ public sealed class AttentionCoordinator
             if (lane.Current is { Kind: AttentionKind.Notice } shown && shown.Group == item.Group && now - shown.LastMerge <= AggregationWindow)
             {
                 Merge(shown, item, now);
-                if (!lane.Held && lane.Ends - now < MinimumRemaining) lane.Ends = now + MinimumRemaining;
+                // A source that keeps sending does not keep the island: a merged notice stays at most twice its duration.
+                if (!lane.Held && lane.Ends - now < MinimumRemaining && now - shown.StartedAt < shown.Duration * 2) lane.Ends = now + MinimumRemaining;
                 changes.Add(new(item.Lane, null, null, shown));
                 return changes;
             }
@@ -259,6 +261,7 @@ public sealed class AttentionCoordinator
     private void Start(Lane lane, AttentionItem item, DateTimeOffset now, List<AttentionChange> changes)
     {
         lane.Current = item;
+        item.StartedAt = now;
         lane.Ends = now + Positive(item.Remaining > TimeSpan.Zero ? item.Remaining : item.Duration);
         if (item.IsNotice) _noticeShows.Add(now);
         changes.Add(new(item.Lane, null, item, null));

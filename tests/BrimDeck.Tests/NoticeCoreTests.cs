@@ -162,6 +162,20 @@ internal static class NoticeCoreTests
         quiet.SetSuppressed(false, T0.AddSeconds(3), out int arrived);
         check("Suppression ends what shows and counts waiting and arriving notices for one summary", silenced.Single().Ended?.Key == "a" && arrived == 2 && quiet.Current("m") is null && quiet.Queued("m").Count == 0);
 
+        // A source sending every half second for 20 seconds: one merged notice may not hold the island all that time.
+        var chatty = new AttentionCoordinator();
+        int starts = 0;
+        DateTimeOffset? firstEnded = null;
+        for (int i = 0; i <= 40; i++)
+        {
+            var at = T0.AddMilliseconds(500 * i);
+            foreach (var change in chatty.Tick(at).Concat(chatty.Submit(Item("c", AttentionKind.Notice, "m" + i, "Chat", seconds: 6), at)))
+            {
+                if (change.Started is not null) starts++;
+                if (change.Ended is not null) firstEnded ??= at;
+            }
+        }
+        check("A source that keeps sending gives up the island within twice the duration plus the minimum", starts >= 2 && firstEnded <= T0.AddSeconds(13.5));
         var update = new AttentionCoordinator();
         update.Submit(Item("u", AttentionKind.Notice, "task", "T"), T0);
         var refreshed = update.Submit(Item("u", AttentionKind.Notice, "task", "T", refresh: true), T0.AddSeconds(5.5));

@@ -98,6 +98,15 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
 
     protected override Geometry GetLayoutClip(Size layoutSlotSize) => Outline();
 
+    // Screen readers and UI Automation see the notice as one named group holding its text and buttons.
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new NoticeSurfacePeer(this);
+
+    private sealed class NoticeSurfacePeer(NoticeSurface owner) : System.Windows.Automation.Peers.FrameworkElementAutomationPeer(owner)
+    {
+        protected override System.Windows.Automation.Peers.AutomationControlType GetAutomationControlTypeCore() => System.Windows.Automation.Peers.AutomationControlType.Group;
+        protected override string GetClassNameCore() => nameof(NoticeSurface);
+    }
+
     protected override void OnRender(DrawingContext drawing)
     {
         var outline = Outline();

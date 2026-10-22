@@ -427,10 +427,24 @@ begin
     RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', '{#RunValue}');
 end;
 
+// The optional identity package for dynamic notices (identity\Register-NoticeIdentity.ps1) points at this folder. A real
+// uninstall removes it for the current user; an upgrade keeps it, since the new version is installed in the same place.
+procedure RemoveNoticeIdentity;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -Command "Get-AppxPackage -Name BrimDeck.Notices | Remove-AppxPackage"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if (CurUninstallStep = usUninstall) and not HasParam('/UPGRADE') then
-    RemoveStartupEntry
+  begin
+    RemoveStartupEntry;
+    RemoveNoticeIdentity;
+  end
   else if (CurUninstallStep = usPostUninstall) and DeleteUserData and not HasParam('/UPGRADE') then
     DelTree(ExpandConstant('{#DataDir}'), True, True, True)
   else if (CurUninstallStep = usDone) and HasParam('/UI') then
