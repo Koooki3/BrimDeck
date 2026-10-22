@@ -109,11 +109,14 @@ internal sealed class AgentHost
                     await _claimLock.WaitAsync(_stop.Token);
                     try { await ClaimOrWatchAsync(); } finally { _claimLock.Release(); }
                     await _bus.Completion.WaitAsync(_stop.Token);
+                    // The bus went away (a restarted session bus): nothing is received until it is reached again.
+                    await ReportAsync(AgentStates.NoBus, "the session bus closed the connection");
                 }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) when (ex is IOException or SocketException or DBusException or InvalidDataException)
+                catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
+                // Whatever went wrong (an address that cannot be parsed included), the agent says so and tries again later.
+                catch (Exception ex)
                 {
-                    await ReportAsync(AgentStates.NoBus, ex.Message);
+                    await ReportAsync(AgentStates.NoBus, ex.GetType().Name + ": " + ex.Message);
                 }
                 finally { await DisposeBusesAsync(); }
             }
@@ -132,7 +135,8 @@ internal sealed class AgentHost
     {
         await _claimLock.WaitAsync();
         try { if (_bus is not null) { if (vacant) await ClaimOrWatchAsync(); else await WatchAsync(); } }
-        catch (Exception ex) when (ex is IOException or SocketException or DBusException or InvalidDataException or ObjectDisposedException) { }
+        catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine("reclaim: " + ex.GetType().Name + ": " + ex.Message); }
+        catch (OperationCanceledException) { }
         finally { _claimLock.Release(); }
     }
 
@@ -156,7 +160,8 @@ internal sealed class AgentHost
         if (owner == bus.UniqueName) { await ReportAsync(AgentStates.Server); return; }
         try
         {
-            var monitor = await DBusConnection.ConnectAsync(DBusConnection.SessionAddress(_uid)!, _uid, _stop.Token);
+            var address = DBusConnection.SessionAddress(_uid) ?? throw new IOException("The session bus address is gone.");
+            var monitor = await DBusConnection.ConnectAsync(address, _uid, _stop.Token);
             lock (_gate) _monitor.Owner = owner;
             monitor.Received = message =>
             {
@@ -277,7 +282,8 @@ internal sealed class AgentHost
         message.Distro = null;
         message.EventId ??= Guid.NewGuid().ToString("N");
         var waiter = new TaskCompletionSource<NoticeMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _replies[message.EventId] = waiter;
+        // A retry with the same id while the first is still on its way is the same notice; it must not take the first's reply.
+        if (!_replies.TryAdd(message.EventId, waiter)) return NoticeProtocol.Reply(NoticeResults.Duplicate, null, message.EventId);
         await SendAsync(message);
         try { return await waiter.Task.WaitAsync(TimeSpan.FromSeconds(5), _stop.Token); }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException) { return NoticeProtocol.Reply(NoticeResults.Rejected, "no-reply"); }

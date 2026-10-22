@@ -37,14 +37,20 @@ internal sealed class WindowsNoticeSource : IDisposable
     private readonly object _gate = new();
     private readonly Dictionary<uint, string> _known = [];
     private readonly Dictionary<string, Windows.ApplicationModel.AppInfo> _apps = new(StringComparer.OrdinalIgnoreCase);
-    private UserNotificationListener? _listener;
-    private CancellationTokenSource? _run;
-    private Task _loop = Task.CompletedTask;
+    // One Start's loop and what only it touches. Stop cancels it and the loop lets go of its listener as it ends, so a loop
+    // still finishing a reading never shares its listener or reports a state after Stop, even when Start follows at once.
+    private sealed class Run
+    {
+        public readonly CancellationTokenSource Stop = new();
+        public UserNotificationListener? Listener;
+        public bool Events;
+        public DateTimeOffset LastFull = DateTimeOffset.MinValue;
+    }
+    private Run? _run;
     private uint _newest;
-    private bool _baseline = true, _events, _dirty, _quiet;
+    private bool _baseline = true, _dirty, _quiet;
     // A full reading has seen a notice arrive, so _newest is the newest id Windows has given out and the probe can rely on it.
     private bool _confirmed;
-    private DateTimeOffset _lastFull = DateTimeOffset.MinValue;
     private readonly SemaphoreSlim _wake = new(0, 1);
 
     public NoticeSourceState State { get; private set; } = NoticeSourceState.Off;
@@ -70,21 +76,18 @@ internal sealed class WindowsNoticeSource : IDisposable
     public void Start()
     {
         if (_run is not null) return;
-        _run = new CancellationTokenSource();
-        lock (_gate) { _baseline = true; _known.Clear(); _newest = 0; _confirmed = false; }
+        var run = new Run();
+        lock (_gate) { _run = run; _baseline = true; _known.Clear(); _newest = 0; _confirmed = false; }
         SystemEvents.PowerModeChanged += PowerModeChanged;
-        var token = _run.Token;
-        _loop = Task.Run(() => LoopAsync(token), token);
+        _ = Task.Run(() => LoopAsync(run));
     }
 
     public void Stop()
     {
         if (_run is not { } run) return;
-        _run = null;
         SystemEvents.PowerModeChanged -= PowerModeChanged;
-        run.Cancel();
-        if (_listener is { } listener && _events) try { listener.NotificationChanged -= Changed; } catch (Exception ex) when (ex is COMException or InvalidOperationException) { }
-        _listener = null; _events = false;
+        // Cancelled under the lock, so the loop's last state report either comes before Off or not at all.
+        lock (_gate) { _run = null; run.Stop.Cancel(); }
         SetState(NoticeSourceState.Off, "");
     }
 
@@ -102,7 +105,7 @@ internal sealed class WindowsNoticeSource : IDisposable
         Wake();
     }
 
-    private void Wake() { try { _wake.Release(); } catch (SemaphoreFullException) { } }
+    private void Wake() { try { _wake.Release(); } catch (Exception ex) when (ex is SemaphoreFullException or ObjectDisposedException) { } }
 
     private void PowerModeChanged(object? sender, PowerModeChangedEventArgs e)
     {
@@ -116,68 +119,83 @@ internal sealed class WindowsNoticeSource : IDisposable
         Wake();
     }
 
-    private async Task LoopAsync(CancellationToken token)
+    private async Task LoopAsync(Run run)
     {
-        while (!token.IsCancellationRequested)
+        var token = run.Stop.Token;
+        try
         {
-            try { await StepAsync(token); }
-            catch (OperationCanceledException) { return; }
-            catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException)
+            while (!token.IsCancellationRequested)
             {
-                SetState(NoticeSourceState.Failed, ex.Message);
+                try { await StepAsync(run); }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException)
+                {
+                    SetState(NoticeSourceState.Failed, ex.Message, run);
+                }
+                try { await _wake.WaitAsync(ProbeInterval, token); }
+                catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { return; }
             }
-            try { await _wake.WaitAsync(ProbeInterval, token); }
-            catch (OperationCanceledException) { return; }
         }
+        finally { Detach(run); }
     }
 
-    private async Task StepAsync(CancellationToken token)
+    private void Detach(Run run)
     {
+        if (run.Listener is { } listener && run.Events)
+            try { listener.NotificationChanged -= Changed; } catch (Exception ex) when (ex is COMException or InvalidOperationException) { }
+        run.Listener = null; run.Events = false;
+    }
+
+    private async Task StepAsync(Run run)
+    {
+        var token = run.Stop.Token;
         var now = DateTimeOffset.UtcNow;
         bool full, quiet;
         uint newest;
         bool confirmed;
         lock (_gate) { full = _dirty || _baseline; quiet = _quiet; newest = _newest; confirmed = _confirmed; }
-        var interval = quiet ? QuietInterval : _events ? EventSafetyInterval : !confirmed ? UnknownInterval : FullInterval;
-        if (!full && now - _lastFull >= interval) full = true;
+        var interval = quiet ? QuietInterval : run.Events ? EventSafetyInterval : !confirmed ? UnknownInterval : FullInterval;
+        if (!full && now - run.LastFull >= interval) full = true;
         // The next id is taken by the next notice for this user, so finding it means something arrived. Without access the
         // lookup finds nothing, and the next full reading reports the change of access.
-        if (!full && _listener is not null && !_events && !quiet && newest > 0)
+        if (!full && run.Listener is { } probe && !run.Events && !quiet && newest > 0)
         {
-            try { if (_listener.GetNotification(newest + 1) is not null) full = true; }
+            try { if (probe.GetNotification(newest + 1) is not null) full = true; }
             catch (Exception ex) when (ex is COMException or UnauthorizedAccessException) { full = true; }
         }
-        if (!full && _listener is not null) return;
+        if (!full && run.Listener is not null) return;
         // A revoked permission makes the list read as empty; that must not look like every notice being removed.
         var access = AccessStatus();
+        token.ThrowIfCancellationRequested();
         if (access != UserNotificationListenerAccessStatus.Allowed)
         {
             lock (_gate) { _baseline = true; _known.Clear(); _newest = 0; _confirmed = false; }
-            if (_listener is { } old && _events) { try { old.NotificationChanged -= Changed; } catch (Exception ex) when (ex is COMException or InvalidOperationException) { } _events = false; }
-            _listener = null;
-            SetState(access == UserNotificationListenerAccessStatus.Unspecified ? NoticeSourceState.NeedsAccess : NoticeSourceState.Denied, "");
+            Detach(run);
+            SetState(access == UserNotificationListenerAccessStatus.Unspecified ? NoticeSourceState.NeedsAccess : NoticeSourceState.Denied, "", run);
             return;
         }
-        if (_listener is null)
+        if (run.Listener is null)
         {
-            _listener = UserNotificationListener.Current;
+            run.Listener = UserNotificationListener.Current;
             // Only a process with package identity gets the change event; without it subscribing fails (0x80070490).
-            try { _listener.NotificationChanged += Changed; _events = true; }
-            catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException) { _events = false; }
+            try { run.Listener.NotificationChanged += Changed; run.Events = true; }
+            catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException) { run.Events = false; }
         }
-        SetState(_events ? NoticeSourceState.Events : NoticeSourceState.Polling, "");
+        SetState(run.Events ? NoticeSourceState.Events : NoticeSourceState.Polling, "", run);
         lock (_gate) _dirty = false;
-        _lastFull = now;
-        var list = await _listener.GetNotificationsAsync(NotificationKinds.Toast).AsTask(token);
-        Sync(list);
+        run.LastFull = now;
+        var list = await run.Listener.GetNotificationsAsync(NotificationKinds.Toast).AsTask(token);
+        Sync(list, run);
     }
 
-    private void Sync(IReadOnlyList<UserNotification> list)
+    private void Sync(IReadOnlyList<UserNotification> list, Run run)
     {
         var added = new List<NoticeInput>();
         var removed = new List<string>();
         lock (_gate)
         {
+            // Stopped (and perhaps started again) while reading: this reading belongs to no run any more.
+            if (_run != run) return;
             var present = new HashSet<uint>();
             foreach (var notification in list)
             {
@@ -244,8 +262,10 @@ internal sealed class WindowsNoticeSource : IDisposable
         if (app is null) return null;
         try
         {
-            var logo = app.DisplayInfo.GetLogo(new Windows.Foundation.Size(64, 64));
+            // Desktop applications may have no display information or no logo at all.
+            if (app.DisplayInfo?.GetLogo(new Windows.Foundation.Size(64, 64)) is not { } logo) return null;
             using var stream = await logo.OpenReadAsync();
+            if (stream is null) return null;
             if (stream.Size == 0 || stream.Size > 2_000_000) return null;
             var bytes = new byte[stream.Size];
             using var reader = new Windows.Storage.Streams.DataReader(stream);
@@ -278,7 +298,9 @@ internal sealed class WindowsNoticeSource : IDisposable
         if (!IsAppId(appId)) return false;
         try
         {
-            var start = new System.Diagnostics.ProcessStartInfo("explorer.exe") { UseShellExecute = false };
+            // By its full path: a bare name is also looked for in BrimDeck's folder and the current directory.
+            var explorer = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+            var start = new System.Diagnostics.ProcessStartInfo(explorer) { UseShellExecute = false };
             start.ArgumentList.Add("shell:AppsFolder\\" + appId);
             using var shell = System.Diagnostics.Process.Start(start);
             return shell is not null;
@@ -287,17 +309,23 @@ internal sealed class WindowsNoticeSource : IDisposable
     }
 
     // Letters, digits and the punctuation application ids use (package family names, "!App", "{GUID}\\folder\\app.exe");
-    // no commas, slashes, colons, quotes or leading dashes, which the shell would read as switches or paths.
+    // no commas, slashes, colons, quotes, ".." or leading dashes, which the shell would read as switches or paths.
     internal static bool IsAppId(string appId)
-        => appId.Length is > 0 and <= 512 && appId[0] is not ('-' or '/' or '\\' or '.')
+        => appId.Length is > 0 and <= 512 && appId[0] is not ('-' or '/' or '\\' or '.') && !appId.Contains("..", StringComparison.Ordinal)
            && appId.All(c => char.IsLetterOrDigit(c) || c is '.' or '_' or '!' or '{' or '}' or '-' or '\\' or ' ' or '+' or '(' or ')' or '~');
 
-    private void SetState(NoticeSourceState state, string detail)
+    // A loop reports only while its run is current: after Stop the state stays Off.
+    private void SetState(NoticeSourceState state, string detail, Run? run = null)
     {
-        if (State == state && Detail == detail) return;
-        State = state; Detail = detail;
+        lock (_gate)
+        {
+            if (run is not null && _run != run) return;
+            if (State == state && Detail == detail) return;
+            State = state; Detail = detail;
+        }
         StateChanged?.Invoke();
     }
 
-    public void Dispose() { Stop(); _wake.Dispose(); }
+    // The semaphore is left alone: a loop still ending, or a late change event, may touch it.
+    public void Dispose() => Stop();
 }

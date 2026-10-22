@@ -9,7 +9,7 @@ its external location. Nothing is copied or moved and no administrator rights ar
 package like this one while Developer Mode is on (Settings > System > For developers); a release signed with a trusted
 certificate does not need it. Quit BrimDeck first and start it again afterwards.
 
-Run with -Remove to unregister. Uninstalling BrimDeck does not remove the registration; run -Remove before uninstalling.
+Run with -Remove to unregister. Uninstalling BrimDeck removes the registration for the user who uninstalls it; upgrading keeps it.
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\BrimDeck\identity\Register-NoticeIdentity.ps1"

@@ -71,6 +71,11 @@ public static class NoticeIntake
         return icon.StartsWith('/') ? !icon.StartsWith("//", StringComparison.Ordinal) : icon.IndexOf('/') < 0;
     }
 
+    // A WSL distribution's name as WSL allows it: letters, digits, ".", "_" and "-". It is used in \\wsl.localhost paths and
+    // passed to wsl.exe, so nothing else may get through.
+    public static bool IsDistroName(string name)
+        => name.Length is > 0 and <= 64 && name is not ("." or "..") && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-');
+
     private static string Name(string? name, string fallback) => string.IsNullOrWhiteSpace(name) ? fallback : name.Trim();
     private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }

@@ -205,6 +205,13 @@ internal static class NoticeCoreTests
         check("A file with broken contents is reported", history.Load(out _, out _) == NoticeHistoryState.Unreadable);
         history.Delete();
         check("Deleting removes the file", !File.Exists(history.FilePath));
+        history.Save([notice], [], wanted: () => false);
+        check("A save no longer wanted when it writes leaves no file", !File.Exists(history.FilePath) && !File.Exists(history.FilePath + ".tmp"));
+        var writers = Enumerable.Range(0, 8).Select(i => Task.Run(() => history.Save([notice], []))).ToArray();
+        bool together = true;
+        try { Task.WaitAll(writers); } catch (AggregateException) { together = false; }
+        check("Saves at the same time take turns instead of failing", together && history.Load(out var last, out _) == NoticeHistoryState.Loaded && last.Count == 1);
+        history.Delete();
     }
 
     private static void Geometry(Action<string, bool> check)
@@ -269,6 +276,9 @@ internal static class NoticeCoreTests
         check("A watched desktop notice offers nothing that cannot be done", watched.Capabilities == NoticeCapabilities.None && watched.Actions.Count == 0);
         var cli = NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", Title = "t" }, "Debian", true);
         check("brim-notify through the agent is keyed by the agent's distribution", cli.Origin == NoticeOrigin.Cli && cli.AppKey == "cli:Debian:brim-notify" && cli.Distro == "Debian");
+        check("Distribution names are WSL's own characters only", NoticeIntake.IsDistroName("Ubuntu-24.04") && NoticeIntake.IsDistroName("my_distro")
+            && !NoticeIntake.IsDistroName("..") && !NoticeIntake.IsDistroName(@"..\server") && !NoticeIntake.IsDistroName("a/b") && !NoticeIntake.IsDistroName("Ubuntu 24")
+            && !NoticeIntake.IsDistroName("") && !NoticeIntake.IsDistroName(new string('a', 65)));
         check("File URLs become paths", NoticeIntake.IconRef("file:///C:/icons/a.png", NoticeOrigin.Cli, null) == "file:C:/icons/a.png" || NoticeIntake.IconRef("file:///C:/icons/a.png", NoticeOrigin.Cli, null) == @"file:C:\icons\a.png");
     }
 
@@ -294,12 +304,12 @@ internal static class NoticeCoreTests
         var odd = new DeckSettings
         {
             NoticeScreen = (NoticeScreen)42, NoticeDuration = 0, NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity,
-            NoticeWslDistros = ["Ubuntu", " ubuntu ", "", "Debian"],
+            NoticeWslDistros = ["Ubuntu", " ubuntu ", "", "Debian", @"..\..\server\share", "a b"], NoticeHistoryFolder = @"relative\notices",
             NoticeApps = [new() { Key = "a", AccentColor = "ff0000", Priority = (NoticePriority)9, Privacy = (NoticePrivacy)9 }, new() { Key = "a" }, new() { Key = " " }]
         };
         odd.Normalize();
         check("Notice settings are normalized", odd.NoticeScreen == NoticeScreen.Foreground && odd.NoticeDuration == 2 && odd.NoticeHistoryHours == 168
-            && odd.NoticesWidth == 460 && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeApps.Count == 1 && odd.NoticeApps[0].AccentColor == "#FF0000"
+            && odd.NoticesWidth == 460 && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeHistoryFolder == "" && odd.NoticeApps.Count == 1 && odd.NoticeApps[0].AccentColor == "#FF0000"
             && odd.NoticeApps[0].Priority == NoticePriority.Normal && odd.NoticeApps[0].Privacy is null);
         var copy = odd.Copy();
         copy.NoticeApps[0].Muted = true; copy.NoticeWslDistros.Add("Arch");

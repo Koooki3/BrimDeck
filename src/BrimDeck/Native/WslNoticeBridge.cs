@@ -25,6 +25,8 @@ internal sealed class WslNoticeBridge : IDisposable
     public event Action? StateChanged;
 
     public static string AgentPath => Path.Combine(AppContext.BaseDirectory, "wsl", "brimdeck-agent");
+    // By its full path: a bare name is also looked for in BrimDeck's folder and the current directory before System32.
+    public static string WslExe => Path.Combine(Environment.SystemDirectory, "wsl.exe");
     public static string HelperPath => Path.Combine(AppContext.BaseDirectory, "BrimDeck.Notify.exe");
     public static bool AgentPackaged => File.Exists(AgentPath);
 
@@ -98,7 +100,7 @@ internal sealed class WslNoticeBridge : IDisposable
 
     internal static async Task<string?> RunWslAsync(IEnumerable<string> arguments, CancellationToken token, Encoding? encoding = null, TimeSpan? timeout = null)
     {
-        var start = new ProcessStartInfo("wsl.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = encoding ?? Encoding.UTF8 };
+        var start = new ProcessStartInfo(WslExe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = encoding ?? Encoding.UTF8 };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         try
         {
@@ -141,7 +143,8 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
 {
     // Copies the agent from Windows (path as $1, converted by wslpath), records how brim-notify reaches Windows without the
     // agent ($2), adds ~/.local/bin/brim-notify unless the user has a different file there, and writes the stamp ($3) last.
-    private const string InstallScript = """
+    // sh needs plain line feeds; a raw string takes the source file's line endings, which Git on Windows checks out as CRLF.
+    private static readonly string InstallScript = """
         set -e
         dir="$HOME/.local/share/brimdeck"
         mkdir -p "$dir"
@@ -158,7 +161,7 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
           chmod 755 "$b"
         fi
         printf '%s' "$3" > "$dir/agent.version"
-        """;
+        """.ReplaceLineEndings("\n");
     private const string StampScript = "cat \"$HOME/.local/share/brimdeck/agent.version\" 2>/dev/null || true";
     private readonly object _gate = new();
     private readonly SemaphoreSlim _writeLock = new(1, 1);
@@ -197,7 +200,7 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
                 _installed = true;
             }
             SetState(WslAgentState.Starting, "");
-            var start = new ProcessStartInfo("wsl.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            var start = new ProcessStartInfo(WslNoticeBridge.WslExe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var argument in new[] { "-d", Distribution, "--cd", "~", "--exec", "/bin/sh", "-c", "exec \"$HOME/.local/share/brimdeck/brimdeck-agent\" serve" }) start.ArgumentList.Add(argument);
             var process = Process.Start(start);
             if (process is null) { Retry("start"); return; }

@@ -25,7 +25,9 @@ internal sealed class NoticeCenter : IDisposable
     private readonly WslNoticeBridge _wsl = new();
     private readonly NoticeQuiet _quiet;
     private NoticePipeServer? _pipe;
-    private NoticeHistory? _history;
+    private volatile NoticeHistory? _history;
+    // Whether notices are kept on disk, for a save finishing on a worker thread (see NoticeHistory.Save).
+    private volatile bool _keepHistory;
     private bool _historyLoaded, _saving, _savePending, _enabled, _disposed;
     private DateTimeOffset? _attentionAt;
     // Messages each link (the pipe, each distribution) may deliver per window; more are refused until the window moves on.
@@ -61,7 +63,8 @@ internal sealed class NoticeCenter : IDisposable
         Hub.Changed += () => Changed?.Invoke();
         Hub.Persist += QueueSave;
         Icons.Loaded += _ => Changed?.Invoke();
-        _windows.Received += input => _dispatcher.BeginInvoke(() => Receive(input));
+        // A reading still under way when notices or the source were switched off arrives late; it is dropped.
+        _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && Settings.NoticeWindowsSource) Receive(input); });
         _windows.Removed += key => _dispatcher.BeginInvoke(() => Hub.SourceRemoved(key));
         _windows.StateChanged += () => _dispatcher.BeginInvoke(() => Changed?.Invoke());
         _wsl.Received += (distro, message) => _dispatcher.BeginInvoke(() => FromAgent(distro, message));
@@ -173,7 +176,7 @@ internal sealed class NoticeCenter : IDisposable
 
     private void FromAgent(string distro, NoticeMessage message)
     {
-        if (!_enabled || NoticeProtocol.Validate(message) is not null) return;
+        if (!_enabled || !Settings.NoticeWslDistros.Contains(distro, StringComparer.OrdinalIgnoreCase) || NoticeProtocol.Validate(message) is not null) return;
         bool server = _wsl.States.TryGetValue(distro, out var state) && state.State == WslAgentState.Server;
         switch (message.Type)
         {
@@ -337,6 +340,7 @@ internal sealed class NoticeCenter : IDisposable
     {
         if (!_enabled) return;
         if (Settings.NoticesPausedUntil is { } until && until <= DateTimeOffset.UtcNow) { _app.Settings.NoticesPausedUntil = null; _app.QueueSave(); }
+        _quiet.Recheck();
         bool quiet = _quiet.Locked || Paused || Settings.NoticeRespectFocus && (_quiet.FocusActive || NoticeQuiet.PresentationOrQuietTime());
         _windows.SetQuiet(_quiet.Locked || Paused);
         if (quiet) { if (!_quietCheck.IsEnabled) _quietCheck.Start(); } else _quietCheck.Stop();
@@ -373,14 +377,16 @@ internal sealed class NoticeCenter : IDisposable
     private void UseHistoryFolder(DeckSettings settings)
     {
         string folder = HistoryFolder(settings);
-        Icons.Folder = folder;
+        _keepHistory = settings.NoticeHistory;
+        // Application icons are kept beside the saved notices only while notices are kept: memory only leaves nothing on disk.
+        Icons.Folder = settings.NoticeHistory ? folder : "";
         if (_history?.DirectoryPath == folder)
         {
-            if (!settings.NoticeHistory) _history.Delete();
+            if (!settings.NoticeHistory) { _history.Delete(); NoticeIcons.DeleteStored(folder); }
             return;
         }
         // A new folder takes the notices from now on; the file in the old one is removed so no copy stays behind.
-        _history?.Delete();
+        if (_history is { } old) { old.Delete(); NoticeIcons.DeleteStored(old.DirectoryPath); }
         _history = new NoticeHistory(folder, new NoticeProtection());
         if (_historyLoaded && settings.NoticeHistory) QueueSave();
     }
@@ -417,16 +423,17 @@ internal sealed class NoticeCenter : IDisposable
         _saving = true;
         var notices = Hub.Notices.Select(n => n.Copy()).ToList();
         var apps = Hub.KnownApps.ToList();
-        try { await Task.Run(() => history.Save(notices, apps)); }
+        try { await Task.Run(() => history.Save(notices, apps, () => _keepHistory && _history == history)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { }
         finally { _saving = false; }
         if (_savePending) { _savePending = false; QueueSave(); }
     }
 
-    // On exit: what is not saved yet is written now.
+    // On exit: what is not saved yet is written now. A background save still writing is waited for (NoticeHistory.Save takes
+    // one writer at a time) and followed by this one, so the newest list is the one left on disk.
     public void Flush()
     {
-        if (!_saveTimer.IsEnabled && !_savePending) return;
+        if (!_saveTimer.IsEnabled && !_savePending && !_saving) return;
         _saveTimer.Stop(); _savePending = false;
         if (_history is not { } history || !Settings.NoticeHistory || HistoryState == NoticeHistoryState.Unreadable) return;
         try { history.Save(Hub.Notices, Hub.KnownApps); }

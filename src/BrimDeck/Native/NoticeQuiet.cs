@@ -11,12 +11,16 @@ internal sealed class NoticeQuiet : IDisposable
 {
     private readonly System.Windows.Threading.Dispatcher _dispatcher;
     private Windows.UI.Shell.FocusSessionManager? _focus;
-    public bool Locked { get; private set; }
+    // Locked: the session's lock screen is up. Away: the session is not on the screen (another user's is, or a remote
+    // connection ended). Either keeps notices back.
+    private bool _sessionLocked, _away;
+    public bool Locked => _sessionLocked || _away;
     public event Action? Changed;
 
     public NoticeQuiet(System.Windows.Threading.Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
+        _sessionLocked = SessionLocked() ?? false;
         SystemEvents.SessionSwitch += SessionSwitch;
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621))
         {
@@ -52,14 +56,43 @@ internal sealed class NoticeQuiet : IDisposable
 
     private void SessionSwitch(object sender, SessionSwitchEventArgs e)
     {
-        bool? locked = e.Reason switch
+        var reason = e.Reason;
+        _dispatcher.BeginInvoke(() =>
         {
-            SessionSwitchReason.SessionLock or SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect => true,
-            SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect => false,
-            _ => null
-        };
-        if (locked is not { } value) return;
-        _dispatcher.BeginInvoke(() => { if (Locked == value) return; Locked = value; Changed?.Invoke(); });
+            bool before = Locked;
+            switch (reason)
+            {
+                case SessionSwitchReason.SessionLock: _sessionLocked = true; break;
+                case SessionSwitchReason.SessionUnlock or SessionSwitchReason.SessionLogon: _sessionLocked = false; break;
+                case SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect: _away = true; break;
+                // Back on the screen, but perhaps at its lock screen (switching back to a locked session): Windows says which.
+                case SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect: _away = false; _sessionLocked = SessionLocked() ?? _sessionLocked; break;
+                default: return;
+            }
+            if (Locked != before) Changed?.Invoke();
+        });
+    }
+
+    // While held back for a lock, asks Windows again (from the periodic quiet check), so a missed unlock does not keep
+    // notices back for good. The caller recomputes the quiet state.
+    public void Recheck()
+    {
+        if (_sessionLocked && SessionLocked() == false) _sessionLocked = false;
+    }
+
+    // Whether this session's lock screen is up (WTSSessionInfoEx's session flags), or null when Windows does not say.
+    private static bool? SessionLocked()
+    {
+        const int SessionInfoEx = 25, Level1 = 1, LockedFlag = 0, UnlockedFlag = 1;
+        const uint CurrentSession = uint.MaxValue;
+        if (!WTSQuerySessionInformationW(IntPtr.Zero, CurrentSession, SessionInfoEx, out var buffer, out int bytes)) return null;
+        try
+        {
+            // WTSINFOEXW: the level, then (8-byte aligned) the session id, its connect state and its flags.
+            if (bytes < 20 || Marshal.ReadInt32(buffer) != Level1) return null;
+            return Marshal.ReadInt32(buffer, 16) switch { LockedFlag => true, UnlockedFlag => false, _ => null };
+        }
+        finally { WTSFreeMemory(buffer); }
     }
 
     private void FocusChanged(Windows.UI.Shell.FocusSessionManager sender, object args) => _dispatcher.BeginInvoke(() => Changed?.Invoke());
@@ -73,6 +106,9 @@ internal sealed class NoticeQuiet : IDisposable
     }
 
     [DllImport("shell32")] private static extern int SHQueryUserNotificationState(out int state);
+    [DllImport("wtsapi32", SetLastError = true)]
+    private static extern bool WTSQuerySessionInformationW(IntPtr server, uint session, int infoClass, out IntPtr buffer, out int bytes);
+    [DllImport("wtsapi32")] private static extern void WTSFreeMemory(IntPtr memory);
 }
 
 // Window and monitor calls the notices need besides WindowsHost's.

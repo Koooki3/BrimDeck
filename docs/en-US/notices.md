@@ -74,7 +74,7 @@ Exit codes: 0 delivered (or kept quiet by your rules), 1 usage error, 2 refused,
 
 ## Privacy
 
-- Recent notices are kept for 24 hours, at most 500, encrypted on this PC with Windows' per-user data protection (DPAPI). Keeping them can be switched off (memory only), and the period and folder changed; they can be cleared at any time.
+- Recent notices are kept for 24 hours, at most 500, encrypted on this PC with Windows' per-user data protection (DPAPI). Keeping them can be switched off (memory only: then no application icons are kept on disk either), and the period and folder changed; they can be cleared at any time.
 - Raw notification content, attachments and pictures are never saved. Icons come only from Windows or local files; nothing is downloaded. Network paths, links and shortcuts as icons are refused.
 - The diagnostic log `notices.log` holds only error types, codes and code locations, never titles or bodies.
 - The local channel accepts only the current user on this PC (a named pipe that refuses network access). A notice's content is only ever shown as text: it is never run and its links are never opened.

@@ -83,6 +83,8 @@ public partial class MainWindow
     internal void AttentionUpdated(AttentionItem item)
     {
         if (item.IsNotice) _noticeWindow?.Update(item);
+        // The same quota rose again while its alert shows: the alert shows the new level.
+        else if (item.Kind == AttentionKind.Quota && item.Payload is CompactAlertInfo alert && _alert is not null) { _alert = alert; RenderCompact(); }
     }
 
     // While a notice covers the island, the island itself is not drawn (see NoticeWindow.Present and Finish).

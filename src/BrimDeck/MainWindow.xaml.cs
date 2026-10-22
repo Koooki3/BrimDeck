@@ -424,14 +424,17 @@ public partial class MainWindow : Window
     private static string QuotaKey(CompactAlertInfo alert) => "quota:" + alert.Entry.InstanceId + ":" + alert.Label;
     private void PresentAlert(CompactAlertInfo alert)
     {
-        if (IsSuppressed) return;
+        // Switched off or hidden since it was submitted: it ends at once instead of holding the island unseen.
+        if (IsSuppressed || !Settings.QuotaAlerts) { _app.Notices.Withdraw(QuotaKey(alert)); return; }
         _alert = alert;
         RenderCompact();
         if (!_expanded && !IsSuppressed) SetExpanded(false);
     }
+    // By key: submitting the same alert again while it shows replaces its payload (AttentionUpdated), so the item that ends
+    // may carry a newer one than PresentAlert received.
     private void EndAlert(CompactAlertInfo alert)
     {
-        if (!ReferenceEquals(_alert, alert)) return;
+        if (_alert is null || QuotaKey(_alert) != QuotaKey(alert)) return;
         _alert = null; RenderCompact();
         if (!_expanded) SetExpanded(false);
     }

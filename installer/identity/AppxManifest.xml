@@ -2,7 +2,7 @@
 <!-- An identity package for BrimDeck (a "sparse" package): it gives the installed BrimDeck.exe a package identity, without moving
      or repackaging anything, so that Windows raises its notification change events for dynamic notices instead of BrimDeck
      reading the list on a timer. The application files stay in the install folder (the external location); this package holds
-     only this manifest and its logos. scripts/Register-NoticeIdentity.ps1 registers and removes it. The names here must match
+     only this manifest and its logos. Register-NoticeIdentity.ps1 beside it registers and removes it. The names here must match
      the msix element in src/BrimDeck/app.manifest. -->
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"

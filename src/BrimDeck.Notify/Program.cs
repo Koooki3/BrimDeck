@@ -92,7 +92,8 @@ internal static class Program
         catch (Win32Exception)
         {
             // Batch files and shell built-ins are not executables; cmd runs them the way a prompt would.
-            start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false };
+            // cmd by its full path: a bare name is looked for in the current directory first.
+            start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe")) { UseShellExecute = false };
             start.ArgumentList.Add("/d"); start.ArgumentList.Add("/c");
             foreach (var argument in program) start.ArgumentList.Add(argument);
             try { process = Process.Start(start); }

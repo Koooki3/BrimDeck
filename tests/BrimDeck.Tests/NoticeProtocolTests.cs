@@ -52,6 +52,10 @@ internal static class NoticeProtocolTests
         check("An unknown type is refused", NoticeProtocol.Validate(new NoticeMessage { Type = "exec", Title = "x" }) == "unknown-type");
         check("Progress outside 0..1 is refused", NoticeProtocol.Validate(new NoticeMessage { Title = "x", Progress = 1.5 }) == "bad-progress"
             && NoticeProtocol.Validate(new NoticeMessage { Title = "x", Progress = double.NaN }) == "bad-progress");
+        check("A run duration that cannot be a time span is refused", NoticeProtocol.Validate(new NoticeMessage { ExitCode = 0, DurationMs = long.MaxValue }) == "bad-duration"
+            && NoticeProtocol.Validate(new NoticeMessage { ExitCode = 0, DurationMs = -1 }) == "bad-duration"
+            && NoticeProtocol.Validate(new NoticeMessage { ExitCode = 0, DurationMs = NoticeProtocol.MaxDurationMs }) is null
+            && TimeSpan.FromMilliseconds(NoticeProtocol.MaxDurationMs) > TimeSpan.Zero);
         var long_ = new NoticeMessage { Title = new string('标', 1000), Body = "a\u0007b\r\nc\td", Actions = Enumerable.Range(0, 20).Select(i => new NoticeActionInfo { Key = "k" + i, Label = "L" }).Append(new NoticeActionInfo { Key = "", Label = "x" }).ToList() };
         check("Validation trims texts and actions to the limits", NoticeProtocol.Validate(long_) is null && long_.Title!.Length == NoticeProtocol.MaxTitle
             && long_.Body == "a b\nc\td" && long_.Actions!.Count == NoticeProtocol.MaxActions);

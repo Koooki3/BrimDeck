@@ -104,10 +104,11 @@ internal sealed class NoticePipeServer : IDisposable
         }
     }
 
+    // Not waited for: Dispose runs on the UI thread, which a listener serving a message may be waiting for. Each listener
+    // closes its pipe as it sees the cancellation; the token source goes once they all have.
     public void Dispose()
     {
         _stop.Cancel();
-        try { Task.WaitAll([.. _listeners], TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
-        _stop.Dispose();
+        _ = Task.WhenAll(_listeners).ContinueWith(_ => _stop.Dispose(), TaskScheduler.Default);
     }
 }

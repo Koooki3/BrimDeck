@@ -436,13 +436,15 @@ public sealed class DeckSettings
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
-        NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        NoticeWslDistros = (NoticeWslDistros ?? []).Where(name => name is not null).Select(name => name.Trim()).Where(NoticeIntake.IsDistroName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (!Enum.IsDefined(NoticeScreen)) NoticeScreen = NoticeScreen.Foreground;
         if (!Enum.IsDefined(NoticePrivacy)) NoticePrivacy = NoticePrivacy.Full;
         NoticeDuration = Math.Clamp(NoticeDuration, 2, 30);
         NoticeHighDuration = Math.Clamp(NoticeHighDuration, 2, 60);
         NoticeHistoryHours = Math.Clamp(NoticeHistoryHours, 1, 24 * 7);
         NoticeHistoryFolder = (NoticeHistoryFolder ?? "").Trim();
+        // A folder written out in full; a relative one would depend on BrimDeck's current directory.
+        if (NoticeHistoryFolder.Length > 0 && !Path.IsPathFullyQualified(NoticeHistoryFolder)) NoticeHistoryFolder = "";
         NoticeHotkey ??= "";
         NoticesWidth = double.IsFinite(NoticesWidth) ? Math.Clamp(NoticesWidth, 440, 1200) : 460;
         NoticesHeight = double.IsFinite(NoticesHeight) ? Math.Clamp(NoticesHeight, 140, 400) : 280;

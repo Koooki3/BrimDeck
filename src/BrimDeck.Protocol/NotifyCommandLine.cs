@@ -10,7 +10,8 @@ public sealed record NotifyCommand(NotifyCommandKind Kind, NoticeMessage? Messag
 // The command line shared by the Windows sender (BrimDeck.Notify.exe) and the WSL agent's brim-notify.
 public static class NotifyCommandLine
 {
-    public const string Usage = """
+    // In the platform's own line endings, whatever the source file's are (Git on Windows checks it out with CRLF).
+    public static readonly string Usage = """
         brim-notify TITLE [BODY] [options]       Show a notice in BrimDeck
         brim-notify run [options] -- PROGRAM ... Run a program, then show its result
         brim-notify status                       Check that BrimDeck receives notices
@@ -27,7 +28,7 @@ public static class NotifyCommandLine
           -t, --title TEXT       Title (for run: replaces the program name)
           -h, --help             Show this help
               --version          Show the version
-        """;
+        """.ReplaceLineEndings();
 
     private static readonly HashSet<string> Categories = ["message", "task", "success", "warning", "error", "info"];
     private static readonly HashSet<string> Priorities = ["low", "normal", "high"];

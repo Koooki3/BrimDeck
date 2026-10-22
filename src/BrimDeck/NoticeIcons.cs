@@ -38,18 +38,25 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
     private async Task LoadAsync(string iconRef)
     {
         BitmapSource? image = null;
+        Color? accent = null;
         try
         {
             var bytes = await Task.Run(() => ReadAsync(iconRef));
             if (bytes is not null) image = await Task.Run(() => Decode(bytes));
+            if (image is not null) accent = AccentOf(image);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or InvalidOperationException) { }
-        Color? accent = image is null ? null : AccentOf(image);
+        // A damaged or unsupported picture (WIC reports those as format, COM or overflow errors) leaves the initial instead.
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or InvalidOperationException
+                                   or FormatException or System.Runtime.InteropServices.COMException or OverflowException) { }
+        // Anything else is a fault in BrimDeck: it goes to notices.log, and the icon is still settled below, so it is not
+        // left loading for good.
+        catch (Exception ex) { NoticeCenter.Log(ex); image = null; accent = null; }
         await dispatcher.InvokeAsync(() =>
         {
             _loading.Remove(iconRef);
-            // A WSL icon that could not be read while its distribution was stopped is tried again later.
-            if (image is null && iconRef.StartsWith("wsl:", StringComparison.Ordinal)) return;
+            // A WSL icon that could not be read while its distribution was stopped is tried again later; one its running
+            // distribution does not have is remembered as missing, like any other.
+            if (image is null && WslDistribution(iconRef) is { } distro && !distributionRunning(distro)) return;
             _cache[iconRef] = (image, accent); _order.AddFirst(iconRef);
             while (_order.Count > Capacity) { _cache.Remove(_order.Last!.Value); _order.RemoveLast(); }
             Loaded?.Invoke(iconRef);
@@ -68,7 +75,7 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
                 if (stored is not null) TryWrite(stored, bytes);
                 return bytes;
             }
-            return stored is not null && File.Exists(stored) ? await File.ReadAllBytesAsync(stored) : null;
+            return stored is not null ? ReadImageFile(stored) : null;
         }
         if (iconRef.StartsWith("file:", StringComparison.Ordinal))
         {
@@ -80,17 +87,23 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
             catch (ArgumentException) { return null; }
             return ThroughLinks(path) ? null : ReadImageFile(path);
         }
-        if (iconRef.StartsWith("wsl:", StringComparison.Ordinal))
+        if (WslDistribution(iconRef) is { } distro)
         {
-            var rest = iconRef[4..];
-            int colon = rest.IndexOf(':');
-            if (colon <= 0) return null;
-            string distro = rest[..colon], icon = rest[(colon + 1)..];
+            string icon = iconRef[(5 + distro.Length)..];
             if (!distributionRunning(distro)) return null;
             foreach (var path in WslCandidates(icon))
                 if (ReadImageFile(@"\\wsl.localhost\" + distro + path.Replace('/', '\\')) is { } found) return found;
         }
         return null;
+    }
+
+    // The distribution of a "wsl:<distribution>:<icon>" reference, if it names one by a valid distribution name: the name
+    // becomes part of a \\wsl.localhost path, which must not reach anywhere else.
+    private static string? WslDistribution(string iconRef)
+    {
+        if (!iconRef.StartsWith("wsl:", StringComparison.Ordinal)) return null;
+        int colon = iconRef.IndexOf(':', 4);
+        return colon > 4 && NoticeIntake.IsDistroName(iconRef[4..colon]) ? iconRef[4..colon] : null;
     }
 
     // An absolute path as given; an icon name in the usual theme and pixmap folders, at sizes WPF can read (PNG, not SVG).
@@ -132,6 +145,22 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
     private string? StoredPath(string iconRef)
         => Folder.Length == 0 ? null : Path.Combine(Folder, "icons", Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(iconRef)))[..24] + ".png");
 
+    // Removes the icons kept in a notices folder (keeping notices switched off, or the folder changed). Only files named as
+    // StoredPath names them are touched; the icons folder goes too once it is empty.
+    public static void DeleteStored(string folder)
+    {
+        var icons = Path.Combine(folder, "icons");
+        try
+        {
+            // Not through a link: it would lead to a folder BrimDeck did not fill.
+            if (!Directory.Exists(icons) || (File.GetAttributes(icons) & FileAttributes.ReparsePoint) != 0) return;
+            foreach (var file in Directory.EnumerateFiles(icons, "*.png"))
+                if (Path.GetFileNameWithoutExtension(file) is { Length: 24 } name && name.All(Uri.IsHexDigit)) File.Delete(file);
+            if (!Directory.EnumerateFileSystemEntries(icons).Any()) Directory.Delete(icons);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
     private static void TryWrite(string path, byte[] bytes)
     {
         try
@@ -143,20 +172,43 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
+    // An icon larger than this on either side is not decoded: a small file can declare a huge picture.
+    private const int MaxPixels = 1024;
+
     private static BitmapSource? Decode(byte[] bytes)
     {
         using var stream = new MemoryStream(bytes);
-        var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        // Nothing is decoded yet: the frames' sizes come from their headers, and only the chosen frame is decoded, below.
+        if (DecoderFor(stream, bytes) is not { } decoder) return null;
         // The frame closest to 64 pixels: icon files hold several sizes.
         var frame = decoder.Frames.OrderBy(f => Math.Abs(f.PixelWidth - 64) + (f.PixelWidth < 32 ? 1000 : 0)).FirstOrDefault();
-        if (frame is null || frame.PixelWidth == 0) return null;
+        if (frame is null || frame.PixelWidth == 0 || frame.PixelHeight == 0 || frame.PixelWidth > MaxPixels || frame.PixelHeight > MaxPixels) return null;
         BitmapSource result = frame;
-        if (frame.PixelWidth > 96)
-            result = new TransformedBitmap(frame, new ScaleTransform(96d / frame.PixelWidth, 96d / frame.PixelHeight));
+        if (Math.Max(frame.PixelWidth, frame.PixelHeight) > 96)
+        {
+            double scale = 96d / Math.Max(frame.PixelWidth, frame.PixelHeight);
+            result = new TransformedBitmap(frame, new ScaleTransform(scale, scale));
+        }
         result = new FormatConvertedBitmap(result, PixelFormats.Pbgra32, null, 0);
         var copy = new WriteableBitmap(result);
         copy.Freeze();
         return copy;
+    }
+
+    // WPF's own decoder for the picture's format, told by its first bytes: PNG, ICO, JPEG or BMP. Other formats, and the
+    // other image codecs installed in Windows, never see a notice's icon.
+    private static BitmapDecoder? DecoderFor(Stream stream, ReadOnlySpan<byte> head)
+    {
+        const BitmapCreateOptions Options = BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.DelayCreation;
+        const BitmapCacheOption Cache = BitmapCacheOption.None;
+        return head switch
+        {
+            [0x89, 0x50, 0x4E, 0x47, ..] => new PngBitmapDecoder(stream, Options, Cache),
+            [0x00, 0x00, 0x01, 0x00, ..] => new IconBitmapDecoder(stream, Options, Cache),
+            [0xFF, 0xD8, 0xFF, ..] => new JpegBitmapDecoder(stream, Options, Cache),
+            [0x42, 0x4D, ..] => new BmpBitmapDecoder(stream, Options, Cache),
+            _ => null
+        };
     }
 
     // The icon's main color, made readable; null for icons without a clear color (white, grey or transparent ones).

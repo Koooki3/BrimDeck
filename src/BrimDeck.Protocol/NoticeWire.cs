@@ -100,6 +100,8 @@ public static class NoticeProtocol
     // One frame's payload at most; a longer frame is refused and the connection closed.
     public const int MaxFrame = 64 * 1024;
     public const int MaxTitle = 256, MaxBody = 4000, MaxActions = 8, MaxField = 256;
+    // A run's duration at most (about 100 years): larger values cannot be turned into a time span.
+    public const long MaxDurationMs = 36500L * 24 * 60 * 60 * 1000;
 
     // The pipe is per user and per logon session: one user's senders never reach another session's BrimDeck.
     // The user's SID is hashed only to keep the name short and free of characters a pipe name cannot hold.
@@ -125,6 +127,7 @@ public static class NoticeProtocol
         if (message.Type == NoticeTypes.Notify && string.IsNullOrWhiteSpace(message.Title) && string.IsNullOrWhiteSpace(message.Body) && message.ExitCode is null)
             return "empty";
         if (message.Progress is { } progress && !(double.IsFinite(progress) && progress >= 0 && progress <= 1)) return "bad-progress";
+        if (message.DurationMs is < 0 or > MaxDurationMs) return "bad-duration";
         message.Title = Clip(message.Title, MaxTitle);
         message.Body = Clip(message.Body, MaxBody);
         message.EventId = Clip(message.EventId, MaxField);

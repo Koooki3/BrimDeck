@@ -19,6 +19,8 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
 {
     private static readonly byte[] Magic = "BDN1"u8.ToArray();
     private static readonly JsonSerializerOptions Options = new() { Converters = { new JsonStringEnumConverter() } };
+    // One writer at a time: the app saves in the background and once more on exit, and both use the same temporary file.
+    private readonly object _write = new();
     public string DirectoryPath { get; } = directory;
     public string FilePath => Path.Combine(DirectoryPath, "notices.dat");
 
@@ -49,26 +51,34 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
         }
     }
 
-    public void Save(IEnumerable<Notice> notices, IEnumerable<NoticeKnownApp> apps)
+    // wanted is asked again just before writing, under the writer lock: a save that started before keeping notices was
+    // switched off (or the folder changed) then writes nothing, instead of putting back the file Delete just removed.
+    public void Save(IEnumerable<Notice> notices, IEnumerable<NoticeKnownApp> apps, Func<bool>? wanted = null)
     {
         var contents = new Contents { Notices = notices.Select(n => n.Copy()).ToList(), Apps = apps.ToList() };
         var json = JsonSerializer.SerializeToUtf8Bytes(contents, Options);
         var protectedData = protector.Protect(json);
-        Directory.CreateDirectory(DirectoryPath);
-        var temporary = FilePath + ".tmp";
-        using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+        lock (_write)
         {
-            stream.Write(Magic); stream.Write(protectedData); stream.Flush(true);
+            if (wanted?.Invoke() == false) return;
+            Directory.CreateDirectory(DirectoryPath);
+            var temporary = FilePath + ".tmp";
+            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(Magic); stream.Write(protectedData); stream.Flush(true);
+            }
+            File.Move(temporary, FilePath, true);
         }
-        File.Move(temporary, FilePath, true);
     }
 
-    // Removes the file, for "clear" and when keeping notices is switched off.
+    // Removes the file, for "clear" and when keeping notices is switched off. A save under way finishes first, so it cannot
+    // put the file back afterwards.
     public void Delete()
     {
-        foreach (var path in new[] { FilePath, FilePath + ".tmp" })
-            try { if (File.Exists(path)) File.Delete(path); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        lock (_write)
+            foreach (var path in new[] { FilePath, FilePath + ".tmp" })
+                try { if (File.Exists(path)) File.Delete(path); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     // A protector for tests and for platforms without data protection: it only marks the data, it does not hide it.

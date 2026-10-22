@@ -51,7 +51,8 @@ internal static class Program
     private static async Task<int> RunAsync(NotifyCommand command)
     {
         var program = command.Program!;
-        var start = new ProcessStartInfo(program[0]) { UseShellExecute = false };
+        if (Native.FindProgram(program[0]) is not { } path) { Console.Error.WriteLine("brim-notify: " + program[0] + ": command not found"); return 127; }
+        var start = new ProcessStartInfo(path) { UseShellExecute = false };
         foreach (var argument in program.Skip(1)) start.ArgumentList.Add(argument);
         var watch = Stopwatch.StartNew();
         Process? process;
@@ -95,13 +96,15 @@ internal static class Program
     private static async Task<NoticeMessage?> ViaHelperAsync(NoticeMessage message)
     {
         string? helper = null;
+        if (AgentPaths.BridgeConfig is not { } config) return null;
         try
         {
-            var json = await File.ReadAllBytesAsync(AgentPaths.BridgeConfig);
+            var json = await File.ReadAllBytesAsync(config);
             helper = JsonSerializer.Deserialize(json, NoticeJson.Default.AgentBridgeConfig)?.Helper;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
-        if (string.IsNullOrEmpty(helper) || !File.Exists(helper)) return null;
+        // BrimDeck writes the helper's full path (under /mnt); a bare name would be looked up in the current directory.
+        if (string.IsNullOrEmpty(helper) || !Path.IsPathRooted(helper) || !File.Exists(helper)) return null;
         var start = new ProcessStartInfo(helper) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true };
         start.ArgumentList.Add("--stdio");
         try
@@ -121,9 +124,9 @@ internal static class Program
 
 internal static class AgentPaths
 {
-    public static string Home => Environment.GetEnvironmentVariable("HOME") is { Length: > 0 } home ? home : "/tmp";
-    public static string DataDirectory => Path.Combine(Home, ".local", "share", "brimdeck");
-    public static string BridgeConfig => Path.Combine(DataDirectory, "bridge.json");
+    // Without HOME there is no data folder: a shared place like /tmp could hold another user's bridge.json.
+    public static string? Home => Environment.GetEnvironmentVariable("HOME") is { Length: > 0 } home && Path.IsPathRooted(home) ? home : null;
+    public static string? BridgeConfig => Home is { } home ? Path.Combine(home, ".local", "share", "brimdeck", "bridge.json") : null;
 
     // The CLI socket lives in the user's runtime directory, which only the user can enter. Without such a directory there is
     // no socket: a shared place like /tmp could be taken over by another user first, and brim-notify then reaches Windows
@@ -156,12 +159,14 @@ internal static class Native
         catch (IOException) { }
         return 0;
     }
-    // The owner of a file, from stat(1)'s output; uint.MaxValue when it cannot be told.
+    // The owner of a file, from stat(1)'s output; uint.MaxValue when it cannot be told. stat is named by its full path:
+    // Process.Start looks for a bare name in the current directory before PATH.
     public static uint OwnerOf(string path)
     {
+        if (new[] { "/usr/bin/stat", "/bin/stat" }.FirstOrDefault(File.Exists) is not { } stat) return uint.MaxValue;
         try
         {
-            var start = new System.Diagnostics.ProcessStartInfo("stat") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            var start = new System.Diagnostics.ProcessStartInfo(stat) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
             start.ArgumentList.Add("-c"); start.ArgumentList.Add("%u"); start.ArgumentList.Add("--"); start.ArgumentList.Add(path);
             using var process = System.Diagnostics.Process.Start(start);
             if (process is null) return uint.MaxValue;
@@ -170,6 +175,25 @@ internal static class Native
             return process.ExitCode == 0 && uint.TryParse(text.Trim(), out var uid) ? uid : uint.MaxValue;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return uint.MaxValue; }
+    }
+
+    // A program as the shell finds it: a name with a slash from the current directory, otherwise the first executable file
+    // of that name in PATH (an empty entry is the current directory, as in the shell). Process.Start alone would look in the
+    // agent's folder and the current directory first.
+    public static string? FindProgram(string name)
+    {
+        if (name.Length == 0) return null;
+        if (name.Contains('/')) return Path.GetFullPath(name);
+        foreach (var folder in (Environment.GetEnvironmentVariable("PATH") ?? "/usr/local/bin:/usr/bin:/bin").Split(':'))
+        {
+            var path = Path.Combine(folder.Length == 0 ? "." : folder, name);
+            try
+            {
+                if (File.Exists(path) && (File.GetUnixFileMode(path) & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0) return Path.GetFullPath(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        return null;
     }
 
     // The user id of the process at the other end of a Unix socket (SO_PEERCRED), or null when it cannot be read.
