@@ -91,6 +91,8 @@ public partial class MainWindow : Window
             if (_expanded && !_preview) PointerChanged(_pointerInside);
         }) { Interval = TimeSpan.FromSeconds(1) };
         InitializeComponent();
+        // Out of sight until the boot (or, without animations, until it has its place): the window shows before it is placed.
+        HoverZone.Opacity = 0;
         InitializeMusic();
         InitializeMonitor();
         InitializeResize();
@@ -479,19 +481,22 @@ public partial class MainWindow : Window
         // quickly, and the content fades in once the surface is about two thirds open.
         // Open already (a page switch, a new page size), the surface reshapes over the whole of a slightly longer time, easing in
         // and out, so the change of size reads as one soft move rather than a jump.
-        // Booting (MainWindow.Lifecycle.cs), the surface swells from a dot into the collapsed shape: a longer move on the opening
-        // spring, the compact content arriving once the shape has nearly settled.
+        // Booting (MainWindow.Lifecycle.cs), once the dot has popped up the surface swells from it into the collapsed shape on the
+        // opening spring, the compact content arriving once the shape has nearly settled.
         // A new collapsed style chosen in the settings (MorphShape), the surface changes from one form into the other over the
         // whole of a longer move on the monitor's curve; the compact content steps out at once and comes back in its new layout
         // once the form has nearly settled.
         bool reshaping = expanded && wasExpanded, booting = _booting && !expanded && duration > 0, morphing = _morphingShape && !expanded && duration > 0;
         _booting = false; _morphingShape = false;
         if (reshaping) duration = (int)(duration * 1.25);
-        if (booting) duration = (int)(duration * BootStretch);
+        if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
         // The opening spring is most of the way there within a fifth of the move, so the content follows soon after it.
         Track content = expanded ? new(.12, .8) : new(0, .30);
-        Track surface = reshaping || morphing ? new(0, 1) : booting ? new(BootDot, 1) : expanded ? new(0, 1) : new(.12, line ? .92 : 1);
+        Track surface = reshaping || morphing || booting || expanded ? new(0, 1) : new(.12, line ? .92 : 1);
+        // Between forms the corners turn early: a notch becoming a capsule rounds its flat top long before it has its new size,
+        // rather than showing a square top over round bottom corners for most of the move.
+        Track cornerTrack = morphing ? new(0, .4) : surface;
         Track compact = booting ? new(.5, 1) : expanded ? new(0, .15) : line ? new(0, morphing ? .25 : .35) : morphing ? new(.55, 1) : new(.62, 1);
         Track shadow = booting ? new(.35, 1) : expanded ? new(0, .3) : morphing ? new(.2, .9) : new(.5, 1);
         Track rim = expanded ? new(.2, .5) : morphing ? new(.2, .7) : new(.5, .8);
@@ -537,7 +542,7 @@ public partial class MainWindow : Window
             }
             HoverZone.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(left, 0, 0, 0), EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
             Island.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(0, gap, 0, 0), EasingFunction = settle }, duration, surface), HandoffBehavior.SnapshotAndReplace);
-            Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = radius, EasingFunction = corners }, duration, surface), HandoffBehavior.SnapshotAndReplace);
+            Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = radius, EasingFunction = morphing ? Soft.Out : corners }, duration, cornerTrack), HandoffBehavior.SnapshotAndReplace);
         }
         bool compactGone = expanded || line;
         Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });

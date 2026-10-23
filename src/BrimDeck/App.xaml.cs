@@ -282,7 +282,7 @@ public partial class App : Application
         _settingsWindow?.Hide();
         var decks = Decks.ToList();
         int waiting = decks.Count;
-        var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Settings.AnimationDuration * 2 + 500) };
+        var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(BrimDeck.MainWindow.PowerOffLength(Settings.AnimationDuration) + 500) };
         bool done = false;
         void End() { if (done) return; done = true; fallback.Stop(); FinishWriting(); Shutdown(); }
         fallback.Tick += (_, _) => End();
