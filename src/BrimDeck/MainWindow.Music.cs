@@ -451,8 +451,8 @@ public partial class MainWindow
         }
         if (layout.MiddleHeight >= c.MiddleGap + c.LyricLine)
         {
-            // One line; a longer message (a failed full control connection) is read whole in its tooltip.
-            _musicMessage = UI.Fixed(message, c.Lyric, c.LyricLine, UI.Tertiary); _musicMessage.ToolTip = message.Length > 0 ? message : null;
+            // One line; a longer message (a failed full control connection) is read whole in its tooltip, like a cut title.
+            _musicMessage = UI.Fixed(message, c.Lyric, c.LyricLine, UI.Tertiary); ShowCutText(_musicMessage, message);
             _musicMessage.Visibility = layout.ShowMessage ? Visibility.Visible : Visibility.Collapsed; middle.Children.Add(_musicMessage);
         }
         if (track.HasTimeline)
@@ -604,12 +604,12 @@ public partial class MainWindow
         if (_musicFullControl is not null) _musicFullControl.Visibility = entryLabel is not null ? Visibility.Visible : Visibility.Collapsed;
         MusicContent.Children.Insert(0, body); UpdateMusicPosition();
     }
-    // The page suppresses tooltips. A title or artist line cut off by its ellipsis still shows its whole text on hover.
+    // The page suppresses tooltips. A line cut off by its ellipsis (a title, an artist, a long message) still shows its whole
+    // text on hover. A later text goes in ToolTip alone: whether it is cut is checked when the tooltip would open.
     private static void ShowCutText(TextBlock block, string text)
     {
-        if (text.Length == 0) return;
         block.SetValue(SuppressMusicToolTipsProperty, false);
-        block.ToolTip = text;
+        block.ToolTip = text.Length > 0 ? text : null;
         block.ToolTipOpening += (_, e) =>
         {
             double shown = block.ActualWidth;
