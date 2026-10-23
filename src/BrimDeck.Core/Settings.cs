@@ -13,6 +13,9 @@ public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
 public enum DisplayPlacement { Primary, Chosen }
 // A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named.
 public sealed record ChosenDisplay(string Id, string Name);
+// An app whose full-screen windows keep the panel in its normal style, such as a desktop beautification tool. Path is the
+// executable when it is known; an entry with only a name matches any process of that name.
+public sealed record FullscreenException(string Name = "", string Path = "");
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop app or local web app) signed in with; DeepSeek uses a key entered by hand.
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
@@ -107,6 +110,8 @@ public sealed class AppEntry
 public static class AppPresets
 {
     public const int MaximumApps = 7;
+    // A long list would be hard to review, and the exceptions are meant for a few shell-level apps.
+    public const int MaximumFullscreenExceptions = 32;
     public const string WarningColor = "#E5C890", CriticalColor = "#E78284";
     public const double WarningPercent = 70, CriticalPercent = 90;
     // Each column needs this much width; the panel's minimum width follows the number of enabled applications.
@@ -239,6 +244,9 @@ public sealed class DeckSettings
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
+    // Applications whose windows are not counted as full screen, so that a desktop beautification tool does not hide the
+    // panel. Empty by default: every app follows the three rules above.
+    public List<FullscreenException> FullscreenExceptions { get; set; } = [];
     public DisplayPlacement Display { get; set; }
     // Kept while Display is Primary, so that choosing displays again restores them.
     public List<ChosenDisplay> DisplayMonitors { get; set; } = [];
@@ -365,6 +373,7 @@ public sealed class DeckSettings
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
+        copy.FullscreenExceptions = [.. FullscreenExceptions ?? []];
         copy.NoticeWslDistros = [.. NoticeWslDistros ?? []];
         copy.NoticeApps = (NoticeApps ?? []).Select(rule => rule.Copy()).ToList();
         return copy;
@@ -439,6 +448,13 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
+        // A path-only entry takes its name from the executable, so it can also be matched when the path cannot be read.
+        FullscreenExceptions = (FullscreenExceptions ?? []).OfType<FullscreenException>()
+            .Select(e => new FullscreenException(ScreenPolicy.NormalizeName(e.Name), ScreenPolicy.NormalizePath(e.Path)))
+            .Select(e => e.Name.Length == 0 && e.Path.Length > 0 ? e with { Name = System.IO.Path.GetFileNameWithoutExtension(e.Path) } : e)
+            .Where(e => e.Name.Length > 0 || e.Path.Length > 0)
+            .DistinctBy(ScreenPolicy.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(AppPresets.MaximumFullscreenExceptions).ToList();
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
