@@ -8,7 +8,7 @@ namespace BrimDeck;
 
 // The particles a moving pointer leaves over the open panel, in the theme's style (ThemeMotion.Particles): soft dust, small
 // squares as on a contribution graph, short sparks along the movement, four-point stars that twinkle, fireflies that drift up and
-// glow slowly, or neon dashes that jitter. They lie under the content, on the surface's material (InteractionFx.Island), so text
+// glow slowly, or neon motes in two colors with a soft glow. They lie under the content, on the surface's material (InteractionFx.Island), so text
 // and controls stay above them as above the theme's own gradient and scan lines. They come from the distance the pointer travels,
 // not from time, so a still pointer leaves none; each lives well under two seconds and fades, shrinks or turns as its style does.
 // A fixed set of shapes is reused; the frame callback runs only while any is alive, and nothing is allocated per frame.
@@ -46,7 +46,7 @@ internal sealed partial class FxSurface
     private void DressParticles(Color first, Color second)
     {
         ClearParticles();
-        bool soft = _motion.Particles is ParticleFx.Dust or ParticleFx.Firefly;
+        bool soft = _motion.Particles is ParticleFx.Dust or ParticleFx.Firefly or ParticleFx.Neon;
         _moteFirst = soft ? Glow(first) : Solid(first);
         _moteSecond = soft ? Glow(second) : Solid(second);
         _moteStyle = ParticleFx.None;
@@ -71,7 +71,7 @@ internal sealed partial class FxSurface
         {
             Shape shape = _moteStyle switch
             {
-                ParticleFx.Dust or ParticleFx.Firefly => new Ellipse(),
+                ParticleFx.Dust or ParticleFx.Firefly or ParticleFx.Neon => new Ellipse(),
                 ParticleFx.Star => new Path { Data = StarShape, Stretch = Stretch.Fill },
                 ParticleFx.Pixel => new Rectangle { RadiusX = 1, RadiusY = 1 },
                 _ => new Rectangle { RadiusX = .8, RadiusY = .8 }
@@ -95,7 +95,7 @@ internal sealed partial class FxSurface
         var direction = step / distance;
         double spacing = _moteStyle switch
         {
-            ParticleFx.Spark => 7, ParticleFx.Pixel => 11, ParticleFx.Glitch => 10, ParticleFx.Star => 14, ParticleFx.Firefly => 17, _ => 9
+            ParticleFx.Spark => 7, ParticleFx.Pixel => 11, ParticleFx.Neon => 8, ParticleFx.Star => 14, ParticleFx.Firefly => 17, _ => 9
         };
         _travel += distance;
         int made = 0;
@@ -120,7 +120,7 @@ internal sealed partial class FxSurface
                 break;
             case ParticleFx.Spark:
             {
-                m.Life = .42; m.Width = Random(9, 15); m.Height = 1.6;
+                m.Life = .45; m.Width = Random(4.5, 7.5); m.Height = 2;
                 double angle = Math.Atan2(-direction.Y, -direction.X) + Random(-.35, .35), speed = Random(50, 85);
                 m.Vx = Math.Cos(angle) * speed; m.Vy = Math.Sin(angle) * speed; m.Angle = angle * 180 / Math.PI;
                 m.Second = _random.NextDouble() < .35;
@@ -134,9 +134,10 @@ internal sealed partial class FxSurface
                 m.Life = 1.5; m.Width = m.Height = Random(6, 10);
                 m.Vx = Random(-8, 8); m.Vy = -Random(14, 28); m.Second = _random.NextDouble() < .75;
                 break;
-            case ParticleFx.Glitch:
-                m.Life = .34; m.Width = Random(8, 24); m.Height = 1.6;
-                m.Vx = Random(-40, 40); m.Vy = 0; m.Second = index % 2 == 1;
+            case ParticleFx.Neon:
+                // Round neon motes that follow the pointer's path, alternating the theme's two colors.
+                m.Life = .65; m.Width = m.Height = Random(5, 9);
+                m.Vx = -direction.X * 18 + Random(-8, 8); m.Vy = -direction.Y * 18 + Random(-8, 8); m.Second = index % 2 == 1;
                 break;
             default:
                 m.Life = .7; m.Width = m.Height = Random(3, 6);
@@ -195,10 +196,8 @@ internal sealed partial class FxSurface
                     alpha *= .65 + .35 * Math.Sin(2 * Math.PI * .9 * age + m.Seed * 6.28);
                     x += Math.Sin(age * 2.4 + m.Seed * 6) * 3;
                     break;
-                case ParticleFx.Glitch:
-                    // It holds its light and jumps sideways a little every 70 ms, then ends quickly.
-                    alpha = strength * rise * (t < .85 ? 1 : (1 - t) / .15);
-                    x += (Scatter(Math.Floor(age / .07), m.Seed) - .5) * 6;
+                case ParticleFx.Neon:
+                    sx = sy = 1 - .55 * t;
                     break;
             }
             shape.Opacity = alpha;
@@ -210,12 +209,6 @@ internal sealed partial class FxSurface
             _moteTransforms[i].Matrix = matrix;
         }
         if (alive == 0) UnhookMotes();
-    }
-
-    private static double Scatter(double a, double b)
-    {
-        double v = Math.Sin(a * 12.9898 + b * 78.233) * 43758.5453;
-        return v - Math.Floor(v);
     }
 
     private void StopEmitting() { _emitting = false; _travel = 0; }

@@ -11,8 +11,8 @@ public enum PressFx { None, Pulse, Ripple, Ring }
 public enum FocusFx { None, Ring, Glow, Neon }
 // The particles a moving pointer leaves over the open panel: dust (soft motes), pixel (small squares, as a contribution graph),
 // spark (short streaks along the movement), star (four-point twinkles), firefly (warm lights drifting up and glowing slowly),
-// glitch (thin neon dashes that jitter).
-public enum ParticleFx { None, Dust, Pixel, Spark, Star, Firefly, Glitch }
+// neon (round motes in two neon colors with a soft glow).
+public enum ParticleFx { None, Dust, Pixel, Spark, Star, Firefly, Neon }
 
 // Periods and lengths are seconds; 0 turns an effect off.
 public sealed record AmbientMotion(double Breathe, double BreatheDepth, double Drift, double Sweep, double SweepOpacity, double Flicker, double FlickerDepth)
@@ -200,7 +200,7 @@ public sealed class PanelThemeMotion
     public double? PressStrength { get; set; }
     // 0 to 0.6: how strongly the particles show (0: none)
     public double? Trail { get; set; }
-    // none, dust, pixel, spark, star, firefly, glitch
+    // none, dust, pixel, spark, star, firefly, neon
     public string? Particles { get; set; }
     // none, ring, glow, neon: a bloom around the control keyboard focus moves to
     public string? Focus { get; set; }
