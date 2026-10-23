@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace BrimDeck.Core;
@@ -8,40 +10,54 @@ namespace BrimDeck.Core;
 // before the restart stands in, as the last reading of the same run already did (UsageService.Freshest).
 // It holds the quotas, the plan and when they were read, never a token. A reading older than MaxAge is not used, and a quota
 // whose window has reset since is left out: its share no longer says anything.
+// It also says which account it was read for, as a hash of the account id (AccountHash), never the id itself. It is used only
+// for the same account: after a switch of account while BrimDeck was closed, the other account's quotas and plan would
+// otherwise stand in for the new one's. A file that names no account (one written before the hash was kept) or a sign-in
+// whose account cannot be told is not used either.
 public static class ClaudeQuotaCache
 {
     public static readonly TimeSpan MaxAge = TimeSpan.FromDays(7);
     public const string FileName = "claude-quota.json";
 
-    public static string Serialize(ClaudeQuotaSnapshot snapshot) => JsonSerializer.Serialize(snapshot with { Local = false });
+    private sealed record Stored(string? Account, DateTimeOffset Time, string? Plan, string? PlanSource, string? Source, List<Quota>? Quotas);
 
-    public static ClaudeQuotaSnapshot? Parse(string json, DateTimeOffset now)
+    // A one-way hash of the account id, enough to tell two accounts apart without naming either. "" when the id is unknown.
+    public static string AccountHash(string account) => string.IsNullOrWhiteSpace(account) ? ""
+        : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("BrimDeck Claude account " + account.Trim().ToLowerInvariant())))[..32];
+
+    public static string Serialize(ClaudeQuotaSnapshot snapshot, string account) =>
+        JsonSerializer.Serialize(new Stored(AccountHash(account), snapshot.Time, snapshot.Plan, snapshot.PlanSource, snapshot.Source, snapshot.Quotas));
+
+    // account is the id of the account signed in now.
+    public static ClaudeQuotaSnapshot? Parse(string json, DateTimeOffset now, string account)
     {
-        ClaudeQuotaSnapshot? stored;
-        try { stored = JsonSerializer.Deserialize<ClaudeQuotaSnapshot>(json); }
+        Stored? stored;
+        try { stored = JsonSerializer.Deserialize<Stored>(json); }
         catch (JsonException) { return null; }
+        var expected = AccountHash(account);
+        if (stored is null || expected.Length == 0 || stored.Account != expected) return null;
         // A reading from the future (a clock set back since) or too old is not shown as the account's quota.
-        if (stored?.Quotas is null || stored.Time > now.AddMinutes(5) || now - stored.Time > MaxAge) return null;
+        if (stored.Quotas is null || stored.Time > now.AddMinutes(5) || now - stored.Time > MaxAge) return null;
         var quotas = stored.Quotas.Where(quota => quota is not null && !string.IsNullOrWhiteSpace(quota.Label)
             && double.IsFinite(quota.UsedPercent) && (quota.ResetAt is not { } reset || reset > now)).ToList();
-        return quotas.Count == 0 ? null : stored with { Quotas = quotas, Local = false, Plan = stored.Plan ?? "", PlanSource = stored.PlanSource ?? "", Source = stored.Source ?? "" };
+        return quotas.Count == 0 ? null : new(stored.Time, stored.Plan ?? "", stored.PlanSource ?? "", stored.Source ?? "", quotas);
     }
 
-    public static ClaudeQuotaSnapshot? Load(string path, DateTimeOffset now)
+    public static ClaudeQuotaSnapshot? Load(string path, DateTimeOffset now, string account)
     {
-        try { return File.Exists(path) ? Parse(File.ReadAllText(path), now) : null; }
+        try { return File.Exists(path) ? Parse(File.ReadAllText(path), now, account) : null; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
     // Written whole and then moved into place, so a reading cut short by an exit never leaves half a file. A failed write keeps
     // the previous file; the reading is still kept in memory for this run.
-    public static void Save(string path, ClaudeQuotaSnapshot snapshot)
+    public static void Save(string path, ClaudeQuotaSnapshot snapshot, string account)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var temporary = path + ".tmp";
-            File.WriteAllText(temporary, Serialize(snapshot));
+            File.WriteAllText(temporary, Serialize(snapshot, account));
             File.Move(temporary, path, true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
