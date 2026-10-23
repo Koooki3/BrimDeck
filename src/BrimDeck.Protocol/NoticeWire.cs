@@ -42,6 +42,15 @@ public sealed class NoticeMessage
     public long? DurationMs { get; set; }
     public string? Command { get; set; }
     public DateTimeOffset? CreatedAt { get; set; }
+    // Time-kind notices (see NoticeTimes): alarm, stopwatch, countdown, mail or event. At is a time and InMs a duration from
+    // when BrimDeck receives the message (a countdown's end, an event's start); Until an event's end; LeadMs how long before
+    // an event's start BrimDeck reminds. Stop ends the stopwatch, countdown or event sent before with the same ReplaceId.
+    public string? Kind { get; set; }
+    public string? At { get; set; }
+    public long? InMs { get; set; }
+    public string? Until { get; set; }
+    public long? LeadMs { get; set; }
+    public bool? Stop { get; set; }
     public List<NoticeActionInfo>? Actions { get; set; }
     // Type "action": the chosen action's key.
     public string? ActionKey { get; set; }
@@ -124,8 +133,13 @@ public static class NoticeProtocol
         if (message.Version < 1 || message.Version > Version) return "unsupported-version";
         if (message.Type is not (NoticeTypes.Notify or NoticeTypes.Close or NoticeTypes.Status or NoticeTypes.Action or NoticeTypes.Dismissed or NoticeTypes.Reply))
             return "unknown-type";
-        if (message.Type == NoticeTypes.Notify && string.IsNullOrWhiteSpace(message.Title) && string.IsNullOrWhiteSpace(message.Body) && message.ExitCode is null)
+        // A time-kind notice may come without text: BrimDeck names it by its kind ("Timer", "Stopwatch").
+        if (message.Type == NoticeTypes.Notify && string.IsNullOrWhiteSpace(message.Title) && string.IsNullOrWhiteSpace(message.Body) && message.ExitCode is null
+            && message.Kind is not (NoticeTimes.Countdown or NoticeTimes.Stopwatch or NoticeTimes.Event) && message.Stop != true)
             return "empty";
+        if ((message.Kind?.Length ?? 0) > NoticeTimes.MaxText || (message.At?.Length ?? 0) > NoticeTimes.MaxText || (message.Until?.Length ?? 0) > NoticeTimes.MaxText)
+            return "bad-time";
+        if (NoticeTimes.Check(message, DateTimeOffset.UtcNow, TimeZoneInfo.Local) is { } timeProblem) return timeProblem;
         if (message.Progress is { } progress && !(double.IsFinite(progress) && progress >= 0 && progress <= 1)) return "bad-progress";
         if (message.DurationMs is < 0 or > MaxDurationMs) return "bad-duration";
         message.Title = Clip(message.Title, MaxTitle);

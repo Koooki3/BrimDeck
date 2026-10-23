@@ -19,6 +19,8 @@ public sealed class AttentionItem
     public int Count { get; set; } = 1;
     // An update that should keep the item on screen a little longer, such as a task's progress.
     public bool Refresh { get; init; }
+    // An alarm, a countdown that ended or an event's reminder (NoticeClock.Alerting): it is not held back by the rate limit.
+    public bool Urgent { get; init; }
     internal DateTimeOffset SubmittedAt { get; set; }
     internal DateTimeOffset LastMerge { get; set; }
     internal DateTimeOffset StartedAt { get; set; }
@@ -40,7 +42,7 @@ public readonly record struct AttentionChange(string Lane, AttentionItem? Ended,
 
 // Decides what each panel's collapsed island briefly shows. One item shows at a time per lane, for its duration; others wait
 // in rank order. A higher-ranked item takes over unless the user is interacting with the current one (Hold). Notices are
-// limited to RateLimit shows per RateWindow; a notice that has waited longer than Staleness is not shown at all (it stays in
+// limited to RateLimit shows per RateWindow (urgent ones, such as an alarm, still count but are never held back); a notice that has waited longer than Staleness is not shown at all (it stays in
 // the recent notices). While suppressed (locked, paused, in a focus session) nothing shows and arriving notices are only
 // counted, so that one summary can follow. The coordinator keeps no timer: the caller ticks it at NextDeadline.
 public sealed class AttentionCoordinator
@@ -155,7 +157,7 @@ public sealed class AttentionCoordinator
             if (lane.Current is null && !lane.Busy && lane.Queue.Count > 0)
             {
                 // Waiting only for the rate limit: wake when the oldest show leaves the window.
-                if (lane.Queue.Any(item => !item.IsNotice) || _noticeShows.Count < RateLimit) Consider(now);
+                if (lane.Queue.Any(item => !item.IsNotice || item.Urgent) || _noticeShows.Count < RateLimit) Consider(now);
                 else if (_noticeShows.Count > 0) Consider(_noticeShows.Min() + RateWindow);
             }
             foreach (var item in lane.Queue) if (StaleAfter(item) is { } limit) Consider(item.SubmittedAt + limit);
@@ -271,7 +273,7 @@ public sealed class AttentionCoordinator
 
     private bool CanStart(AttentionItem item, DateTimeOffset now)
     {
-        if (!item.IsNotice) return true;
+        if (!item.IsNotice || item.Urgent) return true;
         _noticeShows.RemoveAll(time => now - time >= RateWindow);
         return _noticeShows.Count < RateLimit;
     }

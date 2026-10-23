@@ -26,7 +26,13 @@ internal static class Program
             case NotifyCommandKind.Status: return await StatusAsync();
             case NotifyCommandKind.Stdio: return await RelayAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
             case NotifyCommandKind.Run: return await RunAsync(command);
-            default: return Report(await SendAsync(command.Message!));
+            default:
+            {
+                int code = Report(await SendAsync(command.Message!));
+                // A timer, stopwatch or event: its key, for "brim-notify stop KEY".
+                if (code == 0 && NotifyCommandLine.PrintsKey(command.Message!)) Console.WriteLine(command.Message!.ReplaceId);
+                return code;
+            }
         }
     }
 
