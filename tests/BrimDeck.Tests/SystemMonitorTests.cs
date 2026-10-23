@@ -220,7 +220,7 @@ static class SystemMonitorTests
         check("Compact fit: a capsule grows to its content plus its insets", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 300).Surface.Width == 332);
         check("Compact fit: never below the saved width", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 50).Surface.Width == 196
             && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area).Surface.Width == 196);
-        check("Compact fit: up to the largest width and the screen", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 5000).Surface.Width == CollapsedLimits.CapsuleWidthMax
+        check("Compact fit: up to the screen", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 5000).Surface.Width == 2560
             && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, new DipRect(0, 0, 500, 400), new DipRect(0, 0, 500, 400), 1, 5000).Surface.Width == 500);
         check("Compact fit: the notch grows centred, the line keeps its length", CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Notch, screen, area, 1, 400) is { Surface: { Width: 460, X: 1050 } }
             && CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Line, screen, area, 1, 400).Surface.Width == CollapsedLimits.LineLengthDefault);

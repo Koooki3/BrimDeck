@@ -80,7 +80,14 @@ public partial class MainWindow : Window
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle);
         UpdateCollapsedGeometry();
-        _hover = new(Dispatcher, () => { _hover!.Stop(); if (!IsSuppressed && _pointerInside) SetExpanded(true); });
+        _hover = new(Dispatcher, () =>
+        {
+            _hover!.Stop();
+            if (IsSuppressed || !_pointerInside) return;
+            // Opened by hovering: the panel centres on the pointer (see SetExpanded).
+            if (PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
+            SetExpanded(true);
+        });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
         _pointerTrack = new(Dispatcher, TrackPointer) { Interval = TimeSpan.FromMilliseconds(TrackNear) };
         _pageSwitchHold = new(Dispatcher, () =>
@@ -169,11 +176,12 @@ public partial class MainWindow : Window
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
         // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is
-        // every page at the largest size a drag can give it, and the collapsed surface at the widest any form can be, with room
-        // on either side for the resize grips just outside them (ResizeGrips). Only Island animates.
+        // every page at the largest size a drag can give it, and the collapsed surface at the widest any form can be on this
+        // monitor, with room on either side for the resize grips just outside them (ResizeGrips). The notch and the capsule may be
+        // as wide as the monitor, so the window is as wide as the monitor too. Only Island animates.
         var largest = DeckPages.Largest(Settings);
         largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight));
-        double widestSurface = Math.Max(Math.Max(CollapsedLimits.NotchWidthMax, CollapsedLimits.CapsuleWidthMax), CollapsedLimits.LineLengthMax);
+        double widestSurface = Enum.GetValues<CompactStyle>().Max(style => CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip).Max);
         Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Math.Max(Fit(largest.Width), widestSurface), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
         double hostHeight = largest.Height;
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
@@ -218,7 +226,8 @@ public partial class MainWindow : Window
     // has now. A window on a monitor with another scale is therefore first moved onto the target in one step, which gives
     // it the target's DPI; setting Left and then Top could pass it over a third monitor on the way.
     // The window is centred on the collapsed surface and kept on the monitor. It is at least as wide as the surface and the
-    // pages, so the island, and the open panel centred on it, always lie inside the window. Only the surface and the nearly
+    // pages (as wide as the monitor, see ApplySettings), so the island and the open panel, wherever it is centred, always lie
+    // inside the window. Only the surface and the nearly
     // transparent hover strip are drawn; the rest of the layered window stays fully transparent and lets clicks through.
     private void Place(Rect bounds, double scale)
     {
@@ -248,6 +257,9 @@ public partial class MainWindow : Window
     private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, Settings.CompactAutoWidth(style) ? _compactWanted : 0);
     // The width the collapsed content asks for while it shows system readings; 0 keeps the saved width (see CollapsedGeometry).
     private double _compactWanted;
+    // Where the pointer was when hovering opened the panel, in DIPs from the monitor's left edge; null when the panel was opened
+    // another way (the hotkey) or is closed.
+    private double? _openCentre;
     // The content changed what it asks for: the collapsed surface moves to the new width with its usual animation, and the window
     // grows first when the surface would be wider than it.
     private void FitCompactToContent()
@@ -449,8 +461,14 @@ public partial class MainWindow : Window
         var radius = expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)
             : new CornerRadius(shape.TopRadius, shape.TopRadius, shape.BottomRadius, shape.BottomRadius);
         double gap = expanded ? panelTop : shape.Surface.Y;
-        // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor.
-        double panelLeft = Math.Clamp(shape.Surface.X + shape.Surface.Width / 2 - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
+        // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor. A
+        // panel opened by hovering a surface wider than itself centres on where the pointer was instead, as far as the surface's
+        // ends allow, and keeps that centre while open (page switches, resizing) without following the pointer.
+        if (!expanded) _openCentre = null;
+        double panelCentre = shape.Surface.X + shape.Surface.Width / 2;
+        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > _pageWidth)
+            panelCentre = Math.Clamp(pointer, shape.Surface.X + _pageWidth / 2, shape.Surface.Right - _pageWidth / 2);
+        double panelLeft = Math.Clamp(panelCentre - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
         double left = (expanded ? panelLeft : shape.Surface.X) - _windowOffset;
         ApplyCollapsedLayout();
         Island.BorderThickness = new Thickness(0);

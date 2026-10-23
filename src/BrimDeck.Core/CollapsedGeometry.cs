@@ -6,9 +6,11 @@ public static class CollapsedLimits
 {
     // The height at which compact content is drawn at its designed size; Scale is the surface height divided by this.
     public const double BaseHeight = 32;
-    public const double NotchWidthDefault = 238, NotchWidthMin = 180, NotchWidthMax = 800;
+    // The notch and the capsule may be as wide as the monitor (the work area for the capsule). NotchWidthMax and CapsuleWidthMax
+    // are only the limits for saved values; each monitor narrows them when the shape is resolved (WidthRange).
+    public const double NotchWidthDefault = 238, NotchWidthMin = 180, NotchWidthMax = 8000;
     public const double NotchHeightDefault = 32, NotchHeightMin = 24, NotchHeightMax = 64;
-    public const double CapsuleWidthDefault = 196, CapsuleWidthMin = 140, CapsuleWidthMax = 800;
+    public const double CapsuleWidthDefault = 196, CapsuleWidthMin = 140, CapsuleWidthMax = 8000;
     public const double CapsuleHeightDefault = 32, CapsuleHeightMin = 24, CapsuleHeightMax = 64;
     // CapsuleTopMax is only the limit for saved values; on a monitor the capsule may go down until its bottom edge meets the
     // bottom of the work area (CapsuleTopRange).
