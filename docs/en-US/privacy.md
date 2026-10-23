@@ -44,4 +44,5 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 - While the port is open, other programs on this PC and web pages in a browser may use it to control NetEase Cloud Music and read its page content and sign-in state.
 - Before connecting, BrimDeck checks that the port listens only on this PC and belongs to NetEase Cloud Music, but this cannot remove the risk of the port itself.
 - Through this port, BrimDeck reads the song that is playing, its progress, the playback mode and whether the current song is liked, and has NetEase Cloud Music act only when you select a control. When you select the heart, NetEase Cloud Music itself adds the song to, or removes it from, the liked songs of your account. To show the heart, BrimDeck takes only two results, whether NetEase Cloud Music is signed in and whether the current song is liked; it neither reads nor keeps your account details or your other songs.
-- Turn it on only in an environment you trust. Starting NetEase Cloud Music the normal way ends full control.
+- The port stays open until NetEase Cloud Music is started again the normal way: quitting BrimDeck, or a full control connection that fails (BrimDeck then only reads what is playing), does not close it.
+- Turn it on only in an environment you trust. Starting NetEase Cloud Music the normal way ends full control and closes the port.
