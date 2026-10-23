@@ -1008,7 +1008,7 @@ public sealed partial class SettingsWindow : Window
         {
             // An info icon right after the title, as the settings rows carry theirs.
             var heading = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
-            heading.Children.Add(label); heading.Children.Add(HelpIcon(title, help, 13));
+            heading.Children.Add(label); heading.Children.Add(HelpIcon(title, help, 13, nudge: 0));
             row.Children.Add(heading);
         }
         Target.Children.Add(row);

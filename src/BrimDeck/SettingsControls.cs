@@ -23,11 +23,13 @@ public sealed partial class SettingsWindow
     }
 
     // The info icon that shows a setting's or a section's description on hover or focus.
-    private FrameworkElement HelpIcon(string title, Func<string> help, double size)
+    private FrameworkElement HelpIcon(string title, Func<string> help, double size, double nudge = 1)
     {
-        var icon = Stroke("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1", size, size, TextTertiary);
-        // Measured ink: the circle's center sat 1 DIP above the center of the label's glyphs.
-        icon.RenderTransform = new TranslateTransform(0, 1);
+        // The geometry is drawn for a 14 DIP box; smaller icons scale it so the circle stays centered and unclipped.
+        var icon = Stroke("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1", 14, 14, TextTertiary);
+        if (size != 14) icon.LayoutTransform = new ScaleTransform(size / 14, size / 14);
+        // Measured ink: beside a 13pt label the circle's center sat 1 DIP above the center of the label's glyphs.
+        if (nudge != 0) icon.RenderTransform = new TranslateTransform(0, nudge);
         var info = new Border
         {
             Width = size + 8, Height = 24, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent,

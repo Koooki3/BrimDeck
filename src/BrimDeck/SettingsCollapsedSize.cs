@@ -26,14 +26,14 @@ public sealed partial class SettingsWindow
         public Action Refresh = () => { };
     }
 
-    private static string DragWidthHint => Loc.T("也可以把鼠标移到刘海、胶囊或指示条的左右两端，直接拖动调整；双击两端恢复默认（刘海与胶囊恢复按内容自动加宽）。",
-        "You can also point at either end of the notch, capsule or indicator and drag it. A double click on an end restores the default (the notch and the capsule widen to their content again).");
+    private static string DragWidthHint(CompactStyle style) => Loc.T("把鼠标移到" + StyleName(style) + "的左右两端，可以直接拖动调整。",
+        "Point at either end of the " + StyleName(style).ToLowerInvariant() + " and drag it to adjust.");
 
     private void CollapsedSizeOptions(CompactStyle style)
     {
         var reset = KeepPreview(ActionButton(Loc.T("恢复默认尺寸", "Reset to default size"), () => ResetCollapsedSize(style))); reset.FontSize = 11;
         AutomationProperties.SetName(reset, Loc.T("恢复" + StyleName(style) + "的默认尺寸", "Reset " + StyleName(style) + " to default size"));
-        SectionTitle(Loc.T("尺寸与位置 · ", "Size and position · ") + StyleName(style), reset, () => DragWidthHint);
+        SectionTitle(Loc.T("尺寸与位置 · ", "Size and position · ") + StyleName(style), reset, () => DragWidthHint(style));
         switch (style)
         {
             case CompactStyle.Notch:
