@@ -41,7 +41,7 @@ public static partial class PanelThemes
         new("textSecondary", "次要文字", "Secondary text", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("textTertiary", "辅助文字", "Tertiary text", GraphicContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("accent", "强调色（键盘焦点、选中日期）", "Accent (keyboard focus, chosen dates)", GraphicContrast, PanelThemeBackdrop.SurfaceAndPopup),
-        new("onAccent", "强调色上的文字（选中的日期）", "Text on the accent (chosen dates)", GraphicContrast, PanelThemeBackdrop.Accent),
+        new("onAccent", "强调色上的文字（选中的日期、通知主按钮）", "Text on the accent (chosen dates, a notice's main button)", TextContrast, PanelThemeBackdrop.Accent),
         new("danger", "错误与暂停同步", "Errors and paused sync", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("liked", "已喜欢", "Liked song", GraphicContrast, PanelThemeBackdrop.Surface),
         new("clock", "时间默认色", "Default clock color", TextContrast, PanelThemeBackdrop.Surface),

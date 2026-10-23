@@ -642,7 +642,7 @@ internal sealed partial class NoticeWindow : Window
     private Button TextButton(string text, Action click, bool primary, bool flat = false)
     {
         string rest = primary ? _look.Accent : flat ? "Transparent" : _look.Fill;
-        var face = new Border { CornerRadius = new CornerRadius(8), Background = UI.Brush(rest), Padding = new Thickness(12, 0, 12, 0), MinHeight = 32, BorderBrush = UI.Brush(_look.Accent) };
+        var face = new Border { CornerRadius = new CornerRadius(8), Background = UI.Brush(rest), Padding = new Thickness(12, 0, 12, 0), MinHeight = 32, BorderBrush = UI.Brush(primary ? _look.OnAccent : _look.Accent) };
         face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal, Foreground = UI.Brush(primary ? _look.OnAccent : _look.Primary), VerticalAlignment = VerticalAlignment.Center };
         var button = new Button { Content = face, Margin = new Thickness(8, 0, 0, 0), MinHeight = 32, Cursor = Cursors.Hand, FocusVisualStyle = null,
             Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };

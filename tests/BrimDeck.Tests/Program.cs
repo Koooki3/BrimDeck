@@ -24,6 +24,7 @@ try
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     NoticeGlyphTests.Run(Check);
+    ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);

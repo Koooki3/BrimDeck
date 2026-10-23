@@ -36,6 +36,8 @@ internal sealed class ModelDateWindow : Window
         var button = new Button { Content = text, Padding = new Thickness(4, 1, 4, 1), Foreground = UI.Brush(selected ? PanelTheme.Hex("onAccent") : UI.Primary),
             Background = selected ? UI.Brush(UI.Accent) : Brushes.Transparent, BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(1),
             HorizontalContentAlignment = HorizontalAlignment.Center, MinWidth = 0, MinHeight = 24 };
+        // The focus ring is drawn in the accent, so on an accent button it stands outside it.
+        if (selected) button.FocusVisualStyle = (Style)FindResource("PanelOutsetKeyboardFocus");
         AutomationProperties.SetName(button, name); button.Click += (_, _) => click(); return button;
     }
 
@@ -76,8 +78,10 @@ internal sealed class ModelDateWindow : Window
             var day = _month.AddDays(i - first);
             var button = Control(day.Day.ToString(CultureInfo.InvariantCulture), day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), () => ChooseDate(day), day == _start || day == _end);
             button.Height = 24; button.Padding = new Thickness(0); button.IsEnabled = day <= DateTime.Today;
-            if (day != _start && day != _end) button.Foreground = UI.Brush(day.Month == _month.Month ? UI.Primary : UI.Tertiary);
-            if (day > _start && day < _end) button.Background = UI.Brush(PanelTheme.Hex("rangeFill"));
+            bool inRange = day > _start && day < _end;
+            // Days of the next or previous month are dimmed, except inside the range, where only the primary text reads on its fill.
+            if (day != _start && day != _end) button.Foreground = UI.Brush(day.Month == _month.Month || inRange ? UI.Primary : UI.Tertiary);
+            if (inRange) button.Background = UI.Brush(PanelTheme.Hex("rangeFill"));
             calendar.Children.Add(button);
         }
         _body.Children.Add(calendar);
