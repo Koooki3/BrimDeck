@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using BrimDeck.Core;
 
 namespace BrimDeck;
@@ -15,6 +16,8 @@ public partial class MainWindow
     private CollapsedShape? _compactRendered;
     private bool _compactRendering;
     private (CollapsedShape Shape, object Alert)? _alertRendered;
+    // The notice on show and when it appeared (Environment.TickCount64).
+    private (object Alert, long Since)? _alertSince;
     private static readonly object AlertRegionTag = new();
 
     // The row's width. The notch's shoulders and bottom corners keep their sizes at every height while its inset shrinks with
@@ -51,16 +54,18 @@ public partial class MainWindow
         }
     }
 
-    // The quota notice replaces the collapsed row. Its ring, name, "used" text and reset time each have a region that clips;
-    // when the row is short, the reset time gives way first, then the name, then the ring, and the used text last.
+    // The quota notice replaces the collapsed row: its ring, name, "used" text and reset time side by side, centred. A notice
+    // longer than the row scrolls through it once while it is shown (CompactAlertLayout.Scroll).
     partial void LayoutCompactAlert(CollapsedShape shape, bool alertVisible)
     {
         if (!alertVisible || _alert is not { } alert)
         {
             // A cleared notice leaves none of this file's regions behind.
             if (CompactAlert.Children.Count > 0 && CompactAlert.Children[0] is FrameworkElement { Tag: var own } && ReferenceEquals(own, AlertRegionTag)) CompactAlert.Children.Clear();
-            _alertRendered = null; return;
+            _alertRendered = null; _alertSince = null; return;
         }
+        // The scroll follows the time since the notice appeared, so a rebuild (a new shape or theme) carries on where it was.
+        if (_alertSince is not { } since || !ReferenceEquals(since.Alert, alert)) _alertSince = (alert, Environment.TickCount64);
         // An unchanged notice that this file built is kept, so opening and closing the panel do not rebuild it.
         if (_alertRendered is { } done && Equals(done.Shape, shape) && ReferenceEquals(done.Alert, alert)
             && CompactAlert.Children.Count > 0 && CompactAlert.Children[0] is FrameworkElement { Tag: var tag } && ReferenceEquals(tag, AlertRegionTag)) return;
@@ -82,24 +87,51 @@ public partial class MainWindow
             return Math.Ceiling(element.DesiredSize.Width * dpi - .001) / dpi;
         }
         double nameWidth = Natural(name), usedWidth = Natural(used), resetWidth = reset is null ? 0 : Natural(reset);
-        var layout = CompactAlertLayout.Calculate(width, scale, nameWidth, usedWidth, resetWidth);
+        var layout = CompactAlertLayout.Calculate(double.MaxValue, scale, nameWidth, usedWidth, resetWidth);
         double row = Math.Max(layout.RingSize, layout.LineHeight);
-        var ring = UI.Ring(alert.Used, alert.Entry.Theme, layout.RingSize, layout.RingThickness);
-        if (layout.RingWidth > 0) CompactAlert.Children.Add(CompactRegion(ring, layout.RingWidth, layout.RingSize, layout.RingSize, row, RegionAnchor.Left, dpi));
-        if (layout.NameWidth > 0) CompactAlert.Children.Add(CompactRegion(name, layout.NameWidth, Math.Min(nameWidth, name.MaxWidth), line, row, RegionAnchor.Left, dpi));
-        if (layout.TextWidth > 0) CompactAlert.Children.Add(CompactRegion(used, layout.TextWidth, usedWidth, line, row, RegionAnchor.Left, dpi));
-        if (reset is not null && layout.ResetWidth > 0) CompactAlert.Children.Add(CompactRegion(reset, layout.ResetWidth, resetWidth, line, row, RegionAnchor.Left, dpi, layout.Gap));
-        foreach (FrameworkElement region in CompactAlert.Children) region.Tag = AlertRegionTag;
+        var ring = UI.Ring(alert.Used, PanelTheme.AppTheme(alert.Entry), layout.RingSize, layout.RingThickness);
+        var parts = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (layout.RingWidth > 0) parts.Children.Add(CompactRegion(ring, layout.RingWidth, layout.RingSize, layout.RingSize, row, RegionAnchor.Left, dpi));
+        if (layout.NameWidth > 0) parts.Children.Add(CompactRegion(name, layout.NameWidth, Math.Min(nameWidth, name.MaxWidth), line, row, RegionAnchor.Left, dpi));
+        if (layout.TextWidth > 0) parts.Children.Add(CompactRegion(used, layout.TextWidth, usedWidth, line, row, RegionAnchor.Left, dpi));
+        if (reset is not null && layout.ResetWidth > 0) parts.Children.Add(CompactRegion(reset, layout.ResetWidth, resetWidth, line, row, RegionAnchor.Left, dpi, layout.Gap));
+        parts.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double span = SnapDown(width, dpi), full = parts.DesiredSize.Width;
+        // The allowance keeps rounding noise from starting a one-pixel scroll.
+        double overflow = Math.Max(0, Math.Ceiling((full - span) * dpi - .01) / dpi);
+        if (overflow <= 0) { CompactAlert.Children.Add(parts); parts.Tag = AlertRegionTag; return; }
+        // The row is laid out in a Canvas, which leaves it its full width; inside a clipping panel the layout clip would move
+        // with the translation and cut off the end that scrolls in.
+        var shift = new TranslateTransform();
+        parts.RenderTransform = shift;
+        var view = new Canvas { Width = span, Height = row, ClipToBounds = true, VerticalAlignment = VerticalAlignment.Center, Tag = AlertRegionTag };
+        Canvas.SetTop(parts, Snap((row - parts.DesiredSize.Height) / 2, dpi));
+        view.Children.Add(parts);
+        RenderOptions.SetClearTypeHint(parts, ClearTypeHint.Enabled);
+        CompactAlert.Children.Add(view);
+        double shown = _alertTimer.Interval.TotalSeconds;
+        var (start, end) = CompactAlertLayout.Scroll(overflow, shown);
+        static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
+        var glide = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(shown), FillBehavior = FillBehavior.HoldEnd };
+        glide.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
+        glide.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(start)));
+        // Without animations the notice steps to its end once, when the glide would have finished.
+        if (Settings.Animations && SystemParameters.ClientAreaAnimation) glide.KeyFrames.Add(new SplineDoubleKeyFrame(-overflow, At(end), new KeySpline(.4, 0, .6, 1)));
+        else glide.KeyFrames.Add(new DiscreteDoubleKeyFrame(-overflow, At(end)));
+        var clock = glide.CreateClock();
+        shift.ApplyAnimationClock(TranslateTransform.XProperty, clock);
+        double elapsed = Math.Clamp((Environment.TickCount64 - _alertSince!.Value.Since) / 1000d, 0, shown);
+        if (elapsed > 0) clock.Controller!.Seek(TimeSpan.FromSeconds(elapsed), TimeSeekOrigin.BeginTime);
     }
 
     private enum RegionAnchor { Left, Center, Right }
     // Rounded down to whole device pixels, so regions never add up to more than the row.
-    private static double SnapDown(double value, double dpi) => double.IsFinite(value) && value > 0 && dpi > 0 ? Math.Floor(value * dpi + .001) / dpi : 0;
+    private static double SnapDown(double value, double dpi) => DevicePixels.Down(value, dpi);
     private static double Snap(double value, double dpi) => double.IsFinite(value) && dpi > 0 ? Math.Round(value * dpi, MidpointRounding.AwayFromZero) / dpi : 0;
 
     // A region of the given width holding one element, centred vertically in the row. The element keeps its size and is
     // anchored to one side (after a leading gap, if any); a region narrower than that cuts the other side off.
-    // Text below the cut is set to ClearType again: the clip would otherwise turn it grayscale, and it lies over the opaque black surface.
+    // Text below the cut is set to ClearType again: the clip would otherwise turn it grayscale, and it lies over the opaque surface.
     private static FrameworkElement CompactRegion(FrameworkElement child, double width, double childWidth, double childHeight, double row, RegionAnchor anchor, double dpi, double leading = 0)
     {
         double w = SnapDown(width, dpi), cw = Math.Max(0, double.IsFinite(childWidth) ? childWidth : 0), ch = Math.Max(0, double.IsFinite(childHeight) ? childHeight : 0);

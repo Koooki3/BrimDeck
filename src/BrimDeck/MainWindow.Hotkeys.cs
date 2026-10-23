@@ -74,7 +74,8 @@ public partial class MainWindow
             _hover.Stop(); _leave.Stop(); _pointerInside = false; _cursorInCompact = false;
             if (_alert is not null) ClearAlert();
         }
-        ApplySettings();
+        // Hiding and showing again are immediate (MainWindow.ApplySettings).
+        ApplySettings(true);
     }
 
     private void Rehide(object? sender, EventArgs e)

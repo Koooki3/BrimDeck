@@ -38,9 +38,10 @@ public partial class MainWindow
 
     internal void OpenModelDetails(ProviderId provider, int days)
     {
-        if (IsMusicPage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
+        if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
         _modelApps.Clear(); _modelApps.Add(provider);
         _knownModelApps.Clear(); _knownModelApps.UnionWith(Settings.StatisticsProviders);
+        _usageHandover = _details ? Handover.Dissolve : Handover.Forward;
         _customRange = null; _days = days; _details = true;
         ResetModelScroll(); RenderUsage();
     }
@@ -50,17 +51,17 @@ public partial class MainWindow
     {
         if (!_modelApps.Contains(provider)) _modelApps.Add(provider);
         else if (_modelApps.Count > 1) _modelApps.Remove(provider);
-        ResetModelScroll(); RenderUsage();
+        _usageHandover = Handover.Dissolve; ResetModelScroll(); RenderUsage();
     }
     internal void SelectModelPeriod(int days)
     {
         _ = UsageDateRange.Recent(days, DateTime.Today);
-        _days = days; _customRange = null; ResetModelScroll(); RenderUsage();
+        _days = days; _customRange = null; _usageHandover = Handover.Dissolve; ResetModelScroll(); RenderUsage();
     }
     internal void SelectModelRange(UsageDateRange range)
     {
         if (range.End > DateTime.Today) throw new ArgumentException(Loc.T("结束日期不能晚于今天。", "The end date cannot be later than today."));
-        _customRange = range; ResetModelScroll();
+        _customRange = range; _usageHandover = Handover.Dissolve; ResetModelScroll();
         var earliest = _historyStart ?? DateTime.Today.AddDays(-29);
         if (range.Start < earliest)
         {
@@ -85,7 +86,7 @@ public partial class MainWindow
         AutomationProperties.SetName(button, name); button.Click += (_, _) => click(); return button;
     }
 
-    private string StatisticsTheme(ProviderId id) => Settings.EnabledApps.FirstOrDefault(app => app.UsageSource == id)?.Theme ?? UI.ColorFor(id);
+    private string StatisticsTheme(ProviderId id) => Settings.EnabledApps.FirstOrDefault(app => app.UsageSource == id) is { } app ? PanelTheme.AppTheme(app) : UI.ColorFor(id);
 
     private FrameworkElement ModelApplicationFilter(IReadOnlyList<ProviderId> apps, int stage)
     {
@@ -144,7 +145,7 @@ public partial class MainWindow
         for (int i = 0; i < 5; i++) filters.ColumnDefinitions.Add(new ColumnDefinition
         { Width = i % 2 == 0 ? GridLength.Auto : new GridLength(8) });
         Border Periods(double padding) => Segmented(new[] { 1, 7, 30 }.Select(days => new SegmentItem(PeriodName(days), PeriodName(days),
-            _customRange is null && days == _days, () => SelectModelPeriod(days))).ToList(), 12, 22, padding, centerText: true);
+            _customRange is null && days == _days, () => SelectModelPeriod(days))).ToList(), 12, 22, padding, centerText: true, glide: "periods");
         var periods = Periods(7);
         FrameworkElement applications = null!; Button dates = null!;
         double available = Math.Max(0, ContentCanvas.Width - ModelToolbar.Margin.Left - ModelToolbar.Margin.Right - 36);
@@ -190,7 +191,7 @@ public partial class MainWindow
             { ToggleModelApp(app); button.Tag = _modelApps.Contains(app) ? "Selected" : null; }, _modelApps.Contains(app), toolTip: false);
             button.Margin = new Thickness(0, 3, 0, 3); stack.Children.Add(button);
         }
-        popup.Content = new Border { Child = stack, Background = UI.Brush("#1A1A1D"), CornerRadius = new CornerRadius(10), Padding = new Thickness(8), BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1) };
+        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(10), Padding = new Thickness(8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
         ShowModelPopup(popup, ModelToolbar);
     }
 
@@ -374,11 +375,11 @@ public partial class MainWindow
                 int column = Grid.GetColumn(text) / 2;
                 text.ToolTip = column == 1 ? PriceBreakdown(record) : column >= 2 ? tips[column - 2] : (object?)null;
             }
-            var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush("#0DFFFFFF"), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
-            item.MouseEnter += (_, _) => item.Background = UI.Brush("#0AFFFFFF"); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
+            var item = new Border { Child = row, Background = Brushes.Transparent, BorderBrush = UI.Brush(PanelTheme.Hex("rowDivider")), BorderThickness = new Thickness(0, i > 0 ? 1 : 0, 0, 0) };
+            item.MouseEnter += (_, _) => item.Background = UI.Brush(PanelTheme.Hex("rowHover")); item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
             list.Children.Add(item);
         }
-        // The viewport clip would turn the rows grayscale; they lie over the island's opaque black surface.
+        // The viewport clip would turn the rows grayscale; they lie over the island's opaque surface.
         RenderOptions.SetClearTypeHint(list, ClearTypeHint.Enabled);
         // Focusable so the arrow keys scroll the list; an outline around the whole list would only add noise.
         var scroll = new ScrollViewer { Content = list, Style = (Style)FindResource("ModelScrollViewer"), Focusable = true, FocusVisualStyle = null };

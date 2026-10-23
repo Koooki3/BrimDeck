@@ -16,8 +16,9 @@ public sealed record TokenEntry(string Key, DateTimeOffset Time, string Model,
 }
 
 // The most recent account quota values; Local marks values taken from the desktop application's own usage history.
-// Claude and Grok Bot each keep one.
-public sealed record ClaudeQuotaSnapshot(DateTimeOffset Time, string Plan, string PlanSource, string Source, List<Quota> Quotas, bool Local = false);
+// Claude and Grok Bot each keep one. ScopedTime is when the per-model quotas (Fable and the like) were read, where a local
+// sample newer than them carries them over from an earlier online reading.
+public sealed record ClaudeQuotaSnapshot(DateTimeOffset Time, string Plan, string PlanSource, string Source, List<Quota> Quotas, bool Local = false, DateTimeOffset? ScopedTime = null);
 
 public sealed class ProviderSnapshot(ProviderId id)
 {

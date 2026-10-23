@@ -16,7 +16,8 @@ public interface IDesktopSources
     IReadOnlyList<string?[]>? QueryDatabase(string database, string sql) => null;
 }
 
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null) : IDisposable
+// quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -42,7 +43,55 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
     private readonly SemaphoreSlim _gate = new(1);
-    private ClaudeQuotaSnapshot? _claudeRetained, _grokBotRetained;
+    private ClaudeQuotaSnapshot? _grokBotRetained;
+    // The last Claude quota read online; until this run reads its own, the previous run's (ClaudeQuotaCache), which is read on
+    // the first refresh that needs it, off the UI thread, rather than while BrimDeck starts.
+    // _claudeAccount is the hash of the account it was read for ("" when the sign-in did not name one). A reading is shown only
+    // for the account signed in now: the file needs the same known account, while a reading of this run is set aside only
+    // when both accounts are known and differ, as before for a sign-in whose records name no account.
+    private ClaudeQuotaSnapshot? _claudeRetained;
+    private string _claudeAccount = "";
+    private bool _claudeCacheRead;
+    private ClaudeQuotaSnapshot? ClaudeRetained(string account)
+    {
+        var hash = ClaudeQuotaCache.AccountHash(account);
+        if (_claudeRetained is not null && hash.Length > 0 && _claudeAccount.Length > 0 && hash != _claudeAccount) { _claudeRetained = null; _claudeAccount = hash; }
+        // The file is read once the account is known; a sign-in that names no account leaves it for a later refresh.
+        if (_claudeRetained is null && !_claudeCacheRead && quotaCache is not null && hash.Length > 0)
+        {
+            _claudeCacheRead = true;
+            _claudeRetained = ClaudeQuotaCache.Load(quotaCache, _clock(), account);
+            _claudeAccount = hash;
+        }
+        return _claudeRetained;
+    }
+    // The file is written when the quotas, the plan or the account changed, and otherwise once its reading is
+    // ClaudeQuotaCache.RewriteAfter old, not on every refresh (about one a minute) that read the same values. The time it
+    // keeps, which the status names after a restart, is so never more than RewriteAfter behind the last successful reading.
+    // A reading whose account is not known is kept for this run only: the file could not tell whose it is.
+    private string _claudeSaved = "";
+    private DateTimeOffset _claudeSavedTime;
+    private void KeepOnline(ClaudeQuotaSnapshot snapshot, ClaudeCredential credential, ClaudePlanOrigin planFrom)
+    {
+        _claudeRetained = snapshot; _claudeAccount = ClaudeQuotaCache.AccountHash(credential.Account); _claudeCacheRead = true;
+        if (quotaCache is null || _claudeAccount.Length == 0) return;
+        var key = string.Join("|", _claudeAccount, snapshot.Plan, planFrom, credential.SignIn, string.Join(";", snapshot.Quotas));
+        if (key == _claudeSaved && snapshot.Time - _claudeSavedTime < ClaudeQuotaCache.RewriteAfter) return;
+        _claudeSaved = key; _claudeSavedTime = snapshot.Time;
+        ClaudeQuotaCache.Save(quotaCache, snapshot, credential.Account, credential.SignIn, planFrom);
+    }
+    // A sign-in that is gone or rejected keeps no quota, on disk either. A sign-in that could not be read just now only drops
+    // the reading of this run; the file is read again the next time a reading is needed, so once the sign-in can be read and
+    // the API is still rate limited, the kept quotas show again.
+    private void ForgetClaude(bool signedOut = true)
+    {
+        _claudeRetained = null; _claudeAccount = "";
+        if (!signedOut) { _claudeCacheRead = false; return; }
+        if (quotaCache is null) return;
+        _claudeCacheRead = true;
+        _claudeSaved = "";
+        ClaudeQuotaCache.Delete(quotaCache);
+    }
     private readonly ConfiguredProviders _configured = new(secrets, http, clock);
     public Task<ProviderTestResult> TestProviderAsync(AppEntry entry, CancellationToken ct = default) => _configured.TestAsync(entry, ct);
 
@@ -159,7 +208,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         // The reader owns a cache and is accessed serially before the first asynchronous request.
         var snapshot = id is ProviderId.Claude or ProviderId.Codex
             ? _logs.Read(id, id == ProviderId.Codex ? _locations.CodexHome : _locations.ClaudeHome, now, start.LocalDateTime) : new ProviderSnapshot(id) { UsageStart = start.LocalDateTime.Date };
-        if (id == ProviderId.Claude) ReadClaudeProfile(snapshot);
+        var claudeAccount = id == ProviderId.Claude ? ReadClaudeProfile(snapshot) : "";
         var wslRead = _includeWsl && id is ProviderId.Claude or ProviderId.Codex ? StartWsl(snapshot, now, start.LocalDateTime) : null;
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
@@ -188,7 +237,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 }
                 case ProviderId.Claude:
                     // Without an online Claude row this snapshot only serves token statistics, so no sign-in is read.
-                    if (claudeOnline) await ReadClaudeAsync(snapshot, now, ct);
+                    if (claudeOnline) await ReadClaudeAsync(snapshot, claudeAccount, now, ct);
                     break;
                 case ProviderId.Cursor:
                     await ReadCursorAsync(snapshot, now, start, ct);
@@ -232,7 +281,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         return snapshot;
     }
 
-    private void ReadClaudeProfile(ProviderSnapshot snapshot)
+    // Returns the id of the account Claude Code is signed in to (oauthAccount.accountUuid, written by Claude Code at sign-in),
+    // or "" when the record is missing or names none. It ties a kept quota to its account without a request.
+    private string ReadClaudeProfile(ProviderSnapshot snapshot)
     {
         try
         {
@@ -242,9 +293,10 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 .Equals(Path.Combine(home, ".claude"), StringComparison.OrdinalIgnoreCase)) profile = Path.Combine(home, ".claude.json");
             using var doc = ReadJson(profile);
             snapshot.Plan = PlanParser.ClaudeProfile(doc?.RootElement ?? default);
-            if (snapshot.Plan.Length > 0) snapshot.PlanSource = Loc.T("Claude 本地账户记录", "Claude local account record");
+            if (snapshot.Plan.Length > 0) snapshot.PlanSource = ClaudeSources.Plan(ClaudePlanOrigin.LocalRecord, ClaudeSignIn.Code);
+            return doc?.RootElement.Get("oauthAccount").Get("accountUuid").Text() ?? "";
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { return ""; }
     }
 
     // Null-safe: the account endpoint needs the profile scope, which not every sign-in has, so a failure only means the plan
@@ -262,7 +314,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         { return ""; }
     }
 
-    private async Task ReadClaudeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    // codeAccount is the account Claude Code's local record names (ReadClaudeProfile); the desktop app's sign-ins carry their own.
+    private async Task ReadClaudeAsync(ProviderSnapshot snapshot, string codeAccount, DateTimeOffset now, CancellationToken ct)
     {
         var attempted = new HashSet<string>(StringComparer.Ordinal);
         Exception? failure = null;
@@ -287,18 +340,20 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 // Publish only a complete successful result, all from the same login.
                 snapshot.Quotas = quotas;
                 var live = await planRequest;
-                if (live.Length > 0) { snapshot.Plan = live; snapshot.PlanSource = Loc.T("Claude 账户", "Claude account"); }
+                ClaudePlanOrigin planFrom;
+                if (live.Length > 0) { snapshot.Plan = live; planFrom = ClaudePlanOrigin.Account; }
                 else
                 {
                     var plan = PlanParser.ReconcileClaude(credential.Plan, snapshot.Plan);
                     // The local account record already filled Plan and PlanSource; a sign-in record only describes its own plan.
-                    if (plan == credential.Plan || snapshot.PlanSource.Length == 0)
-                        snapshot.PlanSource = plan.Length > 0 ? credential.Source + Loc.T(" 登录记录", " sign-in record") : "";
+                    planFrom = plan == credential.Plan || snapshot.PlanSource.Length == 0
+                        ? plan.Length > 0 ? ClaudePlanOrigin.SignIn : ClaudePlanOrigin.None : ClaudePlanOrigin.LocalRecord;
                     snapshot.Plan = plan;
                 }
-                Connected(snapshot, credential.Source + Loc.T(" · 账户配额", " · account quota"), now);
+                snapshot.PlanSource = ClaudeSources.Plan(planFrom, credential.SignIn);
+                Connected(snapshot, ClaudeSources.Quota(credential.SignIn), now);
                 snapshot.UsageNote += ClaudeUsageNote;
-                _claudeRetained = new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList());
+                KeepOnline(new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList()), credential, planFrom);
                 return true;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is
@@ -321,7 +376,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             var token = oauth.Get("accessToken").Text();
             var plan = PlanParser.ClaudeTier(oauth.Get("rateLimitTier").Text(), oauth.Get("subscriptionType").Text());
             if (plan.Equals("max", StringComparison.OrdinalIgnoreCase) && snapshot.Plan.StartsWith("Max ", StringComparison.Ordinal)) plan = snapshot.Plan;
-            if (token.Length > 0) codeCredential = new(token, plan, "Claude Code");
+            if (token.Length > 0) codeCredential = new(token, plan, ClaudeSignIn.Code, codeAccount);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { codeReadFailed = true; }
         if (codeCredential is not null && await TryCredential(codeCredential)) return;
@@ -341,10 +396,11 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         if (failure is not null)
         {
-            if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) _claudeRetained = null;
+            if (failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) ForgetClaude();
             else
             {
-                if (Freshest(now) is { } local)
+                // The reading shown in place of the failed one must belong to the account of the sign-in that was asked.
+                if (Freshest(now, login?.Account ?? "") is { } local)
                 {
                     // The plan stays known while the quota interface is unavailable (rate limited, for one): it is asked from the
                     // account endpoint, which a rate-limited quota request does not block, and otherwise taken from the local records.
@@ -352,8 +408,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     {
                         var live = loginPlan is null ? "" : await loginPlan;
                         var plan = live.Length > 0 ? live : PlanParser.ReconcileClaude(login.Plan, snapshot.Plan);
-                        var source = live.Length > 0 ? Loc.T("Claude 账户", "Claude account")
-                            : plan == snapshot.Plan && snapshot.PlanSource.Length > 0 ? snapshot.PlanSource : login.Source + Loc.T(" 登录记录", " sign-in record");
+                        var source = live.Length > 0 ? ClaudeSources.Plan(ClaudePlanOrigin.Account, login.SignIn)
+                            : plan == snapshot.Plan && snapshot.PlanSource.Length > 0 ? snapshot.PlanSource : ClaudeSources.Plan(ClaudePlanOrigin.SignIn, login.SignIn);
                         if (plan.Length > 0) _claudeRetained = local = local with { Plan = plan, PlanSource = source };
                     }
                     Retain(snapshot, local, failure, now); return;
@@ -361,7 +417,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             }
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         }
-        _claudeRetained = null;
+        ForgetClaude(signedOut: !desktopState.ReadFailed && !codeReadFailed);
         snapshot.StatusLabel = desktopState.ReadFailed || codeReadFailed ? Loc.T("读取失败", "Read failed")
             : desktopState.Detected ? Loc.T("等待登录", "Waiting for sign-in") : Loc.T("未连接", "Not connected");
         snapshot.Status = desktopState.ReadFailed ? Loc.T("已发现 Claude 桌面版，暂时无法读取登录信息", "The Claude desktop app was found, but its sign-in cannot be read right now.")
@@ -397,16 +453,17 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     // The desktop application samples the same account about every fifteen minutes. A newer local
     // sample replaces the last interface reading; reset times are carried over while they still lie ahead.
     // Null when neither an earlier reading nor a usable sample exists.
-    private ClaudeQuotaSnapshot? Freshest(DateTimeOffset now)
+    private ClaudeQuotaSnapshot? Freshest(DateTimeOffset now, string account)
     {
-        var kept = _claudeRetained;
+        var kept = ClaudeRetained(account);
         var sample = ClaudeUsageHistory.Latest(_locations);
         if (sample is not null && sample.Time <= now.AddMinutes(5) && (kept is null || sample.Time > kept.Time))
         {
             DateTimeOffset? Reset(int minutes) => kept?.Quotas.FirstOrDefault(quota => quota.Minutes == minutes)?.ResetAt is { } reset && reset > sample.Time ? reset : null;
             var scoped = kept?.Quotas.Where(q => q.Label is not ("5 小时额度" or "每周额度")).ToList() ?? [];
+            var scopedTime = scoped.Count == 0 ? null : kept!.Local ? kept.ScopedTime : kept.Time;
             kept = new(sample.Time, kept?.Plan ?? "", kept?.PlanSource ?? "", Loc.T("Claude 桌面版 · 本地用量记录", "Claude desktop app · local usage records"),
-                [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080), .. scoped], true);
+                [new Quota("5 小时额度", sample.FiveHour, Reset(300), 300), new Quota("每周额度", sample.SevenDay, Reset(10080), 10080), .. scoped], true, scopedTime);
             _claudeRetained = kept;
         }
         return kept;
@@ -421,6 +478,12 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         var time = kept.Time.LocalDateTime.ToString(kept.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
         var shown = kept.Local ? Loc.T($"显示 Claude 桌面版 {time} 记录的配额", $"showing the quota the Claude desktop app recorded at {time}")
             : Loc.T($"显示 {time} 读取的配额", $"showing the quota read at {time}");
+        // Per-model quotas carried over from an earlier online reading say when they were read.
+        if (kept.Local && kept.ScopedTime is { } scoped && kept.Time - scoped > TimeSpan.FromMinutes(1))
+        {
+            var at = scoped.LocalDateTime.ToString(scoped.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+            shown += Loc.T($"（按模型的额度为 {at} 读取）", $" (per-model quotas read at {at})");
+        }
         snapshot.Status = failure switch
         {
             null => kept.Local ? Loc.T($"已连接，{shown}", $"Connected, {shown}") : Loc.T("已连接", "Connected"),

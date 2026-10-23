@@ -88,6 +88,48 @@
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- An action that cannot be undone, in a confirmation: red instead of the accent. -->
+  <Style x:Key="SettingsDangerButton" TargetType="Button" BasedOn="{StaticResource SettingsPrimaryButton}">
+    <Setter Property="Background" Value="#C42B1C"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border x:Name="Chrome" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"><ContentPresenter.RenderTransform><TranslateTransform Y="-1"/></ContentPresenter.RenderTransform></ContentPresenter>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="#D83B2C"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.8"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- The delete button on a custom theme's card: a round chip at the preview's top right corner, red under the pointer. -->
+  <Style x:Key="SettingsCardDelete" TargetType="Button">
+    <Setter Property="Width" Value="22"/><Setter Property="Height" Value="22"/><Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="#A6202024"/>
+    <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsRoundFocus}"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Grid UseLayoutRounding="False" SnapsToDevicePixels="False">
+        <Ellipse x:Name="Disc" Fill="{TemplateBinding Background}" Stroke="#40FFFFFF" StrokeThickness="1"/>
+        <Path Data="M 0,0 L 7,7 M 7,0 L 0,7" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Disc" Property="Fill" Value="#C42B1C"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.8"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- A custom theme's name under its card: plain text that renames the theme when clicked. -->
+  <Style x:Key="SettingsCardName" TargetType="Button">
+    <Setter Property="Cursor" Value="IBeam"/><Setter Property="FocusVisualStyle" Value="{DynamicResource SettingsGlyphFocus}"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Border Background="Transparent" Padding="4,0">
+        <TextBlock x:Name="Text" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" Foreground="{TemplateBinding Foreground}"
+          FontSize="{TemplateBinding FontSize}" FontWeight="{TemplateBinding FontWeight}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Text" Property="TextDecorations" Value="Underline"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <!-- A secondary action that still reads as a button: input fill with the standard border. -->
   <Style x:Key="SettingsOutlineButton" TargetType="Button" BasedOn="{StaticResource SettingsButton}">
     <Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/><Setter Property="Background" Value="{DynamicResource SettingsInput}"/>
@@ -170,15 +212,38 @@
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- A card that adds something, in a theme card's frame (SettingsChoice): a plus in place of the preview, 84 high as a theme
+       preview is (CompactStylePreview.ThemeHeight), and the action as its name. -->
+  <Style x:Key="SettingsAddCard" TargetType="Button">
+    <Setter Property="Foreground" Value="{DynamicResource SettingsTextSecondary}"/><Setter Property="FontSize" Value="12.5"/>
+    <Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource SettingsCardFocus}"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <StackPanel Background="Transparent">
+        <Border x:Name="Chrome" CornerRadius="12" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="1.5" Padding="3">
+          <Border Height="84" CornerRadius="9" Background="Transparent">
+            <Path x:Name="Plus" Data="M 12,0 V 24 M 0,12 H 24" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.75" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+        </Border>
+        <Grid Height="30" Margin="8,4,8,0">
+          <TextBlock Text="{TemplateBinding Tag}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" HorizontalAlignment="Center" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+        </Grid>
+      </StackPanel>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#74747C"/><Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Plus" Property="Opacity" Value="0.7"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style x:Key="SettingsTileFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
     <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1.5" CornerRadius="13" Margin="-3"/>
   </ControlTemplate></Setter.Value></Setter></Style>
-  <!-- A clock style: the face on the black of the collapsed surface, with a check at the top right once chosen. -->
+  <!-- A clock style: the face on the panel theme's surface, with a check at the top right once chosen. -->
   <Style x:Key="SettingsClockTile" TargetType="RadioButton">
     <Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource SettingsTileFocus}"/>
     <Setter Property="Height" Value="72"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-      <Border x:Name="Chrome" CornerRadius="10" Background="#111114" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="2">
+      <Border x:Name="Chrome" CornerRadius="10" Background="{DynamicResource PanelSurface}" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="2">
         <Grid>
           <ContentPresenter x:Name="Preview" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           <Border x:Name="Selection" Width="16" Height="16" CornerRadius="8" Background="{DynamicResource SettingsAccent}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0" Visibility="Hidden">

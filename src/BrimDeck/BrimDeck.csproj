@@ -24,7 +24,13 @@
     <ApplicationIcon>Assets\BrimDeck.ico</ApplicationIcon>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
+    <!-- A panel that mostly sits idle: no background collection thread, and a collector that compacts and returns memory rather
+         than keeping room to grow into (see App.Memory.cs). -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
 
   <Import Project="ReleaseVersion.targets" />
 

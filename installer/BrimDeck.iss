@@ -120,6 +120,10 @@ en.UninstallButton=Uninstall
 en.DeleteUserData=Delete user data
 en.Uninstalled={#AppName} was uninstalled.
 
+; The folder's rights are settled before any file is copied into it (SecureAppDir).
+[Dirs]
+Name: "{app}"; AfterInstall: SecureAppDir
+
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -247,6 +251,96 @@ begin
   Result := True;
   if CurPageID = wpSelectDir then
     WizardForm.DirEdit.Text := NormalizeAppDir(WizardForm.DirEdit.Text);
+end;
+
+// ----- Folder rights -----
+
+// Whether Dir is Root or a folder inside it.
+function IsUnder(const Dir, Root: String): Boolean;
+begin
+  Result := (Root <> '') and (Pos(Lowercase(AddBackslash(Root)), Lowercase(AddBackslash(Dir))) = 1);
+end;
+
+// Program Files and the user's profile (the default %LOCALAPPDATA%\Programs) already keep other users from changing the
+// program. A folder chosen elsewhere, such as D:\BrimDeck, inherits the rights of the drive's root, which on a second
+// drive let every signed-in user change files: anyone could replace the program that runs as this user at sign-in.
+function NeedsOwnRights(const Dir: String): Boolean;
+begin
+  Result := not (IsUnder(Dir, ExpandConstant('{commonpf32}')) or IsUnder(Dir, ExpandConstant('{commonpf64}'))
+    or IsUnder(Dir, GetEnv('USERPROFILE')) or IsUnder(Dir, ExpandConstant('{localappdata}')));
+end;
+
+// The SID of the user running Setup, such as S-1-5-21-..., or '' when it cannot be read.
+function CurrentUserSid: String;
+var
+  Output: TExecOutput;
+  Line: String;
+  ResultCode, I: Integer;
+begin
+  Result := '';
+  if not ExecAndCaptureOutput(ExpandConstant('{sys}\whoami.exe'), '/user /fo csv /nh', '', SW_HIDE, ewWaitUntilTerminated, ResultCode, Output)
+    or (ResultCode <> 0) or (GetArrayLength(Output.StdOut) = 0) then
+    Exit;
+  // "domain\user","S-1-5-21-...": the SID is read from the end, so the characters of the user name do not matter.
+  Line := Trim(Output.StdOut[0]);
+  if (Length(Line) < 2) or (Line[Length(Line)] <> '"') then
+    Exit;
+  I := Length(Line) - 1;
+  while (I > 0) and (Pos(Line[I], '0123456789-S') > 0) do
+    I := I - 1;
+  if (I = 0) or (Line[I] <> '"') then
+    Exit;
+  Line := Copy(Line, I + 1, Length(Line) - I - 1);
+  if Copy(Line, 1, 4) = 'S-1-' then
+    Result := Line;
+end;
+
+// Whether Setup can create and delete a file in Dir.
+function CanWrite(const Dir: String): Boolean;
+var
+  Probe: String;
+begin
+  Probe := AddBackslash(Dir) + '.brimdeck-write-test';
+  Result := SaveStringToFile(Probe, 'BrimDeck', False) and DeleteFile(Probe);
+end;
+
+// Gives such a folder the rights of Program Files: it stops inheriting from its parent; SYSTEM and Administrators have full
+// control and Users may read and run. Installed for the current user, that user also has full control, so in-app updates
+// keep working without an administrator prompt. Subfolders with rights of their own keep them. If the rights cannot be set,
+// or Setup cannot write to the folder with them, the folder inherits its parent's rights as before, so updates keep working.
+procedure SecureAppDir;
+var
+  Dir, Grants, Sid: String;
+  ResultCode: Integer;
+begin
+  Dir := ExpandConstant('{app}');
+  if not NeedsOwnRights(Dir) then
+  begin
+    Log('The install folder keeps its inherited rights: ' + Dir);
+    Exit;
+  end;
+  // Every account by SID, so the names need no translation and cannot be mistaken for another account.
+  Grants := '"*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"';
+  if not IsAdminInstallMode then
+  begin
+    Sid := CurrentUserSid;
+    if Sid = '' then
+    begin
+      Log('The install folder keeps its inherited rights, because the current user''s SID could not be read: ' + Dir);
+      Exit;
+    end;
+    Grants := Grants + ' "*' + Sid + ':(OI)(CI)F"';
+  end;
+  if Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /inheritance:r /grant:r ' + Grants + ' /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0) then
+    Log('The install folder no longer inherits rights from its parent: ' + Dir)
+  else
+    Log('The install folder rights could not be set (code ' + IntToStr(ResultCode) + '): ' + Dir);
+  if not CanWrite(Dir) then
+  begin
+    Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /reset /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('Setup could not write to the install folder, so it inherits its parent''s rights again (code ' + IntToStr(ResultCode) + '): ' + Dir);
+  end;
 end;
 
 // Returns <path> from a command line such as "<path>\unins000.exe" /SILENT /UI.

@@ -21,12 +21,12 @@ internal static class CollapsedGeometryTests
 
         var settings = new DeckSettings
         {
-            NotchWidth = 5000, NotchHeight = 1, NotchOffsetX = double.NaN, CapsuleWidth = 10, CapsuleHeight = 100, CapsuleTop = -3,
+            NotchWidth = 9000, NotchHeight = 1, NotchOffsetX = double.NaN, CapsuleWidth = 10, CapsuleHeight = 100, CapsuleTop = -3,
             CapsuleOffsetX = 9999, LineLength = 1000, LineThickness = 3.3, LineTop = 50, LineOffsetX = double.NegativeInfinity
         };
         settings.Normalize();
         check("Normalize clamps every collapsed value to its range",
-            settings.NotchWidth == 800 && settings.NotchHeight == 24 && settings.NotchOffsetX == 0 && settings.CapsuleWidth == 140
+            settings.NotchWidth == 8000 && settings.NotchHeight == 24 && settings.NotchOffsetX == 0 && settings.CapsuleWidth == 140
             && settings.CapsuleHeight == 64 && settings.CapsuleTop == 0 && settings.CapsuleOffsetX == 4000 && settings.LineLength == 600
             && settings.LineThickness == 3.5 && settings.LineTop == 16 && settings.LineOffsetX == 0);
         var halves = new DeckSettings { LineThickness = 2.24 }; halves.Normalize();
@@ -144,11 +144,16 @@ internal static class CollapsedGeometryTests
         check("Content width is never negative", Near(narrowTall.ContentWidth, 60)
             && CollapsedGeometry.Resolve(new DeckSettings { NotchWidth = 180, NotchHeight = 64 }, CompactStyle.Notch, new DipRect(0, 0, 100, 600), new DipRect(0, 0, 100, 560)).ContentWidth == 0);
 
+        check("The notch spans the monitor and the capsule the work area at their largest widths",
+            CollapsedGeometry.Resolve(new DeckSettings { NotchWidth = 1920 }, CompactStyle.Notch, monitor, work).Surface == new DipRect(0, 0, 1920, 32)
+            && CollapsedGeometry.Resolve(new DeckSettings { CapsuleWidth = 8000 }, CompactStyle.Capsule, monitor, leftBar) is { Surface: var wide } && Near(wide.X, leftBar.X) && Near(wide.Width, leftBar.Width));
+
         check("Ranges: offsets for a width, widths for a monitor",
             CollapsedGeometry.OffsetXRange(CompactStyle.Notch, 238, monitor, work) == (-841, 841)
             && CollapsedGeometry.OffsetXRange(CompactStyle.Capsule, 196, monitor, leftBar) == (-832, 832)
             && CollapsedGeometry.OffsetXRange(CompactStyle.Notch, 5000, monitor, work) == (0, 0)
-            && CollapsedGeometry.WidthRange(CompactStyle.Notch, monitor, work) == (180, 800)
+            && CollapsedGeometry.WidthRange(CompactStyle.Notch, monitor, work) == (180, 1920)
+            && CollapsedGeometry.WidthRange(CompactStyle.Capsule, monitor, leftBar) == (140, leftBar.Width)
             && CollapsedGeometry.WidthRange(CompactStyle.Line, new DipRect(0, 0, 400, 300), new DipRect(0, 0, 400, 300)) == (24, 400)
             && CollapsedGeometry.WidthRange(CompactStyle.Capsule, new DipRect(0, 0, 100, 300), new DipRect(0, 0, 100, 300)) == (100, 100)
             && CollapsedGeometry.LineTopRange(4, work) == (0, 16));

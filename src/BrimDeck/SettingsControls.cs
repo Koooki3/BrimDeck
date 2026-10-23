@@ -18,18 +18,26 @@ public sealed partial class SettingsWindow
         if (help is null) return label;
         var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         heading.Children.Add(label);
+        heading.Children.Add(HelpIcon(title, help, 14));
+        return heading;
+    }
+
+    // The info icon that shows a setting's or a section's description on hover or focus.
+    private FrameworkElement HelpIcon(string title, Func<string> help, double size, double nudge = 1)
+    {
+        // The geometry is drawn for a 14 DIP box; smaller icons scale it so the circle stays centered and unclipped.
         var icon = Stroke("M 7,1 A 6,6 0 1 1 6.99,1 M 7,6.5 V 10 M 7,4 V 4.1", 14, 14, TextTertiary);
-        // Measured ink: the circle's center sat 1 DIP above the center of the label's glyphs.
-        icon.RenderTransform = new TranslateTransform(0, 1);
+        if (size != 14) icon.LayoutTransform = new ScaleTransform(size / 14, size / 14);
+        // Measured ink: beside a 13pt label the circle's center sat 1 DIP above the center of the label's glyphs.
+        if (nudge != 0) icon.RenderTransform = new TranslateTransform(0, nudge);
         var info = new Border
         {
-            Width = 22, Height = 24, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent,
+            Width = size + 8, Height = 24, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent,
             VerticalAlignment = VerticalAlignment.Center, Focusable = true, Cursor = Cursors.Help,
             Child = icon, FocusVisualStyle = (Style)FindResource("SettingsHelpFocus")
         };
         AttachSettingHelp(info, title, help);
-        heading.Children.Add(info);
-        return heading;
+        return info;
     }
 
     private static void AttachSettingHelp(FrameworkElement info, string title, Func<string> help)
@@ -76,7 +84,7 @@ public sealed partial class SettingsWindow
         {
             if (!SystemParameters.ClientAreaAnimation || Math.Abs(from - to) < 0.5) { move.BeginAnimation(TranslateTransform.XProperty, null); move.X = to; return; }
             var slide = new System.Windows.Media.Animation.DoubleAnimation(from, to, TimeSpan.FromMilliseconds(200))
-            { EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut } };
+            { EasingFunction = Soft.Out };
             // Hand the final position back to the property so later layout passes can move the highlight again.
             slide.Completed += (_, _) => { if (move.X == to) { move.BeginAnimation(TranslateTransform.XProperty, null); move.X = to; } };
             move.BeginAnimation(TranslateTransform.XProperty, slide);
@@ -148,5 +156,34 @@ public sealed partial class SettingsWindow
         controls.Slider.Margin=new Thickness(0,24,0,6);panel.Children.Add(controls.Slider);
         var scale=new DockPanel();var last=TextLine(max.ToString("0"),10,TextTertiary);DockPanel.SetDock(last,Dock.Right);scale.Children.Add(last);scale.Children.Add(TextLine(min.ToString("0"),10,TextTertiary));panel.Children.Add(scale);
         return panel;
+    }
+
+    // A question before an action that cannot be undone, in a small dialog over the settings: Cancel (Esc) or the action, in red.
+    private bool Confirm(string title, string message, string action)
+    {
+        var dialog = new Window { Title = title, Owner = this, Width = 400, SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false, FontFamily = UI.PanelFont,
+            Background = UI.Brush(Surface), Foreground = UI.Brush(TextPrimary), ResizeMode = ResizeMode.NoResize };
+        dialog.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/BrimDeck;component/SettingsResources.xaml", UriKind.Relative) });
+        _palette.Apply(dialog.Resources); Native.SettingsChrome.Apply(dialog);
+        dialog.SourceInitialized += (_, _) => Native.SettingsChrome.SetTheme(dialog, _palette.Dark);
+        TextOptions.SetTextFormattingMode(dialog, TextFormattingMode.Display);
+        var panel = new StackPanel { Margin = new Thickness(24, 20, 24, 20) };
+        var heading = TextLine(title, 16, TextPrimary, FontWeights.SemiBold); heading.Margin = new Thickness(0, 0, 0, 10); panel.Children.Add(heading);
+        var text = TextLine(message, 12.5, TextSecondary); text.TextWrapping = TextWrapping.Wrap; panel.Children.Add(text);
+        bool confirmed = false;
+        var cancel = ActionButton(Loc.T("取消", "Cancel"), dialog.Close); cancel.Style = (Style)dialog.FindResource("SettingsOutlineButton"); cancel.IsCancel = true;
+        var confirm = ActionButton(action, () => { confirmed = true; dialog.Close(); }); confirm.Style = (Style)dialog.FindResource("SettingsDangerButton");
+        foreach (var button in new[] { cancel, confirm }) { button.MinWidth = 84; button.Padding = new Thickness(14, 6, 14, 6); }
+        confirm.Margin = new Thickness(8, 0, 0, 0);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };
+        buttons.Children.Add(cancel); buttons.Children.Add(confirm); panel.Children.Add(buttons);
+        var frame = new Border { BorderThickness = new Thickness(1), Child = panel };
+        frame.SetResourceReference(Border.BorderBrushProperty, "SettingsBorder");
+        frame.SetResourceReference(Border.BackgroundProperty, "SettingsSurface"); dialog.Content = frame;
+        // Cancel has the focus, so Enter alone does not delete.
+        dialog.Loaded += (_, _) => cancel.Focus();
+        dialog.ShowDialog();
+        return confirmed;
     }
 }

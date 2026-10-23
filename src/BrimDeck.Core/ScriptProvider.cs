@@ -96,7 +96,7 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
             {
                 using var input = JsonDocument.Parse(argument);
                 var root = input.RootElement; var options = root.Get("options");
-                var uri = ProviderCatalog.ValidateUrl(root.Get("url").Text());
+                var uri = ProviderCatalog.ValidateUrl(root.Get("url").Text(), entry.AllowHttp);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
                 timeout.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(options.Get("timeout").Number() ?? 8000, 100, 10000)));
                 using var request = new HttpRequestMessage(method == "POST" ? HttpMethod.Post : HttpMethod.Get, uri);
@@ -247,7 +247,11 @@ public sealed class ConfiguredProviders : IDisposable
                     if (_retryAt.TryGetValue(requestKey, out var retry) && now < retry) throw new ProviderReadException(Loc.T("请求频繁", "Too many requests"), Loc.T($"站点要求在 {retry.LocalDateTime:HH:mm:ss} 后重试。", $"The site asks to retry after {retry.LocalDateTime:HH:mm:ss}."));
                     if (secret.Length == 0 && entry.QuotaSource != ProviderId.Custom) throw new ProviderReadException(Loc.T("未配置", "Not configured"), Loc.T("请在设置中填写此来源的 API 密钥。", "Enter this source's API key in settings."));
                     if (ProviderCatalog.NeedsSite(entry.QuotaSource) && (entry.Site.Length > 0 || entry.QuotaSource != ProviderId.Custom))
-                    { var uri = ProviderCatalog.ValidateUrl(entry.Site); if (uri.Query.Length > 0) throw new InvalidDataException(Loc.T("站点地址只需填写域名或部署子路径，不要包含查询参数。", "Enter only the domain or deployment path in the site address, without query parameters.")); }
+                    {
+                        // An HTTP address saved by an earlier version, or kept after HTTP was turned off, stops here, before any request.
+                        if (Uri.TryCreate(entry.Site, UriKind.Absolute, out var saved) && ProviderCatalog.NeedsHttps(saved, entry.AllowHttp))
+                            throw new ProviderReadException(Loc.T("需要 HTTPS", "HTTPS required"), ProviderCatalog.HttpsRequired);
+                        var uri = ProviderCatalog.ValidateUrl(entry.Site, entry.AllowHttp); if (uri.Query.Length > 0) throw new InvalidDataException(Loc.T("站点地址只需填写域名或部署子路径，不要包含查询参数。", "Enter only the domain or deployment path in the site address, without query parameters.")); }
                     var result = await Task.Run(session.RunAsync, deadline.Token);
                     snapshot.Metrics = result.Metrics; snapshot.Plan = result.Plan; snapshot.Scope = result.Scope;
                     snapshot.Details = result.Details; snapshot.QuotaTime = now; snapshot.LiveQuota = true;

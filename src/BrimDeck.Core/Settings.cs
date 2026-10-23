@@ -12,6 +12,9 @@ public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
 public enum DisplayPlacement { Primary, Chosen }
 // A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named.
 public sealed record ChosenDisplay(string Id, string Name);
+// An app whose full-screen windows keep the panel in its normal style, such as a desktop beautification tool. Path is the
+// executable when it is known; an entry with only a name matches any process of that name.
+public sealed record FullscreenException(string Name = "", string Path = "");
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop app or local web app) signed in with; DeepSeek uses a key entered by hand.
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
@@ -19,9 +22,19 @@ public sealed record ChosenDisplay(string Id, string Name);
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14 }
 public enum SettingsTheme { System, Light, Dark }
-public enum DeckPage { Usage, Music }
-public enum DefaultDeckPage { Last, Usage, Music }
+// Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
+public enum DeckPage { Usage, Music, Monitor }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor }
 public enum CompactMusicText { None, Title, Lyrics }
+// The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left and the
+// equalizer and the clock at the right; Music places only the title or lyric. Saved as numbers, so new members go at the end.
+public enum CompactPart { Rings, Music, Monitor }
+public static class CompactParts
+{
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor];
+    // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
+    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
+}
 public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed }
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
 // and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
@@ -30,6 +43,12 @@ public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom
 public static class ClockColors
 {
     public const string DefaultCustom = "#B9A8FF";
+    // The clock colors a panel theme may give its own shade (see PanelPalette.ClockPreset), and their names in theme files.
+    public static readonly IReadOnlyList<ClockColor> Swatches = [ClockColor.Amber, ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime];
+    public static string Key(ClockColor color) => color.ToString().ToLowerInvariant();
+    // The built-in colors of the amber, cyan, pink and lime swatches; a panel theme can replace them (PanelPalette.ClockPreset).
+    public static string Preset(ClockColor color) => color switch
+    { ClockColor.Amber => "#FF9F43", ClockColor.Cyan => "#5CE1E6", ClockColor.Pink => "#FF8FB1", ClockColor.Lime => "#E4FF6A", _ => "#F5F5F7" };
     // Every gradient has three colors: start, middle and end.
     public static readonly string[] Sunset = ["#FFB38A", "#FF7EB3", "#B69CFF"];
     public static IReadOnlyList<(string Name, string[] Stops)> Gradients =>
@@ -56,6 +75,9 @@ public sealed class AppEntry
     // Claude and Grok Bot rows only: read the quota from the account API. When off, the row sends no request and shows the
     // quota the desktop app (Claude or Grok Bot) recorded on this PC. Each row has its own choice.
     public bool QuotaOnline { get; set; } = true;
+    // New API, Sub2API and custom rows: also send requests, and so the API key, over plain HTTP to any address, such as a
+    // gateway on a NAS or reached through Tailscale. Off by default; HTTP to this PC is allowed either way.
+    public bool AllowHttp { get; set; }
     [JsonIgnore] public string ConfigurationKey => ProviderCatalog.ConfigurationKey(this);
     // Shorthand for QuotaSource in code. The "Id" member of old files is converted by SettingsMigrations.
     [JsonIgnore] public ProviderId Id { get => QuotaSource; set => QuotaSource = value; }
@@ -66,6 +88,7 @@ public sealed class AppEntry
     public string ThemeColor { get; set; } = "";
     public string WarningColor { get; set; } = "";
     public string CriticalColor { get; set; } = "";
+    // The chosen color or the application's preset, before any panel theme; the panel draws PanelTheme.AppTheme and friends.
     [JsonIgnore] public string Theme => ThemeColor.Length > 0 ? ThemeColor : AppPresets.ThemeColor(QuotaSource);
     [JsonIgnore] public string Warning => WarningColor.Length > 0 ? WarningColor : AppPresets.WarningColor;
     [JsonIgnore] public string Critical => CriticalColor.Length > 0 ? CriticalColor : AppPresets.CriticalColor;
@@ -93,6 +116,8 @@ public sealed class AppEntry
 public static class AppPresets
 {
     public const int MaximumApps = 7;
+    // A long list would be hard to review, and the exceptions are meant for a few shell-level apps.
+    public const int MaximumFullscreenExceptions = 32;
     public const string WarningColor = "#E5C890", CriticalColor = "#E78284";
     public const double WarningPercent = 70, CriticalPercent = 90;
     // Each column needs this much width; the panel's minimum width follows the number of enabled applications.
@@ -109,8 +134,6 @@ public static class AppPresets
       ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
     // Sources entered by hand share one purple by default.
     public const string ManualColor = "#CC9EED";
-    public static string QuotaColor(AppEntry entry, double usedPercent)
-        => usedPercent >= CriticalPercent ? entry.Critical : usedPercent >= WarningPercent ? entry.Warning : entry.Theme;
     public static int Level(double usedPercent) => usedPercent >= CriticalPercent ? 2 : usedPercent >= WarningPercent ? 1 : 0;
     public static bool IsColor(string value) => Regex.IsMatch(value, "^#[0-9A-Fa-f]{6}$");
     public static string NormalizeColor(string? value)
@@ -147,13 +170,29 @@ public static class PanelSizes
     public static string Name(PanelSize size) => size switch { PanelSize.Compact => Loc.T("紧凑", "Compact"), PanelSize.Spacious => Loc.T("宽敞", "Spacious"), _ => Loc.T("标准", "Standard") };
 }
 
+// The system monitor page's quick sizes. Unlike the usage page's they do not depend on the applications.
+public static class MonitorSizes
+{
+    public static readonly (double Width, double Height) Default = (620, 220);
+    public static (double Width, double Height) For(PanelSize size) => size switch
+    { PanelSize.Compact => (480, 160), PanelSize.Spacious => (860, 320), _ => Default };
+}
+
 public sealed class DeckSettings
 {
     private List<AppEntry>? _apps;
+    private List<CompactReading>? _readings;
+    private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
     public SettingsTheme Theme { get; set; } = SettingsTheme.System;
+    // The panel's color theme (see PanelThemes): "system", "dark", "light", a built-in theme or a theme file's id.
+    // The dark default is the original look. An id whose file is missing is kept and shown as the dark theme meanwhile.
+    public string PanelTheme { get; set; } = PanelThemes.Dark;
+    // What the user changed under each panel theme, by theme id (see ThemeChoices); the theme in use keeps its choices in the
+    // ordinary settings, and they are saved here when another theme is chosen.
+    public Dictionary<string, ThemeChoices> ThemeChoices { get; set; } = [];
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
     public string Language { get; set; } = Loc.English;
@@ -213,10 +252,48 @@ public sealed class DeckSettings
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
+    // Applications whose windows are not counted as full screen, so that a desktop beautification tool does not hide the
+    // panel. Empty by default: every app follows the three rules above.
+    public List<FullscreenException> FullscreenExceptions { get; set; } = [];
     public DisplayPlacement Display { get; set; }
     // Kept while Display is Primary, so that choosing displays again restores them.
     public List<ChosenDisplay> DisplayMonitors { get; set; } = [];
     public bool UsagePage { get; set; } = true;
+    // The system monitor page; it reads the system only while it is open on screen.
+    public bool MonitorPage { get; set; } = true;
+    public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
+    public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
+    public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
+    // Seconds between readings: 1 or 2.
+    public int MonitorInterval { get; set; } = 1;
+    public bool MonitorProcesses { get; set; } = true;
+    public ProcessSort MonitorSort { get; set; }
+    public MonitorMain MonitorMain { get; set; }
+    public MonitorProcessView MonitorProcessView { get; set; }
+    // The notch and the capsule each switch the system readings on; what they show is shared.
+    public bool NotchMonitor { get; set; }
+    public bool CapsuleMonitor { get; set; }
+    // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
+    public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
+    public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value); }
+    // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
+    // its own off, so the width set by hand stays.
+    public bool NotchAutoWidth { get; set; } = true;
+    // Compacts the heap and trims the working set after the panel has been collapsed and idle for a while (App.Memory.cs). Off
+    // by default: the memory is read back in when the panel next opens, which can stutter.
+    public bool TrimMemoryWhenIdle { get; set; }
+    public bool CapsuleAutoWidth { get; set; } = true;
+    // What the collapsed readings showed before their table (CompactReadings). Kept to read older files and, written to match the
+    // table (the preset it matches and the readings shown), for older versions.
+    public CompactMonitorMode CompactMonitor { get; set; }
+    public CompactMonitorItems CompactMonitorItems { get; set; } = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Download | CompactMonitorItems.Upload;
+    // The collapsed readings in their order, each shown or not, with or without its figure, in its own color or the palette's.
+    // Files saved before the table have none; they take it from CompactMonitor and CompactMonitorItems.
+    public List<CompactReading> CompactReadings
+    {
+        get => _readings ??= Core.CompactMonitor.Readings(CompactMonitor, CompactMonitorItems);
+        set => _readings = value;
+    }
     public bool UsageAutoSync { get; set; } = true;
     // The settings window's size when last closed, in DIPs, and whether it was maximized. Empty until it is closed once;
     // it opens at the default size then. The size is fitted to the screen the window opens on.
@@ -239,6 +316,17 @@ public sealed class DeckSettings
     public bool ShowsMusic(CompactStyle style) => style switch { CompactStyle.Notch => NotchMusic, CompactStyle.Capsule => CapsuleMusic, _ => false };
     // The indicator is too thin for text, so it never shows the clock.
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
+    // The indicator is too thin for readings, as for the clock.
+    public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
+    public IReadOnlyList<CompactPart> CompactOrder(CompactStyle style) => style == CompactStyle.Capsule ? CapsuleOrder : NotchOrder;
+    public void SetCompactOrder(CompactStyle style, IEnumerable<CompactPart> order) { if (style == CompactStyle.Notch) NotchOrder = [.. order]; else if (style == CompactStyle.Capsule) CapsuleOrder = [.. order]; }
+    public bool CompactAutoWidth(CompactStyle style) => style switch { CompactStyle.Notch => NotchAutoWidth, CompactStyle.Capsule => CapsuleAutoWidth, _ => false };
+    public void SetCompactAutoWidth(CompactStyle style, bool value) { if (style == CompactStyle.Notch) NotchAutoWidth = value; else if (style == CompactStyle.Capsule) CapsuleAutoWidth = value; }
+    // The saved width of the notch or the capsule, or the line's length.
+    public void SetCompactWidth(CompactStyle style, double width)
+    {
+        if (style == CompactStyle.Notch) NotchWidth = width; else if (style == CompactStyle.Capsule) CapsuleWidth = width; else LineLength = width;
+    }
     // Media is detected for the expanded music page, the chosen style's music, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
     [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || MusicIndicatorProgress
@@ -276,12 +364,24 @@ public sealed class DeckSettings
     {
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
+        copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
+        copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
+        copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
+        copy.FullscreenExceptions = [.. FullscreenExceptions ?? []];
         return copy;
     }
     public void Normalize()
     {
+        // Saved per-theme choices: one entry per theme id as the panel names it, each with its lists present.
+        ThemeChoices = (ThemeChoices ?? []).Where(pair => pair.Value is not null && pair.Key.Length > 0).GroupBy(pair => PanelThemes.NormalizeId(pair.Key))
+            .ToDictionary(group => group.Key, group =>
+            {
+                var choices = group.Last().Value;
+                choices.Apps ??= []; choices.ClockGradient ??= []; choices.ClockCustomColor ??= ClockColors.DefaultCustom;
+                return choices;
+            });
         var seen = new HashSet<Guid>();
         Apps = Apps.Where(app => app is not null && ProviderCatalog.Sources.Contains(app.QuotaSource)).Take(AppPresets.MaximumApps).ToList();
         foreach (var app in Apps)
@@ -292,11 +392,24 @@ public sealed class DeckSettings
             }
             app.Normalize();
         }
-        Width = double.IsFinite(Width) ? Math.Clamp(Width, 440, 1200) : 760;
+        Width = double.IsFinite(Width) ? Math.Clamp(Width, DeckPages.MinWidth, DeckPages.MaxWidth) : 760;
         Width = Math.Max(Width, MinimumWidth);
-        Height = double.IsFinite(Height) ? Math.Clamp(Height, 140, 400) : 240;
-        MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, 440, 1200) : 440;
-        MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, 140, 400) : 200;
+        Height = double.IsFinite(Height) ? Math.Clamp(Height, DeckPages.MinHeight, DeckPages.MaxHeight) : 240;
+        MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 440;
+        MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
+        MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
+        MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
+        if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
+        MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
+        if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
+        if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
+        if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
+        if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
+        CompactMonitorItems &= CompactMonitorItems.All;
+        if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
+        CompactReadings = Core.CompactMonitor.Normalize(CompactReadings);
+        CompactMonitor = Core.CompactMonitor.Preset(CompactReadings) ?? CompactMonitorMode.Custom;
+        CompactMonitorItems = Core.CompactMonitor.Shown(CompactReadings);
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
@@ -309,6 +422,7 @@ public sealed class DeckSettings
         CloseDelay = Math.Clamp(CloseDelay, 0, 2000);
         AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
+        PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
         Language = Loc.Normalize(Language);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
@@ -331,6 +445,13 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
+        // A path-only entry takes its name from the executable, so it can also be matched when the path cannot be read.
+        FullscreenExceptions = (FullscreenExceptions ?? []).OfType<FullscreenException>()
+            .Select(e => new FullscreenException(ScreenPolicy.NormalizeName(e.Name), ScreenPolicy.NormalizePath(e.Path)))
+            .Select(e => e.Name.Length == 0 && e.Path.Length > 0 ? e with { Name = System.IO.Path.GetFileNameWithoutExtension(e.Path) } : e)
+            .Where(e => e.Name.Length > 0 || e.Path.Length > 0)
+            .DistinctBy(ScreenPolicy.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(AppPresets.MaximumFullscreenExceptions).ToList();
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
@@ -349,6 +470,10 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
     private JsonObject _snapshots = [];
     // The file as saved by a newer version; saving replaces only this version's snapshot in it.
     private JsonObject? _newerFile;
+    // Settings this build does not know, from a file saved by the same version (another build of it, such as one with a feature
+    // not merged yet). They are written back as they were, so running this build never deletes them. An older version's file
+    // goes through SettingsMigrations instead, and its unknown keys are the ones the migrations retire.
+    private JsonObject _unknown = [];
     public string DirectoryPath { get; } = directory;
     public string FilePath => Path.Combine(DirectoryPath, "settings.json");
     // Worded when shown, in the language the loaded settings choose.
@@ -360,7 +485,7 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
     private DeckSettings FirstStart() { IsFirstStart = true; return new() { Language = Loc.SystemLanguage() }; }
     public DeckSettings Load()
     {
-        _snapshots = []; _newerFile = null; IsFirstStart = false; _loadWarning = null;
+        _snapshots = []; _newerFile = null; _unknown = []; IsFirstStart = false; _loadWarning = null;
         try
         {
             if (!File.Exists(FilePath)) return FirstStart();
@@ -386,6 +511,11 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
             // Keep what an older version saved so that returning to it restores its settings. Files saved before
             // versioning cannot be told apart and are not kept.
             if (saved < running && saved > new Version(0, 0, 0)) _snapshots[saved.ToString(3)] = root.DeepClone();
+            if (saved == running)
+            {
+                var known = JsonSerializer.SerializeToNode(new DeckSettings())!.AsObject();
+                _unknown = new JsonObject(root.Where(pair => !known.ContainsKey(pair.Key)).Select(pair => KeyValuePair.Create(pair.Key, pair.Value?.DeepClone())));
+            }
             return SettingsMigrations.Read(root, running, out _);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
@@ -394,11 +524,16 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
             return FirstStart();
         }
     }
-    public void Save(DeckSettings settings)
+    public void Save(DeckSettings settings) => Write(Serialize(settings));
+
+    // The file's text for these settings. It normalizes them and reads this store's state, so it runs where the settings live;
+    // Write may then run on any thread, one call at a time.
+    public string Serialize(DeckSettings settings)
     {
         settings.AppVersion = _appVersion;
         settings.Normalize();
         var own = JsonSerializer.SerializeToNode(settings)!.AsObject();
+        foreach (var (key, value) in _unknown) if (!own.ContainsKey(key)) own[key] = value?.DeepClone();
         JsonObject file;
         if (_newerFile is not null)
         {
@@ -417,9 +552,14 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
                 .Select(pair => KeyValuePair.Create(pair.Key, pair.Value!.DeepClone())).ToList();
             if (kept.Count > 0) file[SnapshotsKey] = new JsonObject(kept!);
         }
+        return file.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    public void Write(string text)
+    {
         Directory.CreateDirectory(DirectoryPath);
         var temporary = FilePath + ".tmp";
-        File.WriteAllText(temporary, file.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(temporary, text);
         File.Move(temporary, FilePath, true);
     }
 }

@@ -36,9 +36,10 @@ public partial class MainWindow
         shape.SetBinding(Shape.FillProperty, new Binding(nameof(Foreground)) { Source = SettingsButton });
         var mark = new Ellipse
         {
-            Width = dot, Height = dot, Fill = UI.Brush("#0A84FF"), SnapsToDevicePixels = true, HorizontalAlignment = HorizontalAlignment.Left,
+            Width = dot, Height = dot, SnapsToDevicePixels = true, HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(x - dot / 2, y - dot / 2, 0, 0)
         };
+        mark.SetResourceReference(Shape.FillProperty, "PanelAccent");
         var drawing = new Grid { Width = box, Height = box, UseLayoutRounding = true, IsHitTestVisible = false };
         drawing.Children.Add(shape); drawing.Children.Add(mark);
         return drawing;

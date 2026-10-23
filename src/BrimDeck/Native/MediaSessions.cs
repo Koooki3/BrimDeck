@@ -392,7 +392,10 @@ internal sealed class MediaSessions : IDisposable
             var downloaded = buffer.ToArray();
             if (_disposed) return;
             RememberCover(url, downloaded);
-            if (cache.CoverKey == key) { cache.Cover = DecodeCover(downloaded); cache.Previous = null; Schedule(); }
+            if (cache.CoverKey != key) return;
+            var decoded = await Task.Run(() => DecodeCover(downloaded));
+            if (_disposed || cache.CoverKey != key) return;
+            cache.Cover = decoded; cache.Previous = null; Schedule();
         }
         catch { /* A cover request cannot block playback state or controls. */ }
         finally
@@ -453,7 +456,8 @@ internal sealed class MediaSessions : IDisposable
                             await reader.LoadAsync((uint)stream.Size);
                             var bytes = new byte[(int)stream.Size]; reader.ReadBytes(bytes);
                             // Unchanged artwork keeps its image, so periodic rereads do not rebuild the page.
-                            if (coverBytes is null || !bytes.AsSpan().SequenceEqual(coverBytes)) { cover = DecodeCover(bytes); coverBytes = bytes; }
+                            // Decoding a large cover took tens of milliseconds on the UI thread; the frozen image is made on the pool.
+                            if (coverBytes is null || !bytes.AsSpan().SequenceEqual(coverBytes)) { cover = await Task.Run(() => DecodeCover(bytes)); coverBytes = bytes; }
                         }
                     }
                     catch { /* Artwork failure must not suppress controls. */ }

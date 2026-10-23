@@ -34,16 +34,19 @@ internal static class MusicVisuals
     }
     internal static Border Cover(BitmapSource? image, double size, double radius, bool outlined = false)
     {
-        var content = new Grid { Background = UI.Brush("#0FFFFFFF") };
+        var content = new Grid { Background = UI.Brush(PanelTheme.Hex("coverPlaceholder")) };
         if (image is not null) content.Children.Add(new Image { Source = image, Stretch = Stretch.UniformToFill });
         else content.Children.Add(Icon("music", size * .34));
-        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush("#14FFFFFF"), StrokeThickness = 1, RadiusX = radius, RadiusY = radius, Margin = new Thickness(.5), IsHitTestVisible = false });
+        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush(PanelTheme.Hex("coverOutline")), StrokeThickness = 1, RadiusX = radius, RadiusY = radius, Margin = new Thickness(.5), IsHitTestVisible = false });
         content.Clip = new RectangleGeometry(new Rect(0, 0, size, size), radius, radius);
         return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(radius), Child = content };
     }
-    internal static Brush Accent(BitmapSource? source)
+    // The color taken from the cover, or the theme's equalizer color when there is no cover or it gives none.
+    internal static Brush Accent(BitmapSource? source) => Accent(source, out _);
+    internal static Brush Accent(BitmapSource? source, out Color? cover)
     {
-        if (source is null) return UI.Brush("#9EFFFFFF");
+        cover = null;
+        if (source is null) return UI.Brush(PanelTheme.Hex("equalizer"));
         try
         {
             var scaled = new TransformedBitmap(source, new ScaleTransform(16d / source.PixelWidth, 16d / source.PixelHeight));
@@ -57,21 +60,23 @@ internal static class MusicVisuals
                 double w = Math.Max(.12, (max - min) / 255d) * pixels[i + 3] / 255d;
                 b += pixels[i] * w; g += pixels[i + 1] * w; r += pixels[i + 2] * w; weight += w;
             }
-            if (weight == 0) return UI.Brush("#9EFFFFFF");
+            if (weight == 0) return UI.Brush(PanelTheme.Hex("equalizer"));
             r /= weight * 255; g /= weight * 255; b /= weight * 255;
             double maxChannel = Math.Max(r, Math.Max(g, b)), minChannel = Math.Min(r, Math.Min(g, b));
             double light = (maxChannel + minChannel) / 2, delta = maxChannel - minChannel;
             double saturation = delta == 0 ? 0 : delta / (1 - Math.Abs(2 * light - 1));
             double hue = delta == 0 ? 0 : maxChannel == r ? ((g - b) / delta + (g < b ? 6 : 0)) / 6
                 : maxChannel == g ? ((b - r) / delta + 2) / 6 : ((r - g) / delta + 4) / 6;
-            saturation = Math.Max(.35, saturation); light = Math.Clamp(light, .62, .78);
+            bool dark = PanelTheme.Current.IsDark;
+            saturation = Math.Max(.35, saturation); light = dark ? Math.Clamp(light, .62, .78) : Math.Clamp(light, .30, .42);
             double chroma = (1 - Math.Abs(2 * light - 1)) * saturation, x = chroma * (1 - Math.Abs(hue * 6 % 2 - 1)), m = light - chroma / 2;
             (r, g, b) = (hue * 6) switch
             { < 1 => (chroma, x, 0d), < 2 => (x, chroma, 0d), < 3 => (0d, chroma, x), < 4 => (0d, x, chroma), < 5 => (x, 0d, chroma), _ => (chroma, 0d, x) };
             r += m; g += m; b += m;
-            return new SolidColorBrush(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255)));
+            var accent = PanelTheme.Readable(Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255)));
+            var brush = new SolidColorBrush(accent); brush.Freeze(); cover = accent; return brush;
         }
-        catch (Exception) { return UI.Brush("#9EFFFFFF"); }
+        catch (Exception) { return UI.Brush(PanelTheme.Hex("equalizer")); }
     }
     // Coordinates from the element's own width. A relative brush spans everything the element draws,
     // including rings scrolled out of view, so its fades would follow the content instead of the edges.
@@ -171,6 +176,8 @@ internal sealed class MusicMarquee : FrameworkElement
     // Width of the edge fade, and the scroll speed in DIP per second.
     internal const double Edge = 6, Speed = 24;
     private readonly TranslateTransform _shift = new();
+    // The ink fade's brush moves against the text, so its fades stay at the element's edges while the text glides.
+    private readonly TranslateTransform _unshift = new();
     // An edge fades only while text is hidden beyond it: none on the left before the text moves,
     // none on the right once its end is in view. The first and last characters rest unfaded.
     private readonly GradientStop _left = new(Colors.White, 0), _right = new(Colors.White, 1);
@@ -218,6 +225,22 @@ internal sealed class MusicMarquee : FrameworkElement
         }
     }
     private readonly Color? _backdrop;
+    // Over a surface with a gradient or scan lines no single color can paint the fades, so the text itself fades: its brush is
+    // the foreground with transparent ends. The text is still drawn by the child, with no opacity mask and no intermediate
+    // layer, which a mask would need on every frame of the scroll.
+    private readonly bool _inkFade;
+    public bool InkFade
+    {
+        get => _inkFade;
+        init
+        {
+            if (!value || _glyphs is not null) return;
+            _inkFade = true;
+            _glyphs = new Glyphs(this); RenderOptions.SetClearTypeHint(_glyphs, ClearTypeHint.Enabled);
+            AddVisualChild(_glyphs); ClipToBounds = true;
+        }
+    }
+    private Brush? _ink;
     private readonly Glyphs? _glyphs;
     private Brush? _fade;
     private UIElement Painter => _glyphs ?? (UIElement)this;
@@ -230,7 +253,7 @@ internal sealed class MusicMarquee : FrameworkElement
     protected override Size MeasureOverride(Size availableSize) { _glyphs?.Measure(availableSize); return default; }
     protected override Size ArrangeOverride(Size finalSize) { _glyphs?.Arrange(new Rect(finalSize)); return finalSize; }
     private FormattedText Formatted => _formatted ??= new(Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-        Typeface, FontSize, Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        Typeface, FontSize, _ink ?? Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
     public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
     private void ResetText() { _formatted = null; ResetAnimation(); Painter.InvalidateVisual(); }
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
@@ -240,6 +263,7 @@ internal sealed class MusicMarquee : FrameworkElement
     {
         _scroll?.Controller?.Remove(); _scroll = null; _running = false;
         _shift.ApplyAnimationClock(TranslateTransform.XProperty, null); _shift.X = 0;
+        _unshift.ApplyAnimationClock(TranslateTransform.XProperty, null); _unshift.X = 0;
         _left.ApplyAnimationClock(GradientStop.OffsetProperty, null); _left.Offset = 0;
         _right.ApplyAnimationClock(GradientStop.OffsetProperty, null); _right.Offset = 1 - EdgeStop;
     }
@@ -262,12 +286,15 @@ internal sealed class MusicMarquee : FrameworkElement
                 new LinearDoubleKeyFrame(edge, At(1.5 + ramp)), new DiscreteDoubleKeyFrame(edge, At(3 + travel))));
             cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(1 - edge, At(0)), new DiscreteDoubleKeyFrame(1 - edge, At(1.5 + travel - ramp)),
                 new LinearDoubleKeyFrame(1, At(1.5 + travel)), new DiscreteDoubleKeyFrame(1, At(3 + travel))));
+            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new DiscreteDoubleKeyFrame(0, At(1.5)),
+                new LinearDoubleKeyFrame(_overflow, At(1.5 + travel)), new DiscreteDoubleKeyFrame(_overflow, At(3 + travel))));
             // Animate the retained drawing at WPF's render cadence. A background
             // DispatcherTimer can be delayed by input and must not drive text motion.
             _scroll = (ClockGroup)cycle.CreateClock(true);
             _shift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_scroll.Children[0]);
             _left.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_scroll.Children[1]);
             _right.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_scroll.Children[2]);
+            _unshift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_scroll.Children[3]);
             _running = true;
         }
         if (_scroll is not null && _running != running)
@@ -295,11 +322,24 @@ internal sealed class MusicMarquee : FrameworkElement
         if (_fadeWidth != fadeWidth)
         {
             _fadeWidth = fadeWidth;
-            // Coordinates from this element's own width, like MusicVisuals.Fade.
-            var edge = _backdrop ?? Colors.Transparent;
-            var fade = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(edge, 0), _left, _right, new(edge, 1) },
-                new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute } : null;
-            if (_glyphs is null) OpacityMask = fade; else _fade = fade;
+            if (_inkFade)
+            {
+                // The text's own brush fades at the ends (see InkFade).
+                var ink = (Foreground as SolidColorBrush)?.Color ?? Colors.White;
+                _left.Color = _right.Color = ink;
+                var clear = Color.FromArgb(0, ink.R, ink.G, ink.B);
+                _ink = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(clear, 0), _left, _right, new(clear, 1) },
+                    new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute, Transform = _unshift } : null;
+                _formatted = null; text = Formatted;
+            }
+            else
+            {
+                // Coordinates from this element's own width, like MusicVisuals.Fade.
+                var edge = _backdrop ?? Colors.Transparent;
+                var fade = fadeWidth > 0 ? new LinearGradientBrush(new GradientStopCollection { new(edge, 0), _left, _right, new(edge, 1) },
+                    new Point(0, 0), new Point(fadeWidth, 0)) { MappingMode = BrushMappingMode.Absolute } : null;
+                if (_glyphs is null) OpacityMask = fade; else _fade = fade;
+            }
         }
         if (_overflow != overflow) { _overflow = overflow; ResetAnimation(); }
         // Cover the whole box, as the carousel's background does, so the mask layer's edge is not the text's edge.
@@ -314,20 +354,96 @@ internal sealed class MusicMarquee : FrameworkElement
     }
 }
 
-// Overflowing rings scroll like the lyric marquee: rest at the first ring, glide until the
-// last ring is in view, rest there, then fade back to the first ring and start again.
-internal sealed class QuotaCarousel : Grid
+// A region whose content is wider than it scrolls like the lyric marquee: rest at the start, glide until the end is in
+// view, rest there, then fade back to the start and begin again. The quota rings and the system readings use it.
+internal abstract class GlideCarousel : Grid
 {
     internal const double StartHold = 2.5, EndHold = 2, Speed = 12, Fade = .25, FadeEdge = 3;
-    private readonly Canvas _strip;
-    private readonly Storyboard? _cycle;
-    private readonly bool _discrete;
-    private bool _enabled, _paused, _begun;
+    private FrameworkElement? _strip;
+    private Storyboard? _cycle;
+    private bool _discrete, _enabled, _paused, _begun;
     private TimeSpan _elapsed;
-    public bool Rotates { get; }
-    public double Travel { get; }
+    public bool Rotates { get; protected set; }
+    public double Travel { get; private set; }
     // Position within the cycle; the window hands it to the next carousel so a rebuild continues where this one was.
     public TimeSpan Elapsed => _begun ? _cycle!.GetCurrentTime(this) ?? _elapsed : _elapsed;
+
+    // Starts the cycle that moves the strip (with a TranslateTransform) left by travel and back.
+    protected void Glide(FrameworkElement strip, double travel, TimeSpan elapsed, bool animate)
+    {
+        _strip = strip; _discrete = !animate; _elapsed = elapsed;
+        Loaded += (_, _) => Update();
+        Unloaded += (_, _) => Update();
+        IsVisibleChanged += (_, _) => Update();
+        Retarget(travel);
+    }
+
+    // A new travel for a strip whose width changed; the cycle carries on from the same time. No travel leaves it at rest.
+    protected void Retarget(double travel)
+    {
+        if (_cycle is not null && _begun) { _elapsed = Elapsed; _cycle.Remove(this); _begun = false; }
+        Travel = Math.Max(0, travel);
+        if (Travel <= 0)
+        {
+            _cycle = null;
+            if (_strip?.RenderTransform is TranslateTransform shift) shift.X = 0;
+            return;
+        }
+        _cycle = Cycle();
+        _elapsed = TimeSpan.FromTicks(_elapsed.Ticks % _cycle.Duration.TimeSpan.Ticks);
+        Update();
+    }
+    private Storyboard Cycle()
+    {
+        double move = Travel / Speed, end = StartHold + move, reset = end + EndHold;
+        static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
+        var shift = new DoubleAnimationUsingKeyFrames();
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(StartHold)));
+        if (_discrete) shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(end)));
+        else shift.KeyFrames.Add(new SplineDoubleKeyFrame(-Travel, At(end), new KeySpline(.4, 0, .6, 1)));
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(reset + (_discrete ? 0 : Fade))));
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(reset + (_discrete ? 0 : Fade))));
+        var cycle = new Storyboard { Duration = TimeSpan.FromSeconds(reset + (_discrete ? 0 : 2 * Fade)), RepeatBehavior = RepeatBehavior.Forever };
+        Storyboard.SetTarget(shift, _strip); Storyboard.SetTargetProperty(shift, new PropertyPath("(UIElement.RenderTransform).(TranslateTransform.X)"));
+        cycle.Children.Add(shift);
+        if (!_discrete)
+        {
+            // The return to the start is a short fade, so the reset never reads as a backwards scroll.
+            var fade = new DoubleAnimationUsingKeyFrames();
+            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(0)));
+            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(reset)));
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, At(reset + Fade)));
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, At(reset + 2 * Fade)));
+            Storyboard.SetTarget(fade, _strip); Storyboard.SetTargetProperty(fade, new PropertyPath(OpacityProperty));
+            cycle.Children.Add(fade);
+        }
+        return cycle;
+    }
+    public void SetRunning(bool enabled, bool paused) { _enabled = enabled; _paused = paused; Update(); }
+    private void Update()
+    {
+        if (_cycle is null) return;
+        if (!IsLoaded || !IsVisible)
+        {
+            // Release the clocks while detached; a later load resumes from the saved position.
+            if (_begun) { _elapsed = Elapsed; _cycle.Remove(this); _begun = false; }
+            return;
+        }
+        if (!_begun)
+        {
+            _cycle.Begin(this, true); _begun = true;
+            if (_elapsed > TimeSpan.Zero) _cycle.Seek(this, _elapsed, TimeSeekOrigin.BeginTime);
+            _cycle.Pause(this);
+        }
+        if (_enabled && !_paused) _cycle.Resume(this); else _cycle.Pause(this);
+    }
+}
+
+// Overflowing rings scroll through their region by whole ring steps.
+internal sealed class QuotaCarousel : GlideCarousel
+{
+    private readonly Canvas _strip;
     public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
     {
         // The region is the layout's ring width in whole device pixels; rings sit in fixed slots from its left edge and its
@@ -370,56 +486,35 @@ internal sealed class QuotaCarousel : Grid
         // The glide moves by whole ring steps, so at the end the rings stand in the same slots as at the start: the first is
         // whole at the left edge, and the last is whole before the right fade. Since the fade is at most span - ring, this
         // never moves the last ring out of the region.
-        Travel = Math.Ceiling((full + fade - span) / step - 1e-6) * step;
-        _discrete = !animate; _cycle = Cycle();
-        _elapsed = TimeSpan.FromTicks(elapsed.Ticks % _cycle.Duration.TimeSpan.Ticks);
-        Loaded += (_, _) => Update();
-        Unloaded += (_, _) => Update();
-        IsVisibleChanged += (_, _) => Update();
+        Glide(_strip, Math.Ceiling((full + fade - span) / step - 1e-6) * step, elapsed, animate);
     }
-    private Storyboard Cycle()
+}
+
+// System readings wider than their region scroll through it instead of dropping readings. The strip is drawn tight (each
+// figure at its own width, MonitorStrip.Tight), so it scrolls no blanks; its width and the travel follow the readings. The
+// left fade lies outside the region, over the gap before it, so the first reading is whole at rest, and the right fade lies
+// inside, so nothing is drawn past the region toward the equalizer or the clock.
+internal sealed class ReadingsCarousel : GlideCarousel
+{
+    public ReadingsCarousel(MonitorStrip strip, double span, double edge, TimeSpan elapsed, bool animate)
     {
-        double move = Travel / Speed, end = StartHold + move, reset = end + EndHold;
-        static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
-        var shift = new DoubleAnimationUsingKeyFrames();
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(StartHold)));
-        if (_discrete) shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(end)));
-        else shift.KeyFrames.Add(new SplineDoubleKeyFrame(-Travel, At(end), new KeySpline(.4, 0, .6, 1)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(reset + (_discrete ? 0 : Fade))));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(reset + (_discrete ? 0 : Fade))));
-        var cycle = new Storyboard { Duration = TimeSpan.FromSeconds(reset + (_discrete ? 0 : 2 * Fade)), RepeatBehavior = RepeatBehavior.Forever };
-        Storyboard.SetTarget(shift, _strip); Storyboard.SetTargetProperty(shift, new PropertyPath("(UIElement.RenderTransform).(TranslateTransform.X)"));
-        cycle.Children.Add(shift);
-        if (!_discrete)
-        {
-            // The return to the first ring is a short fade, so the reset never reads as a backwards scroll.
-            var fade = new DoubleAnimationUsingKeyFrames();
-            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(0)));
-            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(reset)));
-            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, At(reset + Fade)));
-            fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, At(reset + 2 * Fade)));
-            Storyboard.SetTarget(fade, _strip); Storyboard.SetTargetProperty(fade, new PropertyPath(OpacityProperty));
-            cycle.Children.Add(fade);
-        }
-        return cycle;
-    }
-    public void SetRunning(bool enabled, bool paused) { _enabled = enabled; _paused = paused; Update(); }
-    private void Update()
-    {
-        if (_cycle is null) return;
-        if (!IsLoaded || !IsVisible)
-        {
-            // Release the clocks while detached; a later load resumes from the saved position.
-            if (_begun) { _elapsed = Elapsed; _cycle.Remove(this); _begun = false; }
-            return;
-        }
-        if (!_begun)
-        {
-            _cycle.Begin(this, true); _begun = true;
-            if (_elapsed > TimeSpan.Zero) _cycle.Seek(this, _elapsed, TimeSeekOrigin.BeginTime);
-            _cycle.Pause(this);
-        }
-        if (_enabled && !_paused) _cycle.Resume(this); else _cycle.Pause(this);
+        span = Math.Max(0, span); edge = Math.Max(0, edge);
+        Rotates = span > 0;
+        Width = span + edge; Height = strip.Height; ClipToBounds = true;
+        strip.Tight = true;
+        strip.Width = strip.TightWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        strip.RenderTransform = new TranslateTransform();
+        Canvas.SetLeft(strip, edge);
+        // A Canvas measures the strip at its full width, as for the rings.
+        var host = new Canvas(); host.Children.Add(strip); Children.Add(host);
+        Margin = new Thickness(-edge, 0, 0, 0);
+        double fade = Math.Min(edge, span / 2);
+        OpacityMask = new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), new(Colors.White, edge / Width),
+            new(Colors.White, (Width - fade) / Width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(Width, 0)) { MappingMode = BrushMappingMode.Absolute };
+        Background = Brushes.Transparent;
+        // At the end the last reading stands whole before the right fade.
+        double TravelFor(double full) => Math.Ceiling(full + fade - span);
+        Glide(strip, TravelFor(strip.Width), elapsed, animate);
+        strip.TightWidthChanged += () => { strip.Width = strip.TightWidth; Retarget(TravelFor(strip.Width)); };
     }
 }

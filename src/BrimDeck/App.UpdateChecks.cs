@@ -31,10 +31,17 @@ public partial class App
     internal void CheckUpdatesIfDue()
     {
         if (Exiting || !_updateEvents) return;
-        bool online;
-        try { online = NetworkInterface.GetIsNetworkAvailable(); }
-        catch (NetworkInformationException) { online = false; }
-        _ = Updates.CheckInBackgroundAsync(online, Lifetime.Token);
+        // Asking whether any network is up lists every adapter, which took over 100 ms on the UI thread with many virtual
+        // adapters; it runs on the thread pool, and the check itself was already in the background.
+        var lifetime = Lifetime.Token;
+        _ = Task.Run(() =>
+        {
+            bool online;
+            try { online = NetworkInterface.GetIsNetworkAvailable(); }
+            catch (NetworkInformationException) { online = false; }
+            return online;
+        }, lifetime).ContinueWith(task => { if (!Exiting && task.IsCompletedSuccessfully) _ = Updates.CheckInBackgroundAsync(task.Result, lifetime); },
+            CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     private void NetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)

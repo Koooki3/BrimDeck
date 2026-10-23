@@ -56,7 +56,12 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
         double byWidth = Math.Clamp(1 + 2 * (width - standard.Width) / (spacious.Width - standard.Width), 1, 3);
         return Math.Min(byHeight, byWidth);
     }
-    public static MusicLayout Calculate(double width, double height, bool lyrics, bool timeline, bool message = false, bool logMode = false, bool transport = true)
+    // The lyric lines the room beside the cover holds, whether or not there are lyrics to show in them.
+    public int LyricRoom => (int)Math.Clamp(Math.Floor((MiddleHeight - Metrics.MiddleGap) / Metrics.LyricLine), 0, 3);
+    // lyricsExpected lays out the titles as if lyrics were shown, so they keep their place while lyrics are still looked up,
+    // or when a song has none.
+    public static MusicLayout Calculate(double width, double height, bool lyrics, bool timeline, bool message = false, bool logMode = false, bool transport = true,
+        bool lyricsExpected = false)
     {
         double density = DensityFor(width, height);
         var c = MusicMetrics.At(density);
@@ -73,7 +78,7 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
         // message would then have no line left. Below them sit the current lyric, then the next one, then the one before.
         double separate = c.TitleLine + c.ArtistLine;
         double Room(double header) => cover - header - c.MiddleGap;
-        bool below = lyrics || message;
+        bool below = lyrics || lyricsExpected || message;
         bool merge = below ? Room(separate) < c.LyricLine : cover < separate;
         double headH = merge ? c.TitleLine : separate, room = Room(headH);
         int lines = !lyrics ? 0 : (int)Math.Clamp(Math.Floor(room / c.LyricLine), 0, 3);

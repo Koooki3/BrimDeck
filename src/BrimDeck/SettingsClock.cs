@@ -15,8 +15,9 @@ public sealed partial class SettingsWindow
     private readonly List<(RadioButton Tile, ClockStyle Style)> _clockTiles = [];
     private readonly Dictionary<CompactStyle, RadioButton> _styleCards = [];
 
-    // The title and its arrow open and close the options under the row; the switch only turns the clock on or off.
-    private FrameworkElement ClockRow(CompactStyle style)
+    // The title and its arrow open and close the options under the row; the switch only turns the clock on or off. The title
+    // starts after indent, in line with the names of the draggable rows above it.
+    private FrameworkElement ClockRow(CompactStyle style, double indent = 0)
     {
         bool notch = style == CompactStyle.Notch;
         string title = Loc.T("时间", "Clock");
@@ -32,7 +33,7 @@ public sealed partial class SettingsWindow
         void Flip() { _clockOpen = !_clockOpen; Show(_clockOpen); }
         arrow = ChevronButton(Loc.T("时间设置", "Clock settings"), Flip);
         arrow.Margin = new Thickness(2, 0, 0, 0);
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(indent, 0, 0, 0) };
         heading.Children.Add(SettingLabel(title)); heading.Children.Add(arrow);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.ShowsClock(style), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
@@ -56,13 +57,13 @@ public sealed partial class SettingsWindow
     {
         var panel = new StackPanel();
         var heading = TextLine(Loc.T("时间样式", "Clock style"), 11.5, TextSecondary); heading.Margin = new Thickness(0, 0, 0, 10); panel.Children.Add(heading);
-        // Each card shows only the time; its name is in the tooltip and read by screen readers.
+        // Each card shows only the time; its name is read by screen readers.
         var tiles = new UniformGrid { Columns = 3, Margin = new Thickness(-5, -5, -5, 9) };
         _clockTiles.Clear();
         foreach (var style in Enum.GetValues<ClockStyle>())
         {
             var tile = new RadioButton { Style = (Style)FindResource("SettingsClockTile"), GroupName = "ClockStyle" + compact, IsChecked = S.ClockStyle == style,
-                Margin = new Thickness(5), ToolTip = ClockFace.Title(style), Content = ClockPreview(style) };
+                Margin = new Thickness(5), Content = ClockPreview(style) };
             AutomationProperties.SetName(tile, Loc.T("时间样式 ", "Clock style ") + ClockFace.Title(style));
             tile.Checked += (_, _) => Change(s => s.ClockStyle = style);
             tiles.Children.Add(tile); _clockTiles.Add((tile, style));
@@ -119,7 +120,7 @@ public sealed partial class SettingsWindow
     {
         ClockColor.Amber => Loc.T("琥珀", "Amber"), ClockColor.Cyan => Loc.T("青色", "Cyan"), ClockColor.Pink => Loc.T("粉色", "Pink"),
         ClockColor.Lime => Loc.T("柠檬绿", "Lime"), ClockColor.Gradient => Loc.T("渐变", "Gradient"), ClockColor.Cover => Loc.T("跟随封面", "Cover color"),
-        ClockColor.Custom => Loc.T("自定义颜色", "Custom color"), _ => Loc.T("白色", "White")
+        ClockColor.Custom => Loc.T("自定义颜色", "Custom color"), _ => Loc.T("主题默认色", "Theme default")
     };
     // The cover swatch shows a sample cover color under its note.
     private Brush ColorSwatchFill(ClockColor color) => color switch
@@ -127,7 +128,8 @@ public sealed partial class SettingsWindow
         ClockColor.Gradient => ClockFace.Fill(S.ClockGradient.Select(ClockFace.Parse).ToList()),
         ClockColor.Custom => ClockFace.Fill([ClockFace.Parse(S.ClockCustomColor)]),
         ClockColor.Cover => ClockFace.Fill([Color.FromRgb(0xE0, 0xA4, 0x8C)]),
-        _ => ClockFace.Fill([ClockFace.Preset(color)])
+        // As the panel draws them on the current theme's surface.
+        _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color), PanelThemes.TextContrast)])
     };
     // A pencil over the custom color marks it as editable, dark on light colors and light on dark ones.
     private static FrameworkElement Pencil(Color under)
@@ -166,8 +168,10 @@ public sealed partial class SettingsWindow
             updating = false;
             changed(); RefreshClockTiles();
         }
-        foreach (var (name, colors) in ClockColors.Gradients)
+        // The current panel theme's presets; switching themes carries a chosen preset over to the new theme's (ApplyMatching).
+        foreach (var themed in PanelTheme.Current.ClockGradients)
         {
+            string name = themed.DisplayName; string[] colors = [.. themed.Stops];
             var preset = new RadioButton { Style = (Style)FindResource("SettingsClockSwatch"), GroupName = "ClockGradient" + compact, ToolTip = name,
                 Background = ClockFace.Fill(colors.Select(ClockFace.Parse).ToList()), Margin = new Thickness(line.Children.Count == 0 ? 0 : 6, 0, 0, 0),
                 IsChecked = colors.SequenceEqual(S.ClockGradient, StringComparer.OrdinalIgnoreCase) };
@@ -182,7 +186,9 @@ public sealed partial class SettingsWindow
             int index = i;
             var stop = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(S.ClockGradient[i]), ToolTip = names[i], Margin = new Thickness(i == 0 ? 0 : 4, 0, 0, 0) };
             AutomationProperties.SetName(stop, Loc.T("渐变", "Gradient ") + names[i]);
-            AttachClockPicker(stop, () => S.ClockGradient[index], ClockColors.Sunset[index], value => { Change(s => s.ClockGradient[index] = value); Refresh(); });
+            // "默认" restores this stop of the theme's first preset gradient.
+            var fallback = PanelTheme.Current.ClockGradients[0].Stops[index];
+            AttachClockPicker(stop, () => S.ClockGradient[index], fallback, value => { Change(s => s.ClockGradient[index] = value); Refresh(); });
             stops.Add(stop); line.Children.Add(stop);
         }
         host.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider) });

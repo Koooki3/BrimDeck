@@ -11,13 +11,21 @@ namespace BrimDeck;
 
 public partial class MainWindow
 {
-    internal void ShowModelDetails(bool details) { if (IsMusicPage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false); _details = details && Settings.UsagePage; RenderUsage(); }
+    internal void ShowModelDetails(bool details)
+    {
+        if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
+        bool wanted = details && Settings.UsagePage;
+        if (wanted != _details) _usageHandover = wanted ? Handover.Forward : Handover.Back;
+        _details = wanted; RenderUsage();
+    }
     internal FrameworkElement ScaledContent => ContentCanvas;
 
     private const double ColumnTopInset = 2, EdgeInset = 6;
 
-    private enum Tier { Roomy, Default, Dense, Compact, Tiny }
-    private sealed record SegmentItem(string Text, string Name, bool Active, Action Select, string? Tip = null);
+    // Grand is for a panel dragged tall: the same page with larger figures and more air, so the room is used rather than left
+    // empty above and below the quotas.
+    private enum Tier { Grand, Roomy, Default, Dense, Compact, Tiny }
+    internal sealed record SegmentItem(string Text, string Name, bool Active, Action Select, string? Tip = null);
     // Slots is the most quotas any page of this app shows, so switching pages keeps the same layout.
     private sealed record QuotaView(List<UsageMetric> Quotas, int Pages, int Page, int Slots);
 
@@ -28,6 +36,7 @@ public partial class MainWindow
         // Small panels prioritize quotas; the bottom inset keeps the final row off the edge.
         public static Layout For(Tier tier) => tier switch
         {
+            Tier.Grand => new(tier, 20, 40, 15, 13, 14.5, 12.5, 12, 32, 20, 26, 8, 8, 24, 40, 10, 8, 20, true, true),
             Tier.Roomy => new(tier, 18, 30, 14, 12.5, 14, 12, 12, 28, 18, 16, 6, 6, 20, 40, 8, 7, 18, true, true),
             Tier.Default => new(tier, 15, 20, 12, 11, 12, 10.5, 10.5, 24, 16, 10, 4, 4, 14, 36, 8, 7, 16, true, true),
             Tier.Dense => new(tier, 14, 18, 11.5, 10.5, 11, 10.5, 10.5, 22, 15, 8, 3, 4, 10, 36, 6, 5, 14, true, true),
@@ -85,12 +94,12 @@ public partial class MainWindow
         bool wide = count == 1 && columnWidth >= 480 && slots <= 2;
         // Width limits the tier first; extra height only enlarges columns that are wide enough for it.
         var byWidth = columnWidth >= 220 ? Tier.Default : columnWidth >= 170 ? Tier.Dense : Tier.Compact;
-        var start = panelHeight < 150 ? Tier.Tiny : panelHeight >= 290 && columnWidth >= 260 ? Tier.Roomy : byWidth;
+        var start = panelHeight < 150 ? Tier.Tiny : panelHeight >= 350 && columnWidth >= 340 ? Tier.Grand : panelHeight >= 290 && columnWidth >= 260 ? Tier.Roomy : byWidth;
         for (var tier = start; tier <= Tier.Tiny; tier++)
         {
             var layout = Layout.For(tier); if (wide) layout = layout.Wide();
             // Totals sit side by side only when a column is wide enough for both groups at that tier's size.
-            bool inline = columnWidth >= (tier == Tier.Roomy ? 400 : tier == Tier.Default ? 340 : 300) && count <= 2;
+            bool inline = columnWidth >= (tier == Tier.Grand ? 440 : tier == Tier.Roomy ? 400 : tier == Tier.Default ? 340 : 300) && count <= 2;
             double available = panelHeight - layout.Toolbar - layout.Bottom - ColumnTopInset;
             // Narrow columns pick a small tier for their width alone; they keep the totals whenever the height still has room.
             var candidates = panelHeight < 200 ? [layout with { Footer = false }]
@@ -117,14 +126,69 @@ public partial class MainWindow
         SettingsButton.ToolTip = _app.Updates.NoticeVersion is { } version ? Loc.T($"新版本 {version} 可用", $"Version {version} is available") : null;
     }
 
+    // How the next rebuild of the usage page takes over (PageHandover); the action that changes the page's form sets it.
+    private Handover _usageHandover;
+    // The form the usage page was last laid out in: its size tier and arrangement, model details or the empty page. A rebuild
+    // that changes it while the page is on screen (a drag across a size step, an app added) morphs into the new form.
+    private string _usageForm = "";
+    // The column whose quota page was just flipped, which alone comes up from faint after the rebuild.
+    private Guid? _flippedColumn;
+    // What the quota columns were last built from: their form and the data, page and settings they show, not the panel's exact
+    // size. As the monitor page is built once per layout step and stretches within it, a render with the same key keeps the
+    // page instead of building it again: a drag that stays within a size step, a return from another page, the sync button.
+    private UsageBuild? _usageBuilt;
+    private PanelHeader _usageHeaderBuilt = PanelHeader.For(36, 20);
+    private sealed record UsageBuild(string Form, object Snapshots, object Settings, int ApplicationPage, string QuotaPages, int Theme, string Language, long Minute);
+
+    private UsageBuild? ColumnsBuild()
+    {
+        if (_details || !Settings.UsagePage || Settings.EnabledApps.Count == 0) return null;
+        var columns = DashboardUsage.Columns(Settings, Snapshots);
+        if (columns.Count == 0) return null;
+        var fit = FitColumns(columns, ContentCanvas.Width, ContentCanvas.Height);
+        return new UsageBuild($"{fit.Layout.Tier}|{fit.Layout.Footer}|{fit.Inline}|{fit.Wide}|{fit.Count}", Snapshots, Settings, _applicationPage,
+            string.Join(",", _quotaPages.OrderBy(page => page.Key).Select(page => $"{page.Key:N}:{page.Value}")), PanelTheme.Generation, Loc.Language,
+            DateTime.Now.Ticks / TimeSpan.TicksPerMinute);
+    }
+
     public void RenderUsage()
     {
         if (UsageContent is null) return;
         if (IsMusicPage) { RenderMusic(); return; }
-        MusicContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
+        if (IsMonitorPage) { RenderMonitor(); return; }
+        // Only a page that was on screen hands over; one that arrives by the page switch or with the panel opening comes in whole.
+        bool shown = UsageContent.IsVisible && _expanded && !_preview;
+        MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; UsageContent.Visibility = Visibility.Visible;
         if (!Settings.UsagePage) _details = false;
         RefreshStatus();
-        if (_detailPopup is not null) return;
+        if (_detailPopup is not null) { _flippedColumn = null; return; }
+        var build = ColumnsBuild();
+        if (build is not null && build == _usageBuilt && _usageHandover == Handover.None && UsageContent.Children.Count > 0)
+        {
+            // The page as it was built; another page may have taken the header meanwhile.
+            ApplyHeader(_usageHeaderBuilt);
+            ClockLabel.Visibility = Visibility.Visible; ModelToolbar.Visibility = Visibility.Collapsed;
+            ApplicationPages.Visibility = ApplicationPages.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            return;
+        }
+        var motion = _usageHandover; _usageHandover = Handover.None;
+        string form = _usageForm;
+        _handover.Hold(UsageContent);
+        RenderUsagePage();
+        _usageBuilt = build; _usageHeaderBuilt = _header;
+        if (motion == Handover.None && form.Length > 0 && form != _usageForm) motion = Handover.Morph;
+        if (!shown) motion = Handover.None;
+        _handover.Release(UsageContent, motion);
+        if (_flippedColumn is { } flipped && shown && motion == Handover.None)
+            foreach (var column in UsageContent.Children.OfType<Panel>().SelectMany(grid => grid.Children.OfType<Border>()).Where(border => Equals(border.Tag, flipped)))
+                PageHandover.Brighten(column);
+        _flippedColumn = null;
+        // The application pager is left out: it is what was clicked, under the pointer, when application pages flip.
+        foreach (var part in new UIElement[] { ModelToolbar, PageSwitch, ClockLabel }) PageHandover.Arrive(part, motion);
+    }
+
+    private void RenderUsagePage()
+    {
         if (_modelScroll is { IsLoaded: true }) _modelScrollOffset = _modelScroll.VerticalOffset;
         _modelScroll = null;
         ModelToolbar.Children.Clear(); UsageContent.Children.Clear();
@@ -141,6 +205,7 @@ public partial class MainWindow
         if (_details) RenderModelToolbar(statistics);
         if (apps.Count == 0)
         {
+            _usageForm = "empty";
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             empty.Children.Add(UI.Fixed(Settings.UsagePage ? Loc.T("未选择应用", "No apps selected") : Loc.T("AI 用量已关闭", "AI usage is off"), 14, 20, UI.Secondary));
             var openText = Loc.T("打开设置", "Open settings");
@@ -149,12 +214,14 @@ public partial class MainWindow
             empty.Children.Add(open); UsageContent.Children.Add(empty);
             return;
         }
-        if (_details) RenderModels(DashboardUsage.Statistics(Settings, Snapshots));
+        if (_details) { _usageForm = "details"; RenderModels(DashboardUsage.Statistics(Settings, Snapshots)); }
         else RenderColumns(DashboardUsage.Columns(Settings, Snapshots));
     }
 
-    // A joined switch: one rounded strip, the selected segment filled. Buttons carry accessible names.
-    private static Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX, bool centerText = false)
+    // A joined switch: one rounded strip, the selected segment filled. Buttons carry accessible names. With a glide key the fill
+    // is one piece under the strip that glides to the chosen segment, as the monitor page's sort pill does; the strip is built
+    // again on every choice, so where the fill was is kept by the key and the new strip's fill starts there.
+    internal static Border Segmented(IReadOnlyList<SegmentItem> items, double fontSize, double lineHeight, double padX, bool centerText = false, string? glide = null)
     {
         var strip = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var item in items)
@@ -162,13 +229,39 @@ public partial class MainWindow
             var text = centerText ? UI.Centered(item.Text, fontSize, UI.Secondary) : UI.Fixed(item.Text, fontSize, lineHeight, UI.Secondary);
             text.ClearValue(TextBlock.ForegroundProperty); text.ClearValue(TextBlock.FontWeightProperty);
             var button = new Button { Style = (Style)Application.Current.FindResource("SegmentButton"), Content = text, Height = lineHeight, FontSize = fontSize,
-                Padding = new Thickness(padX, 0, padX, 0), Tag = item.Active ? "Selected" : null, ToolTip = item.Tip };
-            button.Click += (_, _) => item.Select();
+                Padding = new Thickness(padX, 0, padX, 0), Tag = item.Active ? glide is null ? "Selected" : "Chosen" : null, ToolTip = item.Tip };
+            button.Click += (_, _) =>
+            {
+                // The strip that replaces this one glides from here (see below).
+                if (glide is not null && SegmentFills.TryGetValue(glide, out var at)) SegmentFills[glide] = at with { At = Environment.TickCount64 };
+                item.Select();
+            };
             AutomationProperties.SetName(button, item.Name);
             strip.Children.Add(button);
         }
-        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        var shift = new TranslateTransform();
+        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(5), HorizontalAlignment = HorizontalAlignment.Left,
+            IsHitTestVisible = false, RenderTransform = shift, Visibility = Visibility.Hidden };
+        var host = new Grid { Children = { fill, strip } };
+        int chosen = items.ToList().FindIndex(item => item.Active);
+        strip.Loaded += (_, _) =>
+        {
+            if (chosen < 0 || chosen >= strip.Children.Count || strip.Children[chosen] is not FrameworkElement button || button.ActualWidth <= 0) return;
+            double x = button.TranslatePoint(new Point(), host).X, width = button.ActualWidth;
+            fill.Height = button.ActualHeight; fill.Visibility = Visibility.Visible;
+            // Only a strip that replaces one just chosen in glides; one shown afresh (model details opened again) starts in place.
+            bool slide = SegmentFills.TryGetValue(glide, out var was) && Environment.TickCount64 - was.At < 1500 && Soft.Enabled && strip.IsVisible && Math.Abs(was.X - x) > .5;
+            SegmentFills[glide] = (x, width, 0);
+            shift.X = x; fill.Width = width;
+            if (!slide) return;
+            shift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(was.X, x, Soft.Choose, Soft.Follow));
+            fill.BeginAnimation(FrameworkElement.WidthProperty, Soft.Fade(was.Width, width, Soft.Choose, Soft.Follow));
+        };
+        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
     }
+    // Where each gliding strip's fill was last, by its key.
+    private static readonly Dictionary<string, (double X, double Width, long At)> SegmentFills = [];
 
     private QuotaView Quotas(AppEntry entry, ProviderSnapshot snapshot)
     {
@@ -198,7 +291,7 @@ public partial class MainWindow
             var controls = new StackPanel { Orientation = Orientation.Horizontal };
             Button PageButton(string label, string name, int step)
             {
-                var button = ModelAction(label, name, () => { _applicationPage += step; RenderUsage(); }, toolTip: false);
+                var button = ModelAction(label, name, () => { _applicationPage += step; _usageHandover = step > 0 ? Handover.Forward : Handover.Back; RenderUsage(); }, toolTip: false);
                 button.IsEnabled = step < 0 ? _applicationPage > 0 : _applicationPage + 1 < pages;
                 button.Padding = new Thickness(6, 0, 6, 0); return button;
             }
@@ -210,6 +303,7 @@ public partial class MainWindow
         }
         // See FitColumns. A short last page leaves its remaining columns empty.
         var (layout, inline, wide, count, columnWidth, views) = FitColumns(columns, ContentCanvas.Width, ContentCanvas.Height);
+        _usageForm = $"{layout.Tier}|{layout.Footer}|{inline}|{wide}|{count}";
         int first = _applicationPage * pageSize;
         columns = columns.Skip(first).Take(pageSize).ToList(); views = views.Skip(first).Take(pageSize).ToList();
         // The quotas start EdgeInset + ColumnPad from the panel edge; the header lines up with them.
@@ -227,7 +321,8 @@ public partial class MainWindow
     private FrameworkElement Column(AppEntry entry, ProviderSnapshot snapshot, ProviderSnapshot usage, QuotaView view, Layout layout, bool inline, bool wide, bool center, bool separator, double innerWidth)
     {
         bool off = view.Quotas.Count == 0;
-        void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; RenderUsage(); }
+        // Only this column changes: it comes up from faint while the others stay as they are.
+        void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; _flippedColumn = entry.InstanceId; RenderUsage(); }
         var column = new Grid();
         column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.Head) });
         column.RowDefinitions.Add(new RowDefinition());
@@ -251,6 +346,9 @@ public partial class MainWindow
             chip.Measure(new Size(double.PositiveInfinity, layout.Head)); occupied += chip.DesiredSize.Width;
         }
         name.MaxWidth = Math.Max(20, innerWidth - occupied);
+        // The page stretches within its size step instead of being built again (RenderUsage), so the name gives way to the plan
+        // as the column's width changes.
+        head.SizeChanged += (_, e) => name.MaxWidth = Math.Max(20, e.NewSize.Width - occupied);
         column.Children.Add(head);
 
         FrameworkElement body;
@@ -268,12 +366,19 @@ public partial class MainWindow
             if (view.Quotas.Count < cells)
             {
                 var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                foreach (var quota in view.Quotas)
+                for (int i = 0; i < view.Quotas.Count; i++)
                 {
-                    var block = QuotaBlock(entry, quota, layout);
+                    var block = QuotaBlock(entry, view.Quotas[i], layout, i);
                     block.Width = Math.Max(0, innerWidth / cells - 18);
                     row.Children.Add(block);
                 }
+                // As the column stretches, the blocks keep a full page's share of it.
+                column.SizeChanged += (_, e) =>
+                {
+                    // The column lies inside its surface's padding already.
+                    double width = Math.Max(0, e.NewSize.Width / cells - 18);
+                    foreach (FrameworkElement block in row.Children) block.Width = width;
+                };
                 body = row;
             }
             else
@@ -281,7 +386,7 @@ public partial class MainWindow
                 var row = new UniformGrid { Rows = 1, Columns = cells, VerticalAlignment = VerticalAlignment.Center };
                 for (int i = 0; i < view.Quotas.Count; i++)
                 {
-                    var block = QuotaBlock(entry, view.Quotas[i], layout);
+                    var block = QuotaBlock(entry, view.Quotas[i], layout, i);
                     block.Margin = new Thickness(i > 0 ? 18 : 0, 0, i < cells - 1 ? 18 : 0, 0);
                     row.Children.Add(block);
                 }
@@ -294,7 +399,7 @@ public partial class MainWindow
             var stack = new StackPanel { VerticalAlignment = center ? VerticalAlignment.Center : VerticalAlignment.Top };
             for (int i = 0; i < view.Quotas.Count; i++)
             {
-                var block = QuotaBlock(entry, view.Quotas[i], layout);
+                var block = QuotaBlock(entry, view.Quotas[i], layout, i);
                 if (i > 0) block.Margin = new Thickness(0, layout.QuotaGap, 0, 0);
                 stack.Children.Add(block);
             }
@@ -350,10 +455,12 @@ public partial class MainWindow
     }
 
     // Three rows per quota: the period name, the used share with its reset countdown, and the track.
-    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout)
+    // slot is the quota's place in its column: a bar keeps its place's last share (QuotaBar), so a new reading eases the same bar
+    // and a quota page flip eases each bar from the quota it replaces, as the monitor page's values move.
+    private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot)
     {
         double used = Math.Clamp(quota.UsedPercent ?? 100, 0, 100);
-        string color = quota.UsedPercent is null ? entry.Theme : AppPresets.QuotaColor(entry, used);
+        string color = quota.UsedPercent is null ? PanelTheme.AppTheme(entry) : PanelTheme.QuotaColor(entry, used);
         int level = quota.UsedPercent is null ? 0 : AppPresets.Level(used);
         var block = new Grid();
         foreach (double height in new[] { layout.LabelRow, layout.RowGap, layout.NumberRow, layout.RowGap, layout.Track })
@@ -406,11 +513,7 @@ public partial class MainWindow
             right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
         block.Children.Add(numbers);
-        var track = new Grid(); Grid.SetRow(track, 4);
-        track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(.0001, used), GridUnitType.Star) });
-        track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(.0001, 100 - used), GridUnitType.Star) });
-        var background = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(layout.Track / 2) }; Grid.SetColumnSpan(background, 2); track.Children.Add(background);
-        if (used > 0) track.Children.Add(new Border { Background = UI.Brush(color), CornerRadius = new CornerRadius(layout.Track / 2) });
+        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", used / 100, color); Grid.SetRow(track, 4);
         block.Children.Add(track);
         return block;
     }

@@ -35,7 +35,9 @@ public partial class MainWindow
     internal Task RefreshAutomaticallyAsync(bool queueIfBusy = false)
         => AutomaticSyncEnabled ? RefreshAsync(queueIfBusy) : Task.CompletedTask;
 
-    private void AIUsage_Click(object sender, RoutedEventArgs e) { SelectPage(BrimDeck.Core.DeckPage.Usage); ShowModelDetails(false); }
+    // From another page the switch shows the usage page out of the model details (ShowPage leaves them). The tab is hidden in the
+    // details, so on the usage page it has nothing to do.
+    private void AIUsage_Click(object sender, RoutedEventArgs e) { if (!IsUsagePage) SelectPage(BrimDeck.Core.DeckPage.Usage); }
 
     private async void Sync_Click(object sender, RoutedEventArgs e)
     {
@@ -54,8 +56,8 @@ public partial class MainWindow
     {
         bool paused = !_details && !Settings.UsageAutoSync;
         AIUsageButton.Visibility = Settings.UsagePage && !_details ? Visibility.Visible : Visibility.Collapsed;
-        SyncButton.Visibility = Settings.UsagePage && !IsMusicPage ? Visibility.Visible : Visibility.Collapsed;
-        SyncButton.Foreground = UI.Brush(paused ? "#F2777F" : UI.Secondary);
+        SyncButton.Visibility = Settings.UsagePage && IsUsagePage ? Visibility.Visible : Visibility.Collapsed;
+        SyncButton.Foreground = UI.Brush(paused ? PanelTheme.Hex("danger") : UI.Secondary);
         SyncSlash.Visibility = paused ? Visibility.Visible : Visibility.Collapsed;
         var tip = _details ? Refreshing ? Loc.T("正在同步用量与模型消耗…", "Syncing usage and model consumption…") : Loc.T("立即同步用量与模型消耗", "Sync usage and model consumption now")
             : Settings.UsageAutoSync ? Loc.T("每 60 秒自动同步一次，点击关闭同步", "Syncs automatically every 60 seconds. Click to turn syncing off.")
@@ -63,7 +65,7 @@ public partial class MainWindow
         if (SyncButton.ToolTip is System.Windows.Controls.ToolTip shown) shown.Content = tip; else SyncButton.ToolTip = UI.LeftwardToolTip(tip);
         AutomationProperties.SetName(SyncButton, _details ? tip : Settings.UsageAutoSync ? Loc.T("关闭自动同步", "Turn off automatic sync") : Loc.T("开启自动同步", "Turn on automatic sync"));
 
-        bool onScreen = _expanded && !IsMusicPage && Settings.UsagePage && !IsSuppressed;
+        bool onScreen = _expanded && IsUsagePage && Settings.UsagePage && !IsSuppressed;
         _syncCountdown = !_details && Settings.UsageAutoSync && Lead._refresh.IsEnabled;
         SyncTrack.Visibility = SyncProgress.Visibility = _syncCountdown ? Visibility.Visible : Visibility.Collapsed;
         // Inside the ring the arrows shrink to 13 DIP; the stroke stays 1.24 DIP like the standalone icon. The arrows keep the ring's

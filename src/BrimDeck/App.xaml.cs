@@ -35,6 +35,10 @@ public partial class App : Application
     internal event Action? MediaChanged;
     internal LyricsService Lyrics { get; } = new();
     private readonly HashSet<MainWindow> _presentingMedia = [];
+    // The system monitor page's readings, shared by every panel; created when a panel first shows the page.
+    internal SystemSampler? Monitor { get; private set; }
+    internal event Action<MonitorSnapshot>? MonitorUpdated;
+    private readonly HashSet<MainWindow> _presentingMonitor = [], _stripMonitor = [];
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
 
@@ -64,6 +68,9 @@ public partial class App : Application
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck");
         Store = new SettingsStore(folder); Settings = Store.Load();
         UseLanguage();
+        PanelTheme.Use(Settings);
+        // "跟随系统" follows the Windows app theme while BrimDeck runs.
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         // The language a first start takes from Windows is kept, even if the display language changes later.
         if (Store.IsFirstStart) FlushSettings();
         try
@@ -76,7 +83,7 @@ public partial class App : Application
         Prices = new Pricing(folder);
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
-        Usage = new UsageService(new DesktopSources(), secrets: Secrets);
+        Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName));
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
@@ -153,15 +160,42 @@ public partial class App : Application
         bool dataChanged = settings.IncludeWsl != Settings.IncludeWsl || !settings.RequiredProviders.SetEquals(Settings.RequiredProviders) ||
             !settings.EnabledApps.Select(e => e.ConfigurationKey).ToHashSet().SetEquals(Settings.EnabledApps.Select(e => e.ConfigurationKey));
         bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
+        // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
+        bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
         ApplyHotkeys();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
+        PanelTheme.Use(settings);
         AssignDisplays();
-        foreach (var deck in Decks.ToList()) deck.ApplySettings();
+        foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
         QueueSave();
+        CollapsedChanged();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
+    }
+    // The settings window's size group follows changes made on the panel (a drag, or content that changed the auto width).
+    internal void CollapsedChanged() => _settingsWindow?.CollapsedChanged();
+    private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (Dispatcher.HasShutdownStarted) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (Exiting) return;
+            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId) ApplyPanelTheme(systemChanged: true);
+            // The theme page's "System" card shows the Windows mode whichever theme is chosen.
+            else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
+        });
+    }
+    // Makes the chosen panel theme current (reading the theme folder again when asked) and repaints every panel if it changed.
+    // When Windows switches "system" between dark and light, a preset clock gradient carries over as it does when a theme is chosen.
+    internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false)
+    {
+        var previous = PanelTheme.Current;
+        if (!PanelTheme.Use(Settings, reload, systemChanged)) return;
+        if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
+        foreach (var deck in Decks.ToList()) deck.ApplySettings();
+        if (!reload) _settingsWindow?.PanelThemeChanged();
     }
     // A panel reports display changes (monitors added or removed, the primary changed, a work area or scale changed).
     // Each panel receives the same messages, so they are handled once, after Windows has moved the windows to the new layout.
@@ -209,24 +243,64 @@ public partial class App : Application
         if (active) _presentingMedia.Add(deck); else _presentingMedia.Remove(deck);
         Media?.SetPresentationActive(_presentingMedia.Count > 0);
     }
+    // The system is read while any panel shows the monitor page open (and briefly after; see SystemSampler) or shows readings in
+    // its collapsed row. Processes are listed only for an open page.
+    internal void PresentMonitor(MainWindow deck, bool page, bool strip)
+    {
+        if (page) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
+        if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
+        bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
+        if (Exiting || Monitor is null && !wanted) return;
+        if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
+        Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
+    }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
+    // The settings are turned into text here, where they live, and written on the thread pool: writing the file (and the virus
+    // scan that follows a write) took 60 ms and more, which showed as a stall after every page switch. Writes run one after
+    // another in the order they were asked for, so the newest settings always land last.
+    private Task _writing = Task.CompletedTask;
     public void FlushSettings()
     {
         _save.Stop();
-        try { Store.Save(Settings); _settingsWindow?.SaveStatus(""); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _settingsWindow?.SaveStatus(Loc.T("保存失败，请检查设置目录权限。", "Saving failed. Check the permissions of the settings folder."), true); }
+        string text = Store.Serialize(Settings);
+        _writing = _writing.ContinueWith(_ =>
+        {
+            string? error = null;
+            try { Store.Write(text); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { error = Loc.T("保存失败，请检查设置目录权限。", "Saving failed. Check the permissions of the settings folder."); }
+            Dispatcher.BeginInvoke(() => { if (error is null) _settingsWindow?.SaveStatus(""); else _settingsWindow?.SaveStatus(error, true); });
+        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
+    // Before the process ends, the last write must have reached the disk.
+    private void FinishWriting() { try { _writing.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException) { } }
     // The settings window records its size before the final save; closing it during shutdown would be too late.
-    public void ExitApplication() { Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings(); Shutdown(); }
+    // Every panel powers off first (MainWindow.Lifecycle.cs): the islands draw back into dots that sink down through the floor, then the process ends. The
+    // settings window goes at once, so the exit answers immediately. A panel that never reports back cannot hold the exit up:
+    // the process ends anyway once the longest power-off would have finished.
+    public void ExitApplication()
+    {
+        if (Exiting) return;
+        Exiting = true; Lifetime.Cancel(); _settingsWindow?.RememberSize(); FlushSettings();
+        _settingsWindow?.Hide();
+        var decks = Decks.ToList();
+        int waiting = decks.Count;
+        var fallback = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(BrimDeck.MainWindow.PowerOffLength(Settings.AnimationDuration) + 500) };
+        bool done = false;
+        void End() { if (done) return; done = true; fallback.Stop(); FinishWriting(); Shutdown(); }
+        fallback.Tick += (_, _) => End();
+        fallback.Start();
+        foreach (var deck in decks) deck.PowerOff(() => { if (--waiting <= 0) End(); });
+        if (decks.Count == 0) End();
+    }
     internal void InstallUpdate()
     {
-        if (Updates.PrepareRestart(() => Store.Save(Settings))) ExitApplication();
+        if (Updates.PrepareRestart(() => { FinishWriting(); Store.Save(Settings); })) ExitApplication();
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); StopBackgroundUpdates(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

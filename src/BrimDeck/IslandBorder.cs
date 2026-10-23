@@ -6,6 +6,9 @@ namespace BrimDeck;
 
 public sealed class IslandBorder : Border
 {
+    // A faint inner rim keeps the outline readable over wallpapers of the surface's own tone; the pen is twice the rim width
+    // because the layout clip removes the outer half of the stroke.
+    private static readonly Brush DefaultRim = CreateRim();
     public static readonly DependencyProperty ShoulderRadiusProperty = DependencyProperty.Register(
         nameof(ShoulderRadius), typeof(double), typeof(IslandBorder),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsArrange));
@@ -13,10 +16,25 @@ public sealed class IslandBorder : Border
         nameof(MaterialOpacity), typeof(double), typeof(IslandBorder),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender));
 
-    // The surface stays pure black. A faint inner rim keeps the outline readable over dark wallpapers;
-    // the pen is twice the rim width because the layout clip removes the outer half of the stroke.
-    private static readonly Pen Rim = CreateRim();
-    private (Size Size, double Shoulder, CornerRadius Corners)? _outlineKey;
+    // The theme's layers over the base color: a gradient and a pattern (scan lines). Like the rim they fade with MaterialOpacity,
+    // so the indicator, which has neither, keeps its plain color.
+    public static readonly DependencyProperty GradientProperty = DependencyProperty.Register(
+        nameof(Gradient), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty PatternProperty = DependencyProperty.Register(
+        nameof(Pattern), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty RimBrushProperty = DependencyProperty.Register(
+        nameof(RimBrush), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(DefaultRim, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._rim = null));
+    public static readonly DependencyProperty RimWidthProperty = DependencyProperty.Register(
+        nameof(RimWidth), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._rim = null));
+    // Draws the outline this far inside the element's bounds, for the copy that casts the island's shadow. The shadow effect
+    // also draws the copy itself; lying exactly under the island, its edge would double the coverage of the island's
+    // antialiased edge pixels and leave a stepped edge. A shape with shoulders reaches the screen edge at its top, where the
+    // shoulders flare out, so it keeps its top edge and moves in at the sides and the bottom only.
+    public static readonly DependencyProperty InsetProperty = DependencyProperty.Register(
+        nameof(Inset), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    private Pen? _rim;
+    private (Size Size, double Shoulder, CornerRadius Corners, double Inset)? _outlineKey;
     private Geometry _outline = Geometry.Empty;
 
     static IslandBorder() => CornerRadiusProperty.OverrideMetadata(typeof(IslandBorder),
@@ -33,42 +51,59 @@ public sealed class IslandBorder : Border
         get => (double)GetValue(MaterialOpacityProperty);
         set => SetValue(MaterialOpacityProperty, value);
     }
+    public Brush? Gradient { get => (Brush?)GetValue(GradientProperty); set => SetValue(GradientProperty, value); }
+    public Brush? Pattern { get => (Brush?)GetValue(PatternProperty); set => SetValue(PatternProperty, value); }
+    public Brush RimBrush { get => (Brush)GetValue(RimBrushProperty); set => SetValue(RimBrushProperty, value); }
+    public double RimWidth { get => (double)GetValue(RimWidthProperty); set => SetValue(RimWidthProperty, value); }
+    public double Inset { get => (double)GetValue(InsetProperty); set => SetValue(InsetProperty, value); }
 
     protected override void OnRender(DrawingContext drawingContext)
     {
         var outline = Outline();
         drawingContext.DrawGeometry(Background, null, outline);
         if (MaterialOpacity <= 0) return;
-        drawingContext.PushOpacity(Math.Clamp(MaterialOpacity, 0, 1));
-        drawingContext.DrawGeometry(null, Rim, outline);
-        drawingContext.Pop();
+        // Only a fading material needs the opacity layer; fully shown, the layers draw straight onto the surface.
+        bool fading = MaterialOpacity < 1;
+        if (fading) drawingContext.PushOpacity(Math.Clamp(MaterialOpacity, 0, 1));
+        if (Gradient is { } gradient) drawingContext.DrawGeometry(gradient, null, outline);
+        if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
+        if (RimWidth > 0)
+        {
+            if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); _rim.Freeze(); }
+            drawingContext.DrawGeometry(null, _rim, outline);
+        }
+        if (fading) drawingContext.Pop();
     }
 
     // The visible surface owns input; its decorative shadow is a separate, non-interactive sibling.
     protected override Geometry? GetLayoutClip(Size layoutSlotSize) => Outline();
 
-    private static Pen CreateRim()
+    private static Brush CreateRim()
     {
-        var pen = new Pen(new SolidColorBrush(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF)), 2);
-        pen.Freeze();
-        return pen;
+        var brush = new SolidColorBrush(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF));
+        brush.Freeze();
+        return brush;
     }
 
     private Geometry Outline()
     {
-        var key = (RenderSize, ShoulderRadius, CornerRadius);
+        var key = (RenderSize, ShoulderRadius, CornerRadius, Inset);
         if (_outlineKey == key) return _outline;
         _outlineKey = key;
         double w = RenderSize.Width, h = RenderSize.Height;
         if (w <= 0 || h <= 0) return _outline = Geometry.Empty;
+        // The shoulders are sized on the full bounds, so an inset outline has the same shoulders moved in by the inset: its
+        // curves then lie inside the full outline's. The corners keep their centres and lose the inset from their radii.
         double shoulder = Math.Clamp(ShoulderRadius, 0, Math.Min(w / 4, h / 2));
         double shoulderDepth = shoulder * (7d / 16);
+        double inset = Math.Clamp(Inset, 0, Math.Min(w, h) / 4), top = shoulder > 0 ? 0 : inset;
+        w -= 2 * inset; h -= top + inset;
         double left = shoulder, right = w - shoulder;
-        double limit = Math.Min(shoulder > 0 ? h - shoulderDepth : h / 2, (right - left) / 2);
-        double bl = Math.Clamp(CornerRadius.BottomLeft, 0, limit);
-        double br = Math.Clamp(CornerRadius.BottomRight, 0, limit);
-        double tl = Math.Clamp(CornerRadius.TopLeft, 0, Math.Min(w, h) / 2);
-        double tr = Math.Clamp(CornerRadius.TopRight, 0, Math.Min(w, h) / 2);
+        double limit = Math.Max(0, Math.Min(shoulder > 0 ? h - shoulderDepth : h / 2, (right - left) / 2));
+        double bl = Math.Clamp(CornerRadius.BottomLeft - inset, 0, limit);
+        double br = Math.Clamp(CornerRadius.BottomRight - inset, 0, limit);
+        double tl = Math.Clamp(CornerRadius.TopLeft - inset, 0, Math.Min(w, h) / 2);
+        double tr = Math.Clamp(CornerRadius.TopRight - inset, 0, Math.Min(w, h) / 2);
         const double k = .5522847498307936; // Cubic approximation of a circular quadrant.
         var geometry = new StreamGeometry();
         using (var path = geometry.Open())
@@ -105,6 +140,7 @@ public sealed class IslandBorder : Border
                 path.BezierTo(new Point(0, tl * (1 - k)), new Point(tl * (1 - k), 0),
                     new Point(tl, 0), true, true);
         }
+        if (inset > 0) geometry.Transform = new TranslateTransform(inset, top);
         geometry.Freeze();
         return _outline = geometry;
     }
