@@ -155,8 +155,10 @@ public sealed partial class SettingsWindow : Window
         sidebar.RowDefinitions.Add(new RowDefinition { Height = new GridLength(100) }); sidebar.RowDefinitions.Add(new RowDefinition());
         sidebar.Children.Add(Brand(24, new Thickness(24, 0, 22, 0)));
         // The list of pages scrolls once it is taller than the window, so the last pages (About) stay reachable in a short window.
-        _navigation.Margin = new Thickness(12, 0, 12, 12);
-        var navigationScroll = new ScrollViewer { Style = (Style)FindResource("SettingsScrollViewer"), Content = _navigation, Focusable = false,
+        // Like the page, it always keeps the scroll bar's 16 DIP column, here in place of its right margin, so the buttons and the
+        // selected one's background keep their width when the bar appears.
+        _navigation.Margin = new Thickness(12, 0, 0, 12);
+        var navigationScroll = new ScrollViewer { Style = (Style)FindResource("SettingsPageScrollViewer"), Content = _navigation, Focusable = false,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Grid.SetRow(navigationScroll, 1); sidebar.Children.Add(navigationScroll);
         outer.Children.Add(sidebar); outer.Children.Add(new Border { Width = 1, Background = UI.Brush(Divider), HorizontalAlignment = HorizontalAlignment.Right });
