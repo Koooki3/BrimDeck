@@ -51,6 +51,8 @@ public sealed class PanelPalette
     public bool IsDark { get; }
 
     public PanelThemeEffectValues Effects { get; }
+    // How the theme moves: ambient light and the answers to the pointer, held to MotionSafety's limits.
+    public ThemeMotion Motion { get; init; } = ThemeMotion.Default;
     public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0;
     public IReadOnlyList<PanelThemeAdjustment> Adjustments { get; }
 

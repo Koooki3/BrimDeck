@@ -100,6 +100,7 @@ public partial class MainWindow : Window
         InitializeMonitor();
         InitializeResize();
         Island.Background = _surface;
+        InitializeMotion();
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
@@ -221,6 +222,7 @@ public partial class MainWindow : Window
         UpdatePointerTracking();
         RenderUsage();
         NoticesLayoutChanged();
+        UpdateAmbient();
     }
     // Sizes are DIPs as they will be on the target monitor, and WPF turns Left and Top into pixels with the DPI the window
     // has now. A window on a monitor with another scale is therefore first moved onto the target in one step, which gives
@@ -336,6 +338,7 @@ public partial class MainWindow : Window
         Foreground = UI.Brush(UI.Primary);
         PanelTheme.Dress(Island, dpiScale: dpi);
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
+        ApplyThemeMotion();
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
         SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf(!_expanded && Collapsed.Style == CompactStyle.Line ? "indicator" : "surface"));
         _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent);
@@ -600,6 +603,7 @@ public partial class MainWindow : Window
         UpdateMusicTimer();
         UpdateMonitorDemand();
         UpdateGrips();
+        UpdateAmbient();
     }
     private static T Timed<T>(T animation, int duration, Track track) where T : AnimationTimeline
     {

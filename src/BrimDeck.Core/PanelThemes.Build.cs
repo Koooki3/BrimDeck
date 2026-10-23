@@ -23,7 +23,8 @@ public static partial class PanelThemes
         var apps = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var effects = new PanelThemeEffects();
         PanelThemeClock? clock = null;
-        foreach (var layer in BaseChain(file))
+        var chain = BaseChain(file);
+        foreach (var layer in chain)
         {
             foreach (var (key, value) in layer.Colors ?? [])
                 if (Tokens.FirstOrDefault(token => string.Equals(token.Key, key, StringComparison.OrdinalIgnoreCase)) is { } token && ThemeColor.TryParse(value, out var color)) colors[token.Key] = color;
@@ -78,7 +79,7 @@ public static partial class PanelThemes
         // A theme's own picker colors are offered as the panel draws them, like the ones derived from its palette.
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
             .OfType<ThemeColor>().Take(12).ToList();
-        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches);
+        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches) { Motion = MotionValues(chain) };
     }
 
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.
