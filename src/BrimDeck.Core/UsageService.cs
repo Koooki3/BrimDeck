@@ -68,14 +68,14 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     // The file is written only when the quotas, the plan or the account changed, not on every refresh that read the same
     // values. A reading whose account is not known is kept for this run only: the file could not tell whose it is.
     private string _claudeSaved = "";
-    private void KeepOnline(ClaudeQuotaSnapshot snapshot, string account)
+    private void KeepOnline(ClaudeQuotaSnapshot snapshot, ClaudeCredential credential, ClaudePlanOrigin planFrom)
     {
-        _claudeRetained = snapshot; _claudeAccount = ClaudeQuotaCache.AccountHash(account); _claudeCacheRead = true;
+        _claudeRetained = snapshot; _claudeAccount = ClaudeQuotaCache.AccountHash(credential.Account); _claudeCacheRead = true;
         if (quotaCache is null || _claudeAccount.Length == 0) return;
-        var key = string.Join("|", _claudeAccount, snapshot.Plan, snapshot.PlanSource, snapshot.Source, string.Join(";", snapshot.Quotas));
+        var key = string.Join("|", _claudeAccount, snapshot.Plan, planFrom, credential.SignIn, string.Join(";", snapshot.Quotas));
         if (key == _claudeSaved) return;
         _claudeSaved = key;
-        ClaudeQuotaCache.Save(quotaCache, snapshot, account);
+        ClaudeQuotaCache.Save(quotaCache, snapshot, credential.Account, credential.SignIn, planFrom);
     }
     // A sign-in that is gone or rejected keeps no quota, on disk either. A sign-in that could not be read just now only drops
     // the reading of this run; the file is read again the next time a reading is needed, so once the sign-in can be read and
@@ -290,7 +290,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 .Equals(Path.Combine(home, ".claude"), StringComparison.OrdinalIgnoreCase)) profile = Path.Combine(home, ".claude.json");
             using var doc = ReadJson(profile);
             snapshot.Plan = PlanParser.ClaudeProfile(doc?.RootElement ?? default);
-            if (snapshot.Plan.Length > 0) snapshot.PlanSource = Loc.T("Claude 本地账户记录", "Claude local account record");
+            if (snapshot.Plan.Length > 0) snapshot.PlanSource = ClaudeSources.Plan(ClaudePlanOrigin.LocalRecord, ClaudeSignIn.Code);
             return doc?.RootElement.Get("oauthAccount").Get("accountUuid").Text() ?? "";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException) { return ""; }
@@ -337,18 +337,20 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 // Publish only a complete successful result, all from the same login.
                 snapshot.Quotas = quotas;
                 var live = await planRequest;
-                if (live.Length > 0) { snapshot.Plan = live; snapshot.PlanSource = Loc.T("Claude 账户", "Claude account"); }
+                ClaudePlanOrigin planFrom;
+                if (live.Length > 0) { snapshot.Plan = live; planFrom = ClaudePlanOrigin.Account; }
                 else
                 {
                     var plan = PlanParser.ReconcileClaude(credential.Plan, snapshot.Plan);
                     // The local account record already filled Plan and PlanSource; a sign-in record only describes its own plan.
-                    if (plan == credential.Plan || snapshot.PlanSource.Length == 0)
-                        snapshot.PlanSource = plan.Length > 0 ? credential.Source + Loc.T(" 登录记录", " sign-in record") : "";
+                    planFrom = plan == credential.Plan || snapshot.PlanSource.Length == 0
+                        ? plan.Length > 0 ? ClaudePlanOrigin.SignIn : ClaudePlanOrigin.None : ClaudePlanOrigin.LocalRecord;
                     snapshot.Plan = plan;
                 }
-                Connected(snapshot, credential.Source + Loc.T(" · 账户配额", " · account quota"), now);
+                snapshot.PlanSource = ClaudeSources.Plan(planFrom, credential.SignIn);
+                Connected(snapshot, ClaudeSources.Quota(credential.SignIn), now);
                 snapshot.UsageNote += ClaudeUsageNote;
-                KeepOnline(new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList()), credential.Account);
+                KeepOnline(new(now, snapshot.Plan, snapshot.PlanSource, snapshot.Source, quotas.ToList()), credential, planFrom);
                 return true;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is
@@ -371,7 +373,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             var token = oauth.Get("accessToken").Text();
             var plan = PlanParser.ClaudeTier(oauth.Get("rateLimitTier").Text(), oauth.Get("subscriptionType").Text());
             if (plan.Equals("max", StringComparison.OrdinalIgnoreCase) && snapshot.Plan.StartsWith("Max ", StringComparison.Ordinal)) plan = snapshot.Plan;
-            if (token.Length > 0) codeCredential = new(token, plan, "Claude Code", codeAccount);
+            if (token.Length > 0) codeCredential = new(token, plan, ClaudeSignIn.Code, codeAccount);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { codeReadFailed = true; }
         if (codeCredential is not null && await TryCredential(codeCredential)) return;
@@ -403,8 +405,8 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     {
                         var live = loginPlan is null ? "" : await loginPlan;
                         var plan = live.Length > 0 ? live : PlanParser.ReconcileClaude(login.Plan, snapshot.Plan);
-                        var source = live.Length > 0 ? Loc.T("Claude 账户", "Claude account")
-                            : plan == snapshot.Plan && snapshot.PlanSource.Length > 0 ? snapshot.PlanSource : login.Source + Loc.T(" 登录记录", " sign-in record");
+                        var source = live.Length > 0 ? ClaudeSources.Plan(ClaudePlanOrigin.Account, login.SignIn)
+                            : plan == snapshot.Plan && snapshot.PlanSource.Length > 0 ? snapshot.PlanSource : ClaudeSources.Plan(ClaudePlanOrigin.SignIn, login.SignIn);
                         if (plan.Length > 0) _claudeRetained = local = local with { Plan = plan, PlanSource = source };
                     }
                     Retain(snapshot, local, failure, now); return;
