@@ -88,10 +88,42 @@ public partial class MainWindow
         else if (item.Kind == AttentionKind.Quota && item.Payload is CompactAlertInfo alert && _alert is not null) { _alert = alert; RenderCompact(); }
     }
 
-    // While a notice covers the island, the island itself is not drawn (see NoticeWindow.Present and Finish).
-    internal void SetIslandCovered(bool covered)
+    // While a notice covers the island, the island itself is not drawn (see NoticeWindow.Present and Finish). A notice that has
+    // gone back into the island (reveal) leaves it without content; the island's own content then lands as it does when the
+    // panel closes (SetExpanded's compact track), instead of appearing all at once.
+    internal void SetIslandCovered(bool covered, bool reveal = false)
     {
+        // A notice that ended before it had covered the island (within its first frame) leaves the island's content as it was.
+        bool wasCovered = HoverZone.Opacity == 0;
         HoverZone.Opacity = covered ? 0 : 1;
+        if (covered || !reveal || !wasCovered || _expanded || _poweringOff || Compact.Visibility != Visibility.Visible || Collapsed.Style == CompactStyle.Line) return;
+        int duration = (int)(NoticeMotion.Length(Settings.AnimationDuration, Soft.Enabled) * NoticeMotion.RevealLength);
+        if (duration <= 0) return;
+        var land = new Track(0, 1);
+        SetImmediate(Compact, OpacityProperty, 0d);
+        SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, .85); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, .85);
+        Animate(Compact, OpacityProperty, 1, duration, land, Soft.Out);
+        Animate(CompactScale, ScaleTransform.ScaleXProperty, 1, duration, land, Soft.Out);
+        Animate(CompactScale, ScaleTransform.ScaleYProperty, 1, duration, land, Soft.Out);
+    }
+
+    // The panel opens from a notice (NoticeWindow.HandOver): the island takes the notice's outline, place and material at once,
+    // in the frame the notice goes, and SetExpanded's move to the open panel starts from there. The compact content stays out of
+    // sight, as it is leaving anyway.
+    private void StartFromNotice(NoticeFrame from)
+    {
+        // The notice lies within the panel's window (both are centred on the island and the window holds the widest page).
+        double left = Math.Clamp(from.Rect.X - _windowOffset, 0, Math.Max(0, Width - from.Rect.Width));
+        SetImmediate(HoverZone, MarginProperty, new Thickness(left, 0, 0, 0));
+        SetImmediate(Island, MarginProperty, new Thickness(0, Math.Max(0, from.Rect.Y), 0, 0));
+        SetImmediate(Island, WidthProperty, from.Rect.Width);
+        SetImmediate(Island, HeightProperty, from.Rect.Height);
+        SetImmediate(Island, Border.CornerRadiusProperty, new CornerRadius(from.TopRadius, from.TopRadius, from.BottomRadius, from.BottomRadius));
+        SetImmediate(Island, IslandBorder.ShoulderRadiusProperty, from.Shoulder);
+        SetImmediate(Island, IslandBorder.MaterialOpacityProperty, 1d);
+        SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf("surface"));
+        SetImmediate(Compact, OpacityProperty, 0d);
+        ResetDotScale();
     }
 
     // The island moved or changed style, or the theme changed: a shown notice follows.
