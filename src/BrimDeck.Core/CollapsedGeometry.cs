@@ -61,9 +61,11 @@ public static class CollapsedGeometry
 {
     // contentWanted: the width the notch's or capsule's content asks for (0 for none). A surface too short for it grows, as
     // ftop's strip fits its readings, up to the style's largest width and the monitor; it never shrinks below the saved width.
-    public static CollapsedShape Resolve(DeckSettings settings, CompactStyle style, DipRect monitor, DipRect work, double pixelsPerDip = 1, double contentWanted = 0)
+    // contentRequired: the width of what the content must show (CompactMusicLayout.Required: the clock, and while media plays its
+    // cover, equalizer and title). The surface is always at least wide enough for it, whatever width is saved, within the same limits.
+    public static CollapsedShape Resolve(DeckSettings settings, CompactStyle style, DipRect monitor, DipRect work, double pixelsPerDip = 1, double contentWanted = 0, double contentRequired = 0)
     {
-        double wanted = double.IsFinite(contentWanted) ? Math.Max(0, contentWanted) : 0;
+        double wanted = Math.Max(Finite(contentWanted), Finite(contentRequired));
         var (screen, area) = Sanitize(monitor, work);
         switch (style)
         {
@@ -71,7 +73,7 @@ public static class CollapsedGeometry
             {
                 double height = Math.Min(Value(settings.CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault), area.Height);
                 double saved = Value(settings.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, CollapsedLimits.CapsuleWidthDefault);
-                double fit = wanted > 0 ? Math.Min(CollapsedLimits.CapsuleWidthMax, wanted + 2 * CollapsedLimits.CapsuleInset * height / CollapsedLimits.BaseHeight) : 0;
+                double fit = SurfaceWidth(style, height, wanted);
                 double width = Math.Min(Math.Max(saved, fit), area.Width);
                 var (topMin, topMax) = TopRange(height, area.Height, double.PositiveInfinity);
                 double top = Math.Clamp(Value(settings.CapsuleTop, CollapsedLimits.CapsuleTopMin, CollapsedLimits.CapsuleTopMax, CollapsedLimits.CapsuleTopDefault), topMin, topMax);
@@ -92,15 +94,28 @@ public static class CollapsedGeometry
             {
                 double height = Math.Min(Value(settings.NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault), screen.Height);
                 double saved = Value(settings.NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, CollapsedLimits.NotchWidthDefault);
-                // The content keeps clear of the inset and, on a low notch where they are wider, of the shoulders and corners.
-                double side = Math.Max(CollapsedLimits.NotchInset * height / CollapsedLimits.BaseHeight, CollapsedLimits.NotchShoulder + CollapsedLimits.NotchCorner);
-                double fit = wanted > 0 ? Math.Min(CollapsedLimits.NotchWidthMax, wanted + 2 * side) : 0;
+                double fit = SurfaceWidth(CompactStyle.Notch, height, wanted);
                 double width = Math.Min(Math.Max(saved, fit), screen.Width);
                 double scale = height / CollapsedLimits.BaseHeight, inset = CollapsedLimits.NotchInset * scale;
                 var surface = new DipRect(Place(screen.Width, width, settings.NotchOffsetX), 0, width, height);
                 return new(CompactStyle.Notch, surface, scale, inset, Math.Max(0, width - 2 * inset), CollapsedLimits.NotchCorner, 0, CollapsedLimits.NotchShoulder);
             }
         }
+    }
+
+    // The surface width whose content area holds content DIPs at this height, up to the style's largest width; 0 for no content
+    // and for the line. The content keeps clear of the capsule's inset, and of the notch's inset and, on a low notch where they are
+    // wider, its shoulders and corners.
+    public static double SurfaceWidth(CompactStyle style, double height, double content)
+    {
+        double c = Finite(content), h = Finite(height);
+        if (c <= 0) return 0;
+        return style switch
+        {
+            CompactStyle.Capsule => Math.Min(CollapsedLimits.CapsuleWidthMax, c + 2 * CollapsedLimits.CapsuleInset * h / CollapsedLimits.BaseHeight),
+            CompactStyle.Notch => Math.Min(CollapsedLimits.NotchWidthMax, c + 2 * Math.Max(CollapsedLimits.NotchInset * h / CollapsedLimits.BaseHeight, CollapsedLimits.NotchShoulder + CollapsedLimits.NotchCorner)),
+            _ => 0
+        };
     }
 
     // The horizontal offsets that move a surface of this width on this monitor; larger saved offsets act as these limits.
