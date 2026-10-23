@@ -369,6 +369,13 @@ try
             Check("After a restart, rate limiting still shows the per-model quota read before it", limited.LiveQuota && limited.Quotas.Any(q => q.Label == "Fable 每周" && q.UsedPercent == 44));
             Check("The desktop app's newer local sample still decides the 5-hour and weekly shares", limited.Quotas.Single(q => q.Minutes == 300).UsedPercent == 41);
             Check("The status says when the carried-over per-model quotas were read", limited.Status.Contains("按模型的额度为") && limited.Status.Contains(usageClock.LocalDateTime.ToString("HH:mm")));
+            // A sign-in that cannot be read for a moment drops only this run's reading; the kept one comes back with the sign-in.
+            desktopFixture.State = new(true, [], true);
+            var unreadable = (await restarted.RefreshAsync(onlyClaude)).Single();
+            desktopFixture.State = new(true, desktopCredentials);
+            var readable = (await restarted.RefreshAsync(onlyClaude)).Single();
+            Check("After the sign-in was unreadable for a moment, rate limiting shows the kept per-model quotas again",
+                !unreadable.LiveQuota && File.Exists(quotaFile) && readable.Quotas.Any(q => q.Label == "Fable 每周" && q.UsedPercent == 44));
             quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.Unauthorized);
             await restarted.RefreshAsync(onlyClaude);
             Check("A rejected sign-in removes the kept Claude reading", !File.Exists(quotaFile));
