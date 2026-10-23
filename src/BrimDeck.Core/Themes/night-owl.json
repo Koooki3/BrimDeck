@@ -64,5 +64,7 @@
       { "name": "霓虹", "nameEn": "Neon", "stops": ["#C792EA", "#82AAFF", "#7FDBCA"] }
     ]
   },
-  "effects": { "shadowOpacity": 0.4 }
+  "effects": { "shadowOpacity": 0.4 },
+  // Calm, for night work: a soft glow, slow ripples and a faint light that trails the pointer.
+  "motion": { "hover": "spot", "hoverStrength": 0.14, "press": "ripple", "pressStrength": 0.18, "trail": 0.06, "focus": "glow", "pace": 1.15 }
 }

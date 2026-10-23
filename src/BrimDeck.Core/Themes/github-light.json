@@ -64,5 +64,7 @@
       { "name": "霓虹", "nameEn": "Neon", "stops": ["#BF3989", "#8250DF", "#0969DA"] }
     ]
   },
-  "effects": { "shadowOpacity": 0.18 }
+  "effects": { "shadowOpacity": 0.18 },
+  // Restrained and flat, as GitHub is: a thin outline that comes and goes quickly, no trailing light.
+  "motion": { "hover": "edge", "hoverStrength": 0.2, "press": "pulse", "pressStrength": 0.1, "trail": 0, "focus": "ring", "pace": 0.75 }
 }

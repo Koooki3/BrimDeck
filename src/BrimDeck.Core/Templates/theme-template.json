@@ -94,5 +94,29 @@
     "shadowDepth": 4,               // 0 to 12; 0 spreads the shadow evenly around the surface
     "shadowOpacity": 0.28,          // 0 to 1
     "scanlines": 0                  // 0 to 0.12: horizontal lines in the primary text color at this opacity
+  },
+
+  // How the theme moves. Everything here follows Settings › Animations and Windows' "Animation effects": with either off, or in
+  // high contrast, nothing moves. Values outside their range are brought into it, so no theme can flash.
+  "motion": {
+    // Slow light on the island while it is on screen. Periods are seconds; 0 turns an effect off.
+    "ambient": {
+      "breathe": 0,                 // 3 to 30: the rim and glow dim a little and come back once per period
+      "breatheDepth": 0,            // 0 to 0.35: how far they dim
+      "drift": 0,                   // 4 to 60: the rim gradient's colors travel one width in this time
+      "sweep": 0,                   // 6 to 120: a faint scan line passes down the surface once per period (taking 2.4 s)
+      "sweepOpacity": 0,            // 0 to 0.12
+      "flicker": 0,                 // 20 to 300: the neon sags softly once per period (taking 1.2 s)
+      "flickerDepth": 0             // 0 to 0.15
+    },
+    "hover": "spot",                // none, spot (a light under the pointer), edge (a thin outline), lift (a soft shadow ring), neon (light and outline)
+    "hoverStrength": 0.1,           // 0 to 0.3
+    "press": "pulse",               // none, pulse (one glow), ripple (a spreading disc), ring (a spreading ring)
+    "pressStrength": 0.16,          // 0 to 0.35
+    "trail": 0,                     // 0 to 0.12: a faint light that follows the pointer over the open panel
+    "focus": "glow",                // none, ring, glow, neon: a bloom where keyboard focus lands
+    "pace": 1,                      // 0.6 to 1.6: scales the animation length chosen in settings
+    "color": "accent",              // A color key above, a "#RRGGBB" color, or "system" (the Windows accent color)
+    "secondary": "accent"           // The second color of the neon styles and rings
   }
 }

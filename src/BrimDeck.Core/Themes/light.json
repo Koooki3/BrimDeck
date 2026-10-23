@@ -64,5 +64,7 @@
       { "name": "霓虹", "nameEn": "Neon", "stops": ["#B02E9E", "#6E4BD1", "#0B7A82"] }
     ]
   },
-  "effects": { "shadowBlur": 16, "shadowDepth": 3, "shadowOpacity": 0.2 }
+  "effects": { "shadowBlur": 16, "shadowDepth": 3, "shadowOpacity": 0.2 },
+  // Paper-like: what the pointer hovers lifts on a soft shadow ring with a faint sheen.
+  "motion": { "hover": "lift", "hoverStrength": 0.1, "press": "pulse", "pressStrength": 0.12, "trail": 0, "focus": "glow" }
 }

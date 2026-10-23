@@ -78,5 +78,13 @@
     "shadowDepth": 0,
     "shadowOpacity": 0.6,
     "scanlines": 0.04
+  },
+  // Living neon: the rim and glow breathe over 6.5 s, the rim's cyan and magenta drift along it, a faint scan line
+  // passes every 16 s and the tube sags softly about once in 41 s; never faster than one change a second. The pointer gets
+  // a cyan light with a neon outline, rings that spread in cyan and magenta, and a faint trailing light.
+  "motion": {
+    "ambient": { "breathe": 6.5, "breatheDepth": 0.22, "drift": 11, "sweep": 16, "sweepOpacity": 0.07, "flicker": 41, "flickerDepth": 0.1 },
+    "hover": "neon", "hoverStrength": 0.16, "press": "ring", "pressStrength": 0.24, "trail": 0.07, "focus": "neon", "pace": 1,
+    "color": "accent", "secondary": "shadow"
   }
 }

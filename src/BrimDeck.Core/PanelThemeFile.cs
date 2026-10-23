@@ -18,6 +18,8 @@ public sealed class PanelThemeFile
     public Dictionary<string, string>? Colors { get; set; }
     public Dictionary<string, string>? Apps { get; set; }
     public PanelThemeEffects? Effects { get; set; }
+    // Ambient light and the answers to the pointer (see ThemeMotion), merged field by field like the effects.
+    public PanelThemeMotion? Motion { get; set; }
     // The clock style and color that suit the theme; choosing the theme in settings switches the clock to them.
     public PanelThemeClock? Clock { get; set; }
     // The twelve preset colors of the color picker in settings. Unlike everything else these are not inherited: a theme without

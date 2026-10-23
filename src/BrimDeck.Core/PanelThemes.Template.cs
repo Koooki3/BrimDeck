@@ -54,7 +54,7 @@ public static partial class PanelThemes
         text = Regex.Replace(text, @"""rimGradient"": \[\]", "\"rimGradient\": " + ColorList(effects.RimGradient));
         foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines) })
             text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {value.ToString("0.###", CultureInfo.InvariantCulture)}");
-        return text;
+        return FillMotion(text, start.Motion);
     }
 
     // Every palette has every token and, from the dark theme it is built on, every app color.
@@ -62,8 +62,9 @@ public static partial class PanelThemes
 
     private static string FillClock(string text, PanelPalette start, PanelThemeClock clock)
     {
-        if (Enum.TryParse<ClockStyle>(clock.Style, true, out var style)) text = Regex.Replace(text, @"""style"": ""\w+""", $"\"style\": \"{style.ToString().ToLowerInvariant()}\"");
-        if (ParseClockColor(clock.Color) is { } color) text = Regex.Replace(text, @"""color"": ""\w+""", $"\"color\": \"{ClockColorKey(color)}\"");
+        // Only the first "style" and "color": the clock's. The motion section further down has a "color" of its own.
+        if (Enum.TryParse<ClockStyle>(clock.Style, true, out var style)) text = FirstStyle().Replace(text, $"\"style\": \"{style.ToString().ToLowerInvariant()}\"", 1);
+        if (ParseClockColor(clock.Color) is { } color) text = FirstColor().Replace(text, $"\"color\": \"{ClockColorKey(color)}\"", 1);
         if (clock.Custom.Length > 0) text = Regex.Replace(text, @"""custom"": ""#[0-9A-Fa-f]{6}""", $"\"custom\": \"{clock.Custom}\"");
         if (clock.Gradient is { Count: 3 } gradient) text = Regex.Replace(text, @"""gradient"": \[[^\]]*\]", "\"gradient\": " + ColorList(gradient));
         // The swatches and preset gradients, written out in full as the template lays them out.
@@ -71,6 +72,27 @@ public static partial class PanelThemes
         text = Regex.Replace(text, @"""palette"": \{[^}]*\}", "\"palette\": { " + swatches + " }");
         var presets = string.Join(",\n", start.ClockGradients.Select(g => $"      {{ \"name\": {Quote(g.Name)}, \"nameEn\": {Quote(g.NameEn)}, \"stops\": {ColorList(g.Stops)} }}"));
         return Regex.Replace(text, @"""gradients"": \[\s*\n(?:.*\n)*?    \]", "\"gradients\": [\n" + presets + "\n    ]");
+    }
+
+    [GeneratedRegex(@"""style"": ""\w+""")] private static partial Regex FirstStyle();
+    [GeneratedRegex(@"""color"": ""\w+""")] private static partial Regex FirstColor();
+
+    // The motion section, after everything else in the template, written out from the palette's resolved motion.
+    private static string FillMotion(string text, ThemeMotion motion)
+    {
+        int at = text.IndexOf("\"motion\": {", StringComparison.Ordinal);
+        if (at < 0) return text;
+        string head = text[..at], tail = text[at..];
+        var a = motion.Ambient;
+        static string Number(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+        foreach (var (key, value) in new[] { ("breathe", a.Breathe), ("breatheDepth", a.BreatheDepth), ("drift", a.Drift), ("sweep", a.Sweep), ("sweepOpacity", a.SweepOpacity),
+            ("flicker", a.Flicker), ("flickerDepth", a.FlickerDepth), ("hoverStrength", motion.HoverStrength), ("pressStrength", motion.PressStrength), ("trail", motion.Trail), ("pace", motion.Pace) })
+            tail = Regex.Replace(tail, $"\"{key}\": [0-9.]+", $"\"{key}\": {Number(value)}");
+        foreach (var (key, value) in new[] { ("hover", motion.Hover.ToString()), ("press", motion.Press.ToString()), ("focus", motion.Focus.ToString()) })
+            tail = Regex.Replace(tail, $"\"{key}\": \"\\w+\"", $"\"{key}\": \"{value.ToLowerInvariant()}\"");
+        foreach (var (key, value) in new[] { ("color", motion.Color), ("secondary", motion.Secondary) })
+            tail = Regex.Replace(tail, $"\"{key}\": \"[^\"]*\"", $"\"{key}\": {Quote(value).Replace("$", "$$", StringComparison.Ordinal)}");
+        return head + tail;
     }
 
     private static string Quote(string value) => JsonSerializer.Serialize(value, Json);

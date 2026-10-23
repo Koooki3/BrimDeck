@@ -64,5 +64,7 @@
       { "name": "霓虹", "nameEn": "Neon", "stops": ["#C678DD", "#61AFEF", "#56B6C2"] }
     ]
   },
-  "effects": { "shadowOpacity": 0.35 }
+  "effects": { "shadowOpacity": 0.35 },
+  // A soft blue light under the pointer, a ripple where it presses and a faint light that trails it.
+  "motion": { "hover": "spot", "hoverStrength": 0.14, "press": "ripple", "pressStrength": 0.18, "trail": 0.05, "focus": "glow", "pace": 1 }
 }

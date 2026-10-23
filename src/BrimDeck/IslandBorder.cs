@@ -62,7 +62,9 @@ public sealed class IslandBorder : Border
         if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
         if (RimWidth > 0)
         {
-            if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); _rim.Freeze(); }
+            // A rim brush the ambient light animates (AmbientGlow) stays unfrozen, and so does its pen: freezing the pen would
+            // freeze the brush. Its changes then reach the screen without this method running again.
+            if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); if (RimBrush.IsFrozen) _rim.Freeze(); }
             drawingContext.DrawGeometry(null, _rim, outline);
         }
         if (fading) drawingContext.Pop();

@@ -21,6 +21,7 @@ try
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);
+    ThemeMotionTests.Run(Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
