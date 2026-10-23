@@ -104,6 +104,12 @@ internal sealed class FxAdorner : Adorner
     protected override Size ArrangeOverride(Size finalSize) { _surface.Arrange(new Rect(finalSize)); return finalSize; }
 }
 
+// The answers to the pointer, centred on the pointer rather than drawn around controls: a control's layout box often differs
+// from what it draws (a transparent button wider than its icon, a card, a slider's track), and an outline around it reads as a
+// stray frame. In the panel they lie under the content with the particles (Backdrop), on the surface's own material; on a
+// notice, above it. Each theme has its own (ThemeMotion): a soft light, a shadow pool under a light theme's pointer, a crisp
+// small ring, or a neon light with a two-color ring. Over something that can be clicked, it grows and brightens a little. A press
+// spreads from the pointer (a pulse, a ripple or a ring) and throws a few of the theme's particles.
 internal sealed partial class FxSurface : Canvas
 {
     private const int RippleLimit = 4;
@@ -112,13 +118,12 @@ internal sealed partial class FxSurface : Canvas
     private readonly Func<bool> _interactive;
     private readonly bool _particlesAllowed;
 
-    // Hover: a group that fades, with the lift's shadow ring outside the control and, clipped to the control, the light and edge.
-    private readonly Canvas _hover = new() { Opacity = 0 }, _hoverInside = new();
-    private readonly RectangleGeometry _hoverRect = new();
-    private readonly Path _liftOuter = new() { StrokeThickness = 7 }, _liftInner = new() { StrokeThickness = 3 }, _edge = new() { StrokeThickness = 2 };
-    private readonly Ellipse _spot = new();
-    private readonly TranslateTransform _spotShift = new();
-    private readonly Canvas _ripples = new();
+    // The pointer's light and ring, scaled about their centres and moved to the pointer.
+    private readonly Ellipse _light = new() { IsHitTestVisible = false, Opacity = 0, RenderTransformOrigin = new Point(.5, .5) };
+    private readonly Ellipse _ring = new() { IsHitTestVisible = false, Opacity = 0, RenderTransformOrigin = new Point(.5, .5) };
+    private readonly ScaleTransform _lightScale = new(), _ringScale = new();
+    private readonly TranslateTransform _lightShift = new(), _ringShift = new();
+    private readonly Canvas _ripples = new() { IsHitTestVisible = false };
     private readonly Canvas _focus = new() { Opacity = 0 };
     private readonly RectangleGeometry _focusRect = new();
     private readonly Path _focusOuter = new() { StrokeThickness = 6 }, _focusInner = new() { StrokeThickness = 1.5 };
@@ -127,10 +132,10 @@ internal sealed partial class FxSurface : Canvas
     private int _generation = -1;
     private bool _dressedSystem;
     private Brush? _pulseFill, _rippleFill, _ringFill, _ringStroke;
-    private FrameworkElement? _target;
+    private double _lightRadius, _ringRadius, _restOpacity = .6;
     private DependencyObject? _lastSource;
     private FrameworkElement? _lastTarget;
-    private bool _hasRect, _hoverShown, _detached;
+    private bool _shown, _overControl, _detached;
 
     public event Action? Detached;
 
@@ -138,19 +143,21 @@ internal sealed partial class FxSurface : Canvas
     {
         _input = input; _scope = scope; _interactive = interactive; _particlesAllowed = particles;
         IsHitTestVisible = false; Focusable = false; ClipToBounds = false;
-        _liftOuter.Data = _liftInner.Data = _edge.Data = _hoverRect;
-        _hoverInside.Clip = _hoverRect;
-        _spot.RenderTransform = _spotShift;
-        _hoverInside.Children.Add(_spot); _hoverInside.Children.Add(_edge);
-        _hover.Children.Add(_liftOuter); _hover.Children.Add(_liftInner); _hover.Children.Add(_hoverInside);
+        _light.RenderTransform = new TransformGroup { Children = { _lightScale, _lightShift } };
+        _ring.RenderTransform = new TransformGroup { Children = { _ringScale, _ringShift } };
+        // In the panel, under the content; on a notice, on this layer.
+        var host = particles ? _particleLayer : (Panel)this;
+        host.Children.Add(_light); host.Children.Add(_ring); host.Children.Add(_ripples);
         _focusOuter.Data = _focusInner.Data = _focusRect;
         _focus.Children.Add(_focusOuter); _focus.Children.Add(_focusInner);
-        Children.Add(_hover); Children.Add(_ripples); Children.Add(_focus);
+        Children.Add(_focus);
         input.PreviewMouseMove += Moved;
         input.PreviewMouseLeftButtonDown += Pressed;
         input.MouseLeave += Left;
         input.AddHandler(Keyboard.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler(Focused), true);
     }
+
+    private Panel PointerHost => _particlesAllowed ? _particleLayer : this;
 
     // The window closed: no handler, timer or frame callback stays behind.
     public void Detach()
@@ -193,19 +200,25 @@ internal sealed partial class FxSurface : Canvas
         Color secondary = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, motion.Secondary, system));
         Color shade = palette.IsDark ? Colors.Black : PanelTheme.ColorOf("shadow");
         double hover = motion.HoverStrength, press = motion.PressStrength;
-        bool spot = motion.Hover is HoverFx.Spot or HoverFx.Neon or HoverFx.Lift, edge = motion.Hover is HoverFx.Edge or HoverFx.Neon, lift = motion.Hover == HoverFx.Lift;
-        // A lift's sheen is half as strong as a light; the outline of a neon hover runs from the first color into the second.
-        _spot.Fill = spot ? Radial(color, motion.Hover == HoverFx.Lift ? hover * .5 : hover) : null;
-        _spot.Visibility = spot ? Visibility.Visible : Visibility.Collapsed;
-        _edge.Stroke = !edge ? null : motion.Hover == HoverFx.Neon ? Linear(Alpha(color, Math.Min(.7, hover * 3)), Alpha(secondary, Math.Min(.7, hover * 3))) : Solid(Alpha(color, Math.Min(.6, hover * 2.2)));
-        _edge.Visibility = edge ? Visibility.Visible : Visibility.Collapsed;
-        _liftOuter.Stroke = lift ? Solid(Alpha(shade, hover * .45)) : null;
-        _liftInner.Stroke = lift ? Solid(Alpha(shade, hover * .8)) : null;
-        _liftOuter.Visibility = _liftInner.Visibility = lift ? Visibility.Visible : Visibility.Collapsed;
-        _pulseFill = Solid(Alpha(color, press));
-        _rippleFill = Radial(color, press, edge: .55);
-        _ringStroke = Linear(Alpha(color, Math.Min(.8, press * 2.6)), Alpha(secondary, Math.Min(.8, press * 2.6)));
-        _ringFill = Radial(secondary, press * .35);
+        // Each style's light and ring (radii in DIP); a stronger light where the hover is the light itself.
+        (Brush? light, double lightRadius, Brush? ring, double ringRadius, double ringWidth) = motion.Hover switch
+        {
+            HoverFx.Spot => (Radial(color, Math.Min(.6, hover * 1.6)), 58d, (Brush?)null, 0d, 0d),
+            // A light theme's pointer casts a soft pool of shade, with a faint glint of the accent at its middle.
+            HoverFx.Lift => (Pool(shade, Math.Min(.4, hover * 2.2), color, Math.Min(.25, hover * 1.2)), 46d, null, 0d, 0d),
+            // GitHub's: a crisp small ring and a little light inside it.
+            HoverFx.Edge => (Radial(color, Math.Min(.35, hover * 1.1)), 22d, Solid(Alpha(color, Math.Min(.7, hover * 3))), 11d, 1.5d),
+            HoverFx.Neon => (Radial(color, Math.Min(.55, hover * 2.2)), 50d, Linear(Alpha(color, Math.Min(.8, hover * 4.5)), Alpha(secondary, Math.Min(.8, hover * 4.5))), 15d, 1.6d),
+            _ => ((Brush?)null, 0d, (Brush?)null, 0d, 0d)
+        };
+        _light.Fill = light; _lightRadius = lightRadius; _light.Width = _light.Height = lightRadius * 2;
+        _ring.Stroke = ring; _ringRadius = ringRadius; _ring.StrokeThickness = ringWidth; _ring.Width = _ring.Height = Math.Max(0, ringRadius * 2);
+        _light.Visibility = light is null ? Visibility.Collapsed : Visibility.Visible;
+        _ring.Visibility = ring is null ? Visibility.Collapsed : Visibility.Visible;
+        _pulseFill = Radial(color, Math.Min(.6, press * 2.4), edge: .7);
+        _rippleFill = Radial(color, Math.Min(.55, press * 2), edge: .55);
+        _ringStroke = Linear(Alpha(color, Math.Min(.85, press * 3)), Alpha(secondary, Math.Min(.85, press * 3)));
+        _ringFill = Radial(secondary, press * .5);
         DressParticles(color, secondary);
         (_focusOuter.Stroke, _focusInner.Stroke) = motion.Focus switch
         {
@@ -240,6 +253,15 @@ internal sealed partial class FxSurface : Canvas
         brush.Freeze();
         return brush;
     }
+    private static Brush Pool(Color shade, double strength, Color glint, double glintStrength)
+    {
+        var brush = new RadialGradientBrush(new GradientStopCollection
+        {
+            new GradientStop(Alpha(glint, glintStrength), 0), new GradientStop(Alpha(shade, strength), .28), new GradientStop(Alpha(shade, strength * .45), .6), new GradientStop(Alpha(shade, 0), 1)
+        });
+        brush.Freeze();
+        return brush;
+    }
 
     // ----- Pointer -----
 
@@ -247,9 +269,9 @@ internal sealed partial class FxSurface : Canvas
     {
         if (!_detached) EnsureDressed();
         if (!Active) { Release(); return; }
-        var p = e.GetPosition(this);
-        Hover(TargetOf(e.OriginalSource as DependencyObject), p);
-        if (_particlesAllowed && _motion.Trail > 0 && _motion.Particles != ParticleFx.None) Emit(e.GetPosition(_particleLayer));
+        var p = e.GetPosition(PointerHost);
+        Follow(p, TargetOf(e.OriginalSource as DependencyObject) is not null);
+        if (_particlesAllowed && _motion.Trail > 0 && _motion.Particles != ParticleFx.None) Emit(p);
     }
 
     private void Left(object sender, MouseEventArgs e) => Release();
@@ -257,128 +279,72 @@ internal sealed partial class FxSurface : Canvas
     // What is shown fades out: the pointer left, or the panel closed. Particles already out finish their short lives.
     public void Release()
     {
-        HideHover(Timing);
+        if (_shown)
+        {
+            _shown = false;
+            int ms = Timing.HoverOut;
+            Fade(_light, 0, ms, Soft.InOut); Fade(_ring, 0, ms, Soft.InOut);
+        }
         StopEmitting();
     }
 
-    private void Hover(FrameworkElement? target, Point p)
+    // The light and ring sit on the pointer at once (a lag would read as a separate layer sliding behind); over something that can
+    // be clicked they grow a little and come to full strength.
+    private void Follow(Point p, bool overControl)
     {
-        if (_motion.Hover == HoverFx.None || _motion.HoverStrength <= 0) target = null;
+        if (_motion.Hover == HoverFx.None || _motion.HoverStrength <= 0) return;
+        _lightShift.X = p.X - _lightRadius; _lightShift.Y = p.Y - _lightRadius;
+        _ringShift.X = p.X - _ringRadius; _ringShift.Y = p.Y - _ringRadius;
         var timing = Timing;
-        if (target is null)
+        if (!_shown || overControl != _overControl)
         {
-            HideHover(timing);
-            return;
+            _shown = true; _overControl = overControl;
+            double opacity = overControl ? 1 : _restOpacity;
+            Fade(_light, opacity, timing.HoverIn, Soft.Follow);
+            Fade(_ring, overControl ? 1 : _restOpacity * .8, timing.HoverIn, Soft.Follow);
+            Scale(_lightScale, overControl ? 1.18 : 1, timing.Glide);
+            Scale(_ringScale, overControl ? 1.45 : 1, timing.Glide);
         }
-        var bounds = BoundsOf(target);
-        if (bounds.IsEmpty || bounds.Width < 4 || bounds.Height < 4) { Hover(null, p); return; }
-        double radius = Math.Min(CornerOf(target), Math.Min(bounds.Width, bounds.Height) / 2);
-        if (!ReferenceEquals(target, _target))
-        {
-            // From one control to the next while the light still shows, it glides there; otherwise it appears in place.
-            bool glide = _hasRect && _hover.Opacity > .05;
-            _target = target;
-            Place(_hoverRect, bounds, radius, glide ? timing.Glide : 0);
-            double reach = Math.Clamp(Math.Max(bounds.Width, bounds.Height) * .75, 26, 150);
-            if (Math.Abs(_spot.Width - reach * 2) > .5) _spot.Width = _spot.Height = reach * 2;
-            _hasRect = true;
-            if (!_hoverShown) { _hoverShown = true; Fade(_hover, 1, timing.HoverIn, Soft.Follow); }
-        }
-        // The control moved under a still light (the panel opening, a page or list moving): the light goes with it. A glide in
-        // progress already ends on the control's box, which is the base value.
-        else if (!Near(_hoverRect.Rect, bounds)) Place(_hoverRect, bounds, radius, 0);
-        _spotShift.X = p.X - _spot.Width / 2; _spotShift.Y = p.Y - _spot.Height / 2;
-        Settle();
     }
 
-    // For a moment after the pointer moves, the light keeps checking where its control is, frame by frame: content that is still
-    // moving (the panel opening, a page switching, a scroll gliding) gives no pointer events, and the light would stay behind.
-    private const double SettleSeconds = .8;
-    private double _settleUntil;
-    private bool _settleHooked;
-
-    private void Settle()
+    private static void Scale(ScaleTransform scale, double to, int milliseconds)
     {
-        _settleUntil = Eased.Now + SettleSeconds;
-        if (_settleHooked) return;
-        _settleHooked = true;
-        CompositionTarget.Rendering += SettleFrame;
+        var animation = new DoubleAnimation(to, TimeSpan.FromMilliseconds(Math.Max(1, milliseconds))) { EasingFunction = Soft.Follow };
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, animation, HandoffBehavior.SnapshotAndReplace);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, animation, HandoffBehavior.SnapshotAndReplace);
     }
 
-    private void SettleFrame(object? sender, EventArgs e)
-    {
-        if (_target is { } target && _hoverShown && !_detached)
-        {
-            var bounds = BoundsOf(target);
-            if (bounds.IsEmpty || bounds.Width < 4 || bounds.Height < 4) HideHover(Timing);
-            else if (!Near(_hoverRect.Rect, bounds)) Place(_hoverRect, bounds, Math.Min(CornerOf(target), Math.Min(bounds.Width, bounds.Height) / 2), 0);
-        }
-        if (_target is null || !_hoverShown || _detached || Eased.Now > _settleUntil) Unsettle();
-    }
-
-    private void Unsettle()
-    {
-        if (!_settleHooked) return;
-        _settleHooked = false;
-        CompositionTarget.Rendering -= SettleFrame;
-    }
-
-    private static bool Near(Rect a, Rect b) => !a.IsEmpty && !b.IsEmpty && Math.Abs(a.X - b.X) < .5 && Math.Abs(a.Y - b.Y) < .5 && Math.Abs(a.Width - b.Width) < .5 && Math.Abs(a.Height - b.Height) < .5;
-
-    // Once per leave: a fade restarted on every move would never finish.
-    private void HideHover(MotionTiming timing)
-    {
-        _target = null;
-        if (!_hoverShown) return;
-        _hoverShown = false;
-        Fade(_hover, 0, timing.HoverOut, Soft.InOut);
-    }
-
+    // A press spreads from the pointer in the theme's way and throws a few of its particles; no outline of the control.
     private void Pressed(object sender, MouseButtonEventArgs e)
     {
         if (_detached) return;
         EnsureDressed();
         if (!Active || _motion.Press == PressFx.None || _motion.PressStrength <= 0) return;
-        if (TargetOf(e.OriginalSource as DependencyObject) is not { } target) return;
-        var bounds = BoundsOf(target);
-        if (bounds.IsEmpty || bounds.Width < 4 || bounds.Height < 4) return;
-        var p = e.GetPosition(this);
-        double radius = Math.Min(CornerOf(target), Math.Min(bounds.Width, bounds.Height) / 2);
+        if (IsSliderPart(e.OriginalSource as DependencyObject)) return;
+        var p = e.GetPosition(PointerHost);
         int length = Timing.Press;
-        var host = new Canvas { Clip = new RectangleGeometry(bounds, radius, radius), IsHitTestVisible = false, Opacity = 0 };
-        if (_motion.Press == PressFx.Pulse)
+        double reach = _motion.Press switch { PressFx.Pulse => 30, PressFx.Ring => 40, _ => 46 };
+        var scale = new ScaleTransform(_motion.Press == PressFx.Pulse ? .35 : .15, _motion.Press == PressFx.Pulse ? .35 : .15);
+        var wave = new Ellipse
         {
-            var fill = new Rectangle { Width = bounds.Width, Height = bounds.Height, RadiusX = radius, RadiusY = radius, Fill = _pulseFill };
-            SetLeft(fill, bounds.X); SetTop(fill, bounds.Y);
-            host.Children.Add(fill);
-        }
-        else
-        {
-            // A disc or ring from the press to the farthest corner.
-            double reach = Math.Max(Math.Max(Distance(p, bounds.TopLeft), Distance(p, bounds.TopRight)), Math.Max(Distance(p, bounds.BottomLeft), Distance(p, bounds.BottomRight)));
-            var scale = new ScaleTransform(.15, .15);
-            var wave = new Ellipse
-            {
-                Width = reach * 2, Height = reach * 2, RenderTransformOrigin = new Point(.5, .5), RenderTransform = scale,
-                Fill = _motion.Press == PressFx.Ring ? _ringFill : _rippleFill,
-                Stroke = _motion.Press == PressFx.Ring ? _ringStroke : null, StrokeThickness = 1.5
-            };
-            SetLeft(wave, p.X - reach); SetTop(wave, p.Y - reach);
-            host.Children.Add(wave);
-            var grow = new DoubleAnimation(.15, 1, TimeSpan.FromMilliseconds(length)) { EasingFunction = Soft.Out };
-            scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
-            scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
-        }
+            Width = reach * 2, Height = reach * 2, RenderTransformOrigin = new Point(.5, .5), RenderTransform = scale, IsHitTestVisible = false,
+            Fill = _motion.Press switch { PressFx.Ring => _ringFill, PressFx.Pulse => _pulseFill, _ => _rippleFill },
+            Stroke = _motion.Press == PressFx.Ring ? _ringStroke : null, StrokeThickness = 1.6, Opacity = 0
+        };
+        SetLeft(wave, p.X - reach); SetTop(wave, p.Y - reach);
+        var grow = new DoubleAnimation(scale.ScaleX, 1, TimeSpan.FromMilliseconds(length)) { EasingFunction = Soft.Out };
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
         if (_ripples.Children.Count >= RippleLimit) _ripples.Children.RemoveAt(0);
-        _ripples.Children.Add(host);
+        _ripples.Children.Add(wave);
         // Rises quickly, then fades over the rest: one soft change, never a blink.
         var fade = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(length) };
         fade.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromPercent(_motion.Press == PressFx.Pulse ? .2 : .12), Soft.Out));
         fade.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(1), Soft.InOut));
-        fade.Completed += (_, _) => _ripples.Children.Remove(host);
-        host.BeginAnimation(OpacityProperty, fade);
+        fade.Completed += (_, _) => _ripples.Children.Remove(wave);
+        wave.BeginAnimation(OpacityProperty, fade);
+        if (_particlesAllowed && _motion.Trail > 0 && _motion.Particles != ParticleFx.None) Burst(p);
     }
-    private static double Distance(Point a, Point b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
     // ----- Focus -----
 
@@ -392,7 +358,7 @@ internal sealed partial class FxSurface : Canvas
         if (bounds.IsEmpty || TooLarge(bounds)) return;
         double radius = Math.Min(CornerOf(element), Math.Min(bounds.Width, bounds.Height) / 2) + 3;
         bounds.Inflate(3, 3);
-        Place(_focusRect, bounds, radius, 0);
+        _focusRect.Rect = bounds; _focusRect.RadiusX = _focusRect.RadiusY = radius;
         var bloom = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(Timing.Focus) };
         bloom.KeyFrames.Add(new EasingDoubleKeyFrame(_focus.Opacity, KeyTime.FromPercent(0)));
         bloom.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromPercent(.28), Soft.Out));
@@ -405,10 +371,9 @@ internal sealed partial class FxSurface : Canvas
     // Ends everything at once, as if nothing had been shown.
     public void Reset()
     {
-        Unsettle(); ClearParticles();
-        _target = null; _hasRect = false; _hoverShown = false; _lastSource = null; _lastTarget = null;
-        foreach (var element in new UIElement[] { _hover, _focus }) { element.BeginAnimation(OpacityProperty, null); element.Opacity = 0; }
-        _hoverRect.BeginAnimation(RectangleGeometry.RectProperty, null);
+        ClearParticles();
+        _shown = false; _overControl = false; _lastSource = null; _lastTarget = null;
+        foreach (var element in new UIElement[] { _light, _ring, _focus }) { element.BeginAnimation(OpacityProperty, null); element.Opacity = 0; }
         _ripples.Children.Clear();
     }
 
@@ -418,51 +383,31 @@ internal sealed partial class FxSurface : Canvas
         element.BeginAnimation(OpacityProperty, new DoubleAnimation(to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = easing }, HandoffBehavior.SnapshotAndReplace);
     }
 
-    private static void Place(RectangleGeometry geometry, Rect bounds, double radius, int milliseconds)
-    {
-        if (milliseconds > 0)
-        {
-            var from = geometry.Rect;
-            geometry.Rect = bounds;
-            // Stops at its end, where the base value already is, so later moves of the control (a scroll) can place it again.
-            geometry.BeginAnimation(RectangleGeometry.RectProperty, new RectAnimation(from, bounds, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = Soft.Follow, FillBehavior = FillBehavior.Stop });
-        }
-        else { geometry.BeginAnimation(RectangleGeometry.RectProperty, null); geometry.Rect = bounds; }
-        geometry.RadiusX = geometry.RadiusY = radius;
-    }
-
-    // The control a pointer event belongs to: a button of any kind, a list or combo box item, a tab or a slider, and only one that
-    // draws a box of its own (a fill or a border) where the light and edge would go. Larger clickable areas (a usage card, a
-    // monitor row) and buttons drawn as bare text or icons on a wider transparent box are left alone: an outline around their
-    // layout box would not match anything on screen. So are scroll bars, text fields and whole surfaces (a notice, a page).
+    // Whether the pointer is over something that can be clicked: a button of any kind, a list or combo box item or a tab. Scroll
+    // bars, sliders, text fields and whole surfaces are not.
     private FrameworkElement? TargetOf(DependencyObject? source)
     {
         if (source is null) return null;
-        if (ReferenceEquals(source, _lastSource)) return _lastTarget is { IsEnabled: true } && HasChrome(_lastTarget) ? _lastTarget : null;
+        if (ReferenceEquals(source, _lastSource)) return _lastTarget is { IsEnabled: true } ? _lastTarget : null;
         FrameworkElement? found = null;
         for (var node = source; node is not null && !ReferenceEquals(node, _scope); node = Up(node))
         {
-            if (node is ScrollBar or TextBoxBase or PasswordBox) { found = null; break; }
+            if (node is ScrollBar or TextBoxBase or PasswordBox or RepeatButton or Thumb or Slider) { found = null; break; }
             if (node is NoticeSurface or IslandBorder) break;
-            // The parts of a slider or scroll bar (the track's repeat buttons, the thumb) span the whole bar's row, not what it draws.
-            if (node is RepeatButton or Thumb or Slider) { found = null; break; }
             if (found is null && node is ButtonBase or ListBoxItem or ComboBox or TabItem) found = (FrameworkElement)node;
         }
-        if (found is not null && (!found.IsEnabled || !found.IsVisible || TooLarge(BoundsOf(found)))) found = null;
+        if (found is not null && (!found.IsEnabled || !found.IsVisible)) found = null;
         _lastSource = source; _lastTarget = found;
-        return found is not null && HasChrome(found) ? found : null;
+        return found;
     }
 
-    // Whether the control shows a box now (its hover style included): a visible fill or border on itself or on the border its
-    // template starts with.
-    private static bool HasChrome(FrameworkElement element)
+    private bool IsSliderPart(DependencyObject? source)
     {
-        var border = element as Border ?? (VisualTreeHelper.GetChildrenCount(element) > 0 ? VisualTreeHelper.GetChild(element, 0) as Border : null);
-        // A template that does not start with a border draws its box some other way: unknown, so nothing is drawn around it.
-        if (border is null) return false;
-        return Visible(border.Background) || border.BorderThickness.Left > 0 && Visible(border.BorderBrush);
+        for (var node = source; node is not null && !ReferenceEquals(node, _scope); node = Up(node))
+            if (node is ScrollBar or RepeatButton or Thumb or Slider) return true;
+        return false;
     }
-    private static bool Visible(Brush? brush) => brush is not null && brush.Opacity > 0 && (brush is not SolidColorBrush solid || solid.Color.A > 8);
+
     private static DependencyObject? Up(DependencyObject node) => node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node);
 
     private bool IsWithin(DependencyObject element)
@@ -471,11 +416,10 @@ internal sealed partial class FxSurface : Canvas
         return false;
     }
 
-    // A control the size of a card or larger is a surface, not a control to light.
+    // A control the size of a card or larger is a surface: keyboard focus on it gets no bloom.
     private bool TooLarge(Rect bounds) => bounds.IsEmpty || bounds.Height > 64 || ActualWidth > 0 && ActualHeight > 0 && bounds.Width * bounds.Height > ActualWidth * ActualHeight * .12;
 
-    // The element's box on this layer, cut to the scroll viewers it sits in, so a control scrolled half out of sight lights
-    // only its visible half.
+    // The element's box on this layer, cut to the scroll viewers it sits in.
     private Rect BoundsOf(FrameworkElement element)
     {
         try

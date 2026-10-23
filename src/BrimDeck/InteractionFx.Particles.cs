@@ -102,7 +102,32 @@ internal sealed partial class FxSurface
         // Along the stretch just travelled, so a quick movement leaves an even line rather than a clump at its end.
         while (_travel >= spacing && made < 4) { _travel -= spacing; made++; Spawn(p - direction * _travel, direction); }
         if (made == 4) _travel = 0;
-        if (made > 0 && !_motesHooked) { _motesHooked = true; _moteFrame = Eased.Now; CompositionTarget.Rendering += MoteFrame; }
+        if (made > 0) HookMotes();
+    }
+
+    // A press throws a small ring of the theme's particles outward from the pointer.
+    private void Burst(Point at)
+    {
+        EnsureShapes();
+        const int count = 7;
+        double start = _random.NextDouble() * Math.PI * 2;
+        for (int i = 0; i < count; i++)
+        {
+            double angle = start + i * Math.PI * 2 / count + Random(-.2, .2), speed = Random(45, 80);
+            var direction = new Vector(Math.Cos(angle), Math.Sin(angle));
+            Spawn(at, -direction);
+            ref var m = ref _motes[(_nextMote + MoteCount - 1) % MoteCount];
+            m.Vx = direction.X * speed; m.Vy = direction.Y * speed - (_moteStyle == ParticleFx.Firefly ? 15 : 0);
+            if (_moteStyle == ParticleFx.Spark) m.Angle = angle * 180 / Math.PI;
+        }
+        HookMotes();
+    }
+
+    private void HookMotes()
+    {
+        if (_motesHooked) return;
+        _motesHooked = true; _moteFrame = Eased.Now;
+        CompositionTarget.Rendering += MoteFrame;
     }
 
     private double Random(double from, double to) => from + (to - from) * _random.NextDouble();
