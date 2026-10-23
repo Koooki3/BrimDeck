@@ -13,7 +13,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | Grok Bot | 读取 Grok Bot 桌面版自己的登录（`%APPDATA%\Grok Bot\sand-secrets.json`），向 Cursor 查询该账户的每周额度。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Grok Bot 桌面版在本机缓存的每周额度（`%APPDATA%\Grok Bot\sand-client-persistence`） | 不提供 |
 | ZCode | 读取 ZCode 的登录，查询 Coding Plan、Start Plan 与 MCP 每日额度 | 读取本地请求记录（`%USERPROFILE%\.zcode\cli\db\db.sqlite`） |
 | DeepSeek Harness | 读取 DeepSeek Harness 的登录（`%USERPROFILE%\.dsh\.credentials.yaml`），向 DeepSeek 开放平台查询账户余额与累计消费金额；未登录账户时，使用其中保存的 API 密钥查询余额 | 读取本地会话记录（`%USERPROFILE%\.dsh\sessions`） |
-| 智谱 GLM、Z.ai GLM、DeepSeek、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址 | 不提供 |
+| 智谱 GLM、Z.ai GLM、DeepSeek、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
 
 - 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME` 或 `DSH_HOME`（须为绝对路径）时，从该目录读取。
 - 这些账户接口与本地数据格式并非公开的稳定接口。无法读取时，面板显示实际状态，不会显示虚构的数值。
