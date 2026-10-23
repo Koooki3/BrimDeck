@@ -113,8 +113,8 @@
     "hoverStrength": 0.1,           // 0 to 0.3
     "press": "pulse",               // none, pulse (one glow), ripple (a spreading disc), ring (a spreading ring)
     "pressStrength": 0.16,          // 0 to 0.35
-    "trail": 0.3,                   // 0 to 0.6: how strongly particles show where the pointer moves over the open panel (0: none)
-    "particles": "dust",            // dust, pixel, spark, star, firefly, neon: the particles' look, drawn under the content
+    "trail": 0.3,                   // 0 to 0.6: how strongly the particles a click throws show (0: none)
+    "particles": "dust",            // dust, pixel, spark, star, firefly, neon: the look of the particles a click throws, drawn under the content
     "focus": "glow",                // none, ring, glow, neon: a bloom where keyboard focus lands
     "pace": 1,                      // 0.6 to 1.6: scales the animation length chosen in settings
     "color": "accent",              // A color key above, a "#RRGGBB" color, or "system" (the Windows accent color)

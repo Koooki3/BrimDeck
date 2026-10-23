@@ -6,17 +6,15 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The particles a moving pointer leaves over the open panel, in the theme's style (ThemeMotion.Particles): soft dust, small
-// squares as on a contribution graph, short sparks along the movement, four-point stars that twinkle, fireflies that drift up and
-// glow slowly, or neon motes in two colors with a soft glow. They lie under the content, on the surface's material (InteractionFx.Island), so text
-// and controls stay above them as above the theme's own gradient and scan lines. They come from the distance the pointer travels,
-// not from time, so a still pointer leaves none; each lives well under two seconds and fades, shrinks or turns as its style does.
-// A fixed set of shapes is reused; the frame callback runs only while any is alive, and nothing is allocated per frame.
+// The few particles a press throws over the open panel, in the theme's style (ThemeMotion.Particles): soft dust, small squares as
+// on a contribution graph, short sparks, four-point stars that twinkle, fireflies that drift up and glow slowly, or neon motes in
+// two colors with a soft glow. They lie under the content, on the surface's material (InteractionFx.Island), so text and controls
+// stay above them as above the theme's own gradient and scan lines; each lives well under two seconds and fades, shrinks or turns
+// as its style does. A fixed set of shapes is reused; the frame callback runs only while any is alive, and nothing is allocated
+// per frame.
 internal sealed partial class FxSurface
 {
     private const int MoteCount = 32;
-    // A jump farther than this between two pointer events (the pointer came back in elsewhere) draws no line of particles.
-    private const double MoteJump = 160;
     private readonly Canvas _particleLayer = new() { IsHitTestVisible = false, ClipToBounds = true };
     private readonly Mote[] _motes = new Mote[MoteCount];
     private readonly Shape?[] _moteShapes = new Shape?[MoteCount];
@@ -24,9 +22,8 @@ internal sealed partial class FxSurface
     private readonly Random _random = new();
     private ParticleFx _moteStyle = ParticleFx.None;
     private Brush? _moteFirst, _moteSecond;
-    private Point _emitFrom;
-    private bool _emitting, _motesHooked;
-    private double _travel, _moteFrame;
+    private bool _motesHooked;
+    private double _moteFrame;
     private int _nextMote;
     // A four-point star in a unit square, its points pulled in by curves.
     private static readonly Geometry StarShape = Frozen(Geometry.Parse("M 0.5,0 C 0.56,0.38 0.62,0.44 1,0.5 C 0.62,0.56 0.56,0.62 0.5,1 C 0.44,0.62 0.38,0.56 0,0.5 C 0.38,0.44 0.44,0.38 0.5,0 Z"));
@@ -81,28 +78,6 @@ internal sealed partial class FxSurface
             _particleLayer.Children.Add(shape);
             _moteShapes[i] = shape;
         }
-    }
-
-    private void Emit(Point p)
-    {
-        EnsureShapes();
-        if (!_emitting) { _emitting = true; _emitFrom = p; _travel = 0; return; }
-        var step = p - _emitFrom;
-        double distance = step.Length;
-        if (distance < .5) return;
-        _emitFrom = p;
-        if (distance > MoteJump) { _travel = 0; return; }
-        var direction = step / distance;
-        double spacing = _moteStyle switch
-        {
-            ParticleFx.Spark => 7, ParticleFx.Pixel => 11, ParticleFx.Neon => 8, ParticleFx.Star => 14, ParticleFx.Firefly => 17, _ => 9
-        };
-        _travel += distance;
-        int made = 0;
-        // Along the stretch just travelled, so a quick movement leaves an even line rather than a clump at its end.
-        while (_travel >= spacing && made < 4) { _travel -= spacing; made++; Spawn(p - direction * _travel, direction); }
-        if (made == 4) _travel = 0;
-        if (made > 0) HookMotes();
     }
 
     // A press throws a small ring of the theme's particles outward from the pointer.
@@ -236,8 +211,6 @@ internal sealed partial class FxSurface
         if (alive == 0) UnhookMotes();
     }
 
-    private void StopEmitting() { _emitting = false; _travel = 0; }
-
     private void UnhookMotes()
     {
         if (!_motesHooked) return;
@@ -249,7 +222,6 @@ internal sealed partial class FxSurface
     private void ClearParticles()
     {
         UnhookMotes();
-        StopEmitting();
         for (int i = 0; i < MoteCount; i++)
         {
             _motes[i].Alive = false;

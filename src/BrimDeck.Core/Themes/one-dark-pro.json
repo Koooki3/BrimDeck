@@ -65,6 +65,6 @@
     ]
   },
   "effects": { "shadowOpacity": 0.35 },
-  // A soft blue light under the pointer, a ripple where it presses and short sparks along its path.
+  // A soft blue light under the pointer, a ripple where it presses and short sparks from a click.
   "motion": { "hover": "spot", "hoverStrength": 0.14, "press": "ripple", "pressStrength": 0.18, "trail": 0.4, "particles": "spark", "focus": "glow", "pace": 1 }
 }

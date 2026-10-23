@@ -104,12 +104,12 @@ internal sealed class FxAdorner : Adorner
     protected override Size ArrangeOverride(Size finalSize) { _surface.Arrange(new Rect(finalSize)); return finalSize; }
 }
 
-// The answers to the pointer, centred on the pointer rather than drawn around controls: a control's layout box often differs
-// from what it draws (a transparent button wider than its icon, a card, a slider's track), and an outline around it reads as a
-// stray frame. In the panel they lie under the content with the particles (Backdrop), on the surface's own material; on a
-// notice, above it. Each theme has its own (ThemeMotion): a soft light, a shadow pool under a light theme's pointer, a crisp
-// small ring, or a neon light with a two-color ring. Over something that can be clicked, it grows and brightens a little. A press
-// spreads from the pointer (a pulse, a ripple or a ring) and throws a few of the theme's particles.
+// The answers to the pointer. Nothing follows the pointer and nothing is drawn around a control's box (a control's layout box
+// often differs from what it draws, and an outline around it reads as a stray frame). Hovering something that can be clicked
+// gives the theme's mark at that control, centred on it (ThemeMotion): a soft light, a shadow pool under a light theme, a small
+// crisp dot under the control, or a neon light with a two-color ring around a small button; it fades when the pointer leaves the
+// control. A press spreads from where it was pressed (a pulse, a ripple or a ring) and throws a few of the theme's particles. In
+// the panel all of it lies under the content (Backdrop), on the surface's own material; on a notice, above it.
 internal sealed partial class FxSurface : Canvas
 {
     private const int RippleLimit = 4;
@@ -118,7 +118,7 @@ internal sealed partial class FxSurface : Canvas
     private readonly Func<bool> _interactive;
     private readonly bool _particlesAllowed;
 
-    // The pointer's light and ring, scaled about their centres and moved to the pointer.
+    // The hovered control's light and ring (or dot), scaled about their centres and placed on the control.
     private readonly Ellipse _light = new() { IsHitTestVisible = false, Opacity = 0, RenderTransformOrigin = new Point(.5, .5) };
     private readonly Ellipse _ring = new() { IsHitTestVisible = false, Opacity = 0, RenderTransformOrigin = new Point(.5, .5) };
     private readonly ScaleTransform _lightScale = new(), _ringScale = new();
@@ -132,10 +132,10 @@ internal sealed partial class FxSurface : Canvas
     private int _generation = -1;
     private bool _dressedSystem;
     private Brush? _pulseFill, _rippleFill, _ringFill, _ringStroke;
-    private double _lightRadius, _ringRadius, _restOpacity = .6;
+    private double _lightRadius, _ringRadius;
     private DependencyObject? _lastSource;
-    private FrameworkElement? _lastTarget;
-    private bool _shown, _overControl, _detached;
+    private FrameworkElement? _lastTarget, _lastShown;
+    private bool _shown, _detached;
 
     public event Action? Detached;
 
@@ -206,8 +206,8 @@ internal sealed partial class FxSurface : Canvas
             HoverFx.Spot => (Radial(color, Math.Min(.6, hover * 1.6)), 58d, (Brush?)null, 0d, 0d),
             // A light theme's pointer casts a soft pool of shade, with a faint glint of the accent at its middle.
             HoverFx.Lift => (Pool(shade, Math.Min(.4, hover * 2.2), color, Math.Min(.25, hover * 1.2)), 46d, null, 0d, 0d),
-            // GitHub's: a crisp small ring and a little light inside it.
-            HoverFx.Edge => (Radial(color, Math.Min(.35, hover * 1.1)), 22d, Solid(Alpha(color, Math.Min(.7, hover * 3))), 11d, 1.5d),
+            // GitHub's: a crisp small dot under the control, as its selected tabs are marked, and a faint light behind it.
+            HoverFx.Edge => (Radial(color, Math.Min(.3, hover * 1)), 22d, Solid(Alpha(color, Math.Min(.9, hover * 4))), 2.5d, 5d),
             HoverFx.Neon => (Radial(color, Math.Min(.55, hover * 2.2)), 50d, Linear(Alpha(color, Math.Min(.8, hover * 4.5)), Alpha(secondary, Math.Min(.8, hover * 4.5))), 15d, 1.6d),
             _ => ((Brush?)null, 0d, (Brush?)null, 0d, 0d)
         };
@@ -269,42 +269,55 @@ internal sealed partial class FxSurface : Canvas
     {
         if (!_detached) EnsureDressed();
         if (!Active) { Release(); return; }
-        var p = e.GetPosition(PointerHost);
-        Follow(p, TargetOf(e.OriginalSource as DependencyObject) is not null);
-        if (_particlesAllowed && _motion.Trail > 0 && _motion.Particles != ParticleFx.None) Emit(p);
+        HoverOn(TargetOf(e.OriginalSource as DependencyObject));
     }
 
     private void Left(object sender, MouseEventArgs e) => Release();
 
-    // What is shown fades out: the pointer left, or the panel closed. Particles already out finish their short lives.
-    public void Release()
+    // What is shown fades out: the pointer left, or the panel closed.
+    public void Release() => HoverOn(null);
+
+    // The theme's mark on the hovered control, placed from the control's box each time the pointer moves over it (so it stays on the
+    // control while the panel or a list moves); it comes and goes with the control, never trailing the pointer.
+    private void HoverOn(FrameworkElement? target)
     {
-        if (_shown)
+        if (_motion.Hover == HoverFx.None || _motion.HoverStrength <= 0) target = null;
+        var bounds = target is null ? Rect.Empty : BoundsOf(target, PointerHost);
+        if (bounds.IsEmpty || bounds.Width < 4 || bounds.Height < 4) target = null;
+        var timing = Timing;
+        if (target is null)
         {
-            _shown = false;
-            int ms = Timing.HoverOut;
-            Fade(_light, 0, ms, Soft.InOut); Fade(_ring, 0, ms, Soft.InOut);
+            if (!_shown) return;
+            _shown = false; _lastShown = null;
+            Fade(_light, 0, timing.HoverOut, Soft.InOut); Fade(_ring, 0, timing.HoverOut, Soft.InOut);
+            Scale(_lightScale, .8, timing.HoverOut); Scale(_ringScale, .8, timing.HoverOut);
+            return;
         }
-        StopEmitting();
+        double cx = bounds.X + bounds.Width / 2, cy = bounds.Y + bounds.Height / 2;
+        // The light reaches a little past the control; a small control gets a small light.
+        double lightScale = Math.Clamp(Math.Max(bounds.Width, bounds.Height) * .7 / Math.Max(1, _lightRadius), .45, 1.4);
+        _lightShift.X = cx - _lightRadius; _lightShift.Y = cy - _lightRadius;
+        bool dot = _motion.Hover == HoverFx.Edge;
+        // The dot sits under the control; the neon ring goes only around a small, roughly square button, which it can follow.
+        bool ringFits = dot || Math.Max(bounds.Width, bounds.Height) <= 40 && Math.Abs(bounds.Width - bounds.Height) <= 12;
+        double ringScale = dot ? 1 : Math.Max(bounds.Width, bounds.Height) / 2 / Math.Max(1, _ringRadius) + .25;
+        _ringShift.X = cx - _ringRadius; _ringShift.Y = (dot ? bounds.Bottom + 3 : cy) - _ringRadius;
+        if (!ReferenceEquals(target, _lastShown))
+        {
+            bool first = !_shown;
+            _shown = true; _lastShown = target;
+            Fade(_light, 1, timing.HoverIn, Soft.Follow);
+            Fade(_ring, ringFits ? 1 : 0, timing.HoverIn, Soft.Follow);
+            // It blooms from a little smaller as it arrives; moving to the next control it simply takes the new size.
+            if (first) { SetScale(_lightScale, lightScale * .8); SetScale(_ringScale, ringScale * .8); }
+            Scale(_lightScale, lightScale, timing.HoverIn); Scale(_ringScale, ringScale, timing.HoverIn);
+        }
     }
 
-    // The light and ring sit on the pointer at once (a lag would read as a separate layer sliding behind); over something that can
-    // be clicked they grow a little and come to full strength.
-    private void Follow(Point p, bool overControl)
+    private static void SetScale(ScaleTransform scale, double value)
     {
-        if (_motion.Hover == HoverFx.None || _motion.HoverStrength <= 0) return;
-        _lightShift.X = p.X - _lightRadius; _lightShift.Y = p.Y - _lightRadius;
-        _ringShift.X = p.X - _ringRadius; _ringShift.Y = p.Y - _ringRadius;
-        var timing = Timing;
-        if (!_shown || overControl != _overControl)
-        {
-            _shown = true; _overControl = overControl;
-            double opacity = overControl ? 1 : _restOpacity;
-            Fade(_light, opacity, timing.HoverIn, Soft.Follow);
-            Fade(_ring, overControl ? 1 : _restOpacity * .8, timing.HoverIn, Soft.Follow);
-            Scale(_lightScale, overControl ? 1.18 : 1, timing.Glide);
-            Scale(_ringScale, overControl ? 1.45 : 1, timing.Glide);
-        }
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, null); scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        scale.ScaleX = scale.ScaleY = value;
     }
 
     private static void Scale(ScaleTransform scale, double to, int milliseconds)
@@ -372,7 +385,7 @@ internal sealed partial class FxSurface : Canvas
     public void Reset()
     {
         ClearParticles();
-        _shown = false; _overControl = false; _lastSource = null; _lastTarget = null;
+        _shown = false; _lastShown = null; _lastSource = null; _lastTarget = null;
         foreach (var element in new UIElement[] { _light, _ring, _focus }) { element.BeginAnimation(OpacityProperty, null); element.Opacity = 0; }
         _ripples.Children.Clear();
     }
@@ -419,15 +432,16 @@ internal sealed partial class FxSurface : Canvas
     // A control the size of a card or larger is a surface: keyboard focus on it gets no bloom.
     private bool TooLarge(Rect bounds) => bounds.IsEmpty || bounds.Height > 64 || ActualWidth > 0 && ActualHeight > 0 && bounds.Width * bounds.Height > ActualWidth * ActualHeight * .12;
 
-    // The element's box on this layer, cut to the scroll viewers it sits in.
-    private Rect BoundsOf(FrameworkElement element)
+    // The element's box on this layer (or another one), cut to the scroll viewers it sits in.
+    private Rect BoundsOf(FrameworkElement element, Visual? on = null)
     {
+        on ??= this;
         try
         {
-            if (PresentationSource.FromVisual(element) is null || PresentationSource.FromVisual(this) is null) return Rect.Empty;
-            var bounds = element.TransformToVisual(this).TransformBounds(new Rect(element.RenderSize));
+            if (PresentationSource.FromVisual(element) is null || PresentationSource.FromVisual(on) is null) return Rect.Empty;
+            var bounds = element.TransformToVisual(on).TransformBounds(new Rect(element.RenderSize));
             for (var node = VisualTreeHelper.GetParent(element); node is not null && !ReferenceEquals(node, _scope); node = VisualTreeHelper.GetParent(node))
-                if (node is ScrollContentPresenter viewport) bounds.Intersect(viewport.TransformToVisual(this).TransformBounds(new Rect(viewport.RenderSize)));
+                if (node is ScrollContentPresenter viewport) bounds.Intersect(viewport.TransformToVisual(on).TransformBounds(new Rect(viewport.RenderSize)));
             return bounds;
         }
         catch (InvalidOperationException) { return Rect.Empty; }

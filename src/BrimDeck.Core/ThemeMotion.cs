@@ -9,7 +9,7 @@ namespace BrimDeck.Core;
 public enum HoverFx { None, Spot, Edge, Lift, Neon }
 public enum PressFx { None, Pulse, Ripple, Ring }
 public enum FocusFx { None, Ring, Glow, Neon }
-// The particles a moving pointer leaves over the open panel: dust (soft motes), pixel (small squares, as a contribution graph),
+// The particles a click throws over the open panel: dust (soft motes), pixel (small squares, as a contribution graph),
 // spark (short streaks along the movement), star (four-point twinkles), firefly (warm lights drifting up and glowing slowly),
 // neon (round motes in two neon colors with a soft glow).
 public enum ParticleFx { None, Dust, Pixel, Spark, Star, Firefly, Neon }
@@ -198,7 +198,7 @@ public sealed class PanelThemeMotion
     // none, pulse (the control glows once), ripple (a disc spreading from the pointer), ring (a spreading ring)
     public string? Press { get; set; }
     public double? PressStrength { get; set; }
-    // 0 to 0.6: how strongly the particles show (0: none)
+    // 0 to 0.6: how strongly the particles a click throws show (0: none)
     public double? Trail { get; set; }
     // none, dust, pixel, spark, star, firefly, neon
     public string? Particles { get; set; }
