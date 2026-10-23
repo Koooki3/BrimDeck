@@ -79,10 +79,14 @@ public sealed partial class LyricsService : IDisposable
     private readonly Dictionary<string, Lyrics> _cache = new();
     private readonly LinkedList<string> _order = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
+    // A lyric reply is a few kilobytes; a larger one is given up rather than read into memory.
+    public const int MaxResponseBytes = 2 * 1024 * 1024;
+    private const int MaxRedirects = 2;
     public LyricsService(HttpClient? http = null)
     {
         _ownsHttp = http is null;
-        _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        // Redirects are followed by Get, only to HTTPS on the same host.
+        _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(8) };
     }
     public async Task<Lyrics> FindAsync(MediaTrack track, bool enabled, CancellationToken token)
     {
@@ -122,18 +126,35 @@ public sealed partial class LyricsService : IDisposable
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromSeconds(8));
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.UserAgent.ParseAdd("BrimDeck/0.1.0");
-            if (url.StartsWith("https://music.163.com/", StringComparison.Ordinal)) request.Headers.Referrer = new Uri("https://music.163.com/");
-            if (request.RequestUri?.Host is "u.y.qq.com" or "c.y.qq.com") request.Headers.Referrer = new Uri("https://y.qq.com/");
             try
             {
-                using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-                if (response.StatusCode == HttpStatusCode.NotFound) return null;
-                response.EnsureSuccessStatusCode();
-                await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-                using var json = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
-                return json.RootElement.Clone();
+                var address = new Uri(url);
+                for (int redirects = 0; ; redirects++)
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Get, address);
+                    request.Headers.UserAgent.ParseAdd("BrimDeck/0.1.0");
+                    if (address.Host == "music.163.com") request.Headers.Referrer = new Uri("https://music.163.com/");
+                    if (address.Host is "u.y.qq.com" or "c.y.qq.com") request.Headers.Referrer = new Uri("https://y.qq.com/");
+                    using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                    if ((int)response.StatusCode is >= 300 and < 400)
+                    {
+                        // Only to HTTPS on the same host, and only a few times: a lookup never ends up somewhere else.
+                        if (redirects >= MaxRedirects || response.Headers.Location is not { } location) return null;
+                        var next = location.IsAbsoluteUri ? location : new Uri(address, location);
+                        if (next.Scheme != Uri.UriSchemeHttps || !string.Equals(next.Host, address.Host, StringComparison.OrdinalIgnoreCase)) return null;
+                        address = next;
+                        continue;
+                    }
+                    if (response.StatusCode == HttpStatusCode.NotFound) return null;
+                    response.EnsureSuccessStatusCode();
+                    if (response.Content.Headers.ContentLength > MaxResponseBytes) return null;
+                    await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+                    var body = await ReadLimitedAsync(stream, timeout.Token);
+                    if (body is null) return null;
+                    // As a stream, which skips a byte order mark the way reading the response directly did.
+                    using var json = JsonDocument.Parse(new MemoryStream(body, writable: false));
+                    return json.RootElement.Clone();
+                }
             }
             catch (Exception ex) when (ex is HttpRequestException or JsonException || ex is OperationCanceledException && !token.IsCancellationRequested)
             {
@@ -144,6 +165,19 @@ public sealed partial class LyricsService : IDisposable
             }
         }
         return null;
+    }
+    // The reply, or null once it is larger than MaxResponseBytes, whatever its declared length said.
+    private static async Task<byte[]?> ReadLimitedAsync(Stream stream, CancellationToken token)
+    {
+        using var buffer = new MemoryStream();
+        var chunk = new byte[16384];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, token)) > 0)
+        {
+            if (buffer.Length + read > MaxResponseBytes) return null;
+            buffer.Write(chunk, 0, read);
+        }
+        return buffer.ToArray();
     }
     private static string Str(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
     private static double Num(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) ? number : 0;
