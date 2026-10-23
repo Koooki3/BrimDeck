@@ -34,6 +34,7 @@ try
     await AppUpdateTests.Run(root, Check);
     await InstallerUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    FullscreenExceptionTests.Run(Check);
     LanguageTests.Run(root, Check);
     await ConfiguredProviderTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);
@@ -630,6 +631,43 @@ try
     var claude = logs.Read(ProviderId.Claude, claudeRoot, now);
     Check("Claude streamed messages use complete counters once", claude.Entries.Count == 1 && claude.Entries.Single().Total == 370);
     Check("Claude 1-hour writes separated", claude.Entries.Single().CacheWriteHour == 10 && claude.Entries.Single().CacheWrite == 20);
+    // Lines over the reader's limit are skipped and counted once, when complete; lines under it grow the buffer.
+    string Padded(string id, int padding) => JsonSerializer.Serialize(new { timestamp = now.AddMinutes(-1), type = "assistant", pad = new string('x', padding),
+        message = new { id, model = "claude-sonnet-4-6", usage = new { input_tokens = 1, output_tokens = 1 } } });
+    var longRoot = Path.Combine(root, "long-lines"); var longProjects = Path.Combine(longRoot, "projects"); Directory.CreateDirectory(longProjects);
+    var longFile = Path.Combine(longProjects, "session.jsonl");
+    File.WriteAllLines(longFile, [Padded("before", 10), Padded("too-long", 20_000), Padded("after", 10)]);
+    var smallReader = new LogReader(4096);
+    var skippedRead = smallReader.Read(ProviderId.Claude, longRoot, now);
+    Check("A line over the limit is skipped and the lines around it are read",
+        skippedRead.Entries.Select(e => e.Key).SequenceEqual(["claude:before", "claude:after"]) && skippedRead.UsageNote.Contains("1 处记录未能读取"));
+    File.AppendAllText(longFile, Padded("unfinished", 20_000)[..15_000]);
+    var unfinished = smallReader.Read(ProviderId.Claude, longRoot, now);
+    Check("A long line still being written is not counted yet", unfinished.Entries.Count == 2 && unfinished.UsageNote.Contains("1 处记录未能读取"));
+    File.AppendAllText(longFile, Padded("unfinished", 20_000)[15_000..] + "\n" + Padded("last", 10) + "\n");
+    var finished = smallReader.Read(ProviderId.Claude, longRoot, now);
+    Check("A long line is counted once it is complete and reading goes on after it",
+        finished.Entries.Count == 3 && finished.Entries.Any(e => e.Key == "claude:last") && finished.UsageNote.Contains("2 处记录未能读取"));
+    File.WriteAllLines(Path.Combine(longProjects, "large.jsonl"), [Padded("large", 3_000_000)]);
+    Check("A line longer than the first buffer but under the limit is read whole",
+        new LogReader().Read(ProviderId.Claude, longRoot, now).Entries.Any(e => e.Key == "claude:large"));
+    // A long line without usage, such as a tool result or an attached file, is dropped without counting.
+    var quietRoot = Path.Combine(root, "quiet-lines"); Directory.CreateDirectory(Path.Combine(quietRoot, "projects"));
+    File.WriteAllLines(Path.Combine(quietRoot, "projects", "session.jsonl"),
+        [Padded("q1", 10), JsonSerializer.Serialize(new { type = "user", content = new string('x', 20_000) }), Padded("q2", 10)]);
+    var quiet = new LogReader(4096).Read(ProviderId.Claude, quietRoot, now);
+    Check("A long line without usage is dropped quietly", quiet.Entries.Count == 2 && quiet.UsageComplete && !quiet.UsageNote.Contains("未能读取"));
+    // "usage" starts 4 bytes before the end of the first 4096-byte read, so the key is split between two reads.
+    File.WriteAllLines(Path.Combine(quietRoot, "projects", "session.jsonl"),
+        ["{\"p\":\"" + new string('x', 4084) + "\",\"usage\":1,\"q\":\"" + new string('y', 10_000) + "\"}"]);
+    var split = new LogReader(4096).Read(ProviderId.Claude, quietRoot, now);
+    Check("A dropped line whose usage key is split between two reads is still counted", !split.UsageComplete && split.UsageNote.Contains("1 处记录未能读取"));
+    // The limit is the one given, not the size of the array the pool hands out (8192 for 5000).
+    string near = Padded("near", 4_700), over = Padded("over", 5_900);
+    File.WriteAllLines(Path.Combine(quietRoot, "projects", "session.jsonl"), [near, over]);
+    var exact = new LogReader(5000).Read(ProviderId.Claude, quietRoot, now);
+    Check("The line limit is exactly the one given",
+        near.Length < 5000 && over.Length is > 5000 and < 8192 && exact.Entries.Select(e => e.Key).SequenceEqual(["claude:near"]) && exact.UsageNote.Contains("1 处记录未能读取"));
     // A WSL distribution's file system: a user's .claude and .codex folders, and a user without any.
     var wslRoot = Path.Combine(root, "wsl-distribution");
     var wslClaude = Path.Combine(wslRoot, "home", "dev", ".claude"); Directory.CreateDirectory(Path.Combine(wslClaude, "projects"));

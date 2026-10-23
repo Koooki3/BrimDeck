@@ -26,7 +26,7 @@ public sealed class MusicControlButton : Button
         if (Template?.FindName("Hover", this) is Ellipse hover)
         {
             double opacity = !IsEnabled ? 0 : IsPressed ? .16 : (bool)GetValue(IsMouseOverProperty) ? .10 : 0;
-            Animate(hover, OpacityProperty, opacity, AnimationsEnabled, 120);
+            Animate(hover, OpacityProperty, opacity, AnimationsEnabled, Soft.Hover);
         }
         if (Template?.FindName("ControlScale", this) is ScaleTransform scale)
         {
@@ -40,14 +40,14 @@ public sealed class MusicControlButton : Button
         double from = (double)target.GetValue(property);
         target.BeginAnimation(property, null); target.SetValue(property, value);
         if (animate && from != value) target.BeginAnimation(property, new DoubleAnimation(from, value, TimeSpan.FromMilliseconds(milliseconds))
-        { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
+        { EasingFunction = Soft.Follow, FillBehavior = FillBehavior.Stop });
     }
     private static void Animate(UIElement target, DependencyProperty property, double value, bool animate, int milliseconds)
     {
         double from = (double)target.GetValue(property);
         target.BeginAnimation(property, null); target.SetValue(property, value);
         if (animate && from != value) target.BeginAnimation(property, new DoubleAnimation(from, value, TimeSpan.FromMilliseconds(milliseconds))
-        { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
+        { EasingFunction = Soft.Follow, FillBehavior = FillBehavior.Stop });
     }
 }
 
@@ -88,14 +88,14 @@ public sealed class MusicSeekSlider : Slider
         bool active = IsEnabled && ((bool)GetValue(IsMouseOverProperty) || Seeking);
         double height = active ? HoverHeight : RestHeight, fromHeight = BarHeight;
         BeginAnimation(BarHeightProperty, null); BarHeight = height;
-        if (animate && fromHeight != height) BeginAnimation(BarHeightProperty, new DoubleAnimation(fromHeight, height, TimeSpan.FromMilliseconds(150))
-        { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
+        if (animate && fromHeight != height) BeginAnimation(BarHeightProperty, new DoubleAnimation(fromHeight, height, TimeSpan.FromMilliseconds(Soft.Hover))
+        { EasingFunction = Soft.Follow, FillBehavior = FillBehavior.Stop });
         // On a dark surface the hover color is lighter, on a light one darker, so hovering only ever adds contrast.
         bool dark = PanelTheme.Current.IsDark;
         byte Shift(byte value) => (byte)Math.Round(dark ? value + (255 - value) * .12 : value * .88);
         var color = active ? Color.FromArgb(Accent.A, Shift(Accent.R), Shift(Accent.G), Shift(Accent.B)) : Accent;
         var from = _fill.Color; _fill.BeginAnimation(SolidColorBrush.ColorProperty, null); _fill.Color = color;
-        if (animate && from != color) _fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(from, color, TimeSpan.FromMilliseconds(150)) { FillBehavior = FillBehavior.Stop });
+        if (animate && from != color) _fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(from, color, TimeSpan.FromMilliseconds(Soft.Hover)) { EasingFunction = Soft.Follow, FillBehavior = FillBehavior.Stop });
         Cursor = IsEnabled ? Cursors.Hand : Cursors.Arrow;
         BubbleVisible = active ? Visibility.Visible : Visibility.Collapsed;
         UpdateBubble();

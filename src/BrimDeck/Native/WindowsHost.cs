@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -9,19 +11,30 @@ namespace BrimDeck.Native;
 public sealed class WindowsHost : IDisposable
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private readonly Func<IntPtr> _monitor;
+    private readonly Func<IReadOnlyList<FullscreenException>> _exceptions;
+    // The foreground window changes rarely but is polled several times a second, so its process is read once per window.
+    private IntPtr _identityWindow;
+    private uint _identityPid;
+    private string _identityName = "", _identityPath = "";
     public event Action<ScreenContext>? ContextChanged;
     public ScreenContext Current { get; private set; }
-    // monitor gives the monitor whose foreground window decides the context.
-    public WindowsHost(Func<IntPtr> monitor)
+    // monitor gives the monitor whose foreground window decides the context. exceptions gives the apps whose full-screen
+    // windows are ignored; it is read on every poll, so a list change applies without recreating the panel.
+    public WindowsHost(Func<IntPtr> monitor, Func<IReadOnlyList<FullscreenException>> exceptions)
     {
-        _timer.Tick += (_, _) =>
-        {
-            var context = DetectContext(monitor());
-            if (context == Current) return;
-            Current = context; ContextChanged?.Invoke(context);
-        };
+        _monitor = monitor; _exceptions = exceptions;
+        _timer.Tick += (_, _) => Poll();
         _timer.Start();
     }
+    private void Poll()
+    {
+        var context = DetectNow();
+        if (context == Current) return;
+        Current = context; ContextChanged?.Invoke(context);
+    }
+    // The context right now, without raising ContextChanged; a caller applies it itself, for instance at startup.
+    public ScreenContext DetectNow() => Detect(_monitor());
     public static IntPtr PrimaryMonitor() => MonitorFromPoint(new POINT(), 1);
     public static (Rect Bounds, Rect Work, double Scale) PrimaryScreen() => Screen(PrimaryMonitor());
     // Null when the handle no longer names a connected monitor.
@@ -55,13 +68,20 @@ public sealed class WindowsHost : IDisposable
     public static Point Cursor()
     { GetCursorPos(out var point); return new Point(point.X, point.Y); }
     // Only a foreground window on the given monitor counts; each panel follows the windows on its own monitor.
-    public static ScreenContext DetectContext(IntPtr monitor)
+    private ScreenContext Detect(IntPtr monitor)
     {
         var foreground = GetForegroundWindow();
         if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) return ScreenContext.Desktop;
         GetWindowThreadProcessId(foreground, out var pid);
         if (pid == Environment.ProcessId) return ScreenContext.Desktop;
         if (MonitorFromWindow(foreground, 2) != monitor) return ScreenContext.Desktop;
+        // The window's app decides first: a desktop beautification tool can cover the monitor and would otherwise read as a
+        // full-screen app, even though the user wants no part of the window rules applied to it.
+        if (_exceptions() is { Count: > 0 } exceptions)
+        {
+            Describe(foreground, pid, out var processName, out var imagePath);
+            if (ScreenPolicy.IsException(processName, imagePath, exceptions)) return ScreenContext.Desktop;
+        }
         var name = new System.Text.StringBuilder(256);
         GetClassName(foreground, name, name.Capacity);
         if (name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return ScreenContext.Desktop;
@@ -73,6 +93,24 @@ public sealed class WindowsHost : IDisposable
         bool caption = (style & 0x00C00000) != 0;
         bool covers = rect.Left <= info.Monitor.Left + 2 && rect.Top <= info.Monitor.Top + 2 && rect.Right >= info.Monitor.Right - 2 && rect.Bottom >= info.Monitor.Bottom - 2;
         return ScreenPolicy.Classify(false, covers, caption, IsZoomed(foreground));
+    }
+    // A window's process name and executable, read once per window. Both reads can fail when the process exited, runs as
+    // administrator or has another bitness; the name alone still matches a saved exception.
+    private void Describe(IntPtr window, uint pid, out string processName, out string imagePath)
+    {
+        if (window != _identityWindow || pid != _identityPid)
+        {
+            _identityWindow = window; _identityPid = pid; _identityName = ""; _identityPath = "";
+            try
+            {
+                using var process = Process.GetProcessById((int)pid);
+                _identityName = process.ProcessName;
+                try { _identityPath = process.MainModule?.FileName ?? ""; }
+                catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or NotSupportedException) { }
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { }
+        }
+        processName = _identityName; imagePath = _identityPath;
     }
     public static void ConfigureOverlay(Window window)
     {

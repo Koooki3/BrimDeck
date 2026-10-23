@@ -41,6 +41,7 @@ public partial class MainWindow
         if (!IsUsagePage && Settings.UsagePage) SelectPage(DeckPage.Usage, remember: false);
         _modelApps.Clear(); _modelApps.Add(provider);
         _knownModelApps.Clear(); _knownModelApps.UnionWith(Settings.StatisticsProviders);
+        _usageHandover = _details ? Handover.Dissolve : Handover.Forward;
         _customRange = null; _days = days; _details = true;
         ResetModelScroll(); RenderUsage();
     }
@@ -50,17 +51,17 @@ public partial class MainWindow
     {
         if (!_modelApps.Contains(provider)) _modelApps.Add(provider);
         else if (_modelApps.Count > 1) _modelApps.Remove(provider);
-        ResetModelScroll(); RenderUsage();
+        _usageHandover = Handover.Dissolve; ResetModelScroll(); RenderUsage();
     }
     internal void SelectModelPeriod(int days)
     {
         _ = UsageDateRange.Recent(days, DateTime.Today);
-        _days = days; _customRange = null; ResetModelScroll(); RenderUsage();
+        _days = days; _customRange = null; _usageHandover = Handover.Dissolve; ResetModelScroll(); RenderUsage();
     }
     internal void SelectModelRange(UsageDateRange range)
     {
         if (range.End > DateTime.Today) throw new ArgumentException(Loc.T("结束日期不能晚于今天。", "The end date cannot be later than today."));
-        _customRange = range; ResetModelScroll();
+        _customRange = range; _usageHandover = Handover.Dissolve; ResetModelScroll();
         var earliest = _historyStart ?? DateTime.Today.AddDays(-29);
         if (range.Start < earliest)
         {
@@ -144,7 +145,7 @@ public partial class MainWindow
         for (int i = 0; i < 5; i++) filters.ColumnDefinitions.Add(new ColumnDefinition
         { Width = i % 2 == 0 ? GridLength.Auto : new GridLength(8) });
         Border Periods(double padding) => Segmented(new[] { 1, 7, 30 }.Select(days => new SegmentItem(PeriodName(days), PeriodName(days),
-            _customRange is null && days == _days, () => SelectModelPeriod(days))).ToList(), 12, 22, padding, centerText: true);
+            _customRange is null && days == _days, () => SelectModelPeriod(days))).ToList(), 12, 22, padding, centerText: true, glide: "periods");
         var periods = Periods(7);
         FrameworkElement applications = null!; Button dates = null!;
         double available = Math.Max(0, ContentCanvas.Width - ModelToolbar.Margin.Left - ModelToolbar.Margin.Right - 36);

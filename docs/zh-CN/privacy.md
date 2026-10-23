@@ -13,7 +13,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | Grok Bot | 读取 Grok Bot 桌面版自己的登录（`%APPDATA%\Grok Bot\sand-secrets.json`），向 Cursor 查询该账户的每周额度。每一行可以单独关闭"联网获取额度"：关闭的行不读取登录、不联网，只显示 Grok Bot 桌面版在本机缓存的每周额度（`%APPDATA%\Grok Bot\sand-client-persistence`） | 不提供 |
 | ZCode | 读取 ZCode 的登录，查询 Coding Plan、Start Plan 与 MCP 每日额度 | 读取本地请求记录（`%USERPROFILE%\.zcode\cli\db\db.sqlite`） |
 | DeepSeek Harness | 读取 DeepSeek Harness 的登录（`%USERPROFILE%\.dsh\.credentials.yaml`），向 DeepSeek 开放平台查询账户余额与累计消费金额；未登录账户时，使用其中保存的 API 密钥查询余额 | 读取本地会话记录（`%USERPROFILE%\.dsh\sessions`） |
-| 智谱 GLM、Z.ai GLM、DeepSeek、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址 | 不提供 |
+| 智谱 GLM、Z.ai GLM、DeepSeek、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
 
 - 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME` 或 `DSH_HOME`（须为绝对路径）时，从该目录读取。
 - 这些账户接口与本地数据格式并非公开的稳定接口。无法读取时，面板显示实际状态，不会显示虚构的数值。
@@ -44,4 +44,5 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 - 端口开启期间，本机其他程序和浏览器网页可能借此操控网易云，读取其页面内容与登录状态。
 - BrimDeck 连接前会确认端口仅监听本机地址且属于网易云进程，但无法消除端口本身带来的风险。
 - 通过这个端口，BrimDeck 读取正在播放的歌曲、进度、播放模式和当前歌曲是否已喜欢，只在您点击按钮时让网易云执行对应的操作。点击红心时，由网易云自己把歌曲加入或移出您账户中的"我喜欢的音乐"。为显示红心，BrimDeck 只取得网易云是否已登录、当前歌曲是否已喜欢这两项结果，不读取或保存您的账户信息和其他歌曲。
-- 请仅在可信的环境中启用。以普通方式重新启动网易云，即可退出完整控制。
+- 端口会一直开到网易云以普通方式重新启动为止：退出 BrimDeck、完整控制连接失败（BrimDeck 改为只读取播放信息）都不会关闭它。
+- 请仅在可信的环境中启用。以普通方式重新启动网易云，即可退出完整控制并关闭端口。

@@ -13,7 +13,7 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 | Grok Bot | Reads the Grok Bot desktop app's own sign-in (`%APPDATA%\Grok Bot\sand-secrets.json`) and asks Cursor for that account's weekly allowance. Each row can turn off "Fetch quota online": such a row reads no sign-in and sends nothing, and shows only the weekly allowance the Grok Bot desktop app cached on this PC (`%APPDATA%\Grok Bot\sand-client-persistence`) | Not available |
 | ZCode | Reads the ZCode sign-in and asks for the Coding Plan, Start Plan and MCP daily limits | Reads the local request records (`%USERPROFILE%\.zcode\cli\db\db.sqlite`) |
 | DeepSeek Harness | Reads the DeepSeek Harness sign-in (`%USERPROFILE%\.dsh\.credentials.yaml`) and asks the DeepSeek platform for the account balance and total cost; without a signed-in account, uses the API key saved there to ask for the balance | Reads the local session records (`%USERPROFILE%\.dsh\sessions`) |
-| Zhipu GLM, Z.ai GLM, DeepSeek, New API, Sub2API, Custom | Uses the key and site address entered in settings | Not available |
+| Zhipu GLM, Z.ai GLM, DeepSeek, New API, Sub2API, Custom | Uses the key and site address entered in settings. The key goes only over HTTPS or to this PC; a New API, Sub2API or Custom source with "Allow HTTP" on also sends it over HTTP, in plain text | Not available |
 
 - When `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ZCODE_HOME` or `DSH_HOME` is set to an absolute path, that folder is read instead.
 - These account APIs and local data formats are not stable public interfaces. When they cannot be read, the panel shows the actual status and never makes up numbers.
@@ -44,4 +44,5 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 - While the port is open, other programs on this PC and web pages in a browser may use it to control NetEase Cloud Music and read its page content and sign-in state.
 - Before connecting, BrimDeck checks that the port listens only on this PC and belongs to NetEase Cloud Music, but this cannot remove the risk of the port itself.
 - Through this port, BrimDeck reads the song that is playing, its progress, the playback mode and whether the current song is liked, and has NetEase Cloud Music act only when you select a control. When you select the heart, NetEase Cloud Music itself adds the song to, or removes it from, the liked songs of your account. To show the heart, BrimDeck takes only two results, whether NetEase Cloud Music is signed in and whether the current song is liked; it neither reads nor keeps your account details or your other songs.
-- Turn it on only in an environment you trust. Starting NetEase Cloud Music the normal way ends full control.
+- The port stays open until NetEase Cloud Music is started again the normal way: quitting BrimDeck, or a full control connection that fails (BrimDeck then only reads what is playing), does not close it.
+- Turn it on only in an environment you trust. Starting NetEase Cloud Music the normal way ends full control and closes the port.
