@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using BrimDeck.Core;
@@ -28,7 +29,7 @@ public sealed partial class SettingsWindow
             var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = content, GroupName = "MonitorPalette", IsChecked = S.MonitorPalette == palette };
             AutomationProperties.SetName(choice, Loc.T("配色 ", "Colors ") + MonitorColors.Name(palette));
             // Choosing a scheme shows it on the open monitor page, as a size change does.
-            choice.Checked += (_, _) => Resize(s => s.MonitorPalette = palette, DeckPage.Monitor);
+            choice.Checked += (_, _) => { Resize(s => s.MonitorPalette = palette, DeckPage.Monitor); _refreshReadings?.Invoke(); };
             schemes.Children.Add(choice);
         }
         // The options stay available while the page is off, so they can be set before it is shown.
@@ -45,35 +46,150 @@ public sealed partial class SettingsWindow
         CompactMonitorOptions();
     }
 
-    // What the collapsed notch or capsule shows when its "系统监控" switch is on: full, brief or chosen readings, the chosen ones
-    // as switches shown while Custom is picked; and whether each surface widens to its content.
+    // What the collapsed notch or capsule shows when its "系统监控" switch is on: a table of the readings, laid out as the app list
+    // is (drag handle, color circle, switches), with Full and Brief under it as quick presets; and whether each surface widens to its content.
+    private Action? _refreshReadings;
+    private const double ReadingRowHeight = 53;
     private void CompactMonitorOptions()
     {
         SectionTitle(Loc.T("收起时的读数", "Collapsed readings"));
-        var items = new UniformGrid { Columns = 2, Margin = new Thickness(20, 0, 0, 4), Visibility = S.CompactMonitor == CompactMonitorMode.Custom ? Visibility.Visible : Visibility.Collapsed };
-        var content = MusicChoice(Loc.T("显示内容", "Content"), S.CompactMonitor,
-            [(CompactMonitorMode.Full, Loc.T("完整", "Full")), (CompactMonitorMode.Brief, Loc.T("简洁", "Brief")), (CompactMonitorMode.Custom, Loc.T("自选", "Custom"))],
-            mode => { Change(s => s.CompactMonitor = mode); items.Visibility = mode == CompactMonitorMode.Custom ? Visibility.Visible : Visibility.Collapsed; });
-        (CompactMonitorItems Item, string Name)[] choices =
-        [
-            (CompactMonitorItems.Columns, Loc.T("核心柱", "Core columns")), (CompactMonitorItems.Cpu, "CPU"), (CompactMonitorItems.Memory, Loc.T("内存", "Memory")),
-            (CompactMonitorItems.Gpu, "GPU"), (CompactMonitorItems.Download, Loc.T("下载", "Download")), (CompactMonitorItems.Upload, Loc.T("上传", "Upload"))
-        ];
-        foreach (var (item, name) in choices)
+        bool syncing = false;
+        var refresh = new List<Action>();
+        // Shows what the settings hold in place, without saving anything: the preset the table matches, the switches, the colors.
+        void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } }
+        _refreshReadings = Refresh;
+        void Edit(Action<DeckSettings> edit) { if (syncing) return; Change(edit); Refresh(); }
+
+        var rows = new StackPanel();
+        foreach (var reading in S.CompactReadings) rows.Children.Add(ReadingRow(reading.Item, rows, refresh, Edit));
+        UpdateDividers(rows);
+        var headings = ReadingColumns(); headings.Height = 34;
+        AddHeadings(headings, new[]
         {
-            var toggle = Toggle(name, S.CompactMonitorItems.HasFlag(item), on => Change(s => s.CompactMonitorItems = on ? s.CompactMonitorItems | item : s.CompactMonitorItems & ~item));
-            if (toggle is Border { Child: CheckBox { Content: TextBlock text } }) text.FontWeight = FontWeights.Normal;
-            items.Children.Add(toggle);
+            (Loc.T("读数", "Reading"), 1, Loc.T("拖动左侧手柄调整读数在刘海和胶囊中从左到右的顺序。宽度不够时，读数仍按上传、GPU、下载、核心柱、内存的顺序隐藏，CPU 保留到最后，与这里的顺序无关。",
+                "Drag the handle at the left to set the order of the readings in the notch and the capsule, left to right. When the width runs short, readings still give way in turn: upload, GPU, download, the core columns, memory; CPU stays longest, whatever the order here.")),
+            (Loc.T("主题", "Theme"), 2, Loc.T("读数在刘海和胶囊中的颜色，默认跟随上方的“配色”。选色后改用所选颜色；在颜色选择器中点“默认”恢复跟随配色。内存占用偏高或过高时仍改用预警或告警色。只影响收起时的读数。",
+                "The reading's color in the notch and the capsule; by default it follows Colors above. A chosen color replaces it; Default in the color picker follows Colors again. Memory still turns to the warning or critical color when it runs high. Only the collapsed readings use it.")),
+            (Loc.T("显示数值", "Value"), 3, Loc.T("CPU、内存和 GPU 的圆环旁是否显示百分比。关闭后只显示圆环（环内显示图标），占用的宽度更小。核心柱没有数值，下载和上传始终显示速率，不能设置。",
+                "Whether the CPU, memory and GPU rings show their percentage beside them. Off, the ring shows alone, with its icon inside, and takes less width. The core columns have no figure and download and upload always show their rate, so they have no choice.")),
+            (Loc.T("显示", "Show"), 4, "")
+        });
+        var table = new StackPanel();
+        table.Children.Add(headings);
+        table.Children.Add(new Border { Child = rows, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0) });
+        // Quick presets under the table, as the quick sizes: one sets which readings show and which rings carry their figure, never
+        // the order or the colors. The one the table matches exactly is lit, else none; the table itself is the custom choice.
+        // Each segment keeps the width of a quick size's.
+        var presets = new UniformGrid { Columns = 2, Width = 196 };
+        foreach (var (mode, label, help) in new[]
+        {
+            (CompactMonitorMode.Full, Loc.T("完整", "Full"), Loc.T("显示全部读数，CPU、内存和 GPU 带百分比。不改变顺序和颜色。", "Shows every reading, with the percentages of CPU, memory and GPU. The order and the colors stay.")),
+            (CompactMonitorMode.Brief, Loc.T("简洁", "Brief"), Loc.T("只显示 CPU、内存和 GPU 的圆环，不带数值。不改变顺序和颜色。", "Shows only the CPU, memory and GPU rings, without figures. The order and the colors stay."))
+        })
+        {
+            var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = label, GroupName = "CompactMonitorPreset", ToolTip = help };
+            AutomationProperties.SetName(choice, Loc.T("快捷预设 ", "Preset ") + label); AutomationProperties.SetHelpText(choice, help);
+            choice.Checked += (_, _) => { if (!syncing) Edit(s => CompactMonitor.Apply(s.CompactReadings, mode)); };
+            refresh.Add(() => choice.IsChecked = CompactMonitor.Preset(S.CompactReadings) == mode);
+            presets.Children.Add(choice);
         }
-        var chosen = new StackPanel(); chosen.Children.Add(content); chosen.Children.Add(items);
+        var quick = QuickRow(Loc.T("快捷预设", "Presets"), presets);
+        Refresh();
+
         string widen = Loc.T("内容放不下时自动加宽。拖动其左右两端或调整宽度滑块即手动设定宽度（会关闭此项），双击两端恢复。",
             "Widens the surface when its content does not fit. Dragging either end or moving the width slider sets the width by hand (and turns this off); a double click on an end turns it back on.");
-        Group(chosen,
+        Group(table, quick,
             Toggle(Loc.T("刘海按内容自动加宽", "Notch widens to the content"), S.NotchAutoWidth, on => Change(s => s.NotchAutoWidth = on), help: widen),
             Toggle(Loc.T("胶囊按内容自动加宽", "Capsule widens to the content"), S.CapsuleAutoWidth, on => Change(s => s.CapsuleAutoWidth = on), help: widen));
-        Note(Loc.T("读数显示在打开了“系统监控”的刘海或胶囊中（收起外观 › 显示内容）。放不下的读数按上传、GPU、下载、核心柱、内存的顺序隐藏，CPU 保留到最后。",
-            "The readings show in a notch or capsule whose \"System monitor\" switch is on (Collapsed view › Content). Readings that do not fit give way in turn: upload, GPU, download, the core columns, memory; CPU stays longest."),
+        Note(Loc.T("读数显示在打开了“系统监控”的刘海或胶囊中（收起外观 › 显示内容），从左到右按上表的顺序。放不下的读数按上传、GPU、下载、核心柱、内存的顺序隐藏，CPU 保留到最后。",
+            "The readings show in a notch or capsule whose \"System monitor\" switch is on (Collapsed view › Content), left to right in the order of the table. Readings that do not fit give way in turn: upload, GPU, download, the core columns, memory; CPU stays longest."),
             11.5, TextTertiary, new Thickness(0, -16, 0, 20));
+    }
+
+    private static Grid ReadingColumns()
+    {
+        var grid = new Grid { Background = Brushes.Transparent };
+        foreach (var width in new[] { new GridLength(40), new GridLength(1, GridUnitType.Star), new GridLength(Loc.IsEnglish ? 64 : 56),
+            new GridLength(Loc.IsEnglish ? 76 : 84), new GridLength(64) })
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+        return grid;
+    }
+
+    private static string ReadingName(CompactMonitorItems item) => item switch
+    {
+        CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
+        CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"), _ => "CPU"
+    };
+    private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
+
+    // One row of the readings' table; its switches follow the settings when a preset changes them (refresh).
+    private Border ReadingRow(CompactMonitorItems item, StackPanel rows, List<Action> refresh, Action<Action<DeckSettings>> edit)
+    {
+        string name = ReadingName(item);
+        var row = ReadingColumns();
+        var handle = new Border { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
+        row.Children.Add(handle);
+        var label = TextLine(name, 13, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(6, 0, 6, 0);
+        Grid.SetColumn(label, 1); row.Children.Add(label);
+        Button? swatch = null;
+        void Swatch()
+        {
+            if (swatch is not null) row.Children.Remove(swatch);
+            swatch = ReadingSwatch(item, Swatch); Grid.SetColumn(swatch, 2); row.Children.Add(swatch);
+        }
+        Swatch();
+        refresh.Add(Swatch);
+
+        // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
+        bool choice = CompactMonitor.HasValueChoice(item);
+        var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload };
+        AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
+        if (!choice)
+        {
+            value.ToolTip = item == CompactMonitorItems.Columns ? Loc.T("核心柱没有数值。", "The core columns have no figure.") : Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.");
+            ToolTipService.SetShowOnDisabled(value, true);
+        }
+        else
+        {
+            value.Checked += (_, _) => edit(s => Reading(s, item).ShowValue = true); value.Unchecked += (_, _) => edit(s => Reading(s, item).ShowValue = false);
+            refresh.Add(() => value.IsChecked = Reading(S, item).ShowValue);
+        }
+        Grid.SetColumn(value, 3); row.Children.Add(value);
+
+        var shown = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(shown, Loc.T("显示 ", "Show ") + name);
+        shown.Checked += (_, _) => edit(s => Reading(s, item).Visible = true); shown.Unchecked += (_, _) => edit(s => Reading(s, item).Visible = false);
+        refresh.Add(() => shown.IsChecked = Reading(S, item).Visible);
+        Grid.SetColumn(shown, 4); row.Children.Add(shown);
+
+        // Dropped in a new place, the strip takes the new order at once.
+        AttachDrag(handle, () => rows, ReadingRowHeight, list =>
+        {
+            var order = list.Children.OfType<Border>().Where(b => b.Tag is CompactMonitorItems).Select(b => (CompactMonitorItems)b.Tag).ToArray();
+            Change(s => s.CompactReadings = order.Select(id => Reading(s, id)).ToList());
+        });
+        return new Border { Child = row, Height = ReadingRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = item, RenderTransform = new TranslateTransform() };
+    }
+
+    // The reading's color circle: its own color, or the palette's as the strip draws it. The picker's "默认" follows the palette again.
+    private Button ReadingSwatch(CompactMonitorItems item, Action refreshed)
+    {
+        var colors = MonitorThemeColors.Strip(S.MonitorPalette, S.CompactReadings);
+        string? own = Reading(S, item).Color;
+        string color = own ?? colors.Default(item), name = ReadingName(item);
+        var button = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(colors.Normal(item)) };
+        AutomationProperties.SetName(button, Loc.T($"{name} 主题颜色", $"{name} theme color"));
+        AutomationProperties.SetHelpText(button, color + (own is null ? Loc.T("（跟随配色）", " (follows Colors)") : ""));
+        var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
+        popup.Child = ColorPicker(color, own is null, value =>
+        {
+            popup.IsOpen = false;
+            Change(s => Reading(s, item).Color = value.Length > 0 ? value : null);
+            refreshed();
+        });
+        TogglePopup(button, popup);
+        return button;
     }
 
     private void MonitorSizeControls()

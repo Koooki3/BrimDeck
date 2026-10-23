@@ -4,8 +4,9 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, then CPU,
-// memory and GPU each as a ring gauge with its figure, then download and upload; or, brief, the three rings alone. It asks for
+// The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, CPU,
+// memory and GPU each as a ring gauge with its figure, or alone with its glyph inside (narrower), and download and upload, in
+// the order and the colors set in the settings' table (CompactReading); the rings alone sit closer together. It asks for
 // the width of everything chosen (PreferredWidth) and shows what fits in the width it gets, dropping whole readings
 // (CompactMonitor.Fit), so it never cuts through a figure. It draws itself once per reading; the collapsed row stays still
 // between readings. When the row narrows or widens (a drag on its end, the lyric beside it changing), a reading that no longer
@@ -14,43 +15,40 @@ namespace BrimDeck;
 internal sealed class MonitorStrip : FrameworkElement
 {
     private readonly StripPresence _presence;
-    private readonly CompactMonitorItems _items;
-    private readonly bool _brief, _centered;
-    private readonly MonitorColors _colors;
-    private readonly double _scale, _font, _ring, _gap, _row, _dpi;
+    private readonly CompactMonitorItems _shown, _values;
+    private readonly IReadOnlyList<CompactMonitorItems> _order;
+    private readonly bool _centered;
+    private readonly StripColors _colors;
+    private readonly double _scale, _font, _ring, _bare, _gap, _row, _dpi;
+    private readonly Func<CompactMonitorItems, double> _width;
     private MonitorSnapshot? _snapshot;
 
-    public MonitorStrip(CompactMonitorMode mode, CompactMonitorItems custom, MonitorColors colors, double scale, bool centered, StripPresence presence, double dpi)
+    public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi)
     {
-        _presence = presence; _dpi = dpi;
-        _items = CompactMonitor.Items(mode, custom); _brief = mode == CompactMonitorMode.Brief; _colors = colors; _centered = centered;
+        _presence = presence; _dpi = dpi; _colors = colors; _centered = centered;
+        _order = [.. readings.Select(reading => reading.Item)];
+        _shown = CompactMonitor.Shown(readings); _values = CompactMonitor.Values(readings);
         _scale = CompactMusicLayout.SafeScale(scale);
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
-        _ring = Math.Max(4, CompactMusicLayout.Whole((_brief ? 14 : 12) * _scale));
-        _gap = CompactMusicLayout.Whole((_brief ? 7 : 10) * _scale);
+        // A ring with its figure is smaller than one alone, which carries its glyph.
+        _ring = Math.Max(4, CompactMusicLayout.Whole(12 * _scale));
+        _bare = Math.Max(4, CompactMusicLayout.Whole(14 * _scale));
+        _gap = CompactMusicLayout.Whole((CompactMonitor.RingsOnly(_shown, _values) ? 7 : 10) * _scale);
         _row = Math.Max(1, CompactMusicLayout.Whole(24 * _scale));
         Height = _row;
         IsHitTestVisible = false;
         // A reading fading out of a narrow row stays within it, off the lyric or the rings beside it.
         ClipToBounds = true;
+        // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings.
+        double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
+        _width = CompactMonitor.Widths(_values, _ring, Math.Round(4 * _scale) + Math.Ceiling(text("100%")), _bare, ColumnsWidth(Environment.ProcessorCount),
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(text("999.9M")));
     }
 
-    // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings.
-    private double ItemWidth(CompactMonitorItems item)
-    {
-        double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
-        return item switch
-        {
-            CompactMonitorItems.Columns => _brief ? 0 : ColumnsWidth(Environment.ProcessorCount),
-            CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu => _brief ? _ring : _ring + Math.Round(4 * _scale) + Math.Ceiling(text("100%")),
-            CompactMonitorItems.Download or CompactMonitorItems.Upload => _brief ? 0 : Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(text("999.9M")),
-            _ => 0
-        };
-    }
+    private double ItemWidth(CompactMonitorItems item) => _width(item);
     private double ColumnsWidth(int cores) => Math.Min(Math.Round(56 * _scale), cores * Math.Max(1.5, 2 * _scale) + (cores - 1) * Math.Max(.5, _scale));
 
-    // Brief shows only the rings; columns and rates are not part of it.
-    private CompactMonitorItems Shown => _brief ? _items & (CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu) : _items;
+    private CompactMonitorItems Shown => _shown;
     // Rounded up to whole device pixels: the row rounds the region it gives down to them, which must not drop a reading.
     public double PreferredWidth => DevicePixels.Up(CompactMonitor.Width(Shown, ItemWidth, _gap), _dpi);
 
@@ -69,23 +67,13 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), center = _row / 2, now = Eased.Now;
         // Each reading takes its width and the gap after it in proportion to how present it is, so the row closes up smoothly.
-        double total = 0, last = 0;
-        foreach (var item in CompactMonitor.Order)
-        {
-            if ((Shown & item) == 0) continue;
-            double p = _presence.At(item, now);
-            if (p <= 0) continue;
-            total += (ItemWidth(item) + _gap) * p; last = p;
-        }
-        total -= _gap * last;
+        var (items, total) = CompactMonitor.Arrange(_order, Shown, ItemWidth, _gap, item => _presence.At(item, now));
         if (total <= 0) return;
-        double x = _centered ? (w - total) / 2 : w - total;
+        double start = _centered ? (w - total) / 2 : w - total;
         var s = _snapshot;
-        foreach (var item in CompactMonitor.Order)
+        foreach (var (item, at, width, presence) in items)
         {
-            if ((Shown & item) == 0) continue;
-            double presence = _presence.At(item, now), width = ItemWidth(item);
-            if (presence <= 0) continue;
+            double x = start + at;
             // A reading on its way in or out is drawn smaller and fainter, centred in the room it has.
             bool partial = presence < .999;
             double offset = (width * presence - width) / 2;
@@ -100,16 +88,15 @@ internal sealed class MonitorStrip : FrameworkElement
             switch (item)
             {
                 case CompactMonitorItems.Columns: Columns(drawing, left, width, center, s?.Cpu.OrDefault); break;
-                case CompactMonitorItems.Cpu: Gauge(drawing, left, center, s?.Cpu.OrDefault?.Usage, _colors.Performance, MonitorGlyph.Cpu, ppd); break;
+                case CompactMonitorItems.Cpu: Gauge(drawing, left, center, s?.Cpu.OrDefault?.Usage, _colors.Normal(item), MonitorGlyph.Cpu, (_values & item) != 0, ppd); break;
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
-                    Gauge(drawing, left, center, memory?.UsedFraction, memory is null ? UI.Tertiary : _colors.Memory(memory.Level), MonitorGlyph.Memory, ppd); break;
-                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, _colors.Gpu, MonitorGlyph.Gpu, ppd); break;
-                case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, _colors.Performance, ppd); break;
-                case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, _colors.Efficiency, ppd); break;
+                    Gauge(drawing, left, center, memory?.UsedFraction, memory is null ? UI.Tertiary : _colors.Memory(memory.Level), MonitorGlyph.Memory, (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, _colors.Normal(item), MonitorGlyph.Gpu, (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, _colors.Normal(item), ppd); break;
+                case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, _colors.Normal(item), ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
-            x += (width + _gap) * presence;
         }
     }
 
@@ -129,21 +116,21 @@ internal sealed class MonitorStrip : FrameworkElement
         }
     }
 
-    // A ring whose arc is the share, and, unless brief, the figure after it. Brief rings carry their glyph inside, as ftop's
-    // corner badges do, so they are not taken for the quota rings beside them.
-    private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, MonitorGlyph glyph, double ppd)
+    // A ring whose arc is the share, and the figure after it; a ring alone carries its glyph inside, as ftop's corner badges do,
+    // so it is not taken for the quota rings beside it.
+    private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, MonitorGlyph glyph, bool figured, double ppd)
     {
-        double ring = Math.Max(1.2, _ring * .16), radius = _ring / 2 - ring / 2;
-        var c = new Point(x + _ring / 2, center);
+        double size = figured ? _ring : _bare, ring = Math.Max(1.2, size * .16), radius = size / 2 - ring / 2;
+        var c = new Point(x + size / 2, center);
         var track = new Pen(UI.Brush(UI.Track), ring); track.Freeze();
         drawing.DrawEllipse(null, track, c, radius, radius);
         if (share is { } value) MonitorDraw.Arc(drawing, c, radius, ring, value, color);
-        if (_brief)
+        if (!figured)
         {
-            double size = _ring * .5, scale = size / 16;
+            double glyphSize = size * .5, scale = glyphSize / 16;
             var pen = new Pen(UI.Brush(UI.Secondary), Math.Max(.9, _scale) / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
             pen.Freeze();
-            drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, c.X - size / 2, c.Y - size / 2));
+            drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, c.X - glyphSize / 2, c.Y - glyphSize / 2));
             drawing.DrawGeometry(null, pen, MonitorDraw.Glyph(glyph));
             drawing.Pop();
             return;

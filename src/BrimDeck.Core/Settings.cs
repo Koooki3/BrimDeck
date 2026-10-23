@@ -164,6 +164,7 @@ public static class MonitorSizes
 public sealed class DeckSettings
 {
     private List<AppEntry>? _apps;
+    private List<CompactReading>? _readings;
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -258,8 +259,17 @@ public sealed class DeckSettings
     // by default: the memory is read back in when the panel next opens, which can stutter.
     public bool TrimMemoryWhenIdle { get; set; }
     public bool CapsuleAutoWidth { get; set; } = true;
+    // What the collapsed readings showed before their table (CompactReadings). Kept to read older files and, written to match the
+    // table (the preset it matches and the readings shown), for older versions.
     public CompactMonitorMode CompactMonitor { get; set; }
     public CompactMonitorItems CompactMonitorItems { get; set; } = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Download | CompactMonitorItems.Upload;
+    // The collapsed readings in their order, each shown or not, with or without its figure, in its own color or the palette's.
+    // Files saved before the table have none; they take it from CompactMonitor and CompactMonitorItems.
+    public List<CompactReading> CompactReadings
+    {
+        get => _readings ??= Core.CompactMonitor.Readings(CompactMonitor, CompactMonitorItems);
+        set => _readings = value;
+    }
     public bool UsageAutoSync { get; set; } = true;
     // The settings window's size when last closed, in DIPs, and whether it was maximized. Empty until it is closed once;
     // it opens at the default size then. The size is fitted to the screen the window opens on.
@@ -328,6 +338,7 @@ public sealed class DeckSettings
     {
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
+        copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
@@ -368,6 +379,9 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
+        CompactReadings = Core.CompactMonitor.Normalize(CompactReadings);
+        CompactMonitor = Core.CompactMonitor.Preset(CompactReadings) ?? CompactMonitorMode.Custom;
+        CompactMonitorItems = Core.CompactMonitor.Shown(CompactReadings);
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
         if (!Enum.IsDefined(ClockStyle)) ClockStyle = ClockStyle.Minimal;
         if (!Enum.IsDefined(ClockColor)) ClockColor = ClockColor.White;
