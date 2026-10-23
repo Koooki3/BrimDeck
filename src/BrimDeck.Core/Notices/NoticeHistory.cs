@@ -21,6 +21,9 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
     private static readonly JsonSerializerOptions Options = new() { Converters = { new JsonStringEnumConverter() } };
     // One writer at a time: the app saves in the background and once more on exit, and both use the same temporary file.
     private readonly object _write = new();
+    // The order of the lists given to Save, taken when each list is copied: a list copied earlier never replaces one copied
+    // later, even when its (background) write reaches the file last.
+    private long _issued, _written;
     public string DirectoryPath { get; } = directory;
     public string FilePath => Path.Combine(DirectoryPath, "notices.dat");
 
@@ -51,16 +54,21 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
         }
     }
 
+    // The order for a list about to be saved; take it where the list is copied (see _issued).
+    public long NextOrder() => Interlocked.Increment(ref _issued);
+
     // wanted is asked again just before writing, under the writer lock: a save that started before keeping notices was
     // switched off (or the folder changed) then writes nothing, instead of putting back the file Delete just removed.
-    public void Save(IEnumerable<Notice> notices, IEnumerable<NoticeKnownApp> apps, Func<bool>? wanted = null)
+    // order comes from NextOrder when the list was copied; without one, the list counts as copied now.
+    public void Save(IEnumerable<Notice> notices, IEnumerable<NoticeKnownApp> apps, Func<bool>? wanted = null, long? order = null)
     {
+        long own = order ?? NextOrder();
         var contents = new Contents { Notices = notices.Select(n => n.Copy()).ToList(), Apps = apps.ToList() };
         var json = JsonSerializer.SerializeToUtf8Bytes(contents, Options);
         var protectedData = protector.Protect(json);
         lock (_write)
         {
-            if (wanted?.Invoke() == false) return;
+            if (wanted?.Invoke() == false || own < _written) return;
             Directory.CreateDirectory(DirectoryPath);
             var temporary = FilePath + ".tmp";
             using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
@@ -68,6 +76,7 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
                 stream.Write(Magic); stream.Write(protectedData); stream.Flush(true);
             }
             File.Move(temporary, FilePath, true);
+            _written = own;
         }
     }
 

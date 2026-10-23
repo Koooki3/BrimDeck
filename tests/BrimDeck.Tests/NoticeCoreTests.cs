@@ -236,6 +236,15 @@ internal static class NoticeCoreTests
         bool together = true;
         try { Task.WaitAll(writers); } catch (AggregateException) { together = false; }
         check("Saves at the same time take turns instead of failing", together && history.Load(out var last, out _) == NoticeHistoryState.Loaded && last.Count == 1);
+        // A background save whose list was copied before the exit save, but which reaches the file after it.
+        var stale = notice.Copy(); stale.Title = "旧";
+        var fresh = notice.Copy(); fresh.Title = "新";
+        long copiedFirst = history.NextOrder();
+        history.Save([fresh], []);
+        history.Save([stale], [], order: copiedFirst);
+        check("A list copied earlier never replaces one copied later", history.Load(out var kept, out _) == NoticeHistoryState.Loaded && kept.Single().Title == "新");
+        history.Save([stale], []);
+        check("A list copied after that is written again", history.Load(out kept, out _) == NoticeHistoryState.Loaded && kept.Single().Title == "旧");
         history.Delete();
     }
 

@@ -495,14 +495,16 @@ internal sealed class NoticeCenter : IDisposable
         _saving = true;
         var notices = Hub.Notices.Select(n => n.Copy()).ToList();
         var apps = Hub.KnownApps.ToList();
-        try { await Task.Run(() => history.Save(notices, apps, () => _keepHistory && _history == history)); }
+        long order = history.NextOrder();
+        try { await Task.Run(() => history.Save(notices, apps, () => _keepHistory && _history == history, order)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { }
         finally { _saving = false; }
         if (_savePending) { _savePending = false; QueueSave(); }
     }
 
-    // On exit: what is not saved yet is written now. A background save still writing is waited for (NoticeHistory.Save takes
-    // one writer at a time) and followed by this one, so the newest list is the one left on disk.
+    // On exit: what is not saved yet is written now. A background save still under way may reach the file before or after
+    // this one; its list was copied earlier, so NoticeHistory.Save skips it if it comes last, and the newest list is the one
+    // left on disk.
     public void Flush()
     {
         if (!_saveTimer.IsEnabled && !_savePending && !_saving) return;
