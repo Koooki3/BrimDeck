@@ -5,11 +5,10 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// A miniature of the collapsed surface on a desktop, for the collapsed view's style cards and the panel theme cards. Its content is
-// fixed (four quota rings, and the clock when asked), so it reads as a style or a theme rather than as live data. Without a
-// palette it always takes the built-in dark theme's colors: the style cards show the shapes and must not change when another
-// panel theme is chosen. The theme cards pass each theme's palette and ask for focus: the same scene with the surface enlarged
-// in the middle, so its colors can be told apart.
+// A miniature of the collapsed surface on a desktop, for the collapsed view's style cards, and the collapsed capsule alone for
+// the panel theme cards (Theme). The content is fixed (four quota rings, and the clock when asked), so it reads as a style or a
+// theme rather than as live data. The style cards always take the built-in dark theme's colors: they show the shapes and must
+// not change when another panel theme is chosen.
 internal static class CompactStylePreview
 {
     private const double Width = 240, Height = 136;
@@ -17,11 +16,12 @@ internal static class CompactStylePreview
     private static readonly DrawingBrush LightDesktop = CreateDesktop(false);
     private static PanelPalette? _fixed;
     private static PanelPalette Fixed => _fixed ??= PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.Dark)!);
-    private const double Focus = 2.6;
+    // A theme card's height; the custom section's new-theme tile takes it too.
+    public const double ThemeHeight = 84;
 
-    public static FrameworkElement Create(CompactStyle style, bool dark = true, bool clock = false, PanelPalette? palette = null, bool focus = false)
+    public static FrameworkElement Create(CompactStyle style, bool dark = true, bool clock = false)
     {
-        palette ??= Fixed;
+        var palette = Fixed;
         string Hex(string key) => palette[key].ToString();
         // Every option uses the same scene and scale so only the panel's shape changes.
         var screen = new Grid
@@ -51,15 +51,9 @@ internal static class CompactStylePreview
                 Margin = new Thickness(0, notch ? 0 : 4, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top
             };
-            // The surface, its layers, the rim and the shadow or glow come from the palette, as on the real island. A card never
-            // changes, so the blur is kept as a bitmap instead of being drawn again whenever the page scrolls: made at the scale the
-            // card is shown at (the focus enlargement, on up to a 200% display), so it is never stretched.
-            var glow = new System.Windows.Media.Effects.DropShadowEffect { Direction = 270 };
-            PanelTheme.Dress(glow, palette); glow.Freeze();
-            var shadow = Shape(); shadow.Effect = glow; shadow.CacheMode = new BitmapCache { RenderAtScale = (focus ? Focus : 1) * 2 };
-            // Enlarged about the top centre and brought down to the middle of the scene.
+            // The surface, its layers, the rim and the shadow come from the palette, as on the real island.
+            var shadow = Shadow(Shape(), palette);
             var surface = new Grid();
-            if (focus) surface.RenderTransform = new TransformGroup { Children = { new ScaleTransform(Focus, Focus, Width / 2, 0), new TranslateTransform(0, 42) } };
             surface.Children.Add(shadow);
             screen.Children.Add(surface);
             var island = Shape();
@@ -82,6 +76,58 @@ internal static class CompactStylePreview
             surface.Children.Add(island);
         }
         return new Viewbox { Child = screen, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Stretch };
+    }
+
+    // A theme card: the collapsed capsule alone at the real island's default size (32 high, rings 12 across, the clock at 12.5),
+    // so the rim, the shadow or glow and the text keep the widths they have on screen; enlarging the capsule would widen the rim
+    // and the glow with it. It sits on the settings window's own inset color, the same for every theme, and shrinks only when the
+    // card is narrower than it.
+    public static FrameworkElement Theme(PanelPalette palette)
+    {
+        const double width = 180, height = 32, ring = 12, gap = 8, inset = 16;
+        string Hex(string key) => palette[key].ToString();
+        IslandBorder Shape() => new()
+        {
+            Background = UI.Brush(Hex("surface")), MaterialOpacity = 1, Width = width, Height = height, CornerRadius = new CornerRadius(height / 2),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+        };
+        var shadow = Shadow(Shape(), palette);
+        var island = Shape();
+        PanelTheme.Dress(island, palette);
+        var rings = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var (app, percent) in new[] { (ProviderId.Claude, 47d), (ProviderId.Codex, 23), (ProviderId.Antigravity, 16), (ProviderId.Cursor, 37) })
+        {
+            var arc = UI.Ring(percent, palette.AppColor(app).ToString(), ring, 2, Hex("ringTrack"));
+            if (rings.Children.Count > 0) arc.Margin = new Thickness(gap, 0, 0, 0);
+            rings.Children.Add(arc);
+        }
+        var time = new TextBlock { Text = "14:32", FontFamily = UI.PanelFont, FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(Hex("clock")),
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(gap, 0, 0, 0) };
+        var row = new DockPanel { Margin = new Thickness(inset, 0, inset, 0), VerticalAlignment = VerticalAlignment.Center };
+        DockPanel.SetDock(time, Dock.Right); row.Children.Add(time); row.Children.Add(rings);
+        island.Child = row;
+        // Room around the capsule for a wide glow to fade out before the card's edge.
+        var scene = new Grid { Width = width + 48, Height = ThemeHeight, IsHitTestVisible = false };
+        scene.Children.Add(shadow); scene.Children.Add(island);
+        var card = new Border { Height = ThemeHeight, CornerRadius = new CornerRadius(9), ClipToBounds = true,
+            Child = new Viewbox { Child = scene, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly } };
+        card.SetResourceReference(Border.BackgroundProperty, "SettingsInset");
+        return card;
+    }
+
+    // The shadow under the collapsed surface, or the glow of a theme that gives it no depth, as the real island draws it: on a
+    // grid around a copy of the shape, since an island clips what it draws to its own outline and would cut off its own effect.
+    // The copy is drawn inset (IslandBorder.Inset), so its edge does not double the island's. A card never changes, so the blur
+    // is kept as a bitmap (for up to a 200% display) instead of being drawn again whenever the page scrolls.
+    private static Grid Shadow(IslandBorder shape, PanelPalette palette)
+    {
+        shape.Inset = 1;
+        var glow = new System.Windows.Media.Effects.DropShadowEffect { Direction = 270 };
+        PanelTheme.Dress(glow, palette); glow.Freeze();
+        var shadow = new Grid { Effect = glow, CacheMode = new BitmapCache { RenderAtScale = 2 },
+            HorizontalAlignment = shape.HorizontalAlignment, VerticalAlignment = shape.VerticalAlignment };
+        shadow.Children.Add(shape);
+        return shadow;
     }
 
     private static DrawingBrush CreateDesktop(bool dark)
