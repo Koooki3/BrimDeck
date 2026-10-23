@@ -33,6 +33,7 @@ try
     await AppUpdateTests.Run(root, Check);
     await InstallerUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    FullscreenExceptionTests.Run(Check);
     LanguageTests.Run(root, Check);
     await ConfiguredProviderTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);

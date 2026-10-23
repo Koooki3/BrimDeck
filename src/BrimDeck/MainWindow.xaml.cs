@@ -80,7 +80,7 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainWindow? lead = null)
     {
         _app = app; _lead = lead;
-        _host = new WindowsHost(() => MonitorHandle);
+        _host = new WindowsHost(() => MonitorHandle, () => Settings.FullscreenExceptions);
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () => { _hover!.Stop(); if (!IsSuppressed && _pointerInside) SetExpanded(true); });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
@@ -108,7 +108,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) =>
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
-            _context = WindowsHost.DetectContext(MonitorHandle);
+            _context = _host.DetectNow();
             if (_lead is { } lead) { Snapshots = lead.Snapshots; _updatedAt = lead._updatedAt; DetectThresholds(); UpdateNotice(); }
             ApplySettings();
             Boot();
@@ -164,6 +164,9 @@ public partial class MainWindow : Window
     {
         // Powering off holds the panel as it is; RestoreAfterPowerOff applies the settings once it has gone.
         if (_poweringOff) return;
+        // An exception added or removed in settings changes the context before the next poll; read it again so that the
+        // panel hides or returns in this pass.
+        _context = _host.DetectNow();
         bool wasVisible = IsVisible;
         ApplyLanguage();
         ApplyTheme();
