@@ -5,7 +5,7 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, CPU,
-// memory and GPU each as a ring gauge with its figure, or alone as a dial with its letter inside (narrower), and download and upload, in
+// memory and GPU each as a dial with its letter inside, with its figure after it or alone (narrower), and download and upload, in
 // the order and the colors set in the settings' table (CompactReading); the rings alone sit closer together. It asks for
 // the width of everything chosen (PreferredWidth); when its region is narrower, the row draws it at that width and scrolls it
 // through the region (ReadingsCarousel). It draws itself once per reading; the collapsed row stays still between readings.
@@ -19,7 +19,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly IReadOnlyList<CompactMonitorItems> _order;
     private readonly bool _centered;
     private readonly StripColors _colors;
-    private readonly double _scale, _font, _ring, _bare, _gap, _row, _dpi;
+    private readonly double _scale, _font, _dial, _gap, _row, _dpi;
     private readonly Func<CompactMonitorItems, double> _width;
     private MonitorSnapshot? _snapshot;
 
@@ -30,9 +30,8 @@ internal sealed class MonitorStrip : FrameworkElement
         _shown = CompactMonitor.Shown(readings); _values = CompactMonitor.Values(readings);
         _scale = CompactMusicLayout.SafeScale(scale);
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
-        // A ring with its figure is smaller than a dial alone, which carries its letter.
-        _ring = Math.Max(4, CompactMusicLayout.Whole(12 * _scale));
-        _bare = Math.Max(4, CompactMusicLayout.Whole(16 * _scale));
+        // Each ring is a dial carrying its letter, with its figure after it or alone.
+        _dial = Math.Max(4, CompactMusicLayout.Whole(16 * _scale));
         // Readings with figures sit closer than the dials alone: a figure narrower than the widest it can show already leaves room after it.
         _gap = CompactMusicLayout.Whole((CompactMonitor.RingsOnly(_shown, _values) ? 7 : 6) * _scale);
         _row = Math.Max(1, CompactMusicLayout.Whole(24 * _scale));
@@ -43,7 +42,7 @@ internal sealed class MonitorStrip : FrameworkElement
         // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings. A rate has
         // at most five characters (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
-        _width = CompactMonitor.Widths(_values, _ring, Math.Round(4 * _scale) + Math.Ceiling(text("100%")), _bare, ColumnsWidth(Environment.ProcessorCount),
+        _width = CompactMonitor.Widths(_values, _dial, Math.Round(4 * _scale) + Math.Ceiling(text("100%")), _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))));
     }
 
@@ -87,7 +86,7 @@ internal sealed class MonitorStrip : FrameworkElement
             double? share = item switch { CompactMonitorItems.Cpu => s?.Cpu.OrDefault?.Usage, CompactMonitorItems.Memory => s?.Memory.OrDefault?.UsedFraction, CompactMonitorItems.Gpu => s?.Gpu.OrDefault?.Usage, _ => null };
             _actual[item] = item switch
             {
-                CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu when (_values & item) != 0 => _ring + Math.Round(4 * _scale) + text(GaugeFigure(share)),
+                CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu when (_values & item) != 0 => _dial + Math.Round(4 * _scale) + text(GaugeFigure(share)),
                 CompactMonitorItems.Download => Math.Round(9 * _scale) + Math.Round(3 * _scale) + text(RateFigure(s?.Network.OrDefault?.DownBytesPerSecond)),
                 CompactMonitorItems.Upload => Math.Round(9 * _scale) + Math.Round(3 * _scale) + text(RateFigure(s?.Network.OrDefault?.UpBytesPerSecond)),
                 _ => _width(item)
@@ -165,19 +164,14 @@ internal sealed class MonitorStrip : FrameworkElement
         }
     }
 
-    // A ring whose arc is the share, and the figure after it. Alone, it is a dial open at the bottom with the reading's letter
-    // inside: the gap tells it from the full quota rings beside it, and a letter stays legible at this size where a glyph does not.
+    // A dial open at the bottom with the reading's letter inside, and the figure after it when it shows one: the gap tells it from
+    // the full quota rings beside it, and a letter stays legible at this size where a glyph does not.
     private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, string letter, bool figured, double ppd)
     {
-        if (!figured) { Dial(drawing, x, center, share, color, letter, ppd); return; }
-        double size = _ring, ring = Math.Max(1.2, size * .16), radius = size / 2 - ring / 2;
-        var c = new Point(x + size / 2, center);
-        // The empty part is the quota rings' track, so the rings beside them read as rings as clearly as theirs do.
-        var track = new Pen(UI.Brush(PanelTheme.Hex("ringTrack")), ring); track.Freeze();
-        drawing.DrawEllipse(null, track, c, radius, radius);
-        if (share is { } value) MonitorDraw.Arc(drawing, c, radius, ring, value, color);
+        Dial(drawing, x, center, share, color, letter, ppd);
+        if (!figured) return;
         var text = MonitorDraw.Text(GaugeFigure(share), _font, UI.Primary, ppd);
-        MonitorDraw.Baseline(drawing, text, x + _ring + Math.Round(4 * _scale), Math.Round(center + _font * .36));
+        MonitorDraw.Baseline(drawing, text, x + _dial + Math.Round(4 * _scale), Math.Round(center + _font * .36));
     }
 
     // Three quarters of a circle, from lower left over the top to lower right, filled clockwise by the share. Its centre sits a
@@ -186,7 +180,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private void Dial(DrawingContext drawing, double x, double center, double? share, string color, string letter, double ppd)
     {
         // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
-        double size = _bare, ring = Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), radius = size / 2 - ring / 2;
+        double size = _dial, ring = Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), radius = size / 2 - ring / 2;
         var c = new Point(x + size / 2, center + .5 * _scale);
         DialArc(drawing, c, radius, ring, 1, PanelTheme.Hex("ringTrack"));
         if (share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);

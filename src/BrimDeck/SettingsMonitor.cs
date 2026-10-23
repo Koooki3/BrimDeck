@@ -66,8 +66,8 @@ public sealed partial class SettingsWindow
         var headings = ReadingColumns(); headings.Height = 34;
         AddHeadings(headings, new[]
         {
-            (Loc.T("读数", "Reading"), 1, ""),
-            (Loc.T("主题", "Theme"), 2, ""),
+            (Loc.T("监控项", "Item"), 1, ""),
+            (Loc.T("主题色", "Color"), 2, ""),
             (Loc.T("显示数值", "Value"), 3, ""),
             (Loc.T("显示", "Show"), 4, "")
         });
