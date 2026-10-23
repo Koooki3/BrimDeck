@@ -58,8 +58,9 @@ public sealed record MediaTrack
     }
 }
 
-// The collapsed row, left to right: the cover region, the middle (quota rings, then the lyric or track notice), the
-// equalizer region and the clock region. Each region has a width and clips what does not fit; nothing is hidden as a
+// The collapsed row, left to right: the cover region, the middle (quota rings, the lyric or track notice and the system
+// readings, in the order of CompactPart chosen for the style), the equalizer region and the clock region. The order only
+// places the regions; their widths are the same in any order. Each region has a width and clips what does not fit; nothing is hidden as a
 // whole. Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are
 // whole or half DIPs. The width only moves the middle: the side regions keep their size until the middle is empty.
 public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, double RingGap, int VisibleRings, double RingWidth, double TextWidth, bool ScrollRings)
@@ -78,7 +79,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public double EqualizerSize { get; init; } = 18;
     public double EqualizerHeight { get; init; } = 14;
     public double EqualizerBar { get; init; } = 3;
-    // System readings region (CompactMonitor): between the middle and the equalizer, after a gap; alone in the row it is centred.
+    // System readings region (CompactMonitor), with a gap toward its neighbour; alone in the row it is centred.
     public double MonitorWidth { get; init; }
     public double MonitorFace { get; init; }
     public bool MonitorAlone { get; init; }

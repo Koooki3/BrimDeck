@@ -23,6 +23,15 @@ public enum SettingsTheme { System, Light, Dark }
 public enum DeckPage { Usage, Music, Monitor }
 public enum DefaultDeckPage { Last, Usage, Music, Monitor }
 public enum CompactMusicText { None, Title, Lyrics }
+// The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left and the
+// equalizer and the clock at the right; Music places only the title or lyric. Saved as numbers, so new members go at the end.
+public enum CompactPart { Rings, Music, Monitor }
+public static class CompactParts
+{
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor];
+    // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
+    public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
+}
 public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed }
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
 // and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
@@ -165,6 +174,7 @@ public sealed class DeckSettings
 {
     private List<AppEntry>? _apps;
     private List<CompactReading>? _readings;
+    private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -252,6 +262,9 @@ public sealed class DeckSettings
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
+    // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
+    public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
+    public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value); }
     // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
     // its own off, so the width set by hand stays.
     public bool NotchAutoWidth { get; set; } = true;
@@ -294,6 +307,8 @@ public sealed class DeckSettings
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
     // The indicator is too thin for readings, as for the clock.
     public bool ShowsMonitor(CompactStyle style) => style switch { CompactStyle.Notch => NotchMonitor, CompactStyle.Capsule => CapsuleMonitor, _ => false };
+    public IReadOnlyList<CompactPart> CompactOrder(CompactStyle style) => style == CompactStyle.Capsule ? CapsuleOrder : NotchOrder;
+    public void SetCompactOrder(CompactStyle style, IEnumerable<CompactPart> order) { if (style == CompactStyle.Notch) NotchOrder = [.. order]; else if (style == CompactStyle.Capsule) CapsuleOrder = [.. order]; }
     public bool CompactAutoWidth(CompactStyle style) => style switch { CompactStyle.Notch => NotchAutoWidth, CompactStyle.Capsule => CapsuleAutoWidth, _ => false };
     public void SetCompactAutoWidth(CompactStyle style, bool value) { if (style == CompactStyle.Notch) NotchAutoWidth = value; else if (style == CompactStyle.Capsule) CapsuleAutoWidth = value; }
     // The saved width of the notch or the capsule, or the line's length.
@@ -339,6 +354,7 @@ public sealed class DeckSettings
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
+        copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());

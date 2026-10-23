@@ -769,32 +769,28 @@ public partial class MainWindow
         double row = layout.RowHeight;
         var grid = new Grid { Width = SnapDown(contentWidth, dpi), Height = row };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.CoverWidth, dpi)) }); grid.ColumnDefinitions.Add(new ColumnDefinition());
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.MonitorAlone ? 0 : SnapDown(layout.MonitorWidth, dpi)) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.EqualizerWidth, dpi)) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(layout.ClockAlone ? 0 : SnapDown(layout.ClockWidth, dpi)) });
-        if (strip is not null && layout.MonitorWidth > 0)
+        // The readings in a region of the given width; wider than it, they scroll in a carousel whose left fade lies over the gap before it.
+        FrameworkElement Readings(MonitorStrip readings, double span)
         {
-            // After the middle, the gap and then the readings, which end at the region's right edge; alone they span the row, centred.
-            double gap = layout.MonitorAlone ? 0 : CompactMusicLayout.Whole(8 * scale);
-            double span = SnapDown(Math.Max(0, layout.MonitorWidth - gap), dpi);
-            FrameworkElement region = strip;
-            if (strip.PreferredWidth > span + .001)
-            {
-                _stripCarousel = new ReadingsCarousel(strip, span, Snap(layout.TextEdge, dpi), _stripElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation);
-                region = _stripCarousel;
-                // The carousel's left fade lies over the gap before it.
-                region.Margin = new Thickness(gap + region.Margin.Left, 0, 0, 0);
-            }
-            else { strip.Width = span; strip.Margin = new Thickness(gap, 0, 0, 0); }
-            region.HorizontalAlignment = layout.MonitorAlone ? HorizontalAlignment.Center : HorizontalAlignment.Left; region.VerticalAlignment = VerticalAlignment.Center;
-            if (layout.MonitorAlone) Grid.SetColumnSpan(region, 5); else Grid.SetColumn(region, 2);
-            grid.Children.Add(region); _compactStrip = strip;
+            _compactStrip = readings;
+            if (readings.PreferredWidth > span + .001)
+                return _stripCarousel = new ReadingsCarousel(readings, span, Snap(layout.TextEdge, dpi), _stripElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation);
+            readings.Width = span; readings.Margin = new Thickness(0); return readings;
+        }
+        // Alone, the readings span the row, centred.
+        if (strip is not null && layout.MonitorWidth > 0 && layout.MonitorAlone)
+        {
+            var region = Readings(strip, SnapDown(layout.MonitorWidth, dpi));
+            region.HorizontalAlignment = HorizontalAlignment.Center; region.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumnSpan(region, 4); grid.Children.Add(region);
         }
         if (clock is not null && layout.ClockWidth > 0)
         {
             var region = CompactRegion(clock, layout.ClockWidth, clock.ReservedWidth, clock.Height, row, layout.ClockAlone ? RegionAnchor.Center : RegionAnchor.Right, dpi);
             region.HorizontalAlignment = layout.ClockAlone ? HorizontalAlignment.Center : HorizontalAlignment.Right;
-            if (layout.ClockAlone) Grid.SetColumnSpan(region, 5); else Grid.SetColumn(region, 4);
+            if (layout.ClockAlone) Grid.SetColumnSpan(region, 4); else Grid.SetColumn(region, 3);
             grid.Children.Add(region); _compactClock = clock;
         }
         if (media && layout.CoverWidth > 0)
@@ -806,38 +802,53 @@ public partial class MainWindow
         {
             _compactEqualizer = new MusicEqualizer { Bars = 4, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
             var region = CompactRegion(_compactEqualizer, layout.EqualizerWidth, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Right, dpi);
-            Grid.SetColumn(region, 3); grid.Children.Add(region);
+            Grid.SetColumn(region, 2); grid.Children.Add(region);
         }
         var middle = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(middle, 1); grid.Children.Add(middle);
-        // The rings, the space between and the lyric are snapped cumulatively from the middle's left edge and kept inside its
-        // column, so rounding never pushes one region into the next.
-        double middleColumn = Math.Max(0, grid.Width - grid.ColumnDefinitions[0].Width.Value - grid.ColumnDefinitions[2].Width.Value - grid.ColumnDefinitions[3].Width.Value - grid.ColumnDefinitions[4].Width.Value);
-        double ringEnd = Math.Min(middleColumn, SnapDown(layout.RingWidth, dpi)), textStart = Math.Min(middleColumn, SnapDown(layout.RingWidth + layout.Between, dpi));
-        double textEnd = Math.Min(middleColumn, SnapDown(layout.RingWidth + layout.Between + layout.TextWidth, dpi));
-        if (layout.RingWidth > 0 && apps.Count > 0)
+        double middleColumn = Math.Max(0, grid.Width - grid.ColumnDefinitions[0].Width.Value - grid.ColumnDefinitions[2].Width.Value - grid.ColumnDefinitions[3].Width.Value);
+        // The rings, the lyric and the readings in the order chosen for this style. The readings' gap lies on the side of their
+        // neighbour (after them only when they come first and something follows); the space between the rings and the lyric lies
+        // before whichever of the two comes second. Positions are snapped cumulatively from the middle's left edge and kept inside
+        // its column, so rounding never pushes one region into the next.
+        bool hasRings = layout.RingWidth > 0 && apps.Count > 0, hasText = layout.TextWidth > 0, hasReadings = strip is not null && layout.MonitorWidth > 0 && !layout.MonitorAlone;
+        var parts = Settings.CompactOrder(EffectiveStyle).Where(part => part switch { CompactPart.Rings => hasRings, CompactPart.Music => hasText, _ => hasReadings }).ToList();
+        double readingsGap = CompactMusicLayout.Whole(8 * scale), cursor = 0, placed = 0;
+        for (int i = 0; i < parts.Count; i++)
         {
-            var items = apps.Select(entry =>
+            var part = parts[i];
+            double gap = (part == CompactPart.Monitor && (i > 0 || parts.Count == 1)) || (i == 1 && parts[0] == CompactPart.Monitor) ? readingsGap : 0;
+            if (part != CompactPart.Monitor && parts.Take(i).Any(p => p != CompactPart.Monitor)) gap += layout.Between;
+            double width = part switch { CompactPart.Rings => layout.RingWidth, CompactPart.Music => layout.TextWidth, _ => Math.Max(0, layout.MonitorWidth - readingsGap) };
+            double start = Math.Min(middleColumn, SnapDown(cursor + gap, dpi)), end = Math.Min(middleColumn, SnapDown(cursor + gap + width, dpi));
+            cursor += gap + width;
+            FrameworkElement element = part switch
             {
-                var snapshot = DashboardUsage.Quota(entry, Snapshots);
-                var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
-                double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
-                string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
-                    : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-                return (used, PanelTheme.AppTheme(entry), tip);
-            }).ToArray();
-            _quotaCarousel = new QuotaCarousel(items, layout, _quotaElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation) { VerticalAlignment = VerticalAlignment.Center }; middle.Children.Add(_quotaCarousel);
-        }
-        if (layout.TextWidth > 0)
-        {
-            // Too narrow for a meaningful stretch of text, the lyric rests at its start, cut at the edge.
-            _compactMarquee = new MusicMarquee { Text = text, Width = Math.Max(0, textEnd - textStart), Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
-                ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay, Margin = new Thickness(_quotaCarousel is not null && middle.Children.Contains(_quotaCarousel) ? textStart - ringEnd : textStart, 0, 0, 0) };
-            middle.Children.Add(_compactMarquee);
+                CompactPart.Rings => _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout, _quotaElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation),
+                // Too narrow for a meaningful stretch of text, the lyric rests at its start, cut at the edge.
+                CompactPart.Music => _compactMarquee = new MusicMarquee { Text = text, Width = end - start, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
+                    ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay },
+                _ => Readings(strip!, end - start)
+            };
+            // The carousels keep their own width and left fade; the margins put each element's slot at [start, end).
+            double left = element.Margin.Left;
+            element.Margin = new Thickness(left + start - placed, 0, end - start - (element.Width + left), 0);
+            element.VerticalAlignment = VerticalAlignment.Center; element.HorizontalAlignment = HorizontalAlignment.Left;
+            middle.Children.Add(element); placed = end;
         }
         CompactRings.Children.Add(grid); UpdateMusicTimer();
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
+    // One ring per application: the highest used share among its quotas, with every quota in the tooltip.
+    private (double Used, string Color, string Tip)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
+    {
+        var snapshot = DashboardUsage.Quota(entry, Snapshots);
+        var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
+        double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
+        string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
+            : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
+        return (used, PanelTheme.AppTheme(entry), tip);
+    }).ToArray();
     private void UpdateMusicTimer()
     {
         bool musicVisible = MusicPresentationVisible;

@@ -15,8 +15,9 @@ public sealed partial class SettingsWindow
     private readonly List<(RadioButton Tile, ClockStyle Style)> _clockTiles = [];
     private readonly Dictionary<CompactStyle, RadioButton> _styleCards = [];
 
-    // The title and its arrow open and close the options under the row; the switch only turns the clock on or off.
-    private FrameworkElement ClockRow(CompactStyle style)
+    // The title and its arrow open and close the options under the row; the switch only turns the clock on or off. The title
+    // starts after indent, in line with the names of the draggable rows above it.
+    private FrameworkElement ClockRow(CompactStyle style, double indent = 0)
     {
         bool notch = style == CompactStyle.Notch;
         string title = Loc.T("时间", "Clock");
@@ -32,7 +33,7 @@ public sealed partial class SettingsWindow
         void Flip() { _clockOpen = !_clockOpen; Show(_clockOpen); }
         arrow = ChevronButton(Loc.T("时间设置", "Clock settings"), Flip);
         arrow.Margin = new Thickness(2, 0, 0, 0);
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(indent, 0, 0, 0) };
         heading.Children.Add(SettingLabel(title)); heading.Children.Add(arrow);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.ShowsClock(style), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);

@@ -14,6 +14,7 @@ internal static class CompactReadingTests
         Highlight(check);
         Layout(check);
         Copies(check);
+        PartOrder(check);
     }
 
     private static DeckSettings Read(string json) => SettingsMigrations.Read(json);
@@ -163,5 +164,23 @@ internal static class CompactReadingTests
             && read.CompactMonitor == CompactMonitorMode.Custom && read.CompactMonitorItems == (Gpu | Upload | Cpu));
         var untouched = new DeckSettings { CompactMonitor = CompactMonitorMode.Brief }.Copy();
         check("Compact readings: Copy keeps a table not yet built", CompactMonitor.Preset(untouched.CompactReadings) == CompactMonitorMode.Brief);
+    }
+
+    // The order of the collapsed parts: one per style, each part once, kept by copies and by saving.
+    private static void PartOrder(Action<string, bool> check)
+    {
+        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor];
+        var defaults = new DeckSettings();
+        check("Compact order: defaults are rings, music, readings", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual(standard));
+        var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
+        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music])
+            && odd.CapsuleOrder.SequenceEqual(standard));
+        var settings = new DeckSettings();
+        settings.SetCompactOrder(CompactStyle.Capsule, [CompactPart.Music, CompactPart.Monitor, CompactPart.Rings]);
+        var copy = settings.Copy(); copy.SetCompactOrder(CompactStyle.Capsule, standard);
+        check("Compact order: each style keeps its own and Copy is deep", settings.CompactOrder(CompactStyle.Capsule)[0] == CompactPart.Music
+            && settings.CompactOrder(CompactStyle.Notch).SequenceEqual(standard));
+        var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
+        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings]));
     }
 }
