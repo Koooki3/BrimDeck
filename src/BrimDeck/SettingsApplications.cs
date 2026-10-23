@@ -57,8 +57,12 @@ public sealed partial class SettingsWindow
     private AppDrag? _appDrag;
     private readonly Dictionary<Border, long> _appRowMotionVersions = [];
     private long _appRowMotionVersion;
-    private sealed class AppDrag(Border[] rows, Border row, Border handle, double grabOffset)
+    // A drag in a list of rows of one height (the app list, the collapsed readings); Reordered saves the rows' new order.
+    private sealed class AppDrag(Panel list, double height, Action<Panel> reordered, Border[] rows, Border row, Border handle, double grabOffset)
     {
+        public Panel List { get; } = list;
+        public double Height { get; } = height;
+        public Action<Panel> Reordered { get; } = reordered;
         public Border[] Rows { get; } = rows;
         public Border Row { get; } = row;
         public Border Handle { get; } = handle;
@@ -111,22 +115,29 @@ public sealed partial class SettingsWindow
         Panel.SetZIndex(row, 0);
     }
 
-    private void AttachDrag(Border handle)
+    private void AttachDrag(Border handle) => AttachDrag(handle, () => _appRows, AppRowHeight, rows =>
+    {
+        var order = rows.Children.OfType<Border>().Where(b => b.Tag is AppEntry).Select(b => ((AppEntry)b.Tag).InstanceId).ToArray();
+        Change(s => s.Apps = order.Select(id => s.Entry(id)!).ToList());
+    }, CollapseSourceRows);
+
+    // The rows are the list's children with a Tag, each a Border holding a Grid that holds the handle.
+    private void AttachDrag(Border handle, Func<Panel?> list, double height, Action<Panel> reordered, Action? starting = null)
     {
         AutomationProperties.SetName(handle, Loc.T("拖动调整顺序", "Drag to reorder"));
         // Focusable so that pressing it commits a name being edited; reordering is by mouse only, so Tab skips it.
         handle.Focusable = true; KeyboardNavigation.SetIsTabStop(handle, false); handle.FocusVisualStyle = null;
         handle.MouseLeftButtonDown += (_, e) =>
         {
-            if (_appRows is null || handle.Parent is not Grid { Parent: Border row }) return;
+            if (list() is not { } rows || handle.Parent is not Grid { Parent: Border row }) return;
             handle.Focus(); // Commits any name being edited before beginning the drag.
-            StartAppDrag(row, handle, e.GetPosition(_appRows).Y);
+            StartAppDrag(rows, height, reordered, starting, row, handle, e.GetPosition(rows).Y);
             e.Handled = true;
         };
         handle.MouseMove += (_, e) =>
         {
-            if (_appDrag?.Handle != handle || !handle.IsMouseCaptured || _appRows is null) return;
-            UpdateAppDrag(e.GetPosition(_appRows).Y);
+            if (_appDrag?.Handle != handle || !handle.IsMouseCaptured) return;
+            UpdateAppDrag(e.GetPosition(_appDrag.List).Y);
         };
         handle.MouseLeftButtonUp += (_, e) =>
         {
@@ -136,15 +147,15 @@ public sealed partial class SettingsWindow
         handle.LostMouseCapture += (_, _) => { if (_appDrag?.Handle == handle) EndAppDrag(false); };
     }
 
-    private void StartAppDrag(Border row, Border handle, double pointerY)
+    private void StartAppDrag(Panel list, double height, Action<Panel> reordered, Action? starting, Border row, Border handle, double pointerY)
     {
         EndAppDrag(false, false);
-        CollapseSourceRows();
-        if (_appRows is null) return;
-        var rows = _appRows.Children.OfType<Border>().Where(b => b.Tag is AppEntry).ToArray();
+        starting?.Invoke();
+        var rows = list.Children.OfType<Border>().Where(b => b.Tag is not null).ToArray();
         foreach (var item in rows) ResetDragAppearance(item);
         int from = Array.IndexOf(rows, row);
-        _appDrag = new AppDrag(rows, row, handle, pointerY - from * AppRowHeight - RowTransform(row).Y);
+        if (from < 0) return;
+        _appDrag = new AppDrag(list, height, reordered, rows, row, handle, pointerY - from * height - RowTransform(row).Y);
         // Keep the visual tree and mouse capture intact until release. Only transforms move during a drag.
         SetRowOffset(row, RowTransform(row).Y);
         row.Background = UI.Brush(Inset); row.CornerRadius = new CornerRadius(6); Panel.SetZIndex(row, 2);
@@ -154,9 +165,9 @@ public sealed partial class SettingsWindow
     internal void UpdateAppDrag(double pointerY)
     {
         if (_appDrag is not { } drag) return;
-        double top = Math.Clamp(pointerY - drag.GrabOffset, 0, (drag.Rows.Length - 1) * AppRowHeight);
-        SetRowOffset(drag.Row, top - drag.From * AppRowHeight);
-        int target = Math.Clamp((int)Math.Floor(top / AppRowHeight + .5), 0, drag.Rows.Length - 1);
+        double top = Math.Clamp(pointerY - drag.GrabOffset, 0, (drag.Rows.Length - 1) * drag.Height);
+        SetRowOffset(drag.Row, top - drag.From * drag.Height);
+        int target = Math.Clamp((int)Math.Floor(top / drag.Height + .5), 0, drag.Rows.Length - 1);
         if (target == drag.Target) return;
         drag.Target = target;
         for (int i = 0; i < drag.Rows.Length; i++)
@@ -165,32 +176,29 @@ public sealed partial class SettingsWindow
             int slot = i;
             if (i > drag.From && i <= target) slot--;
             else if (i < drag.From && i >= target) slot++;
-            AnimateRow(drag.Rows[i], (slot - i) * AppRowHeight);
+            AnimateRow(drag.Rows[i], (slot - i) * drag.Height);
         }
     }
 
     internal void EndAppDrag(bool commit, bool animate = true)
     {
-        if (_appDrag is not { } drag || _appRows is null) return;
+        if (_appDrag is not { } drag) return;
         _appDrag = null;
         if (drag.Handle.IsMouseCaptured) drag.Handle.ReleaseMouseCapture();
-        var positions = drag.Rows.Select((row, i) => (row, y: i * AppRowHeight + RowTransform(row).Y)).ToArray();
+        var list = drag.List;
+        var positions = drag.Rows.Select((row, i) => (row, y: i * drag.Height + RowTransform(row).Y)).ToArray();
         bool changed = commit && drag.From != drag.Target;
         if (changed)
         {
-            _appRows.Children.Remove(drag.Row);
-            _appRows.Children.Insert(drag.Target, drag.Row);
-            UpdateDividers();
+            list.Children.Remove(drag.Row);
+            list.Children.Insert(drag.Target, drag.Row);
+            UpdateDividers(list);
         }
         foreach (var (row, y) in positions)
         {
-            SetRowOffset(row, y - _appRows.Children.IndexOf(row) * AppRowHeight);
+            SetRowOffset(row, y - list.Children.IndexOf(row) * drag.Height);
             AnimateRow(row, 0, () => { if (_appDrag?.Row != row) ResetDragAppearance(row); }, animate);
         }
-        if (changed)
-        {
-            var order = _appRows.Children.OfType<Border>().Where(b => b.Tag is AppEntry).Select(b => ((AppEntry)b.Tag).InstanceId).ToArray();
-            Change(s => s.Apps = order.Select(id => s.Entry(id)!).ToList());
-        }
+        if (changed) drag.Reordered(list);
     }
 }

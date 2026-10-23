@@ -102,6 +102,14 @@ internal static class MusicTests
         check("The standard preset gives the artist its own line above one lyric line", !standard.MergeTitle && standard.LyricLines == 1);
         check("The spacious preset shows the lines before and after the current lyric", !spacious.MergeTitle && spacious.LyricLines == 3);
         check("Without lyrics the artist keeps its own line at the compact preset", !MusicLayout.Calculate(440, 140, false, true).MergeTitle);
+        bool steadyTitles = true;
+        foreach (var (w, h) in new[] { (440.0, 140.0), (440.0, 200.0), (560.0, 280.0), (1200.0, 400.0) })
+        {
+            var waiting = MusicLayout.Calculate(w, h, false, true, lyricsExpected: true); var found = MusicLayout.Calculate(w, h, true, true, lyricsExpected: true);
+            steadyTitles &= waiting.MergeTitle == found.MergeTitle && waiting.HeaderHeight == found.HeaderHeight && waiting.Cover == found.Cover
+                && waiting.CoverY == found.CoverY && waiting.LyricRoom == found.LyricRoom && waiting.LyricLines == 0 && found.LyricLines == found.LyricRoom;
+        }
+        check("With lyrics expected, the titles keep their place and the room its lines until lyrics arrive", steadyTitles);
         check("A tall, narrow panel stays one step above the narrow preset", MusicLayout.DensityFor(440, 400) == 1);
         check("Without a timeline the cover takes the progress row's room",
             MusicLayout.Calculate(440, 200, true, false).Cover > standard.Cover && MusicLayout.Calculate(440, 200, true, false).ProgressHeight == 0);
@@ -319,6 +327,10 @@ internal static class MusicTests
             alertSane &= new[] { a.RingWidth, a.NameWidth, a.TextWidth, a.ResetWidth, a.RingSize, a.FontSize }.All(v => double.IsFinite(v) && v >= 0) && a.Total <= row + 1e-9;
         }
         check("Every notice width and scale gives finite, non-negative regions within the row", alertSane);
+        var shortScroll = CompactAlertLayout.Scroll(24, 5);
+        var longScroll = CompactAlertLayout.Scroll(500, 5);
+        check("A notice longer than its row scrolls at the lyric's pace, or faster to finish with a rest at the end",
+            shortScroll == (1, 2) && longScroll == (1, 4) && CompactAlertLayout.Scroll(double.NaN, 5) == (1, 1) && CompactAlertLayout.Scroll(50, 0) == (0, 0));
 
         // Every size in the row follows the height alone: across widths 0 to 800, for each style and height, the rings, cover,
         // equalizer, clock and type keep one size; only the regions change.

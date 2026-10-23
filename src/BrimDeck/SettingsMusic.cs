@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using BrimDeck.Core;
@@ -51,13 +52,49 @@ public sealed partial class SettingsWindow
             Group(Toggle(Loc.T("显示播放进度", "Show playback progress"), S.MusicIndicatorProgress, v => Change(s => s.MusicIndicatorProgress = v)));
             return;
         }
+        // The rows that can be dragged are in the order the row shows them; the clock always stays at the right, so it comes last.
+        var rows = new StackPanel();
+        foreach (var part in S.CompactOrder(style)) rows.Children.Add(PartRow(style, part, rows));
+        UpdateDividers(rows);
+        Group(rows, ClockRow(style, PartHandleWidth));
+    }
+
+    private const double PartRowHeight = 44, PartHandleWidth = 40;
+    // One draggable row of the collapsed content: the handle, the name and the switch.
+    private Border PartRow(CompactStyle style, CompactPart part, StackPanel rows)
+    {
         bool notch = style == CompactStyle.Notch;
-        Group(Toggle(Loc.T("配额环", "Quota rings"), S.ShowsSummary(style), v => Change(s => { if (notch) s.NotchSummary = v; else s.CapsuleSummary = v; })),
-            Toggle(Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style), v => Change(s => { if (notch) s.NotchMusic = v; else s.CapsuleMusic = v; })),
-            ClockRow(style),
-            Toggle(Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), v => Change(s => { if (notch) s.NotchMonitor = v; else s.CapsuleMonitor = v; }),
-                help: Loc.T("在收起的刘海或胶囊中显示 CPU、内存、GPU 与网速。显示哪些读数在“系统监控 › 显示与读数”中设置。",
-                    "Shows CPU, memory, GPU and network speed in the collapsed notch or capsule. Which readings are shown is set in \"System monitor › Display and readings\".")));
+        var (title, shown, help) = part switch
+        {
+            CompactPart.Rings => (Loc.T("配额环", "Quota rings"), S.ShowsSummary(style), null),
+            CompactPart.Music => (Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style),
+                Loc.T("拖动只改变歌名或歌词的位置。封面始终在最左侧，律动条在右侧。", "Dragging moves only the title or lyric. The cover stays at the left and the equalizer at the right.")),
+            _ => (Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), null)
+        };
+        void Show(bool on) => Change(s =>
+        {
+            switch (part)
+            {
+                case CompactPart.Rings: if (notch) s.NotchSummary = on; else s.CapsuleSummary = on; break;
+                case CompactPart.Music: if (notch) s.NotchMusic = on; else s.CapsuleMusic = on; break;
+                default: if (notch) s.NotchMonitor = on; else s.CapsuleMonitor = on; break;
+            }
+        });
+        var row = new Grid { Background = Brushes.Transparent };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(PartHandleWidth) }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var handle = new Border { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
+        row.Children.Add(handle);
+        var label = SettingLabel(title, help is null ? null : () => help); Grid.SetColumn(label, 1); row.Children.Add(label);
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = shown, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(toggle, title); toggle.Checked += (_, _) => Show(true); toggle.Unchecked += (_, _) => Show(false);
+        Grid.SetColumn(toggle, 2); row.Children.Add(toggle);
+        // Dropped in a new place, the collapsed row takes the new order at once.
+        AttachDrag(handle, () => rows, PartRowHeight, list =>
+        {
+            var order = list.Children.OfType<Border>().Where(b => b.Tag is CompactPart).Select(b => (CompactPart)b.Tag).ToArray();
+            Change(s => s.SetCompactOrder(style, order));
+        });
+        return new Border { Child = row, Height = PartRowHeight, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = part, RenderTransform = new TranslateTransform() };
     }
     // Settings every player shares: colors, cover and text.
     private void MusicStyle()

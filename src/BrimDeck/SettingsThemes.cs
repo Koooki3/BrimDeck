@@ -70,7 +70,7 @@ public sealed partial class SettingsWindow
     }
 
     // Three cards to a row, each the collapsed capsule in that theme. A user's own theme can be renamed by clicking its name and
-    // carries a delete button on its preview (OwnThemeCard), and the custom section ends with the tools tile (tile).
+    // carries a delete button on its preview (OwnThemeCard), and the custom section ends with the new-theme card (tile).
     private void ThemeCards(IReadOnlyList<(string Id, string Name, PanelThemeInfo Theme)> themes, string chosen, FrameworkElement? tile = null)
     {
         var grid = new UniformGrid { Columns = 3, Margin = new Thickness(-6, 0, -6, 18) };
@@ -116,8 +116,8 @@ public sealed partial class SettingsWindow
             if (kept.Preview.Parent is ContentControl previous) previous.Content = null;
             return kept.Preview;
         }
-        // The collapsed capsule with its quota rings and clock, as on the collapsed view's style cards, in this theme's colors.
-        var preview = CompactStylePreview.Create(CompactStyle.Capsule, palette.IsDark, clock: true, palette, focus: true);
+        // The collapsed capsule with its quota rings and clock, at its real size, in this theme's colors.
+        var preview = CompactStylePreview.Theme(palette);
         _themePreviews[key] = (palette, preview);
         return preview;
     }
@@ -169,14 +169,24 @@ public sealed partial class SettingsWindow
         return block;
     }
 
-    // The custom section, as the review sketched it: the title with a reload button, the theme guide at the right; the user's
-    // themes as cards, each renamed by clicking its name and deleted from its preview; and a tile of the same size with "New from
-    // current theme" and "Open themes folder". Files that cannot be used are listed under it with their errors.
+    // The custom section: the title with a reload button, and "Open themes folder" and the theme guide at the right; the user's
+    // themes as cards, each renamed by clicking its name and deleted from its preview; and a card with a plus that makes a new
+    // theme from the current one. Files that cannot be used are listed under it with their errors.
     private void CustomSection(IReadOnlyList<PanelThemeInfo> users, string chosen)
     {
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
         var guide = Link(Loc.T("主题制作指南 ↗", "Theme guide ↗"), Updates.GitHubUpdates.RepositoryUrl + Loc.T("/blob/main/docs/zh-CN/themes.md", "/blob/main/docs/en-US/themes.md"));
         guide.VerticalAlignment = VerticalAlignment.Center; DockPanel.SetDock(guide, Dock.Right); head.Children.Add(guide);
+        // The folder holds the theme files, so it is opened from the section's title row, beside the guide to writing them.
+        var folder = ActionButton(Loc.T("打开主题文件夹", "Open themes folder"), () =>
+        {
+            try { Directory.CreateDirectory(PanelTheme.Folder); Process.Start(new ProcessStartInfo("explorer.exe", "\"" + PanelTheme.Folder + "\"") { UseShellExecute = true }); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception) { SaveStatus(ex.Message, true); }
+        });
+        folder.Style = (Style)FindResource("SettingsLink");
+        folder.ToolTip = Loc.T("主题文件放在这里：*.json，或子文件夹中的 theme.json。", "Theme files live here: *.json, or theme.json in a subfolder.");
+        folder.VerticalAlignment = VerticalAlignment.Center; folder.Margin = new Thickness(0, 0, 16, 0);
+        DockPanel.SetDock(folder, Dock.Right); head.Children.Add(folder);
         var title = TextLine(Loc.T("自定义", "Custom"), 11, TextSecondary); title.VerticalAlignment = VerticalAlignment.Center; head.Children.Add(title);
         var reload = GlyphButton("M 12.5,4.5 A 5.5,5.5 0 1 0 13,9 M 12.5,1.5 V 4.5 H 9.5", 14, 14, Loc.T("重新加载主题文件", "Reload theme files"), () => ShowPage(ThemePage));
         reload.Width = 22; reload.Height = 22; reload.Margin = new Thickness(4, 0, 0, 0); reload.VerticalAlignment = VerticalAlignment.Center;
@@ -187,14 +197,14 @@ public sealed partial class SettingsWindow
         Target.Children.Add(head);
         Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, 12) });
         var own = users.Where(t => t.Usable).ToList();
-        ThemeCards([.. own.Select(t => (t.Id, t.DisplayName, t))], chosen, CustomTile(own.Count > 0));
+        ThemeCards([.. own.Select(t => (t.Id, t.DisplayName, t))], chosen, CustomTile());
         var broken = users.Where(t => !t.Usable).ToList();
         if (broken.Count > 0)
             Group([.. broken.Select(t => (FrameworkElement)Row(t.Path is { } file ? PanelThemes.DisplayFileName(file) : t.Id, Wrapped(Loc.T("无法使用：", "Cannot be used: ") + t.Error, true)))]);
     }
 
-    // The tools tile: the same frame as a card, the two buttons in it, and how to rename in the name row.
-    private FrameworkElement CustomTile(bool themes)
+    // The new-theme card: a theme card's frame with a plus in place of the preview. The new theme starts as a copy of the current one.
+    private FrameworkElement CustomTile()
     {
         var create = ActionButton(Loc.T("以当前主题新建", "New from current theme"), () =>
         {
@@ -216,28 +226,10 @@ public sealed partial class SettingsWindow
         });
         create.ToolTip = Loc.T("把当前主题的全部颜色写入一个带注释的模板文件并打开它；改好后保存，本页会自动重新加载。",
             "Writes every color of the current theme into a commented template file and opens it; save your changes and this page reloads them.");
-        var folder = ActionButton(Loc.T("打开主题文件夹", "Open themes folder"), () =>
-        {
-            try { Directory.CreateDirectory(PanelTheme.Folder); Process.Start(new ProcessStartInfo("explorer.exe", "\"" + PanelTheme.Folder + "\"") { UseShellExecute = true }); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception) { SaveStatus(ex.Message, true); }
-        });
-        folder.ToolTip = Loc.T("主题文件放在这里：*.json，或子文件夹中的 theme.json。", "Theme files live here: *.json, or theme.json in a subfolder.");
-        foreach (var button in new[] { create, folder }) { button.FontSize = 11.5; button.HorizontalAlignment = HorizontalAlignment.Center; button.MinWidth = 132; }
-        folder.Margin = new Thickness(0, 10, 0, 0);
-        var buttons = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        buttons.Children.Add(create); buttons.Children.Add(folder);
-        // The frame takes a card's size: the same scene proportions inside the same border and padding.
-        var frame = new Grid();
-        frame.Children.Add(new Viewbox { Child = new Border { Width = 240, Height = 136 }, Stretch = System.Windows.Media.Stretch.Uniform });
-        frame.Children.Add(buttons);
-        var chrome = new Border { CornerRadius = new CornerRadius(12), BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(1.5), Padding = new Thickness(3), Child = frame };
-        var nameRow = new Grid { Height = 30, Margin = new Thickness(8, 4, 8, 0) };
-        var hint = TextLine(Loc.T("单击主题名称可重命名", "Click a theme's name to rename it"), 11, TextTertiary);
-        hint.HorizontalAlignment = HorizontalAlignment.Center; hint.VerticalAlignment = VerticalAlignment.Center; hint.TextTrimming = TextTrimming.CharacterEllipsis;
-        if (themes) nameRow.Children.Add(hint);
-        var tile = new StackPanel { Margin = new Thickness(6, 3, 6, 6) };
-        tile.Children.Add(chrome); tile.Children.Add(nameRow);
-        return tile;
+        create.Style = (Style)FindResource("SettingsAddCard"); create.Content = null;
+        create.Tag = Loc.T("以当前主题新建", "New from current theme"); create.Margin = new Thickness(6, 3, 6, 6);
+        AutomationProperties.SetName(create, Loc.T("以当前主题新建主题", "New theme from current theme"));
+        return create;
     }
 
     // A user theme's card with what only a user's theme has. Its name (the card's own is left empty) renames the theme when

@@ -26,32 +26,36 @@ public sealed partial class SettingsWindow
         public Action Refresh = () => { };
     }
 
-    private static string DragWidthHint => Loc.T("也可以把鼠标移到刘海、胶囊或指示条的左右两端，直接拖动调整；双击两端恢复默认（刘海与胶囊恢复按内容自动加宽）。",
-        "You can also point at either end of the notch, capsule or indicator and drag it. A double click on an end restores the default (the notch and the capsule widen to their content again).");
+    private static string DragWidthHint(CompactStyle style) => Loc.T("把鼠标移到" + StyleName(style) + "的左右两端，可以直接拖动调整。",
+        "Point at either end of the " + StyleName(style).ToLowerInvariant() + " and drag it to adjust.");
 
     private void CollapsedSizeOptions(CompactStyle style)
     {
         var reset = KeepPreview(ActionButton(Loc.T("恢复默认尺寸", "Reset to default size"), () => ResetCollapsedSize(style))); reset.FontSize = 11;
         AutomationProperties.SetName(reset, Loc.T("恢复" + StyleName(style) + "的默认尺寸", "Reset " + StyleName(style) + " to default size"));
-        SectionTitle(Loc.T("尺寸与位置 · ", "Size and position · ") + StyleName(style), reset, () => DragWidthHint);
+        SectionTitle(Loc.T("尺寸与位置 · ", "Size and position · ") + StyleName(style), reset, () => DragWidthHint(style));
         switch (style)
         {
             case CompactStyle.Notch:
             {
+                var auto = AutoWidthRow(style);
                 var width = SizeRow(Loc.T("宽度", "Width"), S.NotchWidth, CollapsedLimits.NotchWidthMin, CollapsedLimits.NotchWidthMax, 1, v => ChangeCollapsed(s => { s.NotchWidth = v; s.NotchAutoWidth = false; }));
                 var height = SizeRow(Loc.T("高度", "Height"), S.NotchHeight, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, 1, v => ChangeCollapsed(s => s.NotchHeight = v));
                 var offset = SizeRow(Loc.T("水平偏移", "Horizontal offset"), S.NotchOffsetX, 0, 0, 1, v => ChangeCollapsed(s => s.NotchOffsetX = v), centered: true);
                 _refreshCollapsedRanges = () =>
                 {
-                    var limits = _app.Deck.CurrentCollapsedRanges(style, S.NotchWidth, S.NotchHeight);
-                    SetCollapsedRange(width, limits.WidthMin, limits.WidthMax, S.NotchWidth);
+                    double shown = ShownWidth(style);
+                    var limits = _app.Deck.CurrentCollapsedRanges(style, shown, S.NotchHeight);
+                    SetCollapsedRange(width, limits.WidthMin, limits.WidthMax, shown);
+                    SetAutoWidth(auto, width, S.NotchAutoWidth);
                     SetCollapsedRange(offset, -Whole(limits.OffsetMax), Whole(limits.OffsetMax), S.NotchOffsetX);
                 };
-                Group(width.Row, height.Row, offset.Row);
+                Group(auto, width.Row, height.Row, offset.Row);
                 break;
             }
             case CompactStyle.Capsule:
             {
+                var auto = AutoWidthRow(style);
                 var width = SizeRow(Loc.T("宽度", "Width"), S.CapsuleWidth, CollapsedLimits.CapsuleWidthMin, CollapsedLimits.CapsuleWidthMax, 1, v => ChangeCollapsed(s => { s.CapsuleWidth = v; s.CapsuleAutoWidth = false; }));
                 var height = SizeRow(Loc.T("高度", "Height"), S.CapsuleHeight, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, 1, v => ChangeCollapsed(s => s.CapsuleHeight = v));
                 var top = SizeRow(Loc.T("垂直偏移", "Vertical offset"), S.CapsuleTop, CollapsedLimits.CapsuleTopMin, Math.Max(CollapsedLimits.CapsuleTopMin, S.CapsuleTop), 1, v => ChangeCollapsed(s => s.CapsuleTop = v),
@@ -59,13 +63,15 @@ public sealed partial class SettingsWindow
                 var offset = SizeRow(Loc.T("水平偏移", "Horizontal offset"), S.CapsuleOffsetX, 0, 0, 1, v => ChangeCollapsed(s => s.CapsuleOffsetX = v), centered: true);
                 _refreshCollapsedRanges = () =>
                 {
-                    var limits = _app.Deck.CurrentCollapsedRanges(style, S.CapsuleWidth, S.CapsuleHeight);
-                    SetCollapsedRange(width, limits.WidthMin, limits.WidthMax, S.CapsuleWidth);
+                    double shown = ShownWidth(style);
+                    var limits = _app.Deck.CurrentCollapsedRanges(style, shown, S.CapsuleHeight);
+                    SetCollapsedRange(width, limits.WidthMin, limits.WidthMax, shown);
+                    SetAutoWidth(auto, width, S.CapsuleAutoWidth);
                     // The capsule can move down to the bottom of the work area; the limit follows its height and the display.
                     SetCollapsedRange(top, CollapsedLimits.CapsuleTopMin, Whole(limits.TopMax), S.CapsuleTop);
                     SetCollapsedRange(offset, -Whole(limits.OffsetMax), Whole(limits.OffsetMax), S.CapsuleOffsetX);
                 };
-                Group(width.Row, height.Row, top.Row, offset.Row);
+                Group(auto, width.Row, height.Row, top.Row, offset.Row);
                 break;
             }
             default:
@@ -109,6 +115,41 @@ public sealed partial class SettingsWindow
         finally { _updatingCollapsedRanges = false; }
         control.Refresh();
     }
+
+    // The auto width switch of the notch or the capsule. While it is on the content sets the width and the width row only
+    // shows it; turning it off keeps the width the surface has at that moment.
+    private FrameworkElement AutoWidthRow(CompactStyle style)
+    {
+        string title = Loc.T("自适应宽度", "Fit width to content");
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.CompactAutoWidth(style), VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(0) };
+        AutomationProperties.SetName(toggle, title);
+        toggle.Checked += (_, _) => ChangeCollapsed(s => s.SetCompactAutoWidth(style, true));
+        toggle.Unchecked += (_, _) => { double shown = ShownWidth(style); ChangeCollapsed(s => { s.SetCompactWidth(style, shown); s.SetCompactAutoWidth(style, false); }); };
+        string help = Loc.T("开启后不能手动调整宽度。拖动" + StyleName(style) + "两端会关闭此项，双击两端可重新开启。",
+            "While on, the width cannot be set by hand. Dragging either end of the " + StyleName(style).ToLowerInvariant() + " turns this off; a double click on an end turns it back on.");
+        var row = Row(title, toggle, help: () => help);
+        row.Tag = toggle;
+        return row;
+    }
+
+    private void SetAutoWidth(FrameworkElement auto, SizeControl width, bool on)
+    {
+        _updatingCollapsedRanges = true;
+        try { if (auto.Tag is CheckBox toggle) toggle.IsChecked = on; }
+        finally { _updatingCollapsedRanges = false; }
+        width.Row.IsEnabled = !on;
+    }
+
+    // The width the panel shows for the style: with auto width the content's, otherwise the saved one.
+    private double ShownWidth(CompactStyle style)
+    {
+        var shape = _app.Deck.Collapsed;
+        return S.CompactAutoWidth(style) && shape.Style == style ? shape.Surface.Width : style == CompactStyle.Capsule ? S.CapsuleWidth : S.NotchWidth;
+    }
+
+    // The panel changed the collapsed size or switch from outside this window (a drag, a double click, or content that
+    // changed the auto width).
+    internal void CollapsedChanged() { if (IsLoaded && _page == 1) _refreshCollapsedRanges?.Invoke(); }
 
     private void ChangeCollapsed(Action<DeckSettings> edit)
     {

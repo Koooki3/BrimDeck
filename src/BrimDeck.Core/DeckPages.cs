@@ -5,7 +5,7 @@ namespace BrimDeck.Core;
 public static class DeckPages
 {
     // The page switch, left to right.
-    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Monitor, DeckPage.Music];
+    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor];
 
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {

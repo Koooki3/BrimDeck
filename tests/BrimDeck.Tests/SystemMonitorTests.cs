@@ -179,26 +179,68 @@ static class SystemMonitorTests
         check("Compact monitor: upload leaves first", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 69) == (CompactMonitorItems.All & ~CompactMonitorItems.Upload));
         check("Compact monitor: CPU and memory stay longest", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 33) == (CompactMonitorItems.Cpu | CompactMonitorItems.Memory));
         check("Compact monitor: nothing fits", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 5) == CompactMonitorItems.None && CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, double.NaN) == CompactMonitorItems.None);
+        // At 125 % and 150 % the row rounds the readings' region down to whole device pixels; the readings ask for their width
+        // rounded up, so CPU, memory, GPU, download and upload (3 × 43 + 2 × 50 + 4 × 10 = 269 DIP) all stay, alone or beside
+        // the song and the clock, while a row set too short still lets upload go first.
+        var chosen = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu | CompactMonitorItems.Download | CompactMonitorItems.Upload;
+        static double Strip(CompactMonitorItems item) => item is CompactMonitorItems.Download or CompactMonitorItems.Upload ? 50 : 43;
+        double content = CompactMonitor.Width(chosen, Strip, 10);
+        check("Compact monitor: rounding the region down alone dropped upload", content == 269 && CompactMonitor.Fit(chosen, Strip, 10, DevicePixels.Down(269, 1.5)) == (chosen & ~CompactMonitorItems.Upload));
+        foreach (double dpi in new[] { 1.25, 1.5 })
+        {
+            double wanted = DevicePixels.Up(content, dpi);
+            bool fits = wanted >= content && wanted < content + 1 / dpi + 1e-9 && Math.Abs(wanted * dpi - Math.Round(wanted * dpi)) < 1e-6;
+            foreach (var (media, text, clock) in new[] { (false, false, 0d), (true, true, 0d), (true, true, 60d), (false, false, 60d) })
+            {
+                var row = CompactMusicLayout.Calculate(CompactMusicLayout.NaturalWidth(1, media, 0, text, clock, wanted), 1, media, 0, text, clock, wanted);
+                double region = DevicePixels.Down(Math.Max(0, row.MonitorWidth - (row.MonitorAlone ? 0 : 8)), dpi);
+                fits &= CompactMonitor.Fit(chosen, Strip, 10, region) == chosen;
+            }
+            check($"Compact monitor: every reading stays after snapping at {dpi:P0}", fits);
+            check($"Compact monitor: a short row still drops upload at {dpi:P0}", CompactMonitor.Fit(chosen, Strip, 10, DevicePixels.Down(260, dpi)) == (chosen & ~CompactMonitorItems.Upload));
+        }
+        check("Device pixels: whole widths stay, others round", DevicePixels.Up(268, 1.5) == 268 && DevicePixels.Up(269, 1.25) == 269.6 && DevicePixels.Down(269, 1.25) == 268.8
+            && DevicePixels.Up(double.NaN, 1.5) == 0 && DevicePixels.Up(10, 0) == 10 && DevicePixels.Down(10, 0) == 0);
         check("Compact rates", MonitorFormat.CompactRate(84_200) == new MonitorFormat.Quantity("84", "K") && MonitorFormat.CompactRate(1_240_000) == new MonitorFormat.Quantity("1.2", "M")
             && MonitorFormat.CompactRate(120_000_000) == new MonitorFormat.Quantity("120", "M") && MonitorFormat.CompactRate(2_500_000_000) == new MonitorFormat.Quantity("2.5", "G")
             && MonitorFormat.CompactRate(999_600).Unit == "M");
+        // The strip reserves five characters for a rate ("99.9M"); none below a terabyte a second is longer.
+        bool five = true;
+        for (double rate = 1; rate < 999_000_000_000; rate *= 1.003)
+        {
+            var q = MonitorFormat.CompactRate(rate);
+            five &= (q.Number + q.Unit).Length <= 5;
+        }
+        check("Compact rates: at most five characters", five);
         var alone = CompactMusicLayout.Calculate(300, 1, false, 0, false, 0, 120);
         check("Compact row: readings alone take the row, centred", alone is { MonitorAlone: true, MonitorWidth: 120 });
         var withRings = CompactMusicLayout.Calculate(300, 1, false, 2, false, 0, 120);
         check("Compact row: readings after the rings, with a gap", withRings is { MonitorAlone: false, MonitorWidth: 128 } && withRings.MiddleWidth == 172);
         var tight = CompactMusicLayout.Calculate(100, 1, false, 2, true, 0, 400);
-        check("Compact row: one ring and the shortest lyric stay", tight.MonitorWidth == 70 && tight.MiddleWidth == 30);
+        // The readings keep half of the middle; one ring and the shortest lyric (30 DIP) stay in any case.
+        check("Compact row: one ring and the shortest lyric stay", tight.MonitorWidth == 50 && tight.MiddleWidth == 50
+            && CompactMusicLayout.Calculate(40, 1, false, 2, true, 0, 400) is { MonitorWidth: 10, MiddleWidth: 30 });
         check("Compact row: no readings, no region", CompactMusicLayout.Calculate(300, 1, true, 2, true, 40).MonitorWidth == 0);
         bool steady = true;
         for (double width = 60; width < 400; width++)
             steady &= Math.Abs(CompactMusicLayout.Calculate(width + 1, 1, true, 3, true, 30, 150).MonitorWidth - CompactMusicLayout.Calculate(width, 1, true, 3, true, 30, 150).MonitorWidth) <= 1 + 1e-9;
         check("Compact row: a DIP of width moves the readings by at most a DIP", steady);
+        // 269 DIP of readings and a 160 DIP lyric slot: the readings narrow first, then both share the middle evenly.
+        var lyricWhole = CompactMusicLayout.Calculate(400, 1, true, 0, true, 0, content);
+        var shared = CompactMusicLayout.Calculate(330, 1, true, 0, true, 0, content);
+        check("Compact row: a short middle narrows the readings before the lyric", lyricWhole.TextWidth == CompactMusicLayout.TextSlot && lyricWhole.MonitorWidth == 186);
+        check("Compact row: a shorter middle splits evenly between the readings and the lyric", shared.MonitorWidth == 138 && shared.TextWidth == 138);
+        check("Compact row: a middle wide enough gives the readings all they want", CompactMusicLayout.Calculate(600, 1, true, 0, true, 0, content).MonitorWidth == 277);
         var screen = new DipRect(0, 0, 2560, 1440); var area = new DipRect(0, 0, 2560, 1392);
         var capsule = new DeckSettings { CapsuleWidth = 196, CapsuleHeight = 32 };
         check("Compact fit: a capsule grows to its content plus its insets", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 300).Surface.Width == 332);
-        check("Compact fit: never below the saved width", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 50).Surface.Width == 196
-            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area).Surface.Width == 196);
-        check("Compact fit: up to the largest width and the screen", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 5000).Surface.Width == CollapsedLimits.CapsuleWidthMax
+        check("Compact fit: narrower content narrows the surface, down to the style's smallest width",
+            CollapsedGeometry.Resolve(new DeckSettings { CapsuleWidth = 500 }, CompactStyle.Capsule, screen, area, 1, 150).Surface.Width == 182
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 50).Surface.Width == CollapsedLimits.CapsuleWidthMin
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 0).Surface.Width == CollapsedLimits.CapsuleWidthMin
+            && CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Notch, screen, area, 1, 0).Surface.Width == CollapsedLimits.NotchWidthMin);
+        check("Compact fit: without auto width the saved width stays", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area).Surface.Width == 196);
+        check("Compact fit: up to the screen", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 5000).Surface.Width == 2560
             && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, new DipRect(0, 0, 500, 400), new DipRect(0, 0, 500, 400), 1, 5000).Surface.Width == 500);
         check("Compact fit: the notch grows centred, the line keeps its length", CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Notch, screen, area, 1, 400) is { Surface: { Width: 460, X: 1050 } }
             && CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Line, screen, area, 1, 400).Surface.Width == CollapsedLimits.LineLengthDefault);
@@ -208,7 +250,12 @@ static class SystemMonitorTests
         check("Compact fit: a low notch keeps the content clear of its shoulders", CollapsedGeometry.Resolve(low, CompactStyle.Notch, screen, area, 1, 300).Surface.Width == 356);
         double natural = CompactMusicLayout.NaturalWidth(1, true, 3, true, 40, 150);
         var fitted = CompactMusicLayout.Calculate(natural, 1, true, 3, true, 40, 150);
-        check("Compact fit: at its natural width the row shows every reading and every ring", fitted.MonitorWidth == 158 && !fitted.ScrollRings && fitted.TextWidth >= 56);
+        check("Compact fit: at its natural width the row shows every reading and every ring", fitted.MonitorWidth == 158 && !fitted.ScrollRings && fitted.TextWidth >= CompactMusicLayout.TextSlot);
+        check("Compact fit: the lyric keeps a fixed slot, and each piece of content adds its width",
+            CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0) - CompactMusicLayout.NaturalWidth(1, true, 0, false, 0, 0) == CompactMusicLayout.TextSlot
+            && CompactMusicLayout.NaturalWidth(1, true, 2, true, 0, 0) > CompactMusicLayout.NaturalWidth(1, true, 1, true, 0, 0)
+            && CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 0) > CompactMusicLayout.NaturalWidth(1, true, 2, true, 0, 0)
+            && CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 150) > CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 0));
         var engines = GpuEngines.Order([new("Copy", .1), new("3D", .4), new("Compute_0", .2), new("Compute_1", .5), new("Foo", .3)]);
         check("GPU engines: kinds folded and ordered as Task Manager", engines.Select(e => e.Kind).SequenceEqual(["3D", "Compute", "Copy", "Foo"]) && engines[1].Usage == .5);
         check("GPU engine kinds", GpuEngines.Kind("Compute_1") == "Compute" && GpuEngines.Kind("VideoDecode") == "VideoDecode" && GpuEngines.Kind("Engine_x") == "Engine_x"
@@ -220,7 +267,7 @@ static class SystemMonitorTests
     private static void Pages(Action<string, bool> check)
     {
         var settings = new DeckSettings();
-        check("Pages: monitor sits between usage and music", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Monitor, DeckPage.Music]));
+        check("Pages: monitor comes after usage and music", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor]));
         var sized = new DeckSettings();
         DeckPages.SetSize(sized, DeckPage.Music, 700, 300); DeckPages.SetSize(sized, DeckPage.Monitor, 800, 320); DeckPages.SetSize(sized, DeckPage.Usage, 900, 260);
         check("Pages: a drag sets the size of the page it is on and of no other",
@@ -232,7 +279,7 @@ static class SystemMonitorTests
             DeckPages.Limits(sized, DeckPage.Usage).MinWidth == Math.Max(DeckPages.MinWidth, sized.MinimumWidth) && DeckPages.Limits(sized, DeckPage.Music).MinWidth == DeckPages.MinWidth);
         check("Pages: a shown page resolves to itself", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Monitor);
         settings.UsagePage = false;
-        check("Pages: a hidden page falls back to the first shown one", DeckPages.Resolve(settings, DeckPage.Usage) == DeckPage.Monitor);
+        check("Pages: a hidden page falls back to the first shown one", DeckPages.Resolve(settings, DeckPage.Usage) == DeckPage.Music);
         settings.MonitorPage = false;
         check("Pages: the music page alone", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Music);
         settings.MusicPage = false;

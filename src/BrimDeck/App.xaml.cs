@@ -171,8 +171,11 @@ public partial class App : Application
         AssignDisplays();
         foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
         QueueSave();
+        CollapsedChanged();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
     }
+    // The settings window's size group follows changes made on the panel (a drag, or content that changed the auto width).
+    internal void CollapsedChanged() => _settingsWindow?.CollapsedChanged();
     private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
     {
         if (Dispatcher.HasShutdownStarted) return;
@@ -272,7 +275,7 @@ public partial class App : Application
     // Before the process ends, the last write must have reached the disk.
     private void FinishWriting() { try { _writing.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException) { } }
     // The settings window records its size before the final save; closing it during shutdown would be too late.
-    // Every panel powers off first (MainWindow.Lifecycle.cs): the islands narrow into dots and fade, then the process ends. The
+    // Every panel powers off first (MainWindow.Lifecycle.cs): the islands draw back into dots that sink down through the floor, then the process ends. The
     // settings window goes at once, so the exit answers immediately. A panel that never reports back cannot hold the exit up:
     // the process ends anyway once the longest power-off would have finished.
     public void ExitApplication()

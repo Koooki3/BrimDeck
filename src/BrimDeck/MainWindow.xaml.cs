@@ -82,7 +82,14 @@ public partial class MainWindow : Window
         _app = app; _lead = lead;
         _host = new WindowsHost(() => MonitorHandle, () => Settings.FullscreenExceptions);
         UpdateCollapsedGeometry();
-        _hover = new(Dispatcher, () => { _hover!.Stop(); if (!IsSuppressed && _pointerInside) SetExpanded(true); });
+        _hover = new(Dispatcher, () =>
+        {
+            _hover!.Stop();
+            if (IsSuppressed || !_pointerInside) return;
+            // Opened by hovering: the panel centres on the pointer (see SetExpanded).
+            if (PresentationSource.FromVisual(Stage) is not null) _openCentre = Stage.PointFromScreen(WindowsHost.Cursor()).X + _windowOffset;
+            SetExpanded(true);
+        });
         _leave = new(Dispatcher, () => CheckPointerExit(WindowsHost.Cursor()));
         _pointerTrack = new(Dispatcher, TrackPointer) { Interval = TimeSpan.FromMilliseconds(TrackNear) };
         _pageSwitchHold = new(Dispatcher, () =>
@@ -162,7 +169,7 @@ public partial class MainWindow : Window
     // moves between the notch, the capsule and the indicator.
     private void ApplySettings(bool animatePage)
     {
-        // Powering off holds the panel as it is; RestoreAfterPowerOff applies the settings once it has gone.
+        // Powering off (exit) holds the panel as it is.
         if (_poweringOff) return;
         // An exception added or removed in settings changes the context before the next poll; read it again so that the
         // panel hides or returns in this pass.
@@ -180,11 +187,12 @@ public partial class MainWindow : Window
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
         // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is
-        // every page at the largest size a drag can give it, and the collapsed surface at the widest any form can be, with room
-        // on either side for the resize grips just outside them (ResizeGrips). Only Island animates.
+        // every page at the largest size a drag can give it, and the collapsed surface at the widest any form can be on this
+        // monitor, with room on either side for the resize grips just outside them (ResizeGrips). The notch and the capsule may be
+        // as wide as the monitor, so the window is as wide as the monitor too. Only Island animates.
         var largest = DeckPages.Largest(Settings);
         largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight));
-        double widestSurface = Math.Max(Math.Max(CollapsedLimits.NotchWidthMax, CollapsedLimits.CapsuleWidthMax), CollapsedLimits.LineLengthMax);
+        double widestSurface = Enum.GetValues<CompactStyle>().Max(style => CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip).Max);
         Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Math.Max(Fit(largest.Width), widestSurface), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
         double hostHeight = largest.Height;
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
@@ -197,23 +205,25 @@ public partial class MainWindow : Window
         Place(bounds, scale);
         UpdateClock();
         RenderCompact();
-        // Hiding and showing (the tray's hide, a full-screen rule) powers the surface off and boots it again (MainWindow.Lifecycle.cs)
-        // when the change asks for animation; every other change stays immediate.
-        bool animate = animatePage && !_preview && Soft.Enabled && Settings.AnimationDuration > 0;
+        // Hiding and showing again (the tray, a full-screen rule) are immediate. The boot plays only when the panel first
+        // appears (Loaded); the power-off only when BrimDeck exits (App.ExitApplication).
         // The window's own opacity is no longer animated; a build that faded it may have left it lowered.
         if (Opacity < 1) { BeginAnimation(OpacityProperty, null); Opacity = 1; }
         if (IsSuppressed)
         {
             _hover.Stop(); _leave.Stop(); _pointerInside = false;
-            if (animate && wasVisible) PowerOff(RestoreAfterPowerOff);
-            else { SetExpanded(false, true); Hide(); }
+            // A boot cut short here never reaches its own reset: the dot's lift and squash would hold their last frame and
+            // squash the whole surface once it shows again (without a boot).
+            ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
+            ResetDotPose();
+            SetExpanded(false, true); Hide();
         }
         else
         {
-            bool appearing = !IsVisible && animate;
+            bool appearing = !IsVisible;
             if (!IsVisible) Show();
+            if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
             SetExpanded(_expanded, !animatePage || !wasVisible);
-            if (appearing) Boot();
         }
         UpdatePointerTracking();
         RenderUsage();
@@ -222,7 +232,8 @@ public partial class MainWindow : Window
     // has now. A window on a monitor with another scale is therefore first moved onto the target in one step, which gives
     // it the target's DPI; setting Left and then Top could pass it over a third monitor on the way.
     // The window is centred on the collapsed surface and kept on the monitor. It is at least as wide as the surface and the
-    // pages, so the island, and the open panel centred on it, always lie inside the window. Only the surface and the nearly
+    // pages (as wide as the monitor, see ApplySettings), so the island and the open panel, wherever it is centred, always lie
+    // inside the window. Only the surface and the nearly
     // transparent hover strip are drawn; the rest of the layered window stays fully transparent and lets clicks through.
     private void Place(Rect bounds, double scale)
     {
@@ -249,16 +260,22 @@ public partial class MainWindow : Window
         WorkDip = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
         Collapsed = ShapeFor(EffectiveStyle);
     }
-    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, Settings.CompactAutoWidth(style) ? _compactWanted : 0);
-    // The width the collapsed content asks for while it shows system readings; 0 keeps the saved width (see CollapsedGeometry).
-    private double _compactWanted;
+    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
+        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null);
+    // The width the collapsed content asks for (see CollapsedGeometry); NaN until the row is first built, which keeps the saved width.
+    private double _compactWanted = double.NaN;
+    // Where the pointer was when hovering opened the panel, in DIPs from the monitor's left edge; null when the panel was opened
+    // another way (the hotkey) or is closed.
+    private double? _openCentre;
     // The content changed what it asks for: the collapsed surface moves to the new width with its usual animation, and the window
     // grows first when the surface would be wider than it.
     private void FitCompactToContent()
     {
         var before = Collapsed;
         UpdateCollapsedGeometry();
-        if (Equals(Collapsed.Surface, before.Surface) || _expanded) return;
+        if (Equals(Collapsed.Surface, before.Surface)) return;
+        _app.CollapsedChanged();
+        if (_expanded) return;
         // A surface that no longer lies within the window (wider, or moved along a screen edge) places the window again.
         if (Collapsed.Surface.X < _windowOffset || Collapsed.Surface.X + Collapsed.Surface.Width > _windowOffset + Width) ApplySettings(); else SetExpanded(false);
     }
@@ -369,7 +386,8 @@ public partial class MainWindow : Window
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
-        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _compactClock = null; _compactStrip = null;
+        if (_stripCarousel is not null) { _stripElapsed = _stripCarousel.Elapsed; _stripCarousel.SetRunning(false, false); }
+        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null;
         if (_alert is not null)
         {
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;
@@ -426,6 +444,7 @@ public partial class MainWindow : Window
     public void SetExpanded(bool expanded, bool instant = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
+        if (expanded && !_expanded) EndBoot();
         // Only the panel under the pointer is open; the others close at once and give up the Escape key.
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
@@ -453,10 +472,18 @@ public partial class MainWindow : Window
         var radius = expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)
             : new CornerRadius(shape.TopRadius, shape.TopRadius, shape.BottomRadius, shape.BottomRadius);
         double gap = expanded ? panelTop : shape.Surface.Y;
-        // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor.
-        double panelLeft = Math.Clamp(shape.Surface.X + shape.Surface.Width / 2 - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
+        // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor. A
+        // panel opened by hovering a surface wider than itself centres on where the pointer was instead, as far as the surface's
+        // ends allow, and keeps that centre while open (page switches, resizing) without following the pointer.
+        if (!expanded) _openCentre = null;
+        double panelCentre = shape.Surface.X + shape.Surface.Width / 2;
+        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > _pageWidth)
+            panelCentre = Math.Clamp(pointer, shape.Surface.X + _pageWidth / 2, shape.Surface.Right - _pageWidth / 2);
+        double panelLeft = Math.Clamp(panelCentre - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
         double left = (expanded ? panelLeft : shape.Surface.X) - _windowOffset;
         ApplyCollapsedLayout();
+        // The boot circle is still jumping: do not grow the island to the collapsed size under its lift.
+        if (!expanded && KeepBootDot(shape)) return;
         Island.BorderThickness = new Thickness(0);
         ExpandedContent.Height = pageHeight;
         // The page and its header start headerExtra below the panel's top edge. The header row keeps its own height, so its
@@ -487,8 +514,8 @@ public partial class MainWindow : Window
         // quickly, and the content fades in once the surface is about two thirds open.
         // Open already (a page switch, a new page size), the surface reshapes over the whole of a slightly longer time, easing in
         // and out, so the change of size reads as one soft move rather than a jump.
-        // Booting (MainWindow.Lifecycle.cs), once the dot has popped up the surface swells from it into the collapsed shape on the
-        // opening spring, the compact content arriving once the shape has nearly settled.
+        // Booting (MainWindow.Lifecycle.cs), after the round dot's jumps the surface swells from that resting circle into the
+        // collapsed shape on the opening spring, the compact content arriving once the shape has nearly settled.
         // A new collapsed style chosen in the settings (MorphShape), the surface changes from one form into the other over the
         // whole of a longer move on the monitor's curve; the compact content steps out at once and comes back in its new layout
         // once the form has nearly settled.
@@ -516,7 +543,9 @@ public partial class MainWindow : Window
         }
         // Opening, the size and place spring past their end by under 2 percent of the move and settle back; the corners never
         // bounce (a radius would pass zero). A panel that has no room in the window for that give opens on the plain curve.
-        bool bounce = (booting || expanded && !reshaping) && duration > 0 && HasRoomToBounce(width, height, left, gap);
+        // Booting does not use that give: Bounce on Margin and Height would bob the whole capsule or line after the round
+        // dot has already finished its jumps (the notch sits at the top edge, so the same overshoot is barely seen).
+        bool bounce = !booting && expanded && !reshaping && duration > 0 && HasRoomToBounce(width, height, left, gap);
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Settle;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
@@ -554,6 +583,8 @@ public partial class MainWindow : Window
         Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
         Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
         Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
+        // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
+        Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
         Animate(IslandShadow, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
