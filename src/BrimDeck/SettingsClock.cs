@@ -57,13 +57,13 @@ public sealed partial class SettingsWindow
     {
         var panel = new StackPanel();
         var heading = TextLine(Loc.T("时间样式", "Clock style"), 11.5, TextSecondary); heading.Margin = new Thickness(0, 0, 0, 10); panel.Children.Add(heading);
-        // Each card shows only the time; its name is in the tooltip and read by screen readers.
+        // Each card shows only the time; its name is read by screen readers.
         var tiles = new UniformGrid { Columns = 3, Margin = new Thickness(-5, -5, -5, 9) };
         _clockTiles.Clear();
         foreach (var style in Enum.GetValues<ClockStyle>())
         {
             var tile = new RadioButton { Style = (Style)FindResource("SettingsClockTile"), GroupName = "ClockStyle" + compact, IsChecked = S.ClockStyle == style,
-                Margin = new Thickness(5), ToolTip = ClockFace.Title(style), Content = ClockPreview(style) };
+                Margin = new Thickness(5), Content = ClockPreview(style) };
             AutomationProperties.SetName(tile, Loc.T("时间样式 ", "Clock style ") + ClockFace.Title(style));
             tile.Checked += (_, _) => Change(s => s.ClockStyle = style);
             tiles.Children.Add(tile); _clockTiles.Add((tile, style));
