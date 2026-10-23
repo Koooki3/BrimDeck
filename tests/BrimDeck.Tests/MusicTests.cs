@@ -59,7 +59,38 @@ internal static class MusicTests
         using var versioned = new NeteaseLyricHandler(); using var versionedHttp = new HttpClient(versioned); using var versionedService = new LyricsService(versionedHttp);
         var firstVersion = await versionedService.FindAsync(track with { Source = "NetEase", SongId = "netease:2692035029" }, true, default);
         check("A NetEase lyric still at its first version is requested in full", firstVersion.At(1.5).Current == "first" && versioned.Requested.All(u => !u.Contains("lv=1")));
+        async Task<(Lyrics Lyrics, List<Uri> Requested)> Served(Func<Uri, HttpResponseMessage> reply)
+        {
+            using var served = new ReplyHandler(reply); using var servedHttp = new HttpClient(served); using var servedService = new LyricsService(servedHttp);
+            return (await servedService.FindAsync(track, true, default), served.Requested);
+        }
+        const string LrclibReply = "{\"trackName\":\"测试曲目\",\"artistName\":\"测试歌手\",\"duration\":200,\"syncedLyrics\":\"[00:01]歌词\"}";
+        HttpResponseMessage Moved(string location) { var moved = new HttpResponseMessage(HttpStatusCode.Found); moved.Headers.Location = new Uri(location, UriKind.RelativeOrAbsolute); return moved; }
+        var sameHost = await Served(uri => uri.AbsolutePath == "/moved" ? new(HttpStatusCode.OK) { Content = new StringContent(LrclibReply) } : Moved("/moved"));
+        check("A lyrics redirect to HTTPS on the same host is followed", sameHost.Lyrics.Lines.Count == 1 && sameHost.Requested[1].ToString() == "https://lrclib.net/moved");
+        var elsewhere = await Served(uri => uri.Host == "lrclib.net" ? Moved("https://lyrics.example/get") : new(HttpStatusCode.OK) { Content = new StringContent(LrclibReply) });
+        check("A lyrics redirect to another host or to HTTP is not followed",
+            elsewhere.Lyrics.Lines.Count == 0 && elsewhere.Requested.All(uri => uri.Host != "lyrics.example")
+            && (await Served(uri => uri.Scheme == "https" ? Moved("http://lrclib.net/get") : new(HttpStatusCode.OK) { Content = new StringContent(LrclibReply) })).Requested.All(uri => uri.Scheme == "https"));
+        var loop = await Served(uri => Moved("/again"));
+        check("Lyrics redirects stop after a few hops", loop.Lyrics.Lines.Count == 0 && loop.Requested.Count(uri => uri.Host == "lrclib.net") <= 3 * 2);
+        string padded = LrclibReply.Insert(1, "\"pad\":\"" + new string('x', LyricsService.MaxResponseBytes) + "\",");
+        var large = await Served(_ => new(HttpStatusCode.OK) { Content = new StringContent(padded) });
+        check("A lyrics reply over the size limit is given up", large.Lyrics.Lines.Count == 0);
+        var undeclared = await Served(_ => new(HttpStatusCode.OK) { Content = new StreamContent(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(padded))) });
+        check("A lyrics reply without a declared length is cut off at the limit", undeclared.Lyrics.Lines.Count == 0);
+        var bom = await Served(_ => new(HttpStatusCode.OK) { Content = new ByteArrayContent([0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes(LrclibReply)]) });
+        check("A lyrics reply under the limit is still read, byte order mark included", bom.Lyrics.Lines.Count == 1);
         await QqLyricsTests.Run(check);
+    }
+    private sealed class ReplyHandler(Func<Uri, HttpResponseMessage> reply) : HttpMessageHandler
+    {
+        public readonly List<Uri> Requested = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            lock (Requested) Requested.Add(request.RequestUri!);
+            return Task.FromResult(reply(request.RequestUri!));
+        }
     }
     private static void PageLayout(Action<string, bool> check)
     {
