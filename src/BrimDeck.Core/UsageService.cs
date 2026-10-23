@@ -78,11 +78,13 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         ClaudeQuotaCache.Save(quotaCache, snapshot, account);
     }
     // A sign-in that is gone or rejected keeps no quota, on disk either. A sign-in that could not be read just now only drops
-    // the reading of this run.
+    // the reading of this run; the file is read again the next time a reading is needed, so once the sign-in can be read and
+    // the API is still rate limited, the kept quotas show again.
     private void ForgetClaude(bool signedOut = true)
     {
         _claudeRetained = null; _claudeAccount = "";
-        if (!signedOut || quotaCache is null) return;
+        if (!signedOut) { _claudeCacheRead = false; return; }
+        if (quotaCache is null) return;
         _claudeCacheRead = true;
         _claudeSaved = "";
         ClaudeQuotaCache.Delete(quotaCache);
