@@ -34,7 +34,7 @@ $exe = Join-Path $InstallDir 'BrimDeck.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "BrimDeck.exe was not found in $InstallDir. Pass -InstallDir with BrimDeck's folder." }
 $unlock = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -ErrorAction SilentlyContinue
 if ($unlock.AllowDevelopmentWithoutDevLicense -ne 1) {
-    throw 'Developer Mode is off. Windows registers this unsigned identity package only in Developer Mode (Settings > System > For developers). BrimDeck works without it, in polling mode.'
+    throw 'Developer Mode is off. Windows registers this unsigned identity package only in Developer Mode (Settings > System > For developers). Developer Mode lets any unsigned app package be installed on this PC, so turn it on only if you accept that. BrimDeck works without it, in polling mode.'
 }
 if (Get-Process BrimDeck -ErrorAction SilentlyContinue) { throw 'Quit BrimDeck from its tray icon first, then run this again.' }
 if ($existing) { $existing | Remove-AppxPackage }

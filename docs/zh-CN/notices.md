@@ -21,7 +21,7 @@
 
 BrimDeck 作为普通桌面程序运行时，Windows 不向它发送通知变化事件，因此使用**轮询模式**：每 2.5 秒检查是否有新通知（约 2.5 毫秒 CPU），每 15 秒完整读取一次列表；新通知通常在 0.2–2.6 秒内出现。实测空闲开销约为单个核心的 0.36%。
 
-注册**身份包**后改用**事件模式**，几乎没有空闲开销。安装目录的 `identity\Register-NoticeIdentity.ps1` 会为当前用户注册一个只含清单的身份包，以安装目录作为外部位置，不复制、不移动任何文件，也不需要管理员权限。Windows 只在“开发者模式”下注册这种未签名的包；没有开发者模式时保持轮询即可，功能完全相同。卸载 BrimDeck 时会为执行卸载的用户自动注销；升级时保留。同一台电脑上的其他 Windows 用户若也注册过，需要各自运行 `Register-NoticeIdentity.ps1 -Remove`（Windows 不允许普通权限移除其他用户的包）。
+注册**身份包**后改用**事件模式**，几乎没有空闲开销。安装目录的 `identity\Register-NoticeIdentity.ps1` 会为当前用户注册一个只含清单的身份包，以安装目录作为外部位置，不复制、不移动任何文件，也不需要管理员权限。Windows 只在“开发者模式”下注册这种未签名的包；没有开发者模式时保持轮询即可，功能完全相同。注意：开发者模式是系统级设置，打开后任何未签名的应用包都能在这台电脑上安装，不只是 BrimDeck 的身份包；如果不需要事件模式省下的那点开销，建议保持关闭。卸载 BrimDeck 时会为执行卸载的用户自动注销；升级时保留。同一台电脑上的其他 Windows 用户若也注册过，需要各自运行 `Register-NoticeIdentity.ps1 -Remove`（Windows 不允许普通权限移除其他用户的包）。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "<BrimDeck 安装目录>\identity\Register-NoticeIdentity.ps1"
