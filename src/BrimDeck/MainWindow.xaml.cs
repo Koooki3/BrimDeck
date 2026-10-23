@@ -255,9 +255,14 @@ public partial class MainWindow : Window
         WorkDip = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
         Collapsed = ShapeFor(EffectiveStyle);
     }
-    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, Settings.CompactAutoWidth(style) ? _compactWanted : 0);
+    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
+        Settings.CompactAutoWidth(style) ? _compactWanted : 0, _compactRequired);
     // The width the collapsed content asks for while it shows system readings; 0 keeps the saved width (see CollapsedGeometry).
     private double _compactWanted;
+    // The width of what the collapsed content must show (CompactMusicLayout.Required); the surface is never narrower.
+    private double _compactRequired;
+    // The collapsed row last built; the next one carries its parts over (CompactRow).
+    private CompactRow? _compactRow;
     // The content changed what it asks for: the collapsed surface moves to the new width with its usual animation, and the window
     // grows first when the surface would be wider than it.
     private void FitCompactToContent()
@@ -380,7 +385,7 @@ public partial class MainWindow : Window
         _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _compactClock = null; _compactStrip = null;
         if (_alert is not null)
         {
-            CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;
+            CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed; _compactRow = null;
             // LayoutCompactAlert (MainWindow.CompactLayout.cs) builds the alert row from _alert and sizes it for the shape.
             ApplyCollapsedLayout();
             // The notice hides the system readings, which then need none.

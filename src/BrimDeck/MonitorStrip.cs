@@ -5,9 +5,9 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, then CPU,
-// memory and GPU each as a ring gauge with its figure, then download and upload; or, brief, the three rings alone. It asks for
-// the width of everything chosen (PreferredWidth) and shows what fits in the width it gets, dropping whole readings
-// (CompactMonitor.Fit), so it never cuts through a figure. It draws itself once per reading; the collapsed row stays still
+// memory and GPU each as a ring gauge with its figure, then download and upload; or, brief, the three rings alone. It offers
+// each reading's width (Candidates) and the collapsed row admits the readings that fit whole (Admit, CompactMusicLayout); on
+// its own it shows what fits the width it gets (CompactMonitor.Fit). Either way it never cuts through a figure. It draws itself once per reading; the collapsed row stays still
 // between readings. When the row narrows or widens (a drag on its end, the lyric beside it changing), a reading that no longer
 // fits fades and shrinks out of its place while the others slide together, and one that fits again comes back the same way.
 // The panel keeps those transitions (StripPresence) across rebuilds of the row, which happen on every change of its width.
@@ -52,22 +52,23 @@ internal sealed class MonitorStrip : FrameworkElement
     // Brief shows only the rings; columns and rates are not part of it.
     private CompactMonitorItems Shown => _brief ? _items & (CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu) : _items;
     public double PreferredWidth => CompactMonitor.Width(Shown, ItemWidth, _gap);
+    // What the collapsed row fits (CompactMusicLayout): each chosen reading's width in the order they stay, and the space between two.
+    public IReadOnlyList<double> Candidates => [.. CompactMonitor.Priority.Where(item => (Shown & item) != 0).Select(ItemWidth)];
+    public double Gap => _gap;
 
-    public void Update(MonitorSnapshot? snapshot) { _snapshot = snapshot; InvalidateVisual(); }
-
-    // The readings that fit the width the row gives; a change starts their transitions. A row built again in the middle of one
-    // carries it on, as the old row no longer draws.
-    protected override Size ArrangeOverride(Size finalSize)
+    // The row's choice: the first count of the Candidates. From then on the strip shows these instead of what fits its own
+    // width, and the row gives it exactly the width they take as they come and go (DrawnWidth), so nothing is cut at its edges.
+    private CompactMonitorItems? _admitted;
+    public void Admit(int count)
     {
-        if (_presence.Set(Shown, CompactMonitor.Fit(Shown, ItemWidth, _gap, finalSize.Width)) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
-        return finalSize;
+        _admitted = CompactMonitor.First(Shown, count);
+        ClipToBounds = false;
+        if (_presence.Set(Shown, _admitted.Value)) Motion.Start(this, Step);
     }
-    private bool Step(double now) { InvalidateVisual(); return _presence.Moving(now); }
-
-    protected override void OnRender(DrawingContext drawing)
+    // The width the readings take now, each in proportion to how present it is; how present the most present one is; and
+    // whether any is still coming or going.
+    public double DrawnWidth(double now)
     {
-        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), center = _row / 2, now = Eased.Now;
-        // Each reading takes its width and the gap after it in proportion to how present it is, so the row closes up smoothly.
         double total = 0, last = 0;
         foreach (var item in CompactMonitor.Order)
         {
@@ -76,7 +77,28 @@ internal sealed class MonitorStrip : FrameworkElement
             if (p <= 0) continue;
             total += (ItemWidth(item) + _gap) * p; last = p;
         }
-        total -= _gap * last;
+        return Math.Max(0, total - _gap * last);
+    }
+    public double Presence(double now) => CompactMonitor.Order.Where(item => (Shown & item) != 0).Select(item => _presence.At(item, now)).DefaultIfEmpty(0).Max();
+    public bool Moving(double now) => _presence.Moving(now);
+
+    public void Update(MonitorSnapshot? snapshot) { _snapshot = snapshot; InvalidateVisual(); }
+
+    // The readings that fit the width the row gives (or that the row admitted); a change starts their transitions. A row built
+    // again in the middle of one carries it on, as the old row no longer draws.
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        var fitting = _admitted ?? CompactMonitor.Fit(Shown, ItemWidth, _gap, finalSize.Width);
+        if (_presence.Set(Shown, fitting) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
+        return finalSize;
+    }
+    private bool Step(double now) { InvalidateVisual(); return _presence.Moving(now); }
+
+    protected override void OnRender(DrawingContext drawing)
+    {
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), center = _row / 2, now = Eased.Now;
+        // Each reading takes its width and the gap after it in proportion to how present it is, so the row closes up smoothly.
+        double total = DrawnWidth(now);
         if (total <= 0) return;
         double x = _centered ? (w - total) / 2 : w - total;
         var s = _snapshot;
@@ -190,5 +212,7 @@ internal sealed class StripPresence
     }
 
     public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
+    // Whether any reading still shows, even fading out.
+    public bool Any(double now) => _items.Values.Any(eased => eased.At(now) > 0 || eased.Target > 0);
     public bool Moving(double now) => _items.Values.Any(eased => eased.Moving(now));
 }
