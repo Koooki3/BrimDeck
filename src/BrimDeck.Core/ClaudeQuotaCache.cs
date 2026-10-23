@@ -18,6 +18,8 @@ public static class ClaudeQuotaCache
 {
     public static readonly TimeSpan MaxAge = TimeSpan.FromDays(7);
     public const string FileName = "claude-quota.json";
+    // How old the kept reading may grow before a refresh that read the same values writes the file again (UsageService.KeepOnline).
+    public static readonly TimeSpan RewriteAfter = TimeSpan.FromMinutes(10);
 
     // The sources are kept as which sign-in and which plan origin, not as text: a text written in the language of the day would
     // still show in that language after a change of language and a restart. They are named again when the file is read.

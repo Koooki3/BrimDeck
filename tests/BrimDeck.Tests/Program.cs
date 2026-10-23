@@ -409,6 +409,21 @@ try
             Check("A Claude Code reading is kept for the account its local record names", File.ReadAllText(quotaFile).Contains(ClaudeQuotaCache.AccountHash("code-account")));
         }
         File.Delete(credentialPath); File.Delete(profilePath); File.Delete(quotaFile);
+        // The kept reading's time follows the latest online reading even when the values stay the same, without a write every refresh.
+        var cacheClock = usageClock;
+        using (var steady = new UsageService(desktopFixture, locations, quotaClient, () => cacheClock, quotaCache: quotaFile))
+        {
+            DateTimeOffset? KeptTime() => ClaudeQuotaCache.Load(quotaFile, cacheClock, "current")?.Time;
+            await steady.RefreshAsync(onlyClaude);
+            var firstKept = KeptTime();
+            cacheClock = usageClock.AddMinutes(5);
+            await steady.RefreshAsync(onlyClaude);
+            Check("A refresh that reads the same values soon after does not write the kept reading again", firstKept == usageClock && KeptTime() == usageClock);
+            cacheClock = usageClock.AddMinutes(12);
+            await steady.RefreshAsync(onlyClaude);
+            Check("Once the kept reading is ten minutes old, a refresh with the same values updates its time", KeptTime() == usageClock.AddMinutes(12));
+        }
+        File.Delete(quotaFile);
         quotaHandler.Override = null;
 
         var savedRow = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(Only(ProviderId.Claude)))!.AsObject();
