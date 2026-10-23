@@ -60,6 +60,7 @@ public sealed class NoticeHub
         var priority = EffectivePriority(rule, input.PriorityHint);
         bool quiet = rule?.Muted == true || priority == NoticePriority.Low;
         var existing = FindInstance(input.InstanceKey)
+            ?? (input.Replaces is { Length: > 0 } replaced && FindInstance(replaced) is { } previous && previous.AppKey == input.AppKey ? previous : null)
             ?? (input.ReplaceKey is { Length: > 0 } replace ? _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == replace) : null);
         if (existing is not null)
         {

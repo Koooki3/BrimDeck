@@ -16,6 +16,7 @@ try
     ModelUsageTests.Run(Check);
     await NoticeProtocolTests.Run(Check);
     NoticeCoreTests.Run(root, Check);
+    NoticeWindowsAppTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     EqualizerSignalTests.Run(Check);
