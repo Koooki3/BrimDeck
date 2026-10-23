@@ -89,54 +89,83 @@ public sealed class LogReader
         return result;
     }
 
-    // Reads complete lines after the remembered offset. A line still being written is left for the next refresh. The buffer
-    // comes from the shared pool, so a refresh that finds many changed files does not allocate a megabyte for each of them.
+    // Reads complete lines after the remembered offset. A line still being written is left for the next refresh. The first
+    // megabyte comes from the shared pool, so a refresh that finds many changed files does not allocate one for each of them.
+    // A longer line gets a buffer of its own, collected after the read, instead of leaving large, rarely rented arrays in the pool.
     private void Parse(string file, ProviderId id, CacheItem item, FileInfo info)
     {
         using var stream = SharedFile.Open(file);
         stream.Seek(item.Offset, SeekOrigin.Begin);
-        var buffer = ArrayPool<byte>.Shared.Rent(Math.Min(Chunk, _maxLine));
+        // capacity is how much of the buffer is used: the pool may hand out a larger array than asked for, and a line is measured
+        // against _maxLine, not against the array.
+        int capacity = Math.Min(Chunk, _maxLine);
+        var pooled = ArrayPool<byte>.Shared.Rent(capacity);
+        var buffer = pooled;
         // The bytes dropped so far of a line over the limit. The offset moves past them only once the line's end is found, so a
         // long line still being written is looked at again on the next refresh and counted once, when it is complete.
         long skipped = 0;
-        bool skipping = false;
+        bool skipping = false, usage = false;
         try
         {
             int filled = 0, read;
-            while ((read = stream.Read(buffer, filled, buffer.Length - filled)) > 0)
+            while ((read = stream.Read(buffer, filled, capacity - filled)) > 0)
             {
                 filled += read;
                 int start = 0, newline;
                 while ((newline = Array.IndexOf(buffer, (byte)'\n', start, filled - start)) >= 0)
                 {
-                    if (skipping) { skipping = false; item.Offset += skipped; skipped = 0; item.Errors++; }
+                    if (skipping)
+                    {
+                        // Only a dropped line that held usage leaves a gap in the statistics. Others, such as a large tool result
+                        // or an attached file, are dropped quietly, as they always were.
+                        if (usage || HasUsageKey(buffer.AsSpan(start, newline - start))) item.Errors++;
+                        skipping = usage = false; item.Offset += skipped; skipped = 0;
+                    }
                     else ParseLine(buffer.AsMemory(start, newline - start), id, item);
                     start = newline + 1;
                 }
                 item.Offset += start;
                 Buffer.BlockCopy(buffer, start, buffer, 0, filled - start);
                 filled -= start;
-                if (filled < buffer.Length) continue;
-                // A single line fills the buffer (a large tool result): it grows up to the limit, beyond which the line is dropped.
-                if (buffer.Length < _maxLine)
+                if (filled < capacity) continue;
+                // A single line fills the buffer: it grows up to the limit, beyond which the line is dropped.
+                if (capacity < _maxLine)
                 {
-                    var larger = ArrayPool<byte>.Shared.Rent(Math.Min(_maxLine, buffer.Length * 2));
-                    Buffer.BlockCopy(buffer, 0, larger, 0, filled);
-                    ArrayPool<byte>.Shared.Return(buffer);
-                    buffer = larger;
+                    capacity = (int)Math.Min(_maxLine, capacity * 2L);
+                    if (capacity > buffer.Length)
+                    {
+                        var larger = new byte[capacity];
+                        Buffer.BlockCopy(buffer, 0, larger, 0, filled);
+                        buffer = larger;
+                    }
                 }
-                else { skipping = true; skipped += filled; filled = 0; }
+                else
+                {
+                    // The last bytes stay in the buffer, so a key split between two reads is still found.
+                    usage |= HasUsageKey(buffer.AsSpan(0, filled));
+                    skipping = true; skipped += filled - KeyTail;
+                    Buffer.BlockCopy(buffer, filled - KeyTail, buffer, 0, KeyTail);
+                    filled = KeyTail;
+                }
             }
         }
-        finally { ArrayPool<byte>.Shared.Return(buffer); }
+        finally { ArrayPool<byte>.Shared.Return(pooled); }
         item.Length = info.Length; item.Modified = info.LastWriteTimeUtc;
+    }
+
+    // ParseLine reads only lines with one of these keys.
+    private static readonly byte[][] UsageKeys = ["\"token_count\""u8.ToArray(), "\"turn_context\""u8.ToArray(), "\"usage\""u8.ToArray()];
+    private static readonly int KeyTail = UsageKeys.Max(key => key.Length) - 1;
+    private static bool HasUsageKey(ReadOnlySpan<byte> span)
+    {
+        foreach (var key in UsageKeys) if (span.IndexOf(key) >= 0) return true;
+        return false;
     }
 
     private static void ParseLine(ReadOnlyMemory<byte> line, ProviderId id, CacheItem item)
     {
         if (line.Span.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF])) line = line[3..]; // UTF-8 byte order mark
-        var span = line.Span;
-        if (span.IndexOf("\"token_count\""u8) < 0 && span.IndexOf("\"turn_context\""u8) < 0 && span.IndexOf("\"usage\""u8) < 0) return;
+        if (!HasUsageKey(line.Span)) return;
         try
         {
             using var doc = JsonDocument.Parse(line);

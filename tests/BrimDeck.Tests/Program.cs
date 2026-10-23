@@ -559,6 +559,23 @@ try
     File.WriteAllLines(Path.Combine(longProjects, "large.jsonl"), [Padded("large", 3_000_000)]);
     Check("A line longer than the first buffer but under the limit is read whole",
         new LogReader().Read(ProviderId.Claude, longRoot, now).Entries.Any(e => e.Key == "claude:large"));
+    // A long line without usage, such as a tool result or an attached file, is dropped without counting.
+    var quietRoot = Path.Combine(root, "quiet-lines"); Directory.CreateDirectory(Path.Combine(quietRoot, "projects"));
+    File.WriteAllLines(Path.Combine(quietRoot, "projects", "session.jsonl"),
+        [Padded("q1", 10), JsonSerializer.Serialize(new { type = "user", content = new string('x', 20_000) }), Padded("q2", 10)]);
+    var quiet = new LogReader(4096).Read(ProviderId.Claude, quietRoot, now);
+    Check("A long line without usage is dropped quietly", quiet.Entries.Count == 2 && quiet.UsageComplete && !quiet.UsageNote.Contains("未能读取"));
+    // "usage" starts 4 bytes before the end of the first 4096-byte read, so the key is split between two reads.
+    File.WriteAllLines(Path.Combine(quietRoot, "projects", "session.jsonl"),
+        ["{\"p\":\"" + new string('x', 4084) + "\",\"usage\":1,\"q\":\"" + new string('y', 10_000) + "\"}"]);
+    var split = new LogReader(4096).Read(ProviderId.Claude, quietRoot, now);
+    Check("A dropped line whose usage key is split between two reads is still counted", !split.UsageComplete && split.UsageNote.Contains("1 处记录未能读取"));
+    // The limit is the one given, not the size of the array the pool hands out (8192 for 5000).
+    string near = Padded("near", 4_700), over = Padded("over", 5_900);
+    File.WriteAllLines(Path.Combine(quietRoot, "projects", "session.jsonl"), [near, over]);
+    var exact = new LogReader(5000).Read(ProviderId.Claude, quietRoot, now);
+    Check("The line limit is exactly the one given",
+        near.Length < 5000 && over.Length is > 5000 and < 8192 && exact.Entries.Select(e => e.Key).SequenceEqual(["claude:near"]) && exact.UsageNote.Contains("1 处记录未能读取"));
     // A WSL distribution's file system: a user's .claude and .codex folders, and a user without any.
     var wslRoot = Path.Combine(root, "wsl-distribution");
     var wslClaude = Path.Combine(wslRoot, "home", "dev", ".claude"); Directory.CreateDirectory(Path.Combine(wslClaude, "projects"));
