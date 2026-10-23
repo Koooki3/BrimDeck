@@ -451,7 +451,8 @@ public partial class MainWindow
         }
         if (layout.MiddleHeight >= c.MiddleGap + c.LyricLine)
         {
-            _musicMessage = UI.Fixed(message, c.Lyric, c.LyricLine, UI.Tertiary);
+            // One line; a longer message (a failed full control connection) is read whole in its tooltip.
+            _musicMessage = UI.Fixed(message, c.Lyric, c.LyricLine, UI.Tertiary); _musicMessage.ToolTip = message.Length > 0 ? message : null;
             _musicMessage.Visibility = layout.ShowMessage ? Visibility.Visible : Visibility.Collapsed; middle.Children.Add(_musicMessage);
         }
         if (track.HasTimeline)
@@ -682,7 +683,7 @@ public partial class MainWindow
     private void ShowMusicError(string error)
     {
         if (_musicMessage is null) return;
-        _musicMessage.Text = error; _musicMessage.Visibility = Visibility.Visible;
+        _musicMessage.Text = error; _musicMessage.ToolTip = error; _musicMessage.Visibility = Visibility.Visible;
         if (_musicInfo is not null) foreach (UIElement child in _musicInfo.Children) child.Visibility = ReferenceEquals(child, _musicMessage) ? Visibility.Visible : Visibility.Collapsed;
     }
     private static string MusicTime(TimeSpan time) => time.TotalHours >= 1 ? $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}" : $"{(int)time.TotalMinutes}:{time.Seconds:00}";

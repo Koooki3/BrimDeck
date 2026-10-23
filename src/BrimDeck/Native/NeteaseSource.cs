@@ -100,6 +100,9 @@ internal sealed record NeteaseProcess(int Id, long Started, string Path, int? De
 internal sealed class NeteaseSource : IMediaPlayerConnection
 {
     internal const int ControlPort = 21631;
+    // A failed connection leaves BrimDeck reading only what plays, but the player keeps the port it was started with.
+    internal static string PortStillOpen => Loc.T("BrimDeck 已改为只读取播放信息。网易云如果仍在运行，它的调试端口仍然开着；以普通方式重新启动网易云即可关闭。",
+        " BrimDeck now only reads what is playing. If NetEase Cloud Music is still running, its debugging port is still open; start NetEase Cloud Music again the normal way to close it.");
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _refresh = new(1, 1);
     private readonly SemaphoreSlim _wake = new(0, 1);
@@ -175,7 +178,7 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
             if (_cdp is { Failed: true })
             {
                 _cdpFailed = true;
-                Error = (_cdp.Error ?? Loc.T("完整控制连接失败。", "The full control connection failed.")) + Loc.T(" 已恢复普通模式。", " Normal mode is restored.");
+                Error = (_cdp.Error ?? Loc.T("完整控制连接失败。", "The full control connection failed.")) + PortStillOpen;
                 _cdp.Changed -= CdpChanged; _cdp.Dispose(); _cdp = null;
             }
             if (_cdp is not null) { PublishCdp(); return; }
@@ -265,7 +268,7 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
                 if (_cdp is { } failed) { _cdp = null; failed.Changed -= CdpChanged; failed.Dispose(); }
             }
             finally { _refresh.Release(); }
-            throw new InvalidOperationException(Loc.T("未能建立完整控制连接，已恢复普通模式。", "The full control connection could not be made. Normal mode is restored."));
+            throw new InvalidOperationException(Loc.T("未能建立完整控制连接。", "The full control connection could not be made.") + PortStillOpen);
         }
         catch (OperationCanceledException) { return false; }
         catch (Exception ex) { if (!quiet) Error = ex.Message; return false; }

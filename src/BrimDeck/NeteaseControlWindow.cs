@@ -13,8 +13,8 @@ internal enum NeteaseControlAction { Restart, Start, Reconnect }
 
 internal sealed class NeteaseControlWindow : Window
 {
-    internal static string SecurityNotice => Loc.T("完整控制依赖网易云的调试端口。端口打开期间，这台电脑上的其他程序和浏览器网页有可能借此操控网易云，读取它显示的内容和登录状态。",
-        "Full control relies on the debugging port of NetEase Cloud Music. While the port is open, other programs and web pages on this PC could use it to control NetEase Cloud Music and read what it shows and its sign-in state.");
+    internal static string SecurityNotice => Loc.T("完整控制依赖网易云的调试端口。端口打开期间，这台电脑上的其他程序和浏览器网页有可能借此操控网易云，读取它显示的内容和登录状态。端口会一直开到网易云以普通方式重新启动为止，退出 BrimDeck 或连接失败都不会关闭它。",
+        "Full control relies on the debugging port of NetEase Cloud Music. While the port is open, other programs and web pages on this PC could use it to control NetEase Cloud Music and read what it shows and its sign-in state. The port stays open until NetEase Cloud Music is started again the normal way; quitting BrimDeck or a failed connection does not close it.");
     public NeteaseControlWindow(SettingsTheme theme, NeteaseControlAction action = NeteaseControlAction.Restart)
     {
         var palette = new SettingsPalette(SettingsPalette.IsDark(theme));
