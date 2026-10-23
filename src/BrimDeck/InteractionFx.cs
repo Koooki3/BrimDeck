@@ -20,7 +20,7 @@ internal static class InteractionFx
     private static readonly List<FxSurface> Surfaces = [];
     private static readonly DependencyProperty AttachedProperty = DependencyProperty.RegisterAttached("Attached", typeof(bool), typeof(InteractionFx));
 
-    // Once at startup: notices and the settings window get their layer when they first load; panels attach their own (Island).
+    // Once at startup: notices get their layer when they first load; panels attach their own (Island).
     public static void Install(App app)
     {
         MotionEnvironment.Install(app.Dispatcher);
@@ -50,7 +50,8 @@ internal static class InteractionFx
     private static void WindowLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is not Window window || !ReferenceEquals(e.OriginalSource, window) || (bool)window.GetValue(AttachedProperty)) return;
-        var scope = window switch { NoticeWindow => FxScope.Panel, SettingsWindow => FxScope.Settings, _ => (FxScope?)null };
+        // The settings window keeps its own hover and focus styles: a second layer over them reads as a stray outline.
+        var scope = window switch { NoticeWindow => FxScope.Panel, _ => (FxScope?)null };
         if (scope is null) return;
         // Above the content in the window's own adorner layer, over the content presenter, which stays when the content is replaced.
         var decorator = FindDecorator(window, 4);
@@ -297,9 +298,46 @@ internal sealed class FxSurface : Canvas
             _hasRect = true;
             if (!_hoverShown) { _hoverShown = true; Fade(_hover, 1, timing.HoverIn, Soft.Follow); }
         }
-        else if (_hoverRect.HasAnimatedProperties is false && _hoverRect.Rect != bounds) Place(_hoverRect, bounds, radius, 0);
+        // The control moved under a still light (the panel opening, a page or list moving): the light goes with it. A glide in
+        // progress already ends on the control's box, which is the base value.
+        else if (!Near(_hoverRect.Rect, bounds)) Place(_hoverRect, bounds, radius, 0);
         _spotShift.X = p.X - _spot.Width / 2; _spotShift.Y = p.Y - _spot.Height / 2;
+        Settle();
     }
+
+    // For a moment after the pointer moves, the light keeps checking where its control is, frame by frame: content that is still
+    // moving (the panel opening, a page switching, a scroll gliding) gives no pointer events, and the light would stay behind.
+    private const double SettleSeconds = .8;
+    private double _settleUntil;
+    private bool _settleHooked;
+
+    private void Settle()
+    {
+        _settleUntil = Eased.Now + SettleSeconds;
+        if (_settleHooked) return;
+        _settleHooked = true;
+        CompositionTarget.Rendering += SettleFrame;
+    }
+
+    private void SettleFrame(object? sender, EventArgs e)
+    {
+        if (_target is { } target && _hoverShown && !_detached)
+        {
+            var bounds = BoundsOf(target);
+            if (bounds.IsEmpty || bounds.Width < 4 || bounds.Height < 4) HideHover(Timing);
+            else if (!Near(_hoverRect.Rect, bounds)) Place(_hoverRect, bounds, Math.Min(CornerOf(target), Math.Min(bounds.Width, bounds.Height) / 2), 0);
+        }
+        if (_target is null || !_hoverShown || _detached || Eased.Now > _settleUntil) Unsettle();
+    }
+
+    private void Unsettle()
+    {
+        if (!_settleHooked) return;
+        _settleHooked = false;
+        CompositionTarget.Rendering -= SettleFrame;
+    }
+
+    private static bool Near(Rect a, Rect b) => !a.IsEmpty && !b.IsEmpty && Math.Abs(a.X - b.X) < .5 && Math.Abs(a.Y - b.Y) < .5 && Math.Abs(a.Width - b.Width) < .5 && Math.Abs(a.Height - b.Height) < .5;
 
     // Once per leave: a fade restarted on every move would never finish.
     private void HideHover(MotionTiming timing)
@@ -414,7 +452,7 @@ internal sealed class FxSurface : Canvas
     // Ends everything at once, as if nothing had been shown.
     public void Reset()
     {
-        Unhook();
+        Unhook(); Unsettle();
         _target = null; _hasRect = false; _hoverShown = false; _trailShown = false; _lastSource = null; _lastTarget = null;
         foreach (var element in new UIElement[] { _hover, _trail, _focus }) { element.BeginAnimation(OpacityProperty, null); element.Opacity = 0; }
         _hoverRect.BeginAnimation(RectangleGeometry.RectProperty, null);
@@ -440,25 +478,35 @@ internal sealed class FxSurface : Canvas
         geometry.RadiusX = geometry.RadiusY = radius;
     }
 
-    // The control a pointer event belongs to: a button of any kind, a list or combo box item, a tab, a slider, or anything that
-    // shows the hand cursor. Scroll bars, text fields and whole surfaces (a notice, a page) are left alone.
+    // The control a pointer event belongs to: a button of any kind, a list or combo box item, a tab or a slider, and only one that
+    // draws a box of its own (a fill or a border) where the light and edge would go. Larger clickable areas (a usage card, a
+    // monitor row) and buttons drawn as bare text or icons on a wider transparent box are left alone: an outline around their
+    // layout box would not match anything on screen. So are scroll bars, text fields and whole surfaces (a notice, a page).
     private FrameworkElement? TargetOf(DependencyObject? source)
     {
         if (source is null) return null;
-        if (ReferenceEquals(source, _lastSource)) return _lastTarget is { IsEnabled: true } ? _lastTarget : null;
+        if (ReferenceEquals(source, _lastSource)) return _lastTarget is { IsEnabled: true } && HasChrome(_lastTarget) ? _lastTarget : null;
         FrameworkElement? found = null;
         for (var node = source; node is not null && !ReferenceEquals(node, _scope); node = Up(node))
         {
             if (node is ScrollBar or TextBoxBase or PasswordBox) { found = null; break; }
             if (node is NoticeSurface or IslandBorder) break;
-            if (found is null && node is FrameworkElement element
-                && (node is ButtonBase or ListBoxItem or ComboBox or TabItem or Slider || element.ReadLocalValue(CursorProperty) == Cursors.Hand))
-                found = element;
+            if (found is null && node is ButtonBase or ListBoxItem or ComboBox or TabItem or Slider) found = (FrameworkElement)node;
         }
         if (found is not null && (!found.IsEnabled || !found.IsVisible || TooLarge(BoundsOf(found)))) found = null;
         _lastSource = source; _lastTarget = found;
-        return found;
+        return found is not null && HasChrome(found) ? found : null;
     }
+
+    // Whether the control shows a box now (its hover style included): a visible fill or border on itself or on the border its
+    // template starts with.
+    private static bool HasChrome(FrameworkElement element)
+    {
+        var border = element as Border ?? (VisualTreeHelper.GetChildrenCount(element) > 0 ? VisualTreeHelper.GetChild(element, 0) as Border : null);
+        if (border is null) return element is Control control && Visible(control.Background);
+        return Visible(border.Background) || border.BorderThickness.Left > 0 && Visible(border.BorderBrush);
+    }
+    private static bool Visible(Brush? brush) => brush is not null && brush.Opacity > 0 && (brush is not SolidColorBrush solid || solid.Color.A > 8);
     private static DependencyObject? Up(DependencyObject node) => node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node);
 
     private bool IsWithin(DependencyObject element)
@@ -467,7 +515,8 @@ internal sealed class FxSurface : Canvas
         return false;
     }
 
-    private bool TooLarge(Rect bounds) => bounds.IsEmpty || ActualWidth > 0 && ActualHeight > 0 && bounds.Width * bounds.Height > ActualWidth * ActualHeight * .45;
+    // A control the size of a card or larger is a surface, not a control to light.
+    private bool TooLarge(Rect bounds) => bounds.IsEmpty || bounds.Height > 64 || ActualWidth > 0 && ActualHeight > 0 && bounds.Width * bounds.Height > ActualWidth * ActualHeight * .12;
 
     // The element's box on this layer, cut to the scroll viewers it sits in, so a control scrolled half out of sight lights
     // only its visible half.
