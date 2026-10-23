@@ -13,6 +13,7 @@ internal static class NoticeCoreTests
         Coordinator(check);
         History(root, check);
         Geometry(check);
+        Motion(check);
         Routing(check);
         Intake(check);
         Pages(check);
@@ -284,6 +285,35 @@ internal static class NoticeCoreTests
         var nan = NoticeGeometry.Frame(notch, monitor, work, NoticeForm.Toast, double.NaN, double.PositiveInfinity);
         check("Unknown sizes fall back to the range", double.IsFinite(nan.Rect.Width) && double.IsFinite(nan.Rect.Height));
         check("The collapsed frame is the surface itself", NoticeGeometry.Collapsed(notch).Rect == notch.Surface);
+        // A notice ends exactly on the island it returns to, in every collapsed form, so the island takes over without a jump.
+        foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule, CompactStyle.Line })
+        {
+            var island = CollapsedGeometry.Resolve(new DeckSettings(), style, monitor, work);
+            var end = NoticeGeometry.Collapsed(island);
+            check($"A notice returns onto the {style} island's outline", end.Rect == island.Surface && end.TopRadius == island.TopRadius
+                && end.BottomRadius == island.BottomRadius && end.Shoulder == island.Shoulder);
+            var start = NoticeGeometry.Frame(island, monitor, work, NoticeForm.Toast, 300, 48);
+            check($"A {style} notice grows and shrinks about the island's middle", Math.Abs(start.Rect.X + start.Rect.Width / 2 - (island.Surface.X + island.Surface.Width / 2)) < .001);
+        }
+    }
+
+    private static void Motion(Action<string, bool> check)
+    {
+        NoticeMotion.Track[] all = [NoticeMotion.Surface, NoticeMotion.ArriveContent, NoticeMotion.ArriveTint, NoticeMotion.ArriveGlow, NoticeMotion.FollowContent,
+            NoticeMotion.ReturnContent, NoticeMotion.ReturnSurface, NoticeMotion.ReturnGlow, NoticeMotion.ReturnTint, NoticeMotion.Landing, NoticeMotion.OpenOut, NoticeMotion.OpenIn];
+        check("Notice motion: every track lies within its move", all.All(t => t.Start >= 0 && t.End <= 1 && t.Start < t.End));
+        check("Notice motion: a move takes the panel's own duration", NoticeMotion.Length(360, true) == 360 && NoticeMotion.Length(720, true) == 720);
+        check("Notice motion: nothing moves without animations", NoticeMotion.Length(360, false) == 0);
+        check("Notice motion: a duration outside the settings' range is kept to it", NoticeMotion.Length(5, true) == 100 && NoticeMotion.Length(9000, true) == 1000);
+        check("Notice motion: the surface returns to the island when its move ends", NoticeMotion.ReturnSurface.End == 1 && NoticeMotion.Surface.End == 1);
+        check("Notice motion: what leaves has gone before what arrives starts",
+            NoticeMotion.OpenOut.End <= NoticeMotion.OpenIn.Start && NoticeMotion.ReturnContent.End <= NoticeMotion.Landing.Start && NoticeMotion.ReturnContent.End <= NoticeMotion.FollowContent.Start);
+        check("Notice motion: the content leaves before the surface starts to settle", NoticeMotion.ReturnContent.End > NoticeMotion.ReturnSurface.Start && NoticeMotion.ReturnContent.Start == 0);
+        // The indicator's flat color shows only at the line's size: gone within the opening spring's first frames, back only once
+        // the settling surface is nearly the line (the panel's own indicator tracks).
+        check("Notice motion: the indicator's color never shows as a large block", NoticeMotion.ArriveTint.End <= .12 && NoticeMotion.ReturnTint.Start >= .85
+            && Curves.Bezier(.45, 0, .12, 1, (NoticeMotion.ReturnTint.Start - NoticeMotion.ReturnSurface.Start) / NoticeMotion.ReturnSurface.Length) > .9);
+        check("Notice motion: the island's content lands as the panel's compact content does", Math.Abs(NoticeMotion.RevealLength - .38) < 1e-9);
     }
 
     private static void Routing(Action<string, bool> check)

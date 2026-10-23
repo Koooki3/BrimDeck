@@ -8,6 +8,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using BrimDeck.Core.Notices;
 using BrimDeck.Native;
 
 namespace BrimDeck;
@@ -456,6 +457,8 @@ public partial class MainWindow : Window
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
         // A hand-over cut short by closing the panel leaves nothing behind for the next opening.
         if (expanded && !_expanded) _handover.Drop();
+        // Opening over a notice, the panel grows on from the notice's outline (StartFromNotice) rather than from the island.
+        NoticeFrame? fromNotice = expanded && !_expanded && !instant && !_preview ? _noticeWindow?.HandOver() : null;
         if (expanded) _noticeWindow?.Abort();
         bool wasExpanded = _expanded;
         _expanded = expanded;
@@ -493,6 +496,7 @@ public partial class MainWindow : Window
         ContentCanvas.Width = _pageWidth;
         ContentCanvas.Height = ExpandedContent.Height;
         int duration = !instant && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
+        if (fromNotice is { } notice && duration > 0) StartFromNotice(notice);
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.

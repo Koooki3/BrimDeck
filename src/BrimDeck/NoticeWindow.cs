@@ -17,14 +17,14 @@ namespace BrimDeck;
 
 // One panel's dynamic notices. The window lies over the panel's collapsed island and is shown only while a notice is: the
 // notice grows out of the island's exact outline in the island's own theme material, shows the application's icon, title and
-// summary, opens into its details on hover or click, and shrinks back into the island at the end, moving as the island does
-// (Soft.Bounce opening, Soft.Settle closing). Its window is sized once per notice to hold the largest form, so nothing resizes
-// the window while it moves; only the drawn surface is hit-tested, the rest lets clicks through. It never takes focus unless
-// the notices hotkey asks for the keyboard.
+// summary, opens into its details on hover or click, and shrinks back into the island at the end, moving as the island does,
+// on the panel's own clock and tracks (NoticeMotion: Soft.Bounce opening, Soft.Settle closing). Its window is sized once per
+// notice to hold the largest form, so nothing resizes the window while it moves; only the drawn surface is hit-tested, the rest
+// lets clicks through. It never takes focus unless the notices hotkey asks for the keyboard. Opened over, the panel takes the
+// notice's outline and grows on from it (HandOver).
 internal sealed class NoticeWindow : Window
 {
-    // Durations at the default animation length (360 ms); the user's length scales them.
-    private const double EnterMs = 300, ExitMs = 200, DetailMs = 320, HoverOpenMs = 250, GlowMargin = 32;
+    private const double HoverOpenMs = 250, GlowMargin = 32;
     private readonly MainWindow _deck;
     private readonly App _app;
     private readonly Canvas _stage = new() { Background = null };
@@ -44,6 +44,9 @@ internal sealed class NoticeWindow : Window
     // The details' row of actions; the keyboard starts on its last button, the main action.
     private Panel? _actions;
     private int _generation;
+    // The item the details were last built for; opening them for the same item only moves the surface.
+    private AttentionItem? _detailFor;
+    private bool _dressed;
 
     public NoticeWindow(MainWindow deck, App app)
     {
@@ -85,8 +88,10 @@ internal sealed class NoticeWindow : Window
     public void Present(AttentionItem item)
     {
         bool continuing = IsVisible;
-        _item = item; _leaving = false; _openFailed = false; _generation++;
-        _showingDetail = false; _keyboard = false;
+        _item = item; _leaving = false; _openFailed = false;
+        int generation = ++_generation;
+        _showingDetail = false; _keyboard = false; _detailFor = null;
+        // Everything the move needs is built before it starts: the window's size and place, the theme and the toast.
         Layout();
         Dress();
         BuildToast();
@@ -94,28 +99,38 @@ internal sealed class NoticeWindow : Window
         {
             // Starts exactly as the island: its outline, its place and its material. The indicator has no material of its own;
             // the notice starts in its flat color and takes the theme's surface as it grows.
-            SetFrame(_collapsed, 0);
+            SetFrame(_collapsed, 0, NoticeMotion.Surface);
             _surface.IslandColor = PanelTheme.ColorOf("indicator");
             Set(_surface, NoticeSurface.IslandOpacityProperty, Indicator ? 1d : 0d);
             Set(_toast, OpacityProperty, 0d); Set(_detail, OpacityProperty, 0d); _detail.Visibility = Visibility.Collapsed; _toast.Visibility = Visibility.Visible;
             Set(_glow, OpacityProperty, 0d);
             Show();
-            // The notice now stands exactly where the island is; the island underneath is hidden while it does.
-            _deck.SetIslandCovered(true);
             // Shown on a monitor with another scale, Windows has just given the window that scale; it is placed again in it.
             Place();
             NoticeNative.BringToTop(new WindowInteropHelper(this).Handle);
         }
         var cursor = CursorInStage();
         _arrivedUnderPointer = new Rect(_toastFrame.Rect.X - _stageRect.X, _toastFrame.Rect.Y - _stageRect.Y, _toastFrame.Rect.Width, _toastFrame.Rect.Height).Contains(cursor);
-        double duration = Duration(EnterMs);
-        SetFrame(_toastFrame, duration, Soft.Bounce);
-        Animate(_surface, NoticeSurface.IslandOpacityProperty, 0, duration, 0, .5, Soft.Out);
-        Animate(_detail, OpacityProperty, 0, duration * .5, 0, 1, Soft.Out, () => { if (!_showingDetail) _detail.Visibility = Visibility.Collapsed; });
         _toast.Visibility = Visibility.Visible;
-        Animate(_toast, OpacityProperty, 1, duration, continuing ? .2 : .35, 1, Soft.Out);
-        GlowIn(duration);
         Announce();
+        // A window just shown draws its first frame late (Windows sets up the layered window, WPF lays out the toast). Started
+        // now, the growth would spend its first frames behind that and seem to jump; it starts once that frame is drawn. The
+        // notice stands in the island's place until then, drawn over the island itself, so neither ever goes missing.
+        if (continuing || Duration() <= 0) Arrive(continuing);
+        else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => { if (generation == _generation && _item is not null) Arrive(false); });
+    }
+
+    // The notice grows out of the island (or out of the notice before it) on the opening spring, as the panel opens.
+    private void Arrive(bool continuing)
+    {
+        // The notice now stands exactly where the island is; the island underneath is hidden while it does.
+        if (!continuing) _deck.SetIslandCovered(true);
+        double duration = Duration();
+        SetFrame(_toastFrame, duration, NoticeMotion.Surface, Soft.Bounce);
+        Animate(_surface, NoticeSurface.IslandOpacityProperty, 0, duration, NoticeMotion.ArriveTint, Soft.Out);
+        Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.InOut, () => { if (!_showingDetail && _detailFor is null) _detail.Visibility = Visibility.Collapsed; });
+        Animate(_toast, OpacityProperty, 1, duration, continuing ? NoticeMotion.FollowContent : NoticeMotion.ArriveContent, Soft.Out);
+        GlowIn(duration);
     }
 
     // The shown notice changed in place (a task's progress, a burst from the same application).
@@ -130,9 +145,11 @@ internal sealed class NoticeWindow : Window
         // does not start the morph again (it would redraw the window at full frame rate for the whole burst).
         bool moved = frame != _toastFrame;
         _toastFrame = frame;
+        if (!_showingDetail) _detailFor = null;
         BuildToast();
-        if (_showingDetail) ShowDetailFrame(Duration(DetailMs) * .6, Soft.Follow);
-        else if (moved) SetFrame(_toastFrame, Duration(EnterMs) * .6, Soft.Follow);
+        // A change in place glides as the monitor's selections do.
+        if (_showingDetail) ShowDetailFrame(InPlace, Soft.Follow);
+        else if (moved) SetFrame(_toastFrame, InPlace, NoticeMotion.Surface, Soft.Follow);
         Announce();
     }
 
@@ -148,12 +165,15 @@ internal sealed class NoticeWindow : Window
         // The island may have changed meanwhile (a window rule turned it into the indicator).
         _collapsed = NoticeGeometry.Collapsed(_deck.Collapsed);
         _surface.IslandColor = PanelTheme.ColorOf("indicator");
-        double duration = Duration(ExitMs);
-        Animate(_toast, OpacityProperty, 0, duration, 0, .45, Soft.InOut);
-        Animate(_detail, OpacityProperty, 0, duration, 0, .45, Soft.InOut);
-        Animate(_glow, OpacityProperty, 0, duration, 0, .6, Soft.InOut);
-        if (Indicator) Animate(_surface, NoticeSurface.IslandOpacityProperty, 1, duration, .4, 1, Soft.InOut);
-        SetFrame(_collapsed, duration, Soft.Settle, () => { if (generation == _generation && _item is null) Finish(); });
+        // As the panel closes: the content leaves first, the surface settles into the island with a slow start, and the
+        // indicator's color comes back only once the surface is nearly the line. The shadow or glow ends as the island's own
+        // (none for the line), so nothing about it changes when the island takes over.
+        double duration = Duration();
+        Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.InOut);
+        Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.InOut);
+        Animate(_glow, OpacityProperty, Indicator ? 0 : 1, duration, NoticeMotion.ReturnGlow, Soft.InOut);
+        if (Indicator) Animate(_surface, NoticeSurface.IslandOpacityProperty, 1, duration, NoticeMotion.ReturnTint, Soft.InOut);
+        SetFrame(_collapsed, duration, NoticeMotion.ReturnSurface, Soft.Settle, () => { if (generation == _generation && _item is null) Finish(reveal: true); });
     }
 
     // The panel opens over the island: a notice still on its way out is removed at once, so the panel is never hidden.
@@ -164,11 +184,32 @@ internal sealed class NoticeWindow : Window
         Finish();
     }
 
-    private void Finish()
+    // The panel opens over the island while a notice shows or leaves (the notices hotkey, "View all"): the notice gives the
+    // panel its outline as it is on screen now, and goes in the same frame, so the panel grows on from the notice instead of
+    // the notice vanishing and the panel starting again from the island. What the notice showed ends with it; the coordinator
+    // ends its item as the panel opens (AttentionCoordinator.SetBusy), which then finds nothing left to do here.
+    public NoticeFrame? HandOver()
     {
-        _leaving = false; _showingDetail = false;
-        // The notice ended in the island's outline and material: the island shows again in the same frame as the window hides.
-        _deck.SetIslandCovered(false);
+        if (!IsVisible) return null;
+        double left = Canvas.GetLeft(_surface), top = Canvas.GetTop(_surface), width = _surface.Width, height = _surface.Height;
+        NoticeFrame? frame = double.IsFinite(left) && double.IsFinite(top) && width > 0 && height > 0
+            ? new NoticeFrame(new DipRect(_stageRect.X + left, _stageRect.Y + top, width, height), _surface.TopRadius, _surface.BottomRadius, _surface.Shoulder)
+            : null;
+        _item = null;
+        _hoverOpen.Stop(); _leaveClose.Stop();
+        if (_keyboard) EndKeyboard();
+        _escape?.SetEnabled(false);
+        _generation++;
+        Finish();
+        return frame;
+    }
+
+    private void Finish(bool reveal = false)
+    {
+        _leaving = false; _showingDetail = false; _detailFor = null;
+        // The notice ended in the island's outline and material: the island shows again in the same frame as the window hides,
+        // and its own content lands as it does when the panel closes.
+        _deck.SetIslandCovered(false, reveal);
         Hide();
         // The surface keeps no stale animations, so the next notice starts from the island again.
         foreach (var property in new[] { Canvas.LeftProperty, Canvas.TopProperty, WidthProperty, HeightProperty })
@@ -182,6 +223,7 @@ internal sealed class NoticeWindow : Window
         if (_leaving || Notice?.IconRef != iconRef) return;
         BuildToast();
         if (_showingDetail) BuildDetail();
+        else _detailFor = null;
     }
 
     // The theme or the island changed while a notice shows: it is laid out and drawn again in place.
@@ -191,8 +233,8 @@ internal sealed class NoticeWindow : Window
         Layout();
         Dress();
         BuildToast();
-        if (_showingDetail) ShowDetailFrame(Duration(DetailMs) * .5, Soft.Follow);
-        else SetFrame(_toastFrame, Duration(EnterMs) * .5, Soft.Follow);
+        if (_showingDetail) ShowDetailFrame(InPlace, Soft.Follow);
+        else { _detailFor = null; SetFrame(_toastFrame, InPlace, NoticeMotion.Surface, Soft.Follow); }
     }
 
     // ----- Geometry -----
@@ -254,26 +296,34 @@ internal sealed class NoticeWindow : Window
         return new Point((cursor.X - bounds.Left) / scale - _stageRect.X, (cursor.Y - bounds.Top) / scale - _stageRect.Y);
     }
 
-    private void SetFrame(NoticeFrame frame, double duration, IEasingFunction? easing = null, Action? completed = null)
+    // Moves the surface and the copy that casts its shadow to a frame: place, size, corners and shoulders on one clock and one
+    // curve, so the outline never changes shape on the way other than as the curve says.
+    private void SetFrame(NoticeFrame frame, double duration, NoticeMotion.Track track, IEasingFunction? easing = null, Action? completed = null)
     {
         easing ??= Soft.Out;
         double left = frame.Rect.X - _stageRect.X, top = frame.Rect.Y - _stageRect.Y;
         bool line = Indicator && ReferenceEquals(frame, _collapsed);
         foreach (var element in new NoticeSurface[] { _surface, _glow })
         {
-            Animate(element, Canvas.LeftProperty, left, duration, 0, 1, easing);
-            Animate(element, Canvas.TopProperty, top, duration, 0, 1, easing);
-            Animate(element, WidthProperty, Math.Max(0, frame.Rect.Width), duration, 0, 1, easing);
-            Animate(element, HeightProperty, Math.Max(0, frame.Rect.Height), duration, 0, 1, easing, ReferenceEquals(element, _surface) ? completed : null);
-            Animate(element, NoticeSurface.TopRadiusProperty, frame.TopRadius, duration, 0, 1, easing);
-            Animate(element, NoticeSurface.BottomRadiusProperty, line ? frame.Rect.Height / 2 : frame.BottomRadius, duration, 0, 1, easing);
-            Animate(element, NoticeSurface.ShoulderProperty, frame.Shoulder, duration, 0, 1, easing);
+            Animate(element, Canvas.LeftProperty, left, duration, track, easing);
+            Animate(element, Canvas.TopProperty, top, duration, track, easing);
+            Animate(element, WidthProperty, Math.Max(0, frame.Rect.Width), duration, track, easing);
+            Animate(element, HeightProperty, Math.Max(0, frame.Rect.Height), duration, track, easing, ReferenceEquals(element, _surface) ? completed : null);
+            Animate(element, NoticeSurface.TopRadiusProperty, frame.TopRadius, duration, track, easing);
+            Animate(element, NoticeSurface.BottomRadiusProperty, line ? frame.Rect.Height / 2 : frame.BottomRadius, duration, track, easing);
+            Animate(element, NoticeSurface.ShoulderProperty, frame.Shoulder, duration, track, easing);
         }
     }
 
     // ----- Motion -----
 
-    private double Duration(double baseMs) => Soft.Enabled ? baseMs * Math.Clamp(Settings.AnimationDuration / 360d, .5, 2) : 0;
+    // A move takes as long as the panel's opening or closing (NoticeMotion.Length); a change in place as long as the monitor's
+    // glide between choices (Soft.Choose). Without animations (BrimDeck's setting or Windows' own), nothing moves.
+    private double Duration() => NoticeMotion.Length(Settings.AnimationDuration, Soft.Enabled);
+    private static double InPlace => Soft.Enabled ? Soft.Choose : 0;
+
+    private static void Animate(IAnimatable target, DependencyProperty property, double value, double duration, NoticeMotion.Track track, IEasingFunction easing, Action? completed = null) =>
+        Animate(target, property, value, duration, track.Start, track.End, easing, completed);
 
     private static void Animate(IAnimatable target, DependencyProperty property, double value, double duration, double start, double end, IEasingFunction easing, Action? completed = null)
     {
@@ -297,7 +347,12 @@ internal sealed class NoticeWindow : Window
     private void Dress()
     {
         double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
-        _look = NoticeLook.Current(dpi);
+        var look = NoticeLook.Current(dpi);
+        // The look is cached per theme and scale: an unchanged one keeps its brushes and shadow, so a notice that arrives does
+        // not build them again as its move starts.
+        if (_dressed && ReferenceEquals(look, _look)) return;
+        _dressed = true;
+        _look = look;
         _surface.Look = _look;
         // An opaque surface casts its shadow from a copy of its shape behind it. A translucent one (a theme file may make the
         // surface see-through) would show that copy, so its shadow comes from its outline alone.
@@ -324,7 +379,7 @@ internal sealed class NoticeWindow : Window
             pulse.KeyFrames.Add(new EasingDoubleKeyFrame(.7, KeyTime.FromPercent(1), Soft.InOut));
             _glow.BeginAnimation(OpacityProperty, pulse, HandoffBehavior.SnapshotAndReplace);
         }
-        else Animate(_glow, OpacityProperty, 1, duration, .3, 1, Soft.Out);
+        else Animate(_glow, OpacityProperty, 1, duration, NoticeMotion.ArriveGlow, Soft.Out);
     }
 
     // ----- Content -----
@@ -534,12 +589,24 @@ internal sealed class NoticeWindow : Window
     // the surface moves, so the text never rewraps during the morph; the surface's outline reveals it.
     private void ShowDetailFrame(double duration, IEasingFunction easing)
     {
+        PrepareDetail(rebuild: true);
+        SetFrame(_detailFrame, duration, NoticeMotion.Surface, easing);
+    }
+
+    // Builds and measures the details for the shown item, unless they are built for it already, and lays them out hidden, so
+    // that opening them only moves the surface (the monitor's rule: build before the move, never at its start). Returns
+    // whether it built them now.
+    private bool PrepareDetail(bool rebuild = false)
+    {
+        if (!rebuild && _detail.Children.Count > 0 && ReferenceEquals(_detailFor, _item)) return false;
         BuildDetail();
         _detailFrame = Frame(NoticeForm.Detail, DetailSize());
         double padding = DetailPadding();
         _detail.Width = Math.Max(0, _detailFrame.Rect.Width - padding * 2);
         _detail.Height = Math.Max(0, _detailFrame.Rect.Height - DetailTop - DetailBottom);
-        SetFrame(_detailFrame, duration, easing);
+        _detailFor = _item;
+        if (_detail.Visibility == Visibility.Collapsed) _detail.Visibility = Visibility.Hidden;
+        return true;
     }
 
     private static TextBlock Wrapped(string text, double size, string color, FontWeight weight, Thickness margin, int maxLines = 0)
@@ -584,26 +651,38 @@ internal sealed class NoticeWindow : Window
         _hoverOpen.Stop();
         Center.Hold(_deck, true);
         if (Notice is { } notice) Center.Hub.MarkViewed(notice.Id);
-        _detail.Visibility = Visibility.Visible;
-        double duration = Duration(DetailMs);
-        ShowDetailFrame(duration, Soft.Bounce);
-        Animate(_toast, OpacityProperty, 0, duration, 0, .3, Soft.InOut, () => { if (_showingDetail) _toast.Visibility = Visibility.Hidden; });
-        Animate(_detail, OpacityProperty, 1, duration, .35, 1, Soft.Out);
         _escape?.SetEnabled(!_keyboard);
+        // Usually built while the pointer rested on the notice (PointerEntered). Built only now (a click, the hotkey), the card
+        // opens once its first layout is done, rather than losing the first frames of its move to it.
+        bool built = PrepareDetail();
+        _detail.Visibility = Visibility.Visible;
+        int generation = _generation;
+        if (!built || Duration() <= 0) GrowIntoDetail();
+        else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => { if (generation == _generation && _showingDetail && _item is not null) GrowIntoDetail(); });
     }
 
-    // Back from the details to the arriving notice, which then runs out its remaining time.
+    // The notice opens into its details as the panel opens: on the opening spring, its text gone before the details arrive.
+    private void GrowIntoDetail()
+    {
+        double duration = Duration();
+        SetFrame(_detailFrame, duration, NoticeMotion.Surface, Soft.Bounce);
+        Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.OpenOut, Soft.InOut, () => { if (_showingDetail) _toast.Visibility = Visibility.Hidden; });
+        Animate(_detail, OpacityProperty, 1, duration, NoticeMotion.OpenIn, Soft.Out);
+    }
+
+    // Back from the details to the arriving notice, which then runs out its remaining time. It closes as the panel closes: the
+    // details leave first, the card settles, the notice's text lands last. The details stay built (hidden) for the next opening.
     private void LeaveDetail()
     {
         if (!_showingDetail || _item is null) return;
         _showingDetail = false;
         _toast.Visibility = Visibility.Visible;
-        _toastFrame = Frame(NoticeForm.Toast, ToastSize());
-        BuildToast();
-        double duration = Duration(DetailMs) * .8;
-        SetFrame(_toastFrame, duration, Soft.Settle);
-        Animate(_detail, OpacityProperty, 0, duration, 0, .3, Soft.InOut, () => { if (!_showingDetail) _detail.Visibility = Visibility.Collapsed; });
-        Animate(_toast, OpacityProperty, 1, duration, .4, 1, Soft.Out);
+        var toast = Frame(NoticeForm.Toast, ToastSize());
+        if (toast != _toastFrame) { _toastFrame = toast; BuildToast(); }
+        double duration = Duration();
+        SetFrame(_toastFrame, duration, NoticeMotion.ReturnSurface, Soft.Settle);
+        Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.InOut, () => { if (!_showingDetail && _detail.Children.Count > 0) _detail.Visibility = Visibility.Hidden; });
+        Animate(_toast, OpacityProperty, 1, duration, NoticeMotion.Landing, Soft.Out);
         _escape?.SetEnabled(false);
         if (!_surface.IsMouseOver) Center.Hold(_deck, false);
     }
@@ -612,7 +691,8 @@ internal sealed class NoticeWindow : Window
     {
         if (await Center.OpenAsync(notice)) { Dismiss(false); return; }
         _openFailed = true;
-        if (_showingDetail && ReferenceEquals(Notice, notice)) ShowDetailFrame(Duration(DetailMs) * .5, Soft.Follow);
+        if (_showingDetail && ReferenceEquals(Notice, notice)) ShowDetailFrame(InPlace, Soft.Follow);
+        else _detailFor = null;
     }
 
     private void ViewAll()
@@ -638,7 +718,14 @@ internal sealed class NoticeWindow : Window
         if (_arrivedUnderPointer) return;
         Center.Hold(_deck, true);
         _escape?.SetEnabled(true);
-        if (!_showingDetail && Settings.NoticeHoverDetails) _hoverOpen.Start();
+        if (!_showingDetail && Settings.NoticeHoverDetails)
+        {
+            _hoverOpen.Start();
+            // The details are built and laid out while the pointer rests, after anything more urgent, so the card only has to
+            // move when it opens.
+            var item = _item;
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => { if (ReferenceEquals(_item, item) && !_showingDetail && !_leaving && IsVisible) PrepareDetail(); });
+        }
     }
 
     private void PointerLeft()
