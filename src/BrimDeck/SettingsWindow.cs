@@ -146,7 +146,7 @@ public sealed partial class SettingsWindow : Window
         Background = UI.Brush(Surface); Foreground = UI.Brush(TextPrimary); FontFamily = UI.PanelFont;
         // Detach reused panels before rebuilding the window's theme-specific surfaces.
         _navigation.Children.Clear(); _content.Children.Clear();
-        if (_navigation.Parent is Panel oldNavigation) oldNavigation.Children.Remove(_navigation);
+        if (_navigation.Parent is ScrollViewer oldNavigation) oldNavigation.Content = null;
         if (_scroll is not null) _scroll.Content = null;
         if (_status.Parent is Panel oldStatus) oldStatus.Children.Remove(_status);
         var outer = new Grid { Background = UI.Brush(Surface) };
@@ -154,7 +154,15 @@ public sealed partial class SettingsWindow : Window
         var sidebar = new Grid { Background = UI.Brush(Sidebar) };
         sidebar.RowDefinitions.Add(new RowDefinition { Height = new GridLength(100) }); sidebar.RowDefinitions.Add(new RowDefinition());
         sidebar.Children.Add(Brand(24, new Thickness(24, 0, 22, 0)));
-        _navigation.Margin = new Thickness(12, 0, 12, 0); Grid.SetRow(_navigation, 1); sidebar.Children.Add(_navigation);
+        // The list of pages scrolls once it is taller than the window, so the last pages (About) stay reachable in a short window.
+        // Like the page, it always keeps the scroll bar's 16 DIP column, here in place of its right margin, so the buttons and the
+        // selected one's background keep their width when the bar appears. The scroll area clips at its edges, so the list keeps a
+        // 4 DIP inset at the top, left and right for the keyboard focus outline, which reaches 2 DIP past a button; the scroll
+        // area's own margin gives the top and left back, and the buttons stay where they were.
+        _navigation.Margin = new Thickness(8, 4, 4, 12);
+        var navigationScroll = new ScrollViewer { Style = (Style)FindResource("SettingsPageScrollViewer"), Content = _navigation, Focusable = false,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(4, -4, 0, 0) };
+        Grid.SetRow(navigationScroll, 1); sidebar.Children.Add(navigationScroll);
         outer.Children.Add(sidebar); outer.Children.Add(new Border { Width = 1, Background = UI.Brush(Divider), HorizontalAlignment = HorizontalAlignment.Right });
         // The scroll area clips at its edges, so the content keeps a 4 DIP inset inside it for keyboard focus outlines
         // that extend past a control; the outer margins give those 4 DIP back and the page stays where it was.
@@ -329,6 +337,8 @@ public sealed partial class SettingsWindow : Window
             if (i == 7) { _updateBadge = UpdateBadge(); row.Children.Add(_updateBadge); }
             var button=new Button { Style=(Style)FindResource("SettingsNav"),Content=row,Margin=new Thickness(0,0,0,4),Tag=selected ? "Selected" : null };
             button.Click+=(_,_)=>ShowPage(target); AutomationProperties.SetName(button,_pages[i]); _navigation.Children.Add(button);
+            // The rebuilt list keeps its scroll position; a page opened from elsewhere (the tray, a link) is brought into view.
+            if (selected) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => { if (button.IsLoaded) button.BringIntoView(); });
         }
         // The About page is titled by the wordmark itself, so the name does not appear twice.
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
