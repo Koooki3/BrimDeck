@@ -57,6 +57,10 @@ public sealed record NoticeInput
     public int? ExitCode { get; init; }
     public long? DurationMs { get; init; }
     public string? Command { get; init; }
+    // A time-kind notice's times (NoticeTime.cs); null for every other notice.
+    public NoticeTiming? Timing { get; init; }
+    // Ends the timing of the earlier notice with the same AppKey and ReplaceKey (brim-notify stop) instead of adding one.
+    public bool StopTiming { get; init; }
 }
 
 // A notice BrimDeck keeps. Id is BrimDeck's own; Revision counts updates, so a view can tell a changed notice apart.
@@ -87,8 +91,10 @@ public sealed class Notice
     // application's own read state.
     public bool Viewed { get; set; }
     public int Revision { get; set; }
+    public NoticeTiming? Timing { get; set; }
     [JsonIgnore] public bool HasProgress => Progress is not null;
-    public Notice Copy() { var copy = (Notice)MemberwiseClone(); copy.Actions = [.. Actions]; return copy; }
+    [JsonIgnore] public NoticeTimeKind TimeKind => Timing?.Kind ?? NoticeTimeKind.None;
+    public Notice Copy() { var copy = (Notice)MemberwiseClone(); copy.Actions = [.. Actions]; copy.Timing = Timing?.Copy(); return copy; }
 }
 
 // The user's choices for one application. Disabled drops its notices entirely; Muted keeps them in the recent notices

@@ -22,7 +22,7 @@ namespace BrimDeck;
 // notice to hold the largest form, so nothing resizes the window while it moves; only the drawn surface is hit-tested, the rest
 // lets clicks through. It never takes focus unless the notices hotkey asks for the keyboard. Opened over, the panel takes the
 // notice's outline and grows on from it (HandOver).
-internal sealed class NoticeWindow : Window
+internal sealed partial class NoticeWindow : Window
 {
     private const double HoverOpenMs = 250, GlowMargin = 32;
     private readonly MainWindow _deck;
@@ -73,7 +73,7 @@ internal sealed class NoticeWindow : Window
         PreviewKeyDown += KeyPressed;
         Deactivated += (_, _) => { if (_keyboard) EndKeyboard(); };
         _app.Notices.Icons.Loaded += IconLoaded;
-        Closed += (_, _) => { _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; };
+        Closed += (_, _) => { _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
     }
 
     // True while a notice covers the island: the panel then leaves hovering to this window.
@@ -118,6 +118,7 @@ internal sealed class NoticeWindow : Window
         // notice stands in the island's place until then, drawn over the island itself, so neither ever goes missing.
         if (continuing || Duration() <= 0) Arrive(continuing);
         else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => { if (generation == _generation && _item is not null) Arrive(false); });
+        WatchLive();
     }
 
     // The notice grows out of the island (or out of the notice before it) on the opening spring, as the panel opens.
@@ -151,6 +152,7 @@ internal sealed class NoticeWindow : Window
         if (_showingDetail) ShowDetailFrame(InPlace, Soft.Follow);
         else if (moved) SetFrame(_toastFrame, InPlace, NoticeMotion.Surface, Soft.Follow);
         Announce();
+        WatchLive();
     }
 
     // The item ended. Unless another one follows at once (Present), the notice shrinks back into the island and the window hides.
@@ -158,6 +160,7 @@ internal sealed class NoticeWindow : Window
     {
         if (!ReferenceEquals(_item, item) && _item?.Key != item.Key) return;
         _item = null; _leaving = true;
+        WatchLive();
         _hoverOpen.Stop(); _leaveClose.Stop();
         if (_keyboard) EndKeyboard();
         _escape?.SetEnabled(false);
@@ -406,7 +409,7 @@ internal sealed class NoticeWindow : Window
         return new Size(Math.Ceiling((padding * 2 + plate + 10 + text + TrailingWidth()) / 16) * 16, height);
     }
 
-    private double TrailingWidth() => _item is { Count: > 1 } ? 30 : Notice?.Progress is not null ? 26 : 12;
+    private double TrailingWidth() => _item is { Count: > 1 } ? 30 : Notice?.Progress is not null || HasCountdownRing(Notice) ? 26 : 12;
 
     private (string Title, string Summary) ToastTexts()
     {
@@ -414,6 +417,7 @@ internal sealed class NoticeWindow : Window
             return (NoticeText.Count(count), Loc.T("在 BrimDeck 安静期间收到", "Arrived while BrimDeck kept quiet"));
         if (Notice is not { } notice) return ("", "");
         var (title, summary) = NoticeText.Presented(notice, Privacy(notice));
+        summary = LiveWords(notice) ?? summary;
         if (_item is { Count: > 1 } && summary.Length == 0) summary = notice.AppName;
         return (title, summary);
     }
@@ -447,7 +451,9 @@ internal sealed class NoticeWindow : Window
         AutomationProperties.SetName(_announced, (notice?.AppName is { Length: > 0 } app ? app + ": " : "") + (summary.Length > 0 ? title + ", " + summary : title));
         AutomationProperties.SetLiveSetting(_announced, AutomationLiveSetting.Polite);
         texts.Children.Add(_announced);
-        if (summary.Length > 0) texts.Children.Add(Line(summary, 11.5, _look.Secondary, FontWeights.Normal));
+        var summaryLine = summary.Length > 0 ? Line(summary, 11.5, _look.Secondary, FontWeights.Normal) : null;
+        if (summaryLine is not null) texts.Children.Add(summaryLine);
+        KeepLiveLine(summaryLine);
         Grid.SetColumn(texts, 1); _toast.Children.Add(texts);
         var trailing = Trailing(notice);
         if (trailing is not null) { Grid.SetColumn(trailing, 2); _toast.Children.Add(trailing); }
@@ -463,6 +469,7 @@ internal sealed class NoticeWindow : Window
             AutomationProperties.SetName(chip, NoticeText.Count(item.Count));
             return chip;
         }
+        if (CountdownRing(notice) is { } countdown) return countdown;
         if (notice?.Progress is { } progress)
         {
             var ring = UI.Ring(progress * 100, AccentHex, 18, 2.2);
@@ -561,6 +568,7 @@ internal sealed class NoticeWindow : Window
         else if (notice is not null)
         {
             if (notice.Title.Length > 0) stack.Children.Add(Wrapped(notice.Title, 14, _look.Primary, FontWeights.SemiBold, new Thickness(0, 12, 0, 0), maxLines: 3));
+            if (LiveDetailLine(notice) is { } live) stack.Children.Add(live);
             if (notice.Body.Length > 0)
             {
                 var body = Wrapped(notice.Body, 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0));
@@ -583,6 +591,7 @@ internal sealed class NoticeWindow : Window
         if (notice is not null && (notice.Capabilities & NoticeCapabilities.Actions) != 0)
             foreach (var action in notice.Actions.Where(a => a.Key != "default").Take(3))
                 actions.Children.Add(TextButton(action.Label, () => { if (Center.Invoke(notice, action.Key)) Dismiss(false); }, primary: false));
+        if (notice is not null) AddTimeActions(actions, notice);
         if (notice is not null && Center.CanOpen(notice)) actions.Children.Add(TextButton(Loc.T("打开应用", "Open app"), () => _ = OpenAsync(notice), primary: true));
         stack.Children.Add(actions);
         _actions = actions;

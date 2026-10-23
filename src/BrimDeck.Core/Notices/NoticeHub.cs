@@ -44,6 +44,11 @@ public sealed class NoticeHub
         return chosen == NoticePriority.High ? NoticePriority.High : hint == NoticePriority.Low ? NoticePriority.Low : chosen;
     }
 
+    // An alarm ringing, a countdown that ended, an event's reminder (NoticeClock.Alerting) is high priority by its nature,
+    // unless the sender lowered it or the user set the application to low priority.
+    public static NoticePriority AlertPriority(NoticeAppRule? rule, NoticePriority hint)
+        => hint == NoticePriority.Low || rule?.Priority == NoticePriority.Low ? NoticePriority.Low : NoticePriority.High;
+
     public NoticeOutcome Receive(NoticeInput input, DateTimeOffset now)
     {
         var rule = _rule(input.AppKey);
@@ -55,21 +60,23 @@ public sealed class NoticeHub
             if (_events.ContainsKey(key)) return new(NoticeReceipt.Duplicate, null, false);
             _events[key] = now;
         }
+        if (input.StopTiming) return StopByKey(input, now);
         RememberApp(input, now);
         var (title, body) = Words(input);
-        var priority = EffectivePriority(rule, input.PriorityHint);
+        var priority = NoticeClock.Alerting(input.Timing) ? AlertPriority(rule, input.PriorityHint) : EffectivePriority(rule, input.PriorityHint);
         bool quiet = rule?.Muted == true || priority == NoticePriority.Low;
         var existing = FindInstance(input.InstanceKey)
             ?? (input.Replaces is { Length: > 0 } replaced && FindInstance(replaced) is { } previous && previous.AppKey == input.AppKey ? previous : null)
             ?? (input.ReplaceKey is { Length: > 0 } replace ? _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == replace) : null);
         if (existing is not null)
         {
-            bool significant = existing.Title != title || existing.Category != input.Category
+            bool significant = existing.Title != title || existing.Category != input.Category || existing.TimeKind != (input.Timing?.Kind ?? NoticeTimeKind.None)
                 || existing.Progress is not null && (input.Progress is null || input.Progress >= 1) || existing.Body != body && input.Progress is null;
             existing.InstanceKey = input.InstanceKey;
             existing.AppName = input.AppName; existing.Title = title; existing.Body = body;
             existing.IconRef = input.IconRef ?? existing.IconRef; existing.Category = input.Category; existing.Priority = priority;
             existing.Progress = input.Progress; existing.Actions = [.. input.Actions]; existing.Capabilities = input.Capabilities;
+            existing.Timing = input.Timing?.Copy();
             existing.UpdatedAt = now; existing.SourcePresent = true; existing.Revision++;
             if (significant) existing.Viewed = false;
             // An update moves the notice to the top, as a new one would arrive there.
@@ -82,12 +89,75 @@ public sealed class NoticeHub
             InstanceKey = input.InstanceKey, AppKey = input.AppKey, AppName = input.AppName, AppId = input.AppId, Origin = input.Origin,
             Distro = input.Distro, ReplaceKey = input.ReplaceKey, Title = title, Body = body, IconRef = input.IconRef,
             CreatedAt = input.CreatedAt ?? now, ReceivedAt = now, UpdatedAt = now, Category = input.Category, Priority = priority,
-            Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities
+            Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy()
         };
         _notices.Insert(0, notice);
         Prune(now, notify: false);
         Recount(); Changed?.Invoke(); Persist?.Invoke();
         return new(NoticeReceipt.Accepted, notice, !quiet);
+    }
+
+    // brim-notify stop: ends the earlier timer, stopwatch or event with the same key. Nothing new shows.
+    private NoticeOutcome StopByKey(NoticeInput input, DateTimeOffset now)
+    {
+        var target = input.ReplaceKey is { Length: > 0 } key ? _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key) : null;
+        if (target is null || !StopTimer(target.Id, now)) return new(NoticeReceipt.Filtered, null, false, "no-timer");
+        return new(NoticeReceipt.Updated, target, false);
+    }
+
+    // ----- Time-kind notices BrimDeck keeps time for -----
+
+    // The earliest moment a notice BrimDeck keeps time for is due (NoticeClock.NextDue), or null when none is.
+    public DateTimeOffset? NextDue()
+    {
+        DateTimeOffset? next = null;
+        foreach (var notice in _notices)
+            if (NoticeClock.NextDue(notice.Timing) is { } due && (next is null || due < next)) next = due;
+        return next;
+    }
+
+    // Gives the reminders that are due: a countdown's end, an event's reminder or start. Returns the notices to show; a
+    // reminder missed by more than NoticeClock.MissedLimit (BrimDeck was asleep or not running) is only recorded.
+    public IReadOnlyList<Notice> FireDue(DateTimeOffset now)
+    {
+        var shown = new List<Notice>();
+        bool changed = false;
+        foreach (var notice in _notices.ToList())
+        {
+            if (notice.Timing is not { } timing || NoticeClock.Advance(timing, now) is not { } due) continue;
+            changed = true;
+            var rule = _rule(notice.AppKey);
+            if (notice.Priority != NoticePriority.Low) notice.Priority = AlertPriority(rule, NoticePriority.Normal);
+            notice.UpdatedAt = now; notice.Revision++;
+            if (now - due > NoticeClock.MissedLimit) continue;
+            notice.Viewed = false;
+            // A reminder moves the notice to the top, as an update does.
+            _notices.Remove(notice); _notices.Insert(0, notice);
+            if (rule is not { Enabled: false } && rule?.Muted != true && notice.Priority != NoticePriority.Low) shown.Add(notice);
+        }
+        if (changed) { Recount(); Changed?.Invoke(); Persist?.Invoke(); }
+        return shown;
+    }
+
+    // Stops a stopwatch (keeping the time it ran) or cancels a countdown or event. False when there was nothing to stop.
+    public bool StopTimer(string id, DateTimeOffset now)
+    {
+        if (Find(id) is not { Timing: { Stopped: false } timing } notice) return false;
+        if (timing.Kind == NoticeTimeKind.Stopwatch && timing.EndsAt is null) timing.EndsAt = now;
+        timing.Stopped = true;
+        notice.UpdatedAt = now; notice.Revision++;
+        Changed?.Invoke(); Persist?.Invoke();
+        return true;
+    }
+
+    // A countdown that ended reminds again after the span.
+    public bool Snooze(string id, TimeSpan span, DateTimeOffset now)
+    {
+        if (Find(id) is not { Timing: { Kind: NoticeTimeKind.Countdown, Native: true, Stopped: false, Stage: >= 1 } timing } notice) return false;
+        timing.StartsAt = now; timing.EndsAt = now + span; timing.Stage = 0;
+        notice.UpdatedAt = now; notice.Revision++;
+        Changed?.Invoke(); Persist?.Invoke();
+        return true;
     }
 
     // The source no longer has the notice (removed from the notification center, closed by its application). BrimDeck keeps
@@ -130,7 +200,8 @@ public sealed class NoticeHub
     {
         int before = _notices.Count;
         var limit = now - Retention;
-        _notices.RemoveAll(n => n.ReceivedAt < limit);
+        // A reminder BrimDeck still has to give (an event next week) stays past the retention; the count limit still applies.
+        _notices.RemoveAll(n => n.ReceivedAt < limit && NoticeClock.NextDue(n.Timing) is null);
         if (_notices.Count > MaxCount) _notices.RemoveRange(MaxCount, _notices.Count - MaxCount);
         foreach (var stale in _apps.Values.Where(app => app.LastSeen < now - TimeSpan.FromDays(30)).Select(app => app.Key).ToList()) _apps.Remove(stale);
         bool changed = _notices.Count != before;
@@ -145,7 +216,8 @@ public sealed class NoticeHub
         _notices.Clear();
         foreach (var notice in notices.Where(n => n is not null && n.Id.Length > 0).DistinctBy(n => n.Id).OrderByDescending(n => n.ReceivedAt))
         {
-            notice.SourcePresent = false;
+            // BrimDeck is the source of the timers it keeps; every other source may have changed meanwhile.
+            notice.SourcePresent = notice.Timing is { Native: true };
             notice.Capabilities &= ~(NoticeCapabilities.Actions | NoticeCapabilities.ReportDismissal);
             notice.Title ??= ""; notice.Body ??= ""; notice.AppName ??= ""; notice.AppKey ??= ""; notice.Actions ??= [];
             _notices.Add(notice);
@@ -191,6 +263,8 @@ public sealed class NoticeHub
             }
         }
         if (title.Length == 0) { title = body.Split('\n')[0]; body = body.Length > title.Length ? body[title.Length..].TrimStart('\n') : ""; }
+        // A timer or stopwatch without text is named by its kind.
+        if (title.Length == 0 && input.Timing is { } timing) title = NoticeClock.Name(timing.Kind);
         return (title, body);
     }
 }

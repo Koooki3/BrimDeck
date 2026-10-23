@@ -119,6 +119,43 @@ public sealed partial class SettingsWindow
                 "On Windows use BrimDeck.Notify.exe in BrimDeck's folder; in WSL use brim-notify once the distribution is on. run runs a command and shows its result when it ends; the same --replace key updates the same notice.")));
         var pipe = StatusLine(() => center.PipeError is { } error ? (Loc.T("本地通道不可用：", "The local channel is unavailable: ") + error, true) : ("", false));
         if (pipe.Text.Length > 0) Target.Children.Add(pipe);
+        NoticeTimeSection(center);
+    }
+
+    // The time-kind applications this PC has (read only): their alarms, mail and reminders are recognized automatically.
+    private void NoticeTimeSection(NoticeCenter center)
+    {
+        SectionTitle(Loc.T("时间类通知", "Time notices"));
+        Note(Loc.T("闹钟、计时器、邮件和日程提醒会自动识别：倒计时实时显示剩余时间，闹钟和日程提醒优先显示。下列应用的提醒来自 Windows 通知，需要开启“Windows 应用通知”；BrimDeck 不读取邮箱或日历内容。",
+            "Alarms, timers, mail and event reminders are recognized automatically: countdowns show the time left as it runs, and alarms and event reminders come first. The apps below remind through Windows notifications, so \"Windows app notifications\" needs to be on; BrimDeck does not read mailboxes or calendars."));
+        var rows = new List<FrameworkElement>();
+        var seen = center.Hub.KnownApps.Select(app => app.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var detected = TimeSourceDetection.InstalledAsync();
+        foreach (var source in NoticeTimeSources.All)
+        {
+            bool received = source.AppIds.Any(id => seen.Contains(NoticeKeys.Windows(id)));
+            var status = TextLine(Loc.T("正在检测…", "Checking…"), 12, TextSecondary);
+            void Show(bool installed) => status.Text = installed
+                ? received ? Loc.T("已安装 · 收到过通知", "Installed · notices received") : Loc.T("已安装", "Installed")
+                : received ? Loc.T("收到过通知", "Notices received") : Loc.T("未安装", "Not installed");
+            if (detected.IsCompleted) Show(detected.Result.GetValueOrDefault(source.Id));
+            else _ = detected.ContinueWith(task => Dispatcher.BeginInvoke(() => Show(task.Result.GetValueOrDefault(source.Id))), TaskContinuationOptions.OnlyOnRanToCompletion);
+            var kinds = TextLine(source.Role switch
+            {
+                NoticeTimeRole.Clock => Loc.T("闹钟、计时器结束（时钟内正在运行的计时 Windows 不对外提供）", "Alarms and finished timers (Windows does not share the Clock's running timers)"),
+                NoticeTimeRole.Calendar => Loc.T("日程提醒", "Event reminders"),
+                NoticeTimeRole.Meetings => Loc.T("会议提醒和开始；其他消息照常", "Meeting reminders and starts; other messages as usual"),
+                _ => Loc.T("新邮件、日程提醒", "New mail, event reminders")
+            }, 11.5, TextSecondary);
+            kinds.TextWrapping = TextWrapping.Wrap; kinds.TextTrimming = TextTrimming.None;
+            rows.Add(Row(source.DisplayName, status, kinds));
+        }
+        var native = TextLine("brim-notify timer 25m · stopwatch · event --at 15:00", 11.5, TextSecondary);
+        native.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+        rows.Add(Row(Loc.T("BrimDeck 计时器", "BrimDeck timers"), TextLine(Loc.T("始终可用", "Always available"), 12, TextSecondary), native,
+            () => Loc.T("用 brim-notify 设倒计时、秒表或日程提醒（Windows 和 WSL 都可用），由 BrimDeck 自己计时：倒计时到点和日程开始前会提醒，可取消、停止或 5 分钟后再提醒。",
+                "Set a countdown, stopwatch or event reminder with brim-notify (on Windows and in WSL); BrimDeck keeps the time itself: it reminds when a countdown ends and before an event starts, and they can be cancelled, stopped or snoozed for 5 minutes.")));
+        Group([.. rows]);
     }
 
     private static (string, bool) WslStatus(NoticeCenter center, string name)

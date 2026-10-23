@@ -41,6 +41,7 @@ public partial class MainWindow
     {
         if (_noticesSubscribed) { _app.Notices.Changed -= NoticesChanged; _app.Notices.Icons.Loaded -= NoticeIconLoaded; }
         _noticesSubscribed = false;
+        if (_app.Notices is not null) { _liveRows.Clear(); WatchPageLive(); }
         _noticeWindow?.Close(); _noticeWindow = null;
         _app.Notices?.DeckRetired(this);
     }
@@ -192,6 +193,7 @@ public partial class MainWindow
         double offset = NoticesContent.Children.OfType<DockPanel>().FirstOrDefault()?.Children.OfType<ScrollViewer>().FirstOrDefault()?.VerticalOffset ?? 0;
         NoticesContent.Children.Clear();
         _waitingPlates.Clear();
+        _liveRows.Clear();
         NoticesContent.Margin = new Thickness(_header.Side, 0, _header.Side, 10);
         var center = _app.Notices;
         var notices = center.Hub.Notices;
@@ -205,7 +207,7 @@ public partial class MainWindow
             () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); RenderNotices(); }));
         if (notices.Count > 0) tools.Children.Add(PageButton(Loc.T("清空", "Clear"), () => { center.Clear(); _expandedNotice = null; RenderNotices(); }));
         head.Children.Add(UI.Fixed(Status(center, notices.Count), 11.5, 22, UI.Tertiary));
-        if (notices.Count == 0) { page.Children.Add(Empty(center)); return; }
+        if (notices.Count == 0) { page.Children.Add(Empty(center)); WatchPageLive(); return; }
         var list = new StackPanel();
         var now = DateTimeOffset.UtcNow;
         foreach (var notice in notices.Take(_noticeRows)) list.Children.Add(Row(notice, now));
@@ -218,6 +220,7 @@ public partial class MainWindow
         var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly };
         page.Children.Add(scroll);
         if (offset > 0) { scroll.UpdateLayout(); scroll.ScrollToVerticalOffset(offset); }
+        WatchPageLive();
     }
 
     private static string Status(NoticeCenter center, int count)
@@ -261,6 +264,7 @@ public partial class MainWindow
         var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
         Grid.SetColumn(texts, 1); grid.Children.Add(texts);
         texts.Children.Add(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold));
+        if (NoticeTimeLine(notice, now) is { } timeLine) texts.Children.Add(timeLine);
         if (notice.Body.Length > 0)
         {
             var body = UI.Line(open ? notice.Body : NoticeText.Summary(notice.Body), 11.5, UI.Secondary);
@@ -284,6 +288,8 @@ public partial class MainWindow
             if ((notice.Capabilities & NoticeCapabilities.Actions) != 0)
                 foreach (var action in notice.Actions.Where(a => a.Key != "default").Take(3))
                     actions.Children.Add(PageButton(action.Label, () => { center.Invoke(notice, action.Key); RenderNotices(); }));
+            foreach (var action in center.TimeActions(notice))
+                actions.Children.Add(PageButton(action.Label, () => { center.TimeAction(notice, action.Key); RenderNotices(); }));
             actions.Children.Add(PageButton(Loc.T("删除", "Delete"), () => { center.Delete(notice); _expandedNotice = null; RenderNotices(); }));
             texts.Children.Add(actions);
         }

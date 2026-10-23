@@ -51,6 +51,8 @@ public static partial class FreedesktopNotifications
             AppId = Hint<string>(hints, "desktop-entry"),
             CreatedAt = DateTimeOffset.UtcNow,
             Category = CategoryOf(Hint<string>(hints, "category")),
+            // Mail clients (Thunderbird, Evolution) mark new mail with this category; it is shown as a mail notice.
+            Kind = Hint<string>(hints, "category") is "email" or "email.arrived" ? NoticeTimes.Mail : null,
             Priority = Hint<byte?>(hints, "urgency") switch { 0 => "low", 2 => "high", _ => null }
         };
         var pairs = new List<NoticeActionInfo>();

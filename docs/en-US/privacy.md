@@ -39,7 +39,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 - Sign-in tokens are used only in memory and never written to disk; the sign-in caches of the Claude and Grok Bot desktop apps are decrypted in memory with Windows encryption for the current user.
 - Custom scripts run in a sandbox with no access to files, processes or .NET objects; see the limits in [Supported tools](ai-tools.md#custom-script).
 - The sound behind the equalizer is analyzed only in memory and never saved.
-- Dynamic notices (off by default) read only the current user's Windows notifications and use no network; the local channel accepts only the current user on this PC. WSL notices are off by default; an agent is installed in a distribution only once you switch it on. See [Dynamic notices](notices.md#privacy).
+- Dynamic notices (off by default) read only the current user's Windows notifications and use no network; the local channel accepts only the current user on this PC. WSL notices are off by default; an agent is installed in a distribution only once you switch it on. Time notices (alarms, mail, event reminders) are sorted on this PC by the application's id and the notice's text; no mailbox, calendar or Clock data is read, and the list of time sources in the settings only checks whether those applications are installed. See [Dynamic notices](notices.md#privacy).
 
 ## NetEase Cloud Music full control
 

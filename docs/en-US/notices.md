@@ -72,13 +72,45 @@ Options: `-b/--body`, `-s/--source` (the source's name), `-c/--category` (messag
 
 Exit codes: 0 delivered (or kept quiet by your rules), 1 usage error, 2 refused, 3 BrimDeck is not running or dynamic notices are off; `run` returns the program's own exit code.
 
+## Time notices
+
+Alarms, timers, countdowns, mail and event reminders are recognized and shown by kind:
+
+| Kind | From | Shown |
+|---|---|---|
+| Alarm | Windows Clock's notifications for alarms, finished timers and finished focus sessions | High priority; "Open app" returns to Clock |
+| Timer running (stopwatch) | `brim-notify stopwatch` | "Running 12:03", live; can be stopped |
+| Countdown | `brim-notify timer` | "24:59 left" with a ring, live; shows again when it ends (high priority); can be cancelled or reminded again in 5 minutes |
+| Mail | New-mail notifications of Outlook (new and classic), Mail and Calendar, Thunderbird, Foxmail and others; WSL desktop notifications with the `email` category | Ordinary notice |
+| Event | Reminders of Microsoft 365 Calendar and Mail and Calendar; Outlook notifications that read as reminders ("In 15 minutes", "Now", or a line starting with "3:00 PM - 3:30 PM"); Teams meeting reminders and "meeting started"; `brim-notify event` | High priority, "Starts in 14 min", "In progress"; for `brim-notify event` BrimDeck itself reminds before the start |
+
+- Notices are sorted by the application's id (AUMID) and the notice's text, in memory on this PC; the original notification is not kept, and no mailbox or calendar is read. The sorting is heuristic: Outlook's and Teams' reminder wording varies by version and language, and what is not recognized shows as an ordinary notice.
+- Settings › Dynamic notices › Time notices lists which of these applications this PC has (only whether they are installed; nothing is read from them). They remind through Windows notifications, so "Windows app notifications" needs to be on.
+- Alarms, ended countdowns and event reminders are high priority and are not held back by the "at most 3 in 10 seconds" limit; an application you set to muted or low priority stays quiet as usual. While locked, presenting or paused they only count toward the summary.
+- The live words follow one shared second tick, which runs only while a running timer shows on the island or on the recent notices page. Countdowns and events are worked out from the clock, again at once after waking or a change of the system time. A reminder missed by more than 10 minutes (asleep, BrimDeck not running) does not pop up; the list says "Ended at 15:30".
+- Limits: Windows does not share the Clock app's running timers, stopwatch or alarm list, nor the snooze and dismiss buttons of its notifications, so a Clock alarm shows only when it rings and cannot be snoozed from BrimDeck; for a timer on the island use `brim-notify timer`. Calendar sync (reading Outlook's or Windows' calendar directly) is not supported yet; the applications' own reminder notifications are used.
+
+```text
+brim-notify timer 25m "Focus"                    count down 25 minutes, then remind (also 1h30m, 90s)
+brim-notify timer --at 15:30 "Meeting"           count down to 15:30
+brim-notify stopwatch "Build" -r build           a stopwatch showing the time elapsed
+brim-notify stop build                           stop the stopwatch, or cancel a countdown or event (same -s source as sent)
+brim-notify event "Weekly" --at 15:00 --remind 10m --ends 16:00   an event: reminds 10 minutes before and at its start
+brim-notify "New mail" --kind mail               mark a plain notice as mail (or alarm)
+```
+
+- Times: `15:30` (the next 15:30) or `2026-10-24 15:30`, read in **Windows' time zone** (also from a WSL distribution set to another zone); or ISO 8601 with an offset, such as `2026-10-24T15:30:00+08:00`. A time daylight saving skips moves to just after the change; one it repeats is the earlier.
+- Durations: `90s`, `25m`, `1h30m`, `2d`; countdowns from 1 second to 31 days, reminders at most 7 days ahead of the start, times from 1 day ago to 1 year ahead. A duration counts from when BrimDeck receives it, whatever the WSL clock says.
+- Without `-r` a key is made up and printed on standard output, for `brim-notify stop KEY`; sending again with the same `-r` starts it over.
+- Countdowns and events still running continue after a restart while "Keep recent notices" is on; an event not reminded yet is not removed by the retention.
+
 ## How notices show
 
 - A notice never takes the keyboard focus, and never pops up over the open panel or details you are using; while the panel is open, the bell only gets its red dot.
 - It stays 6 seconds, 8 for high priority; hovering, opening the details or working it from the keyboard pauses the time.
 - Notices from one application within 0.8 seconds become one notice with a count; at most 3 notices pop up per 10 seconds, the rest go to the recent notices; a normal notice that waited over 30 seconds is not shown late; a merged notice stays at most twice its duration.
 - A notice that arrives under a resting pointer does not open its details by itself: move away and back, or click.
-- Order: what you are working with > high priority notices > other notices > quota alerts > track changes.
+- Order: what you are working with > high priority notices > other notices > quota alerts > track changes. Alarms, ended countdowns and event reminders are high priority (see "Time notices").
 - Nothing is shown while the session is locked or switched, while the panels are hidden or hidden by a full-screen rule. During a Windows focus session, presentation mode and BrimDeck's own pause nothing pops up; afterwards one summary shows how many arrived. Windows' separate "Do not disturb" switch has no public interface and is not detected; use BrimDeck's pause instead.
 - Several monitors: a notice pops up on the monitor with the foreground window, if BrimDeck shows there. If that panel is hidden, the notice stays in the recent notices; it does not jump to another monitor.
 - The notices shortcut (unset by default): with a notice on screen it opens the details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise it opens the recent notices.

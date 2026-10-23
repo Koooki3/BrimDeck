@@ -8,29 +8,31 @@ public static class NoticeIntake
 {
     // A message from the local pipe (BrimDeck.Notify.exe on Windows, or brim-notify in WSL through it while the agent is not
     // running). The pipe only admits the current user, so a distribution named by such a sender is taken as a label.
-    public static NoticeInput FromPipe(NoticeMessage message)
+    // now and zone resolve a time-kind notice's times (NoticeTimeIntake); they default to the present and Windows' time zone.
+    public static NoticeInput FromPipe(NoticeMessage message, DateTimeOffset? now = null, TimeZoneInfo? zone = null)
     {
         string name = Name(message.AppName, "brim-notify");
         string? distro = Blank(message.Distro);
-        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, name), name, distro, $"cli:{distro}:" + (message.EventId ?? Guid.NewGuid().ToString("N")), NoticeCapabilities.None);
+        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, name), name, distro, $"cli:{distro}:" + (message.EventId ?? Guid.NewGuid().ToString("N")), NoticeCapabilities.None, now, zone);
     }
 
     // A message from a distribution's agent. Desktop notifications get the agent's capabilities: actions and dismissal reach
     // the application only while the agent is the session's notification service.
-    public static NoticeInput FromAgent(NoticeMessage message, string distro, bool agentIsServer)
+    public static NoticeInput FromAgent(NoticeMessage message, string distro, bool agentIsServer, DateTimeOffset? now = null, TimeZoneInfo? zone = null)
     {
         if (message.Origin == "dbus")
         {
             string name = Name(message.AppName, Loc.T("Linux 应用", "Linux app"));
             var capabilities = agentIsServer ? NoticeCapabilities.ReportDismissal | (message.Actions is { Count: > 0 } ? NoticeCapabilities.Actions : 0) : NoticeCapabilities.None;
             string instance = $"wsl:{distro}:{message.Session ?? ""}:{message.NativeId ?? Guid.NewGuid().ToString("N")}";
-            return Build(message, NoticeOrigin.Wsl, NoticeKeys.Wsl(distro, name), name, distro, instance, capabilities);
+            return Build(message, NoticeOrigin.Wsl, NoticeKeys.Wsl(distro, name), name, distro, instance, capabilities, now, zone);
         }
         string cliName = Name(message.AppName, "brim-notify");
-        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, cliName), cliName, distro, $"cli:{distro}:" + (message.EventId ?? Guid.NewGuid().ToString("N")), NoticeCapabilities.None);
+        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, cliName), cliName, distro, $"cli:{distro}:" + (message.EventId ?? Guid.NewGuid().ToString("N")), NoticeCapabilities.None, now, zone);
     }
 
-    private static NoticeInput Build(NoticeMessage message, NoticeOrigin origin, string appKey, string appName, string? distro, string instance, NoticeCapabilities capabilities) => new()
+    private static NoticeInput Build(NoticeMessage message, NoticeOrigin origin, string appKey, string appName, string? distro, string instance, NoticeCapabilities capabilities,
+        DateTimeOffset? now, TimeZoneInfo? zone) => new()
     {
         Origin = origin, AppKey = appKey, AppName = appName, AppId = message.AppId ?? "", Distro = distro, InstanceKey = instance,
         ReplaceKey = Blank(message.ReplaceId), EventId = Blank(message.EventId),
@@ -38,7 +40,9 @@ public static class NoticeIntake
         CreatedAt = message.CreatedAt, Category = NoticeKeys.Category(message.Category), PriorityHint = NoticeKeys.Priority(message.Priority),
         Progress = message.Progress, Capabilities = capabilities,
         Actions = (capabilities & NoticeCapabilities.Actions) != 0 && message.Actions is { } actions ? actions.Select(a => new NoticeAction(a.Key, a.Label)).ToList() : [],
-        ExitCode = message.ExitCode, DurationMs = message.DurationMs, Command = Blank(message.Command)
+        ExitCode = message.ExitCode, DurationMs = message.DurationMs, Command = Blank(message.Command),
+        Timing = NoticeTimeIntake.Resolve(message, now ?? DateTimeOffset.UtcNow, zone ?? TimeZoneInfo.Local),
+        StopTiming = message.Stop == true
     };
 
     // Icons are local only: a Windows file path for the Windows link, a Linux path or icon name inside the distribution for

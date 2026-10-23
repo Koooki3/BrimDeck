@@ -97,6 +97,8 @@ internal static class NoticeBadges
     // the icon by a ring of the surface. Null for a plain message, and for a task, whose progress shows elsewhere.
     public static FrameworkElement? Status(Notice notice, double plateSize, bool glow, string? kind = null)
     {
+        // A time notice (alarm, stopwatch, countdown, mail, event) shows its kind; the glyph names match NoticeTimeKind's.
+        if (kind is null && notice.TimeKind != NoticeTimeKind.None) kind = notice.TimeKind.ToString();
         if (notice.Category == NoticeCategory.Task && kind is null) return null;
         if (NoticeGlyphs.Status(notice.Category, kind) is not { } glyph) return null;
         var colors = Colors;
