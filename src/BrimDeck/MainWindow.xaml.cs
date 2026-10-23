@@ -180,12 +180,12 @@ public partial class MainWindow : Window
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
         // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is
-        // every page at the largest size a drag can give it with its shoulders, and the collapsed surface at the widest any form can be, with room
+        // every page at the largest size a drag can give it, and the collapsed surface at the widest any form can be, with room
         // on either side for the resize grips just outside them (ResizeGrips). Only Island animates.
         var largest = DeckPages.Largest(Settings);
         largest = (Math.Max(largest.Width, PageMaxWidth), Math.Max(largest.Height, DeckPages.MaxHeight));
         double widestSurface = Math.Max(Math.Max(CollapsedLimits.NotchWidthMax, CollapsedLimits.CapsuleWidthMax), CollapsedLimits.LineLengthMax);
-        Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Math.Max(Fit(largest.Width) + 2 * PanelHeader.PanelShoulder, widestSurface), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
+        Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Math.Max(Fit(largest.Width), widestSurface), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
         double hostHeight = largest.Height;
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
         // just above a lowered capsule; see CollapsedGeometry.Panel), so the window reaches the panel's bottom; it always holds the collapsed surface and its shadow, and never passes the
@@ -472,9 +472,7 @@ public partial class MainWindow : Window
         var panel = PanelFor(wantedHeight);
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);
-        // Hanging from the screen edge, the panel has shoulders on both sides of its page; floating, it has none.
-        double shoulder = expanded && panelTop <= 0 ? PanelHeader.PanelShoulder : 0;
-        double width = expanded ? _pageWidth + 2 * shoulder : shape.Surface.Width;
+        double width = expanded ? _pageWidth : shape.Surface.Width;
         // A floating panel is taller than its page by headerExtra, the space above its header.
         double height = expanded ? pageHeight + headerExtra : shape.Surface.Height;
         // Every compact style opens into the same panel, hanging from the screen edge or, below a lowered capsule, rounded all round.
@@ -483,7 +481,7 @@ public partial class MainWindow : Window
             : new CornerRadius(shape.TopRadius, shape.TopRadius, shape.BottomRadius, shape.BottomRadius);
         double gap = expanded ? panelTop : shape.Surface.Y;
         // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor.
-        double panelLeft = Math.Clamp(shape.Surface.X + shape.Surface.Width / 2 - width / 2, 0, Math.Max(0, MonitorBoundsDip.Width - width));
+        double panelLeft = Math.Clamp(shape.Surface.X + shape.Surface.Width / 2 - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
         double left = (expanded ? panelLeft : shape.Surface.X) - _windowOffset;
         ApplyCollapsedLayout();
         Island.BorderThickness = new Thickness(0);
@@ -491,8 +489,6 @@ public partial class MainWindow : Window
         // The page and its header start headerExtra below the panel's top edge. The header row keeps its own height, so its
         // controls keep their size tier. Collapsing keeps the offset the content had, so it fades out without moving.
         if (expanded) ExpandedContent.Margin = new Thickness(0, headerExtra, 0, 0);
-        // The header spans the page only, clear of the shoulders beside it.
-        if (expanded) Toolbar.Margin = new Thickness(shoulder, 0, shoulder, 0);
         // Lay out in device-independent pixels. Column typography adapts to its available space.
         ContentCanvas.Width = _pageWidth;
         ContentCanvas.Height = ExpandedContent.Height;
@@ -555,9 +551,7 @@ public partial class MainWindow : Window
         Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
         Animate(Island, WidthProperty, width, duration, surface, settle);
         Animate(Island, HeightProperty, height, duration, surface, settle);
-        double shoulderTo = expanded ? shoulder : shape.Shoulder;
-        var shoulderTrack = ShoulderTrack(surface, Island.ShoulderRadius, shoulderTo);
-        Animate(Island, IslandBorder.ShoulderRadiusProperty, shoulderTo, duration, shoulderTrack, shoulderTrack == surface ? corners : easeInOut);
+        Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, surface, corners);
         // Compact notch and capsule hover over their full bounding box from the screen edge; the open panel uses its own outline.
         Animate(HoverExtension, HeightProperty, double.IsFinite(box.Height) ? Math.Max(0, box.Height) : 0, duration, surface, settle);
         if (duration == 0)
@@ -602,16 +596,6 @@ public partial class MainWindow : Window
         UpdateMusicTimer();
         UpdateMonitorDemand();
         UpdateGrips();
-    }
-    // Shoulders belong only at the screen edge. A surface that loses them (a hanging panel closing into a capsule or a line)
-    // draws them in during the first part of its move, before it leaves the edge; one that gains them grows them in the later
-    // part, once it is there. Between two shapes that both have them (the notch and a hanging panel) they follow the surface.
-    private static Track ShoulderTrack(Track surface, double from, double to)
-    {
-        double span = surface.End - surface.Start;
-        if (from > 0 && to <= 0) return new(surface.Start, surface.Start + span * .4);
-        if (from <= 0 && to > 0) return new(surface.Start + span * .35, surface.End);
-        return surface;
     }
     private static T Timed<T>(T animation, int duration, Track track) where T : AnimationTimeline
     {
