@@ -28,6 +28,7 @@ try
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
     CurvesTests.Run(Check);
+    DotMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);

@@ -169,7 +169,7 @@ public partial class MainWindow : Window
     // moves between the notch, the capsule and the indicator.
     private void ApplySettings(bool animatePage)
     {
-        // Powering off holds the panel as it is; RestoreAfterPowerOff applies the settings once it has gone.
+        // Powering off (exit) holds the panel as it is.
         if (_poweringOff) return;
         // An exception added or removed in settings changes the context before the next poll; read it again so that the
         // panel hides or returns in this pass.
@@ -205,23 +205,25 @@ public partial class MainWindow : Window
         Place(bounds, scale);
         UpdateClock();
         RenderCompact();
-        // Hiding and showing (the tray's hide, a full-screen rule) powers the surface off and boots it again (MainWindow.Lifecycle.cs)
-        // when the change asks for animation; every other change stays immediate.
-        bool animate = animatePage && !_preview && Soft.Enabled && Settings.AnimationDuration > 0;
+        // Hiding and showing again (the tray, a full-screen rule) are immediate. The boot plays only when the panel first
+        // appears (Loaded); the power-off only when BrimDeck exits (App.ExitApplication).
         // The window's own opacity is no longer animated; a build that faded it may have left it lowered.
         if (Opacity < 1) { BeginAnimation(OpacityProperty, null); Opacity = 1; }
         if (IsSuppressed)
         {
             _hover.Stop(); _leave.Stop(); _pointerInside = false;
-            if (animate && wasVisible) PowerOff(RestoreAfterPowerOff);
-            else { SetExpanded(false, true); Hide(); }
+            // A boot cut short here never reaches its own reset: the dot's lift and squash would hold their last frame and
+            // squash the whole surface once it shows again (without a boot).
+            ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
+            ResetDotPose();
+            SetExpanded(false, true); Hide();
         }
         else
         {
-            bool appearing = !IsVisible && animate;
+            bool appearing = !IsVisible;
             if (!IsVisible) Show();
+            if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
             SetExpanded(_expanded, !animatePage || !wasVisible);
-            if (appearing) Boot();
         }
         UpdatePointerTracking();
         RenderUsage();
@@ -442,6 +444,7 @@ public partial class MainWindow : Window
     public void SetExpanded(bool expanded, bool instant = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
+        if (expanded && !_expanded) EndBoot();
         // Only the panel under the pointer is open; the others close at once and give up the Escape key.
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
@@ -479,6 +482,8 @@ public partial class MainWindow : Window
         double panelLeft = Math.Clamp(panelCentre - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
         double left = (expanded ? panelLeft : shape.Surface.X) - _windowOffset;
         ApplyCollapsedLayout();
+        // The boot circle is still jumping: do not grow the island to the collapsed size under its lift.
+        if (!expanded && KeepBootDot(shape)) return;
         Island.BorderThickness = new Thickness(0);
         ExpandedContent.Height = pageHeight;
         // The page and its header start headerExtra below the panel's top edge. The header row keeps its own height, so its
@@ -509,8 +514,8 @@ public partial class MainWindow : Window
         // quickly, and the content fades in once the surface is about two thirds open.
         // Open already (a page switch, a new page size), the surface reshapes over the whole of a slightly longer time, easing in
         // and out, so the change of size reads as one soft move rather than a jump.
-        // Booting (MainWindow.Lifecycle.cs), once the dot has popped up the surface swells from it into the collapsed shape on the
-        // opening spring, the compact content arriving once the shape has nearly settled.
+        // Booting (MainWindow.Lifecycle.cs), after the round dot's jumps the surface swells from that resting circle into the
+        // collapsed shape on the opening spring, the compact content arriving once the shape has nearly settled.
         // A new collapsed style chosen in the settings (MorphShape), the surface changes from one form into the other over the
         // whole of a longer move on the monitor's curve; the compact content steps out at once and comes back in its new layout
         // once the form has nearly settled.
@@ -538,7 +543,9 @@ public partial class MainWindow : Window
         }
         // Opening, the size and place spring past their end by under 2 percent of the move and settle back; the corners never
         // bounce (a radius would pass zero). A panel that has no room in the window for that give opens on the plain curve.
-        bool bounce = (booting || expanded && !reshaping) && duration > 0 && HasRoomToBounce(width, height, left, gap);
+        // Booting does not use that give: Bounce on Margin and Height would bob the whole capsule or line after the round
+        // dot has already finished its jumps (the notch sits at the top edge, so the same overshoot is barely seen).
+        bool bounce = !booting && expanded && !reshaping && duration > 0 && HasRoomToBounce(width, height, left, gap);
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Settle;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
@@ -576,6 +583,8 @@ public partial class MainWindow : Window
         Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
         Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
         Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
+        // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
+        Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
         Animate(IslandShadow, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);

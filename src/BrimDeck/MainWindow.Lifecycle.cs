@@ -2,54 +2,69 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Shapes;
 using System.Windows.Threading;
 using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// Booting and powering off, as the iPhone's island starts and shuts down. Every form (notch, capsule, line) starts as the same
-// small round dot at the middle of its surface: the dot pops up with two little bounces, then quickly swells into the collapsed
-// shape. On the way out the surface draws back into that dot, which bounces once and sinks like a drop into water, leaving a
-// ripple. A panel boots when it first appears (BrimDeck starts, a monitor is connected) and whenever it shows again after being
-// hidden (the tray's hide, a full-screen rule); it powers off when BrimDeck exits and when it is hidden. Without animations it
-// appears and goes at once.
+// Booting and powering off. Every form (notch, capsule, line) starts and ends as the same round dot, DotMotion.Size across,
+// resting on a floor at the bottom of its place; DotMotion gives how it moves. Booting, the dot fades in, jumps twice (up, then
+// down onto that floor) and swells into the collapsed shape once the second landing has sprung back. Powering off, the surface
+// draws back into the dot, which jumps twice and at the second landing merges into the water: a neck joins it to the plane,
+// the free drop is taken in leaving a mound, and the mound settles flat.
+// A panel boots only when it first appears (BrimDeck starts, a monitor is connected); showing it again after a hide (the tray,
+// a full-screen rule) is immediate. It powers off only when BrimDeck exits; hiding is immediate. Without animations it appears
+// and goes at once.
 public partial class MainWindow
 {
     // _booting asks the next SetExpanded for the boot's tracks; _poweringOff holds the panel still while it goes.
-    private bool _booting, _poweringOff, _bootWaiting;
+    // _bootDot keeps the surface as the round jumping circle: ApplySettings and music updates call SetExpanded while the
+    // jumps play, and without this they would grow the island to its collapsed size under the same lift, so the whole
+    // capsule or line would jump (the notch sits at the top and is clipped, so the same fault is easy to miss there).
+    private bool _booting, _poweringOff, _bootWaiting, _bootDot;
     // Pointing at the surface does not open the panel while it waits out of sight for its boot, or until the boot has played
     // (TrackPointer): a pointer already resting there would open an invisible panel, or cut the swell short.
     private long _bootEnds;
     private bool BootHoldsPointer => _bootWaiting || Environment.TickCount64 < _bootEnds;
-    // The parts of the boot and the power-off, as multiples of the duration set for the panel: the dot's pop, the swell into the
-    // shape (SetExpanded); the draw back into the dot, its bounce and its drop.
-    private const double BootPop = 1.1, BootSwell = 1.0, PowerOffShrink = .9, PowerOffBounce = .5, PowerOffDrop = .9;
+    // The swell from the dot into the shape (SetExpanded), and the surface drawing back into the dot, as multiples of the
+    // duration set for the panel: these change the panel's shape as opening and closing do. The dot's own motion keeps its
+    // pace (DotMotion).
+    private const double BootSwell = 1.0, PowerOffShrink = .75;
     // How long BrimDeck's exit waits at most for the panels to power off (App.ExitApplication).
-    internal static int PowerOffLength(int duration) => (int)(duration * (PowerOffShrink + PowerOffBounce + PowerOffDrop));
+    internal static int PowerOffLength(int duration) => (int)(duration * PowerOffShrink + DotMotion.PowerOffLength);
 
-    // The dot: a small circle, the same for every form, at the middle of the surface (kept inside the window at the top).
-    private static double DotSize(CollapsedShape shape) => Math.Clamp(Math.Round(shape.Surface.Height * .5), 8, 16);
-    private double DotLeft(CollapsedShape shape) => shape.Surface.X + (shape.Surface.Width - DotSize(shape)) / 2 - _windowOffset;
-    private static double DotTop(CollapsedShape shape) => Math.Max(0, shape.Surface.Y + (shape.Surface.Height - DotSize(shape)) / 2);
+    // The dot: at the middle of the surface, resting on a floor at the bottom of that place, and low enough that its jumps stay
+    // inside the window (the line and a low notch are near the top edge, where the jumps were cut off).
+    private double DotLeft(CollapsedShape shape) => shape.Surface.X + (shape.Surface.Width - DotMotion.Size) / 2 - _windowOffset;
+    private static double DotTop(CollapsedShape shape) => Math.Max(DotMotion.Headroom, shape.Surface.Y + Math.Max(0, shape.Surface.Height - DotMotion.Size));
 
-    // The dot pops and bounces by scaling the island about its middle; outside the boot and the power-off the scale is 1.
-    private ScaleTransform? _dotScale;
-    private ScaleTransform DotScale()
+    // The dot's pose moves the island: its lift above the floor (up the screen) and its squash about the middle of that floor.
+    // Outside the boot and the power-off the island has no lift and a scale of 1.
+    private ScaleTransform? _dotSquash;
+    private TranslateTransform? _dotLift;
+    private void ResetDotPose()
     {
-        if (_dotScale is null) { _dotScale = new ScaleTransform(1, 1); Island.RenderTransformOrigin = new Point(.5, .5); Island.RenderTransform = _dotScale; }
-        return _dotScale;
+        if (_dotSquash is null || _dotLift is null) return;
+        SetImmediate(_dotSquash, ScaleTransform.ScaleXProperty, 1d); SetImmediate(_dotSquash, ScaleTransform.ScaleYProperty, 1d);
+        SetImmediate(_dotLift, TranslateTransform.YProperty, 0d);
     }
-    private void ResetDotScale()
+    // Moves the dot by pose (its time in milliseconds) for length ms, starting after delay ms; completed runs at the end. The
+    // pose's opacity is the panel's, through HoverZone. Lift is above the floor: WPF's Y grows down, so the translate is -Lift.
+    private void PoseDot(Func<double, DotPose> pose, double length, double delay = 0, Action? completed = null)
     {
-        if (_dotScale is null) return;
-        SetImmediate(_dotScale, ScaleTransform.ScaleXProperty, 1d); SetImmediate(_dotScale, ScaleTransform.ScaleYProperty, 1d);
-    }
-    private void ScaleDot(AnimationTimeline animation)
-    {
-        var scale = DotScale();
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, animation, HandoffBehavior.SnapshotAndReplace);
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, animation, HandoffBehavior.SnapshotAndReplace);
+        if (_dotSquash is null || _dotLift is null)
+        {
+            _dotSquash = new ScaleTransform(); _dotLift = new TranslateTransform();
+            Island.RenderTransformOrigin = new Point(.5, 1);
+            Island.RenderTransform = new TransformGroup { Children = { _dotSquash, _dotLift } };
+        }
+        PoseAnimation Part(Func<DotPose, double> part) => new(t => part(pose(t)), length) { BeginTime = TimeSpan.FromMilliseconds(delay) };
+        var lift = Part(p => -p.Lift);
+        if (completed is not null) lift.Completed += (_, _) => completed();
+        _dotLift.BeginAnimation(TranslateTransform.YProperty, lift, HandoffBehavior.SnapshotAndReplace);
+        _dotSquash.BeginAnimation(ScaleTransform.ScaleXProperty, Part(p => p.ScaleX), HandoffBehavior.SnapshotAndReplace);
+        _dotSquash.BeginAnimation(ScaleTransform.ScaleYProperty, Part(p => p.ScaleY), HandoffBehavior.SnapshotAndReplace);
+        HoverZone.BeginAnimation(OpacityProperty, Part(p => p.Opacity), HandoffBehavior.SnapshotAndReplace);
     }
 
     // Whether the island can pass a size of width x height at left and gap (window coordinates) by the opening spring's give
@@ -83,8 +98,9 @@ public partial class MainWindow
     private int _boot;
     private const int BootWait = 700;
 
-    // The dot pops up at the middle of the surface with two little bounces, then swells into the collapsed shape on the opening
-    // spring (SetExpanded's boot tracks) while the compact content arrives last.
+    // The dot fades in and jumps twice; once the second landing has sprung back and the dot is a still circle again, the lift
+    // and squash are cleared so only the round dot has jumped, then the surface swells from that resting circle into the collapsed shape on the opening
+    // spring (SetExpanded's boot tracks). The compact content arrives last.
     private void BeginBoot()
     {
         int boot = ++_boot; _bootWaiting = false;
@@ -92,67 +108,103 @@ public partial class MainWindow
         if (_expanded || IsSuppressed || !CanAnimateLifecycle) { SetImmediate(HoverZone, OpacityProperty, 1d); return; }
         var shape = Collapsed = ShapeFor(EffectiveStyle);
         PlaceDot(shape);
+        _bootDot = true;
         SetImmediate(IslandShadow, OpacityProperty, 0d);
         if (Compact.Visibility == Visibility.Visible)
         {
             SetImmediate(Compact, OpacityProperty, 0d);
             SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, .85); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, .85);
         }
-        int pop = (int)(Settings.AnimationDuration * BootPop);
-        _bootEnds = Environment.TickCount64 + pop + (long)(Settings.AnimationDuration * BootSwell);
-        SetImmediate(HoverZone, OpacityProperty, 1d);
-        HoverZone.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(pop * .2)) { EasingFunction = Soft.Out, FillBehavior = FillBehavior.Stop });
-        // Two bounces, the second smaller, and no still tail before the swell.
-        var popUp = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(pop) };
-        popUp.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromPercent(0)));
-        foreach (var (at, size, ease) in new[] { (.35, 1.28, Soft.Out), (.55, .86, Soft.InOut), (.72, 1.1, Soft.InOut), (.87, .97, Soft.InOut), (1, 1, Soft.InOut) })
-            popUp.KeyFrames.Add(new EasingDoubleKeyFrame(size, KeyTime.FromPercent(at), ease));
-        popUp.Completed += (_, _) =>
+        const double swell = DotMotion.SwellStart;
+        _bootEnds = Environment.TickCount64 + (long)(swell + Settings.AnimationDuration * BootSwell);
+        SetImmediate(HoverZone, OpacityProperty, 0d);
+        PoseDot(DotMotion.Boot, swell, completed: () =>
         {
             if (boot != _boot || _poweringOff || _app.Exiting || _retiring) return;
-            ResetDotScale();
+            // Clear the pose before the swell: continuing the landing on Island would lift the whole shape (capsule and line
+            // especially), not only the circle that jumped.
+            _bootDot = false;
+            ResetDotPose();
+            SetImmediate(HoverZone, OpacityProperty, 1d);
             // Opened meanwhile (a hotkey), the panel is already on its way; otherwise the dot swells into the shape.
             if (_expanded) return;
             _booting = true;
             SetExpanded(false);
-        };
-        ScaleDot(popUp);
+        });
     }
 
-    // The surface as the dot, at once: round, without shoulders, centred on the surface.
+    // Cuts a boot short when the panel opens before it has played (a hotkey): the panel opens from wherever the surface is.
+    private void EndBoot()
+    {
+        if (!BootHoldsPointer) return;
+        ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
+        ResetDotPose();
+        SetImmediate(HoverZone, OpacityProperty, 1d);
+    }
+
+    // While the boot circle is jumping, keep it a circle: refresh layout may call SetExpanded, which would otherwise size the
+    // island to the collapsed form under the lift transform. Must not call ResetDotPose or PlaceDot here: those stop the jump
+    // animation clock, so its Completed never runs and the swell never starts (the circle stays on screen).
+    private bool KeepBootDot(CollapsedShape shape)
+    {
+        if (!_bootDot) return false;
+        double dot = DotMotion.Size;
+        SetImmediate(HoverZone, MarginProperty, new Thickness(DotLeft(shape), 0, 0, 0));
+        SetImmediate(Island, WidthProperty, dot);
+        SetImmediate(Island, HeightProperty, dot);
+        SetImmediate(Island, MarginProperty, new Thickness(0, DotTop(shape), 0, 0));
+        SetImmediate(Island, Border.CornerRadiusProperty, new CornerRadius(dot / 2));
+        SetImmediate(Island, IslandBorder.ShoulderRadiusProperty, 0d);
+        SetImmediate(Compact, OpacityProperty, 0d);
+        SetImmediate(MusicIndicator, OpacityProperty, 0d);
+        SetImmediate(IslandShadow, OpacityProperty, 0d);
+        return true;
+    }
+
+    // The surface as the dot, at once: round, without shoulders, in the surface's own color and material for every form.
     private void PlaceDot(CollapsedShape shape)
     {
-        double dot = DotSize(shape);
+        double dot = DotMotion.Size;
         SetImmediate(HoverZone, MarginProperty, new Thickness(DotLeft(shape), 0, 0, 0));
         SetImmediate(Island, WidthProperty, dot); SetImmediate(Island, HeightProperty, dot);
         SetImmediate(Island, MarginProperty, new Thickness(0, DotTop(shape), 0, 0));
         SetImmediate(Island, Border.CornerRadiusProperty, new CornerRadius(dot / 2));
         SetImmediate(Island, IslandBorder.ShoulderRadiusProperty, 0d);
-        ResetDotScale();
+        SetImmediate(Island, IslandBorder.MaterialOpacityProperty, 1d);
+        SetImmediate(Island, OpacityProperty, 1d);
+        SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf("surface"));
+        // The line's playback progress lies inside the surface: it is not part of the dot (SetExpanded brings it back).
+        SetImmediate(MusicIndicator, OpacityProperty, 0d);
+        ResetDotPose();
     }
 
-    // Takes the panel off the screen: an open panel closes at once, the compact content leaves first, then the surface draws
-    // back into the dot on the settling curve, the dot bounces once and sinks into a ripple. gone runs once it has, or at once
-    // when nothing animates. Nothing opens it meanwhile; ApplySettings and SetExpanded wait for it (see RestoreAfterPowerOff).
+    // Takes the panel off the screen on exit: an open panel closes at once, the compact content leaves first, then the surface
+    // draws back into the dot on the settling curve, without the give an opening has; the dot then jumps twice and merges into
+    // the water. gone runs once it has, or at once when nothing animates. Nothing opens it meanwhile; SetExpanded waits for it.
     internal void PowerOff(Action gone)
     {
         if (_poweringOff) { _whenGone += gone; return; }
         if (!CanAnimateLifecycle) { gone(); return; }
-        int boot = ++_boot; _bootWaiting = false; _bootEnds = 0;
+        int boot = ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
         if (_expanded) SetExpanded(false, instant: true);
         _hover.Stop(); _leave.Stop(); _pointerInside = false; _cursorInCompact = false;
         _poweringOff = true; _whenGone = gone;
         UpdateGrips();
-        ResetDotScale();
+        ResetDotPose();
         var shape = Collapsed;
-        double dot = DotSize(shape);
+        double dot = DotMotion.Size;
         int shrink = (int)(Settings.AnimationDuration * PowerOffShrink);
-        // The shoulders and the flat top go early, so the surface is round well before it is small.
-        Track compact = new(0, .35), surface = new(.15, 1), corners = new(.15, .6), shadow = new(0, .45);
+        // The shoulders and the flat top go early, so the surface is round well before it is small. The line takes the
+        // surface's color and material on the way, so it ends as the same dot as the other forms.
+        Track compact = new(0, .35), surface = new(.1, 1), corners = new(.1, .55), shadow = new(0, .45), tone = new(0, .5);
         Animate(Compact, OpacityProperty, 0, shrink, compact, Soft.InOut);
+        // The line's playback progress leaves with the content: kept, it showed as a grey bar inside the shrinking dot.
+        Animate(MusicIndicator, OpacityProperty, 0, shrink, compact, Soft.InOut);
         Animate(CompactScale, ScaleTransform.ScaleXProperty, .85, shrink, compact, Soft.InOut);
         Animate(CompactScale, ScaleTransform.ScaleYProperty, .85, shrink, compact, Soft.InOut);
         Animate(IslandShadow, OpacityProperty, 0, shrink, shadow, Soft.Out);
+        Animate(Island, IslandBorder.MaterialOpacityProperty, 1, shrink, tone, Soft.Out);
+        _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = PanelTheme.ColorOf("surface"), EasingFunction = Soft.InOut }, shrink, tone), HandoffBehavior.SnapshotAndReplace);
         Animate(Island, IslandBorder.ShoulderRadiusProperty, 0, shrink, corners, Soft.InOut);
         Island.BeginAnimation(Border.CornerRadiusProperty, Timed(new CornerRadiusAnimation { To = new CornerRadius(dot / 2), EasingFunction = Soft.Out }, shrink, corners), HandoffBehavior.SnapshotAndReplace);
         Island.BeginAnimation(MarginProperty, Timed(new ThicknessAnimation { To = new Thickness(0, DotTop(shape), 0, 0), EasingFunction = Soft.Settle }, shrink, surface), HandoffBehavior.SnapshotAndReplace);
@@ -162,71 +214,50 @@ public partial class MainWindow
         Sink(shape, boot, shrink);
     }
     private Action? _whenGone;
+    private DropMerge? _merge;
 
-    // Once the surface is the dot (after `after` ms), it bounces once, then sinks: it shrinks away while a ripple spreads from
-    // where it was and fades. Everything is set up now, with its start delayed: built at the moment the dot is reached, the
-    // rings and their animations held up the frames there.
+    // Once the surface is the dot (after `after` ms), it jumps twice; then the island hands off to the water-merge drawing.
     private void Sink(CollapsedShape shape, int boot, int after)
     {
-        int bounce = (int)(Settings.AnimationDuration * PowerOffBounce), drop = (int)(Settings.AnimationDuration * PowerOffDrop);
-        var hop = new DoubleAnimationUsingKeyFrames { BeginTime = TimeSpan.FromMilliseconds(after), Duration = TimeSpan.FromMilliseconds(bounce + drop) };
-        hop.KeyFrames.Add(new EasingDoubleKeyFrame(1.25, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(bounce * .45)), Soft.Out));
-        hop.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(bounce)), Soft.InOut));
-        hop.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(bounce + drop * .55)), new BezierEase(.55, 0, .9, .5)));
-        hop.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(bounce + drop))));
-        hop.Completed += (_, _) =>
+        PoseDot(DotMotion.PowerOff, DotMotion.Touchdown, after, () =>
         {
             if (boot != _boot || !_poweringOff) return;
-            HideRipple();
+            MergeIntoWater(shape, boot);
+        });
+    }
+
+    // Hides the round island and draws the dot sinking into the water in its place (DropMerge).
+    private void MergeIntoWater(CollapsedShape shape, int boot)
+    {
+        ResetDotPose();
+        SetImmediate(Island, OpacityProperty, 0d);
+        SetImmediate(HoverZone, OpacityProperty, 1d);
+        if (_merge is null) { _merge = new DropMerge { IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top }; Stage.Children.Add(_merge); }
+        // Room for the drop above the waterline and for the line on either side; the waterline is on the floor the dot landed
+        // on. The box may start above the window: only its empty top is cut off there.
+        double width = DotMotion.Size * 4, height = DotMotion.Size * 2 + DropMerge.WaterBelow, floor = DotTop(shape) + DotMotion.Size;
+        _merge.Width = width; _merge.Height = height;
+        _merge.Margin = new Thickness(DotLeft(shape) + DotMotion.Size / 2 - width / 2, floor - (height - DropMerge.WaterBelow), 0, 0);
+        _merge.Fill = _surface.Color;
+        _merge.Visibility = Visibility.Visible;
+        SetImmediate(_merge, DropMerge.ProgressProperty, 0d);
+        var progress = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(DotMotion.SinkLength)) { EasingFunction = null };
+        progress.Completed += (_, _) =>
+        {
+            if (boot != _boot || !_poweringOff) return;
+            HideMerge();
             _poweringOff = false;
             var whenGone = _whenGone; _whenGone = null;
             whenGone?.Invoke();
         };
-        ScaleDot(hop);
-        int total = after + bounce + drop;
-        HoverZone.BeginAnimation(OpacityProperty, Timed(new DoubleAnimation { To = 0, EasingFunction = Soft.InOut }, total, new((after + bounce + drop * .35) / total, (after + bounce + drop * .6) / total)), HandoffBehavior.SnapshotAndReplace);
-        Ripple(shape, after + bounce + (int)(drop * .2), drop);
+        _merge.BeginAnimation(DropMerge.ProgressProperty, progress);
     }
 
-    // Two rings spread from the dot's middle and fade, one a little after the other: in the theme's rim when it has one, else
-    // in a light or dark tint against the surface, so they show on the desktop whatever the surface's own color.
-    private readonly Ellipse[] _ripples = new Ellipse[2];
-    private Brush RippleBrush()
+    private void HideMerge()
     {
-        if (Island.RimBrush is not SolidColorBrush { Color.A: < 0x40 }) return Island.RimBrush.CloneCurrentValue();
-        var surface = _surface.Color;
-        bool dark = .299 * surface.R + .587 * surface.G + .114 * surface.B < 128;
-        return new SolidColorBrush(dark ? Color.FromArgb(0xB0, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x90, 0, 0, 0));
-    }
-    private void Ripple(CollapsedShape shape, int start, int length)
-    {
-        double dot = DotSize(shape), reach = dot * 4.5;
-        double x = DotLeft(shape) + dot / 2, y = DotTop(shape) + dot / 2;
-        var brush = RippleBrush();
-        for (int i = 0; i < _ripples.Length; i++)
-        {
-            var ring = _ripples[i] ??= new Ellipse { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false,
-                RenderTransformOrigin = new Point(.5, .5), RenderTransform = new ScaleTransform() };
-            if (ring.Parent is null) Stage.Children.Add(ring);
-            ring.Width = ring.Height = reach;
-            ring.Margin = new Thickness(x - reach / 2, y - reach / 2, 0, 0);
-            ring.Stroke = brush; ring.StrokeThickness = 1.6 - i * .4;
-            ring.Visibility = Visibility.Visible;
-            var delay = TimeSpan.FromMilliseconds(start + i * length * .22);
-            var span = TimeSpan.FromMilliseconds(length * (1 - i * .22));
-            var grow = new DoubleAnimation(dot / reach, 1, span) { BeginTime = delay, EasingFunction = Soft.Out };
-            var scale = (ScaleTransform)ring.RenderTransform;
-            scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow); scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
-            SetImmediate(ring, OpacityProperty, 0d);
-            var fade = new DoubleAnimationUsingKeyFrames { BeginTime = delay, Duration = span };
-            fade.KeyFrames.Add(new LinearDoubleKeyFrame(.85 - i * .25, KeyTime.FromPercent(.12)));
-            fade.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(1), Soft.Out));
-            ring.BeginAnimation(OpacityProperty, fade);
-        }
-    }
-    private void HideRipple()
-    {
-        foreach (var ring in _ripples) if (ring is not null) { SetImmediate(ring, OpacityProperty, 0d); ring.Visibility = Visibility.Collapsed; }
+        if (_merge is null) return;
+        SetImmediate(_merge, DropMerge.ProgressProperty, 0d);
+        _merge.Visibility = Visibility.Collapsed;
     }
 
     // A new collapsed style from the settings (notch, capsule or line): the surface changes into the new form instead of
@@ -239,16 +270,15 @@ public partial class MainWindow
         ApplySettings(true);
         _morphingShape = false;
     }
+}
 
-    // After a power-off that hid the panel (or was overtaken by the panel being wanted again): the surface gets back its shape and
-    // opacity out of sight, and a panel that is still meant to show boots again.
-    private void RestoreAfterPowerOff()
-    {
-        // Exiting meanwhile, or its monitor gone (Retire closed the window), the panel stays gone.
-        if (_app.Exiting || _retiring) return;
-        ResetDotScale(); HideRipple();
-        SetImmediate(HoverZone, OpacityProperty, 1d);
-        ApplySettings();
-        if (!IsSuppressed && IsVisible && !_expanded) Boot();
-    }
+// One part of the dot's pose (DotMotion) as an animation: its value at each moment is read from the pose, by the time in
+// milliseconds since the animation began.
+internal sealed class PoseAnimation : DoubleAnimationBase
+{
+    private readonly Func<double, double> _at;
+    public PoseAnimation(Func<double, double> at, double length) { _at = at; Duration = TimeSpan.FromMilliseconds(Math.Max(1, length)); }
+    protected override Freezable CreateInstanceCore() => new PoseAnimation(_at, 1);
+    protected override double GetCurrentValueCore(double defaultOriginValue, double defaultDestinationValue, AnimationClock animationClock)
+        => _at((animationClock.CurrentTime ?? TimeSpan.Zero).TotalMilliseconds);
 }
