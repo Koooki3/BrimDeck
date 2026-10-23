@@ -39,10 +39,11 @@ internal sealed class MonitorStrip : FrameworkElement
         IsHitTestVisible = false;
         // A reading fading out of a narrow row stays within it, off the lyric or the rings beside it.
         ClipToBounds = true;
-        // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings.
+        // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings. A rate has
+        // at most five characters (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _ring, Math.Round(4 * _scale) + Math.Ceiling(text("100%")), _bare, ColumnsWidth(Environment.ProcessorCount),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(text("999.9M")));
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))));
     }
 
     private double ItemWidth(CompactMonitorItems item) => _width(item);

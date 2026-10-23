@@ -204,6 +204,14 @@ static class SystemMonitorTests
         check("Compact rates", MonitorFormat.CompactRate(84_200) == new MonitorFormat.Quantity("84", "K") && MonitorFormat.CompactRate(1_240_000) == new MonitorFormat.Quantity("1.2", "M")
             && MonitorFormat.CompactRate(120_000_000) == new MonitorFormat.Quantity("120", "M") && MonitorFormat.CompactRate(2_500_000_000) == new MonitorFormat.Quantity("2.5", "G")
             && MonitorFormat.CompactRate(999_600).Unit == "M");
+        // The strip reserves five characters for a rate ("99.9M"); none below a terabyte a second is longer.
+        bool five = true;
+        for (double rate = 1; rate < 999_000_000_000; rate *= 1.003)
+        {
+            var q = MonitorFormat.CompactRate(rate);
+            five &= (q.Number + q.Unit).Length <= 5;
+        }
+        check("Compact rates: at most five characters", five);
         var alone = CompactMusicLayout.Calculate(300, 1, false, 0, false, 0, 120);
         check("Compact row: readings alone take the row, centred", alone is { MonitorAlone: true, MonitorWidth: 120 });
         var withRings = CompactMusicLayout.Calculate(300, 1, false, 2, false, 0, 120);
