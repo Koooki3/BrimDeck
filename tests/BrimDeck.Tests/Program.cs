@@ -21,6 +21,7 @@ try
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     EqualizerSignalTests.Run(Check);
+    CompactMotionTests.Run(Check);
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     NoticeGlyphTests.Run(Check);

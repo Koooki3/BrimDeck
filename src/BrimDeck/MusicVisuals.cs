@@ -90,81 +90,31 @@ internal static class MusicVisuals
 internal sealed class MusicEqualizer : FrameworkElement
 {
     public Brush Color { get; set; } = UI.Brush(UI.Secondary);
-    public bool Playing { get; set; }
-    public float Peak { get; set; }
     public int Bars { get; init; } = 5;
     // Bar width in DIPs; the collapsed row scales it with its height.
     public double BarWidth { get; init; } = 3;
-    private readonly (double Time, double Peak)[] _history = new (double, double)[64];
-    private readonly double[] _levels = new double[5], _drawn = new double[5];
+    // The heights. The panel hands the collapsed row's bars to each row it builds again, so a new row starts where the old one
+    // was; built afresh, the bars would drop to rest for a frame on every step of a resize and their dynamics would start over.
+    public EqualizerBars Levels { get; init; } = new();
+    private readonly double[] _drawn = new double[EqualizerBars.Count];
     private readonly DrawingGroup _drawing = new();
     private Size _drawnSize;
-    private int _next, _count;
-    private double _time;
-    public void Tick(float peak, bool playing, double seconds = 1d / 30)
-    {
-        Peak = float.IsFinite(peak) ? Math.Clamp(peak, 0, 1) : 0; Playing = playing;
-        if (!playing)
-        {
-            Array.Clear(_levels); _next = _count = 0; _time = 0;
-            Redraw(); return;
-        }
-        seconds = double.IsFinite(seconds) ? Math.Clamp(seconds, .001, .5) : 1d / 30;
-        _time += seconds;
-        _history[_next] = (_time, Peak); _next = (_next + 1) % _history.Length;
-        _count = Math.Min(_count + 1, _history.Length);
-        double low = Peak, high = Peak;
-        for (int i = 0; i < _count; i++)
-        {
-            var sample = Previous(i);
-            if (_time - sample.Time > 1.6) break;
-            low = Math.Min(low, sample.Peak); high = Math.Max(high, sample.Peak);
-        }
-        // Expand the recent musical dynamics instead of compressing absolute
-        // volume with a square root. A minimum range prevents noise amplification.
-        double range = Math.Max(.0025, Math.Max(high * .25, high - low));
-        for (int i = 0; i < _levels.Length; i++)
-        {
-            double sample = SampleAt(_time - i * .075);
-            double contrast = Math.Clamp((sample - low) / range, 0, 1);
-            double target = Math.Clamp(sample / .0015, 0, 1) * (.1 + .9 * Math.Pow(contrast, .8));
-            double response = 1 - Math.Exp(-seconds / (target > _levels[i] ? .035 : .085));
-            _levels[i] += (target - _levels[i]) * response;
-        }
-        Redraw();
-    }
+    public void Tick(float peak, bool playing, double seconds = 1d / 30) { Levels.Tick(peak, playing, seconds); Redraw(); }
     // Bar values already computed from captured audio, leftmost first.
-    public void Show(ReadOnlySpan<double> levels, bool playing)
-    {
-        Playing = playing;
-        for (int i = 0; i < _levels.Length; i++) _levels[i] = playing && i < levels.Length ? Math.Clamp(levels[i], 0, 1) : 0;
-        Redraw();
-    }
-    private (double Time, double Peak) Previous(int offset) => _history[(_next - 1 - offset + _history.Length) % _history.Length];
-    private double SampleAt(double time)
-    {
-        var newer = Previous(0);
-        for (int i = 0; i < _count; i++)
-        {
-            var older = Previous(i);
-            if (older.Time <= time)
-                return newer.Time == older.Time ? older.Peak : older.Peak + (newer.Peak - older.Peak) * (time - older.Time) / (newer.Time - older.Time);
-            newer = older;
-        }
-        return 0;
-    }
+    public void Show(ReadOnlySpan<double> levels, bool playing) { Levels.Show(levels, playing); Redraw(); }
     protected override void OnRender(DrawingContext dc) { Redraw(force: true); dc.DrawDrawing(_drawing); }
     private void Redraw(bool force = false)
     {
         var size = RenderSize;
+        var levels = Levels.Levels;
         // Paused bars stay at rest, so an unchanged frame is not drawn again.
-        if (!force && size == _drawnSize && _levels.AsSpan().SequenceEqual(_drawn)) return;
-        _levels.CopyTo(_drawn, 0); _drawnSize = size;
+        if (!force && size == _drawnSize && levels.SequenceEqual(_drawn)) return;
+        levels.CopyTo(_drawn); _drawnSize = size;
         using var dc = _drawing.Open();
-        for (int i = 0; i < Math.Min(Bars, _levels.Length); i++)
+        for (int i = 0; i < Math.Min(Bars, levels.Length); i++)
         {
             double bar = BarWidth;
-            double height = Math.Clamp(bar + _levels[i] * Math.Max(0, size.Height - bar), bar, Math.Max(bar, size.Height));
+            double height = Math.Clamp(bar + levels[i] * Math.Max(0, size.Height - bar), bar, Math.Max(bar, size.Height));
             dc.DrawRoundedRectangle(Color, null, new Rect(i * Math.Max(0, size.Width - bar) / Math.Max(1, Bars - 1), (size.Height - height) / 2, bar, height), bar / 2, bar / 2);
         }
     }
@@ -184,20 +134,29 @@ internal sealed class MusicMarquee : FrameworkElement
     private string _text = "";
     private double _fontSize = 11.5, _overflow, _fadeWidth = -1;
     private FormattedText? _formatted;
-    private ClockGroup? _scroll;
-    private bool _scrolling, _running, _hovered;
+    private bool _scrolling, _running, _hovered, _hooked;
+    private TimeSpan _frame;
     public MusicMarquee()
     {
         Loaded += (_, _) => UpdateAnimation();
-        Unloaded += (_, _) => { _hovered = false; ResetAnimation(); };
+        Unloaded += (_, _) =>
+        {
+            _hovered = false; UpdateAnimation();
+            // A line of its own starts again when it comes back; the panel's line goes on in the row built in its place.
+            if (!_sharedScroll) { _scroll.Restart(); Apply(); }
+        };
         IsVisibleChanged += (_, _) => UpdateAnimation();
         MouseEnter += (_, _) => { _hovered = true; UpdateAnimation(); };
         MouseLeave += (_, _) => { _hovered = false; UpdateAnimation(); };
     }
+    // Where the line stands in its scroll. The panel hands its own to the collapsed row it builds again, so the line carries on.
+    public MarqueeScroll Scroll { get => _scroll; init { _scroll = value; _sharedScroll = true; } }
+    private readonly MarqueeScroll _scroll = new();
+    private readonly bool _sharedScroll;
     public string Text
     {
         get => _text;
-        set { if (_text == value) return; _text = value; ResetText(); AutomationProperties.SetName(this, value); }
+        set { if (_text == value) return; _text = value; _scroll.Follow(value); ResetText(); AutomationProperties.SetName(this, value); }
     }
     public double FontSize
     {
@@ -255,58 +214,67 @@ internal sealed class MusicMarquee : FrameworkElement
     private FormattedText Formatted => _formatted ??= new(Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
         Typeface, FontSize, _ink ?? Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
     public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
-    private void ResetText() { _formatted = null; ResetAnimation(); Painter.InvalidateVisual(); }
+    // A new size or scale keeps the line's place (MarqueeScroll); only a new line starts it again.
+    private void ResetText() { _formatted = null; Painter.InvalidateVisual(); }
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     { base.OnDpiChanged(oldDpi, newDpi); ResetText(); }
     private double EdgeStop => _fadeWidth > 0 ? Math.Min(.5, EdgeWidth / _fadeWidth) : 0;
-    private void ResetAnimation()
-    {
-        _scroll?.Controller?.Remove(); _scroll = null; _running = false;
-        _shift.ApplyAnimationClock(TranslateTransform.XProperty, null); _shift.X = 0;
-        _unshift.ApplyAnimationClock(TranslateTransform.XProperty, null); _unshift.X = 0;
-        _left.ApplyAnimationClock(GradientStop.OffsetProperty, null); _left.Offset = 0;
-        _right.ApplyAnimationClock(GradientStop.OffsetProperty, null); _right.Offset = 1 - EdgeStop;
-    }
     private void UpdateAnimation()
     {
         bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && _overflow > 0 && _formatted is not null;
-        if (_scroll is null && running)
+        if (running != _running)
         {
-            double travel = _overflow / Speed, ramp = Math.Min(travel, EdgeWidth / Speed), edge = EdgeStop;
-            static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
-            var duration = TimeSpan.FromSeconds(3 + travel);
-            DoubleAnimationUsingKeyFrames Track(params DoubleKeyFrame[] frames)
-            { var track = new DoubleAnimationUsingKeyFrames { Duration = duration }; foreach (var frame in frames) track.KeyFrames.Add(frame); return track; }
-            // Rest, glide to the end, rest, start again. Each fade grows or shrinks over the first
-            // or last Edge of travel, so it follows how much of the text is hidden on that side.
-            var cycle = new ParallelTimeline { Duration = duration, RepeatBehavior = RepeatBehavior.Forever };
-            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new DiscreteDoubleKeyFrame(0, At(1.5)),
-                new LinearDoubleKeyFrame(-_overflow, At(1.5 + travel)), new DiscreteDoubleKeyFrame(-_overflow, At(3 + travel))));
-            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new DiscreteDoubleKeyFrame(0, At(1.5)),
-                new LinearDoubleKeyFrame(edge, At(1.5 + ramp)), new DiscreteDoubleKeyFrame(edge, At(3 + travel))));
-            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(1 - edge, At(0)), new DiscreteDoubleKeyFrame(1 - edge, At(1.5 + travel - ramp)),
-                new LinearDoubleKeyFrame(1, At(1.5 + travel)), new DiscreteDoubleKeyFrame(1, At(3 + travel))));
-            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new DiscreteDoubleKeyFrame(0, At(1.5)),
-                new LinearDoubleKeyFrame(_overflow, At(1.5 + travel)), new DiscreteDoubleKeyFrame(_overflow, At(3 + travel))));
-            // Animate the retained drawing at WPF's render cadence. A background
-            // DispatcherTimer can be delayed by input and must not drive text motion.
-            _scroll = (ClockGroup)cycle.CreateClock(true);
-            _shift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_scroll.Children[0]);
-            _left.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_scroll.Children[1]);
-            _right.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_scroll.Children[2]);
-            _unshift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_scroll.Children[3]);
-            _running = true;
-        }
-        if (_scroll is not null && _running != running)
-        {
-            if (running) _scroll.Controller!.Resume(); else _scroll.Controller!.Pause();
             _running = running;
+            if (running) Hook();
+            else
+            {
+                Unhook();
+                // Held still (paused, hovered, hidden), the time does not count. A row taken out of the window is being replaced,
+                // and the panel's line goes on in the new one without losing a frame.
+                if (PresentationSource.FromVisual(this) is not null) _scroll.Pause();
+            }
         }
         // Scrolling text takes the animated quality, which follows fractional offsets smoothly; otherwise WPF chooses, so resting
         // text gets the static quality and the island's scaling still counts as motion. The mode is a composition flag and does not
-        // draw the text again.
-        TextOptions.SetTextHintingMode(Painter, _running ? TextHintingMode.Animated : TextHintingMode.Auto);
+        // draw the text again. A row built in place of a scrolling one takes it from its first frame, before it has loaded.
+        bool moving = _running || !IsLoaded && _scrolling && ScrollAllowed && !_hovered && _overflow > 0;
+        TextOptions.SetTextHintingMode(Painter, moving ? TextHintingMode.Animated : TextHintingMode.Auto);
     }
+    // The line moves with the display's frames, timed by each frame's own time, as the resize spring is (MainWindow.Resize.cs):
+    // a keyframe clock is ticked at WPF's default animation rate, which does not divide a 144 Hz refresh, so a slow glide stepped
+    // unevenly. Each frame only sets the transforms and fade stops, so nothing is measured or drawn again.
+    private void Hook()
+    {
+        if (_hooked) return;
+        _hooked = true; _frame = TimeSpan.Zero;
+        CompositionTarget.Rendering += Frame;
+    }
+    private void Unhook()
+    {
+        if (!_hooked) return;
+        _hooked = false;
+        CompositionTarget.Rendering -= Frame;
+    }
+    private void Frame(object? sender, EventArgs e)
+    {
+        if (e is not RenderingEventArgs args) return;
+        // WPF may raise Rendering more than once for one frame.
+        if (args.RenderingTime == _frame) return;
+        _frame = args.RenderingTime;
+        _scroll.Advance(_frame.TotalSeconds, _overflow, Speed);
+        Apply();
+    }
+    // Places the text and the fades where the scroll stands; the frames of a rest set nothing.
+    private void Apply()
+    {
+        double offset = _scroll.At(_overflow), edge = EdgeStop;
+        var (left, right) = MarqueeScroll.Fades(offset, _overflow, EdgeWidth);
+        if ((offset, left, right, edge) == _applied) return;
+        _applied = (offset, left, right, edge);
+        _shift.X = -offset; _unshift.X = offset;
+        _left.Offset = edge * left; _right.Offset = 1 - edge * right;
+    }
+    private (double Offset, double Left, double Right, double Edge) _applied = (double.NaN, 0, 0, 0);
     protected override void OnRender(DrawingContext dc) { if (_glyphs is null) Draw(dc, RenderSize); }
     // The size comes from the element that draws: the child renders during this element's arrange, before its own size is set.
     private void Draw(DrawingContext dc, Size size)
@@ -341,7 +309,9 @@ internal sealed class MusicMarquee : FrameworkElement
                 if (_glyphs is null) OpacityMask = fade; else _fade = fade;
             }
         }
-        if (_overflow != overflow) { _overflow = overflow; ResetAnimation(); }
+        // A new width keeps the line's place: the glide goes on, and a line at its end keeps its end at the edge.
+        _scroll.Follow(_text);
+        _overflow = overflow; Apply();
         // Cover the whole box, as the carousel's background does, so the mask layer's edge is not the text's edge.
         if (overflow > 0) dc.DrawRectangle(Brushes.Transparent, null, new Rect(size));
         if (_glyphs is null) dc.PushClip(new RectangleGeometry(new Rect(size)));

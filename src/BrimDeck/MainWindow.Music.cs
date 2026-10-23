@@ -61,6 +61,10 @@ public partial class MainWindow
     private MusicEqualizer? _musicEqualizer, _compactEqualizer;
     private readonly double[] _flowLevels = new double[5];
     private MusicMarquee? _compactMarquee;
+    // The collapsed row's bar heights and the place of its scrolling line. The row is built again on every change of its width
+    // (a resize drag does that every frame), so like the readings' StripPresence they belong to the panel and outlive each row.
+    private readonly EqualizerBars _compactBars = new();
+    private readonly MarqueeScroll _compactScroll = new();
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
     private TimeSpan _quotaElapsed;
@@ -843,7 +847,8 @@ public partial class MainWindow
         if (clock is not null && layout.ClockWidth > 0) { grid.Show(CompactPart.Clock, clock, layout.ClockWidth, previous, motion); _compactClock = clock; }
         if (media && layout.EqualizerWidth > 0)
         {
-            _compactEqualizer = new MusicEqualizer { Bars = 4, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
+            // The bars' levels carry over from the row before (EqualizerBars), so rebuilding the row while resizing never resets them.
+            _compactEqualizer = new MusicEqualizer { Bars = 4, Levels = _compactBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
             grid.Show(CompactPart.Equalizer, _compactEqualizer, layout.EqualizerWidth, previous, motion);
         }
         if (layout.RingWidth > 0 && apps.Count > 0)
@@ -865,8 +870,9 @@ public partial class MainWindow
         }
         if (layout.TextWidth > 0)
         {
-            // The title takes the room the row leaves it (CompactRow), never less than the shortest the layout keeps.
-            _compactMarquee = new MusicMarquee { Text = text, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
+            // The title takes the room the row leaves it (CompactRow), never less than the shortest the layout keeps; its scroll
+            // position carries over from the row before (MarqueeScroll).
+            _compactMarquee = new MusicMarquee { Text = text, Scroll = _compactScroll, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
                 ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
             grid.Show(CompactPart.Text, _compactMarquee, layout.TextWidth, previous, motion);
         }
