@@ -755,7 +755,7 @@ public partial class MainWindow
         // The system readings ask for the width of everything chosen, on whole device pixels, and show what fits in the region they get.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings.MonitorPalette, Settings.CompactReadings), scale,
             !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi) : null;
-        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0); CurrentCompactLayout = layout;
+        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, strip is null ? null : strip.FittedWidth); CurrentCompactLayout = layout;
         // With readings on, a row too short for its content grows to it; the new shape builds the row again.
         double wanted = strip is null ? 0 : CompactMusicLayout.NaturalWidth(scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip.PreferredWidth);
         if (Math.Abs(wanted - _compactWanted) > .5) { _compactWanted = wanted; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }

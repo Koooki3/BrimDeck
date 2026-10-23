@@ -215,6 +215,13 @@ static class SystemMonitorTests
         for (double width = 60; width < 400; width++)
             steady &= Math.Abs(CompactMusicLayout.Calculate(width + 1, 1, true, 3, true, 30, 150).MonitorWidth - CompactMusicLayout.Calculate(width, 1, true, 3, true, 30, 150).MonitorWidth) <= 1 + 1e-9;
         check("Compact row: a DIP of width moves the readings by at most a DIP", steady);
+        // 269 DIP of readings in a region that holds only 250: upload leaves, and the width it had goes to the lyric.
+        double Kept(double room) => CompactMonitor.Width(CompactMonitor.Fit(chosen, Strip, 10, room), Strip, 10);
+        var dropped = CompactMusicLayout.Calculate(330, 1, true, 0, true, 0, content);
+        var given = CompactMusicLayout.Calculate(330, 1, true, 0, true, 0, content, Kept);
+        check("Compact row: dropped readings give their width to the lyric", dropped.MonitorWidth == 258 && given.MonitorWidth == 217
+            && given.TextWidth == dropped.TextWidth + 41 &&CompactMonitor.Fit(chosen, Strip, 10, given.MonitorWidth - 8) == (chosen & ~CompactMonitorItems.Upload));
+        check("Compact row: readings that all fit keep their region", CompactMusicLayout.Calculate(400, 1, true, 0, true, 0, content, Kept).MonitorWidth == 277);
         var screen = new DipRect(0, 0, 2560, 1440); var area = new DipRect(0, 0, 2560, 1392);
         var capsule = new DeckSettings { CapsuleWidth = 196, CapsuleHeight = 32 };
         check("Compact fit: a capsule grows to its content plus its insets", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 300).Surface.Width == 332);

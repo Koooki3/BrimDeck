@@ -51,6 +51,12 @@ internal sealed class MonitorStrip : FrameworkElement
     private CompactMonitorItems Shown => _shown;
     // Rounded up to whole device pixels: the row rounds the region it gives down to them, which must not drop a reading.
     public double PreferredWidth => DevicePixels.Up(CompactMonitor.Width(Shown, ItemWidth, _gap), _dpi);
+    // The width of the readings that fit in the given width, measured as ArrangeOverride will measure the region it gets.
+    public double FittedWidth(double available)
+    {
+        double room = DevicePixels.Down(available, _dpi);
+        return Math.Min(room, DevicePixels.Up(CompactMonitor.Width(CompactMonitor.Fit(Shown, ItemWidth, _gap, room), ItemWidth, _gap), _dpi));
+    }
 
     public void Update(MonitorSnapshot? snapshot) { _snapshot = snapshot; InvalidateVisual(); }
 

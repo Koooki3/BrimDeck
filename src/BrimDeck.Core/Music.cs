@@ -125,8 +125,10 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         => Calculate(contentWidth, 1, media, rings, text, 0);
 
     // contentWidth is the whole row in DIPs; clockFace is the clock's reserved width at this scale, or 0 without a clock;
-    // monitorFace is the width all chosen system readings want, or 0 without them.
-    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0)
+    // monitorFace is the width all chosen system readings want, or 0 without them; monitorFit, when given, is the width the
+    // readings that fit in a given width take, so a region that drops readings gives the rest back to the middle.
+    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0,
+        Func<double, double>? monitorFit = null)
     {
         double s = SafeScale(scale), width = Safe(contentWidth), face = Safe(clockFace), monitorWanted = Safe(monitorFace);
         rings = Math.Max(0, rings);
@@ -147,6 +149,13 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         bool monitorAlone = monitorWanted > 0 && !media && rings == 0 && !text && face == 0;
         double monitorRegion = monitorWanted == 0 ? 0 : monitorAlone ? Math.Min(monitorWanted, middle)
             : Math.Min(monitorWanted + Whole(8 * s), Math.Max(0, middle - (rings > 0 ? Math.Max(1, Whole(12 * s)) : 0) - (text ? Whole(MinimumText * s) : 0)));
+        // A region too short for every reading drops whole readings; it keeps only the width of those that stay, and the
+        // middle gets the rest instead of a blank beside the readings.
+        if (monitorFit is not null && !monitorAlone && monitorRegion > 0 && monitorRegion < monitorWanted + Whole(8 * s))
+        {
+            double kept = Safe(monitorFit(Math.Max(0, monitorRegion - Whole(8 * s))));
+            monitorRegion = kept > 0 ? Math.Min(monitorRegion, kept + Whole(8 * s)) : 0;
+        }
         middle = Math.Max(0, middle - monitorRegion);
 
         // Rings have one size for a given height: the width never shrinks them. The ring region is cut at its edge, through a
