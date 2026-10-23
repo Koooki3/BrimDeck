@@ -354,14 +354,14 @@ public partial class MainWindow
         plate.Children.Add(new Border { CornerRadius = new CornerRadius(size * .28), Background = UI.Brush(UI.Fill) });
         var image = _app.Notices.Icons.Get(notice.IconRef, out _);
         if (image is not null) plate.Children.Add(new Image { Source = image, Width = size * .72, Height = size * .72, Stretch = Stretch.Uniform });
+        else if (NoticeBadges.AppGlyph(notice, size, _app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey))) is { } glyph) plate.Children.Add(glyph);
         else
         {
             var color = PanelTheme.Readable(_app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
             var name = notice.AppName.Trim();
             plate.Children.Add(new TextBlock { Text = name.Length == 0 ? "?" : char.IsSurrogate(name[0]) && name.Length > 1 ? name[..2] : name[..1].ToUpper(Loc.Culture), FontFamily = UI.DisplayFont, FontSize = Math.Round(size * .48), FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(color), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         }
-        if (NoticeLook.Current().StatusColor(notice.Category) is { Length: > 0 } mark && notice.Category != NoticeCategory.Task)
-            plate.Children.Add(new Ellipse { Width = 9, Height = 9, Fill = UI.Brush(mark), Stroke = UI.Brush(PanelTheme.Hex("surface")), StrokeThickness = 1.5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -2, -2) });
+        NoticeBadges.Decorate(plate, notice, size, NoticeLook.Current().Glow, image is null ? NoticeGlyphs.App(notice.AppKey, notice.AppName, notice.Origin) : null);
         return image is not null;
     }
 

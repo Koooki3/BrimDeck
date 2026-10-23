@@ -493,20 +493,23 @@ internal sealed class NoticeWindow : Window
             plate.Children.Add(picture);
         }
         else plate.Children.Add(Fallback(notice, size));
-        if (notice is not null && _look.StatusColor(notice.Category) is { Length: > 0 } mark && notice.Category != NoticeCategory.Task)
-        {
-            double dot = Math.Round(size * .36);
-            plate.Children.Add(new Ellipse { Width = dot, Height = dot, Fill = UI.Brush(mark), Stroke = new SolidColorBrush(_look.Surface), StrokeThickness = 1.5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -dot * .25, -dot * .25) });
-        }
+        // The state and source badges on the plate's corners (NoticeBadges).
+        if (notice is not null) NoticeBadges.Decorate(plate, notice, size, _look.Glow, image is null ? NoticeGlyphs.App(notice.AppKey, notice.AppName, notice.Origin) : null);
         AutomationProperties.SetName(plate, notice?.AppName ?? "BrimDeck");
         return plate;
     }
 
-    // Without an icon: the application's first letter in its color, or a bell for a summary.
+    // Without an icon: a glyph for the kind of application when it can be told, else its first letter in its color; a bell
+    // for a summary.
     private FrameworkElement Fallback(Notice? notice, double size)
     {
         if (notice is null)
-            return new Viewbox { Width = size * .56, Height = size * .56, Child = new Path { Data = Geometry.Parse("M12,3 C8.7,3 6.5,5.6 6.5,8.8 V12.6 L4.8,15.6 H19.2 L17.5,12.6 V8.8 C17.5,5.6 15.3,3 12,3 Z M9.6,17.6 A2.4,2.4 0 0 0 14.4,17.6"), Stroke = UI.Brush(_look.Primary), StrokeThickness = 1.6, Width = 24, Height = 24 } };
+        {
+            var bell = NoticeBadges.Glyph(NoticeGlyph.Bell, Math.Round(size * .6), NoticeBadges.Wpf(NoticeBadges.Colors.Primary));
+            bell.HorizontalAlignment = HorizontalAlignment.Center; bell.VerticalAlignment = VerticalAlignment.Center;
+            return bell;
+        }
+        if (NoticeBadges.AppGlyph(notice, size, _accent) is { } glyph) return glyph;
         var letter = notice.AppName.Trim() is { Length: > 0 } name ? char.IsSurrogate(name[0]) && name.Length > 1 ? name[..2] : name[..1].ToUpper(Loc.Culture) : "?";
         return new TextBlock { Text = letter, FontFamily = UI.DisplayFont, FontSize = Math.Round(size * .5), FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(AccentHex), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     }
