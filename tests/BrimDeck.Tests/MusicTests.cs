@@ -102,6 +102,14 @@ internal static class MusicTests
         check("The standard preset gives the artist its own line above one lyric line", !standard.MergeTitle && standard.LyricLines == 1);
         check("The spacious preset shows the lines before and after the current lyric", !spacious.MergeTitle && spacious.LyricLines == 3);
         check("Without lyrics the artist keeps its own line at the compact preset", !MusicLayout.Calculate(440, 140, false, true).MergeTitle);
+        bool steadyTitles = true;
+        foreach (var (w, h) in new[] { (440.0, 140.0), (440.0, 200.0), (560.0, 280.0), (1200.0, 400.0) })
+        {
+            var waiting = MusicLayout.Calculate(w, h, false, true, lyricsExpected: true); var found = MusicLayout.Calculate(w, h, true, true, lyricsExpected: true);
+            steadyTitles &= waiting.MergeTitle == found.MergeTitle && waiting.HeaderHeight == found.HeaderHeight && waiting.Cover == found.Cover
+                && waiting.CoverY == found.CoverY && waiting.LyricRoom == found.LyricRoom && waiting.LyricLines == 0 && found.LyricLines == found.LyricRoom;
+        }
+        check("With lyrics expected, the titles keep their place and the room its lines until lyrics arrive", steadyTitles);
         check("A tall, narrow panel stays one step above the narrow preset", MusicLayout.DensityFor(440, 400) == 1);
         check("Without a timeline the cover takes the progress row's room",
             MusicLayout.Calculate(440, 200, true, false).Cover > standard.Cover && MusicLayout.Calculate(440, 200, true, false).ProgressHeight == 0);

@@ -347,9 +347,10 @@ public partial class MainWindow
     internal static string SmtcHintWhy => Loc.T("开启网易云的 SMTC 后，才能在这里控制播放", "Turn on SMTC in NetEase to control playback here");
     // The English hint names the menu items as NetEase Cloud Music's Chinese interface shows them.
     internal static string SmtcHintHow => Loc.T("位置：网易云音乐 › 设置 › 系统 › 开启 SMTC", "Where: NetEase Cloud Music › 设置 › 系统 › 开启 SMTC");
-    // The song and the form (PageHandover) the media page was last built with: a new song swaps in, a new form (lyric lines,
-    // the title merged with the artist, the message or the entry shown) morphs in, as when a drag crosses a size step.
+    // The song and the form (PageHandover) the media page was last built with: a new song swaps in, a new form (the lyric lines
+    // the room holds, the title merged with the artist, the message or the entry shown) morphs in, as when a drag crosses a size step.
     private string _musicSong = "", _musicForm = "";
+    private bool _musicHadLyrics;
     private long _songArrived;
     private BitmapSource? _musicCoverShown;
     // The titles of a new song rise into place. A rebuild during the change continues it from where it is.
@@ -384,7 +385,8 @@ public partial class MainWindow
             && _media?.RestartingNetease != true && _media?.Error is null;
         string message = _media?.RestartingNetease == true ? Loc.T("正在重启网易云…", "Restarting NetEase Cloud Music…") : _media?.Error ?? "";
         var modes = track is null ? [] : MusicPlaybackModes.Supported(track);
-        var layout = MusicLayout.Calculate(w, h, hasLyrics, track?.HasTimeline == true, message.Length > 0, logMode, transport: !showSmtcHint);
+        var layout = MusicLayout.Calculate(w, h, hasLyrics, track?.HasTimeline == true, message.Length > 0, logMode, transport: !showSmtcHint,
+            lyricsExpected: Settings.LyricsEnabled);
         CurrentMusicLayout = layout;
         var c = layout.Metrics;
         // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
@@ -394,7 +396,11 @@ public partial class MainWindow
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
-        string form = $"{track is null}|{layout.LyricLines}|{layout.MergeTitle}|{layout.ShowFullControl}|{layout.ShowMessage}|{hasLyrics}|{showSmtcHint}|{track?.HasTimeline}";
+        // Lyrics that arrive after the song, or come and go with the player's line, only fade in their own lines (lyricsArrive):
+        // the form counts the lyric lines the room holds, not whether lyrics are there.
+        string form = $"{track is null}|{layout.LyricRoom}|{layout.MergeTitle}|{layout.ShowFullControl}|{layout.ShowMessage}|{Settings.LyricsEnabled}|{showSmtcHint}|{track?.HasTimeline}";
+        bool lyricsArrive = shown && hasLyrics && !_musicHadLyrics && Soft.Enabled;
+        _musicHadLyrics = hasLyrics;
         // A new song changes the titles and perhaps the cover; the rest of the page is the same and stays still. The titles
         // rise into place (RiseIn) and a new cover fades in. A player announces a song in a few updates (title, artist, and a
         // timeline that may go and come back); the first starts the change and the rest carry it on instead of starting it
@@ -443,15 +449,12 @@ public partial class MainWindow
         var right = new Grid(); Grid.SetColumn(right, 2); upper.Children.Add(right);
         bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
         int lyricLines = playerLyrics ? Math.Min(1, layout.LyricLines) : layout.LyricLines;
-        // With nothing under the titles (no lyrics, no message), the titles sit centred beside the cover instead of at its top,
-        // so a tall panel does not leave the space under them empty.
-        bool alone = !(hasLyrics && lyricLines > 0) && !layout.ShowMessage;
-        right.RowDefinitions.Add(new RowDefinition { Height = alone ? new GridLength(1, GridUnitType.Star) : new GridLength(layout.HeaderHeight) });
-        right.RowDefinitions.Add(new RowDefinition { Height = alone ? GridLength.Auto : new GridLength(1, GridUnitType.Star) });
+        right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.HeaderHeight) });
+        right.RowDefinitions.Add(new RowDefinition());
         double equalizerWidth = Math.Max(27, Math.Round(c.Equalizer * 1.7));
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(equalizerWidth + 16) });
-        var titles = new StackPanel { VerticalAlignment = alone ? VerticalAlignment.Center : VerticalAlignment.Top };
+        var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
         var title = UI.Fixed(track.Title, c.Title, c.TitleLine, UI.Primary, FontWeights.SemiBold);
         AutomationProperties.SetName(title, Loc.T("歌名 ", "Title ") + track.Title); titles.Children.Add(title);
         if (layout.MergeTitle)
@@ -468,7 +471,7 @@ public partial class MainWindow
         header.Children.Add(titles);
         if (shown && songChanging) RiseIn(titles);
         _musicEqualizer = new MusicEqualizer { Width = equalizerWidth, Height = c.Equalizer, Color = _musicAccent, HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = alone ? VerticalAlignment.Center : VerticalAlignment.Top, Margin = new Thickness(0, alone ? 0 : (c.TitleLine - c.Equalizer) / 2, 0, 0) };
+            VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, (c.TitleLine - c.Equalizer) / 2, 0, 0) };
         Grid.SetColumn(_musicEqualizer, 1); header.Children.Add(_musicEqualizer); right.Children.Add(header);
 
         var middle = new Grid(); Grid.SetRow(middle, 1); right.Children.Add(middle); _musicInfo = middle;
@@ -492,6 +495,7 @@ public partial class MainWindow
             RenderOptions.SetClearTypeHint(text, ClearTypeHint.Enabled);
             AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
         }
+        if (lyricsArrive) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; middle.BeginAnimation(OpacityProperty, fade); }
         if (layout.MiddleHeight >= c.MiddleGap + c.LyricLine)
         {
             // One line; a longer message (a failed full control connection) is read whole in its tooltip, like a cut title.
