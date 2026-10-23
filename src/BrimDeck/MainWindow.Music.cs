@@ -833,7 +833,7 @@ public partial class MainWindow
             Settings.MusicText, Settings.CompactMonitor, Settings.CompactMonitorItems, Settings.ClockStyle, PanelTheme.Generation);
         var previous = _compactRow is { } last && Equals(last.Key, key) ? last : null;
         bool motion = previous is not null && Motion.Enabled && Settings.Animations && SystemParameters.ClientAreaAnimation;
-        var grid = new CompactRow(key, layout.Gap, dpi) { Width = rowWidth, Height = layout.RowHeight };
+        var grid = new CompactRow(key, layout.Gap, dpi, scale) { Width = rowWidth, Height = layout.RowHeight };
         if (media && layout.CoverWidth > 0)
         {
             var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
@@ -870,8 +870,9 @@ public partial class MainWindow
         }
         if (layout.TextWidth > 0)
         {
-            // The title takes the room the row leaves it (CompactRow), never less than the shortest the layout keeps; its scroll
-            // position carries over from the row before (MarqueeScroll).
+            // The title takes the room the row gives it (CompactRow, CompactSpacing): what its text needs while there is room, never
+            // less than the shortest the layout keeps when its text is longer; its scroll position carries over from the row before
+            // (MarqueeScroll).
             _compactMarquee = new MusicMarquee { Text = text, Scroll = _compactScroll, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
                 ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
             grid.Show(CompactPart.Text, _compactMarquee, layout.TextWidth, previous, motion);

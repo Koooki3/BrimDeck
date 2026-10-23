@@ -63,7 +63,8 @@ public sealed record MediaTrack
 // in priority order while they fit: first what the row must show (the clock; while media plays, the cover, the equalizer and
 // the title at its shortest), then the quota rings one by one, then the system readings one by one in the order they stay
 // (CompactMonitor.Priority). The first part that does not fit ends the row, so a wider row only ever adds parts and a narrower
-// one only removes them. The title takes the space that is left; without a title that space is free (the window places it).
+// one only removes them. The title takes the space that is left; without a title that space is free. Where the parts then
+// stand, evenly spaced, is CompactSpacing's.
 // Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are whole or half DIPs.
 public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, double RingGap, int VisibleRings, double RingWidth, double TextWidth, bool ScrollRings)
 {
