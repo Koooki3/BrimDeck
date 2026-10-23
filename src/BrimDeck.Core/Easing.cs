@@ -90,3 +90,59 @@ public struct Spring
         return raw;
     }
 }
+
+// The curves behind the panel's timed animations (BrimDeck.Soft), as plain functions of the elapsed fraction of a move.
+public static class Curves
+{
+    // A CSS cubic-bezier(x1, y1, x2, y2): the progress at the elapsed fraction x. x(t) is monotonic while x1 and x2 lie in [0, 1].
+    public static double Bezier(double x1, double y1, double x2, double y2, double x)
+    {
+        x = Math.Clamp(x, 0, 1);
+        double t = x;
+        // Newton steps on the x polynomial, then bisection for what they leave (a flat slope near an end).
+        for (int i = 0; i < 8; i++)
+        {
+            double slope = Slope(t, x1, x2);
+            if (Math.Abs(slope) < 1e-6) break;
+            t = Math.Clamp(t - (Sample(t, x1, x2) - x) / slope, 0, 1);
+        }
+        if (Math.Abs(Sample(t, x1, x2) - x) > 1e-5)
+        {
+            double low = 0, high = 1;
+            for (int i = 0; i < 30; i++) { t = (low + high) / 2; if (Sample(t, x1, x2) < x) low = t; else high = t; }
+        }
+        return Sample(t, y1, y2);
+    }
+    private static double Sample(double t, double a1, double a2) => ((1 - 3 * a2 + 3 * a1) * t + (3 * a2 - 6 * a1)) * t * t + 3 * a1 * t;
+    private static double Slope(double t, double a1, double a2) => 3 * (1 - 3 * a2 + 3 * a1) * t * t + 2 * (3 * a2 - 6 * a1) * t + 3 * a1;
+
+    // The system monitor's own move (Eased) from rest to rest: it leaves at one and a half times its average speed and lands
+    // with no speed left, never passing its end. The panel's content, its selections and its hover feedback follow it, so the
+    // whole panel moves as the monitor page does.
+    public static double Follow(double x) => x <= 0 ? 0 : x >= 1 ? 1 : 1.5 * x - .5 * x * x * x;
+
+    // A spring thrown toward its target, fitted into the move: it leaves at speed (half way there after a tenth of the move),
+    // passes the target by under 2 percent a little after the middle, and has settled by the end (the last few thousandths are
+    // taken at once). This is the island's own gesture: a quick attack and a soft landing with a slight give, for what opens or
+    // appears. Thrown with the speed that cancels the sine term, the spring's path is 1 - e^(-decay x) cos(omega x).
+    public const double BounceDamping = .85;
+    // The envelope e^(-decay x) is down to 0.2 percent at the end.
+    private const double BounceDecay = 6.2;
+    private static double BounceOmega => BounceDecay / BounceDamping * Math.Sqrt(1 - BounceDamping * BounceDamping);
+    public static double Bounce(double x)
+    {
+        if (x <= 0) return 0;
+        if (x >= 1) return 1;
+        return 1 - Math.Exp(-BounceDecay * x) * Math.Cos(BounceOmega * x);
+    }
+    // How far Bounce passes its target, as a fraction of the move.
+    public static double BounceOvershoot
+    {
+        get
+        {
+            // The peak, where the path's slope e^(-decay x) (decay cos + omega sin) is zero.
+            double x = (Math.PI - Math.Atan(BounceDecay / BounceOmega)) / BounceOmega;
+            return Bounce(x) - 1;
+        }
+    }
+}
