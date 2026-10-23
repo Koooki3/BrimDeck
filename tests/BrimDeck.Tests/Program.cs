@@ -637,15 +637,15 @@ try
     var longRoot = Path.Combine(root, "long-lines"); var longProjects = Path.Combine(longRoot, "projects"); Directory.CreateDirectory(longProjects);
     var longFile = Path.Combine(longProjects, "session.jsonl");
     File.WriteAllLines(longFile, [Padded("before", 10), Padded("too-long", 20_000), Padded("after", 10)]);
-    var limited = new LogReader(4096);
-    var skippedRead = limited.Read(ProviderId.Claude, longRoot, now);
+    var smallReader = new LogReader(4096);
+    var skippedRead = smallReader.Read(ProviderId.Claude, longRoot, now);
     Check("A line over the limit is skipped and the lines around it are read",
         skippedRead.Entries.Select(e => e.Key).SequenceEqual(["claude:before", "claude:after"]) && skippedRead.UsageNote.Contains("1 处记录未能读取"));
     File.AppendAllText(longFile, Padded("unfinished", 20_000)[..15_000]);
-    var unfinished = limited.Read(ProviderId.Claude, longRoot, now);
+    var unfinished = smallReader.Read(ProviderId.Claude, longRoot, now);
     Check("A long line still being written is not counted yet", unfinished.Entries.Count == 2 && unfinished.UsageNote.Contains("1 处记录未能读取"));
     File.AppendAllText(longFile, Padded("unfinished", 20_000)[15_000..] + "\n" + Padded("last", 10) + "\n");
-    var finished = limited.Read(ProviderId.Claude, longRoot, now);
+    var finished = smallReader.Read(ProviderId.Claude, longRoot, now);
     Check("A long line is counted once it is complete and reading goes on after it",
         finished.Entries.Count == 3 && finished.Entries.Any(e => e.Key == "claude:last") && finished.UsageNote.Contains("2 处记录未能读取"));
     File.WriteAllLines(Path.Combine(longProjects, "large.jsonl"), [Padded("large", 3_000_000)]);
