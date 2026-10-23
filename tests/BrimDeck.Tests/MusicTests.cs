@@ -319,6 +319,10 @@ internal static class MusicTests
             alertSane &= new[] { a.RingWidth, a.NameWidth, a.TextWidth, a.ResetWidth, a.RingSize, a.FontSize }.All(v => double.IsFinite(v) && v >= 0) && a.Total <= row + 1e-9;
         }
         check("Every notice width and scale gives finite, non-negative regions within the row", alertSane);
+        var shortScroll = CompactAlertLayout.Scroll(24, 5);
+        var longScroll = CompactAlertLayout.Scroll(500, 5);
+        check("A notice longer than its row scrolls at the lyric's pace, or faster to finish with a rest at the end",
+            shortScroll == (1, 2) && longScroll == (1, 4) && CompactAlertLayout.Scroll(double.NaN, 5) == (1, 1) && CompactAlertLayout.Scroll(50, 0) == (0, 0));
 
         // Every size in the row follows the height alone: across widths 0 to 800, for each style and height, the rings, cover,
         // equalizer, clock and type keep one size; only the regions change.

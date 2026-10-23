@@ -203,7 +203,8 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
 // The quota notice that replaces the collapsed row: ring, application name, "used" text and reset time, centred.
 // Each part has a region that clips; when the row is short, the reset time gives way first, then the name, then the
-// ring, and the used text last, each down to nothing before the next starts.
+// ring, and the used text last, each down to nothing before the next starts. The window does not cut the notice this way:
+// it measures it with unlimited width and scrolls it when it is longer than the row (Scroll).
 public sealed record CompactAlertLayout(double Scale, double RingSize, double RingThickness, double FontSize, double LineHeight, double Gap,
     double RingWidth, double NameWidth, double TextWidth, double ResetWidth)
 {
@@ -223,6 +224,19 @@ public sealed record CompactAlertLayout(double Scale, double RingSize, double Ri
         double Take(double region) { double cut = Math.Min(region, deficit); deficit -= cut; return region - cut; }
         resetR = Take(resetR); nameR = Take(nameR); ringR = Take(ringR); textR = Take(textR);
         return new(s, ring, 2.2 * s, Math.Max(1, CompactMusicLayout.Half(11.5 * s)), Math.Max(1, CompactMusicLayout.Whole(16 * s)), gap, ringR, nameR, textR, resetR);
+    }
+
+    // DIP per second, the collapsed lyric's pace.
+    public const double ScrollSpeed = 24;
+    // A notice longer than its row scrolls once while it is shown: it rests at its start, glides until its end is in view and
+    // rests there. The glide keeps the lyric's pace when that leaves the end its rest, and is faster when it does not, so the
+    // whole notice has been seen before it goes. Returns when the glide starts and ends, in seconds from the notice's start.
+    public static (double Start, double End) Scroll(double overflow, double shown)
+    {
+        double time = double.IsFinite(shown) && shown > 0 ? shown : 0;
+        double hold = Math.Min(1, time / 5), glide = Math.Max(0, time - 2 * hold);
+        double distance = double.IsFinite(overflow) && overflow > 0 ? overflow : 0;
+        return (hold, hold + Math.Min(distance / ScrollSpeed, glide));
     }
 }
 
