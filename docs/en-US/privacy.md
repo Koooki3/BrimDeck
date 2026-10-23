@@ -13,7 +13,7 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 | Grok Bot | Reads the Grok Bot desktop app's own sign-in (`%APPDATA%\Grok Bot\sand-secrets.json`) and asks Cursor for that account's weekly allowance. Each row can turn off "Fetch quota online": such a row reads no sign-in and sends nothing, and shows only the weekly allowance the Grok Bot desktop app cached on this PC (`%APPDATA%\Grok Bot\sand-client-persistence`) | Not available |
 | ZCode | Reads the ZCode sign-in and asks for the Coding Plan, Start Plan and MCP daily limits | Reads the local request records (`%USERPROFILE%\.zcode\cli\db\db.sqlite`) |
 | DeepSeek Harness | Reads the DeepSeek Harness sign-in (`%USERPROFILE%\.dsh\.credentials.yaml`) and asks the DeepSeek platform for the account balance and total cost; without a signed-in account, uses the API key saved there to ask for the balance | Reads the local session records (`%USERPROFILE%\.dsh\sessions`) |
-| Zhipu GLM, Z.ai GLM, DeepSeek, New API, Sub2API, Custom | Uses the key and site address entered in settings | Not available |
+| Zhipu GLM, Z.ai GLM, DeepSeek, New API, Sub2API, Custom | Uses the key and site address entered in settings. The key goes only over HTTPS or to this PC; a New API, Sub2API or Custom source with "Allow HTTP" on also sends it over HTTP, in plain text | Not available |
 
 - When `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ZCODE_HOME` or `DSH_HOME` is set to an absolute path, that folder is read instead.
 - These account APIs and local data formats are not stable public interfaces. When they cannot be read, the panel shows the actual status and never makes up numbers.

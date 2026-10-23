@@ -51,7 +51,8 @@ The DeepSeek Harness desktop app and local web app (`npx @deepseek-ai/dsh web`) 
 Choose Zhipu GLM, Z.ai GLM, DeepSeek, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
 
 - **Key**: stored on this PC, encrypted by Windows, and never written to the settings file. It is deleted when you remove the column or change its quota source.
-- **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically.
+- **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically. Requests carry the API key, so the address must use HTTPS; HTTP is only for this PC (`localhost`, `127.0.0.1`, `[::1]`).
+- **Allow HTTP** (New API, Sub2API, Custom): off by default. Turn it on for a source whose site runs on a NAS (such as `http://192.168.x.x`) or is reached through Tailscale. When on, the source's requests, including those of a custom script, may use HTTP to any address, and the API key is sent in plain text, so use it only on a trusted network. When off, a saved HTTP address is not read and the status says "HTTPS required".
 - **Test connection**: reads the source once and shows the result and how long it took.
 - **If a read fails**: the last successful reading stays on screen, and the tooltip on the name explains why.
 
@@ -95,7 +96,7 @@ async function fetchUsage(ctx) {
 | Member | Description |
 | --- | --- |
 | `ctx.site`, `ctx.secrets.key` | The site address and API key you entered; empty strings when not filled in |
-| `ctx.http.get(url, options)`, `ctx.http.post(url, options)` | Sends a request. `options` may contain `headers`, `timeout` (milliseconds) and `body` (POST only). Returns `{ status, headers, text(), json() }` |
+| `ctx.http.get(url, options)`, `ctx.http.post(url, options)` | Sends a request. `options` may contain `headers`, `timeout` (milliseconds) and `body` (POST only). Returns `{ status, headers, text(), json() }`. The address must use HTTPS, by the same rules as the site address |
 | `ctx.log(text)` | Writes a log line shown by Test connection |
 | `ctx.language`, `ctx.now` | The interface language (`"zh-CN"` or `"en-US"`) and the time of this read |
 
