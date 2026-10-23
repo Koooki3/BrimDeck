@@ -5,7 +5,7 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, CPU,
-// memory and GPU each as a ring gauge with its figure, or alone with its glyph inside (narrower), and download and upload, in
+// memory and GPU each as a ring gauge with its figure, or alone as a dial with its letter inside (narrower), and download and upload, in
 // the order and the colors set in the settings' table (CompactReading); the rings alone sit closer together. It asks for
 // the width of everything chosen (PreferredWidth); when its region is narrower, the row draws it at that width and scrolls it
 // through the region (ReadingsCarousel). It draws itself once per reading; the collapsed row stays still between readings.
@@ -30,10 +30,11 @@ internal sealed class MonitorStrip : FrameworkElement
         _shown = CompactMonitor.Shown(readings); _values = CompactMonitor.Values(readings);
         _scale = CompactMusicLayout.SafeScale(scale);
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
-        // A ring with its figure is smaller than one alone, which carries its glyph.
+        // A ring with its figure is smaller than a dial alone, which carries its letter.
         _ring = Math.Max(4, CompactMusicLayout.Whole(12 * _scale));
-        _bare = Math.Max(4, CompactMusicLayout.Whole(14 * _scale));
-        _gap = CompactMusicLayout.Whole((CompactMonitor.RingsOnly(_shown, _values) ? 7 : 10) * _scale);
+        _bare = Math.Max(4, CompactMusicLayout.Whole(16 * _scale));
+        // Readings with figures sit closer than the dials alone: a figure narrower than the widest it can show already leaves room after it.
+        _gap = CompactMusicLayout.Whole((CompactMonitor.RingsOnly(_shown, _values) ? 7 : 6) * _scale);
         _row = Math.Max(1, CompactMusicLayout.Whole(24 * _scale));
         Height = _row;
         IsHitTestVisible = false;
@@ -136,11 +137,11 @@ internal sealed class MonitorStrip : FrameworkElement
             switch (item)
             {
                 case CompactMonitorItems.Columns: Columns(drawing, left, width, center, s?.Cpu.OrDefault); break;
-                case CompactMonitorItems.Cpu: Gauge(drawing, left, center, s?.Cpu.OrDefault?.Usage, _colors.Normal(item), MonitorGlyph.Cpu, (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Cpu: Gauge(drawing, left, center, s?.Cpu.OrDefault?.Usage, _colors.Normal(item), "C", (_values & item) != 0, ppd); break;
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
-                    Gauge(drawing, left, center, memory?.UsedFraction, memory is null ? UI.Tertiary : _colors.Memory(memory.Level), MonitorGlyph.Memory, (_values & item) != 0, ppd); break;
-                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, _colors.Normal(item), MonitorGlyph.Gpu, (_values & item) != 0, ppd); break;
+                    Gauge(drawing, left, center, memory?.UsedFraction, memory is null ? UI.Tertiary : _colors.Memory(memory.Level), "M", (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, _colors.Normal(item), "G", (_values & item) != 0, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, _colors.Normal(item), ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, _colors.Normal(item), ppd); break;
             }
@@ -164,27 +165,46 @@ internal sealed class MonitorStrip : FrameworkElement
         }
     }
 
-    // A ring whose arc is the share, and the figure after it; a ring alone carries its glyph inside, as ftop's corner badges do,
-    // so it is not taken for the quota rings beside it.
-    private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, MonitorGlyph glyph, bool figured, double ppd)
+    // A ring whose arc is the share, and the figure after it. Alone, it is a dial open at the bottom with the reading's letter
+    // inside: the gap tells it from the full quota rings beside it, and a letter stays legible at this size where a glyph does not.
+    private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, string letter, bool figured, double ppd)
     {
-        double size = figured ? _ring : _bare, ring = Math.Max(1.2, size * .16), radius = size / 2 - ring / 2;
+        if (!figured) { Dial(drawing, x, center, share, color, letter, ppd); return; }
+        double size = _ring, ring = Math.Max(1.2, size * .16), radius = size / 2 - ring / 2;
         var c = new Point(x + size / 2, center);
-        var track = new Pen(UI.Brush(UI.Track), ring); track.Freeze();
+        // The empty part is the quota rings' track, so the rings beside them read as rings as clearly as theirs do.
+        var track = new Pen(UI.Brush(PanelTheme.Hex("ringTrack")), ring); track.Freeze();
         drawing.DrawEllipse(null, track, c, radius, radius);
         if (share is { } value) MonitorDraw.Arc(drawing, c, radius, ring, value, color);
-        if (!figured)
-        {
-            double glyphSize = size * .5, scale = glyphSize / 16;
-            var pen = new Pen(UI.Brush(UI.Secondary), Math.Max(.9, _scale) / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
-            pen.Freeze();
-            drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, c.X - glyphSize / 2, c.Y - glyphSize / 2));
-            drawing.DrawGeometry(null, pen, MonitorDraw.Glyph(glyph));
-            drawing.Pop();
-            return;
-        }
         var text = MonitorDraw.Text(GaugeFigure(share), _font, UI.Primary, ppd);
         MonitorDraw.Baseline(drawing, text, x + _ring + Math.Round(4 * _scale), Math.Round(center + _font * .36));
+    }
+
+    // Three quarters of a circle, from lower left over the top to lower right, filled clockwise by the share. Its centre sits a
+    // little low, so the open circle looks centred in the row; the letter is centred on its own outline, not on the font's box.
+    private const double DialStart = Math.PI * 1.25, DialSweep = Math.PI * 1.5;
+    private void Dial(DrawingContext drawing, double x, double center, double? share, string color, string letter, double ppd)
+    {
+        // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
+        double size = _bare, ring = Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), radius = size / 2 - ring / 2;
+        var c = new Point(x + size / 2, center + .5 * _scale);
+        DialArc(drawing, c, radius, ring, 1, PanelTheme.Hex("ringTrack"));
+        if (share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
+        var text = MonitorDraw.Text(letter, Math.Max(1, 7 * _scale), UI.Primary, ppd, strong: true);
+        var bounds = text.BuildGeometry(new Point()).Bounds;
+        if (!bounds.IsEmpty) drawing.DrawText(text, new Point(c.X - bounds.X - bounds.Width / 2, c.Y - bounds.Y - bounds.Height / 2));
+    }
+
+    private static void DialArc(DrawingContext drawing, Point c, double radius, double thickness, double fraction, string color)
+    {
+        Point at(double angle) => new(c.X + radius * Math.Sin(angle), c.Y - radius * Math.Cos(angle));
+        double sweep = DialSweep * fraction;
+        var figure = new PathFigure { StartPoint = at(DialStart), IsClosed = false };
+        figure.Segments.Add(new ArcSegment(at(DialStart + sweep), new Size(radius, radius), 0, sweep > Math.PI, SweepDirection.Clockwise, true));
+        var geometry = new PathGeometry([figure]); geometry.Freeze();
+        var pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        pen.Freeze();
+        drawing.DrawGeometry(null, pen, geometry);
     }
 
     // An arrow and the rate in at most four characters and a letter: "84K", "1.2M".

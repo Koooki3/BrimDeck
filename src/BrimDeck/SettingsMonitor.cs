@@ -66,14 +66,14 @@ public sealed partial class SettingsWindow
         var headings = ReadingColumns(); headings.Height = 34;
         AddHeadings(headings, new[]
         {
-            (Loc.T("读数", "Reading"), 1, Loc.T("拖动左侧手柄调整读数在刘海和胶囊中从左到右的顺序。宽度不够时，读数按这个顺序滚动显示。",
-                "Drag the handle at the left to set the order of the readings in the notch and the capsule, left to right. When the width runs short, the readings scroll in this order.")),
-            (Loc.T("主题", "Theme"), 2, Loc.T("读数在刘海和胶囊中的颜色，默认跟随上方的“配色”。选色后改用所选颜色；在颜色选择器中点“默认”恢复跟随配色。内存占用偏高或过高时仍改用预警或告警色。只影响收起时的读数。",
-                "The reading's color in the notch and the capsule; by default it follows Colors above. A chosen color replaces it; Default in the color picker follows Colors again. Memory still turns to the warning or critical color when it runs high. Only the collapsed readings use it.")),
-            (Loc.T("显示数值", "Value"), 3, Loc.T("CPU、内存和 GPU 的圆环旁是否显示百分比。关闭后只显示圆环（环内显示图标），占用的宽度更小。核心柱没有数值，下载和上传始终显示速率，不能设置。",
-                "Whether the CPU, memory and GPU rings show their percentage beside them. Off, the ring shows alone, with its icon inside, and takes less width. The core columns have no figure and download and upload always show their rate, so they have no choice.")),
+            (Loc.T("读数", "Reading"), 1, ""),
+            (Loc.T("主题", "Theme"), 2, ""),
+            (Loc.T("显示数值", "Value"), 3, ""),
             (Loc.T("显示", "Show"), 4, "")
         });
+        // The names in the rows start at the left of their column, so their heading does too rather than floating in its middle.
+        var nameHeading = headings.Children.OfType<FrameworkElement>().First(heading => Grid.GetColumn(heading) == 1);
+        nameHeading.HorizontalAlignment = HorizontalAlignment.Left; nameHeading.Margin = new Thickness(6, 0, 6, 0);
         var table = new StackPanel();
         table.Children.Add(headings);
         table.Children.Add(new Border { Child = rows, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0) });

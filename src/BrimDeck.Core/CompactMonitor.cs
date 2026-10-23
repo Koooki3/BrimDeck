@@ -19,7 +19,7 @@ public enum CompactMonitorItems
 }
 
 // One reading of the collapsed strip as set in the settings' table; its place there is its place in the strip, left to right.
-// ShowValue: a ring (CPU, memory, GPU) shows its percentage after it, or, off, the ring alone with its glyph inside, which is
+// ShowValue: a ring (CPU, memory, GPU) shows its percentage after it, or, off, a dial alone with its letter inside, which is
 // narrower; the core columns carry no figure and the rates are always text, so it means nothing for them.
 // Color: "#RRGGBB" in place of the palette's color in the reading's normal state, or null to follow the palette.
 public sealed class CompactReading
