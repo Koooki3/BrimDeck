@@ -59,3 +59,11 @@ public static class CompactMonitor
         return Width(shown, width, gap) <= available + 1e-9 ? shown : CompactMonitorItems.None;
     }
 }
+
+// Widths on whole device pixels, for a DIP width and the device pixels per DIP (1.5 at 150 %). The collapsed row rounds its
+// regions down (Down); the readings ask for their width rounded up (Up), so that rounding never takes a reading away.
+public static class DevicePixels
+{
+    public static double Down(double value, double dpi) => double.IsFinite(value) && value > 0 && dpi > 0 ? Math.Floor(value * dpi + .001) / dpi : 0;
+    public static double Up(double value, double dpi) => !double.IsFinite(value) || value <= 0 ? 0 : double.IsFinite(dpi) && dpi > 0 ? Math.Ceiling(value * dpi - .001) / dpi : value;
+}

@@ -179,6 +179,28 @@ static class SystemMonitorTests
         check("Compact monitor: upload leaves first", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 69) == (CompactMonitorItems.All & ~CompactMonitorItems.Upload));
         check("Compact monitor: CPU and memory stay longest", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 33) == (CompactMonitorItems.Cpu | CompactMonitorItems.Memory));
         check("Compact monitor: nothing fits", CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, 5) == CompactMonitorItems.None && CompactMonitor.Fit(CompactMonitorItems.All, Ten, 2, double.NaN) == CompactMonitorItems.None);
+        // At 125 % and 150 % the row rounds the readings' region down to whole device pixels; the readings ask for their width
+        // rounded up, so CPU, memory, GPU, download and upload (3 × 43 + 2 × 50 + 4 × 10 = 269 DIP) all stay, alone or beside
+        // the song and the clock, while a row set too short still lets upload go first.
+        var chosen = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu | CompactMonitorItems.Download | CompactMonitorItems.Upload;
+        static double Strip(CompactMonitorItems item) => item is CompactMonitorItems.Download or CompactMonitorItems.Upload ? 50 : 43;
+        double content = CompactMonitor.Width(chosen, Strip, 10);
+        check("Compact monitor: rounding the region down alone dropped upload", content == 269 && CompactMonitor.Fit(chosen, Strip, 10, DevicePixels.Down(269, 1.5)) == (chosen & ~CompactMonitorItems.Upload));
+        foreach (double dpi in new[] { 1.25, 1.5 })
+        {
+            double wanted = DevicePixels.Up(content, dpi);
+            bool fits = wanted >= content && wanted < content + 1 / dpi + 1e-9 && Math.Abs(wanted * dpi - Math.Round(wanted * dpi)) < 1e-6;
+            foreach (var (media, text, clock) in new[] { (false, false, 0d), (true, true, 0d), (true, true, 60d), (false, false, 60d) })
+            {
+                var row = CompactMusicLayout.Calculate(CompactMusicLayout.NaturalWidth(1, media, 0, text, clock, wanted), 1, media, 0, text, clock, wanted);
+                double region = DevicePixels.Down(Math.Max(0, row.MonitorWidth - (row.MonitorAlone ? 0 : 8)), dpi);
+                fits &= CompactMonitor.Fit(chosen, Strip, 10, region) == chosen;
+            }
+            check($"Compact monitor: every reading stays after snapping at {dpi:P0}", fits);
+            check($"Compact monitor: a short row still drops upload at {dpi:P0}", CompactMonitor.Fit(chosen, Strip, 10, DevicePixels.Down(260, dpi)) == (chosen & ~CompactMonitorItems.Upload));
+        }
+        check("Device pixels: whole widths stay, others round", DevicePixels.Up(268, 1.5) == 268 && DevicePixels.Up(269, 1.25) == 269.6 && DevicePixels.Down(269, 1.25) == 268.8
+            && DevicePixels.Up(double.NaN, 1.5) == 0 && DevicePixels.Up(10, 0) == 10 && DevicePixels.Down(10, 0) == 0);
         check("Compact rates", MonitorFormat.CompactRate(84_200) == new MonitorFormat.Quantity("84", "K") && MonitorFormat.CompactRate(1_240_000) == new MonitorFormat.Quantity("1.2", "M")
             && MonitorFormat.CompactRate(120_000_000) == new MonitorFormat.Quantity("120", "M") && MonitorFormat.CompactRate(2_500_000_000) == new MonitorFormat.Quantity("2.5", "G")
             && MonitorFormat.CompactRate(999_600).Unit == "M");

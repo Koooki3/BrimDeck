@@ -94,7 +94,7 @@ public partial class MainWindow
 
     private enum RegionAnchor { Left, Center, Right }
     // Rounded down to whole device pixels, so regions never add up to more than the row.
-    private static double SnapDown(double value, double dpi) => double.IsFinite(value) && value > 0 && dpi > 0 ? Math.Floor(value * dpi + .001) / dpi : 0;
+    private static double SnapDown(double value, double dpi) => DevicePixels.Down(value, dpi);
     private static double Snap(double value, double dpi) => double.IsFinite(value) && dpi > 0 ? Math.Round(value * dpi, MidpointRounding.AwayFromZero) / dpi : 0;
 
     // A region of the given width holding one element, centred vertically in the row. The element keeps its size and is

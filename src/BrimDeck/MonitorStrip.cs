@@ -17,12 +17,12 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly CompactMonitorItems _items;
     private readonly bool _brief, _centered;
     private readonly MonitorColors _colors;
-    private readonly double _scale, _font, _ring, _gap, _row;
+    private readonly double _scale, _font, _ring, _gap, _row, _dpi;
     private MonitorSnapshot? _snapshot;
 
-    public MonitorStrip(CompactMonitorMode mode, CompactMonitorItems custom, MonitorColors colors, double scale, bool centered, StripPresence presence)
+    public MonitorStrip(CompactMonitorMode mode, CompactMonitorItems custom, MonitorColors colors, double scale, bool centered, StripPresence presence, double dpi)
     {
-        _presence = presence;
+        _presence = presence; _dpi = dpi;
         _items = CompactMonitor.Items(mode, custom); _brief = mode == CompactMonitorMode.Brief; _colors = colors; _centered = centered;
         _scale = CompactMusicLayout.SafeScale(scale);
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
@@ -51,7 +51,8 @@ internal sealed class MonitorStrip : FrameworkElement
 
     // Brief shows only the rings; columns and rates are not part of it.
     private CompactMonitorItems Shown => _brief ? _items & (CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu) : _items;
-    public double PreferredWidth => CompactMonitor.Width(Shown, ItemWidth, _gap);
+    // Rounded up to whole device pixels: the row rounds the region it gives down to them, which must not drop a reading.
+    public double PreferredWidth => DevicePixels.Up(CompactMonitor.Width(Shown, ItemWidth, _gap), _dpi);
 
     public void Update(MonitorSnapshot? snapshot) { _snapshot = snapshot; InvalidateVisual(); }
 
