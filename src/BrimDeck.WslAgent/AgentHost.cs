@@ -143,7 +143,8 @@ internal sealed class AgentHost
     // Becomes the notification service if none runs; otherwise watches the one that does.
     private async Task ClaimOrWatchAsync()
     {
-        var bus = _bus!;
+        // The bus may have closed meanwhile (a reclaim runs beside the reconnecting loop); the loop connects again.
+        var bus = _bus ?? throw new IOException("The session bus closed.");
         const uint DoNotQueue = 4, PrimaryOwner = 1;
         var reply = await bus.CallBusAsync("RequestName", "su", FreedesktopNotifications.Name, DoNotQueue);
         if (reply.Body is [uint result, ..] && result == PrimaryOwner) { await ReportAsync(AgentStates.Server); return; }
@@ -152,7 +153,7 @@ internal sealed class AgentHost
 
     private async Task WatchAsync()
     {
-        var bus = _bus!;
+        var bus = _bus ?? throw new IOException("The session bus closed.");
         if (_monitorBus is { } old) { _monitorBus = null; await old.DisposeAsync(); }
         string owner;
         try { owner = (string)(await bus.CallBusAsync("GetNameOwner", "s", FreedesktopNotifications.Name)).Body[0]; }
@@ -213,7 +214,8 @@ internal sealed class AgentHost
         if (message.Type != DBusMessageType.MethodCall) return;
         ServiceOutput output;
         lock (_gate) output = _state == AgentStates.Server ? _server.Handle(message) : ServiceOutput.None;
-        foreach (var reply in output.Bus) await SendBusAsync(_bus!, reply);
+        // A reply has nowhere to go once the bus closed; the application asks again on the new connection.
+        if (_bus is { } bus) foreach (var reply in output.Bus) await SendBusAsync(bus, reply);
         await ForwardAsync(output.ToBrimDeck);
     }
 

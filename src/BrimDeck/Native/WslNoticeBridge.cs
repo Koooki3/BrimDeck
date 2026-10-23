@@ -98,7 +98,7 @@ internal sealed class WslNoticeBridge : IDisposable
     public static async Task<HashSet<string>> RunningDistributionsAsync(CancellationToken token, bool anyWsl1 = false)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!anyWsl1 && !Process.GetProcessesByName("vmmemWSL").Concat(Process.GetProcessesByName("vmmem")).Any(DisposeAndTrue)) return names;
+        if (!anyWsl1 && !VirtualMachineRuns()) return names;
         var output = await RunWslAsync(["--list", "--running", "--quiet"], token, Encoding.Unicode);
         if (output is null) return names;
         foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -106,7 +106,13 @@ internal sealed class WslNoticeBridge : IDisposable
         return names;
     }
 
-    private static bool DisposeAndTrue(Process process) { process.Dispose(); return true; }
+    // Whether WSL 2's virtual machine process runs. Every Process object found is released, not only the first.
+    private static bool VirtualMachineRuns()
+    {
+        var found = Process.GetProcessesByName("vmmemWSL").Concat(Process.GetProcessesByName("vmmem")).ToList();
+        foreach (var process in found) process.Dispose();
+        return found.Count > 0;
+    }
 
     // Each installed distribution's WSL version, from "wsl --list --verbose" (which starts no distribution): lines such as
     // "* Ubuntu-24.04    Running    2", the default one marked with an asterisk.
@@ -287,7 +293,7 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
                         AgentStates.Server => WslAgentState.Server, AgentStates.Monitor => WslAgentState.Monitor,
                         AgentStates.MonitorDenied => WslAgentState.MonitorDenied, AgentStates.NoBus => WslAgentState.NoBus, _ => WslAgentState.Failed
                     }, message.Detail ?? "");
-                    _backoff = TimeSpan.FromSeconds(5);
+                    lock (_gate) _backoff = TimeSpan.FromSeconds(5);
                     continue;
                 }
                 Received?.Invoke(message);
@@ -317,8 +323,12 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
     // the distribution to run, so a distribution shut down meanwhile is not started again.
     private void Retry(string detail)
     {
-        _retryAt = DateTimeOffset.UtcNow + _backoff;
-        _backoff = TimeSpan.FromSeconds(Math.Min(120, _backoff.TotalSeconds * 2));
+        // Under the lock NeedsStart reads them with: retries come from the loop and from an agent's reading task.
+        lock (_gate)
+        {
+            _retryAt = DateTimeOffset.UtcNow + _backoff;
+            _backoff = TimeSpan.FromSeconds(Math.Min(120, _backoff.TotalSeconds * 2));
+        }
         SetState(WslAgentState.Failed, detail);
     }
 

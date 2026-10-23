@@ -138,7 +138,9 @@ internal static class AgentPaths
         try
         {
             if (File.GetUnixFileMode(runtime) != (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)) return null;
-            if (Native.OwnerOf(runtime) != Native.UserId()) return null;
+            // Both sides fail as Native.Unknown; an unknown user id never matches anything.
+            var uid = Native.UserId();
+            if (uid == Native.Unknown || Native.OwnerOf(runtime) != uid) return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
         return Path.Combine(runtime, "brimdeck-notify.sock");
@@ -157,8 +159,10 @@ internal static class Native
                     && uint.TryParse(line[4..].Trim().Split('\t', ' ')[0], out var uid)) return uid;
         }
         catch (IOException) { }
-        return 0;
+        // Unknown, never root: every check against it (socket owner, peer, bus) then fails safe.
+        return Unknown;
     }
+    public const uint Unknown = uint.MaxValue;
     // The owner of a file, from stat(1)'s output; uint.MaxValue when it cannot be told. stat is named by its full path:
     // Process.Start looks for a bare name in the current directory before PATH.
     public static uint OwnerOf(string path)
