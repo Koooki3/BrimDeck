@@ -19,20 +19,24 @@ public static class ClaudeQuotaCache
     public static readonly TimeSpan MaxAge = TimeSpan.FromDays(7);
     public const string FileName = "claude-quota.json";
 
-    private sealed record Stored(string? Account, DateTimeOffset Time, string? Plan, string? PlanSource, string? Source, List<Quota>? Quotas);
+    // The sources are kept as which sign-in and which plan origin, not as text: a text written in the language of the day would
+    // still show in that language after a change of language and a restart. They are named again when the file is read.
+    // Quota labels are already language-neutral (Loc.Label translates them where they are shown).
+    private sealed record Stored(string? Account, DateTimeOffset Time, string? Plan, ClaudePlanOrigin PlanFrom, ClaudeSignIn SignIn, List<Quota>? Quotas);
+    private static readonly JsonSerializerOptions Options = new() { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
 
     // A one-way hash of the account id, enough to tell two accounts apart without naming either. "" when the id is unknown.
     public static string AccountHash(string account) => string.IsNullOrWhiteSpace(account) ? ""
         : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("BrimDeck Claude account " + account.Trim().ToLowerInvariant())))[..32];
 
-    public static string Serialize(ClaudeQuotaSnapshot snapshot, string account) =>
-        JsonSerializer.Serialize(new Stored(AccountHash(account), snapshot.Time, snapshot.Plan, snapshot.PlanSource, snapshot.Source, snapshot.Quotas));
+    public static string Serialize(ClaudeQuotaSnapshot snapshot, string account, ClaudeSignIn signIn, ClaudePlanOrigin planFrom) =>
+        JsonSerializer.Serialize(new Stored(AccountHash(account), snapshot.Time, snapshot.Plan, planFrom, signIn, snapshot.Quotas), Options);
 
     // account is the id of the account signed in now.
     public static ClaudeQuotaSnapshot? Parse(string json, DateTimeOffset now, string account)
     {
         Stored? stored;
-        try { stored = JsonSerializer.Deserialize<Stored>(json); }
+        try { stored = JsonSerializer.Deserialize<Stored>(json, Options); }
         catch (JsonException) { return null; }
         var expected = AccountHash(account);
         if (stored is null || expected.Length == 0 || stored.Account != expected) return null;
@@ -40,7 +44,9 @@ public static class ClaudeQuotaCache
         if (stored.Quotas is null || stored.Time > now.AddMinutes(5) || now - stored.Time > MaxAge) return null;
         var quotas = stored.Quotas.Where(quota => quota is not null && !string.IsNullOrWhiteSpace(quota.Label)
             && double.IsFinite(quota.UsedPercent) && (quota.ResetAt is not { } reset || reset > now)).ToList();
-        return quotas.Count == 0 ? null : new(stored.Time, stored.Plan ?? "", stored.PlanSource ?? "", stored.Source ?? "", quotas);
+        if (quotas.Count == 0) return null;
+        var plan = stored.Plan ?? "";
+        return new(stored.Time, plan, plan.Length > 0 ? ClaudeSources.Plan(stored.PlanFrom, stored.SignIn) : "", ClaudeSources.Quota(stored.SignIn), quotas);
     }
 
     public static ClaudeQuotaSnapshot? Load(string path, DateTimeOffset now, string account)
@@ -51,13 +57,13 @@ public static class ClaudeQuotaCache
 
     // Written whole and then moved into place, so a reading cut short by an exit never leaves half a file. A failed write keeps
     // the previous file; the reading is still kept in memory for this run.
-    public static void Save(string path, ClaudeQuotaSnapshot snapshot, string account)
+    public static void Save(string path, ClaudeQuotaSnapshot snapshot, string account, ClaudeSignIn signIn, ClaudePlanOrigin planFrom)
     {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var temporary = path + ".tmp";
-            File.WriteAllText(temporary, Serialize(snapshot, account));
+            File.WriteAllText(temporary, Serialize(snapshot, account, signIn, planFrom));
             File.Move(temporary, path, true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }

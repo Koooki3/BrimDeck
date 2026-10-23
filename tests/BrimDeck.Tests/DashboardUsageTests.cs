@@ -117,7 +117,7 @@ internal static class DashboardUsageTests
 
     private sealed class SourceDesktop : IDesktopSources
     {
-        public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => new(true, [new("fixture-claude", "pro", "测试登录")]);
+        public ClaudeDesktopState ReadClaudeDesktop(DataLocations locations) => new(true, [new("fixture-claude", "pro", ClaudeSignIn.Desktop)]);
         public string? ReadCursorToken(string database) => throw new InvalidOperationException("Unselected Cursor source was read");
         public Task<IReadOnlyList<LocalEndpoint>> FindAntigravityAsync(CancellationToken cancellation) => throw new InvalidOperationException("Unselected Antigravity source was read");
     }

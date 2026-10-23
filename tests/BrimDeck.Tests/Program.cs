@@ -288,7 +288,7 @@ try
             Check("Both sources failing leaves quota unavailable instead of inventing a value", !unavailable.LiveQuota && unavailable.Quotas.Count == 0 && quotaHandler.Requests.Count == 2);
         }
 
-        desktopFixture.State = new(true, [new("test-code", "pro", "Claude 桌面版"), desktopCredentials[0]]);
+        desktopFixture.State = new(true, [new("test-code", "pro", ClaudeSignIn.Desktop), desktopCredentials[0]]);
         quotaHandler.Override = (token, _) => token == "test-code" ? new(System.Net.HttpStatusCode.Unauthorized) : null;
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
@@ -350,6 +350,7 @@ try
         var cacheText = File.ReadAllText(quotaFile);
         Check("The kept Claude reading holds no sign-in token", !cacheText.Contains("test-code") && !cacheText.Contains("test-desktop") && !cacheText.Contains("accessToken", StringComparison.OrdinalIgnoreCase));
         Check("The kept Claude reading names its account by a hash, never the id", !cacheText.Contains("current") && cacheText.Contains(ClaudeQuotaCache.AccountHash("current")));
+        Check("The kept Claude reading keeps its sources without the text of the language of the day", !cacheText.Contains("账户配额") && !cacheText.Contains("桌面版"));
         quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.TooManyRequests);
         File.WriteAllText(historyPath, History(usageClock.AddMinutes(10), 41, 8));
         // A switch of account while BrimDeck was closed: the other account's reading is not shown as this one's.
@@ -378,7 +379,7 @@ try
             Check("A rejected sign-in removes the kept Claude reading", !File.Exists(quotaFile));
         }
         var keptReading = new ClaudeQuotaSnapshot(usageClock, "Max 20x", "Claude 账户", "Claude Code", [new("Fable 每周", 44, usageClock.AddDays(2), 10080), new("5 小时额度", 12, usageClock.AddHours(2), 300)]);
-        var keptText = ClaudeQuotaCache.Serialize(keptReading, "current");
+        var keptText = ClaudeQuotaCache.Serialize(keptReading, "current", ClaudeSignIn.Code, ClaudePlanOrigin.Account);
         Check("A kept Claude reading reads back whole", ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1), "current") is { Plan: "Max 20x", Quotas.Count: 2 });
         Check("A quota whose window has reset since is left out", ClaudeQuotaCache.Parse(keptText, usageClock.AddHours(3), "current") is { Quotas: [{ Label: "Fable 每周" }] });
         Check("A kept reading older than a week is not used", ClaudeQuotaCache.Parse(keptText, usageClock.AddDays(8), "current") is null);
@@ -388,6 +389,13 @@ try
         Check("A kept reading is not used while the current account cannot be told", ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1), "") is null);
         Check("A kept reading that names no account, as earlier versions wrote it, is not used",
             ClaudeQuotaCache.Parse(JsonSerializer.Serialize(keptReading), usageClock.AddMinutes(1), "current") is null);
+        // A reading kept while BrimDeck showed Chinese names its sources in English after a change of language and a restart.
+        ClaudeQuotaSnapshot? readInEnglish;
+        Loc.Use(Loc.English);
+        try { readInEnglish = ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1), "current"); }
+        finally { Loc.Use(Loc.Chinese); }
+        Check("A kept reading names its sources in the language shown now", readInEnglish is { Source: "Claude Code · account quota", PlanSource: "Claude account" } &&
+            ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1), "current") is { Source: "Claude Code · 账户配额", PlanSource: "Claude 账户" });
         // A Claude Code sign-in names its account in the local account record that Claude Code writes when signing in.
         File.WriteAllText(credentialPath, """{"claudeAiOauth":{"accessToken":"test-code","subscriptionType":"pro"}}""");
         File.WriteAllText(profilePath, """{"oauthAccount":{"accountUuid":"code-account"}}""");
