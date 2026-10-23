@@ -156,10 +156,12 @@ public sealed partial class SettingsWindow : Window
         sidebar.Children.Add(Brand(24, new Thickness(24, 0, 22, 0)));
         // The list of pages scrolls once it is taller than the window, so the last pages (About) stay reachable in a short window.
         // Like the page, it always keeps the scroll bar's 16 DIP column, here in place of its right margin, so the buttons and the
-        // selected one's background keep their width when the bar appears.
-        _navigation.Margin = new Thickness(12, 0, 0, 12);
+        // selected one's background keep their width when the bar appears. The scroll area clips at its edges, so the list keeps a
+        // 4 DIP inset at the top, left and right for the keyboard focus outline, which reaches 2 DIP past a button; the scroll
+        // area's own margin gives the top and left back, and the buttons stay where they were.
+        _navigation.Margin = new Thickness(8, 4, 4, 12);
         var navigationScroll = new ScrollViewer { Style = (Style)FindResource("SettingsPageScrollViewer"), Content = _navigation, Focusable = false,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(4, -4, 0, 0) };
         Grid.SetRow(navigationScroll, 1); sidebar.Children.Add(navigationScroll);
         outer.Children.Add(sidebar); outer.Children.Add(new Border { Width = 1, Background = UI.Brush(Divider), HorizontalAlignment = HorizontalAlignment.Right });
         // The scroll area clips at its edges, so the content keeps a 4 DIP inset inside it for keyboard focus outlines
