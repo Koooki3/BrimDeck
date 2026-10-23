@@ -498,6 +498,14 @@ public partial class MainWindow : Window
         // Lay out in device-independent pixels. Column typography adapts to its available space.
         ContentCanvas.Width = _pageWidth;
         ContentCanvas.Height = ExpandedContent.Height;
+        // The recent notices page is drawn only while it shows (NoticesChanged), so notices that arrived while the panel was
+        // closed are not on it yet: it is drawn again before the panel opens, and what it lists counts as seen as on a page
+        // switch (the notices hotkey does that itself once open).
+        if (expanded && !wasExpanded && !_preview && CurrentPage == DeckPage.Notices && _app.Notices is not null)
+        {
+            if (!_keepPageOnOpen) NoticesPageShown();
+            RenderNotices();
+        }
         int duration = !instant && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
         if (fromNotice is { } notice && duration > 0) StartFromNotice(notice);
         ExpandedContent.IsHitTestVisible = expanded;

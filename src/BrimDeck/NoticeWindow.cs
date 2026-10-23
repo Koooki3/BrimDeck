@@ -611,13 +611,14 @@ internal sealed partial class NoticeWindow : Window
     private bool PrepareDetail(bool rebuild = false)
     {
         if (!rebuild && _detail.Children.Count > 0 && ReferenceEquals(_detailFor, _item)) return false;
+        // Laid out but not drawn: a collapsed element measures to nothing, which would leave the card at its least height.
+        if (_detail.Visibility == Visibility.Collapsed) _detail.Visibility = Visibility.Hidden;
         BuildDetail();
         _detailFrame = Frame(NoticeForm.Detail, DetailSize());
         double padding = DetailPadding();
         _detail.Width = Math.Max(0, _detailFrame.Rect.Width - padding * 2);
         _detail.Height = Math.Max(0, _detailFrame.Rect.Height - DetailTop - DetailBottom);
         _detailFor = _item;
-        if (_detail.Visibility == Visibility.Collapsed) _detail.Visibility = Visibility.Hidden;
         return true;
     }
 
