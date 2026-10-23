@@ -74,11 +74,13 @@ internal sealed partial class NoticeWindow
             if (_liveLine is not null) _liveLine.Text = words;
             if (_liveDetail is not null) _liveDetail.Text = words;
         }
-        if (_liveRing is { Parent: Grid grid } old && CountdownRing(notice) is { } ring)
+        // The ring stays in place; only its arc is drawn anew, so the toast around it is not laid out again.
+        if (_liveRing is Grid shown && NoticeClock.Fraction(notice.Timing, DateTimeOffset.UtcNow) is { } fraction)
         {
-            Grid.SetColumn(ring, Grid.GetColumn(old));
-            int index = grid.Children.IndexOf(old);
-            grid.Children.RemoveAt(index); grid.Children.Insert(index, ring);
+            var fresh = UI.Ring(fraction * 100, AccentHex, shown.Width, 2.2);
+            shown.Children.Clear();
+            while (fresh.Children.Count > 0) { var part = fresh.Children[0]; fresh.Children.RemoveAt(0); shown.Children.Add(part); }
+            AutomationProperties.SetName(shown, words ?? "");
         }
         // Ended (the countdown reached its end, the event started): the last words stay; the tick is let go.
         WatchLive();

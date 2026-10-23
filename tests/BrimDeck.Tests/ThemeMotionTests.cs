@@ -18,13 +18,19 @@ internal static class ThemeMotionTests
         check("Cyberpunk: breathing, drifting, sweeping, a rare flicker, neon pointer answers",
             cyber.Ambient is { Breathe: 6.5, BreatheDepth: .22, Drift: 11, Sweep: 16, SweepOpacity: .07, Flicker: 41, FlickerDepth: .1 }
             && cyber is { Hover: HoverFx.Neon, Press: PressFx.Ring, Focus: FocusFx.Neon, Color: "accent", Secondary: "shadow" } && cyber.Trail > 0);
-        check("GitHub themes are restrained and quick", Palette("github-dark").Motion is { Hover: HoverFx.Edge, Trail: 0, Pace: < 1 } && Palette("github-light").Motion is { Hover: HoverFx.Edge, Trail: 0, Pace: < 1 });
+        check("GitHub themes are restrained and quick", Palette("github-dark").Motion is { Hover: HoverFx.Edge, Particles: ParticleFx.Pixel, Pace: < 1 } && Palette("github-light").Motion is { Hover: HoverFx.Edge, Particles: ParticleFx.Pixel, Pace: < 1 });
+        check("Every built-in theme leaves its own particles",
+            new Dictionary<string, ParticleFx> { ["dark"] = ParticleFx.Dust, ["light"] = ParticleFx.Dust, ["one-dark-pro"] = ParticleFx.Spark, ["dracula"] = ParticleFx.Star,
+                ["night-owl"] = ParticleFx.Firefly, [PanelThemes.Demo] = ParticleFx.Glitch }.All(pair => Palette(pair.Key).Motion is { Trail: > 0 } motion && motion.Particles == pair.Value));
+        check("Particle styles inherit and unknown ones keep the base's",
+            Custom("""{ "base": "dracula", "motion": { "particles": "firefly" } }""").Motion.Particles == ParticleFx.Firefly
+            && Custom("""{ "base": "dracula", "motion": { "particles": "confetti" } }""").Motion.Particles == ParticleFx.Star);
         check("Light lifts, dark lights, the editor themes ripple",
             Palette("light").Motion.Hover == HoverFx.Lift && Palette("dark").Motion.Hover == HoverFx.Spot
             && new[] { "one-dark-pro", "dracula", "night-owl" }.All(id => Palette(id).Motion is { Hover: HoverFx.Spot, Press: PressFx.Ripple, Trail: > 0 }));
         check("Dracula's second color is its pink", Palette("dracula").Motion.Secondary == "liked");
         var system = Palette("dark").Motion.ForSystem();
-        check("System follows the Windows accent, quietly", system is { Color: ThemeMotion.SystemAccent, Hover: HoverFx.Spot, Trail: 0, Focus: FocusFx.Ring } && !system.Ambient.Any
+        check("System follows the Windows accent, quietly", system is { Color: ThemeMotion.SystemAccent, Hover: HoverFx.Spot, Particles: ParticleFx.Dust, Focus: FocusFx.Ring } && !system.Ambient.Any
             && system.HoverStrength <= Palette("dark").Motion.HoverStrength && system.Pace == Palette("dark").Motion.Pace);
 
         // Inheritance, field by field along the base chain.

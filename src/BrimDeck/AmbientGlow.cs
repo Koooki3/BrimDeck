@@ -61,7 +61,7 @@ internal static class MotionEnvironment
         if (e.PropertyName is nameof(SystemParameters.HighContrast) or nameof(SystemParameters.ClientAreaAnimation)) Changed?.Invoke();
     }
 
-    // Battery saver (energy saver on Windows 11) is the second bit of SYSTEM_POWER_STATUS.SystemStatusFlag.
+    // Battery saver (energy saver on Windows 11): SYSTEM_POWER_STATUS.SystemStatusFlag is 1 while it is on.
     private static bool ReadBatterySaver() => GetSystemPowerStatus(out var status) && (status.SystemStatusFlag & 1) != 0;
     [StructLayout(LayoutKind.Sequential)]
     private struct PowerStatus { public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag; public int BatteryLifeTime, BatteryFullLifeTime; }
@@ -151,7 +151,7 @@ internal sealed class AmbientGlow : IMotionClient
     private readonly TranslateTransform _drift = new(), _sweepShift = new();
     private ThemeMotion _motion = ThemeMotion.Default;
     private Brush? _rim;
-    private double _shadowBase = 1, _origin, _rimShown = 1, _glowShown = 1, _driftShown, _sweepShown = -1, _sweepOpacityShown;
+    private double _shadowBase = 1, _origin, _rimShown = 1, _driftShown, _sweepShown = -1, _sweepOpacityShown;
     private bool _glow, _running;
 
     public AmbientGlow(IslandBorder island, Panel content, DropShadowEffect? shadow, Func<MotionConditions> conditions, Func<bool> open)
@@ -211,7 +211,7 @@ internal sealed class AmbientGlow : IMotionClient
         if (_running) MotionTicker.Remove(this);
         _running = false;
         _sweep.Visibility = Visibility.Collapsed; _sweep.Opacity = 0;
-        _rimShown = _glowShown = 1; _driftShown = 0; _sweepShown = -1; _sweepOpacityShown = 0;
+        _rimShown = 1; _driftShown = 0; _sweepShown = -1; _sweepOpacityShown = 0;
     }
 
     public int Tick(double now)
@@ -220,8 +220,9 @@ internal sealed class AmbientGlow : IMotionClient
         if (_rim is null || !MotionGate.Ambient(_conditions(), _motion)) { Stop(); return 0; }
         var frame = _motion.Ambient.At(now - _origin);
         // Changes below what eight bits of opacity can show are left for a later frame.
+        // Only the rim breathes. The glow is a blurred shadow effect: any change to it, its opacity included, has WPF blur the
+        // whole island again, which cost about 4% of a core at this rate (measured on the cyberpunk island).
         if (Math.Abs(frame.Rim - _rimShown) >= .002) _rim.Opacity = _rimShown = frame.Rim;
-        if (_glow && _shadow is not null && Math.Abs(frame.Glow - _glowShown) >= .002) { _glowShown = frame.Glow; _shadow.Opacity = _shadowBase * frame.Glow; }
         if (Math.Abs(frame.Drift - _driftShown) >= .0015) _drift.X = _driftShown = frame.Drift;
         if (frame.Sweep >= 0)
         {

@@ -66,5 +66,5 @@
   },
   "effects": { "shadowBlur": 16, "shadowDepth": 3, "shadowOpacity": 0.2 },
   // Paper-like: what the pointer hovers lifts on a soft shadow ring with a faint sheen.
-  "motion": { "hover": "lift", "hoverStrength": 0.1, "press": "pulse", "pressStrength": 0.12, "trail": 0, "focus": "glow" }
+  "motion": { "hover": "lift", "hoverStrength": 0.1, "press": "pulse", "pressStrength": 0.12, "trail": 0.32, "particles": "dust", "focus": "glow" }
 }

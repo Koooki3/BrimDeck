@@ -9,6 +9,10 @@ namespace BrimDeck.Core;
 public enum HoverFx { None, Spot, Edge, Lift, Neon }
 public enum PressFx { None, Pulse, Ripple, Ring }
 public enum FocusFx { None, Ring, Glow, Neon }
+// The particles a moving pointer leaves over the open panel: dust (soft motes), pixel (small squares, as a contribution graph),
+// spark (short streaks along the movement), star (four-point twinkles), firefly (warm lights drifting up and glowing slowly),
+// glitch (thin neon dashes that jitter).
+public enum ParticleFx { None, Dust, Pixel, Spark, Star, Firefly, Glitch }
 
 // Periods and lengths are seconds; 0 turns an effect off.
 public sealed record AmbientMotion(double Breathe, double BreatheDepth, double Drift, double Sweep, double SweepOpacity, double Flicker, double FlickerDepth)
@@ -73,7 +77,7 @@ public readonly record struct AmbientFrame(double Rim, double Glow, double Drift
 // Color is a theme color key ("accent", "rim", "shadow", ...), a "#RRGGBB" color, or "system" for the Windows accent color.
 // Secondary is the second color of the neon styles. Pace scales every interaction duration.
 public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double HoverStrength, PressFx Press, double PressStrength,
-    double Trail, FocusFx Focus, double Pace, string Color, string Secondary)
+    double Trail, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.Dust)
 {
     public const string SystemAccent = "system";
     public static readonly ThemeMotion Default = new(AmbientMotion.None, HoverFx.Spot, .1, PressFx.Pulse, .16, 0, FocusFx.Glow, 1, "accent", "accent");
@@ -82,7 +86,7 @@ public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double Ho
     // "system" follows Windows: its accent color and the quietest answers, with no ambient light. The base theme's pace stays.
     public ThemeMotion ForSystem() => this with
     {
-        Ambient = AmbientMotion.None, Hover = HoverFx.Spot, HoverStrength = .08, Press = PressFx.Pulse, PressStrength = .12, Trail = 0,
+        Ambient = AmbientMotion.None, Hover = HoverFx.Spot, HoverStrength = .08, Press = PressFx.Pulse, PressStrength = .12, Trail = .26, Particles = ParticleFx.Dust,
         Focus = FocusFx.Ring, Color = SystemAccent, Secondary = SystemAccent
     };
 
@@ -106,7 +110,7 @@ public static class MotionSafety
     public const double BreatheMin = 3, BreatheMax = 30, BreatheDepthMax = .35, DriftMin = 4, DriftMax = 60;
     public const double SweepMin = 6, SweepMax = 120, SweepLength = 2.4, SweepOpacityMax = .12;
     public const double FlickerMin = 20, FlickerMax = 300, FlickerLength = 1.2, FlickerDepthMax = .15;
-    public const double HoverMax = .3, PressMax = .35, TrailMax = .12, PaceMin = .6, PaceMax = 1.6;
+    public const double HoverMax = .3, PressMax = .35, TrailMax = .6, PaceMin = .6, PaceMax = 1.6;
 
     // A period: 0 (or less) turns the effect off; anything else lies within its range.
     public static double Period(double? value, double min, double max, double fallback)
@@ -194,7 +198,10 @@ public sealed class PanelThemeMotion
     // none, pulse (the control glows once), ripple (a disc spreading from the pointer), ring (a spreading ring)
     public string? Press { get; set; }
     public double? PressStrength { get; set; }
+    // 0 to 0.6: how strongly the particles show (0: none)
     public double? Trail { get; set; }
+    // none, dust, pixel, spark, star, firefly, glitch
+    public string? Particles { get; set; }
     // none, ring, glow, neon: a bloom around the control keyboard focus moves to
     public string? Focus { get; set; }
     public double? Pace { get; set; }
@@ -239,6 +246,7 @@ public static partial class PanelThemes
                 Press = Enum.TryParse<PressFx>(motion.Press, true, out var press) && Enum.IsDefined(press) ? press : m.Press,
                 PressStrength = MotionSafety.Amount(motion.PressStrength, MotionSafety.PressMax, m.PressStrength),
                 Trail = MotionSafety.Amount(motion.Trail, MotionSafety.TrailMax, m.Trail),
+                Particles = Enum.TryParse<ParticleFx>(motion.Particles, true, out var particles) && Enum.IsDefined(particles) ? particles : m.Particles,
                 Focus = Enum.TryParse<FocusFx>(motion.Focus, true, out var focus) && Enum.IsDefined(focus) ? focus : m.Focus,
                 Pace = motion.Pace is { } pace && double.IsFinite(pace) ? Math.Clamp(pace, MotionSafety.PaceMin, MotionSafety.PaceMax) : m.Pace,
                 Color = motion.Color is { Length: > 0 } color ? color.Trim() : m.Color,

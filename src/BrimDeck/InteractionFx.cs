@@ -38,26 +38,28 @@ internal static class InteractionFx
     // Everything shown ends at once: a theme, setting or system change.
     public static void ResetAll() { foreach (var surface in Surfaces) surface.Reset(); }
 
-    // The panel's layer lies inside the island, so the island's outline clips it like the content.
+    // The panel's layers lie inside the island, so the island's outline clips them like the content. The particles go under the
+    // content, on the surface's own material (after the ambient scan line, which is first), so text and controls stay above
+    // them as above the theme's gradient and scan lines; the hover, press and focus answers go above, on what they answer.
     public static FxSurface Island(MainWindow window, IslandBorder island, Panel content, Func<bool> interactive)
     {
-        var surface = new FxSurface(island, content, interactive, trail: true, FxScope.Panel);
+        var surface = new FxSurface(island, content, interactive, particles: true);
+        content.Children.Insert(Math.Min(1, content.Children.Count), surface.Backdrop);
         content.Children.Add(surface);
         Track(window, surface);
         return surface;
     }
 
+    // Notices get the answers too; the settings window keeps its own hover and focus styles, and a second layer over them
+    // reads as a stray outline.
     private static void WindowLoaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not Window window || !ReferenceEquals(e.OriginalSource, window) || (bool)window.GetValue(AttachedProperty)) return;
-        // The settings window keeps its own hover and focus styles: a second layer over them reads as a stray outline.
-        var scope = window switch { NoticeWindow => FxScope.Panel, _ => (FxScope?)null };
-        if (scope is null) return;
+        if (sender is not NoticeWindow window || !ReferenceEquals(e.OriginalSource, window) || (bool)window.GetValue(AttachedProperty)) return;
         // Above the content in the window's own adorner layer, over the content presenter, which stays when the content is replaced.
         var decorator = FindDecorator(window, 4);
         if (decorator?.Child is not UIElement adorned || decorator.AdornerLayer is not { } layer) return;
         window.SetValue(AttachedProperty, true);
-        var surface = new FxSurface(window, adorned, () => true, trail: false, scope.Value);
+        var surface = new FxSurface(window, adorned, () => true, particles: false);
         layer.Add(new FxAdorner(adorned, surface));
         Track(window, surface);
     }
@@ -79,10 +81,6 @@ internal static class InteractionFx
     }
 }
 
-// Panel: the island, its pop-ups and notices, in the panel theme's colors. Settings: the settings window, in its own accent with the
-// panel theme's styles.
-internal enum FxScope { Panel, Settings }
-
 internal sealed class FxAdorner : Adorner
 {
     private readonly FxSurface _surface;
@@ -97,15 +95,13 @@ internal sealed class FxAdorner : Adorner
     protected override Size ArrangeOverride(Size finalSize) { _surface.Arrange(new Rect(finalSize)); return finalSize; }
 }
 
-internal sealed class FxSurface : Canvas
+internal sealed partial class FxSurface : Canvas
 {
     private const int RippleLimit = 4;
-    private const double TrailRadius = 84;
     private readonly UIElement _input;
     private readonly UIElement _scope;
     private readonly Func<bool> _interactive;
-    private readonly bool _trailAllowed;
-    private readonly FxScope _kind;
+    private readonly bool _particlesAllowed;
 
     // Hover: a group that fades, with the lift's shadow ring outside the control and, clipped to the control, the light and edge.
     private readonly Canvas _hover = new() { Opacity = 0 }, _hoverInside = new();
@@ -114,39 +110,33 @@ internal sealed class FxSurface : Canvas
     private readonly Ellipse _spot = new();
     private readonly TranslateTransform _spotShift = new();
     private readonly Canvas _ripples = new();
-    private readonly Ellipse _trail = new() { Width = TrailRadius * 2, Height = TrailRadius * 2, Opacity = 0 };
-    private readonly TranslateTransform _trailShift = new();
     private readonly Canvas _focus = new() { Opacity = 0 };
     private readonly RectangleGeometry _focusRect = new();
     private readonly Path _focusOuter = new() { StrokeThickness = 6 }, _focusInner = new() { StrokeThickness = 1.5 };
 
     private ThemeMotion _motion = ThemeMotion.Default;
     private int _generation = -1;
-    private Color _dressedAccent;
     private bool _dressedSystem;
     private Brush? _pulseFill, _rippleFill, _ringFill, _ringStroke;
     private FrameworkElement? _target;
     private DependencyObject? _lastSource;
     private FrameworkElement? _lastTarget;
-    private bool _hasRect, _hoverShown, _trailShown, _trailHooked, _detached;
-    private Spring _trailX, _trailY;
-    private double _lastFrame;
+    private bool _hasRect, _hoverShown, _detached;
 
     public event Action? Detached;
 
-    public FxSurface(UIElement input, UIElement scope, Func<bool> interactive, bool trail, FxScope kind)
+    public FxSurface(UIElement input, UIElement scope, Func<bool> interactive, bool particles)
     {
-        _input = input; _scope = scope; _interactive = interactive; _trailAllowed = trail; _kind = kind;
+        _input = input; _scope = scope; _interactive = interactive; _particlesAllowed = particles;
         IsHitTestVisible = false; Focusable = false; ClipToBounds = false;
         _liftOuter.Data = _liftInner.Data = _edge.Data = _hoverRect;
         _hoverInside.Clip = _hoverRect;
         _spot.RenderTransform = _spotShift;
         _hoverInside.Children.Add(_spot); _hoverInside.Children.Add(_edge);
         _hover.Children.Add(_liftOuter); _hover.Children.Add(_liftInner); _hover.Children.Add(_hoverInside);
-        _trail.RenderTransform = _trailShift;
         _focusOuter.Data = _focusInner.Data = _focusRect;
         _focus.Children.Add(_focusOuter); _focus.Children.Add(_focusInner);
-        Children.Add(_trail); Children.Add(_hover); Children.Add(_ripples); Children.Add(_focus);
+        Children.Add(_hover); Children.Add(_ripples); Children.Add(_focus);
         input.PreviewMouseMove += Moved;
         input.PreviewMouseLeftButtonDown += Pressed;
         input.MouseLeave += Left;
@@ -174,36 +164,25 @@ internal sealed class FxSurface : Canvas
 
     private void EnsureDressed()
     {
-        var accent = _kind == FxScope.Settings && _scope is FrameworkElement scope && scope.TryFindResource("SettingsAccent") is SolidColorBrush settingsAccent ? settingsAccent.Color : default;
         // "System" and the theme it stands for share a palette, so the choice itself is part of what the layer was dressed for.
         bool system = PanelThemes.NormalizeId(Settings?.PanelTheme) == PanelThemes.SystemId;
-        if (_generation == PanelTheme.Generation && accent == _dressedAccent && system == _dressedSystem) return;
+        if (_generation == PanelTheme.Generation && system == _dressedSystem) return;
         bool restyled = _generation >= 0;
-        _generation = PanelTheme.Generation; _dressedAccent = accent; _dressedSystem = system;
+        _generation = PanelTheme.Generation; _dressedSystem = system;
         if (restyled) Reset();
-        Dress(accent);
+        Dress();
     }
 
-    private void Dress(Color settingsAccent)
+    private void Dress()
     {
         var palette = PanelTheme.Current;
         var motion = palette.Motion;
         if (PanelThemes.NormalizeId(Settings?.PanelTheme) == PanelThemes.SystemId) motion = motion.ForSystem();
         _motion = motion;
-        Color color, secondary, shade;
-        if (_kind == FxScope.Settings && settingsAccent.A > 0)
-        {
-            // The settings window has its own light or dark look; the panel theme lends it only the styles.
-            color = settingsAccent; secondary = motion.Secondary == motion.Color ? settingsAccent : Blend(settingsAccent, PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, motion.Secondary)));
-            shade = Colors.Black;
-        }
-        else
-        {
-            var system = motion.Color == ThemeMotion.SystemAccent || motion.Secondary == ThemeMotion.SystemAccent ? WindowsAccent() : null;
-            color = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, motion.Color, system));
-            secondary = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, motion.Secondary, system));
-            shade = palette.IsDark ? Colors.Black : PanelTheme.ColorOf("shadow");
-        }
+        var system = motion.Color == ThemeMotion.SystemAccent || motion.Secondary == ThemeMotion.SystemAccent ? WindowsAccent() : null;
+        Color color = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, motion.Color, system));
+        Color secondary = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, motion.Secondary, system));
+        Color shade = palette.IsDark ? Colors.Black : PanelTheme.ColorOf("shadow");
         double hover = motion.HoverStrength, press = motion.PressStrength;
         bool spot = motion.Hover is HoverFx.Spot or HoverFx.Neon or HoverFx.Lift, edge = motion.Hover is HoverFx.Edge or HoverFx.Neon, lift = motion.Hover == HoverFx.Lift;
         // A lift's sheen is half as strong as a light; the outline of a neon hover runs from the first color into the second.
@@ -218,7 +197,7 @@ internal sealed class FxSurface : Canvas
         _rippleFill = Radial(color, press, edge: .55);
         _ringStroke = Linear(Alpha(color, Math.Min(.8, press * 2.6)), Alpha(secondary, Math.Min(.8, press * 2.6)));
         _ringFill = Radial(secondary, press * .35);
-        _trail.Fill = Radial(secondary, motion.Trail);
+        DressParticles(color, secondary);
         (_focusOuter.Stroke, _focusInner.Stroke) = motion.Focus switch
         {
             FocusFx.Ring => (null, Solid(Alpha(color, .55))),
@@ -240,7 +219,6 @@ internal sealed class FxSurface : Canvas
     }
 
     private static Color Alpha(Color color, double alpha) => Color.FromArgb((byte)Math.Round(255 * Math.Clamp(alpha, 0, 1)), color.R, color.G, color.B);
-    private static Color Blend(Color a, Color b) => Color.FromRgb((byte)((a.R + b.R) / 2), (byte)((a.G + b.G) / 2), (byte)((a.B + b.B) / 2));
     private static Brush Solid(Color color) { var brush = new SolidColorBrush(color); brush.Freeze(); return brush; }
     private static Brush Linear(Color from, Color to) { var brush = new LinearGradientBrush(from, to, 0); brush.Freeze(); return brush; }
     // A soft light: full strength in the middle, half by the given point, nothing at the edge.
@@ -262,17 +240,16 @@ internal sealed class FxSurface : Canvas
         if (!Active) { Release(); return; }
         var p = e.GetPosition(this);
         Hover(TargetOf(e.OriginalSource as DependencyObject), p);
-        if (_trailAllowed && _motion.Trail > 0) Trail(p);
+        if (_particlesAllowed && _motion.Trail > 0 && _motion.Particles != ParticleFx.None) Emit(e.GetPosition(_particleLayer));
     }
 
     private void Left(object sender, MouseEventArgs e) => Release();
 
-    // What is shown fades out: the pointer left, or the panel closed.
+    // What is shown fades out: the pointer left, or the panel closed. Particles already out finish their short lives.
     public void Release()
     {
-        var timing = Timing;
-        HideHover(timing);
-        if (_trailShown) { _trailShown = false; Fade(_trail, 0, timing.HoverOut, Soft.InOut); }
+        HideHover(Timing);
+        StopEmitting();
     }
 
     private void Hover(FrameworkElement? target, Point p)
@@ -394,39 +371,6 @@ internal sealed class FxSurface : Canvas
     }
     private static double Distance(Point a, Point b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
-    // ----- Trail -----
-
-    private void Trail(Point p)
-    {
-        if (!_trailShown)
-        {
-            // It appears where the pointer is rather than flying in from the last place it was seen.
-            _trailShown = true;
-            _trailX = new Spring(p.X); _trailY = new Spring(p.Y);
-            _trailShift.X = p.X - TrailRadius; _trailShift.Y = p.Y - TrailRadius;
-            Fade(_trail, 1, (int)(Timing.HoverIn * 1.5), Soft.Follow);
-        }
-        _trailX.Target = p.X; _trailY.Target = p.Y;
-        if (!_trailHooked) { _trailHooked = true; _lastFrame = Eased.Now; CompositionTarget.Rendering += Frame; }
-    }
-
-    // Only while the trailing light still moves toward the pointer.
-    private void Frame(object? sender, EventArgs e)
-    {
-        double now = Eased.Now, dt = now - _lastFrame;
-        _lastFrame = now;
-        bool moving = _trailX.Step(dt) | _trailY.Step(dt);
-        _trailShift.X = _trailX.Value - TrailRadius; _trailShift.Y = _trailY.Value - TrailRadius;
-        if (!moving || !_trailShown) Unhook();
-    }
-
-    private void Unhook()
-    {
-        if (!_trailHooked) return;
-        _trailHooked = false;
-        CompositionTarget.Rendering -= Frame;
-    }
-
     // ----- Focus -----
 
     private void Focused(object sender, KeyboardFocusChangedEventArgs e)
@@ -452,9 +396,9 @@ internal sealed class FxSurface : Canvas
     // Ends everything at once, as if nothing had been shown.
     public void Reset()
     {
-        Unhook(); Unsettle();
-        _target = null; _hasRect = false; _hoverShown = false; _trailShown = false; _lastSource = null; _lastTarget = null;
-        foreach (var element in new UIElement[] { _hover, _trail, _focus }) { element.BeginAnimation(OpacityProperty, null); element.Opacity = 0; }
+        Unsettle(); ClearParticles();
+        _target = null; _hasRect = false; _hoverShown = false; _lastSource = null; _lastTarget = null;
+        foreach (var element in new UIElement[] { _hover, _focus }) { element.BeginAnimation(OpacityProperty, null); element.Opacity = 0; }
         _hoverRect.BeginAnimation(RectangleGeometry.RectProperty, null);
         _ripples.Children.Clear();
     }

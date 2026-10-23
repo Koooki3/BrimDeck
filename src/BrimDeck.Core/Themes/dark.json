@@ -71,6 +71,6 @@
   // No ambient light; a soft light under the pointer and one pulse in the accent where it presses.
   "motion": {
     "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 0, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
-    "hover": "spot", "hoverStrength": 0.1, "press": "pulse", "pressStrength": 0.16, "trail": 0, "focus": "glow", "pace": 1, "color": "accent", "secondary": "accent"
+    "hover": "spot", "hoverStrength": 0.1, "press": "pulse", "pressStrength": 0.16, "trail": 0.3, "particles": "dust", "focus": "glow", "pace": 1, "color": "accent", "secondary": "accent"
   }
 }
