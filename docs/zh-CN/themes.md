@@ -58,7 +58,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 | `textPrimary` | 标题、数字（7:1） |
 | `textSecondary` | 标签（4.5:1） |
 | `textTertiary` | 重置时间、备注等辅助文字（3:1） |
-| `accent` / `onAccent` | 键盘焦点、选中的日期 / 其上的文字（3:1） |
+| `accent` / `onAccent` | 键盘焦点、选中的日期（3:1） / 其上的文字，如通知的主按钮（4.5:1） |
 | `danger` | 错误与暂停同步（4.5:1） |
 | `liked` | 已喜欢的歌曲（3:1） |
 | `clock` | 时间颜色选“主题默认色”时的颜色（4.5:1） |

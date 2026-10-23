@@ -61,7 +61,8 @@ public static partial class PanelThemes
             {
                 PanelThemeBackdrop.Surface => surfaces,
                 PanelThemeBackdrop.SurfaceAndPopup => [.. surfaces, popup],
-                PanelThemeBackdrop.Accent => [colors["accent"].Over(popup)],
+                // The chosen date sits on the accent in a pop-up, a notice's main button on the accent over the surface.
+                PanelThemeBackdrop.Accent => [colors["accent"].Over(popup), colors["accent"].Over(surface)],
                 PanelThemeBackdrop.Indicator => [colors["indicator"].Over(ThemeColor.Black)],
                 _ => []
             };

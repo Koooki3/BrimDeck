@@ -58,7 +58,7 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 | `textPrimary` | Titles and figures (7:1) |
 | `textSecondary` | Labels (4.5:1) |
 | `textTertiary` | Reset times and notes (3:1) |
-| `accent` / `onAccent` | Keyboard focus and chosen dates / text on them (3:1) |
+| `accent` / `onAccent` | Keyboard focus and chosen dates (3:1) / text on them, such as a notice's main button (4.5:1) |
 | `danger` | Errors and paused sync (4.5:1) |
 | `liked` | A liked song (3:1) |
 | `clock` | The clock when its color is "Theme default" (4.5:1) |
