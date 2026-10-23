@@ -503,8 +503,11 @@ public partial class MainWindow : Window
         // switch (the notices hotkey does that itself once open).
         if (expanded && !wasExpanded && !_preview && CurrentPage == DeckPage.Notices && _app.Notices is not null)
         {
-            if (!_keepPageOnOpen) NoticesPageShown();
-            RenderNotices();
+            // Marking the list seen raises Changed; the page is drawn here once, not again at background priority mid-opening.
+            bool queued = _noticesRenderQueued;
+            _noticesRenderQueued = true;
+            try { if (!_keepPageOnOpen) NoticesPageShown(); RenderNotices(); }
+            finally { _noticesRenderQueued = queued; }
         }
         int duration = !instant && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
         if (fromNotice is { } notice && duration > 0) StartFromNotice(notice);

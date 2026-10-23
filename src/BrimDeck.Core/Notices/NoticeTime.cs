@@ -185,7 +185,8 @@ public static class NoticeTimeIntake
             case NoticeTimeKind.Countdown when at is { } end: return new NoticeTiming { Kind = kind, StartsAt = now, EndsAt = end, Native = true };
             case NoticeTimeKind.Event when at is { } start:
             {
-                var ends = NoticeTimes.ParseTime(message.Until, now, zone);
+                // The end is read from the start ("--at 23:00 --ends 01:00" ends after midnight), not from now.
+                var ends = NoticeTimes.ParseTime(message.Until, start, zone);
                 var remind = start - TimeSpan.FromMilliseconds(Math.Max(0, message.LeadMs ?? 0));
                 // Arriving after its reminder time, the notice itself is the reminder; after its start, there is nothing left to remind.
                 int stage = start <= now ? 2 : remind <= now ? 1 : 0;
@@ -294,7 +295,8 @@ public static partial class NoticeTimeSources
             var range = RangeStart().Match(raw.Trim());
             if (!range.Success) continue;
             int hour = int.Parse(range.Groups["h"].Value, CultureInfo.InvariantCulture), minute = int.Parse(range.Groups["m"].Value, CultureInfo.InvariantCulture);
-            string half = (range.Groups["pre"].Value + range.Groups["post"].Value).ToUpperInvariant();
+            // "p.m." reads as "PM".
+            string half = (range.Groups["pre"].Value + range.Groups["post"].Value).Replace(".", "", StringComparison.Ordinal).ToUpperInvariant();
             bool pm = half.Contains("PM", StringComparison.Ordinal) || half.Contains("下午", StringComparison.Ordinal) || half.Contains("晚上", StringComparison.Ordinal);
             bool am = half.Contains("AM", StringComparison.Ordinal) || half.Contains("上午", StringComparison.Ordinal) || half.Contains("早上", StringComparison.Ordinal);
             if (pm || am) { if (hour > 12) return null; hour = hour % 12 + (pm ? 12 : 0); }

@@ -61,8 +61,17 @@ internal static class InteractionFx
         window.SetValue(AttachedProperty, true);
         var surface = new FxSurface(window, adorned, () => true, particles: false);
         layer.Add(new FxAdorner(adorned, surface));
+        window.SetValue(SurfaceProperty, surface);
+        // The layer is not clipped by the notice's outline: whatever it shows ends with the notice, never lingers into the next.
+        window.IsVisibleChanged += (_, _) => surface.Reset();
         Track(window, surface);
     }
+
+    private static readonly DependencyProperty SurfaceProperty = DependencyProperty.RegisterAttached("Surface", typeof(FxSurface), typeof(InteractionFx));
+
+    // A notice leaves or hands over to the panel: its light, ripples and focus bloom end at once rather than playing on where
+    // its buttons were.
+    public static void Clear(Window window) => (window.GetValue(SurfaceProperty) as FxSurface)?.Reset();
 
     private static void Track(Window window, FxSurface surface)
     {
@@ -435,7 +444,9 @@ internal sealed partial class FxSurface : Canvas
         {
             if (node is ScrollBar or TextBoxBase or PasswordBox) { found = null; break; }
             if (node is NoticeSurface or IslandBorder) break;
-            if (found is null && node is ButtonBase or ListBoxItem or ComboBox or TabItem or Slider) found = (FrameworkElement)node;
+            // The parts of a slider or scroll bar (the track's repeat buttons, the thumb) span the whole bar's row, not what it draws.
+            if (node is RepeatButton or Thumb or Slider) { found = null; break; }
+            if (found is null && node is ButtonBase or ListBoxItem or ComboBox or TabItem) found = (FrameworkElement)node;
         }
         if (found is not null && (!found.IsEnabled || !found.IsVisible || TooLarge(BoundsOf(found)))) found = null;
         _lastSource = source; _lastTarget = found;
@@ -447,7 +458,8 @@ internal sealed partial class FxSurface : Canvas
     private static bool HasChrome(FrameworkElement element)
     {
         var border = element as Border ?? (VisualTreeHelper.GetChildrenCount(element) > 0 ? VisualTreeHelper.GetChild(element, 0) as Border : null);
-        if (border is null) return element is Control control && Visible(control.Background);
+        // A template that does not start with a border draws its box some other way: unknown, so nothing is drawn around it.
+        if (border is null) return false;
         return Visible(border.Background) || border.BorderThickness.Left > 0 && Visible(border.BorderBrush);
     }
     private static bool Visible(Brush? brush) => brush is not null && brush.Opacity > 0 && (brush is not SolidColorBrush solid || solid.Color.A > 8);

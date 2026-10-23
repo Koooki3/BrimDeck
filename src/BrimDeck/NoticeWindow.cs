@@ -160,6 +160,7 @@ internal sealed partial class NoticeWindow : Window
     {
         if (!ReferenceEquals(_item, item) && _item?.Key != item.Key) return;
         _item = null; _leaving = true;
+        InteractionFx.Clear(this);
         WatchLive();
         _hoverOpen.Stop(); _leaveClose.Stop();
         if (_keyboard) EndKeyboard();
@@ -194,6 +195,7 @@ internal sealed partial class NoticeWindow : Window
     public NoticeFrame? HandOver()
     {
         if (!IsVisible) return null;
+        InteractionFx.Clear(this);
         double left = Canvas.GetLeft(_surface), top = Canvas.GetTop(_surface), width = _surface.Width, height = _surface.Height;
         NoticeFrame? frame = double.IsFinite(left) && double.IsFinite(top) && width > 0 && height > 0
             ? new NoticeFrame(new DipRect(_stageRect.X + left, _stageRect.Y + top, width, height), _surface.TopRadius, _surface.BottomRadius, _surface.Shoulder)
