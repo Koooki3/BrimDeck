@@ -38,6 +38,27 @@ function Uninstall([string[]]$extra) {
     if (Test-Path $uninstallKey) { throw 'Uninstall did not finish.' }
 }
 function InstalledAt { [IO.Path]::GetFullPath((Get-ItemProperty $uninstallKey).InstallLocation).TrimEnd('\') -eq $installPath }
+# The test folder sits under the repository. Like the installer, a folder in Program Files or the profile keeps its inherited
+# rights; anywhere else, such as D:\BrimDeck, it must stop inheriting rights such as Authenticated Users' "modify" from the
+# drive's root.
+$ownRights = !(@($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:USERPROFILE, $env:LOCALAPPDATA) |
+    Where-Object { $_ -and "$installPath\".StartsWith("$($_.TrimEnd('\'))\", [StringComparison]::OrdinalIgnoreCase) })
+$rightsCase = if ($ownRights) { 'a folder outside Program Files and the profile stops inheriting rights; only this user, SYSTEM and Administrators can change it' }
+    else { 'a folder in Program Files or the profile keeps its inherited rights' }
+function ExpectedRights {
+    $rights = if ($ownRights) { PrivateRights } else { !(Get-Acl -LiteralPath $installPath).AreAccessRulesProtected }
+    $rights -and !(Test-Path -LiteralPath (Join-Path $installPath '.brimdeck-write-test'))
+}
+function PrivateRights {
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $full = [int][Security.AccessControl.FileSystemRights]::FullControl
+    $folder = Get-Acl -LiteralPath $installPath
+    $rules = @($folder.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    $program = @((Get-Acl -LiteralPath (Join-Path $installPath 'BrimDeck.UpdateHarness.exe')).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    $folder.AreAccessRulesProtected -and !($rules + $program | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-11' }) `
+        -and ($rules | Where-Object { $_.IdentityReference.Value -eq $me -and ([int]$_.FileSystemRights -band $full) -eq $full }) `
+        -and !($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' -and ([int]$_.FileSystemRights -band [int][Security.AccessControl.FileSystemRights]::Write) })
+}
 
 Push-Location $projectRoot
 try {
@@ -69,6 +90,7 @@ try {
     Assert (InstalledAt) 'a folder with Chinese characters, a space and a trailing \ gets the app folder name appended'
     Assert ($entry.UninstallString -eq "`"$installPath\unins000.exe`" /SILENT /UI") 'Settings > Apps runs the uninstaller with its own confirmation dialog'
     Assert ((Test-Path -LiteralPath $desktopShortcut) -and (Test-Path -LiteralPath $startMenuShortcut)) 'a first install creates the desktop and Start menu shortcuts'
+    Assert (ExpectedRights) $rightsCase
 
     # The user deletes both shortcuts after installing.
     [IO.File]::Delete($startMenuShortcut)
@@ -96,6 +118,7 @@ try {
     Assert (!(Test-Path -LiteralPath $staleFile)) 'update removes the old version before installing the new one'
     Assert ((Test-Path -LiteralPath $startMenuShortcut) -and !(Test-Path -LiteralPath $desktopShortcut)) 'update restores the Start menu shortcut and keeps a deleted desktop shortcut deleted'
     Assert ($null -ne (Get-ItemProperty -Path $runKey -Name $runValue -ErrorAction SilentlyContinue)) 'update keeps the startup entry'
+    Assert (ExpectedRights) "after an in-app update without administrator rights, $rightsCase"
 
     Uninstall @()
     Assert (!(Test-Path -LiteralPath (Join-Path $installPath 'BrimDeck.UpdateHarness.exe'))) 'uninstall removes the program files'
