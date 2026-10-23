@@ -39,6 +39,13 @@ internal sealed class NoticeCenter : IDisposable
     private const int IntakeLimit = 200;
     private static readonly TimeSpan IntakeWindow = TimeSpan.FromSeconds(10);
     private readonly Dictionary<string, Queue<DateTimeOffset>> _intake = new(StringComparer.Ordinal);
+    // Time-kind notices (NoticeTime.cs). _timeDue waits for the next reminder BrimDeck keeps time for, at most a minute at a
+    // time so that sleep and clock changes are noticed; it is off while nothing is due. _liveTick is the one shared second
+    // tick for live words ("24:59 left"); it runs only while something that shows such words is on screen.
+    private readonly PromptTimer _timeDue, _liveTick;
+    private DateTimeOffset? _dueFor;
+    private Action? _live;
+    private static readonly TimeSpan DueRecheck = TimeSpan.FromMinutes(1);
 
     public NoticeHub Hub { get; }
     public AttentionCoordinator Attention { get; } = new();
@@ -66,12 +73,17 @@ internal sealed class NoticeCenter : IDisposable
         _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); AutoClear(); UpdateQuiet(); };
         _quietCheck.Tick += (_, _) => UpdateQuiet();
         _resumeLimit.Tick += (_, _) => FinishResume(int.MaxValue);
+        _timeDue = new PromptTimer(_dispatcher, FireDue);
+        _liveTick = new PromptTimer(_dispatcher, LiveStep);
+        Microsoft.Win32.SystemEvents.TimeChanged += ClockMoved;
+        Microsoft.Win32.SystemEvents.PowerModeChanged += PowerChanged;
         Attention.CanShow = CanShow;
         // A notice gone from the recent list (deleted, cleared, pruned by age or count) no longer waits to be shown.
-        Hub.Changed += () => { DropMissing(); Changed?.Invoke(); };
+        Hub.Changed += () => { DropMissing(); ScheduleDue(); Changed?.Invoke(); };
         Hub.Persist += QueueSave;
         // A reading still under way when notices or the source were switched off arrives late; it is dropped.
-        _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && Settings.NoticeWindowsSource) Receive(input); });
+        // Notifications of Windows' Clock, Outlook, the calendars and Teams are sorted into time kinds here (NoticeTimeSources).
+        _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local)); });
         _windows.Removed += key => _dispatcher.BeginInvoke(() => Hub.SourceRemoved(key));
         _windows.StateChanged += () => _dispatcher.BeginInvoke(() => Changed?.Invoke());
         // Raised after the notices of a reading were handed over, so they are queued on the dispatcher before this.
@@ -94,6 +106,7 @@ internal sealed class NoticeCenter : IDisposable
             _windows.Stop(); _wsl.Apply([]);
             _pipe?.Dispose(); _pipe = null;
             _maintenance.Stop(); _quietCheck.Stop();
+            ScheduleDue();
             // Whatever shows ends and nothing waiting shows later; quota alerts and track changes keep working through the
             // coordinator.
             EndResume();
@@ -111,6 +124,7 @@ internal sealed class NoticeCenter : IDisposable
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
         UpdateQuiet();
+        ScheduleDue();
         Changed?.Invoke();
     }
 
@@ -131,19 +145,24 @@ internal sealed class NoticeCenter : IDisposable
         var outcome = Hub.Receive(input, now);
         if (outcome.Notice is not { } notice) return outcome;
         if (outcome.Present) Present(notice, refresh: outcome.Receipt == NoticeReceipt.Updated);
-        else if (outcome.Receipt == NoticeReceipt.Updated)
-        {
-            // A task's progress moves the notice that shows; nothing new appears.
-            foreach (var deck in _app.Decks)
-                if (Attention.Current(deck.NoticeLane) is { Kind: AttentionKind.Notice, Payload: Notice shown } && shown.Id == notice.Id)
-                    Apply(Attention.Submit(Item(deck.NoticeLane, notice, refresh: true), now));
-        }
+        // A task's progress moves the notice that shows; nothing new appears.
+        else if (outcome.Receipt == NoticeReceipt.Updated) RefreshShown(notice);
         return outcome;
+    }
+
+    // The notice changed in place; where it shows, it shows the change.
+    private void RefreshShown(Notice notice)
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var deck in _app.Decks)
+            if (Attention.Current(deck.NoticeLane) is { Kind: AttentionKind.Notice, Payload: Notice shown } && shown.Id == notice.Id)
+                Apply(Attention.Submit(Item(deck.NoticeLane, notice, refresh: true), now));
     }
 
     private AttentionItem Item(string lane, Notice notice, bool refresh = false) => new()
     {
         Lane = lane, Kind = AttentionKind.Notice, Key = notice.Id, Group = notice.AppKey, Priority = notice.Priority, Payload = notice, Refresh = refresh,
+        Urgent = NoticeClock.Alerting(notice.Timing),
         Duration = TimeSpan.FromSeconds(notice.Priority == NoticePriority.High ? Settings.NoticeHighDuration : Settings.NoticeDuration)
     };
 
@@ -368,6 +387,76 @@ internal sealed class NoticeCenter : IDisposable
         });
     }
 
+    // ----- Time-kind notices -----
+
+    // Waits for the next reminder, at most DueRecheck at a time. Nothing runs while nothing is due.
+    private void ScheduleDue()
+    {
+        var next = _enabled && !_disposed ? Hub.NextDue() : null;
+        if (next is not { } at) { _timeDue.Stop(); _dueFor = null; return; }
+        if (_timeDue.IsEnabled && _dueFor == at) return;
+        _dueFor = at;
+        var wait = at - DateTimeOffset.UtcNow;
+        _timeDue.Interval = wait < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : wait > DueRecheck ? DueRecheck : wait;
+        _timeDue.Start();
+    }
+
+    private void FireDue()
+    {
+        _timeDue.Stop(); _dueFor = null;
+        if (!_enabled) return;
+        // A reminder that fired changes the hub, which schedules the next one; after a recheck with nothing due it is scheduled here.
+        foreach (var notice in Hub.FireDue(DateTimeOffset.UtcNow)) Present(notice, refresh: false);
+        ScheduleDue();
+    }
+
+    // The clock was set or the PC woke: what is due is worked out again from the clock, not from the timer's wait.
+    private void ClockMoved(object? sender, EventArgs e) => _dispatcher.BeginInvoke(() => { _dueFor = null; _timeDue.Stop(); ScheduleDue(); });
+    private void PowerChanged(object? sender, Microsoft.Win32.PowerModeChangedEventArgs e) { if (e.Mode == Microsoft.Win32.PowerModes.Resume) ClockMoved(sender, e); }
+
+    // The shared second tick for live words. Views subscribe while they show such words and unsubscribe when they stop; the
+    // tick runs only while one is subscribed, on the whole second so that every view changes together.
+    public event Action LiveTick
+    {
+        add { _live += value; UpdateLive(); }
+        remove { _live -= value; UpdateLive(); }
+    }
+
+    private void UpdateLive()
+    {
+        if (_live is null || _disposed) { _liveTick.Stop(); return; }
+        if (_liveTick.IsEnabled) return;
+        _liveTick.Interval = ToNextSecond();
+        _liveTick.Start();
+    }
+
+    private void LiveStep()
+    {
+        if (_live is null) { _liveTick.Stop(); return; }
+        _liveTick.Interval = ToNextSecond();
+        _live.Invoke();
+    }
+
+    private static TimeSpan ToNextSecond() => TimeSpan.FromMilliseconds(1000 - DateTimeOffset.UtcNow.Millisecond + 5);
+
+    // What BrimDeck itself can do with a notice it keeps time for (stop, cancel, remind again).
+    public IReadOnlyList<NoticeAction> TimeActions(Notice notice) => NoticeClock.Actions(notice.Timing, DateTimeOffset.UtcNow);
+
+    public void TimeAction(Notice notice, string key)
+    {
+        var now = DateTimeOffset.UtcNow;
+        Hub.MarkViewed(notice.Id);
+        switch (key)
+        {
+            case NoticeClock.StopAction or NoticeClock.CancelAction:
+                if (Hub.StopTimer(notice.Id, now)) RefreshShown(notice);
+                break;
+            case NoticeClock.SnoozeAction:
+                if (Hub.Snooze(notice.Id, NoticeClock.Snooze, now)) Withdraw(notice.Id);
+                break;
+        }
+    }
+
     // ----- Quiet and pause -----
 
     public bool Paused => Settings.NoticesPausedUntil is { } until && until > DateTimeOffset.UtcNow;
@@ -521,7 +610,9 @@ internal sealed class NoticeCenter : IDisposable
         // "Clear on exit": the list is emptied before the last save, so nothing of it is left on disk.
         if (_enabled && Settings.NoticeAutoClear == NoticeAutoClear.OnExit) Hub.Clear();
         Flush();
-        _attentionTimer.Stop(); _saveTimer.Stop(); _maintenance.Stop(); _quietCheck.Stop(); _resumeLimit.Stop();
+        _attentionTimer.Stop(); _saveTimer.Stop(); _maintenance.Stop(); _quietCheck.Stop(); _resumeLimit.Stop(); _timeDue.Stop(); _liveTick.Stop();
+        Microsoft.Win32.SystemEvents.TimeChanged -= ClockMoved;
+        Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged;
         _windows.Dispose(); _wsl.Dispose(); _pipe?.Dispose(); _quiet.Dispose();
     }
 }
