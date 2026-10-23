@@ -42,6 +42,19 @@ internal static class ConfiguredProviderTests
         check("Identical connections issue one set of requests and bind both rows", snapshots.Count == 1 && handler.Calls.Count == 5 && snapshots[0].Configurations.Contains(copy.ConfigurationKey));
         check("New API reads station currency settings and amounts", snapshots[0].LiveQuota && snapshots[0].Metrics.Single() is { Amount: 12.4m, Total: 18m, Currency: "USD", ExpiresAt: not null });
         check("Public status request never carries the API credential", handler.Calls.Single(c => c.Path.EndsWith("/status")).Authorization is null && handler.Calls.Single(c => c.Path.EndsWith("/usage/token/")).Authorization == "Bearer fixture-key-a");
+        static bool Accepted(string url) { try { ProviderCatalog.ValidateUrl(url); return true; } catch (InvalidDataException) { return false; } }
+        check("Site addresses use HTTPS; plain HTTP only reaches this PC",
+            Accepted("https://example.test/deploy") && Accepted("http://localhost:3000") && Accepted("http://127.0.0.1:8080/api") && Accepted("http://[::1]:8080")
+            && !Accepted("http://example.test") && !Accepted("http://192.168.1.20:3000") && !Accepted("http://localhost.example.test"));
+        var plainEntry = new AppEntry { QuotaSource = ProviderId.NewApi, Site = "http://example.test/deploy", SecretRevision = Guid.NewGuid() };
+        secrets.Write(plainEntry.InstanceId, "fixture-key-a");
+        int before = handler.Calls.Count;
+        var plain = await providers.TestAsync(plainEntry);
+        check("A saved HTTP site is not read and says HTTPS is required",
+            handler.Calls.Count == before && plain.Snapshot.StatusLabel == "需要 HTTPS" && plain.Snapshot.Status.Contains("HTTPS") && !plain.Snapshot.LiveQuota);
+        var plainScript = new AppEntry { QuotaSource = ProviderId.Custom, Script = """async function fetchUsage(ctx) { await ctx.http.get("http://example.test/usage"); return [{ title: "x", percent: 1 }]; }""" };
+        var scripted = await providers.TestAsync(plainScript);
+        check("A script's request to an HTTP address is refused before it is sent", handler.Calls.Count == before && scripted.Snapshot.Status.Contains("HTTPS"));
         var settings = new DeckSettings { Apps = [entry, copy] };
         var local = new ProviderSnapshot(ProviderId.Claude) { UsageAvailable = true };
         check("Remote quota columns keep local statistics separate and deduplicated", DashboardUsage.Columns(settings, [.. snapshots, local]).All(c => ReferenceEquals(c.Usage, local)) && DashboardUsage.Statistics(settings, [.. snapshots, local]).Count == 1);

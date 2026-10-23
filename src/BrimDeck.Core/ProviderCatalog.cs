@@ -78,9 +78,15 @@ public static class ProviderCatalog
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http") ||
             uri.UserInfo.Length > 0 || uri.Fragment.Length > 0 || string.IsNullOrEmpty(uri.Host))
-            throw new InvalidDataException(Loc.T("请填写有效的 HTTP 或 HTTPS 站点地址，不要包含账户、密码或片段。 ", "Enter a valid HTTP or HTTPS site address without a user name, password or fragment."));
+            throw new InvalidDataException(Loc.T("请填写有效的 HTTPS 站点地址，不要包含账户、密码或片段。", "Enter a valid HTTPS site address without a user name, password or fragment."));
+        if (NeedsHttps(uri)) throw new InvalidDataException(HttpsRequired);
         return uri;
     }
+    // Requests carry the API key, so they go over HTTPS. Plain HTTP is left only for a service on this PC (a local gateway).
+    public static bool NeedsHttps(Uri uri) => uri.Scheme == Uri.UriSchemeHttp && !IsLoopback(uri);
+    private static bool IsLoopback(Uri uri) => uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
+    public static string HttpsRequired => Loc.T("站点地址必须使用 HTTPS，以免 API 密钥以明文发送；HTTP 只能用于本机地址（localhost、127.0.0.1、[::1]）。",
+        "The site address must use HTTPS so the API key is not sent in plain text. HTTP is allowed only for this PC (localhost, 127.0.0.1, [::1]).");
 }
 
 // Write stable source identifiers; existing numeric enum settings remain readable.
