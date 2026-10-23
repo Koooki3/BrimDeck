@@ -27,6 +27,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 | `settings.json` | Settings; no sign-in tokens or API keys |
 | `secrets.dat` | API keys you entered, encrypted by Windows for the current user |
 | `model-prices.json`, `manual-model-prices.json` | Updated model prices, and prices you added |
+| `claude-quota.json` | The last Claude quota read online (shares, reset times and the plan name), so per-model quotas such as Fable still show after a restart while the account API is rate limited; no sign-in token; the account is recorded only as a one-way hash of its id (never the id itself), and the file is used only while the same account is signed in; not used once older than 7 days, deleted when the sign-in is rejected or removed |
 | `update-prompt.txt`, `updates\` | The last version you were told about, and downloaded installers |
 | `crash.log` | Error records; cleared when it exceeds 1 MB |
 

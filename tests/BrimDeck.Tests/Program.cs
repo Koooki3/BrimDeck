@@ -289,7 +289,7 @@ try
             Check("Both sources failing leaves quota unavailable instead of inventing a value", !unavailable.LiveQuota && unavailable.Quotas.Count == 0 && quotaHandler.Requests.Count == 2);
         }
 
-        desktopFixture.State = new(true, [new("test-code", "pro", "Claude 桌面版"), desktopCredentials[0]]);
+        desktopFixture.State = new(true, [new("test-code", "pro", ClaudeSignIn.Desktop), desktopCredentials[0]]);
         quotaHandler.Override = (token, _) => token == "test-code" ? new(System.Net.HttpStatusCode.Unauthorized) : null;
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
@@ -333,6 +333,96 @@ try
         result = (await Refresh(onlyClaude)).Single();
         Check("A newer local sample wins over the stored reading and keeps the reset time still ahead", result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 41 &&
             result.Quotas.Single(q => q.Minutes == 10080).ResetAt is not null && result.QuotaTime > readingTime);
+
+        // The last online reading survives a restart, so a start while rate limited still shows the per-model quotas.
+        var quotaFile = Path.Combine(root, "claude-quota-cache", ClaudeQuotaCache.FileName);
+        string Fable(DateTimeOffset reset) => JsonSerializer.Serialize(new
+        {
+            five_hour = new { utilization = 12, resets_at = reset.AddDays(-3).AddHours(4) },
+            seven_day = new { utilization = 30, resets_at = reset },
+            limits = new[] { new { kind = "weekly_scoped", group = "weekly", percent = 44, resets_at = reset, scope = new { model = new { display_name = "Fable" } } } }
+        });
+        quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.OK) { Content = new StringContent(Fable(usageClock.AddDays(3))) };
+        using (var beforeRestart = new UsageService(desktopFixture, locations, quotaClient, () => usageClock, quotaCache: quotaFile))
+        {
+            var online = (await beforeRestart.RefreshAsync(onlyClaude)).Single();
+            Check("An online Claude reading with a per-model quota is kept on disk", online.Quotas.Any(q => q.Label == "Fable 每周") && File.Exists(quotaFile));
+        }
+        var cacheText = File.ReadAllText(quotaFile);
+        Check("The kept Claude reading holds no sign-in token", !cacheText.Contains("test-code") && !cacheText.Contains("test-desktop") && !cacheText.Contains("accessToken", StringComparison.OrdinalIgnoreCase));
+        Check("The kept Claude reading names its account by a hash, never the id", !cacheText.Contains("current") && cacheText.Contains(ClaudeQuotaCache.AccountHash("current")));
+        Check("The kept Claude reading keeps its sources without the text of the language of the day", !cacheText.Contains("账户配额") && !cacheText.Contains("桌面版"));
+        quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.TooManyRequests);
+        File.WriteAllText(historyPath, History(usageClock.AddMinutes(10), 41, 8));
+        // A switch of account while BrimDeck was closed: the other account's reading is not shown as this one's.
+        desktopFixture.State = new(true, ClaudeDesktopCache.Parse(cacheFixture, "previous", now));
+        using (var switched = new UsageService(desktopFixture, locations, quotaClient, () => usageClock.AddMinutes(5), quotaCache: quotaFile))
+        {
+            var limited = (await switched.RefreshAsync(onlyClaude)).Single();
+            Check("After a switch of account, rate limiting does not show the previous account's kept quotas", !limited.Quotas.Any(q => q.Label == "Fable 每周") && File.Exists(quotaFile));
+        }
+        desktopFixture.State = new(true, desktopCredentials);
+        using (var restarted = new UsageService(desktopFixture, locations, quotaClient, () => usageClock.AddMinutes(5), quotaCache: quotaFile))
+        {
+            var limited = (await restarted.RefreshAsync(onlyClaude)).Single();
+            Check("After a restart, rate limiting still shows the per-model quota read before it", limited.LiveQuota && limited.Quotas.Any(q => q.Label == "Fable 每周" && q.UsedPercent == 44));
+            Check("The desktop app's newer local sample still decides the 5-hour and weekly shares", limited.Quotas.Single(q => q.Minutes == 300).UsedPercent == 41);
+            Check("The status says when the carried-over per-model quotas were read", limited.Status.Contains("按模型的额度为") && limited.Status.Contains(usageClock.LocalDateTime.ToString("HH:mm")));
+            // A sign-in that cannot be read for a moment drops only this run's reading; the kept one comes back with the sign-in.
+            desktopFixture.State = new(true, [], true);
+            var unreadable = (await restarted.RefreshAsync(onlyClaude)).Single();
+            desktopFixture.State = new(true, desktopCredentials);
+            var readable = (await restarted.RefreshAsync(onlyClaude)).Single();
+            Check("After the sign-in was unreadable for a moment, rate limiting shows the kept per-model quotas again",
+                !unreadable.LiveQuota && File.Exists(quotaFile) && readable.Quotas.Any(q => q.Label == "Fable 每周" && q.UsedPercent == 44));
+            quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.Unauthorized);
+            await restarted.RefreshAsync(onlyClaude);
+            Check("A rejected sign-in removes the kept Claude reading", !File.Exists(quotaFile));
+        }
+        var keptReading = new ClaudeQuotaSnapshot(usageClock, "Max 20x", "Claude 账户", "Claude Code", [new("Fable 每周", 44, usageClock.AddDays(2), 10080), new("5 小时额度", 12, usageClock.AddHours(2), 300)]);
+        var keptText = ClaudeQuotaCache.Serialize(keptReading, "current", ClaudeSignIn.Code, ClaudePlanOrigin.Account);
+        Check("A kept Claude reading reads back whole", ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1), "current") is { Plan: "Max 20x", Quotas.Count: 2 });
+        Check("A quota whose window has reset since is left out", ClaudeQuotaCache.Parse(keptText, usageClock.AddHours(3), "current") is { Quotas: [{ Label: "Fable 每周" }] });
+        Check("A kept reading older than a week is not used", ClaudeQuotaCache.Parse(keptText, usageClock.AddDays(8), "current") is null);
+        Check("A kept reading from the future is not used", ClaudeQuotaCache.Parse(keptText, usageClock.AddHours(-1), "current") is null);
+        Check("A damaged kept reading is ignored", ClaudeQuotaCache.Parse("{ not json", usageClock, "current") is null && ClaudeQuotaCache.Parse("null", usageClock, "current") is null);
+        Check("A kept reading of another account is not used", ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1), "previous") is null);
+        Check("A kept reading is not used while the current account cannot be told", ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1), "") is null);
+        Check("A kept reading that names no account, as earlier versions wrote it, is not used",
+            ClaudeQuotaCache.Parse(JsonSerializer.Serialize(keptReading), usageClock.AddMinutes(1), "current") is null);
+        // A reading kept while BrimDeck showed Chinese names its sources in English after a change of language and a restart.
+        ClaudeQuotaSnapshot? readInEnglish;
+        Loc.Use(Loc.English);
+        try { readInEnglish = ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1), "current"); }
+        finally { Loc.Use(Loc.Chinese); }
+        Check("A kept reading names its sources in the language shown now", readInEnglish is { Source: "Claude Code · account quota", PlanSource: "Claude account" } &&
+            ClaudeQuotaCache.Parse(keptText, usageClock.AddMinutes(1), "current") is { Source: "Claude Code · 账户配额", PlanSource: "Claude 账户" });
+        // A Claude Code sign-in names its account in the local account record that Claude Code writes when signing in.
+        File.WriteAllText(credentialPath, """{"claudeAiOauth":{"accessToken":"test-code","subscriptionType":"pro"}}""");
+        File.WriteAllText(profilePath, """{"oauthAccount":{"accountUuid":"code-account"}}""");
+        quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.OK) { Content = new StringContent(Fable(usageClock.AddDays(3))) };
+        using (var codeSignIn = new UsageService(desktopFixture, locations, quotaClient, () => usageClock, quotaCache: quotaFile))
+        {
+            await codeSignIn.RefreshAsync(onlyClaude);
+            Check("A Claude Code reading is kept for the account its local record names", File.ReadAllText(quotaFile).Contains(ClaudeQuotaCache.AccountHash("code-account")));
+        }
+        File.Delete(credentialPath); File.Delete(profilePath); File.Delete(quotaFile);
+        // The kept reading's time follows the latest online reading even when the values stay the same, without a write every refresh.
+        var cacheClock = usageClock;
+        using (var steady = new UsageService(desktopFixture, locations, quotaClient, () => cacheClock, quotaCache: quotaFile))
+        {
+            DateTimeOffset? KeptTime() => ClaudeQuotaCache.Load(quotaFile, cacheClock, "current")?.Time;
+            await steady.RefreshAsync(onlyClaude);
+            var firstKept = KeptTime();
+            cacheClock = usageClock.AddMinutes(5);
+            await steady.RefreshAsync(onlyClaude);
+            Check("A refresh that reads the same values soon after does not write the kept reading again", firstKept == usageClock && KeptTime() == usageClock);
+            cacheClock = usageClock.AddMinutes(12);
+            await steady.RefreshAsync(onlyClaude);
+            Check("Once the kept reading is ten minutes old, a refresh with the same values updates its time", KeptTime() == usageClock.AddMinutes(12));
+        }
+        File.Delete(quotaFile);
+        quotaHandler.Override = null;
 
         var savedRow = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(Only(ProviderId.Claude)))!.AsObject();
         foreach (var app in savedRow["Apps"]!.AsArray()) app!.AsObject().Remove("QuotaOnline");
