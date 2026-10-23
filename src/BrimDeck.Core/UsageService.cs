@@ -65,16 +65,19 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         return _claudeRetained;
     }
-    // The file is written only when the quotas, the plan or the account changed, not on every refresh that read the same
-    // values. A reading whose account is not known is kept for this run only: the file could not tell whose it is.
+    // The file is written when the quotas, the plan or the account changed, and otherwise once its reading is
+    // ClaudeQuotaCache.RewriteAfter old, not on every refresh (about one a minute) that read the same values. The time it
+    // keeps, which the status names after a restart, is so never more than RewriteAfter behind the last successful reading.
+    // A reading whose account is not known is kept for this run only: the file could not tell whose it is.
     private string _claudeSaved = "";
+    private DateTimeOffset _claudeSavedTime;
     private void KeepOnline(ClaudeQuotaSnapshot snapshot, ClaudeCredential credential, ClaudePlanOrigin planFrom)
     {
         _claudeRetained = snapshot; _claudeAccount = ClaudeQuotaCache.AccountHash(credential.Account); _claudeCacheRead = true;
         if (quotaCache is null || _claudeAccount.Length == 0) return;
         var key = string.Join("|", _claudeAccount, snapshot.Plan, planFrom, credential.SignIn, string.Join(";", snapshot.Quotas));
-        if (key == _claudeSaved) return;
-        _claudeSaved = key;
+        if (key == _claudeSaved && snapshot.Time - _claudeSavedTime < ClaudeQuotaCache.RewriteAfter) return;
+        _claudeSaved = key; _claudeSavedTime = snapshot.Time;
         ClaudeQuotaCache.Save(quotaCache, snapshot, credential.Account, credential.SignIn, planFrom);
     }
     // A sign-in that is gone or rejected keeps no quota, on disk either. A sign-in that could not be read just now only drops
