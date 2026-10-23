@@ -55,9 +55,12 @@ public static class ProviderCatalog
     // Marks the snapshot of such a source built only from this PC's records, shown by its rows that do not read online.
     public const string LocalQuota = "local";
     public static bool ReadsLocalQuota(AppEntry entry) => HasOnlineSwitch(entry.QuotaSource) && !entry.QuotaOnline;
+    // Rows that allow HTTP are read apart from otherwise identical rows that do not; the keys of other rows stay as they were.
     public static string ConfigurationKey(AppEntry entry) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, entry.SecretRevision }))
-        + (ReadsLocalQuota(entry) ? ":" + LocalQuota : "");
-    public static string RequestKey(AppEntry entry, string secret) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, secret }));
+        + (ReadsLocalQuota(entry) ? ":" + LocalQuota : "") + (entry.AllowHttp ? ":" + HttpAllowed : "");
+    public static string RequestKey(AppEntry entry, string secret) => Hash(JsonSerializer.Serialize(new { entry.QuotaSource, entry.Site, entry.Script, secret }))
+        + (entry.AllowHttp ? ":" + HttpAllowed : "");
+    private const string HttpAllowed = "http";
     private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     // Console pages people copy from the address bar; everything from the first such segment on is dropped.
     private static readonly string[] FrontendPages = ["console", "dashboard", "panel", "login", "pricing", "keys"];
@@ -74,19 +77,21 @@ public static class ProviderCatalog
         return site;
     }
     public static bool NeedsSite(ProviderId id) => id is ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom;
-    public static Uri ValidateUrl(string url)
+    public static Uri ValidateUrl(string url, bool allowHttp = false)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http") ||
             uri.UserInfo.Length > 0 || uri.Fragment.Length > 0 || string.IsNullOrEmpty(uri.Host))
-            throw new InvalidDataException(Loc.T("请填写有效的 HTTPS 站点地址，不要包含账户、密码或片段。", "Enter a valid HTTPS site address without a user name, password or fragment."));
-        if (NeedsHttps(uri)) throw new InvalidDataException(HttpsRequired);
+            throw new InvalidDataException(allowHttp
+                ? Loc.T("请填写有效的 HTTP 或 HTTPS 站点地址，不要包含用户名、密码或 # 及其后的内容。", "Enter a valid HTTP or HTTPS site address, without a user name, password, or # and what follows it.")
+                : Loc.T("请填写有效的 HTTPS 站点地址，不要包含用户名、密码或 # 及其后的内容。", "Enter a valid HTTPS site address, without a user name, password, or # and what follows it."));
+        if (NeedsHttps(uri, allowHttp)) throw new InvalidDataException(HttpsRequired);
         return uri;
     }
-    // Requests carry the API key, so they go over HTTPS. Plain HTTP is left only for a service on this PC (a local gateway).
-    public static bool NeedsHttps(Uri uri) => uri.Scheme == Uri.UriSchemeHttp && !IsLoopback(uri);
+    // Requests carry the API key, so they go over HTTPS. Plain HTTP reaches a service on this PC (a local gateway), and any
+    // address once the row allows HTTP (AppEntry.AllowHttp).
+    public static bool NeedsHttps(Uri uri, bool allowHttp = false) => !allowHttp && uri.Scheme == Uri.UriSchemeHttp && !IsLoopback(uri);
     private static bool IsLoopback(Uri uri) => uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
-    public static string HttpsRequired => Loc.T("站点地址必须使用 HTTPS，以免 API 密钥以明文发送；HTTP 只能用于本机地址（localhost、127.0.0.1、[::1]）。",
-        "The site address must use HTTPS so the API key is not sent in plain text. HTTP is allowed only for this PC (localhost, 127.0.0.1, [::1]).");
+    public static string HttpsRequired => Loc.T("须使用 HTTPS；HTTP 仅限本机地址", "Use HTTPS; HTTP is only for this PC");
 }
 
 // Write stable source identifiers; existing numeric enum settings remain readable.

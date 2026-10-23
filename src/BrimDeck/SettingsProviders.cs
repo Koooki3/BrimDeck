@@ -180,12 +180,15 @@ public sealed partial class SettingsWindow
             string usage = custom ? Loc.T("可选，作为 ctx.site 传给脚本", "Optional. Passed to the script as ctx.site")
                 : Loc.T("末尾的 /、/v1 和控制台路径会自动去掉", "A trailing /, /v1 or console path is removed automatically");
             var hint = TextLine(usage, 12.5, TextTertiary);
-            // An HTTP address (one saved by an earlier version included) is no longer read; the field says why while it shows one.
+            // An HTTP address the row does not allow (one saved by an earlier version included) is not read; the line under
+            // the field says why, apart from the hint inside it.
+            var warning = TextLine(ProviderCatalog.HttpsRequired, 12, PanelTheme.WarningDefault); warning.TextWrapping = TextWrapping.Wrap;
+            bool AllowsHttp() => S.Entry(entry.InstanceId)?.AllowHttp == true;
             void Hint()
             {
-                bool insecure = Uri.TryCreate(site.Text.Trim(), UriKind.Absolute, out var typed) && ProviderCatalog.NeedsHttps(typed);
-                hint.Text = insecure ? ProviderCatalog.HttpsRequired : usage;
-                hint.Visibility = site.Text.Length == 0 || insecure ? Visibility.Visible : Visibility.Collapsed;
+                hint.Visibility = site.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+                bool insecure = Uri.TryCreate(site.Text.Trim(), UriKind.Absolute, out var typed) && ProviderCatalog.NeedsHttps(typed, AllowsHttp());
+                warning.Visibility = insecure ? Visibility.Visible : Visibility.Collapsed;
             }
             bool CommitSite()
             {
@@ -195,7 +198,7 @@ public sealed partial class SettingsWindow
                 {
                     try
                     {
-                        var uri = ProviderCatalog.ValidateUrl(normalized);
+                        var uri = ProviderCatalog.ValidateUrl(normalized, current.AllowHttp);
                         if (uri.Query.Length > 0) throw new InvalidDataException(Loc.T("站点地址不应包含查询参数。", "The site address must not contain query parameters."));
                     }
                     catch (InvalidDataException ex) { SaveStatus(ex.Message, true); return false; }
@@ -208,8 +211,29 @@ public sealed partial class SettingsWindow
             site.TextChanged += (_, _) => { Hint(); InvalidateTest(); };
             site.LostKeyboardFocus += (_, _) => CommitSite();
             site.KeyDown += (_, e) => { if (e.Key == Key.Enter) { CommitSite(); e.Handled = true; } };
-            Hint();
             Line(Loc.T("站点地址", "Site address"), Field(site, hint));
+            Line("", warning);
+
+            string allowTitle = Loc.T("允许 HTTP", "Allow HTTP");
+            string allowHelp = Loc.T("开启后，此来源可以用 HTTP 访问任意地址，API 密钥会以明文发送。只在可信的网络中使用，例如家里的 NAS 或 Tailscale。",
+                "When on, this source may use HTTP to any address, and the API key is sent in plain text. Use it only on a trusted network, such as a NAS at home or Tailscale.");
+            var allow = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.AllowHttp, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(allow, allowTitle); AutomationProperties.SetHelpText(allow, allowHelp);
+            AutomationProperties.SetAutomationId(allow, "allow-http-" + entry.InstanceId.ToString("N"));
+            var allowLine = new StackPanel { Orientation = Orientation.Horizontal };
+            var allowInfo = HelpIcon(allowTitle, () => allowHelp, 14); allowInfo.Margin = new Thickness(8, 0, 0, 0);
+            allowLine.Children.Add(allow); allowLine.Children.Add(allowInfo);
+            void SetAllowHttp(bool value)
+            {
+                if (S.Entry(entry.InstanceId) is not { } current || current.AllowHttp == value) return;
+                Change(s => s.Entry(entry.InstanceId)!.AllowHttp = value);
+                Hint(); InvalidateTest();
+                // An HTTP address typed while it was refused is saved now that it is allowed.
+                if (value) CommitSite();
+            }
+            allow.Checked += (_, _) => SetAllowHttp(true); allow.Unchecked += (_, _) => SetAllowHttp(false);
+            Line(allowTitle, allowLine);
+            Hint();
         }
 
         var password = new PasswordBox { FontSize = 12.5, MaxLength = 4096, Padding = new Thickness(0), BorderThickness = new Thickness(0),
