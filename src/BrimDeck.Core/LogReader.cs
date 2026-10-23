@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Json;
 
 namespace BrimDeck.Core;
@@ -20,6 +21,12 @@ public sealed class LogReader
     }
     // Claude and Codex read different folders; each keeps only the files its latest read visited.
     private readonly Dictionary<ProviderId, Dictionary<string, CacheItem>> _caches = [];
+    // A line longer than this (a huge tool result) is skipped and counted as unreadable instead of growing the buffer without end.
+    public const int DefaultMaxLine = 32 << 20;
+    private const int Chunk = 1 << 20;
+    private readonly int _maxLine;
+
+    public LogReader(int maxLine = DefaultMaxLine) => _maxLine = Math.Max(1024, maxLine);
 
     public ProviderSnapshot Read(ProviderId id, string root, DateTimeOffset now, DateTime? startDate = null) => Read(id, [root], now, startDate);
 
@@ -82,28 +89,46 @@ public sealed class LogReader
         return result;
     }
 
-    // Reads complete lines after the remembered offset. A line still being written is left for the next refresh.
-    private static void Parse(string file, ProviderId id, CacheItem item, FileInfo info)
+    // Reads complete lines after the remembered offset. A line still being written is left for the next refresh. The buffer
+    // comes from the shared pool, so a refresh that finds many changed files does not allocate a megabyte for each of them.
+    private void Parse(string file, ProviderId id, CacheItem item, FileInfo info)
     {
         using var stream = SharedFile.Open(file);
         stream.Seek(item.Offset, SeekOrigin.Begin);
-        var buffer = new byte[1 << 20];
-        int filled = 0, read;
-        while ((read = stream.Read(buffer, filled, buffer.Length - filled)) > 0)
+        var buffer = ArrayPool<byte>.Shared.Rent(Math.Min(Chunk, _maxLine));
+        // The bytes dropped so far of a line over the limit. The offset moves past them only once the line's end is found, so a
+        // long line still being written is looked at again on the next refresh and counted once, when it is complete.
+        long skipped = 0;
+        bool skipping = false;
+        try
         {
-            filled += read;
-            int start = 0, newline;
-            while ((newline = Array.IndexOf(buffer, (byte)'\n', start, filled - start)) >= 0)
+            int filled = 0, read;
+            while ((read = stream.Read(buffer, filled, buffer.Length - filled)) > 0)
             {
-                ParseLine(buffer.AsMemory(start, newline - start), id, item);
-                start = newline + 1;
+                filled += read;
+                int start = 0, newline;
+                while ((newline = Array.IndexOf(buffer, (byte)'\n', start, filled - start)) >= 0)
+                {
+                    if (skipping) { skipping = false; item.Offset += skipped; skipped = 0; item.Errors++; }
+                    else ParseLine(buffer.AsMemory(start, newline - start), id, item);
+                    start = newline + 1;
+                }
+                item.Offset += start;
+                Buffer.BlockCopy(buffer, start, buffer, 0, filled - start);
+                filled -= start;
+                if (filled < buffer.Length) continue;
+                // A single line fills the buffer (a large tool result): it grows up to the limit, beyond which the line is dropped.
+                if (buffer.Length < _maxLine)
+                {
+                    var larger = ArrayPool<byte>.Shared.Rent(Math.Min(_maxLine, buffer.Length * 2));
+                    Buffer.BlockCopy(buffer, 0, larger, 0, filled);
+                    ArrayPool<byte>.Shared.Return(buffer);
+                    buffer = larger;
+                }
+                else { skipping = true; skipped += filled; filled = 0; }
             }
-            item.Offset += start;
-            Buffer.BlockCopy(buffer, start, buffer, 0, filled - start);
-            filled -= start;
-            // A single line longer than the buffer (a large tool result) grows it instead of being split.
-            if (filled == buffer.Length) Array.Resize(ref buffer, buffer.Length * 2);
         }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
         item.Length = info.Length; item.Modified = info.LastWriteTimeUtc;
     }
 
