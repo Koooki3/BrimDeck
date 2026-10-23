@@ -120,6 +120,10 @@ en.UninstallButton=Uninstall
 en.DeleteUserData=Delete user data
 en.Uninstalled={#AppName} was uninstalled.
 
+; The folder's rights are settled before any file is copied into it (SecureAppDir).
+[Dirs]
+Name: "{app}"; AfterInstall: SecureAppDir
+
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -247,6 +251,49 @@ begin
   Result := True;
   if CurPageID = wpSelectDir then
     WizardForm.DirEdit.Text := NormalizeAppDir(WizardForm.DirEdit.Text);
+end;
+
+// ----- Folder rights -----
+
+// Whether Dir is Root or a folder inside it.
+function IsUnder(const Dir, Root: String): Boolean;
+begin
+  Result := (Root <> '') and (Pos(Lowercase(AddBackslash(Root)), Lowercase(AddBackslash(Dir))) = 1);
+end;
+
+// Program Files and the user's profile (the default %LOCALAPPDATA%\Programs) already keep other users from changing the
+// program. A folder chosen elsewhere, such as D:\BrimDeck, inherits the rights of the drive's root, which on a second
+// drive let every signed-in user change files: anyone could replace the program that runs as this user at sign-in.
+function NeedsOwnRights(const Dir: String): Boolean;
+begin
+  Result := not (IsUnder(Dir, ExpandConstant('{commonpf32}')) or IsUnder(Dir, ExpandConstant('{commonpf64}'))
+    or IsUnder(Dir, GetEnv('USERPROFILE')) or IsUnder(Dir, ExpandConstant('{localappdata}')));
+end;
+
+// Gives such a folder the rights of Program Files: it stops inheriting from its parent; SYSTEM and Administrators have full
+// control and Users may read and run. Installed for the current user, that user also has full control, so in-app updates
+// keep working without an administrator prompt. Subfolders with rights of their own keep them. A failure is logged and the
+// installation goes on with the inherited rights, as before.
+procedure SecureAppDir;
+var
+  Dir, Grants: String;
+  ResultCode: Integer;
+begin
+  Dir := ExpandConstant('{app}');
+  if not NeedsOwnRights(Dir) then
+  begin
+    Log('The install folder keeps its inherited rights: ' + Dir);
+    Exit;
+  end;
+  // SYSTEM, Administrators and Users by SID, so the names need no translation.
+  Grants := '"*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"';
+  if not IsAdminInstallMode then
+    Grants := Grants + ' "' + GetEnv('USERDOMAIN') + '\' + GetUserNameString + ':(OI)(CI)F"';
+  if Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /inheritance:r /grant:r ' + Grants + ' /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0) then
+    Log('The install folder no longer inherits rights from its parent: ' + Dir)
+  else
+    Log('The install folder rights could not be set (code ' + IntToStr(ResultCode) + '): ' + Dir);
 end;
 
 // Returns <path> from a command line such as "<path>\unins000.exe" /SILENT /UI.
