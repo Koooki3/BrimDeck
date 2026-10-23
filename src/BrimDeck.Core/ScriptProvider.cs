@@ -247,7 +247,11 @@ public sealed class ConfiguredProviders : IDisposable
                     if (_retryAt.TryGetValue(requestKey, out var retry) && now < retry) throw new ProviderReadException(Loc.T("请求频繁", "Too many requests"), Loc.T($"站点要求在 {retry.LocalDateTime:HH:mm:ss} 后重试。", $"The site asks to retry after {retry.LocalDateTime:HH:mm:ss}."));
                     if (secret.Length == 0 && entry.QuotaSource != ProviderId.Custom) throw new ProviderReadException(Loc.T("未配置", "Not configured"), Loc.T("请在设置中填写此来源的 API 密钥。", "Enter this source's API key in settings."));
                     if (ProviderCatalog.NeedsSite(entry.QuotaSource) && (entry.Site.Length > 0 || entry.QuotaSource != ProviderId.Custom))
-                    { var uri = ProviderCatalog.ValidateUrl(entry.Site); if (uri.Query.Length > 0) throw new InvalidDataException(Loc.T("站点地址只需填写域名或部署子路径，不要包含查询参数。", "Enter only the domain or deployment path in the site address, without query parameters.")); }
+                    {
+                        // An HTTP address saved by an earlier version stops here, before any request, and says why.
+                        if (Uri.TryCreate(entry.Site, UriKind.Absolute, out var saved) && ProviderCatalog.NeedsHttps(saved))
+                            throw new ProviderReadException(Loc.T("需要 HTTPS", "HTTPS required"), ProviderCatalog.HttpsRequired);
+                        var uri = ProviderCatalog.ValidateUrl(entry.Site); if (uri.Query.Length > 0) throw new InvalidDataException(Loc.T("站点地址只需填写域名或部署子路径，不要包含查询参数。", "Enter only the domain or deployment path in the site address, without query parameters.")); }
                     var result = await Task.Run(session.RunAsync, deadline.Token);
                     snapshot.Metrics = result.Metrics; snapshot.Plan = result.Plan; snapshot.Scope = result.Scope;
                     snapshot.Details = result.Details; snapshot.QuotaTime = now; snapshot.LiveQuota = true;

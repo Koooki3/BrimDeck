@@ -177,9 +177,16 @@ public sealed partial class SettingsWindow
         {
             bool custom = entry.QuotaSource == ProviderId.Custom;
             var site = Plain("site", Loc.T("站点地址", "Site address")); site.Text = entry.Site;
-            var hint = TextLine(custom ? Loc.T("可选，作为 ctx.site 传给脚本", "Optional. Passed to the script as ctx.site")
-                : Loc.T("末尾的 /、/v1 和控制台路径会自动去掉", "A trailing /, /v1 or console path is removed automatically"), 12.5, TextTertiary);
-            void Hint() => hint.Visibility = site.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            string usage = custom ? Loc.T("可选，作为 ctx.site 传给脚本", "Optional. Passed to the script as ctx.site")
+                : Loc.T("末尾的 /、/v1 和控制台路径会自动去掉", "A trailing /, /v1 or console path is removed automatically");
+            var hint = TextLine(usage, 12.5, TextTertiary);
+            // An HTTP address (one saved by an earlier version included) is no longer read; the field says why while it shows one.
+            void Hint()
+            {
+                bool insecure = Uri.TryCreate(site.Text.Trim(), UriKind.Absolute, out var typed) && ProviderCatalog.NeedsHttps(typed);
+                hint.Text = insecure ? ProviderCatalog.HttpsRequired : usage;
+                hint.Visibility = site.Text.Length == 0 || insecure ? Visibility.Visible : Visibility.Collapsed;
+            }
             bool CommitSite()
             {
                 if (S.Entry(entry.InstanceId) is not { } current) return false;
