@@ -27,7 +27,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | `settings.json` | 设置，不含任何登录令牌或 API 密钥 |
 | `secrets.dat` | 手动填写的 API 密钥，使用 Windows 的加密功能按当前用户加密 |
 | `model-prices.json`、`manual-model-prices.json` | 同步的模型单价、手动添加的单价 |
-| `claude-quota.json` | 最近一次联网读取的 Claude 额度（各项百分比、重置时间与订阅名称），重启后接口被限流时用来继续显示 Fable 等额度；不含登录令牌，超过 7 天不再使用，登录失效或退出登录时删除 |
+| `claude-quota.json` | 最近一次联网读取的 Claude 额度（各项百分比、重置时间与订阅名称），重启后接口被限流时用来继续显示 Fable 等额度；不含登录令牌；账户仅以其 ID 的单向哈希记录（不保存 ID 本身），只在同一账户登录时使用；超过 7 天不再使用，登录失效或退出登录时删除 |
 | `update-prompt.txt`、`updates\` | 已提示过的版本号、下载的安装包 |
 | `crash.log` | 错误记录，超过 1 MB 时清空 |
 | `notices\notices.dat`、`notices\icons\` | 开启灵动提示且保存最近通知时：最近通知（默认 24 小时、最多 500 条），使用 Windows 的加密功能按当前用户加密；应用图标（来自 Windows，不含通知内容）。**默认保存在 BrimDeck 安装目录的 `notices` 文件夹**（权限只开放给当前用户），安装目录不可写时才放在这里；保存位置可在设置中更改，卸载时勾选删除用户数据会一并删除 |

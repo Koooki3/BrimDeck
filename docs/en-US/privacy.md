@@ -27,7 +27,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 | `settings.json` | Settings; no sign-in tokens or API keys |
 | `secrets.dat` | API keys you entered, encrypted by Windows for the current user |
 | `model-prices.json`, `manual-model-prices.json` | Updated model prices, and prices you added |
-| `claude-quota.json` | The last Claude quota read online (shares, reset times and the plan name), so per-model quotas such as Fable still show after a restart while the account API is rate limited; no sign-in token, not used once older than 7 days, deleted when the sign-in is rejected or removed |
+| `claude-quota.json` | The last Claude quota read online (shares, reset times and the plan name), so per-model quotas such as Fable still show after a restart while the account API is rate limited; no sign-in token; the account is recorded only as a one-way hash of its id (never the id itself), and the file is used only while the same account is signed in; not used once older than 7 days, deleted when the sign-in is rejected or removed |
 | `update-prompt.txt`, `updates\` | The last version you were told about, and downloaded installers |
 | `crash.log` | Error records; cleared when it exceeds 1 MB |
 | `notices\notices.dat`, `notices\icons\` | With dynamic notices on and kept: the recent notices (24 hours and at most 500 by default), encrypted for the current user with Windows encryption; application icons (from Windows, no notice content). **Kept by default in the `notices` folder of BrimDeck's install folder** (opened to the current user only), and here only when the install folder cannot be written to; the folder can be changed in settings, and uninstalling with "Delete user data" removes it |
