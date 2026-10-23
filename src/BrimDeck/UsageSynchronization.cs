@@ -35,7 +35,9 @@ public partial class MainWindow
     internal Task RefreshAutomaticallyAsync(bool queueIfBusy = false)
         => AutomaticSyncEnabled ? RefreshAsync(queueIfBusy) : Task.CompletedTask;
 
-    private void AIUsage_Click(object sender, RoutedEventArgs e) { SelectPage(BrimDeck.Core.DeckPage.Usage); ShowModelDetails(false); }
+    // From another page the switch shows the usage page out of the model details (ShowPage leaves them). The tab is hidden in the
+    // details, so on the usage page it has nothing to do.
+    private void AIUsage_Click(object sender, RoutedEventArgs e) { if (!IsUsagePage) SelectPage(BrimDeck.Core.DeckPage.Usage); }
 
     private async void Sync_Click(object sender, RoutedEventArgs e)
     {

@@ -1,5 +1,5 @@
 <Application x:Class="BrimDeck.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" ShutdownMode="OnExplicitShutdown">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck" ShutdownMode="OnExplicitShutdown">
   <Application.Resources>
     <ResourceDictionary>
     <ResourceDictionary.MergedDictionaries>
@@ -61,12 +61,18 @@
       <Setter Property="FocusVisualStyle" Value="{StaticResource PanelKeyboardFocus}"/>
       <Setter Property="Template"><Setter.Value>
         <ControlTemplate TargetType="Button">
-          <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource SegmentCorner}" Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent">
-            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-          </Border>
+          <Grid>
+            <!-- Lit by Feedback where a style turns it on (ToolbarActionButton). -->
+            <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource SegmentCorner}" Opacity="0"/>
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource SegmentCorner}" Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+          </Grid>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/></Trigger>
             <Trigger Property="Tag" Value="Selected"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource PanelFillSelected}"/><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+            <!-- Chosen in a strip whose fill glides between its segments (MainWindow.Segmented): the text only. -->
+            <Trigger Property="Tag" Value="Chosen"><Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -75,7 +81,7 @@
     <!-- A standalone toolbar action in the segment look: 6 DIP corner and a gray hover, like the other toolbar buttons. -->
     <Style x:Key="ToolbarActionButton" TargetType="Button" BasedOn="{StaticResource SegmentButton}">
       <Style.Resources><CornerRadius x:Key="SegmentCorner">6</CornerRadius></Style.Resources>
-      <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource PanelHover}"/></Trigger></Style.Triggers>
+      <Setter Property="local:Feedback.Fade" Value="True"/>
     </Style>
     <Style TargetType="Button">
       <Setter Property="Foreground" Value="#DCDEE7"/><Setter Property="Background" Value="#252730"/>

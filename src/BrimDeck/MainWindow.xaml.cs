@@ -59,6 +59,8 @@ public partial class MainWindow : Window
     private Rect? _popupReturnArea;
     private int _days = 1;
     private bool _details;
+    // Lets the old content of a rebuilt usage or media page leave while the new one arrives.
+    private PageHandover _handover = null!;
     private int _applicationPage;
     private readonly Dictionary<Guid, int> _quotaPages = new();
     private DateTimeOffset? _updatedAt;
@@ -93,6 +95,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         // Out of sight until the boot (or, without animations, until it has its place): the window shows before it is placed.
         HoverZone.Opacity = 0;
+        _handover = new PageHandover(LeavingContent);
         InitializeMusic();
         InitializeMonitor();
         InitializeResize();
@@ -424,8 +427,8 @@ public partial class MainWindow : Window
         if (expanded && !_preview)
             foreach (var other in _app.Decks.Where(deck => deck != this && deck._expanded && !deck._preview).ToList()) other.SetExpanded(false);
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
-        // A page switch cut short by closing the panel leaves nothing behind for the next opening.
-        if (expanded && !_expanded && _switchingTo is null) SettlePage();
+        // A hand-over cut short by closing the panel leaves nothing behind for the next opening.
+        if (expanded && !_expanded) _handover.Drop();
         bool wasExpanded = _expanded;
         _expanded = expanded;
         _escapeDismissal?.SetEnabled(expanded && !_preview);
