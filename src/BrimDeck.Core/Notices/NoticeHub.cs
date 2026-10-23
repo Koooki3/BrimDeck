@@ -202,7 +202,8 @@ public sealed class NoticeHub
         var limit = now - Retention;
         // A reminder BrimDeck still has to give (an event next week) and a stopwatch still running stay past the retention; the
         // count limit still applies.
-        _notices.RemoveAll(n => n.ReceivedAt < limit && NoticeClock.NextDue(n.Timing) is null && !NoticeClock.IsLive(n.Timing, now));
+        _notices.RemoveAll(n => n.ReceivedAt < limit && NoticeClock.NextDue(n.Timing) is null
+            && !(n.Timing is { Kind: NoticeTimeKind.Stopwatch } && NoticeClock.IsLive(n.Timing, now)));
         if (_notices.Count > MaxCount) _notices.RemoveRange(MaxCount, _notices.Count - MaxCount);
         foreach (var stale in _apps.Values.Where(app => app.LastSeen < now - TimeSpan.FromDays(30)).Select(app => app.Key).ToList()) _apps.Remove(stale);
         bool changed = _notices.Count != before;
