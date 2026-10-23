@@ -85,7 +85,7 @@ public sealed partial class SettingsWindow
                 Change(s => s.ClockColor = color); RefreshClockTiles();
                 gradient.Visibility = color == ClockColor.Gradient ? Visibility.Visible : Visibility.Collapsed;
             };
-            if (color == ClockColor.Cover) swatch.Content = MusicVisuals.Icon("music", 13, UI.Brush("#FFFFFF"));
+            if (color == ClockColor.Cover) swatch.Content = MusicVisuals.Icon("music", 13, UI.Brush(SwatchInk(SampleCover)));
             if (color == ClockColor.Gradient) gradientSwatch = swatch;
             if (color == ClockColor.Custom)
             {
@@ -127,15 +127,17 @@ public sealed partial class SettingsWindow
     {
         ClockColor.Gradient => ClockFace.Fill(S.ClockGradient.Select(ClockFace.Parse).ToList()),
         ClockColor.Custom => ClockFace.Fill([ClockFace.Parse(S.ClockCustomColor)]),
-        ClockColor.Cover => ClockFace.Fill([Color.FromRgb(0xE0, 0xA4, 0x8C)]),
+        ClockColor.Cover => ClockFace.Fill([SampleCover]),
         // As the panel draws them on the current theme's surface.
         _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color), PanelThemes.TextContrast)])
     };
-    // A pencil over the custom color marks it as editable, dark on light colors and light on dark ones.
+    private static readonly Color SampleCover = Color.FromRgb(0xE0, 0xA4, 0x8C);
+    // A mark over a swatch (the cover's note, the custom color's pencil): dark on light colors and light on dark ones.
+    private static string SwatchInk(Color under) => .2126 * under.R + .7152 * under.G + .0722 * under.B > 150 ? "#B3202027" : "#E6FFFFFF";
+    // A pencil over the custom color marks it as editable.
     private static FrameworkElement Pencil(Color under)
     {
-        bool light = .2126 * under.R + .7152 * under.G + .0722 * under.B > 150;
-        var path = new Path { Data = Geometry.Parse("M 4,20 L 5,15.5 L 15.5,5 L 19,8.5 L 8.5,19 Z M 13.5,7 L 17,10.5"), Stroke = UI.Brush(light ? "#B3202027" : "#E6FFFFFF"),
+        var path = new Path { Data = Geometry.Parse("M 4,20 L 5,15.5 L 15.5,5 L 19,8.5 L 8.5,19 Z M 13.5,7 L 17,10.5"), Stroke = UI.Brush(SwatchInk(under)),
             StrokeThickness = 2, StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
         var canvas = new Canvas { Width = 24, Height = 24 }; canvas.Children.Add(path);
         return new Viewbox { Width = 12, Height = 12, Child = canvas, IsHitTestVisible = false };
