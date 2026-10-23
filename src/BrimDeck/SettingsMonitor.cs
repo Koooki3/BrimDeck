@@ -66,8 +66,8 @@ public sealed partial class SettingsWindow
         var headings = ReadingColumns(); headings.Height = 34;
         AddHeadings(headings, new[]
         {
-            (Loc.T("读数", "Reading"), 1, Loc.T("拖动左侧手柄调整读数在刘海和胶囊中从左到右的顺序。宽度不够时，读数仍按上传、GPU、下载、核心柱、内存的顺序隐藏，CPU 保留到最后，与这里的顺序无关。",
-                "Drag the handle at the left to set the order of the readings in the notch and the capsule, left to right. When the width runs short, readings still give way in turn: upload, GPU, download, the core columns, memory; CPU stays longest, whatever the order here.")),
+            (Loc.T("读数", "Reading"), 1, Loc.T("拖动左侧手柄调整读数在刘海和胶囊中从左到右的顺序。宽度不够时，读数按这个顺序滚动显示。",
+                "Drag the handle at the left to set the order of the readings in the notch and the capsule, left to right. When the width runs short, the readings scroll in this order.")),
             (Loc.T("主题", "Theme"), 2, Loc.T("读数在刘海和胶囊中的颜色，默认跟随上方的“配色”。选色后改用所选颜色；在颜色选择器中点“默认”恢复跟随配色。内存占用偏高或过高时仍改用预警或告警色。只影响收起时的读数。",
                 "The reading's color in the notch and the capsule; by default it follows Colors above. A chosen color replaces it; Default in the color picker follows Colors again. Memory still turns to the warning or critical color when it runs high. Only the collapsed readings use it.")),
             (Loc.T("显示数值", "Value"), 3, Loc.T("CPU、内存和 GPU 的圆环旁是否显示百分比。关闭后只显示圆环（环内显示图标），占用的宽度更小。核心柱没有数值，下载和上传始终显示速率，不能设置。",
@@ -95,15 +95,7 @@ public sealed partial class SettingsWindow
         }
         var quick = QuickRow(Loc.T("快捷预设", "Presets"), presets);
         Refresh();
-
-        string widen = Loc.T("内容放不下时自动加宽。拖动其左右两端或调整宽度滑块即手动设定宽度（会关闭此项），双击两端恢复。",
-            "Widens the surface when its content does not fit. Dragging either end or moving the width slider sets the width by hand (and turns this off); a double click on an end turns it back on.");
-        Group(table, quick,
-            Toggle(Loc.T("刘海按内容自动加宽", "Notch widens to the content"), S.NotchAutoWidth, on => Change(s => s.NotchAutoWidth = on), help: widen),
-            Toggle(Loc.T("胶囊按内容自动加宽", "Capsule widens to the content"), S.CapsuleAutoWidth, on => Change(s => s.CapsuleAutoWidth = on), help: widen));
-        Note(Loc.T("读数显示在打开了“系统监控”的刘海或胶囊中（收起外观 › 显示内容），从左到右按上表的顺序。放不下的读数按上传、GPU、下载、核心柱、内存的顺序隐藏，CPU 保留到最后。",
-            "The readings show in a notch or capsule whose \"System monitor\" switch is on (Collapsed view › Content), left to right in the order of the table. Readings that do not fit give way in turn: upload, GPU, download, the core columns, memory; CPU stays longest."),
-            11.5, TextTertiary, new Thickness(0, -16, 0, 20));
+        Group(table, quick);
     }
 
     private static Grid ReadingColumns()

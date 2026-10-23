@@ -169,8 +169,11 @@ public partial class App : Application
         AssignDisplays();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         QueueSave();
+        CollapsedChanged();
         if (dataChanged || syncEnabled || languageChanged) _ = Deck.RefreshAutomaticallyAsync(queueIfBusy: true);
     }
+    // The settings window's size group follows changes made on the panel (a drag, or content that changed the auto width).
+    internal void CollapsedChanged() => _settingsWindow?.CollapsedChanged();
     private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
     {
         if (Dispatcher.HasShutdownStarted) return;

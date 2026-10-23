@@ -64,6 +64,9 @@ public partial class MainWindow
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
     private TimeSpan _quotaElapsed;
+    // The readings' carousel while they are wider than their region, and its place in the cycle across rebuilds.
+    private ReadingsCarousel? _stripCarousel;
+    private TimeSpan _stripElapsed;
     // The page on screen: the chosen one while it is shown, otherwise the one DeckPages falls back to.
     internal DeckPage CurrentPage => DeckPages.Resolve(Settings, _page);
     internal bool IsMusicPage => CurrentPage == DeckPage.Music;
@@ -755,10 +758,14 @@ public partial class MainWindow
         // The system readings ask for the width of everything chosen, on whole device pixels, and show what fits in the region they get.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings.MonitorPalette, Settings.CompactReadings), scale,
             !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi) : null;
-        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, strip is null ? null : strip.FittedWidth); CurrentCompactLayout = layout;
-        // With readings on, a row too short for its content grows to it; the new shape builds the row again.
-        double wanted = strip is null ? 0 : CompactMusicLayout.NaturalWidth(scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip.PreferredWidth);
-        if (Math.Abs(wanted - _compactWanted) > .5) { _compactWanted = wanted; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
+        // Readings that do not fit scroll in their region, as the rings and the lyric do, so the region keeps its width.
+        var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0); CurrentCompactLayout = layout;
+        // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
+        // and the lyric's changing length are left out, so the width changes only when the content itself does.
+        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
+        bool steadyText = media && Settings.MusicText != CompactMusicText.None;
+        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0);
+        if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5) { _compactWanted = wanted; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         double row = layout.RowHeight;
         var grid = new Grid { Width = SnapDown(contentWidth, dpi), Height = row };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SnapDown(layout.CoverWidth, dpi)) }); grid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -769,10 +776,19 @@ public partial class MainWindow
         {
             // After the middle, the gap and then the readings, which end at the region's right edge; alone they span the row, centred.
             double gap = layout.MonitorAlone ? 0 : CompactMusicLayout.Whole(8 * scale);
-            strip.Width = SnapDown(Math.Max(0, layout.MonitorWidth - gap), dpi); strip.Margin = new Thickness(gap, 0, 0, 0);
-            strip.HorizontalAlignment = layout.MonitorAlone ? HorizontalAlignment.Center : HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Center;
-            if (layout.MonitorAlone) Grid.SetColumnSpan(strip, 5); else Grid.SetColumn(strip, 2);
-            grid.Children.Add(strip); _compactStrip = strip;
+            double span = SnapDown(Math.Max(0, layout.MonitorWidth - gap), dpi);
+            FrameworkElement region = strip;
+            if (strip.PreferredWidth > span + .001)
+            {
+                _stripCarousel = new ReadingsCarousel(strip, span, Snap(layout.TextEdge, dpi), _stripElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation);
+                region = _stripCarousel;
+                // The carousel's left fade lies over the gap before it.
+                region.Margin = new Thickness(gap + region.Margin.Left, 0, 0, 0);
+            }
+            else { strip.Width = span; strip.Margin = new Thickness(gap, 0, 0, 0); }
+            region.HorizontalAlignment = layout.MonitorAlone ? HorizontalAlignment.Center : HorizontalAlignment.Left; region.VerticalAlignment = VerticalAlignment.Center;
+            if (layout.MonitorAlone) Grid.SetColumnSpan(region, 5); else Grid.SetColumn(region, 2);
+            grid.Children.Add(region); _compactStrip = strip;
         }
         if (clock is not null && layout.ClockWidth > 0)
         {
@@ -843,7 +859,11 @@ public partial class MainWindow
         && MusicAudioActive && IsVisible && !IsSuppressed && _expanded && IsMusicPage);
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
     private void UpdateQuotaCarousel()
-        => _quotaCarousel?.SetRunning(IsVisible && !IsSuppressed && !_expanded && _alert is null, _pointerInside);
+    {
+        bool running = IsVisible && !IsSuppressed && !_expanded && _alert is null;
+        _quotaCarousel?.SetRunning(running, _pointerInside);
+        _stripCarousel?.SetRunning(running, _pointerInside);
+    }
     private bool MusicPresentationVisible => IsVisible && !IsSuppressed && _mediaTrack is { State: not MediaState.Stopped }
         && (_expanded ? IsMusicPage : Settings.ShowsMusic(EffectiveStyle) && _alert is null);
     private bool MusicAudioActive => _mediaTrack is { State: MediaState.Playing };

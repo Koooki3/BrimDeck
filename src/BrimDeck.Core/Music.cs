@@ -102,22 +102,32 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public static double SafeScale(double scale) => double.IsFinite(scale) && scale > 0 ? Math.Clamp(scale, .25, 8) : 1;
     private static double Safe(double width) => double.IsFinite(width) && width > 0 ? width : 0;
 
-    // The width a row with this content takes without cutting or rotating anything: the cover, every ring, a short stretch of
-    // lyric, the system readings, the equalizer and the clock, with their gaps. A row with system readings grows to it
-    // (CollapsedGeometry.Resolve), as ftop's strip fits its readings.
+    // The width an auto-width row keeps for the lyric or the title at scale 1. It does not follow the text, so the surface
+    // keeps its width from line to line; a longer line scrolls in it.
+    public const double TextSlot = 160;
+
+    // The width a row with this content takes without cutting or rotating anything: the cover, every ring, the lyric's fixed
+    // slot, the system readings, the equalizer and the clock, with their gaps. An auto-width surface takes it
+    // (CollapsedGeometry.Resolve).
     public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
     {
         double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace);
         rings = Math.Max(0, rings);
         double width = media ? Whole(20 * s) + Whole(8 * s) + Whole(8 * s) + Math.Max(1, Whole(18 * s)) : 0;
-        double ringSpan = rings == 0 ? 0 : rings * Math.Max(1, Whole(12 * s)) + (rings - 1) * Whole(8 * s);
-        // Beside a lyric the rings may take at most 40 % of the middle (Calculate), so the middle is wide enough for that too.
-        double desired = Whole(56 * s);
-        width += !text ? ringSpan : rings == 0 ? desired : Math.Max(Math.Ceiling(ringSpan / .4), ringSpan + Whole(8 * s) + desired);
+        width += RingsAndText(s, rings, text);
         bool alone = monitor > 0 && !media && rings == 0 && !text && face == 0;
         width += monitor == 0 ? 0 : alone ? monitor : monitor + Whole(8 * s);
         width += face == 0 ? 0 : !media && rings == 0 && !text && monitor == 0 ? face : face + Whole(8 * s);
         return width;
+    }
+
+    // The width the rings and the lyric's fixed slot take without cutting or rotating the rings.
+    private static double RingsAndText(double s, int rings, bool text)
+    {
+        double ringSpan = rings == 0 ? 0 : rings * Math.Max(1, Whole(12 * s)) + (rings - 1) * Whole(8 * s);
+        // Beside a lyric the rings may take at most 40 % of the middle (Calculate), so the middle is wide enough for that too.
+        double desired = Whole(TextSlot * s);
+        return !text ? ringSpan : rings == 0 ? desired : Math.Max(Math.Ceiling(ringSpan / .4), ringSpan + Whole(8 * s) + desired);
     }
 
     // contentWidth here excludes the clock, as before custom sizes: the cover, middle and equalizer share it.
@@ -125,10 +135,8 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         => Calculate(contentWidth, 1, media, rings, text, 0);
 
     // contentWidth is the whole row in DIPs; clockFace is the clock's reserved width at this scale, or 0 without a clock;
-    // monitorFace is the width all chosen system readings want, or 0 without them; monitorFit, when given, is the width the
-    // readings that fit in a given width take, so a region that drops readings gives the rest back to the middle.
-    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0,
-        Func<double, double>? monitorFit = null)
+    // monitorFace is the width all chosen system readings want, or 0 without them; readings wider than their region scroll in it.
+    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0)
     {
         double s = SafeScale(scale), width = Safe(contentWidth), face = Safe(clockFace), monitorWanted = Safe(monitorFace);
         rings = Math.Max(0, rings);
@@ -144,18 +152,15 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         double Take(double region) { double cut = Math.Min(region, deficit); deficit -= cut; return region - cut; }
         eqRegion = Take(eqRegion); coverRegion = Take(coverRegion); clockRegion = Take(clockRegion);
         double middle = Math.Max(0, width - coverRegion - eqRegion - clockRegion);
-        // The readings take what the middle can spare: one ring and the shortest lyric stay, so turning them on never hides the
-        // quotas or the song. Alone, they have the row. Both are min and max of linear functions of the width, as above.
+        // A middle too short for everything narrows the readings first, while the rings and the lyric keep their width; once
+        // the two halves are even they narrow together. The readings scroll in what they keep, as the rings and the lyric do.
+        // One ring and the shortest lyric always stay. Alone, the readings have the row. All are min and max of linear
+        // functions of the width, with slopes from 0 to 1, as above.
         bool monitorAlone = monitorWanted > 0 && !media && rings == 0 && !text && face == 0;
+        double monitorNeed = monitorWanted + Whole(8 * s);
         double monitorRegion = monitorWanted == 0 ? 0 : monitorAlone ? Math.Min(monitorWanted, middle)
-            : Math.Min(monitorWanted + Whole(8 * s), Math.Max(0, middle - (rings > 0 ? Math.Max(1, Whole(12 * s)) : 0) - (text ? Whole(MinimumText * s) : 0)));
-        // A region too short for every reading drops whole readings; it keeps only the width of those that stay, and the
-        // middle gets the rest instead of a blank beside the readings.
-        if (monitorFit is not null && !monitorAlone && monitorRegion > 0 && monitorRegion < monitorWanted + Whole(8 * s))
-        {
-            double kept = Safe(monitorFit(Math.Max(0, monitorRegion - Whole(8 * s))));
-            monitorRegion = kept > 0 ? Math.Min(monitorRegion, kept + Whole(8 * s)) : 0;
-        }
+            : Math.Min(Math.Min(monitorNeed, Math.Max(middle - RingsAndText(s, rings, text), middle / 2)),
+                Math.Max(0, middle - (rings > 0 ? Math.Max(1, Whole(12 * s)) : 0) - (text ? Whole(MinimumText * s) : 0)));
         middle = Math.Max(0, middle - monitorRegion);
 
         // Rings have one size for a given height: the width never shrinks them. The ring region is cut at its edge, through a

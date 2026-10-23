@@ -254,9 +254,10 @@ public partial class MainWindow : Window
         WorkDip = new DipRect((work.Left - bounds.Left) / scale, (work.Top - bounds.Top) / scale, work.Width / scale, work.Height / scale);
         Collapsed = ShapeFor(EffectiveStyle);
     }
-    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip, Settings.CompactAutoWidth(style) ? _compactWanted : 0);
-    // The width the collapsed content asks for while it shows system readings; 0 keeps the saved width (see CollapsedGeometry).
-    private double _compactWanted;
+    private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
+        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null);
+    // The width the collapsed content asks for (see CollapsedGeometry); NaN until the row is first built, which keeps the saved width.
+    private double _compactWanted = double.NaN;
     // Where the pointer was when hovering opened the panel, in DIPs from the monitor's left edge; null when the panel was opened
     // another way (the hotkey) or is closed.
     private double? _openCentre;
@@ -266,7 +267,9 @@ public partial class MainWindow : Window
     {
         var before = Collapsed;
         UpdateCollapsedGeometry();
-        if (Equals(Collapsed.Surface, before.Surface) || _expanded) return;
+        if (Equals(Collapsed.Surface, before.Surface)) return;
+        _app.CollapsedChanged();
+        if (_expanded) return;
         // A surface that no longer lies within the window (wider, or moved along a screen edge) places the window again.
         if (Collapsed.Surface.X < _windowOffset || Collapsed.Surface.X + Collapsed.Surface.Width > _windowOffset + Width) ApplySettings(); else SetExpanded(false);
     }
@@ -377,7 +380,8 @@ public partial class MainWindow : Window
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
-        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _compactClock = null; _compactStrip = null;
+        if (_stripCarousel is not null) { _stripElapsed = _stripCarousel.Elapsed; _stripCarousel.SetRunning(false, false); }
+        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null;
         if (_alert is not null)
         {
             CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;

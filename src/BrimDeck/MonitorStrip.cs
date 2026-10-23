@@ -7,11 +7,11 @@ namespace BrimDeck;
 // The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, CPU,
 // memory and GPU each as a ring gauge with its figure, or alone with its glyph inside (narrower), and download and upload, in
 // the order and the colors set in the settings' table (CompactReading); the rings alone sit closer together. It asks for
-// the width of everything chosen (PreferredWidth) and shows what fits in the width it gets, dropping whole readings
-// (CompactMonitor.Fit), so it never cuts through a figure. It draws itself once per reading; the collapsed row stays still
-// between readings. When the row narrows or widens (a drag on its end, the lyric beside it changing), a reading that no longer
-// fits fades and shrinks out of its place while the others slide together, and one that fits again comes back the same way.
-// The panel keeps those transitions (StripPresence) across rebuilds of the row, which happen on every change of its width.
+// the width of everything chosen (PreferredWidth); when its region is narrower, the row draws it at that width and scrolls it
+// through the region (ReadingsCarousel). It draws itself once per reading; the collapsed row stays still between readings.
+// Given a narrower width directly, it shows what fits, dropping whole readings (CompactMonitor.Fit) so it never cuts through a
+// figure: a reading that no longer fits fades and shrinks out of its place while the others slide together. The panel keeps
+// those transitions (StripPresence) across rebuilds of the row, which happen on every change of its width.
 internal sealed class MonitorStrip : FrameworkElement
 {
     private readonly StripPresence _presence;
@@ -46,20 +46,61 @@ internal sealed class MonitorStrip : FrameworkElement
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))));
     }
 
-    private double ItemWidth(CompactMonitorItems item) => _width(item);
+    private double ItemWidth(CompactMonitorItems item) => _tight && _actual.TryGetValue(item, out var actual) ? actual : _width(item);
     private double ColumnsWidth(int cores) => Math.Min(Math.Round(56 * _scale), cores * Math.Max(1.5, 2 * _scale) + (cores - 1) * Math.Max(.5, _scale));
 
     private CompactMonitorItems Shown => _shown;
     // Rounded up to whole device pixels: the row rounds the region it gives down to them, which must not drop a reading.
-    public double PreferredWidth => DevicePixels.Up(CompactMonitor.Width(Shown, ItemWidth, _gap), _dpi);
-    // The width of the readings that fit in the given width, measured as ArrangeOverride will measure the region it gets.
-    public double FittedWidth(double available)
+    public double PreferredWidth => DevicePixels.Up(CompactMonitor.Width(Shown, _width, _gap), _dpi);
+
+    // While the strip scrolls (ReadingsCarousel), each figure takes its own width instead of the widest it can show, so no
+    // blanks scroll by. The strip's width then follows the readings: TightWidthChanged reports a change of a DIP or more.
+    private bool _tight;
+    private readonly Dictionary<CompactMonitorItems, double> _actual = [];
+    private double _tightWidth;
+    public event Action? TightWidthChanged;
+    public bool Tight { get => _tight; set { _tight = value; MeasureFigures(); } }
+    public double TightWidth => _tightWidth;
+
+    public void Update(MonitorSnapshot? snapshot)
     {
-        double room = DevicePixels.Down(available, _dpi);
-        return Math.Min(room, DevicePixels.Up(CompactMonitor.Width(CompactMonitor.Fit(Shown, ItemWidth, _gap, room), ItemWidth, _gap), _dpi));
+        _snapshot = snapshot;
+        if (_tight)
+        {
+            double before = _tightWidth;
+            MeasureFigures();
+            if (Math.Abs(_tightWidth - before) >= 1) TightWidthChanged?.Invoke();
+        }
+        InvalidateVisual();
     }
 
-    public void Update(MonitorSnapshot? snapshot) { _snapshot = snapshot; InvalidateVisual(); }
+    private void MeasureFigures()
+    {
+        _actual.Clear();
+        if (!_tight) return;
+        var s = _snapshot;
+        double text(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace);
+        foreach (var item in CompactMonitor.Order)
+        {
+            if ((Shown & item) == 0) continue;
+            double? share = item switch { CompactMonitorItems.Cpu => s?.Cpu.OrDefault?.Usage, CompactMonitorItems.Memory => s?.Memory.OrDefault?.UsedFraction, CompactMonitorItems.Gpu => s?.Gpu.OrDefault?.Usage, _ => null };
+            _actual[item] = item switch
+            {
+                CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu when (_values & item) != 0 => _ring + Math.Round(4 * _scale) + text(GaugeFigure(share)),
+                CompactMonitorItems.Download => Math.Round(9 * _scale) + Math.Round(3 * _scale) + text(RateFigure(s?.Network.OrDefault?.DownBytesPerSecond)),
+                CompactMonitorItems.Upload => Math.Round(9 * _scale) + Math.Round(3 * _scale) + text(RateFigure(s?.Network.OrDefault?.UpBytesPerSecond)),
+                _ => _width(item)
+            };
+        }
+        _tightWidth = DevicePixels.Up(CompactMonitor.Width(Shown, ItemWidth, _gap), _dpi);
+    }
+
+    private static string GaugeFigure(double? share) => share is { } v ? MonitorFormat.Percent(v) + "%" : "—";
+    private static string RateFigure(double? rate)
+    {
+        var q = rate is { } r ? MonitorFormat.CompactRate(r) : new MonitorFormat.Quantity("—", "");
+        return q.Number + q.Unit;
+    }
 
     // The readings that fit the width the row gives; a change starts their transitions. A row built again in the middle of one
     // carries it on, as the old row no longer draws.
@@ -142,8 +183,7 @@ internal sealed class MonitorStrip : FrameworkElement
             drawing.Pop();
             return;
         }
-        string figure = share is { } v ? MonitorFormat.Percent(v) + "%" : "—";
-        var text = MonitorDraw.Text(figure, _font, UI.Primary, ppd);
+        var text = MonitorDraw.Text(GaugeFigure(share), _font, UI.Primary, ppd);
         MonitorDraw.Baseline(drawing, text, x + _ring + Math.Round(4 * _scale), Math.Round(center + _font * .36));
     }
 
@@ -156,8 +196,7 @@ internal sealed class MonitorStrip : FrameworkElement
         drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, x, center - size / 2));
         drawing.DrawGeometry(null, pen, MonitorDraw.Glyph(glyph));
         drawing.Pop();
-        var q = rate is { } r ? MonitorFormat.CompactRate(r) : new MonitorFormat.Quantity("—", "");
-        var text = MonitorDraw.Text(q.Number + q.Unit, _font, UI.Primary, ppd);
+        var text = MonitorDraw.Text(RateFigure(rate), _font, UI.Primary, ppd);
         MonitorDraw.Baseline(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 }

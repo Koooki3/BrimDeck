@@ -354,20 +354,96 @@ internal sealed class MusicMarquee : FrameworkElement
     }
 }
 
-// Overflowing rings scroll like the lyric marquee: rest at the first ring, glide until the
-// last ring is in view, rest there, then fade back to the first ring and start again.
-internal sealed class QuotaCarousel : Grid
+// A region whose content is wider than it scrolls like the lyric marquee: rest at the start, glide until the end is in
+// view, rest there, then fade back to the start and begin again. The quota rings and the system readings use it.
+internal abstract class GlideCarousel : Grid
 {
     internal const double StartHold = 2.5, EndHold = 2, Speed = 12, Fade = .25, FadeEdge = 3;
-    private readonly Canvas _strip;
-    private readonly Storyboard? _cycle;
-    private readonly bool _discrete;
-    private bool _enabled, _paused, _begun;
+    private FrameworkElement? _strip;
+    private Storyboard? _cycle;
+    private bool _discrete, _enabled, _paused, _begun;
     private TimeSpan _elapsed;
-    public bool Rotates { get; }
-    public double Travel { get; }
+    public bool Rotates { get; protected set; }
+    public double Travel { get; private set; }
     // Position within the cycle; the window hands it to the next carousel so a rebuild continues where this one was.
     public TimeSpan Elapsed => _begun ? _cycle!.GetCurrentTime(this) ?? _elapsed : _elapsed;
+
+    // Starts the cycle that moves the strip (with a TranslateTransform) left by travel and back.
+    protected void Glide(FrameworkElement strip, double travel, TimeSpan elapsed, bool animate)
+    {
+        _strip = strip; _discrete = !animate; _elapsed = elapsed;
+        Loaded += (_, _) => Update();
+        Unloaded += (_, _) => Update();
+        IsVisibleChanged += (_, _) => Update();
+        Retarget(travel);
+    }
+
+    // A new travel for a strip whose width changed; the cycle carries on from the same time. No travel leaves it at rest.
+    protected void Retarget(double travel)
+    {
+        if (_cycle is not null && _begun) { _elapsed = Elapsed; _cycle.Remove(this); _begun = false; }
+        Travel = Math.Max(0, travel);
+        if (Travel <= 0)
+        {
+            _cycle = null;
+            if (_strip?.RenderTransform is TranslateTransform shift) shift.X = 0;
+            return;
+        }
+        _cycle = Cycle();
+        _elapsed = TimeSpan.FromTicks(_elapsed.Ticks % _cycle.Duration.TimeSpan.Ticks);
+        Update();
+    }
+    private Storyboard Cycle()
+    {
+        double move = Travel / Speed, end = StartHold + move, reset = end + EndHold;
+        static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
+        var shift = new DoubleAnimationUsingKeyFrames();
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(StartHold)));
+        if (_discrete) shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(end)));
+        else shift.KeyFrames.Add(new SplineDoubleKeyFrame(-Travel, At(end), new KeySpline(.4, 0, .6, 1)));
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(reset + (_discrete ? 0 : Fade))));
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(reset + (_discrete ? 0 : Fade))));
+        var cycle = new Storyboard { Duration = TimeSpan.FromSeconds(reset + (_discrete ? 0 : 2 * Fade)), RepeatBehavior = RepeatBehavior.Forever };
+        Storyboard.SetTarget(shift, _strip); Storyboard.SetTargetProperty(shift, new PropertyPath("(UIElement.RenderTransform).(TranslateTransform.X)"));
+        cycle.Children.Add(shift);
+        if (!_discrete)
+        {
+            // The return to the start is a short fade, so the reset never reads as a backwards scroll.
+            var fade = new DoubleAnimationUsingKeyFrames();
+            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(0)));
+            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(reset)));
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, At(reset + Fade)));
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, At(reset + 2 * Fade)));
+            Storyboard.SetTarget(fade, _strip); Storyboard.SetTargetProperty(fade, new PropertyPath(OpacityProperty));
+            cycle.Children.Add(fade);
+        }
+        return cycle;
+    }
+    public void SetRunning(bool enabled, bool paused) { _enabled = enabled; _paused = paused; Update(); }
+    private void Update()
+    {
+        if (_cycle is null) return;
+        if (!IsLoaded || !IsVisible)
+        {
+            // Release the clocks while detached; a later load resumes from the saved position.
+            if (_begun) { _elapsed = Elapsed; _cycle.Remove(this); _begun = false; }
+            return;
+        }
+        if (!_begun)
+        {
+            _cycle.Begin(this, true); _begun = true;
+            if (_elapsed > TimeSpan.Zero) _cycle.Seek(this, _elapsed, TimeSeekOrigin.BeginTime);
+            _cycle.Pause(this);
+        }
+        if (_enabled && !_paused) _cycle.Resume(this); else _cycle.Pause(this);
+    }
+}
+
+// Overflowing rings scroll through their region by whole ring steps.
+internal sealed class QuotaCarousel : GlideCarousel
+{
+    private readonly Canvas _strip;
     public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
     {
         // The region is the layout's ring width in whole device pixels; rings sit in fixed slots from its left edge and its
@@ -410,56 +486,35 @@ internal sealed class QuotaCarousel : Grid
         // The glide moves by whole ring steps, so at the end the rings stand in the same slots as at the start: the first is
         // whole at the left edge, and the last is whole before the right fade. Since the fade is at most span - ring, this
         // never moves the last ring out of the region.
-        Travel = Math.Ceiling((full + fade - span) / step - 1e-6) * step;
-        _discrete = !animate; _cycle = Cycle();
-        _elapsed = TimeSpan.FromTicks(elapsed.Ticks % _cycle.Duration.TimeSpan.Ticks);
-        Loaded += (_, _) => Update();
-        Unloaded += (_, _) => Update();
-        IsVisibleChanged += (_, _) => Update();
+        Glide(_strip, Math.Ceiling((full + fade - span) / step - 1e-6) * step, elapsed, animate);
     }
-    private Storyboard Cycle()
+}
+
+// System readings wider than their region scroll through it instead of dropping readings. The strip is drawn tight (each
+// figure at its own width, MonitorStrip.Tight), so it scrolls no blanks; its width and the travel follow the readings. The
+// left fade lies outside the region, over the gap before it, so the first reading is whole at rest, and the right fade lies
+// inside, so nothing is drawn past the region toward the equalizer or the clock.
+internal sealed class ReadingsCarousel : GlideCarousel
+{
+    public ReadingsCarousel(MonitorStrip strip, double span, double edge, TimeSpan elapsed, bool animate)
     {
-        double move = Travel / Speed, end = StartHold + move, reset = end + EndHold;
-        static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
-        var shift = new DoubleAnimationUsingKeyFrames();
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(StartHold)));
-        if (_discrete) shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(end)));
-        else shift.KeyFrames.Add(new SplineDoubleKeyFrame(-Travel, At(end), new KeySpline(.4, 0, .6, 1)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(reset + (_discrete ? 0 : Fade))));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(reset + (_discrete ? 0 : Fade))));
-        var cycle = new Storyboard { Duration = TimeSpan.FromSeconds(reset + (_discrete ? 0 : 2 * Fade)), RepeatBehavior = RepeatBehavior.Forever };
-        Storyboard.SetTarget(shift, _strip); Storyboard.SetTargetProperty(shift, new PropertyPath("(UIElement.RenderTransform).(TranslateTransform.X)"));
-        cycle.Children.Add(shift);
-        if (!_discrete)
-        {
-            // The return to the first ring is a short fade, so the reset never reads as a backwards scroll.
-            var fade = new DoubleAnimationUsingKeyFrames();
-            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(0)));
-            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(reset)));
-            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, At(reset + Fade)));
-            fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, At(reset + 2 * Fade)));
-            Storyboard.SetTarget(fade, _strip); Storyboard.SetTargetProperty(fade, new PropertyPath(OpacityProperty));
-            cycle.Children.Add(fade);
-        }
-        return cycle;
-    }
-    public void SetRunning(bool enabled, bool paused) { _enabled = enabled; _paused = paused; Update(); }
-    private void Update()
-    {
-        if (_cycle is null) return;
-        if (!IsLoaded || !IsVisible)
-        {
-            // Release the clocks while detached; a later load resumes from the saved position.
-            if (_begun) { _elapsed = Elapsed; _cycle.Remove(this); _begun = false; }
-            return;
-        }
-        if (!_begun)
-        {
-            _cycle.Begin(this, true); _begun = true;
-            if (_elapsed > TimeSpan.Zero) _cycle.Seek(this, _elapsed, TimeSeekOrigin.BeginTime);
-            _cycle.Pause(this);
-        }
-        if (_enabled && !_paused) _cycle.Resume(this); else _cycle.Pause(this);
+        span = Math.Max(0, span); edge = Math.Max(0, edge);
+        Rotates = span > 0;
+        Width = span + edge; Height = strip.Height; ClipToBounds = true;
+        strip.Tight = true;
+        strip.Width = strip.TightWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        strip.RenderTransform = new TranslateTransform();
+        Canvas.SetLeft(strip, edge);
+        // A Canvas measures the strip at its full width, as for the rings.
+        var host = new Canvas(); host.Children.Add(strip); Children.Add(host);
+        Margin = new Thickness(-edge, 0, 0, 0);
+        double fade = Math.Min(edge, span / 2);
+        OpacityMask = new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), new(Colors.White, edge / Width),
+            new(Colors.White, (Width - fade) / Width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(Width, 0)) { MappingMode = BrushMappingMode.Absolute };
+        Background = Brushes.Transparent;
+        // At the end the last reading stands whole before the right fade.
+        double TravelFor(double full) => Math.Ceiling(full + fade - span);
+        Glide(strip, TravelFor(strip.Width), elapsed, animate);
+        strip.TightWidthChanged += () => { strip.Width = strip.TightWidth; Retarget(TravelFor(strip.Width)); };
     }
 }
