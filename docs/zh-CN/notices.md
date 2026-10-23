@@ -29,6 +29,17 @@ powershell -ExecutionPolicy Bypass -File "<BrimDeck 安装目录>\identity\Regis
 
 首次使用如果 Windows 尚未决定是否允许读取通知，设置页会显示“允许访问”按钮；被拒绝时可在 Windows 设置 › 隐私和安全性 › 通知中修改。
 
+### Windows：应用的名称、图标和分类
+
+Windows 通知里的应用标识有时看不出是哪个应用，BrimDeck 会这样处理：
+
+- **Edge 安装的网页应用**（如 WhatsApp 网页版、Facebook）：按网站命名，例如“WhatsApp”，不显示为 Microsoft Edge；不同网站是不同的应用，可以分别设置规则。正文末尾重复的网址会去掉。
+- **Chrome 等浏览器里网站的推送**：浏览器会在最后一行附上网站地址。BrimDeck 去掉这一行，并按网站区分来源，例如“Gmail · Google Chrome”，这样可以只静音某个网站。只有两行文字的通知保持原样。
+- **没有开始菜单快捷方式的桌面程序**：使用它注册的名称和图标（注册表 `HKCU\Software\Classes\AppUserModelId`，图标只取本机文件）。
+- **老式托盘程序的气泡提醒**：Windows 没有给出名称时显示为“托盘程序”，不再显示一串数字；只有程序路径的桌面程序显示为程序名。
+- **默认分类**：Windows 通知不带分类。Claude、Codex 桌面版的通知标为“任务”；Windows 系统提醒、NVIDIA App、Adobe Creative Cloud、Clash Party、截图工具等标为“提示”；聊天、邮件和浏览器保持“消息”。
+- **被替换的通知**：应用用同一条通知更新内容时（比如 QQ 把新消息合并成一条），Windows 会删掉旧通知、加入新通知。如果两者来自同一应用、标题相同，并且在同一次读取中出现，BrimDeck 会更新原来那条提示，不会留下两条。
+
 ### WSL
 
 在“WSL（默认关闭）”下打开某个发行版后，BrimDeck 会：

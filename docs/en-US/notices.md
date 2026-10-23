@@ -29,6 +29,17 @@ powershell -ExecutionPolicy Bypass -File "<BrimDeck folder>\identity\Register-No
 
 If Windows has not yet decided whether BrimDeck may read notifications, the settings page shows "Allow access". A refusal can be changed in Windows Settings › Privacy & security › Notifications.
 
+### Windows: application names, icons and categories
+
+The application id in a Windows notification does not always say which application sent it. BrimDeck handles these cases:
+
+- **Web apps installed from Edge** (such as WhatsApp Web or Facebook): named after the site, for example "WhatsApp", not Microsoft Edge. Each site is a separate application with its own rules. A trailing line that repeats the site's address is dropped.
+- **Site push notifications in Chrome and other browsers**: the browser adds the site's address as the last line. BrimDeck drops that line and tells sites apart, for example "Gmail · Google Chrome", so you can mute one site. Notifications with only two lines are left as they are.
+- **Desktop programs without a Start menu shortcut**: the name and icon they registered are used (registry `HKCU\Software\Classes\AppUserModelId`; the icon only from a local file).
+- **Tray balloons of older programs**: shown as "Tray app" when Windows gives no name, rather than a long number; desktop programs known only by their path are named after the program file.
+- **Default categories**: Windows notifications carry no category. Notices from the Claude and Codex desktop apps are marked "Task"; Windows system notices, NVIDIA App, Adobe Creative Cloud, Clash Party, Snipping Tool and similar are marked "Info"; chat, mail and browsers stay "Message".
+- **Replaced notifications**: when an application updates its notification (QQ gathering new messages into one, for example), Windows removes the old one and adds a new one. If both come from the same application with the same title in the same reading, BrimDeck updates the existing notice instead of keeping two.
+
 ### WSL
 
 When you switch a distribution on under "WSL (off by default)", BrimDeck:

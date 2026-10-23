@@ -30,8 +30,9 @@ public enum NoticeCapabilities
 public sealed record NoticeAction(string Key, string Label);
 
 // A notice as a source delivers it, before BrimDeck's rules. AppKey identifies the application across notices
-// ("windows:<AUMID>", "wsl:<distro>:<name>", "cli:<name>"). InstanceKey identifies this notice at its source; an existing
-// notice with the same InstanceKey, or with the same AppKey and ReplaceKey, is updated instead of added.
+// ("windows:<AUMID>", "windows:<browser AUMID>|<site>" for a site's notice in a browser, "wsl:<distro>:<name>", "cli:<name>"). InstanceKey identifies this notice at its source; an existing
+// notice with the same InstanceKey, or with the same AppKey and ReplaceKey, is updated instead of added. Replaces names the
+// InstanceKey of a notice this one took the place of at its source (see NoticeReplacements); that notice is updated too.
 public sealed record NoticeInput
 {
     public required NoticeOrigin Origin { get; init; }
@@ -41,6 +42,7 @@ public sealed record NoticeInput
     public string AppId { get; init; } = "";
     public string? Distro { get; init; }
     public string? ReplaceKey { get; init; }
+    public string? Replaces { get; init; }
     public string? EventId { get; init; }
     public string Title { get; init; } = "";
     public string Body { get; init; } = "";

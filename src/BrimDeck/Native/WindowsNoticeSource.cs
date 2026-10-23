@@ -35,8 +35,11 @@ internal sealed class WindowsNoticeSource : IDisposable
     public static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(2.5), FullInterval = TimeSpan.FromSeconds(15),
         UnknownInterval = TimeSpan.FromSeconds(3), EventSafetyInterval = TimeSpan.FromSeconds(60), QuietInterval = TimeSpan.FromSeconds(30);
     private readonly object _gate = new();
-    private readonly Dictionary<uint, string> _known = [];
+    // Each listed notification's instance key (empty when it was not read), application key and title.
+    private readonly Dictionary<uint, (string Key, string AppKey, string Title)> _known = [];
     private readonly Dictionary<string, Windows.ApplicationModel.AppInfo> _apps = new(StringComparer.OrdinalIgnoreCase);
+    // The name and icon a desktop program registered for its notifications, read once per application id.
+    private readonly Dictionary<string, (string? Name, string? Icon)> _registered = new(StringComparer.OrdinalIgnoreCase);
     // One Start's loop and what only it touches. Stop cancels it and the loop lets go of its listener as it ends, so a loop
     // still finishing a reading never shares its listener or reports a state after Stop, even when Start follows at once.
     private sealed class Run
@@ -199,7 +202,7 @@ internal sealed class WindowsNoticeSource : IDisposable
     private void Sync(IReadOnlyList<UserNotification> list, Run run, int covers)
     {
         var added = new List<NoticeInput>();
-        var removed = new List<string>();
+        var removed = new List<NoticeReplacements.Gone>();
         lock (_gate)
         {
             // Stopped (and perhaps started again) while reading: this reading belongs to no run any more.
@@ -214,20 +217,21 @@ internal sealed class WindowsNoticeSource : IDisposable
                 if (_known.ContainsKey(id)) continue;
                 // One unreadable notification is skipped without affecting the others.
                 var input = Read(notification, id);
-                _known[id] = input?.InstanceKey ?? "";
+                _known[id] = (input?.InstanceKey ?? "", input?.AppKey ?? "", input?.Title ?? "");
                 if (!_baseline) _confirmed = true;
                 if (input is not null && !_baseline) added.Add(input);
             }
             foreach (var gone in _known.Keys.Where(id => !present.Contains(id)).ToList())
             {
-                if (_known[gone].Length > 0) removed.Add(_known[gone]);
+                if (_known[gone] is { Key.Length: > 0 } known) removed.Add(new(known.Key, known.AppKey, known.Title));
                 _known.Remove(gone);
             }
             _baseline = false;
         }
         // Oldest first, so that the newest ends up on top of the recent notices.
-        foreach (var input in added.OrderBy(i => i.CreatedAt)) Received?.Invoke(input);
-        foreach (var key in removed) Removed?.Invoke(key);
+        var (arrived, left) = NoticeReplacements.Pair(added.OrderBy(i => i.CreatedAt).ToList(), removed);
+        foreach (var input in arrived) Received?.Invoke(input);
+        foreach (var key in left) Removed?.Invoke(key);
         Synced?.Invoke(covers);
     }
 
@@ -238,23 +242,45 @@ internal sealed class WindowsNoticeSource : IDisposable
             var app = notification.AppInfo;
             string appId = Safe(() => app.AppUserModelId) ?? Safe(() => app.Id) ?? "";
             if (appId.Length == 0 || string.Equals(appId, OwnAppId, StringComparison.OrdinalIgnoreCase)) return null;
-            string name = Safe(() => app.DisplayInfo.DisplayName) is { Length: > 0 } display ? display : appId;
             lock (_apps) _apps[appId] = app;
+            var registered = Registered(appId);
             var visual = notification.Notification?.Visual;
             var binding = visual?.GetBinding(KnownNotificationBindings.ToastGeneric) ?? visual?.Bindings.FirstOrDefault();
             var texts = binding?.GetTextElements().Select(text => text.Text?.Trim() ?? "").Where(text => text.Length > 0).ToList() ?? [];
-            name = BrimDeck.Protocol.NoticeProtocol.Clip(name, BrimDeck.Protocol.NoticeProtocol.MaxField)!;
+            var who = WindowsNoticeApps.Identify(new(appId, Safe(() => app.DisplayInfo.DisplayName), registered.Name, texts), BrimDeck.Protocol.NoticeProtocol.MaxField);
             var created = Safe(() => (DateTimeOffset?)notification.CreationTime) ?? DateTimeOffset.UtcNow;
             return new NoticeInput
             {
-                Origin = NoticeOrigin.Windows, AppKey = NoticeKeys.Windows(appId), AppName = name, AppId = appId,
+                Origin = NoticeOrigin.Windows, AppKey = who.AppKey, AppName = who.AppName, AppId = appId,
                 InstanceKey = $"windows:{appId}:{id}:{created.UtcTicks}",
-                Title = BrimDeck.Protocol.NoticeProtocol.Clip(texts.FirstOrDefault() ?? "", BrimDeck.Protocol.NoticeProtocol.MaxTitle)!,
-                Body = BrimDeck.Protocol.NoticeProtocol.Clip(string.Join("\n", texts.Skip(1)), BrimDeck.Protocol.NoticeProtocol.MaxBody)!,
-                IconRef = "aumid:" + appId, CreatedAt = created, Capabilities = NoticeCapabilities.OpenApp
+                Title = BrimDeck.Protocol.NoticeProtocol.Clip(who.Title, BrimDeck.Protocol.NoticeProtocol.MaxTitle)!,
+                Body = BrimDeck.Protocol.NoticeProtocol.Clip(who.Body, BrimDeck.Protocol.NoticeProtocol.MaxBody)!,
+                IconRef = registered.Icon ?? "aumid:" + appId, CreatedAt = created, Category = who.Category, Capabilities = NoticeCapabilities.OpenApp
             };
         }
         catch (Exception ex) when (ex is COMException or InvalidCastException or ArgumentException or NullReferenceException) { return null; }
+    }
+
+    // A desktop program that sends notifications without a Start menu shortcut registers its name and icon under
+    // HKCU\Software\Classes\AppUserModelId (as ToastNotificationManagerCompat does); Windows' display information may have
+    // neither for it. Only an icon on a local drive is taken (NoticeIntake.IconRef); NoticeIcons checks it again when reading.
+    private (string? Name, string? Icon) Registered(string appId)
+    {
+        lock (_registered) if (_registered.TryGetValue(appId, out var known)) return known;
+        (string? Name, string? Icon) found = (null, null);
+        // The id becomes part of a registry path: one that could climb out of the key is not looked up.
+        if (appId.Length <= 256 && !appId.Contains("..", StringComparison.Ordinal) && !appId.Contains('/') && !appId.Any(char.IsControl))
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Classes\AppUserModelId\" + appId);
+                if (key is not null)
+                    found = (key.GetValue("DisplayName") as string, NoticeIntake.IconRef(key.GetValue("IconUri") as string, NoticeOrigin.Windows, null));
+            }
+            catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or System.IO.IOException or ArgumentException) { }
+        }
+        lock (_registered) { if (_registered.Count >= 256) _registered.Clear(); _registered[appId] = found; }
+        return found;
     }
 
     private static T? Safe<T>(Func<T> read)
