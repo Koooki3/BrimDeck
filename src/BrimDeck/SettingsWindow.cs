@@ -28,7 +28,6 @@ public sealed partial class SettingsWindow : Window
     private readonly StackPanel _content = new();
     private readonly TextBlock _status = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
     private ScrollViewer _scroll = null!;
-    private ScrollViewer? _navigationScroll;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
         Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("灵动提示", "Dynamic notices")];
     // The order of the pages in the navigation; the theme page (ThemePage) is listed with the appearance pages, and the system
@@ -156,10 +155,12 @@ public sealed partial class SettingsWindow : Window
         sidebar.RowDefinitions.Add(new RowDefinition { Height = new GridLength(100) }); sidebar.RowDefinitions.Add(new RowDefinition());
         sidebar.Children.Add(Brand(24, new Thickness(24, 0, 22, 0)));
         // The list of pages scrolls once it is taller than the window, so the last pages (About) stay reachable in a short window.
-        _navigation.Margin = new Thickness(12, 0, 12, 12);
-        _navigationScroll = new ScrollViewer { Style = (Style)FindResource("SettingsScrollViewer"), Content = _navigation, Focusable = false,
+        // Like the page, it always keeps the scroll bar's 16 DIP column, here in place of its right margin, so the buttons and the
+        // selected one's background keep their width when the bar appears.
+        _navigation.Margin = new Thickness(12, 0, 0, 12);
+        var navigationScroll = new ScrollViewer { Style = (Style)FindResource("SettingsPageScrollViewer"), Content = _navigation, Focusable = false,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        Grid.SetRow(_navigationScroll, 1); sidebar.Children.Add(_navigationScroll);
+        Grid.SetRow(navigationScroll, 1); sidebar.Children.Add(navigationScroll);
         outer.Children.Add(sidebar); outer.Children.Add(new Border { Width = 1, Background = UI.Brush(Divider), HorizontalAlignment = HorizontalAlignment.Right });
         // The scroll area clips at its edges, so the content keeps a 4 DIP inset inside it for keyboard focus outlines
         // that extend past a control; the outer margins give those 4 DIP back and the page stays where it was.
