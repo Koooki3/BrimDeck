@@ -55,6 +55,24 @@ internal static class ConfiguredProviderTests
         var plainScript = new AppEntry { QuotaSource = ProviderId.Custom, Script = """async function fetchUsage(ctx) { await ctx.http.get("http://example.test/usage"); return [{ title: "x", percent: 1 }]; }""" };
         var scripted = await providers.TestAsync(plainScript);
         check("A script's request to an HTTP address is refused before it is sent", handler.Calls.Count == before && scripted.Snapshot.Status.Contains("HTTPS"));
+        static bool AcceptedWithHttp(string url) { try { ProviderCatalog.ValidateUrl(url, allowHttp: true); return true; } catch (InvalidDataException) { return false; } }
+        check("A row that allows HTTP accepts addresses on the local network, still without a user name or #",
+            AcceptedWithHttp("http://192.168.1.20:3000") && AcceptedWithHttp("http://nas.tailnet.test") && !AcceptedWithHttp("http://user:pass@192.168.1.20") && !AcceptedWithHttp("http://192.168.1.20/#x"));
+        var lanEntry = new AppEntry { QuotaSource = ProviderId.NewApi, Site = "http://192.168.1.20:3000", SecretRevision = Guid.NewGuid(), AllowHttp = true };
+        secrets.Write(lanEntry.InstanceId, "fixture-key-a");
+        var lan = await providers.TestAsync(lanEntry);
+        check("A saved HTTP site is read once the row allows HTTP", handler.Calls.Count > before && lan.Snapshot.LiveQuota);
+        int afterLan = handler.Calls.Count;
+        var lanScript = new AppEntry { QuotaSource = ProviderId.Custom, AllowHttp = true, Script = plainScript.Script };
+        var lanScripted = await providers.TestAsync(lanScript);
+        check("A script's HTTP request is sent once the row allows HTTP", handler.Calls.Count == afterLan + 1 && lanScripted.Snapshot.LiveQuota);
+        var strict = lanEntry.Copy(); strict.AllowHttp = false;
+        check("Rows that differ only in allowing HTTP are read apart, and other rows keep their keys",
+            strict.ConfigurationKey != lanEntry.ConfigurationKey && ProviderCatalog.RequestKey(strict, "k") != ProviderCatalog.RequestKey(lanEntry, "k")
+            && !strict.ConfigurationKey.EndsWith(":http") && lanEntry.Copy().AllowHttp);
+        var savedAllow = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { Apps = [lanEntry] }))!;
+        check("Allowing HTTP is saved per row and off for rows saved before it existed",
+            savedAllow.Apps.Single().AllowHttp && !JsonSerializer.Deserialize<DeckSettings>("""{"Apps":[{"QuotaSource":"newapi","Site":"http://192.168.1.20"}]}""")!.Apps.Single().AllowHttp);
         var settings = new DeckSettings { Apps = [entry, copy] };
         var local = new ProviderSnapshot(ProviderId.Claude) { UsageAvailable = true };
         check("Remote quota columns keep local statistics separate and deduplicated", DashboardUsage.Columns(settings, [.. snapshots, local]).All(c => ReferenceEquals(c.Usage, local)) && DashboardUsage.Statistics(settings, [.. snapshots, local]).Count == 1);

@@ -66,6 +66,9 @@ public sealed class AppEntry
     // Claude and Grok Bot rows only: read the quota from the account API. When off, the row sends no request and shows the
     // quota the desktop app (Claude or Grok Bot) recorded on this PC. Each row has its own choice.
     public bool QuotaOnline { get; set; } = true;
+    // New API, Sub2API and custom rows: also send requests, and so the API key, over plain HTTP to any address, such as a
+    // gateway on a NAS or reached through Tailscale. Off by default; HTTP to this PC is allowed either way.
+    public bool AllowHttp { get; set; }
     [JsonIgnore] public string ConfigurationKey => ProviderCatalog.ConfigurationKey(this);
     // Shorthand for QuotaSource in code. The "Id" member of old files is converted by SettingsMigrations.
     [JsonIgnore] public ProviderId Id { get => QuotaSource; set => QuotaSource = value; }
