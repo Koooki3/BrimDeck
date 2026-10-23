@@ -61,6 +61,10 @@ public partial class MainWindow
     private MusicEqualizer? _musicEqualizer, _compactEqualizer;
     private readonly double[] _flowLevels = new double[5];
     private MusicMarquee? _compactMarquee;
+    // The collapsed row's bar heights and the place of its scrolling line. The row is built again on every change of its width
+    // (a resize drag does that every frame), so like the readings' StripPresence they belong to the panel and outlive each row.
+    private readonly EqualizerBars _compactBars = new();
+    private readonly MarqueeScroll _compactScroll = new();
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
     private TimeSpan _quotaElapsed;
@@ -848,7 +852,7 @@ public partial class MainWindow
         }
         if (media && layout.EqualizerWidth > 0)
         {
-            _compactEqualizer = new MusicEqualizer { Bars = 4, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
+            _compactEqualizer = new MusicEqualizer { Bars = 4, Levels = _compactBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
             var region = CompactRegion(_compactEqualizer, layout.EqualizerWidth, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Right, dpi);
             Grid.SetColumn(region, 3); grid.Children.Add(region);
         }
@@ -874,7 +878,7 @@ public partial class MainWindow
         if (layout.TextWidth > 0)
         {
             // Too narrow for a meaningful stretch of text, the lyric rests at its start, cut at the edge.
-            _compactMarquee = new MusicMarquee { Text = text, Width = Math.Max(0, textEnd - textStart), Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
+            _compactMarquee = new MusicMarquee { Text = text, Scroll = _compactScroll, Width = Math.Max(0, textEnd - textStart), Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
                 ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay, Margin = new Thickness(_quotaCarousel is not null && middle.Children.Contains(_quotaCarousel) ? textStart - ringEnd : textStart, 0, 0, 0) };
             middle.Children.Add(_compactMarquee);
         }
