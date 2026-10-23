@@ -338,7 +338,7 @@ public partial class MainWindow
     {
         var face = new Border { CornerRadius = new CornerRadius(6), Background = UI.Brush(UI.Fill), Padding = new Thickness(9, 0, 9, 0), Height = 22, Margin = new Thickness(4, 0, 0, 0) };
         face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 11.5, Foreground = UI.Brush(UI.Secondary), VerticalAlignment = VerticalAlignment.Center };
-        var button = new Button { Content = face, Cursor = Cursors.Hand, FocusVisualStyle = null, Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
+        var button = new Button { Content = face, Cursor = Cursors.Hand, FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
         button.MouseEnter += (_, _) => face.Background = UI.Brush(UI.FillSelected);
         button.MouseLeave += (_, _) => face.Background = UI.Brush(UI.Fill);
         button.Click += (_, _) => click();
