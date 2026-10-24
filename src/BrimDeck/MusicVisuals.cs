@@ -96,26 +96,40 @@ internal sealed class MusicEqualizer : FrameworkElement
     // The heights. The panel hands the collapsed row's bars to each row it builds again, so a new row starts where the old one
     // was; built afresh, the bars would drop to rest for a frame on every step of a resize and their dynamics would start over.
     public EqualizerBars Levels { get; init; } = new();
-    private readonly double[] _drawn = new double[EqualizerBars.Count];
     private readonly DrawingGroup _drawing = new();
     private Size _drawnSize;
     public void Tick(float peak, bool playing, double seconds = 1d / 30) { Levels.Tick(peak, playing, seconds); Redraw(); }
     // Bar values already computed from captured audio, leftmost first.
     public void Show(ReadOnlySpan<double> levels, bool playing) { Levels.Show(levels, playing); Redraw(); }
     protected override void OnRender(DrawingContext dc) { Redraw(force: true); dc.DrawDrawing(_drawing); }
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi) { base.OnDpiChanged(oldDpi, newDpi); _bars = null; InvalidateVisual(); }
+    // The bars stand on half device pixels (EqualizerLayout): a level that moves none of them draws nothing new, and one that
+    // does only moves its own rectangle in the retained drawing. The drawing is built again only for a new size, color or scale.
+    private RectangleGeometry[]? _bars;
+    private Brush? _barsColor;
     private void Redraw(bool force = false)
     {
         var size = RenderSize;
         var levels = Levels.Levels;
-        // Paused bars stay at rest, so an unchanged frame is not drawn again.
-        if (!force && size == _drawnSize && levels.SequenceEqual(_drawn)) return;
-        levels.CopyTo(_drawn); _drawnSize = size;
-        using var dc = _drawing.Open();
-        for (int i = 0; i < Math.Min(Bars, levels.Length); i++)
+        int count = Math.Min(Bars, levels.Length);
+        double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip, radius = BarWidth / 2;
+        if (force || _bars is null || _bars.Length != count || size != _drawnSize || !ReferenceEquals(_barsColor, Color))
         {
-            double bar = BarWidth;
-            double height = Math.Clamp(bar + levels[i] * Math.Max(0, size.Height - bar), bar, Math.Max(bar, size.Height));
-            dc.DrawRoundedRectangle(Color, null, new Rect(i * Math.Max(0, size.Width - bar) / Math.Max(1, Bars - 1), (size.Height - height) / 2, bar, height), bar / 2, bar / 2);
+            _bars = new RectangleGeometry[count]; _barsColor = Color; _drawnSize = size;
+            using var dc = _drawing.Open();
+            for (int i = 0; i < count; i++)
+            {
+                var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, levels[i], size.Width, size.Height, BarWidth, dpi);
+                _bars[i] = new RectangleGeometry(new Rect(x, y, w, h), radius, radius);
+                dc.DrawGeometry(Color, null, _bars[i]);
+            }
+            return;
+        }
+        for (int i = 0; i < count; i++)
+        {
+            var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, levels[i], size.Width, size.Height, BarWidth, dpi);
+            var rect = new Rect(x, y, w, h);
+            if (_bars[i].Rect != rect) _bars[i].Rect = rect;
         }
     }
 }
