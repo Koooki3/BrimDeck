@@ -435,7 +435,7 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
             // An agent that ended before it said anything did not start: the distribution may have been installed again or
             // the agent removed, so the next start checks the installation again (core-M3).
             if (!reported) _installed = false;
-            _backoff.Ran(TimeSpan.FromMilliseconds(Environment.TickCount64 - started));
+            lock (_gate) _backoff.Ran(TimeSpan.FromMilliseconds(Environment.TickCount64 - started));
         }
         try { process.Dispose(); } catch (InvalidOperationException) { }
         if (!_disposed) Retry(_lastError is { } error && !reported ? "exited: " + error : "exited");
