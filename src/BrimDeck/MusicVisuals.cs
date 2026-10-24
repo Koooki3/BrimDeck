@@ -188,7 +188,7 @@ internal sealed class MusicMarquee : FrameworkElement
             _backdrop = value;
             if (value is not { } color) return;
             _left.Color = _right.Color = Color.FromArgb(0, color.R, color.G, color.B);
-            _glyphs = new Glyphs(this); RenderOptions.SetClearTypeHint(_glyphs, ClearTypeHint.Enabled);
+            _glyphs = new Glyphs(this); RenderOptions.SetClearTypeHint(_glyphs, PanelTheme.ClearType);
             AddVisualChild(_glyphs); ClipToBounds = true;
         }
     }
@@ -204,7 +204,9 @@ internal sealed class MusicMarquee : FrameworkElement
         {
             if (!value || _glyphs is not null) return;
             _inkFade = true;
-            _glyphs = new Glyphs(this); RenderOptions.SetClearTypeHint(_glyphs, ClearTypeHint.Enabled);
+            // Text drawn with a gradient brush under a forced ClearType hint came out white whatever its color (seen on light
+            // themes with a gradient or glass), so here WPF chooses: grayscale for the fading text.
+            _glyphs = new Glyphs(this); RenderOptions.SetClearTypeHint(_glyphs, ClearTypeHint.Auto);
             AddVisualChild(_glyphs); ClipToBounds = true;
         }
     }

@@ -16,8 +16,8 @@ public partial class MainWindow
     {
         bool glass = PanelTheme.GlassShown;
         var palette = PanelTheme.Current;
-        // ClearType needs an opaque background under the text; over glass it would fringe in color.
-        if (Island.Child is Grid content) RenderOptions.SetClearTypeHint(content, glass ? ClearTypeHint.Auto : ClearTypeHint.Enabled);
+        // ClearType needs an opaque background under the text; over glass it washes the text out (PanelTheme.ClearType).
+        if (Island.Child is Grid content) RenderOptions.SetClearTypeHint(content, PanelTheme.ClearType);
         if (palette.Effects.Pixel > 0) TextOptions.SetTextRenderingMode(Island, TextRenderingMode.Aliased); else Island.ClearValue(TextOptions.TextRenderingModeProperty);
         if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) caster.Pixel = palette.Effects.Pixel;
         if (glass == _shadowCut) return;

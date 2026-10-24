@@ -177,6 +177,9 @@ internal static class PanelTheme
     private static bool GlassShownFor(PanelPalette palette) => palette.IsGlass && MotionEnvironment.Transparency && !SystemParameters.HighContrast;
     // The island's base color: the glass tint over the desktop, or the surface. The indicator line keeps its own color.
     public static Color SurfaceColor => GlassShown ? ToColor(Current.Effects.Glass!.Tint) : ColorOf("surface");
+    // What the panel's text asks for: ClearType over an opaque surface; over glass, where the layered window has no opaque
+    // pixels under the text, ClearType would wash the text out, so WPF chooses (grayscale there).
+    public static ClearTypeHint ClearType => GlassShown ? ClearTypeHint.Auto : ClearTypeHint.Enabled;
 
     // A pixel theme's bevel: the rim's last gradient color shades the edges that face down and right (IslandBorder.Pixel).
     public static Brush? BevelBrush(PanelPalette? palette = null)
