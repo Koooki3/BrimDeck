@@ -22,6 +22,10 @@ public sealed class WindowsNoticeList(TimeSpan longestUnknownWait)
     public bool Confirmed { get; private set; }
     public WindowsNoticeBaseline Baseline { get; private set; } = WindowsNoticeBaseline.Start;
     public TimeSpan UnknownWait { get; private set; } = FirstUnknownWait;
+    // The last Compare found a new notice whose id is past the one after Newest. Tiles, badges and toasts share Windows' ids,
+    // so an application that updates its badge before each notice (Teams, mail) leaves the probe looking at a used id; the
+    // source then probes a few ids ahead for a while (WindowsNoticePace.ProbeIds).
+    public bool SkippedProbe { get; private set; }
 
     public sealed record Changes(IReadOnlyList<NoticeInput> Arrived, IReadOnlyList<NoticeInput> Missed, IReadOnlyList<string> Removed);
 
@@ -49,10 +53,12 @@ public sealed class WindowsNoticeList(TimeSpan longestUnknownWait)
         var added = new List<(NoticeInput Input, bool Missed)>();
         var present = new HashSet<uint>();
         bool arrived = false;
+        uint before = Newest, firstNew = uint.MaxValue;
         foreach (var id in ids)
         {
             if (!present.Add(id)) continue;
             if (id > Newest) Newest = id;
+            if (id > before && id < firstNew) firstNew = id;
             if (_known.ContainsKey(id)) continue;
             // One unreadable notification is skipped without affecting the others.
             var input = read(id);
@@ -60,6 +66,8 @@ public sealed class WindowsNoticeList(TimeSpan longestUnknownWait)
             arrived = true;
             if (input is not null && baseline != WindowsNoticeBaseline.Start) added.Add((input, baseline == WindowsNoticeBaseline.Resume));
         }
+        // The first new notice skipped the id the probe looks at: a tile, a badge or a notice already gone took it.
+        SkippedProbe = Confirmed && baseline == WindowsNoticeBaseline.None && firstNew != uint.MaxValue && firstNew > before + 1;
         if (arrived && baseline != WindowsNoticeBaseline.Start) Confirmed = true;
         else if (baseline == WindowsNoticeBaseline.None && !Confirmed) UnknownWait = TimeSpan.FromTicks(Math.Min(UnknownWait.Ticks * 2, longestUnknownWait.Ticks));
         var removed = new List<NoticeReplacements.Gone>();

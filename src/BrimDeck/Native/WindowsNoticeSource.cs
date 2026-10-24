@@ -22,8 +22,9 @@ public enum NoticeSourceState
 
 // The notifications Windows keeps for the current user (UserNotificationListener). Without package identity Windows does not
 // raise its change event for BrimDeck, so the list is read on a timer: every ProbeInterval only the id after the newest one
-// is looked up (about 2.5 ms of CPU, a fifth of reading the whole list), and the whole list is read every FullInterval and
-// whenever the probe finds a new notice. The probe needs the newest id Windows has given out: notifications removed before
+// is looked up (some ms of CPU, a fraction of reading the whole list), and the whole list is read every FullInterval and
+// whenever the probe finds a new notice. Tiles and badges take ids from the same count, so after a notice is seen to have
+// skipped that id the next few are looked up for a while (WindowsNoticePace.ProbeIds). The probe needs the newest id Windows has given out: notifications removed before
 // BrimDeck started can leave that ahead of the newest one still listed, so until a full reading has seen a notice arrive, the
 // list is read every 3 s instead, and less often (WindowsNoticeList.UnknownWait) only once nothing has happened for a few
 // minutes (WindowsNoticePace). A step that fails waits longer after each failure in a row. Access is checked before every
@@ -50,6 +51,8 @@ internal sealed class WindowsNoticeSource : IDisposable
         public UserNotificationListener? Listener;
         public bool Events;
         public DateTimeOffset LastFull = DateTimeOffset.MinValue;
+        // Until when the probe looks a few ids ahead (WindowsNoticePace.ProbeIds).
+        public DateTimeOffset WideUntil = DateTimeOffset.MinValue;
         // Wakes this loop only: a loop still ending cannot take the wake meant for the next one.
         public readonly SemaphoreSlim Wake = new(0, 1);
         // The last failure, so that one repeating every step goes to notices.log once, and how many steps in a row failed.
@@ -208,7 +211,11 @@ internal sealed class WindowsNoticeSource : IDisposable
         // lookup finds nothing, and the next full reading reports the change of access.
         if (!full && run.Listener is { } probe && !run.Events && !quiet && newest > 0)
         {
-            try { if (probe.GetNotification(newest + 1) is not null) full = true; }
+            try
+            {
+                foreach (var id in WindowsNoticePace.ProbeIds(newest, now, run.WideUntil))
+                    if (probe.GetNotification(id) is not null) { full = true; break; }
+            }
             catch (Exception ex) when (ex is COMException or UnauthorizedAccessException) { full = true; }
         }
         if (!full && run.Listener is not null) return;
@@ -272,6 +279,7 @@ internal sealed class WindowsNoticeSource : IDisposable
             if (_run != run) return;
             changes = _list.Compare(listed, id => Read(byId[id], id));
             if (changes.Arrived.Count + changes.Missed.Count > 0) _lastActivity = DateTimeOffset.UtcNow;
+            if (_list.SkippedProbe) run.WideUntil = DateTimeOffset.UtcNow + WindowsNoticePace.WideFor;
         }
         foreach (var input in changes.Arrived) Received?.Invoke(input);
         foreach (var input in changes.Missed) Missed?.Invoke(input);

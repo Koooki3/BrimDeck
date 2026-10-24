@@ -15,6 +15,18 @@ public static class WindowsNoticePace
     // in a row, from FirstRetry up to LongestRetry; a step that succeeds starts over.
     public static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(2.5), LongestRetry = TimeSpan.FromSeconds(60);
 
+    // The ids a probe looks up after newest, in order (WindowsNoticeList.SkippedProbe): the next one, and for WideFor after a
+    // notice skipped it, the next WideIds. Each lookup costs about as much as the next (some ms of CPU), so the wide probe stops
+    // at the first hit and only runs while an application is seen to skip ids.
+    public static readonly TimeSpan WideFor = TimeSpan.FromMinutes(10);
+    public const int WideIds = 3;
+
+    public static IEnumerable<uint> ProbeIds(uint newest, DateTimeOffset now, DateTimeOffset wideUntil)
+    {
+        int count = now < wideUntil ? WideIds : 1;
+        for (uint i = 1; i <= count && newest <= uint.MaxValue - i; i++) yield return newest + i;
+    }
+
     public static TimeSpan Retry(int failures)
         => failures <= 1 ? FirstRetry : TimeSpan.FromTicks(Math.Min(LongestRetry.Ticks, FirstRetry.Ticks << Math.Min(failures - 1, 16)));
 }
