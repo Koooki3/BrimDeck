@@ -144,7 +144,7 @@ public static class NoticeGlyphs
         (NoticeGlyph.Calendar, ["calendar", "日历", "日程"]),
         (NoticeGlyph.Music, ["spotify", "music", "网易云", "音乐", "foobar", "kugou", "酷狗", "kuwo", "酷我", "itunes"]),
         (NoticeGlyph.Video, ["video", "bilibili", "哔哩", "potplayer", "youtube", "视频", "netflix", "movies", "影音", "iqiyi", "爱奇艺", "youku", "优酷", "=vlc", "=obs"]),
-        (NoticeGlyph.Chat, ["wechat", "weixin", "微信", "telegram", "slack", "teams", "discord", "whatsapp", "dingtalk", "钉钉", "飞书", "feishu", "lark", "messenger", "skype", "wecom", "chat", "消息", "=qq", "=tim", "=signal", "=line"]),
+        (NoticeGlyph.Chat, ["wechat", "weixin", "微信", "telegram", "slack", "teams", "discord", "whatsapp", "dingtalk", "钉钉", "飞书", "feishu", "lark", "messenger", "skype", "wecom", "企业微信", "zoom", "腾讯会议", "wemeet", "chat", "消息", "=qq", "=tim", "=signal", "=line"]),
         (NoticeGlyph.Game, ["steam", "epicgames", "epic games", "xbox", "game", "游戏", "battle.net", "ubisoft", "=riot", "=gog"]),
         (NoticeGlyph.Cloud, ["onedrive", "dropbox", "icloud", "网盘", "netdisk", "nutstore", "坚果云", "cloud", "=drive"]),
         (NoticeGlyph.Browser, ["chrome", "msedge", "firefox", "browser", "浏览器", "=opera", "brave", "vivaldi", "safari", "_crx_", "=edge"]),

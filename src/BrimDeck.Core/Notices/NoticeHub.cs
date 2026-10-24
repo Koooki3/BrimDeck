@@ -109,7 +109,7 @@ public sealed class NoticeHub
         if (input.StopTiming) return StopByKey(input, now);
         RememberApp(input, now);
         var (title, body) = Words(input);
-        var priority = NoticeClock.Alerting(input.Timing, now) ? AlertPriority(rule, input.PriorityHint) : EffectivePriority(rule, input.PriorityHint);
+        var priority = NoticeClock.Alerting(input.Timing, now) || input.Call ? AlertPriority(rule, input.PriorityHint) : EffectivePriority(rule, input.PriorityHint);
         bool quiet = rule?.Muted == true || priority == NoticePriority.Low;
         bool late = Late(input, priority, now);
         var existing = SameInstance(input.InstanceKey, input)
@@ -117,13 +117,13 @@ public sealed class NoticeHub
             ?? (input.ReplaceKey is { Length: > 0 } replace ? Replacing(input, replace) : null);
         if (existing is not null)
         {
-            bool significant = existing.Title != title || existing.Category != input.Category || existing.TimeKind != (input.Timing?.Kind ?? NoticeTimeKind.None)
+            bool significant = existing.Title != title || existing.Category != input.Category || existing.Call != input.Call || existing.TimeKind != (input.Timing?.Kind ?? NoticeTimeKind.None)
                 || existing.Progress is not null && (input.Progress is null || input.Progress >= 1) || existing.Body != body && input.Progress is null;
             existing.InstanceKey = input.InstanceKey;
             existing.AppName = input.AppName; existing.Title = title; existing.Body = body;
             existing.IconRef = input.IconRef ?? existing.IconRef; existing.Category = input.Category; existing.Priority = priority;
             existing.Progress = input.Progress; existing.Actions = [.. input.Actions]; existing.Capabilities = input.Capabilities;
-            existing.Timing = input.Timing?.Copy();
+            existing.Timing = input.Timing?.Copy(); existing.Call = input.Call;
             existing.EventId = input.EventId ?? existing.EventId;
             // The notice now says what the latest message said, so it is as old as that message: an update shown as it arrives
             // must not read "38 min ago" from the first notice it replaced. It also keeps the list's order after a restart.
@@ -140,7 +140,7 @@ public sealed class NoticeHub
             InstanceKey = input.InstanceKey, AppKey = input.AppKey, AppName = input.AppName, AppId = input.AppId, Origin = input.Origin,
             Distro = input.Distro, ReplaceKey = input.ReplaceKey, EventId = input.EventId, Title = title, Body = body, IconRef = input.IconRef,
             CreatedAt = input.CreatedAt ?? now, ReceivedAt = now, UpdatedAt = now, Category = input.Category, Priority = priority,
-            Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy()
+            Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy(), Call = input.Call
         };
         _notices.Insert(0, notice); _byId[notice.Id] = notice;
         Prune(now, notify: false, keep: notice);

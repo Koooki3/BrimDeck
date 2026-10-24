@@ -208,7 +208,7 @@ public static class NoticeTimeIntake
 // companions and Teams. Used to sort their notifications into kinds and to list what this PC has in the settings.
 public enum NoticeTimeRole
 {
-    // Every notification is an alarm, a timer that finished or the end of a focus session.
+    // Every notification is an alarm, a timer that finished or the end of a focus session (also a task's reminder in To Do).
     Clock,
     // Every notification is an event's reminder.
     Calendar,
@@ -237,6 +237,7 @@ public static partial class NoticeTimeSources
         new("outlook", "Outlook（新）", "Outlook (new)", NoticeTimeRole.MailAndCalendar, "Microsoft.OutlookForWindows_8wekyb3d8bbwe", ["Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows"]),
         new("outlook-classic", "Outlook（经典）", "Outlook (classic)", NoticeTimeRole.MailAndCalendar, null, ["Microsoft.Office.OUTLOOK.EXE.15", "Microsoft.Office.OUTLOOK.EXE.16"], "OUTLOOK.EXE"),
         new("m365-calendar", "Microsoft 365 日历", "Microsoft 365 Calendar", NoticeTimeRole.Calendar, "Microsoft.M365Companions_8wekyb3d8bbwe", ["Microsoft.M365Companions_8wekyb3d8bbwe!Calendar"]),
+        new("todo", "Microsoft To Do", "Microsoft To Do", NoticeTimeRole.Clock, "Microsoft.Todos_8wekyb3d8bbwe", ["Microsoft.Todos_8wekyb3d8bbwe!App"]),
         new("teams", "Microsoft Teams", "Microsoft Teams", NoticeTimeRole.Meetings, "MSTeams_8wekyb3d8bbwe", ["MSTeams_8wekyb3d8bbwe!MSTeams"]),
         new("windows-mail", "邮件和日历", "Mail and Calendar", NoticeTimeRole.MailAndCalendar, "microsoft.windowscommunicationsapps_8wekyb3d8bbwe",
             ["microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.mail", "microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.calendar"])
@@ -254,6 +255,14 @@ public static partial class NoticeTimeSources
         if (input.Origin != NoticeOrigin.Windows || input.Timing is not null) return input;
         var created = input.CreatedAt ?? DateTimeOffset.UtcNow;
         var source = ForApp(input.AppId);
+        // A web mail or calendar in the browser (a site's notice or an installed web app) is sorted like the programs.
+        if (source is null && WindowsNoticeApps.SiteOf(input.AppKey, input.AppId) is { } site)
+        {
+            string said = input.Title + "\n" + input.Body;
+            if (WindowsNoticeApps.IsCalendarSite(site) || WindowsNoticeApps.IsMailSite(site) && ReadsAsReminder(said))
+                return input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Event, StartsAt = Start(said, created, zone) } };
+            return WindowsNoticeApps.IsMailSite(site) ? input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Mail } } : input;
+        }
         if (source is null)
             return MailNames.Any(name => input.AppName.Contains(name, StringComparison.OrdinalIgnoreCase)) ? input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Mail } } : input;
         string text = input.Title + "\n" + input.Body;

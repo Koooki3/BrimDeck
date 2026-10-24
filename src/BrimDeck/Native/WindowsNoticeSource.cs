@@ -299,7 +299,7 @@ internal sealed class WindowsNoticeSource : IDisposable
                 InstanceKey = $"windows:{appId}:{id}:{created.UtcTicks}",
                 Title = BrimDeck.Protocol.NoticeProtocol.Clip(who.Title, BrimDeck.Protocol.NoticeProtocol.MaxTitle)!,
                 Body = BrimDeck.Protocol.NoticeProtocol.Clip(who.Body, BrimDeck.Protocol.NoticeProtocol.MaxBody)!,
-                IconRef = registered.Icon ?? "aumid:" + appId, CreatedAt = created, Category = who.Category, Capabilities = NoticeCapabilities.OpenApp
+                IconRef = registered.Icon ?? "aumid:" + appId, CreatedAt = created, Category = who.Category, Call = who.Call, Capabilities = NoticeCapabilities.OpenApp
             };
         }
         catch (Exception ex) when (ex is COMException or InvalidCastException or ArgumentException or NullReferenceException) { return null; }

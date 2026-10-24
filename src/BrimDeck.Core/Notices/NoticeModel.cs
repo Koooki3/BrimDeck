@@ -65,6 +65,8 @@ public sealed record NoticeInput
     public bool StopTiming { get; init; }
     // Arrived while BrimDeck could not read its source (the PC slept): recorded, unviewed, but not shown as it arrives (core-M5).
     public bool Missed { get; init; }
+    // An incoming call, as BrimDeck reads a Windows notification (WindowsNoticeApps.ReadsAsCall); never taken from a sender.
+    public bool Call { get; init; }
 }
 
 // A notice BrimDeck keeps. Id is BrimDeck's own; Revision counts updates, so a view can tell a changed notice apart.
@@ -99,6 +101,9 @@ public sealed class Notice
     public bool Viewed { get; set; }
     public int Revision { get; set; }
     public NoticeTiming? Timing { get; set; }
+    // An incoming call (NoticeInput.Call): shown with the call mark and as urgent as a ringing alarm. A plain flag, so that
+    // an older BrimDeck still reads the saved notices.
+    public bool Call { get; set; }
     [JsonIgnore] public bool HasProgress => Progress is not null;
     [JsonIgnore] public NoticeTimeKind TimeKind => Timing?.Kind ?? NoticeTimeKind.None;
     public Notice Copy() { var copy = (Notice)MemberwiseClone(); copy.Actions = [.. Actions]; copy.Timing = Timing?.Copy(); return copy; }

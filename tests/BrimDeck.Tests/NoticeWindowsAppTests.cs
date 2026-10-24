@@ -33,7 +33,14 @@ internal static class NoticeWindowsAppTests
         check("A tray balloon source is not named by its generated number", Who("NotifyIconGeneratedAumid_14992917314978067803", null, "t").AppName == "托盘程序");
         check("A tray balloon source with a display name keeps it", Who("NotifyIconGeneratedAumid_1", "Tailscale", "t").AppName == "Tailscale");
         check("An unregistered desktop program is named by its file", Who(@"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe", null, "t").AppName == "powershell");
-        check("An application without any name keeps its id", Who("BiliBiliPC", "", "t").AppName == "BiliBiliPC");
+        check("An application without any name keeps its id", Who("Some.Unknown.App", "", "t").AppName == "Some.Unknown.App");
+        check("Desktop programs Windows gives no name for are named from BrimDeck's list", Who("BiliBiliPC", "", "t").AppName == "哔哩哔哩"
+            && Who("ali.dingtalk.release", null, "t").AppName == "钉钉" && Who("com.google.gemini.windows", null, "t").AppName == "Gemini"
+            && Who("Microsoft.Office.OUTLOOK.EXE.15", null, "t").AppName == "Outlook");
+        check("A known id still takes the name Windows gives", Who("BiliBiliPC", "哔哩哔哩 PC", "t").AppName == "哔哩哔哩 PC");
+        check("A Squirrel-installed program is named by its program", Who("com.squirrel.Discord.Discord", null, "t").AppName == "Discord"
+            && Who("com.squirrel.slack.slack", null, "t").AppName == "slack" && Who("com.squirrel.", null, "t").AppName == "com.squirrel."
+            && Who("com.squirrel.x.a b", null, "t").AppName == "com.squirrel.x.a b");
         var hostile = Who("Evil", "Bad‮name\u0007" + new string('x', 400), "t");
         check("A name from the sender is clipped and loses direction overrides and control characters",
             hostile.AppName.Length == 256 && !hostile.AppName.Contains('‮') && !hostile.AppName.Contains('\u0007'));
@@ -83,6 +90,47 @@ internal static class NoticeWindowsAppTests
             && WindowsNoticeApps.Category("Windows.Defender.SecurityCenter") == NoticeCategory.Info && WindowsNoticeApps.Category("com.nvidia.nvapp") == NoticeCategory.Info
             && WindowsNoticeApps.Category("party.mihomo.app") == NoticeCategory.Info && WindowsNoticeApps.Category("Microsoft.ScreenSketch_8wekyb3d8bbwe!App") == NoticeCategory.Info);
         check("The category is part of the identity", Who("com.nvidia.nvapp", "NVIDIA App", "Driver").Category == NoticeCategory.Info);
+        check("Other assistants' notices are tasks", WindowsNoticeApps.Category("com.google.gemini.windows") == NoticeCategory.Task
+            && WindowsNoticeApps.Category("OpenAI.ChatGPT-Desktop_2p2nqsd0c76g0!ChatGPT") == NoticeCategory.Task && WindowsNoticeApps.Category("Anysphere.Cursor") == NoticeCategory.Task);
+        check("Security, phone setup and vendor utilities are information", WindowsNoticeApps.Category("Microsoft.SecHealthUI_8wekyb3d8bbwe!SecHealthUI") == NoticeCategory.Info
+            && WindowsNoticeApps.Category("Microsoft.YourPhone_8wekyb3d8bbwe!YourPhoneSetup") == NoticeCategory.Info
+            && WindowsNoticeApps.Category("Microsoft.YourPhone_8wekyb3d8bbwe!App") == NoticeCategory.Message && WindowsNoticeApps.Category("Lenovo.PcManager.MainWnd") == NoticeCategory.Info);
+        Calls(check);
+        Sites(check);
+    }
+
+    private static void Calls(Action<string, bool> check)
+    {
+        check("QQ's voice and video call invitations are calls", Who("QQ", "QQ", "Alice", "邀请你进行语音通话").Call && Who("QQ", "QQ", "Alice", "视频通话邀请").Call);
+        check("Teams and WhatsApp calls are calls", Who("MSTeams_8wekyb3d8bbwe!MSTeams", "Microsoft Teams", "Bob", "is calling you").Call
+            && Who("5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App", "WhatsApp", "Incoming voice call", "Carol").Call
+            && Who("com.squirrel.Discord.Discord", null, "Dan", "Incoming Call").Call);
+        check("A phone call relayed by Phone Link is a call", Who("Microsoft.YourPhone_8wekyb3d8bbwe!App", "手机连接", "来电", "138 0000 0000").Call);
+        check("A missed call or a chat about calls is no ringing call", !Who("QQ", "QQ", "Alice", "未接来电").Call && !Who("QQ", "QQ", "Alice", "我们晚点打电话").Call
+            && !Who("MSTeams_8wekyb3d8bbwe!MSTeams", "Microsoft Teams", "Bob", "Missed call").Call && !Who("QQ", "QQ", "Alice", "recalling yours").Call);
+        check("Only chat and phone apps have calls", !Who("Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows", "Outlook", "Incoming call", "x").Call
+            && !Who("Chrome", "Google Chrome", "Incoming call", "x").Call && !Who("Claude_pzs8sxrjxfjjc!Claude", "Claude", "Task", "is calling you").Call);
+
+        var hub = new NoticeHub();
+        var call = hub.Receive(WinInput("c1", "windows:QQ", "Alice", "邀请你进行语音通话") with { Call = true }, WinT0);
+        check("A call is high priority and keeps its mark", call.Notice!.Priority == NoticePriority.High && call.Notice.Call && call.Present);
+        var ended = hub.Receive(WinInput("c2", "windows:QQ", "Alice", "通话已结束") with { Replaces = "c1" }, WinT0.AddSeconds(20));
+        check("A call that ends loses its mark", ended.Receipt == NoticeReceipt.Updated && !ended.Notice!.Call && ended.Notice.Priority == NoticePriority.Normal);
+        var low = new NoticeHub(key => key == "windows:QQ" ? new NoticeAppRule { Key = key, Priority = NoticePriority.Low } : null);
+        check("A call from an application set to low priority stays low", low.Receive(WinInput("c", "windows:QQ", "A") with { Call = true }, WinT0).Notice!.Priority == NoticePriority.Low);
+        var copy = System.Text.Json.JsonSerializer.Deserialize<Notice>(System.Text.Json.JsonSerializer.Serialize(new Notice { Call = true }));
+        check("The call mark is saved with the notice", copy!.Call);
+    }
+
+    private static void Sites(Action<string, bool> check)
+    {
+        check("A site is read from a browser notice's key or a web app's id", WindowsNoticeApps.SiteOf("windows:Chrome|mail.google.com", "Chrome") == "mail.google.com"
+            && WindowsNoticeApps.SiteOf("windows:Microsoft.MicrosoftEdge.Stable_8wekyb3d8bbwe!https://web.whatsapp.com/", "Microsoft.MicrosoftEdge.Stable_8wekyb3d8bbwe!https://web.whatsapp.com/") == "web.whatsapp.com"
+            && WindowsNoticeApps.SiteOf("windows:QQ", "QQ") is null && WindowsNoticeApps.SiteOf("windows:QQ|not a host", "QQ") is null);
+        check("Mail and calendar sites are known", WindowsNoticeApps.IsMailSite("mail.google.com") && WindowsNoticeApps.IsMailSite("mail.qq.com")
+            && WindowsNoticeApps.IsCalendarSite("calendar.google.com") && !WindowsNoticeApps.IsMailSite("google.com") && !WindowsNoticeApps.IsMailSite("evilmail.google.com.example"));
+        check("More sites have names", WindowsNoticeApps.SiteName("wx.qq.com") == "微信" && WindowsNoticeApps.SiteName("mail.qq.com") == "QQ 邮箱"
+            && WindowsNoticeApps.SiteName("chat.deepseek.com") == "DeepSeek" && WindowsNoticeApps.SiteName("qq.com") == "qq.com");
     }
 
     private static NoticeInput WinInput(string instance, string app, string title, string body = "b") => new()

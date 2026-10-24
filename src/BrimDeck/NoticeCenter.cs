@@ -238,7 +238,8 @@ internal sealed class NoticeCenter : IDisposable
     private AttentionItem Item(string lane, Notice notice, bool refresh = false) => new()
     {
         Lane = lane, Kind = AttentionKind.Notice, Key = notice.Id, Group = notice.AppKey, Priority = notice.Priority, Payload = notice, Refresh = refresh,
-        Urgent = NoticeClock.Alerting(notice.Timing, DateTimeOffset.UtcNow),
+        // A ringing call is as urgent as an alarm; the user can still make its application low priority (NoticeHub).
+        Urgent = NoticeClock.Alerting(notice.Timing, DateTimeOffset.UtcNow) || notice.Call && notice.Priority != NoticePriority.Low,
         Duration = TimeSpan.FromSeconds(notice.Priority == NoticePriority.High ? Settings.NoticeHighDuration : Settings.NoticeDuration)
     };
 
