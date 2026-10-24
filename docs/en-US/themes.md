@@ -4,8 +4,8 @@ The Notch, Capsule and Indicator, the quota notice, the expanded panel and its p
 
 | Kind | Themes |
 | --- | --- |
-| Basics | System, Dark (the default: the original pure black look), Light |
-| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Cyberpunk: Edgerunners (the demo) |
+| Basics | System, Dark (the default: the original pure black look), Light, Liquid Glass (light), Liquid Glass (dark) |
+| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
 | Custom | The theme files in the themes folder, which can be created, edited and deleted in settings |
 
 Each theme remembers the theme, warning and critical colors of the app columns and the clock's style and color you change while using it: they are saved when you switch to another theme and come back when you return. A theme chosen for the first time uses its own colors and suggested clock. Restoring defaults in "Quotas and usage" or "Collapsed view" restores the current theme's defaults.
@@ -70,7 +70,7 @@ The clock style and color that suit the theme. Choosing the theme in settings sw
 "clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
 ```
 
-`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`; `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
+`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`, `pixel`; `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
 
 ### Picker swatches (swatches)
 
@@ -85,6 +85,17 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `rimWidth` | Rim width | 0–3 |
 | `shadowBlur` `shadowDepth` `shadowOpacity` | Blur, offset and opacity of the shadow | 0–40, 0–12, 0–1 |
 | `scanlines` | Horizontal scan lines in the primary text color at this opacity | 0–0.12 |
+| `glass` | Glass: `tint` is a translucent color laid over the desktop (its opacity strictly between 0 and 1), `edge` the light gathered along the inner edge (0–1), `highlight` its color. See "Glass" below | |
+| `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels) and the island's text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right | 0, or 1–4 |
+| `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain | 0–0.12 |
+
+#### Glass
+
+A glass theme's surface is a translucent tint over the desktop rather than a solid color, so the desktop shows through the island. Readability is still guaranteed: text is checked over the tint on a **black** and on a **white** desktop, so a light glass needs a fairly dense tint (about 75%). The glass carries two lights along its edge: `rimGradient`, a specular rim, and `edge`, light that fades inward from the edge as in thick glass.
+
+The glass is drawn as the opaque `surface` color instead while Windows' transparency effects are off (Settings › Personalization › Colors) or in high contrast; the "Current theme" section says so. The shadow under a glass island is drawn only outside it, so it never shows through.
+
+The glass does not blur the desktop for now: Windows' blur cannot be cut to the island's shape (it fills the whole window rectangle), and capturing the screen to blur it would capture the island itself, at a real cost. It is clear glass, through which what lies behind shows faintly.
 
 ### Motion (motion)
 
@@ -103,9 +114,9 @@ The answers to the pointer are drawn on the control's own visible shape, never a
 
 | Key | Effect | Values |
 | --- | --- | --- |
-| `hover` | The mark on a hovered control: `none`, `reveal` (faint fill, edge lit from the top), `lift` (soft shadow outside, light top edge), `underline` (subtle fill, 2 px bar along the bottom), `caret` (line highlight, caret bar at the left), `brackets` (HUD corner brackets), `sheen` (two-color tint and edge), `glow` (warm inner glow and a glint) | earlier names: `spot` = reveal, `edge` = underline, `neon` = brackets |
+| `hover` | The mark on a hovered control (also `lens`: light pooled at the top of a glass bead and a bright top rim; `wave`: a faint tint and a small wave that rolls in along the bottom and settles; `slot`: a square highlight with a solid inner frame, as an inventory slot): `none`, `reveal` (faint fill, edge lit from the top), `lift` (soft shadow outside, light top edge), `underline` (subtle fill, 2 px bar along the bottom), `caret` (line highlight, caret bar at the left), `brackets` (HUD corner brackets), `sheen` (two-color tint and edge), `glow` (warm inner glow and a glint) | earlier names: `spot` = reveal, `edge` = underline, `neon` = brackets |
 | `hoverStrength` | How strongly the mark shows | 0–0.3 |
-| `press` | The press: `none`, `shade` (the shape shades, its edge firms), `sink` (the shadow collapses, pushed in), `indicator` (the bottom bar takes the highlight), `select` (a selection sweeps from the caret), `lock` (brackets clamp on with a chromatic ghost and a glitch slice; a scan line on release), `sparkle` (the tint deepens; stars on release), `ember` (a warm glow swells; fireflies on release) | earlier names: `pulse` and `ripple` = shade, `ring` = lock |
+| `press` | The press (also `bevel`: the bevel turns over, shaded at the top left and lit at the bottom right, as a pixel-art button pushed in): `none`, `shade` (the shape shades, its edge firms), `sink` (the shadow collapses, pushed in), `indicator` (the bottom bar takes the highlight), `select` (a selection sweeps from the caret), `lock` (brackets clamp on with a chromatic ghost and a glitch slice; a scan line on release), `sparkle` (the tint deepens; stars on release), `ember` (a warm glow swells; fireflies on release) | earlier names: `pulse` and `ripple` = shade, `ring` = lock |
 | `pressStrength` | How strongly the press shows | 0–0.35 |
 | `particles` | What a completed press leaves for a moment, from the control's edges: `none`, `dust`, `pixel`, `spark`, `star`, `firefly`, `neon` | |
 | `trail` | How strongly those particles show; 0 shows none | 0–0.6 |
@@ -117,6 +128,10 @@ The answers to the pointer are drawn on the control's own visible shape, never a
 | `highlight` | The color of the moment of a press: an indicator, a selection, a scan line, sparkles, fireflies | as `color` |
 
 Motion colors are kept readable on the surface like any other color chosen outside the theme. The "system" theme uses Windows' accent color and the quiet Fluent answers (`reveal` and `shade`, or `lift` and `sink` on a light base), with no ambient light, particles or steps; its base theme's strengths and pace stay. `Templates/theme-template.json` lists every key with its default.
+
+### Day and night looks (night, daylight)
+
+A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look by the local clock. `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default); the user can move them in Settings › Current theme › Daytime. At the hour the island's old look fades out over 1.6 seconds, like dusk; with animations off it switches at once. Both looks are held to the readability rules below.
 
 ## Readability
 
@@ -138,6 +153,14 @@ The demo theme was made in these five steps.
 3. **Surface and text first**: the surface sets every contrast; space the text levels at 7 : 4.5 : 3.
 4. **Then accents and app colors**: app colors must be told apart and reach 3:1 on the surface; warning and critical should read as yellow and red.
 5. **Check**: look at the collapsed and expanded panel, the notice and the pop-ups, and make sure "Readability" is empty or acceptable; otherwise go back to step 3.
+
+## The newer themes
+
+**Liquid Glass (light / dark)**: after Apple's Liquid Glass, liquid-glass-react and the "transparent island" concept, and the clear mode leaked for Xiaomi HyperOS 4. The light glass is a milky tint (`#C2F7F9FC`), the dark one graphite (`#C8121419`), just dense enough for body text to keep 7:1 over a black or a white desktop. The specular rim is brightest at the top left and catches again at the bottom right, and travels around the edge in about half a minute (`drift`); the inner edge light makes the edge read as thick glass. Hover is `lens`; the light glass sinks and the dark one shades when pressed; no particles.
+
+**Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock and a shoreline rim (turquoise, sky, sand). By night, a moonlit sea from navy into teal, a lantern-gold clock and a soft glow under the island. The rim breathes like a swell and its colors flow like water; a glint of sun crosses now and then by day, a rarer moonlight by night. A small wave rolls in along a hovered control; a press leaves sun glints by day (`sparkle` + `star`) and lets glowing plankton rise at night (`ember` + `firefly`).
+
+**Pixel Blocks**: an unofficial pixel-art look inspired by block sandbox games such as Minecraft, using no artwork, fonts, textures or logos from any game. A deep slate surface with a 5% block grain, 2 DIP stepped corners, a bevel rim lit at the top left and shaded at the bottom right, and a hard shadow with no blur. Chat-style colors: white text, a yellow block clock (the `pixel` clock style), a green accent and a green experience-bar indicator; violet menus with a violet frame. Everything moves in four hard steps: `slot` on hover, `bevel` on press, square particles after; no ambient light, so it costs nothing while idle.
 
 ## Demo: Cyberpunk: Edgerunners
 
