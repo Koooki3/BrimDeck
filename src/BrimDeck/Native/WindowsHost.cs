@@ -28,13 +28,15 @@ public sealed class WindowsHost : IDisposable
     public ScreenContext Current { get; private set; }
     // monitor gives the monitor whose foreground window decides the context. The context is reported with the app it was
     // detected for, and a change of either is a change: two apps can read as the same context with different app rules.
-    public WindowsHost(Func<IntPtr> monitor, Func<IntPtr> window)
+    public WindowsHost(Func<IntPtr> monitor, Func<IntPtr> window, Func<Rect?> island)
     {
-        _monitor = monitor; _window = window;
+        _monitor = monitor; _window = window; _island = island;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
     }
     private readonly Func<IntPtr> _window;
+    // The strip the island actually draws in, in screen physical pixels, as of the last layout; null before the first.
+    private readonly Func<Rect?> _island;
     private string _raisedName = "", _raisedPath = "";
     private void Poll()
     {
@@ -51,18 +53,24 @@ public sealed class WindowsHost : IDisposable
     // The panel is a topmost overlay: nothing belongs over it but another topmost window, and nothing ordinary may
     // cover it. A show-desktop sweep, or an app that moves itself about in the z-order, can leave the panel beneath
     // ordinary windows — and then no window rule can be seen to act, for the panel is simply covered. The watch looks
-    // every poll: when the panel has been buried it is put back over the desktop, and the window that had gone over it
-    // is noted in zorder.log, by name, so the culprit can be told from the panels it covered.
+    // every poll, and distinguishes what it finds:
+    //
+    //  - the topmost flag lost, or an ordinary window above the panel: a real anomaly, and the panel is put back at
+    //    once, since no ordinary window has any business over a topmost overlay;
+    //  - another topmost window covering the island: often deliberate, a pinned video, a screenshot mask, another
+    //    overlay. The panel never fights over it — one recovery attempt per culprit, and only a note afterwards;
+    //    taking the island back by force would flicker against whatever the user chose to keep on top.
     private void WatchOrder(IntPtr window)
     {
         if (window == IntPtr.Zero || !IsWindowVisible(window) || IsIconic(window)) return;
+        var island = _island();
         string? cause = null;
-        if ((GetWindowLongPtr(window, -20).ToInt64() & 0x8) == 0) cause = "topmost flag lost";
+        bool recover = false;
+        if ((GetWindowLongPtr(window, -20).ToInt64() & 0x8) == 0) { cause = "topmost flag lost"; recover = true; }
         else
         {
             // The windows above the panel in z-order, nearest first: the first one that is shown, not cloaked and not
-            // this app's own decides. An ordinary window there has no business above a topmost panel; a topmost one
-            // only matters where it covers the band the island draws in, at the top of the window.
+            // this app's own decides.
             int walked = 0;
             for (var above = GetWindow(window, 3); above != IntPtr.Zero && walked < 32; above = GetWindow(above, 3), walked++)
             {
@@ -71,26 +79,27 @@ public sealed class WindowsHost : IDisposable
                 GetWindowThreadProcessId(above, out var pid);
                 if (pid == Environment.ProcessId) continue;
                 bool over = (GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0;
-                if (!over) { cause = "under " + ProcessName(above); break; }
-                if (Covers(window, above)) { cause = "under topmost " + ProcessName(above); break; }
+                if (!over) { cause = "under " + ProcessName(above); recover = true; break; }
+                if (island is { } strip && Covers(above, strip)) { cause = "covered by topmost " + ProcessName(above); break; }
             }
         }
         if (cause is null) { _orderCulprit = null; return; }
-        SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+        // One recovery per culprit: a topmost window the user keeps over the island would otherwise be fought every
+        // poll. The note stands either way, so the culprit can be told from the panels it covered.
+        if (recover) SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
         if (cause != _orderCulprit || Environment.TickCount64 - _orderLoggedAt > 10000)
         {
             _orderCulprit = cause; _orderLoggedAt = Environment.TickCount64;
-            NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} panel {cause}; topmost restored");
+            NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} panel {cause}" + (recover ? "; topmost restored" : "; left as is"));
         }
     }
     private string? _orderCulprit;
     private long _orderLoggedAt;
-    // Whether the window above reaches into the strip at the top of the panel's window, where the island draws.
-    private static bool Covers(IntPtr window, IntPtr above)
+    // Whether the window above reaches into the island's drawn area, given in screen physical pixels.
+    private static bool Covers(IntPtr above, Rect island)
     {
-        if (!GetWindowRect(window, out var own) || !GetWindowRect(above, out var over)) return false;
-        double strip = Math.Min(own.Bottom, own.Top + 56);
-        return over.Left < own.Right && over.Right > own.Left && over.Top < strip && over.Bottom > own.Top;
+        if (!(island.Width > 0) || !GetWindowRect(above, out var r)) return false;
+        return r.Left < island.Right && r.Right > island.Left && r.Top < island.Bottom && r.Bottom > island.Top;
     }
     private static string ProcessName(IntPtr window)
     {
@@ -100,10 +109,13 @@ public sealed class WindowsHost : IDisposable
             using var process = Process.GetProcessById((int)pid);
             return process.ProcessName;
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception) { return "pid " + window; }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception) { return "pid " + pid_of(window); }
     }
-    // Notes of buried panels, in the data folder, kept small: a note that would grow the file past this size empties it.
+    private static uint pid_of(IntPtr window) { GetWindowThreadProcessId(window, out var pid); return pid; }
+    // Notes of buried panels, in the data folder. The current file is kept and a full one moved aside, so earlier
+    // notes survive a rotation: zorder.log, then zorder.1.log, zorder.2.log, up to three.
     private const long OrderLogLimit = 262144;
+    private const int OrderLogKept = 3;
     private static void NoteOrder(string line)
     {
         try
@@ -111,10 +123,14 @@ public sealed class WindowsHost : IDisposable
             var file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "zorder.log");
             var folder = Path.GetDirectoryName(file);
             if (folder is { Length: > 0 }) Directory.CreateDirectory(folder);
-            if (!File.Exists(file) || new FileInfo(file).Length < OrderLogLimit)
-                File.AppendAllText(file, line + Environment.NewLine);
-            else
-                File.WriteAllText(file, line + Environment.NewLine);
+            if (File.Exists(file) && new FileInfo(file).Length >= OrderLogLimit)
+                for (int i = OrderLogKept - 1; i >= 1; i--)
+                {
+                    var from = $"{file}.{i}";
+                    if (File.Exists(from)) File.Move(from, $"{file}.{i + 1}", true);
+                }
+            if (File.Exists(file) && new FileInfo(file).Length >= OrderLogLimit) File.Move(file, file + ".1", true);
+            File.AppendAllText(file, line + Environment.NewLine);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }

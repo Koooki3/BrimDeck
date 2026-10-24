@@ -80,7 +80,18 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainWindow? lead = null)
     {
         _app = app; _lead = lead;
-        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle);
+        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip);
+        Rect? IslandStrip()
+        {
+            if (!IsVisible || PresentationSource.FromVisual(this) is null) return null;
+            var surface = Collapsed.Surface;
+            double scale = _pixelsPerDip;
+            if (!(scale > 0) || !double.IsFinite(scale)) scale = 1;
+            // The island's drawn band in screen physical pixels: the window's own top edge plus the surface it draws.
+            var top = (int)Math.Round(Top * scale);
+            var left = (int)Math.Round((Left + _windowOffset + surface.X) * scale);
+            return new Rect(left, top, surface.Width * scale, surface.Height * scale);
+        }
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
         {
