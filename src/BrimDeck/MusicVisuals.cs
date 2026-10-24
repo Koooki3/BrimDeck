@@ -339,22 +339,26 @@ internal sealed class MusicMarquee : FrameworkElement
 // last ring is in view, rest there, then fade back to the first ring and start again.
 internal sealed class QuotaCarousel : Grid
 {
-    internal const double StartHold = 2.5, EndHold = 2, Speed = 12, Fade = .25, FadeEdge = 3;
+    internal const double StartHold = QuotaCycle.StartHold, EndHold = QuotaCycle.EndHold, Speed = QuotaCycle.Speed, Fade = QuotaCycle.Fade, FadeEdge = 3;
     private readonly Canvas _strip;
-    private readonly Storyboard? _cycle;
     private readonly bool _discrete;
-    private bool _enabled, _paused, _begun;
+    private bool _enabled, _paused;
     private TimeSpan _elapsed;
-    // With animations off the rings only jump between the two rests, which a timer waits for (Turn): a storyboard of discrete
-    // keyframes kept WPF's animation clock ticking at 60 frames a second for the whole cycle. _since is when the cycle last went
-    // on (Eased.Now), NaN while it is held; _elapsed is where it stood then.
+    // The rests are waited out on a timer (Turn) and an animation clock runs only while the rings move (win2 P1: a storyboard
+    // repeating forever kept WPF's animation clock ticking at 60 frames a second through the rests too, as a storyboard of
+    // discrete keyframes did with animations off). With animations off the rings only jump between the two rests. _since is
+    // when the cycle last went on (Eased.Now), NaN while it is held; _elapsed is where it stood then.
     private PromptTimer? _turn;
-    private double _since = double.NaN, _period, _end;
+    private double _since = double.NaN, _period;
+    private QuotaCycle _cycle;
+    // A move starts on the animation clock this long before its time, so a timer that wakes a little late never delays it.
+    private const double Lead = .05;
+    private static readonly IEasingFunction GlideEase = Frozen(new BezierEase(QuotaCycle.CurveX1, QuotaCycle.CurveY1, QuotaCycle.CurveX2, QuotaCycle.CurveY2));
+    private static IEasingFunction Frozen(BezierEase ease) { ease.Freeze(); return ease; }
     public bool Rotates { get; }
     public double Travel { get; }
     // Position within the cycle; the window hands it to the next carousel so a rebuild continues where this one was.
-    public TimeSpan Elapsed => _discrete ? TimeSpan.FromSeconds(DiscreteAt(Eased.Now))
-        : _begun ? _cycle!.GetCurrentTime(this) ?? _elapsed : _elapsed;
+    public TimeSpan Elapsed => Rotates ? TimeSpan.FromSeconds(At(Eased.Now)) : _elapsed;
     public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
     {
         // The region is the layout's ring width in whole device pixels; rings sit in fixed slots from its left edge and its
@@ -399,79 +403,91 @@ internal sealed class QuotaCarousel : Grid
         // never moves the last ring out of the region.
         Travel = Math.Ceiling((full + fade - span) / step - 1e-6) * step;
         _discrete = !animate;
-        _end = StartHold + Travel / Speed; _period = _end + EndHold;
-        if (!_discrete) { _cycle = Cycle(); _period = _cycle.Duration.TimeSpan.TotalSeconds; }
+        _cycle = new QuotaCycle(Travel);
+        // Without animations there is no fade back, so the cycle ends with the last rest.
+        _period = _discrete ? _cycle.GlideEnd + EndHold : _cycle.Period;
         _elapsed = TimeSpan.FromSeconds(elapsed.TotalSeconds % _period);
         Loaded += (_, _) => Update();
         Unloaded += (_, _) => Update();
         IsVisibleChanged += (_, _) => Update();
     }
-    private Storyboard Cycle()
-    {
-        double end = _end, reset = end + EndHold;
-        static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
-        var shift = new DoubleAnimationUsingKeyFrames();
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(StartHold)));
-        shift.KeyFrames.Add(new SplineDoubleKeyFrame(-Travel, At(end), new KeySpline(.4, 0, .6, 1)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(reset + Fade)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(reset + Fade)));
-        var cycle = new Storyboard { Duration = TimeSpan.FromSeconds(reset + 2 * Fade), RepeatBehavior = RepeatBehavior.Forever };
-        Storyboard.SetTarget(shift, _strip); Storyboard.SetTargetProperty(shift, new PropertyPath("(UIElement.RenderTransform).(TranslateTransform.X)"));
-        cycle.Children.Add(shift);
-        // The return to the first ring is a short fade, so the reset never reads as a backwards scroll.
-        var fade = new DoubleAnimationUsingKeyFrames();
-        fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(0)));
-        fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(reset)));
-        fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, At(reset + Fade)));
-        fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, At(reset + 2 * Fade)));
-        Storyboard.SetTarget(fade, _strip); Storyboard.SetTargetProperty(fade, new PropertyPath(OpacityProperty));
-        cycle.Children.Add(fade);
-        return cycle;
-    }
     public void SetRunning(bool enabled, bool paused) { _enabled = enabled; _paused = paused; Update(); }
 
-    // Where the discrete cycle stands at a time, in seconds from its start.
-    private double DiscreteAt(double now) => ((double.IsNaN(_since) ? _elapsed.TotalSeconds : _elapsed.TotalSeconds + now - _since) % _period + _period) % _period;
-    // The first rest until the glide's end, then the last until the cycle's end, as the keyframes had it.
+    // Where the cycle stands at a time, in seconds from its start.
+    private double At(double now) => ((double.IsNaN(_since) ? _elapsed.TotalSeconds : _elapsed.TotalSeconds + now - _since) % _period + _period) % _period;
+
+    // Shows where the cycle stands and, while it runs, waits for its next turn. Without animations: the first rest until the
+    // glide's end, then the last until the cycle's end. With them: a rest shows its still values with no clock running, and
+    // just before it ends the next move (the glide, or the fade back to the first ring) starts on a clock of its own, which
+    // lets go at the next turn.
     private void Turn()
     {
-        double now = Eased.Now, at = DiscreteAt(now);
-        ((TranslateTransform)_strip.RenderTransform).X = at < _end ? 0 : -Travel;
-        if (double.IsNaN(_since)) { _turn?.Stop(); return; }
+        double now = Eased.Now, at = At(now);
+        var shift = (TranslateTransform)_strip.RenderTransform;
+        bool running = !double.IsNaN(_since);
+        double next;
+        if (_discrete)
+        {
+            shift.X = at < _cycle.GlideEnd ? 0 : -Travel;
+            next = at < _cycle.GlideEnd ? _cycle.GlideEnd - at : _period - at;
+        }
+        else
+        {
+            shift.BeginAnimation(TranslateTransform.XProperty, null); _strip.BeginAnimation(OpacityProperty, null);
+            shift.X = _cycle.Shift(at); _strip.Opacity = _cycle.Opacity(at);
+            var (moving, start, end) = _cycle.StretchAt(at);
+            next = end - at;
+            if (running && moving) Move(start, end, at - start);
+            else if (running && next <= Lead)
+            {
+                // The rest is all but over: the move is handed to the clock now, to start exactly when the rest ends.
+                (_, start, end) = _cycle.StretchAt(end);
+                Move(start, end, at - start);
+                next = end - at;
+            }
+            else if (running) next -= Lead;
+        }
+        if (!running) { _turn?.Stop(); return; }
         _turn ??= new PromptTimer(Dispatcher, Turn);
         // A hair past the turn; a timer that still lands short of it only waits out what is left.
-        _turn.Interval = TimeSpan.FromSeconds((at < _end ? _end - at : _period - at) + .005);
+        _turn.Interval = TimeSpan.FromSeconds(next + .005);
         _turn.Start();
     }
 
+    // One move of the cycle, from start to end, of which `into` seconds have gone (negative: it starts that much later). The
+    // glide eases from the first ring to the last; the reset fades out, jumps back to the first ring and fades in, so it never
+    // reads as a backwards scroll. Each holds its last value until the next turn takes it off.
+    private void Move(double start, double end, double into)
+    {
+        var shift = (TranslateTransform)_strip.RenderTransform;
+        var begin = TimeSpan.FromSeconds(-into);
+        if (start < _cycle.GlideEnd)
+        {
+            shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, -Travel, TimeSpan.FromSeconds(end - start)) { BeginTime = begin, EasingFunction = GlideEase });
+            return;
+        }
+        static KeyTime Key(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
+        var back = new DoubleAnimationUsingKeyFrames { BeginTime = begin, Duration = TimeSpan.FromSeconds(2 * Fade) };
+        back.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, Key(0)));
+        back.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, Key(Fade)));
+        var fade = new DoubleAnimationUsingKeyFrames { BeginTime = begin, Duration = TimeSpan.FromSeconds(2 * Fade) };
+        fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, Key(0)));
+        fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, Key(Fade)));
+        fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, Key(2 * Fade)));
+        shift.BeginAnimation(TranslateTransform.XProperty, back);
+        _strip.BeginAnimation(OpacityProperty, fade);
+    }
+
+    // Runs while it is loaded, visible, enabled and not paused; held, it still shows where the cycle stands (a carousel built
+    // in place of one that was past its glide), with no clock or timer left behind.
     private void Update()
     {
-        if (_discrete)
-        {
-            if (!Rotates) return;
-            bool run = IsLoaded && IsVisible && _enabled && !_paused;
-            double now = Eased.Now;
-            // Held, it still shows where the cycle stands (a carousel built in place of one that was past its glide).
-            if (run == !double.IsNaN(_since)) { if (!run) Turn(); return; }
-            if (run) _since = now;
-            else { _elapsed = TimeSpan.FromSeconds(DiscreteAt(now)); _since = double.NaN; }
-            Turn();
-            return;
-        }
-        if (_cycle is null) return;
-        if (!IsLoaded || !IsVisible)
-        {
-            // Release the clocks while detached; a later load resumes from the saved position.
-            if (_begun) { _elapsed = Elapsed; _cycle.Remove(this); _begun = false; }
-            return;
-        }
-        if (!_begun)
-        {
-            _cycle.Begin(this, true); _begun = true;
-            if (_elapsed > TimeSpan.Zero) _cycle.Seek(this, _elapsed, TimeSeekOrigin.BeginTime);
-            _cycle.Pause(this);
-        }
-        if (_enabled && !_paused) _cycle.Resume(this); else _cycle.Pause(this);
+        if (!Rotates) return;
+        bool run = IsLoaded && IsVisible && _enabled && !_paused;
+        double now = Eased.Now;
+        if (run == !double.IsNaN(_since)) { if (!run) Turn(); return; }
+        if (run) _since = now;
+        else { _elapsed = TimeSpan.FromSeconds(At(now)); _since = double.NaN; }
+        Turn();
     }
 }
