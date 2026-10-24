@@ -13,6 +13,7 @@ public sealed class MarqueeScroll
     private enum Phase { Start, Glide, End }
     private Phase _phase;
     private double _offset, _rested, _last = double.NaN;
+    private bool _waiting;
 
     // The line this place belongs to.
     public string Key { get; private set; } = "";
@@ -25,10 +26,18 @@ public sealed class MarqueeScroll
         return true;
     }
 
-    public void Restart() { _phase = Phase.Start; _offset = 0; _rested = 0; _last = double.NaN; }
+    public void Restart() { _phase = Phase.Start; _offset = 0; _rested = 0; _last = double.NaN; _waiting = false; }
 
     // Stops counting time; the next frame goes on from where the line stands.
-    public void Pause() => _last = double.NaN;
+    public void Pause() { _last = double.NaN; _waiting = false; }
+
+    // How much of the rest the line is in is still to come, in seconds; 0 while it glides.
+    public double RestLeft => _phase == Phase.Glide ? 0 : Math.Max(0, Hold - _rested);
+
+    // The view waits out the rest without frames (nothing moves in it) and comes back for its end: the first step after this
+    // may cover the rest that was left and one ordinary step more, so the line leaves its rest when it would have with every
+    // frame drawn. Time still counts while waiting, unlike Pause.
+    public void Wait() => _waiting = true;
 
     // How far the line is moved to the left, in DIPs, for a region it overflows by the given amount. At its end the line keeps its
     // end at the region's edge however the region changes; gliding, it never passes that.
@@ -39,8 +48,8 @@ public sealed class MarqueeScroll
     {
         if (!(overflow > 0) || !(speed > 0) || !double.IsFinite(time)) { Restart(); return 0; }
         if (!double.IsNaN(_last) && time <= _last) return At(overflow);
-        double step = double.IsNaN(_last) ? 0 : Math.Min(time - _last, MaxStep);
-        _last = time;
+        double step = double.IsNaN(_last) ? 0 : Math.Min(time - _last, MaxStep + (_waiting ? RestLeft : 0));
+        _last = time; _waiting = false;
         // The region changed since the last frame: a glide that already shows the line's end rests there.
         if (_phase == Phase.Glide && _offset >= overflow) { _phase = Phase.End; _rested = 0; }
         if (_phase == Phase.End) _offset = overflow;

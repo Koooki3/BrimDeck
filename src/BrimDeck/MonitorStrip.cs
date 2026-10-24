@@ -56,11 +56,21 @@ internal sealed class MonitorStrip : FrameworkElement
     // Every digit takes the advance of the widest, so figures of one length take one width.
     private double? _digit;
     private double Digit => _digit ??= Enumerable.Range(0, 10).Max(d => MonitorDraw.Text(d.ToString(System.Globalization.CultureInfo.InvariantCulture), _font, UI.Primary, 1).WidthIncludingTrailingWhitespace);
+    // A figure's width is its digits' and the rest's ("%", ".", a unit letter, "—"); the few rests there are are measured once.
+    // Asked for every reading on every sample, so it allocates nothing once they are known.
+    private readonly Dictionary<string, double> _restWidths = [];
     private double FigureText(string figure)
     {
-        int digits = figure.Count(char.IsAsciiDigit);
-        string rest = string.Concat(figure.Where(c => !char.IsAsciiDigit(c)));
-        return Math.Ceiling(digits * Digit + (rest.Length > 0 ? MonitorDraw.Text(rest, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace : 0));
+        int digits = 0, length = 0;
+        Span<char> rest = figure.Length <= 32 ? stackalloc char[figure.Length] : new char[figure.Length];
+        foreach (char c in figure) if (char.IsAsciiDigit(c)) digits++; else rest[length++] = c;
+        double restWidth = 0;
+        if (length > 0 && !_restWidths.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(rest[..length], out restWidth))
+        {
+            var text = new string(rest[..length]);
+            _restWidths[text] = restWidth = MonitorDraw.Text(text, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
+        }
+        return Math.Ceiling(digits * Digit + restWidth);
     }
     private static readonly string[] WidestRates = ["999K", "99.9M", "999M", "99.9G", "999G"];
 
@@ -141,7 +151,15 @@ internal sealed class MonitorStrip : FrameworkElement
         }
         return Math.Max(0, total - _gap * last);
     }
-    public double Presence(double now) => CompactMonitor.Order.Where(item => (Shown & item) != 0).Select(item => _presence.At(item, now)).DefaultIfEmpty(0).Max();
+    public double Presence(double now)
+    {
+        double most = 0;
+        foreach (var item in CompactMonitor.Order) if ((Shown & item) != 0) most = Math.Max(most, _presence.At(item, now));
+        return most;
+    }
+    // Whether the row admitted any reading or one is still fading out: otherwise nothing of the strip shows and it needs no
+    // readings (MainWindow.UpdateMonitorDemand).
+    public bool Showing(double now) => _admitted is not { } admitted || admitted != CompactMonitorItems.None || _presence.Any(now);
     public bool Moving(double now) => _presence.Moving(now);
 
     public void Update(MonitorSnapshot? snapshot)
@@ -165,7 +183,8 @@ internal sealed class MonitorStrip : FrameworkElement
     protected override void OnRender(DrawingContext drawing)
     {
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), center = _row / 2, now = Eased.Now;
-        double Snap(double value) => Math.Round(value * ppd) / ppd;
+        // Halves go up, as FxShapes.Snap rounds: banker's rounding put alternate readings on either side of a half pixel.
+        double Snap(double value) => Math.Round(value * ppd, MidpointRounding.AwayFromZero) / ppd;
         // Each reading takes its width and the gap after it in proportion to how present it is, so the row closes up smoothly.
         double total = DrawnWidth(now);
         if (total <= 0) return;
@@ -213,16 +232,21 @@ internal sealed class MonitorStrip : FrameworkElement
         }
     }
 
-    // The cores as thin columns, fastest kind first, in their colors; their tops show the load at a glance.
+    // The cores as thin columns, fastest kind first, in their colors; their tops show the load at a glance. With more cores than
+    // columns fit (CompactSpacing.CoreColumns), neighbours share a column, which shows the busiest of them.
     private void Columns(DrawingContext drawing, double x, double width, double center, CpuSample? cpu)
     {
         double height = Math.Round(14 * _scale), top = Math.Round(center - height / 2);
         if (cpu is null || cpu.Cores.Count == 0) { drawing.DrawRoundedRectangle(UI.Brush(UI.Fill), null, new Rect(x, top, width, height), 2, 2); return; }
-        int count = cpu.Cores.Count, groups = Math.Max(1, cpu.GroupCount);
-        double gap = Math.Max(.5, _scale), column = Math.Max(1, (width - (count - 1) * gap) / count);
+        int cores = cpu.Cores.Count, groups = Math.Max(1, cpu.GroupCount);
+        double gap = Math.Max(.5, _scale);
+        int count = CompactSpacing.CoreColumns(cores, width, gap);
+        double column = Math.Max(1, (width - (count - 1) * gap) / count);
         for (int i = 0; i < count; i++)
         {
-            var core = cpu.Cores[i];
+            var (first, end) = CompactSpacing.CoreRange(i, count, cores);
+            var core = cpu.Cores[first];
+            for (int j = first + 1; j < end; j++) if (cpu.Cores[j].Usage > core.Usage) core = cpu.Cores[j];
             double cx = x + i * (column + gap), fill = Math.Max(1.5, core.Usage * height);
             drawing.DrawRectangle(UI.Brush(UI.Fill), null, new Rect(cx, top, column, height));
             drawing.DrawRectangle(UI.Brush(_colors.Core(core.Group, groups)), null, new Rect(cx, top + height - fill, column, fill));
@@ -235,14 +259,13 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         double ring = Math.Max(1.2, _ring * .16), radius = _ring / 2 - ring / 2;
         var c = new Point(x + _ring / 2, center);
-        var track = new Pen(UI.Brush(UI.Track), ring); track.Freeze();
+        var track = _track ??= Frozen(new Pen(UI.Brush(UI.Track), ring));
         drawing.DrawEllipse(null, track, c, radius, radius);
         if (share is { } value) MonitorDraw.Arc(drawing, c, radius, ring, value, color);
         if (_brief)
         {
             double size = _ring * .5, scale = size / 16;
-            var pen = new Pen(UI.Brush(UI.Secondary), Math.Max(.9, _scale) / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
-            pen.Freeze();
+            var pen = _glyph ??= Frozen(new Pen(UI.Brush(UI.Secondary), Math.Max(.9, _scale) / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round });
             drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, c.X - size / 2, c.Y - size / 2));
             drawing.DrawGeometry(null, pen, MonitorDraw.Glyph(glyph));
             drawing.Pop();
@@ -257,8 +280,8 @@ internal sealed class MonitorStrip : FrameworkElement
     private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, double? rate, string color, double ppd)
     {
         double size = _arrow, scale = size / 16;
-        var pen = new Pen(UI.Brush(color), _stroke / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
-        pen.Freeze();
+        if (!_arrows.TryGetValue(color, out var pen))
+            _arrows[color] = pen = Frozen(new Pen(UI.Brush(color), _stroke / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round });
         drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, x - ArrowInkLeft, center - size / 2));
         drawing.DrawGeometry(null, pen, MonitorDraw.Glyph(glyph));
         drawing.Pop();
@@ -266,6 +289,11 @@ internal sealed class MonitorStrip : FrameworkElement
         var text = MonitorDraw.Text(q.Number + q.Unit, _font, UI.Primary, ppd);
         MonitorDraw.Baseline(drawing, text, x + Math.Ceiling(ArrowInk + _inner), Math.Round(center + _font * .36));
     }
+
+    // The pens depend only on the strip's size and colors, which a strip keeps; they are made on its first drawing.
+    private Pen? _track, _glyph;
+    private readonly Dictionary<string, Pen> _arrows = [];
+    private static Pen Frozen(Pen pen) { pen.Freeze(); return pen; }
 }
 
 // How present each reading of the collapsed row is, 0 to 1, easing as readings come and go, and how wide each is as its figure

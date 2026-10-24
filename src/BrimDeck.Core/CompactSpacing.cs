@@ -22,6 +22,20 @@ public static class CompactSpacing
 
     public readonly record struct Part(double Width, double Presence);
 
+    // How many core columns the readings draw in a width: one per core while each column gets at least minColumn DIPs with the
+    // gap after it; past that, neighbouring cores share a column, so a machine with many logical processors never draws past its
+    // reading into the next one.
+    public static int CoreColumns(int cores, double width, double gap, double minColumn = 1)
+    {
+        if (cores <= 0) return 0;
+        if (!(width > 0) || !(minColumn > 0) || !double.IsFinite(gap)) return 1;
+        return (int)Math.Clamp(Math.Floor((width + Math.Max(0, gap)) / (minColumn + Math.Max(0, gap)) + 1e-9), 1, cores);
+    }
+
+    // The cores a column stands for when columns share them out (CoreColumns): from First up to, not including, End, in order.
+    public static (int First, int End) CoreRange(int column, int columns, int cores)
+        => columns <= 0 ? (0, 0) : (column * cores / columns, (column + 1) * cores / columns);
+
     // Left and Room are in DIPs, one per part (both 0 for a part that is absent); Gap is the gap between two fully present parts.
     // Presence: how present each part is placed, its own presence or less for a part that gives up its room sooner.
     public sealed record Placement(double[] Left, double[] Room, double Gap, double TitleRoom, double[] Presence);

@@ -14,7 +14,7 @@ public partial class MainWindow
     private MonitorStrip? _compactStrip;
     // Which readings the collapsed row shows and how far each has come in or gone out, kept while the row is built again.
     private readonly StripPresence _stripPresence = new();
-    private bool _monitorShowing, _stripShowing, _monitorFade, _stripWanted;
+    private bool _monitorShowing, _stripShowing, _monitorFade;
 
     private void InitializeMonitor()
     {
@@ -26,8 +26,10 @@ public partial class MainWindow
     // Asked whenever the panel opens, closes, changes page or is hidden, and whenever the collapsed row is built.
     private void UpdateMonitorDemand()
     {
-        bool page = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
-        bool strip = !_expanded && (_compactStrip is not null || _stripWanted) && IsVisible && !IsSuppressed && _alert is null && EffectiveStyle != CompactStyle.Line;
+        // Nothing is read for a display that is off (MotionEnvironment.DisplayOff), nor for a row whose readings have all gone.
+        bool seen = IsVisible && !IsSuppressed && !MotionEnvironment.DisplayOff;
+        bool page = _expanded && IsMonitorPage && seen;
+        bool strip = !_expanded && _compactStrip?.Showing(Eased.Now) == true && seen && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!page)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -43,12 +45,17 @@ public partial class MainWindow
     }
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
-    private bool MonitorMotion => Settings.Animations && SystemParameters.ClientAreaAnimation;
+    private static bool MonitorMotion => Soft.Enabled;
 
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
-        Motion.Enabled = MonitorMotion;
-        if (!_expanded) { _compactStrip?.Update(snapshot); return; }
+        if (!_expanded)
+        {
+            _compactStrip?.Update(snapshot);
+            // The last reading has faded out of a row that stays as it is: the sampler may rest.
+            if (_stripShowing && _compactStrip?.Showing(Eased.Now) != true) UpdateMonitorDemand();
+            return;
+        }
         if (!IsMonitorPage || _monitorView is null) return;
         if (MonitorKey() != _monitorKey) { RenderMonitor(); return; }
         _monitorView.Update(snapshot, MonitorMotion);
@@ -79,7 +86,6 @@ public partial class MainWindow
         var header = PanelHeader.For(ToolbarFor(height), height < 170 ? 14 : 20);
         ApplyHeader(Settings.UsagePage ? header.WithControlsOf(CachedUsageHeader()) : header);
         MonitorContent.Margin = new Thickness(_header.Side, 0, _header.Side, MonitorBottom(height));
-        Motion.Enabled = MonitorMotion;
         var key = MonitorKey();
         bool fade = _monitorFade; _monitorFade = false;
         if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
