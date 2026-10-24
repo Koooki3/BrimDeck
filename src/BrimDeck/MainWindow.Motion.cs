@@ -43,6 +43,8 @@ public partial class MainWindow
     private void EnvironmentChanged()
     {
         if (_glassShown != PanelTheme.GlassShown && _themeGeneration >= 0) ApplySettings();
+        // Battery saver, a remote session: the blur under glass may come or go.
+        _glass?.Update();
         UpdateAmbient(); UpdateMusicTimer(); UpdateMonitorDemand();
     }
 

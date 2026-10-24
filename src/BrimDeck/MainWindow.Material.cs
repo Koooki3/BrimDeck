@@ -4,16 +4,20 @@ using System.Windows.Media;
 
 namespace BrimDeck;
 
-// What a theme's material asks of the island beyond its colors (PanelTheme.Dress): glass lets the desktop through, so its text
-// cannot use ClearType, and the copy that casts the shadow, lying under the island, would show through it; pixel art draws
-// its text unsmoothed and casts a stepped shadow.
+// What a theme's material asks of the island beyond its colors (PanelTheme.Dress): glass lets the desktop through, blurred where
+// Windows can (GlassBackdrop), so its text cannot use ClearType, and the copy that casts the shadow, lying under the island,
+// would show through it; pixel art draws its text unsmoothed and casts a stepped shadow.
 public partial class MainWindow
 {
     private (double X, double Y, Size Size, double Shoulder, CornerRadius Corners)? _shadowCutKey;
     private bool _shadowCut;
+    // The blur under glass (GlassBackdrop), made with the window; it stays out of the way for other themes.
+    private GlassBackdrop? _glass;
 
     private void ApplyMaterial()
     {
+        _glass ??= new GlassBackdrop(this, Island);
+        _glass.Update();
         bool glass = PanelTheme.GlassShown;
         var palette = PanelTheme.Current;
         // ClearType needs an opaque background under the text; over glass it washes the text out (PanelTheme.ClearType).
