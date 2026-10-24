@@ -162,7 +162,11 @@ internal sealed class ColumnGraph : FrameworkElement
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
 
-    private double LabelHeight => _labels ? Math.Ceiling(_label * 2.5) : 0;
+    // The room under the columns for their figures. With the figure line alone, the line's baseline sits on the graph's bottom
+    // edge, level with the foot of the graph beside it (the engines' names and the small cores); a second line needs room for both.
+    private double LabelHeight(double ppd) => !_labels ? 0
+        : _columns.Any(c => c.Sub is { Length: > 0 }) ? Math.Ceiling(_label * 2.5)
+        : 3 + Math.Ceiling(MonitorDraw.Text("3D", _label, UI.Primary, ppd, strong: true).Baseline);
 
     private (double[] X, double Width) Geometry(double width)
     {
@@ -179,7 +183,7 @@ internal sealed class ColumnGraph : FrameworkElement
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double w = ActualWidth, h = ActualHeight - LabelHeight, ppd = MonitorDraw.PixelsPerDip(this), now = Eased.Now;
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), h = ActualHeight - LabelHeight(ppd), now = Eased.Now;
         if (_button) drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
         var (xs, column) = Geometry(w);
         if (xs.Length == 0 || h <= 4) return;
