@@ -913,7 +913,7 @@ public sealed partial class SettingsWindow : Window
     // color shown by every part without closing the popup; "确定" or Enter applies it. A swatch applies its color at once, "默认"
     // restores the preset value, and a click outside closes the popup without changes.
     // choose receives the new color, or "" for the default; the caller closes the popup.
-    private Border ColorPicker(string current, bool isDefault, Action<string> choose)
+    private Border ColorPicker(string current, bool isDefault, Action<string> choose, string? resetLabel = null)
     {
         const double width = 224;
         static Color Parse(string value) => (Color)ColorConverter.ConvertFromString(value);
@@ -929,7 +929,7 @@ public sealed partial class SettingsWindow : Window
 
         var entry = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
         var ok = ActionButton(Loc.T("确定", "OK"), () => { }, primary: true); ok.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(ok, Dock.Right);
-        var reset = ActionButton(Loc.T("默认", "Default"), () => choose("")); reset.IsEnabled = !isDefault; reset.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(reset, Dock.Right);
+        var reset = ActionButton(resetLabel ?? Loc.T("默认", "Default"), () => choose("")); reset.IsEnabled = !isDefault; reset.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(reset, Dock.Right);
         entry.Children.Add(ok); entry.Children.Add(reset);
         var dot = new Ellipse { Width = 20, Height = 20, Stroke = UI.Brush(_palette.Border), StrokeThickness = 1, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         DockPanel.SetDock(dot, Dock.Left); entry.Children.Add(dot);
