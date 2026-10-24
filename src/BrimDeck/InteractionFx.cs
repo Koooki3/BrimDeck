@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -13,7 +14,7 @@ namespace BrimDeck;
 // where keyboard focus lands. Each theme has its own language (InteractionFx.Draw.cs). Everything is drawn on the control's
 // visible shape (FxMark), never around its layout box and never following the pointer, on one layer above the content that
 // takes no input: thin lines and brackets above the content cover nothing that matters, and the tints are faint enough that
-// text shows through. Opaque cards, which hid the effects of a layer under the content, no longer can. Durations come from
+// text shows through. Durations come from
 // the animation length in settings and the theme's pace; with animations off (BrimDeck's or Windows'), or in high contrast,
 // nothing is drawn. The settings window has its own hover and focus styles and gets none of this.
 internal static class InteractionFx
@@ -69,14 +70,20 @@ internal static class InteractionFx
         Track(window, surface);
     }
 
-    // Keeps the layer inside a face that changes height (the picker's message opening).
+    // Keeps the layer inside a face that changes height (the picker's message opening). ui-8: the face slides as the pop-up
+    // enters and leaves (Soft.Enter and Leave move it on its own TranslateTransform); the clip is laid out without that move
+    // and takes the same transform, so it follows the slide on every frame instead of only when the face changes size.
     private static void ClipTo(UIElement layer, Border face, UIElement adorned)
     {
-        var clip = new RectangleGeometry { RadiusX = face.CornerRadius.TopLeft, RadiusY = face.CornerRadius.TopLeft };
+        // Soft.Enter and Leave reuse a TranslateTransform that is there; only an identity one is replaced.
+        if (face.RenderTransform is not TranslateTransform { IsFrozen: false } shift) face.RenderTransform = shift = new TranslateTransform();
+        var clip = new RectangleGeometry { RadiusX = face.CornerRadius.TopLeft, RadiusY = face.CornerRadius.TopLeft, Transform = shift };
         void Fit()
         {
             if (PresentationSource.FromVisual(face) is null || !adorned.IsAncestorOf(face)) return;
-            clip.Rect = face.TransformToAncestor(adorned).TransformBounds(new Rect(face.RenderSize));
+            var bounds = face.TransformToAncestor(adorned).TransformBounds(new Rect(face.RenderSize));
+            bounds.Offset(-shift.X, -shift.Y);
+            clip.Rect = bounds;
         }
         layer.Clip = clip;
         Fit();
@@ -85,6 +92,9 @@ internal static class InteractionFx
 
     // A notice leaves or hands over to the panel: what it showed ends at once rather than playing on where its buttons were.
     public static void Clear(Window window) => (window.GetValue(SurfaceProperty) as FxSurface)?.Reset();
+
+    // Whether the window's layer marks the control under the pointer now (FxSurface.AnswersHover).
+    public static bool AnswersHover(Window window) => window.GetValue(SurfaceProperty) is FxSurface { AnswersHover: true };
 
     private static void Track(Window window, FxSurface surface)
     {
@@ -143,15 +153,10 @@ internal sealed partial class FxSurface : FrameworkElement
     private DependencyObject? _lastSource;
     private FrameworkElement? _lastTarget;
 
-    public event Action? Detached;
+    // Pressed by the keyboard (Space or Enter on a focused control) rather than by the mouse button.
+    private bool _keyPress;
 
-    // For previews and tests: a clock, a palette and the "system" choice instead of the app's.
-    internal Func<double> Clock { get; set; } = () => Eased.Now;
-    internal Func<PanelPalette>? Palette { get; set; }
-    internal bool? SystemTheme { get; set; }
-    internal int? AnimationDuration { get; set; }
-    internal Func<MotionConditions>? Conditions { get; set; }
-    internal bool Hooked => _hooked || _watchingLayout;
+    public event Action? Detached;
 
     public FxSurface(UIElement input, UIElement scope, Func<bool> interactive)
     {
@@ -162,6 +167,8 @@ internal sealed partial class FxSurface : FrameworkElement
         input.PreviewMouseLeftButtonDown += Pressed;
         input.PreviewMouseLeftButtonUp += Lifted;
         input.MouseLeave += Left;
+        input.PreviewKeyDown += KeyWentDown;
+        input.PreviewKeyUp += KeyWentUp;
         input.AddHandler(Keyboard.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler(Focused), true);
     }
 
@@ -177,6 +184,8 @@ internal sealed partial class FxSurface : FrameworkElement
         _input.PreviewMouseLeftButtonDown -= Pressed;
         _input.PreviewMouseLeftButtonUp -= Lifted;
         _input.MouseLeave -= Left;
+        _input.PreviewKeyDown -= KeyWentDown;
+        _input.PreviewKeyUp -= KeyWentUp;
         _input.RemoveHandler(Keyboard.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler(Focused));
         Reset();
         Detached?.Invoke();
@@ -184,34 +193,37 @@ internal sealed partial class FxSurface : FrameworkElement
 
     private static DeckSettings? Settings => (Application.Current as App)?.Settings;
     // Motion allowed at all (BrimDeck's and Windows' animation settings, high contrast), and the window answering now.
-    private bool Allowed => !_detached && MotionGate.Interaction(Conditions?.Invoke() ?? MotionEnvironment.Conditions(), _motion);
+    private bool Allowed => !_detached && MotionGate.Interaction(Preview?.Conditions?.Invoke() ?? MotionEnvironment.Conditions(), _motion);
     private bool Active => Allowed && _interactive();
-    internal Rect DrawnBounds => VisualTreeHelper.GetContentBounds(_visual);
-    internal Rect HoverBox => _hover?.Box ?? Rect.Empty;
-    // For previews: the pointer left or came back onto the pressed control while it is held.
-    internal void ArmPress(bool inside) { if (_pressed is not null) { _press.Arm(Clock(), inside, _timing, _motion.Steps); Wake(); } }
+    private double Clock() => Preview?.Clock() ?? Eased.Now;
+    private int AnimationLength => Preview?.AnimationDuration ?? Settings?.AnimationDuration ?? 360;
+
+    // Whether this layer marks the control under the pointer now: a window that has its own hover look shows it only when not
+    // (NoticeWindow.TextButton), so a control never wears two.
+    internal bool AnswersHover
+    {
+        get { EnsureDressed(); return Allowed && _motion.Hover != HoverFx.None && _motion.HoverStrength > 0; }
+    }
 
     // ----- Theme -----
 
     private void EnsureDressed()
     {
         // "System" and the theme it stands for share a palette, so the choice itself is part of what the layer was dressed for.
-        bool system = SystemTheme ?? PanelThemes.NormalizeId(Settings?.PanelTheme) == PanelThemes.SystemId;
-        // The animation length can change in settings without a new theme.
-        _timing = MotionTiming.From(AnimationDuration ?? Settings?.AnimationDuration ?? 360, _motion.Pace);
-        int generation = Palette is null ? PanelTheme.Generation : _generation < 0 ? 0 : _generation;
-        if (_generation == generation && system == _dressedSystem && _generation >= 0) return;
-        bool restyled = _generation >= 0;
-        _generation = generation; _dressedSystem = system;
-        if (restyled) Reset();
-        var palette = Palette?.Invoke() ?? PanelTheme.Current;
-        _motion = system ? palette.Motion.ForSystem() : palette.Motion;
-        _timing = MotionTiming.From(AnimationDuration ?? Settings?.AnimationDuration ?? 360, _motion.Pace);
-        Dress(palette, system);
+        bool system = Preview?.SystemTheme ?? PanelThemes.NormalizeId(Settings?.PanelTheme) == PanelThemes.SystemId;
+        int generation = Preview?.Palette is null ? PanelTheme.Generation : _generation < 0 ? 0 : _generation;
+        if (_generation != generation || system != _dressedSystem || _generation < 0)
+        {
+            bool restyled = _generation >= 0;
+            _generation = generation; _dressedSystem = system;
+            if (restyled) Reset();
+            var palette = Preview?.Palette?.Invoke() ?? PanelTheme.Current;
+            _motion = system ? palette.Motion.ForSystem() : palette.Motion;
+            Dress(palette, system);
+        }
+        // The animation length can change in settings without a new theme; the theme's pace with one. Worked out once.
+        _timing = MotionTiming.From(AnimationLength, _motion.Pace);
     }
-
-    // A new palette for a preview: dressed again before the next frame.
-    internal void Restyle() { _generation = -1; Reset(); }
 
     // ----- Pointer -----
 
@@ -227,6 +239,25 @@ internal sealed partial class FxSurface : FrameworkElement
 
     private void Left(object sender, MouseEventArgs e) => HoverOn(null);
 
+    // ui-10: a control activated from the keyboard answers as a click does: Space presses while it is held, Enter (which
+    // clicks as it goes down) presses and completes at once.
+    private void KeyWentDown(object sender, KeyEventArgs e)
+    {
+        if (_detached || e.IsRepeat || e.Key is not (Key.Space or Key.Enter) || _press.Down) return;
+        EnsureDressed();
+        if (!Active || TargetOf(Keyboard.FocusedElement as DependencyObject) is not { } target || !IsWithin(target)) return;
+        _keyPress = true;
+        PressOn(target);
+        // A theme without a press leaves nothing held.
+        if (!_press.Down) _keyPress = false;
+        else if (e.Key == Key.Enter) LiftOff(true);
+    }
+
+    private void KeyWentUp(object sender, KeyEventArgs e)
+    {
+        if (_keyPress && e.Key == Key.Space) LiftOff(true);
+    }
+
     private void Pressed(object sender, MouseButtonEventArgs e)
     {
         if (_detached) return;
@@ -237,7 +268,7 @@ internal sealed partial class FxSurface : FrameworkElement
 
     private void Lifted(object sender, MouseButtonEventArgs e)
     {
-        if (_pressed is null || !_press.Down) return;
+        if (_pressed is null || !_press.Down || _keyPress) return;
         LiftOff(Inside(_pressed.Control, e.GetPosition(_pressed.Control)));
     }
 
@@ -344,15 +375,17 @@ internal sealed partial class FxSurface : FrameworkElement
     {
         if (_pressed is null || !_press.Down) return;
         double now = Clock();
+        _keyPress = false;
         Unwatch();
         bool scan = inside && _motion.Press == PressFx.Lock && _flashes.TryTake(now);
         _press.Release(now, inside, scan, _timing, _motion.Steps);
-        if (_press.Committed && _motion.Particles != ParticleFx.None && _motion.Trail > 0 && _pressed.Valid) Burst(_pressed, now);
+        if (_press.Committed && _motion.Particles != ParticleFx.None && _motion.ParticleStrength > 0 && _pressed.Valid) Burst(_pressed, now);
         Wake();
     }
 
     private void CaptureLost(object sender, MouseEventArgs e)
     {
+        if (_keyPress) return;
         // The button lets go of the mouse as it is released too; that release has been seen already (Lifted runs first).
         if (_press.Down) LiftOff(Mouse.LeftButton == MouseButtonState.Pressed ? false : _pressed is { } p && p.Control.IsMouseOver);
     }
@@ -384,22 +417,17 @@ internal sealed partial class FxSurface : FrameworkElement
     private DpiScale Dpi => VisualTreeHelper.GetDpi(this);
     private static DipRect Dip(Rect rect) => new(rect.X, rect.Y, rect.Width, rect.Height);
 
+    // Frames come from the panel's shared clock (Motion, in MonitorDraw.cs), paced to the display as the monitor's are (q-P1.2);
+    // the step lets go once the layer sleeps.
     private void Wake()
     {
         _stillFrames = 0;
         if (_hooked || _detached) return;
         _hooked = true;
-        CompositionTarget.Rendering += Rendering;
+        Motion.Start(this, _ => { if (!_hooked) return false; Frame(Clock()); return _hooked; });
     }
 
-    private void Sleep()
-    {
-        if (!_hooked) return;
-        _hooked = false;
-        CompositionTarget.Rendering -= Rendering;
-    }
-
-    private void Rendering(object? sender, EventArgs e) => Frame(Clock());
+    private void Sleep() => _hooked = false;
 
     // One frame: the theme is checked, every mark is placed anew, the state is drawn, and the frame callback stops once
     // nothing changes.
@@ -410,6 +438,9 @@ internal sealed partial class FxSurface : FrameworkElement
         // Animations turned off or high contrast: nothing decorative, at once. The panel closing: what is shown fades with it.
         if (!Allowed) { Reset(); return; }
         if (!_interactive() && (_hover is not null || _press.Down)) Release();
+        // ui-4: a control that does not capture the mouse (a tab, a list item) never hears the button come up off the window,
+        // which left the press held and the frames running; the button's own state lets it go.
+        if (_press.Down && !_keyPress && Preview is null && !LeftButtonDown()) LiftOff(false);
         var dpi = Dpi;
         _hover?.Update(_scope, dpi);
         _leaving?.Update(_scope, dpi);
@@ -457,7 +488,7 @@ internal sealed partial class FxSurface : FrameworkElement
     {
         Unwatch();
         _hover = _leaving = _pressed = _focus = null;
-        _press.Clear(); _flashes.Clear(); _slice.Visual = null;
+        _press.Clear(); _flashes.Clear(); _slice.Visual = null; _keyPress = false;
         _lastSource = null; _lastTarget = null;
         ClearParticles();
         Sleep(); WatchLayout(false);
@@ -492,4 +523,9 @@ internal sealed partial class FxSurface : FrameworkElement
         for (var node = element; node is not null; node = Up(node)) if (ReferenceEquals(node, _scope)) return true;
         return false;
     }
+
+    // The physical button behind the primary (left) one, read now: Mouse.LeftButton follows this thread's messages, which an
+    // up over another window never reaches.
+    private static bool LeftButtonDown() => (GetAsyncKeyState(SystemParameters.SwapButtons ? 0x02 : 0x01) & 0x8000) != 0;
+    [DllImport("user32")] private static extern short GetAsyncKeyState(int key);
 }

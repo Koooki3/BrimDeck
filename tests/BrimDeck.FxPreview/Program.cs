@@ -170,8 +170,11 @@ internal static class Program
 
         var fx = new FxSurface(island, content, () => true)
         {
-            Clock = () => _now, Palette = () => palette, SystemTheme = system, AnimationDuration = 360,
-            Conditions = () => new MotionConditions(true, true, false, true, false, false, false, false, true)
+            Preview = new()
+            {
+                Clock = () => _now, Palette = () => palette, SystemTheme = system, AnimationDuration = 360,
+                Conditions = () => new MotionConditions(true, true, false, true, false, false, false, false, true)
+            }
         };
         content.Children.Add(fx);
 
@@ -260,13 +263,13 @@ internal static class Program
         Check("A disabled control gets no mark", fx.DrawnBounds.IsEmpty);
         fx.HoverOn(scene.Page1); _now += 1; fx.Frame(_now);
         Check("An enabled control gets a mark", !fx.DrawnBounds.IsEmpty);
-        fx.Conditions = () => new MotionConditions(false, true, false, true, false, false, false, false, true);
+        fx.Preview!.Conditions = () => new MotionConditions(false, true, false, true, false, false, false, false, true);
         _now += .016; fx.Frame(_now);
         Check("Animations off: nothing is drawn and no frame callback stays", fx.DrawnBounds.IsEmpty && !fx.Hooked);
-        fx.Conditions = () => new MotionConditions(true, true, true, true, false, false, false, false, true);
+        fx.Preview!.Conditions = () => new MotionConditions(true, true, true, true, false, false, false, false, true);
         fx.HoverOn(scene.Page1); fx.PressOn(scene.Page1); _now += .016; fx.Frame(_now);
         Check("High contrast: nothing is drawn", fx.DrawnBounds.IsEmpty && !fx.Hooked);
-        fx.Conditions = () => new MotionConditions(true, true, false, true, false, false, false, false, true);
+        fx.Preview!.Conditions = () => new MotionConditions(true, true, false, true, false, false, false, false, true);
 
         // Released outside, a press backs out without its flourish.
         fx.HoverOn(scene.Page1); fx.PressOn(scene.Page1); _now += .2; fx.Frame(_now);
@@ -496,8 +499,8 @@ internal static class Program
             (.15, "1.0", s => { s.Opening.ScaleX = s.Opening.ScaleY = 1; s.Expanded.Opacity = 1; s.Island.UpdateLayout(); }), (.4, "停留", null)]));
         cases.Add(Run(scene, Toolbar, [
             (0, "按下", s => { Hover(s, s.Page2); Down(s, s.Page2); }), (.1, "按住", null),
-            (.12, "切换主题", s => { s.Fx.Palette = () => PanelThemes.Resolve(PanelThemes.BuiltIn(id.StartsWith("dracula") ? "dark" : "dracula")!); s.Fx.Restyle(); }), (.15, "之后", null),
-            (.2, "恢复", s => { s.Fx.Palette = () => s.Palette; s.Fx.Restyle(); })]));
+            (.12, "切换主题", s => { s.Fx.Preview!.Palette = () => PanelThemes.Resolve(PanelThemes.BuiltIn(id.StartsWith("dracula") ? "dark" : "dracula")!); s.Fx.Restyle(); }), (.15, "之后", null),
+            (.2, "恢复", s => { s.Fx.Preview!.Palette = () => s.Palette; s.Fx.Restyle(); })]));
         cases.Add(Run(scene, CardArea, [(0, "键盘焦点", s => s.Fx.FocusOn(s.CardButton)), (timing.Focus / 4000.0, "1/4", null), (timing.Focus / 2000.0, "1/2", null), (timing.Focus / 1000.0 * .8, "4/5", null)]));
         cases.Add(Run(scene, NoticeArea, [(0, "禁用控件悬停", s => Hover(s, s.Disabled)), (hi, "无标记", null), (hi + .1, "按下", s => Down(s, s.Disabled)), (hi + .2, "无反应", null)]));
         Save(cases, palette, id + " · 其他情形", System.IO.Path.Combine(folder, id + "-cases.png"));

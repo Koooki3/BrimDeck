@@ -176,8 +176,13 @@ internal sealed class FxMark
         {
             var area = Through(_viewports[i]!, scope);
             if (area.IsEmpty) return;
-            clip = clip.IsEmpty ? area : Rect.Intersect(clip, area);
-            if (clip.IsEmpty) return;
+            if (!clip.IsEmpty)
+            {
+                var both = FxShapes.Clip(new DipRect(clip.X, clip.Y, clip.Width, clip.Height), new DipRect(area.X, area.Y, area.Width, area.Height));
+                if (both.Width <= 0) return;
+                area = new Rect(both.X, both.Y, both.Width, both.Height);
+            }
+            clip = area;
         }
         var snapped = FxShapes.Snap(new DipRect(box.X, box.Y, box.Width, box.Height), dpi.DpiScaleX, dpi.DpiScaleY);
         Box = new Rect(snapped.X, snapped.Y, snapped.Width, snapped.Height);

@@ -14,9 +14,9 @@ namespace BrimDeck;
 // pill glides, showing the day under them in the accent's own text color as they pass; the range band eases in and out; the
 // active field's outline glides between the fields; a changed date comes up from faint; a month change slides the grid and its
 // header the way of travel, the old month leaving before the new one arrives; the validation message opens and closes on the
-// shared curve, and the apply and month buttons ease between available and not. Every value is driven from one frame callback
-// that runs only while something moves, with durations from the animation length in settings; with animations off
-// (BrimDeck's or Windows') everything is set at once.
+// shared curve, and the apply and month buttons ease between available and not. Every value is driven from one step on the
+// panel's shared frame clock (Motion) that runs only while something moves, with durations from the animation length in
+// settings; with animations off (BrimDeck's or Windows') everything is set at once.
 internal sealed class ModelDatePicker : Border
 {
     private const double Inner = 228, FieldGap = 6, CellHeight = 24, Radius = 8, MessageGap = 5, MessageRise = 4, Faint = .3, Unavailable = .4;
@@ -26,10 +26,8 @@ internal sealed class ModelDatePicker : Border
     private bool _editingEnd;
     private readonly PanelPalette _palette;
 
-    // For previews: a clock, whether anything moves, and the animation length, instead of the app's.
-    internal Func<double> Clock { get; set; } = () => Eased.Now;
-    internal Func<bool> Motion { get; set; } = () => Soft.Enabled;
-    internal int? AnimationDuration { get; set; }
+    // For previews (tests/BrimDeck.FxPreview): a clock, whether anything moves, and the animation length, instead of the app's.
+    internal PreviewHooks? Preview { get; set; }
 
     internal event Action<UsageDateRange>? Applied;
     internal event Action? Cancelled;
@@ -40,7 +38,7 @@ internal sealed class ModelDatePicker : Border
     private readonly TextBlock[] _fieldValues = new TextBlock[2];
     private readonly Border _fieldMark;
     private readonly TranslateTransform _fieldShift = new();
-    private readonly Button _previous, _next, _cancel, _apply;
+    private readonly Button _previous, _next, _apply;
     private readonly TextBlock _monthText, _monthLeaving;
     private readonly TranslateTransform _monthShift = new(), _monthLeavingShift = new();
     private readonly Grid _calendar = new() { Height = DatePickerMotion.Rows * CellHeight, ClipToBounds = true };
@@ -193,8 +191,8 @@ internal sealed class ModelDatePicker : Border
         _body.Children.Add(_messageSlot);
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 7, 0, 0) };
-        _cancel = Control(Text(Loc.T("取消", "Cancel")), Loc.T("取消日期筛选", "Cancel the date filter"), () => Cancelled?.Invoke());
-        _cancel.Padding = new Thickness(10, 1, 10, 1); _cancel.Margin = new Thickness(0, 0, 6, 0); actions.Children.Add(_cancel);
+        var cancel = Control(Text(Loc.T("取消", "Cancel")), Loc.T("取消日期筛选", "Cancel the date filter"), () => Cancelled?.Invoke());
+        cancel.Padding = new Thickness(10, 1, 10, 1); cancel.Margin = new Thickness(0, 0, 6, 0); actions.Children.Add(cancel);
         _apply = Control(Text(Loc.T("应用", "Apply")), Loc.T("应用日期筛选", "Apply the date filter"), ApplySelection);
         _apply.Padding = new Thickness(10, 1, 10, 1); _apply.Background = Brush("accent"); _apply.Foreground = Brush("onAccent");
         // The focus ring is drawn in the accent, so on an accent button it stands outside it.
@@ -207,8 +205,9 @@ internal sealed class ModelDatePicker : Border
         Unloaded += (_, _) => Sleep();
     }
 
-    private DatePickerTiming Timing => DatePickerTiming.From(AnimationDuration ?? (Application.Current as App)?.Settings.AnimationDuration ?? 360);
-    private bool Moves => Motion();
+    private DatePickerTiming Timing => DatePickerTiming.From(Preview?.AnimationDuration ?? (Application.Current as App)?.Settings.AnimationDuration ?? 360);
+    private bool Moves => Preview?.Moves?.Invoke() ?? Soft.Enabled;
+    private double Clock() => Preview?.Clock() ?? Eased.Now;
     private string Hex(string token) => _palette[token].ToString();
     private Brush Brush(string token) => UI.Brush(Hex(token));
 
@@ -428,22 +427,17 @@ internal sealed class ModelDatePicker : Border
 
     // ----- Frames -----
 
+    // On the panel's shared frame clock (Motion, in MonitorDraw.cs), paced to the display as the monitor's moves are (q-P1.2);
+    // the step lets go once the picker sleeps.
     private void Wake()
     {
         _stillFrames = 0;
         if (_hooked || !Moves) return;
         _hooked = true;
-        CompositionTarget.Rendering += Rendering;
+        Motion.Start(this, _ => { if (!_hooked) return false; Frame(Clock()); return _hooked; });
     }
 
-    private void Sleep()
-    {
-        if (!_hooked) return;
-        _hooked = false;
-        CompositionTarget.Rendering -= Rendering;
-    }
-
-    private void Rendering(object? sender, EventArgs e) => Frame(Clock());
+    private void Sleep() => _hooked = false;
 
     // One frame: every value is written where it is now, and the frame callback stops once nothing moves.
     internal void Frame(double now)
@@ -501,12 +495,4 @@ internal sealed class ModelDatePicker : Border
         _leavingShift.X = _monthLeavingShift.X = _pageShift.X = _monthShift.X = 0;
         _page.Opacity = _monthText.Opacity = 1;
     }
-
-    // For previews: the controls a pointer would be on.
-    internal Button DayButton(DateTime day) => _days[Math.Max(0, DatePickerMotion.CellOf(_month, day))];
-    internal Button Cell(int index) => _days[index];
-    internal Button ApplyButton => _apply;
-    internal Button CancelButton => _cancel;
-    internal Button PreviousButton => _previous;
-    internal Button Field(bool end) => _fields[end ? 1 : 0];
 }

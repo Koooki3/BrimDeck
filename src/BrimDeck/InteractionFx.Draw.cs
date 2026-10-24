@@ -18,7 +18,7 @@ namespace BrimDeck;
 // draws.
 internal sealed partial class FxSurface
 {
-    private Brush _main = Brushes.Transparent, _second = Brushes.Transparent, _high = Brushes.Transparent, _light = Brushes.White;
+    private Brush _main = Brushes.Transparent, _second = Brushes.Transparent, _high = Brushes.Transparent;
     private Brush _liftBrush = Brushes.Transparent, _revealEdgeBrush = Brushes.Transparent, _sheen = Brushes.Transparent, _glow = Brushes.Transparent, _ember = Brushes.Transparent, _glint = Brushes.Transparent;
     private Pen _liftLine = new(), _mainLine = new(), _mainBold = new(), _secondLine = new(), _secondBold = new(), _highLine = new(), _highBold = new(), _revealEdge = new(), _sheenEdge = new(), _lightLine = new();
     private double _line = 1, _bold = 1.5, _dressedDpi;
@@ -26,17 +26,15 @@ internal sealed partial class FxSurface
     // The glitch slice: the pressed control itself, a thin band of it drawn a few pixels aside for a moment.
     private readonly VisualBrush _slice = new() { ViewboxUnits = BrushMappingMode.Absolute, ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
     private Rect _sliceBand = Rect.Empty;
-    private PanelPalette? _dressedPalette;
 
     private void Dress(PanelPalette palette, bool system)
     {
-        _dressedPalette = palette;
         var accent = _motion.Color == ThemeMotion.SystemAccent || _motion.Secondary == ThemeMotion.SystemAccent || _motion.Highlight == ThemeMotion.SystemAccent ? WindowsAccent() : null;
         Color main = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, _motion.Color, accent));
         Color second = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, _motion.Secondary, accent));
         Color high = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, _motion.Highlight, accent));
         _darkSurface = palette.IsDark;
-        _main = Solid(main); _second = Solid(second); _high = Solid(high); _light = Solid(palette.IsDark ? Color.FromArgb(255, 255, 255, 255) : Colors.White);
+        _main = Solid(main); _second = Solid(second); _high = Solid(high);
         _revealEdgeBrush = Vertical(main, 1, .3);
         _sheen = Diagonal(main, second);
         _liftBrush = Vertical(second, 0, 1);
@@ -59,9 +57,12 @@ internal sealed partial class FxSurface
         _highLine = Pen(_high, _line); _highBold = Pen(_high, _bold, PenLineCap.Square);
         _revealEdge = Pen(_revealEdgeBrush, _line);
         _sheenEdge = Pen(_sheen, _line);
-        _lightLine = Pen(_light, _line);
+        // The light top edge of a raised card (lift), on light themes only.
+        _lightLine = Pen(Brushes.White, _line);
         // A shadow falls below: its edge fades out toward the top, so it never reads as an outline.
         _liftLine = Pen(_liftBrush, _line);
+        // ui-5: the focus ring's pen is made on first use; a new scale makes it again with the new line width.
+        _pen2 = null;
     }
 
     // The Windows accent color, for the "system" theme; null where Windows does not say.
