@@ -78,7 +78,7 @@ internal static class Program
     private static async Task<NoticeMessage?> SendAsync(NoticeMessage message)
     {
         message.EventId ??= Guid.NewGuid().ToString("N");
-        message.CreatedAt ??= DateTimeOffset.UtcNow;
+        NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
         message.Distro ??= Environment.GetEnvironmentVariable("WSL_DISTRO_NAME");
         return await ViaSocketAsync(message) ?? await ViaHelperAsync(message);
     }

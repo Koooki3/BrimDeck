@@ -40,6 +40,9 @@ internal sealed class AgentHost
 
     private async Task SendAsync(NoticeMessage message)
     {
+        // A notice's age by this distribution's clock, the same one its creation time was read from; BrimDeck cannot compare
+        // that time with Windows' clock.
+        if (message.Type == NoticeTypes.Notify) NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
         await _outputLock.WaitAsync();
         try { await NoticeFrames.WriteAsync(_output, message); }
         catch (IOException) { _stop.Cancel(); }

@@ -37,7 +37,7 @@ public static class NoticeIntake
         Origin = origin, AppKey = appKey, AppName = appName, AppId = message.AppId ?? "", Distro = distro, InstanceKey = instance,
         ReplaceKey = Blank(message.ReplaceId), EventId = Blank(message.EventId),
         Title = message.Title ?? "", Body = message.Body ?? "", IconRef = IconRef(message.Icon, origin, distro),
-        CreatedAt = message.CreatedAt, Category = NoticeKeys.Category(message.Category), PriorityHint = NoticeKeys.Priority(message.Priority),
+        CreatedAt = message.CreatedAt, Age = message.AgeMs is >= 0 and var age ? TimeSpan.FromMilliseconds(age) : null, Category = NoticeKeys.Category(message.Category), PriorityHint = NoticeKeys.Priority(message.Priority),
         Progress = message.Progress, Capabilities = capabilities,
         Actions = (capabilities & NoticeCapabilities.Actions) != 0 && message.Actions is { } actions ? actions.Select(a => new NoticeAction(a.Key, a.Label)).ToList() : [],
         ExitCode = message.ExitCode, DurationMs = message.DurationMs, Command = Blank(message.Command),

@@ -10,6 +10,7 @@ internal static class NoticeCoreTests
     public static void Run(string root, Action<string, bool> check)
     {
         Hub(check);
+        LateAndRestart(root, check);
         Coordinator(check);
         History(root, check);
         Geometry(check);
@@ -38,7 +39,9 @@ internal static class NoticeCoreTests
         var retry = hub.Receive(Input("c", eventId: "e1"), T0.AddSeconds(1));
         check("A retry with the same event id is a duplicate", retry.Receipt == NoticeReceipt.Duplicate && hub.Notices.Count == 2);
         check("The same event id from another application is not a duplicate", hub.Receive(Input("d", app: "cli:x", eventId: "e1"), T0).Receipt == NoticeReceipt.Accepted);
-        check("Event ids are forgotten after ten minutes", hub.Receive(Input("e", eventId: "e1"), T0.AddMinutes(11)).Receipt == NoticeReceipt.Accepted);
+        check("A kept notice still recognizes its event id after ten minutes", hub.Receive(Input("e", eventId: "e1"), T0.AddMinutes(11)).Receipt == NoticeReceipt.Duplicate);
+        hub.Delete(hub.FindInstance("b")!.Id);
+        check("Event ids are forgotten after ten minutes once no kept notice has them", hub.Receive(Input("e", eventId: "e1"), T0.AddMinutes(11)).Receipt == NoticeReceipt.Accepted);
 
         var task = hub.Receive(Input("t1", app: "cli:make", title: "Build", replace: "build", progress: .1, category: NoticeCategory.Task), T0);
         var progress = hub.Receive(Input("t2", app: "cli:make", title: "Build", replace: "build", progress: .6, category: NoticeCategory.Task), T0.AddSeconds(2));
@@ -96,6 +99,66 @@ internal static class NoticeCoreTests
         var bodyOnly = NoticeHub.Words(Input("b", title: "", body: "First line\nSecond"));
         check("A body without title gives its first line as the title", bodyOnly.Title == "First line" && bodyOnly.Body == "Second");
         Loc.Use(language);
+    }
+
+    // A Claude Code hook in WSL: brim-notify with one replace key per session, through the distribution's agent.
+    private static NoticeMessage Hook(string eventId, string body, DateTimeOffset created, long? ageMs, string category = "success") => new()
+    {
+        Origin = "cli", AppName = "Claude Code", Title = "Claude Code · demo", Body = body, Category = category, ReplaceId = "claude-code:s1",
+        EventId = eventId, CreatedAt = created, AgeMs = ageMs
+    };
+
+    // BrimDeck restarted: the saved notices come back, then the WSL hook keeps sending, early or late.
+    private static void LateAndRestart(string root, Action<string, bool> check)
+    {
+        var before = new NoticeHub();
+        var first = before.Receive(NoticeIntake.FromAgent(Hook("ev1", "done", T0, 0), "Ubuntu", false), T0);
+        check("A fresh hook notice is shown and keeps its event id", first.Present && first.Notice!.EventId == "ev1");
+        var history = new NoticeHistory(Path.Combine(root, "notices-restart"), new NoticeHistory.PlainProtector());
+        history.Save(before.Notices, before.KnownApps);
+        history.Load(out var saved, out var apps);
+        check("A notice's event id is saved with it", saved.Single().EventId == "ev1");
+        history.Delete();
+
+        var now = T0.AddMinutes(38);
+        var hub = new NoticeHub();
+        hub.Load(saved, apps, now);
+        hub.MarkAllViewed();
+        var again = hub.Receive(NoticeIntake.FromAgent(Hook("ev1", "done", T0, 0), "Ubuntu", false), now);
+        check("A message recorded before the restart is a duplicate after it", again.Receipt == NoticeReceipt.Duplicate && !again.Present
+            && hub.Notices.Count == 1 && hub.UnviewedCount == 0);
+
+        var late = hub.Receive(NoticeIntake.FromAgent(Hook("ev2", "waiting", T0, 38 * 60_000L, "info"), "Ubuntu", false), now);
+        check("A message that waited 38 minutes is recorded, unviewed, but not shown", late.Receipt == NoticeReceipt.Updated && !late.Present && late.Reason == "late"
+            && hub.Notices.Single().Body == "waiting" && hub.UnviewedCount == 1);
+
+        // The distribution's clock is 10 minutes behind Windows': its own age says the message is fresh.
+        now = now.AddMinutes(1);
+        var fresh = hub.Receive(NoticeIntake.FromAgent(Hook("ev3", "done again", now.AddMinutes(-10), 0), "Ubuntu", false), now);
+        check("A fresh message is shown even when the distribution's clock is off", fresh.Present && fresh.Receipt == NoticeReceipt.Updated);
+        check("An update shown now reads as just arrived, not as old as the notice it replaced", fresh.Notice!.ReceivedAt == now
+            && fresh.Notice.EventId == "ev3" && NoticeText.Relative(fresh.Notice.ReceivedAt, now) == Loc.T("刚刚", "Just now"));
+        var oldAgent = hub.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", Title = "x", EventId = "ev4", CreatedAt = now.AddHours(-2) }, "Ubuntu", false), now);
+        check("A distribution's creation time alone is not trusted to hold a notice back", oldAgent.Present);
+
+        var windowsCli = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { Title = "late", EventId = "w1", CreatedAt = now.AddMinutes(-38) }), now);
+        check("A late message from a sender on Windows' clock is judged by its creation time", windowsCli.Receipt == NoticeReceipt.Accepted && !windowsCli.Present
+            && hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { Title = "now", EventId = "w2", CreatedAt = now.AddSeconds(-2) }), now).Present);
+
+        var input = NoticeIntake.FromAgent(Hook("ev5", "x", now, 2 * 60_000L), "Ubuntu", false);
+        check("A high priority message may be later than a normal one", NoticeHub.Late(input, NoticePriority.Normal, now) && !NoticeHub.Late(input, NoticePriority.High, now)
+            && NoticeHub.Late(input with { Age = TimeSpan.FromMinutes(6) }, NoticePriority.High, now));
+        check("Time-kind notices and Windows' notices keep their own rules", !NoticeHub.Late(input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Countdown } }, NoticePriority.Normal, now)
+            && NoticeHub.Late(input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Mail } }, NoticePriority.Normal, now)
+            && !NoticeHub.Late(Input("w") with { CreatedAt = now.AddHours(-1) }, NoticePriority.Normal, now));
+
+        var message = new NoticeMessage { Title = "t", CreatedAt = now.AddSeconds(-90) };
+        NoticeProtocol.Stamp(message, now);
+        var stamped = new NoticeMessage { Title = "t" };
+        NoticeProtocol.Stamp(stamped, now);
+        check("A sender stamps a message's age by its own clock", message.AgeMs == 90_000 && stamped.CreatedAt == now && stamped.AgeMs == 0
+            && NoticeProtocol.Deserialize(NoticeProtocol.Serialize(message))!.AgeMs == 90_000);
+        check("A negative age is refused", NoticeProtocol.Validate(new NoticeMessage { Title = "t", AgeMs = -1 }) == "bad-age");
     }
 
     private static AttentionItem Item(string lane, AttentionKind kind, string key, string group = "", NoticePriority priority = NoticePriority.Normal, double seconds = 6, bool refresh = false)
