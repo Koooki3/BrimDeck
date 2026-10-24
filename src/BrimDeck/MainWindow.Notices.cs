@@ -294,6 +294,8 @@ public partial class MainWindow
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         ApplyHeader(Settings.UsagePage ? UsageHeader(_usageWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
         double offset = NoticesContent.Children.OfType<DockPanel>().FirstOrDefault()?.Children.OfType<ScrollViewer>().FirstOrDefault()?.VerticalOffset ?? 0;
+        // Worked from the keyboard, the page keeps the focus on the same notice when it is built again (an Enter, a new notice).
+        string? refocus = NoticesContent.IsKeyboardFocusWithin ? _focusedNotice : null;
         NoticesContent.Children.Clear();
         _waitingPlates.Clear();
         _liveRows.Clear();
@@ -313,6 +315,8 @@ public partial class MainWindow
         head.Children.Add(UI.Fixed(Status(center, notices.Count), 11.5, 22, UI.Tertiary));
         if (notices.Count == 0) { page.Children.Add(Empty(center)); WatchPageLive(); return; }
         var list = new StackPanel();
+        // Up and Down move between the rows and their buttons; Tab goes through them in order.
+        KeyboardNavigation.SetDirectionalNavigation(list, KeyboardNavigationMode.Contained);
         var now = DateTimeOffset.UtcNow;
         foreach (var notice in notices.Take(_noticeRows))
         {
@@ -321,6 +325,8 @@ public partial class MainWindow
             _pageRows.Add((notice, notice.Revision, row));
         }
         _pageList = list; _pageKey = NoticePageKey(center);
+        if (refocus is not null && _pageRows.FirstOrDefault(r => r.Notice.Id == refocus).Row is { } focused)
+            Dispatcher.BeginInvoke(() => focused.Focus(), System.Windows.Threading.DispatcherPriority.Input);
         if (notices.Count > _noticeRows)
         {
             var more = PageButton(Loc.T("显示更早的通知", "Show earlier notices"), () => { _noticeRows += NoticePageStep; RenderNotices(); });
@@ -424,6 +430,16 @@ public partial class MainWindow
             if (e.OriginalSource is DependencyObject source && FindButton(source)) return;
             _expandedNotice = open ? null : notice.Id; RenderNotices(); e.Handled = true;
         };
+        // From the keyboard, once a hotkey gave the panel the keyboard (MainWindow.Hotkeys.cs): Enter or Space opens or closes
+        // the row, whose buttons are then the next stops. The focus mark is the panel's static one (motion-review C7).
+        row.Focusable = true;
+        row.FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus");
+        row.GotKeyboardFocus += (_, e) => { if (e.NewFocus == row) _focusedNotice = notice.Id; };
+        row.KeyDown += (_, e) =>
+        {
+            if (e.Key is not (Key.Enter or Key.Space) || e.OriginalSource != row) return;
+            _expandedNotice = open ? null : notice.Id; RenderNotices(); e.Handled = true;
+        };
         AutomationProperties.SetName(row, notice.AppName + ", " + notice.Title + ", " + NoticeText.Relative(notice.ReceivedAt, now));
         return row;
     }
@@ -440,6 +456,9 @@ public partial class MainWindow
             notice.TimeKind, NoticeClock.IsLive(notice.Timing, now), NoticeText.Relative(notice.ReceivedAt, now), notice.Capabilities, center.CanOpen(notice), _expandedNotice == notice.Id,
             _freshNotices.Contains(notice.Id), string.Join('\u0002', notice.Actions.Select(a => a.Key + "=" + a.Label)), string.Join('\u0002', center.TimeActions(notice).Select(a => a.Key)));
     }
+
+    // The notice whose row last had the keyboard focus, to keep it there when the page is built again.
+    private string? _focusedNotice;
 
     private static bool FindButton(DependencyObject node)
     {
