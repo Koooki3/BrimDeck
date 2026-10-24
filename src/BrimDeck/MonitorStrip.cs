@@ -26,6 +26,8 @@ internal sealed class MonitorStrip : FrameworkElement
     private MonitorSnapshot? _snapshot;
     // Where the row placed each reading that shows, from the strip's left, in Order; null while the strip places them itself.
     private double[]? _placed;
+    // How present the row placed each of them, which a reading is drawn at (less than its own while the row is short).
+    private double[]? _shares;
 
     public MonitorStrip(CompactMonitorMode mode, CompactMonitorItems custom, MonitorColors colors, double scale, bool centered, StripPresence presence)
     {
@@ -120,11 +122,11 @@ internal sealed class MonitorStrip : FrameworkElement
         }
         return list;
     }
-    // The row's placing of Readings, from the strip's left.
-    public void Place(double[] offsets)
+    // The row's placing of Readings, from the strip's left, and how present it placed each (CompactSpacing.Placement.Presence).
+    public void Place(double[] offsets, double[] presences)
     {
-        if (_placed is not null && _placed.AsSpan().SequenceEqual(offsets)) return;
-        _placed = offsets; InvalidateVisual();
+        if (_placed is not null && _placed.AsSpan().SequenceEqual(offsets) && _shares is not null && _shares.AsSpan().SequenceEqual(presences)) return;
+        _placed = offsets; _shares = presences; InvalidateVisual();
     }
     // The width the readings take on their own, each in proportion to how present it is.
     public double DrawnWidth(double now)
@@ -175,14 +177,21 @@ internal sealed class MonitorStrip : FrameworkElement
             if ((Shown & item) == 0) continue;
             double presence = _presence.At(item, now), width = LiveWidth(item, now);
             if (presence <= 0) continue;
-            if (_placed is { } placed && index < placed.Length) x = placed[index];
+            double advance = presence;
+            if (_placed is { } placed && index < placed.Length)
+            {
+                x = placed[index];
+                if (_shares is { } shares && index < shares.Length) presence = Math.Clamp(shares[index], 0, 1);
+            }
             index++;
-            // A reading on its way in or out is drawn smaller and fainter, centred in the room it has.
+            if (presence <= 0) continue;
+            // A reading on its way in or out is drawn smaller and fainter, within the room it has (CompactSpacing.Zoom), so it
+            // never lies over the reading or the part beside it.
             bool partial = presence < .999;
             double offset = (width * presence - width) / 2;
             if (partial)
             {
-                double zoom = .82 + .18 * presence;
+                double zoom = CompactSpacing.Zoom(presence);
                 drawing.PushOpacity(presence * presence);
                 drawing.PushTransform(new ScaleTransform(zoom, zoom, x + width * presence / 2, center));
                 drawing.PushTransform(new TranslateTransform(offset, 0));
@@ -200,7 +209,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, _colors.Efficiency, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
-            x += (width + _gap) * presence;
+            x += (width + _gap) * advance;
         }
     }
 

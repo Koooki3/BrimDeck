@@ -129,15 +129,16 @@ internal sealed class CompactRow : Panel
         }
         var placed = CompactSpacing.Arrange(parts, title, text, width, _gap, _scale, _dpi);
         double stripLeft = double.NaN, stripRight = 0;
-        var offsets = new List<double>();
+        var offsets = new List<double>(); var shares = new List<double>();
         for (int i = 0; i < parts.Count; i++)
         {
             var part = owners[i];
-            double room = placed.Room[i], x = placed.Left[i], p = Math.Clamp(parts[i].Presence, 0, 1);
+            // How present the row placed it: less than its own presence when the row is too short to hold it as it comes or goes.
+            double room = placed.Room[i], x = placed.Left[i], p = Math.Clamp(placed.Presence[i], 0, 1);
             if (part == CompactPart.Monitor)
             {
                 if (double.IsNaN(stripLeft)) stripLeft = x;
-                offsets.Add(x - stripLeft); stripRight = x + room;
+                offsets.Add(x - stripLeft); shares.Add(p); stripRight = x + room;
                 continue;
             }
             var slot = _slots[part];
@@ -149,15 +150,16 @@ internal sealed class CompactRow : Panel
             double childWidth = fills ? room : element.DesiredSize.Width, childHeight = element.DesiredSize.Height;
             double left = x + (room - logical) / 2;
             element.Arrange(new Rect(Snap(left), Snap((height - childHeight) / 2), Math.Max(0, childWidth), Math.Max(0, childHeight)));
-            // Every part is drawn smaller and fainter while it comes or goes; the readings do so inside their strip.
-            Fade(slot, p, logical, childHeight);
+            // Every part is drawn smaller and fainter while it comes or goes, within its own room, so it never lies over a neighbour
+            // (CompactSpacing.Zoom); the title already fills just its room. The readings do so inside their strip.
+            Fade(slot, p, fills ? .82 + .18 * p : CompactSpacing.Zoom(p), logical, childHeight);
         }
         if (_strip is { } readings)
         {
             if (double.IsNaN(stripLeft)) readings.Arrange(new Rect(0, 0, 0, readings.DesiredSize.Height));
             else
             {
-                readings.Place([.. offsets]);
+                readings.Place([.. offsets], [.. shares]);
                 double h = readings.DesiredSize.Height;
                 readings.Arrange(new Rect(Snap(stripLeft), Snap((height - h) / 2), Math.Max(0, stripRight - stripLeft), Math.Max(0, h)));
             }
@@ -178,7 +180,7 @@ internal sealed class CompactRow : Panel
         return _title.At(now);
     }
 
-    private static void Fade(Slot slot, double p, double width, double height)
+    private static void Fade(Slot slot, double p, double zoom, double width, double height)
     {
         var element = slot.Element;
         if (p >= .999)
@@ -187,7 +189,6 @@ internal sealed class CompactRow : Panel
             if (!ReferenceEquals(element.RenderTransform, Transform.Identity)) element.RenderTransform = Transform.Identity;
             return;
         }
-        double zoom = .82 + .18 * p;
         element.Opacity = p * p;
         var scale = slot.Zoom ??= new ScaleTransform();
         scale.ScaleX = scale.ScaleY = zoom; scale.CenterX = width / 2; scale.CenterY = height / 2;
