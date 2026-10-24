@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -27,22 +28,95 @@ public sealed class WindowsHost : IDisposable
     public ScreenContext Current { get; private set; }
     // monitor gives the monitor whose foreground window decides the context. The context is reported with the app it was
     // detected for, and a change of either is a change: two apps can read as the same context with different app rules.
-    public WindowsHost(Func<IntPtr> monitor)
+    public WindowsHost(Func<IntPtr> monitor, Func<IntPtr> window)
     {
-        _monitor = monitor;
+        _monitor = monitor; _window = window;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
     }
+    private readonly Func<IntPtr> _window;
     private string _raisedName = "", _raisedPath = "";
     private void Poll()
     {
         var context = DetectNow();
         var change = ScreenPolicy.WhatChanged(context, _appName, _appPath, Current, _raisedName, _raisedPath);
-        if (change == ScreenPolicy.ForegroundChange.None) return;
+        if (change == ScreenPolicy.ForegroundChange.None) { WatchOrder(_window()); return; }
         var previous = (_raisedName, _raisedPath);
         Current = context; _raisedName = _appName; _raisedPath = _appPath;
         if (change == ScreenPolicy.ForegroundChange.Context) ContextChanged?.Invoke(context);
         else AppChanged?.Invoke(previous);
+        WatchOrder(_window());
+    }
+
+    // The panel is a topmost overlay: nothing belongs over it but another topmost window, and nothing ordinary may
+    // cover it. A show-desktop sweep, or an app that moves itself about in the z-order, can leave the panel beneath
+    // ordinary windows — and then no window rule can be seen to act, for the panel is simply covered. The watch looks
+    // every poll: when the panel has been buried it is put back over the desktop, and the window that had gone over it
+    // is noted in zorder.log, by name, so the culprit can be told from the panels it covered.
+    private void WatchOrder(IntPtr window)
+    {
+        if (window == IntPtr.Zero || !IsWindowVisible(window) || IsIconic(window)) return;
+        string? cause = null;
+        if ((GetWindowLongPtr(window, -20).ToInt64() & 0x8) == 0) cause = "topmost flag lost";
+        else
+        {
+            // The windows above the panel in z-order, nearest first: the first one that is shown, not cloaked and not
+            // this app's own decides. An ordinary window there has no business above a topmost panel; a topmost one
+            // only matters where it covers the band the island draws in, at the top of the window.
+            int walked = 0;
+            for (var above = GetWindow(window, 3); above != IntPtr.Zero && walked < 32; above = GetWindow(above, 3), walked++)
+            {
+                if (!IsWindowVisible(above) || IsIconic(above)) continue;
+                if (DwmGetWindowAttribute(above, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
+                GetWindowThreadProcessId(above, out var pid);
+                if (pid == Environment.ProcessId) continue;
+                bool over = (GetWindowLongPtr(above, -20).ToInt64() & 0x8) != 0;
+                if (!over) { cause = "under " + ProcessName(above); break; }
+                if (Covers(window, above)) { cause = "under topmost " + ProcessName(above); break; }
+            }
+        }
+        if (cause is null) { _orderCulprit = null; return; }
+        SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+        if (cause != _orderCulprit || Environment.TickCount64 - _orderLoggedAt > 10000)
+        {
+            _orderCulprit = cause; _orderLoggedAt = Environment.TickCount64;
+            NoteOrder($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} panel {cause}; topmost restored");
+        }
+    }
+    private string? _orderCulprit;
+    private long _orderLoggedAt;
+    // Whether the window above reaches into the strip at the top of the panel's window, where the island draws.
+    private static bool Covers(IntPtr window, IntPtr above)
+    {
+        if (!GetWindowRect(window, out var own) || !GetWindowRect(above, out var over)) return false;
+        double strip = Math.Min(own.Bottom, own.Top + 56);
+        return over.Left < own.Right && over.Right > own.Left && over.Top < strip && over.Bottom > own.Top;
+    }
+    private static string ProcessName(IntPtr window)
+    {
+        try
+        {
+            GetWindowThreadProcessId(window, out var pid);
+            using var process = Process.GetProcessById((int)pid);
+            return process.ProcessName;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception) { return "pid " + window; }
+    }
+    // Notes of buried panels, in the data folder, kept small: a note that would grow the file past this size empties it.
+    private const long OrderLogLimit = 262144;
+    private static void NoteOrder(string line)
+    {
+        try
+        {
+            var file = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "zorder.log");
+            var folder = Path.GetDirectoryName(file);
+            if (folder is { Length: > 0 }) Directory.CreateDirectory(folder);
+            if (!File.Exists(file) || new FileInfo(file).Length < OrderLogLimit)
+                File.AppendAllText(file, line + Environment.NewLine);
+            else
+                File.WriteAllText(file, line + Environment.NewLine);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
     // The context right now, without raising ContextChanged; a caller applies it itself, for instance at startup.
     public ScreenContext DetectNow() => Detect(_monitor());
@@ -97,7 +171,7 @@ public sealed class WindowsHost : IDisposable
         if (SHQueryUserNotificationState(out var state) == 0 && state == 3) return ScreenContext.Exclusive;
         var info = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
         GetMonitorInfo(monitor, ref info);
-        if (DwmGetWindowAttribute(foreground, 9, out var rect, Marshal.SizeOf<RECT>()) != 0) GetWindowRect(foreground, out rect);
+        if (DwmGetWindowAttribute(foreground, 9, out RECT rect, Marshal.SizeOf<RECT>()) != 0) GetWindowRect(foreground, out rect);
         var style = GetWindowLongPtr(foreground, -16).ToInt64();
         bool caption = (style & 0x00C00000) != 0;
         bool covers = rect.Left <= info.Monitor.Left + 2 && rect.Top <= info.Monitor.Top + 2 && rect.Right >= info.Monitor.Right - 2 && rect.Bottom >= info.Monitor.Bottom - 2;
@@ -146,6 +220,8 @@ public sealed class WindowsHost : IDisposable
     [DllImport("shcore")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
     [DllImport("shell32")] private static extern int SHQueryUserNotificationState(out int state);
     [DllImport("dwmapi")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out RECT rect, int size);
+    [DllImport("dwmapi")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
+    [DllImport("user32")] private static extern IntPtr GetWindow(IntPtr window, uint command);
     [DllImport("user32", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
     [DllImport("user32", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
     [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);}

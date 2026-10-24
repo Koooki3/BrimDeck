@@ -80,7 +80,7 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainWindow? lead = null)
     {
         _app = app; _lead = lead;
-        _host = new WindowsHost(() => MonitorHandle);
+        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle);
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
         {
