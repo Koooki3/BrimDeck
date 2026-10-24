@@ -392,7 +392,7 @@ public partial class MainWindow
             var doneColumn = new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 3 };
             var leftColumn = new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) };
             track.ColumnDefinitions.Add(doneColumn); track.ColumnDefinitions.Add(leftColumn);
-            _rowProgress.AddOrUpdate(row, (RowKey(notice, now), doneColumn, leftColumn));
+            _rowProgress.AddOrUpdate(row, new RowProgress(RowKey(notice, now), doneColumn, leftColumn));
             var rail = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(1.5) };
             Grid.SetColumnSpan(rail, 2);
             track.Children.Add(rail);
@@ -428,7 +428,8 @@ public partial class MainWindow
     }
 
     // The rows that show a task's progress, with what else they show (RowKey) and their track's columns (UpdateNoticeRows).
-    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, (string Key, ColumnDefinition Done, ColumnDefinition Left)> _rowProgress = [];
+    private sealed record RowProgress(string Key, ColumnDefinition Done, ColumnDefinition Left);
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, RowProgress> _rowProgress = [];
 
     // Everything a row shows apart from a task's progress.
     private string RowKey(Notice notice, DateTimeOffset now)
