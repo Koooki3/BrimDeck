@@ -24,6 +24,10 @@ public sealed class WindowsHost : IDisposable
     // rules may now answer differently for the same context, but nothing about the panel's own state needs to change —
     // the panel does not fold away for an app switch, only for a context switch.
     public event Action<(string Name, string Path)>? AppChanged;
+    // A panel that took the foreground for the keyboard (MainWindow.Hotkeys.cs). While it is the foreground window the user's
+    // application has not changed: every panel keeps the context and app it had, so nothing closes or hides because of it.
+    public static IntPtr KeyboardPanel { get => s_keyboardPanel; set => s_keyboardPanel = value; }
+    private static volatile nint s_keyboardPanel;
     public ScreenContext Current { get; private set; }
     // monitor gives the monitor whose foreground window decides the context. The context is reported with the app it was
     // detected for, and a change of either is a change: two apps can read as the same context with different app rules.
@@ -86,6 +90,7 @@ public sealed class WindowsHost : IDisposable
     {
         var foreground = GetForegroundWindow();
         if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
+        if (foreground == KeyboardPanel) return Current;
         GetWindowThreadProcessId(foreground, out var pid);
         if (pid == Environment.ProcessId) { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
         if (MonitorFromWindow(foreground, 2) != monitor) { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }

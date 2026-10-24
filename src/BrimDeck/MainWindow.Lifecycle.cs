@@ -186,6 +186,7 @@ public partial class MainWindow
         if (_poweringOff) { _whenGone += gone; return; }
         if (!CanAnimateLifecycle) { gone(); return; }
         int boot = ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
+        _noticeWindow?.Vanish();
         if (_expanded) SetExpanded(false, instant: true);
         _hover.Stop(); _leave.Stop(); _pointerInside = false; _cursorInCompact = false;
         _poweringOff = true; _whenGone = gone;

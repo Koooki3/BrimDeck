@@ -111,6 +111,7 @@ UninstallQuestion=确定要卸载 {#AppName} 吗？
 UninstallButton=卸载
 DeleteUserData=删除用户数据
 Uninstalled={#AppName} 已卸载。
+FolderNotSecured=无法为安装文件夹设置单独的访问权限：%1%n%n这个文件夹仍沿用上级文件夹的权限，这台电脑上的其他用户可能可以修改其中的程序。建议改装到 Program Files，或用户自己的 AppData\Local\Programs 下。
 en.ExitFirstTitle=Quit {#AppName} first
 en.ExitFirstText={#AppName} is running. Right-click the {#AppName} icon in the notification area of the taskbar, choose "Exit", then click "Retry".
 en.DesktopShortcut=Create a desktop shortcut
@@ -120,10 +121,18 @@ en.UninstallQuestion=Do you want to uninstall {#AppName}?
 en.UninstallButton=Uninstall
 en.DeleteUserData=Delete user data
 en.Uninstalled={#AppName} was uninstalled.
+en.FolderNotSecured=Setup could not give the install folder rights of its own: %1%n%nThe folder keeps the rights of the folder above it, so other users of this computer may be able to change the program in it. Installing into Program Files, or into AppData\Local\Programs of your own profile, is recommended.
 
 ; The folder's rights are settled before any file is copied into it (SecureAppDir).
 [Dirs]
 Name: "{app}"; AfterInstall: SecureAppDir
+
+; Earlier versions had the WSL agent as one linux-x64 file in {app}\wsl; it now lies in {app}\wsl\<rid> for each processor and C
+; library (linux-x64, linux-arm64, linux-musl-x64, linux-musl-arm64), so that ARM64 Windows, whose distributions are
+; aarch64, and musl distributions such as Alpine get one too. The old file goes even if the earlier version's uninstall
+; left it behind; BrimDeck itself only falls back to it while {app}\wsl\linux-x64 is missing.
+[InstallDelete]
+Type: files; Name: "{app}\wsl\brimdeck-agent"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -308,11 +317,13 @@ end;
 // Gives such a folder the rights of Program Files: it stops inheriting from its parent; SYSTEM and Administrators have full
 // control and Users may read and run. Installed for the current user, that user also has full control, so in-app updates
 // keep working without an administrator prompt. Subfolders with rights of their own keep them. If the rights cannot be set,
-// or Setup cannot write to the folder with them, the folder inherits its parent's rights as before, so updates keep working.
+// or Setup cannot write to the folder with them, the folder inherits its parent's rights as before, so the files can still
+// be copied and updates keep working; the user is told the folder may be changed by other users (sec-M2).
 procedure SecureAppDir;
 var
   Dir, Grants, Sid: String;
   ResultCode: Integer;
+  Secured: Boolean;
 begin
   Dir := ExpandConstant('{app}');
   if not NeedsOwnRights(Dir) then
@@ -322,26 +333,39 @@ begin
   end;
   // Every account by SID, so the names need no translation and cannot be mistaken for another account.
   Grants := '"*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"';
+  Secured := True;
   if not IsAdminInstallMode then
   begin
     Sid := CurrentUserSid;
     if Sid = '' then
     begin
       Log('The install folder keeps its inherited rights, because the current user''s SID could not be read: ' + Dir);
-      Exit;
-    end;
-    Grants := Grants + ' "*' + Sid + ':(OI)(CI)F"';
+      Secured := False;
+    end
+    else
+      Grants := Grants + ' "*' + Sid + ':(OI)(CI)F"';
   end;
-  if Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /inheritance:r /grant:r ' + Grants + ' /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
-    and (ResultCode = 0) then
-    Log('The install folder no longer inherits rights from its parent: ' + Dir)
-  else
-    Log('The install folder rights could not be set (code ' + IntToStr(ResultCode) + '): ' + Dir);
-  if not CanWrite(Dir) then
+  if Secured then
   begin
-    Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /reset /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Log('Setup could not write to the install folder, so it inherits its parent''s rights again (code ' + IntToStr(ResultCode) + '): ' + Dir);
+    if Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /inheritance:r /grant:r ' + Grants + ' /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+      and (ResultCode = 0) then
+      Log('The install folder no longer inherits rights from its parent: ' + Dir)
+    else
+    begin
+      Log('The install folder rights could not be set (code ' + IntToStr(ResultCode) + '): ' + Dir);
+      Secured := False;
+    end;
+    if not CanWrite(Dir) then
+    begin
+      Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /reset /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Log('Setup could not write to the install folder, so it inherits its parent''s rights again (code ' + IntToStr(ResultCode) + '): ' + Dir);
+      Secured := False;
+    end;
   end;
+  // Not silently: a folder other users can change lets them replace the program that runs as this user. Updates run with
+  // /SUPPRESSMSGBOXES and only log it.
+  if not Secured then
+    SuppressibleMsgBox(FmtMessage(CustomMessage('FolderNotSecured'), [Dir]), mbError, MB_OK, IDOK);
 end;
 
 // Returns <path> from a command line such as "<path>\unins000.exe" /SILENT /UI.
@@ -522,12 +546,30 @@ begin
     RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', '{#RunValue}');
 end;
 
+// The optional identity package for dynamic notices (identity\Register-NoticeIdentity.ps1) points at this folder. A real
+// uninstall removes it for the current user; an upgrade keeps it, since the new version is installed in the same place.
+procedure RemoveNoticeIdentity;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -Command "Get-AppxPackage -Name BrimDeck.Notices | Remove-AppxPackage"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if (CurUninstallStep = usUninstall) and not HasParam('/UPGRADE') then
-    RemoveStartupEntry
+  begin
+    RemoveStartupEntry;
+    RemoveNoticeIdentity;
+  end
   else if (CurUninstallStep = usPostUninstall) and DeleteUserData and not HasParam('/UPGRADE') then
-    DelTree(ExpandConstant('{#DataDir}'), True, True, True)
+  begin
+    DelTree(ExpandConstant('{#DataDir}'), True, True, True);
+    // The recent notices are kept in the install folder by default (NoticeStorage); they are user data too.
+    DelTree(ExpandConstant('{app}\notices'), True, True, True);
+  end
   else if (CurUninstallStep = usDone) and HasParam('/UI') then
     MsgBox(CustomMessage('Uninstalled'), mbInformation, MB_OK);
 end;

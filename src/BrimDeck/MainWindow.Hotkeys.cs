@@ -1,12 +1,18 @@
 using System.Windows;
+using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using BrimDeck.Native;
 
 namespace BrimDeck;
 
 // How a panel follows the global hotkeys (see App.Hotkeys.cs).
 // Opened by the expand hotkey, the panel stays open until the pointer has been inside it once; after that the usual leave
 // rules close it. While the panels are hidden, the expand hotkey still opens this panel; once it closes, it hides again.
+// Opened by a hotkey, the panel also takes the keyboard (Tab, arrows, Enter work its pages, the recent notices among them)
+// and gives it back to the window that had it when it closes. The panel never activates otherwise (WS_EX_NOACTIVATE): opened
+// by the pointer, it leaves the keyboard where it is.
 public partial class MainWindow
 {
     // Shown for the expand hotkey while the panels are hidden.
@@ -14,6 +20,9 @@ public partial class MainWindow
     // Opened by the expand hotkey and not entered by the pointer yet.
     private bool _hotkeyPinned;
     private DispatcherTimer? _hotkeyRehide;
+    // Holding the keyboard since a hotkey opened the panel, and the window that had it before.
+    private bool _keyboardPanel;
+    private IntPtr _keyboardReturn;
 
     // Hidden by the hide hotkey; part of IsSuppressed, so it combines with the full-screen rule the same way.
     internal bool HiddenByUser => _app.UserHidden && !_hotkeyOpened;
@@ -21,7 +30,9 @@ public partial class MainWindow
     internal bool IsOpenForHotkey => _expanded && !_preview;
     internal bool IsHotkeyPinned => _hotkeyPinned;
 
-    internal void OpenFromHotkey()
+    // byKey: the hotkey itself; false when a click asked for the same opening ("View all" on a notice), which leaves the
+    // keyboard where it is.
+    internal void OpenFromHotkey(bool byKey = true)
     {
         if (_expanded) return;
         // A collapsed preview of the settings ends as hovering would end it; a preview of the open panel is left alone.
@@ -34,6 +45,43 @@ public partial class MainWindow
         _hotkeyPinned = true;
         SetExpanded(true);
         if (!_expanded) { _hotkeyPinned = false; if (_hotkeyOpened) { _hotkeyOpened = false; ApplySettings(); } }
+        else if (byKey) TakeKeyboard();
+    }
+
+    // The panel becomes a window that can be active, takes the foreground and puts the focus on its content: the first
+    // notice on the recent notices page, else the selected page's button.
+    private void TakeKeyboard()
+    {
+        var own = new WindowInteropHelper(this).Handle;
+        if (own == IntPtr.Zero) return;
+        if (!_keyboardPanel && NoticeNative.Foreground() is var previous && previous != own) _keyboardReturn = previous;
+        _keyboardPanel = true;
+        WindowsHost.KeyboardPanel = own;
+        NoticeNative.SetActivatable(own, true);
+        Activate();
+        Dispatcher.BeginInvoke(() => { if (_keyboardPanel && _expanded) FocusPanelStart(); }, DispatcherPriority.Input);
+    }
+
+    private void FocusPanelStart()
+    {
+        if (CurrentPage == DeckPage.Notices && _pageRows.Count > 0) { _pageRows[0].Row.Focus(); return; }
+        var button = CurrentPage switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Notices => NoticesPageButton, _ => AIUsageButton };
+        Keyboard.Focus(button);
+    }
+
+    // The panel closed (or the user went to another window): it cannot be active again until the next hotkey, and the window
+    // that had the keyboard gets it back, unless the user has moved on to another one meanwhile.
+    private void ReleaseKeyboard(bool giveBack)
+    {
+        if (!_keyboardPanel) return;
+        _keyboardPanel = false;
+        var own = new WindowInteropHelper(this).Handle;
+        if (own == IntPtr.Zero) return;
+        NoticeNative.SetActivatable(own, false);
+        if (giveBack) NoticeNative.ReturnForeground(own, _keyboardReturn);
+        _keyboardReturn = IntPtr.Zero;
+        // Only once the foreground has moved on: until then the panel being in front must not read as a change of context.
+        if (WindowsHost.KeyboardPanel == own) WindowsHost.KeyboardPanel = IntPtr.Zero;
     }
 
     internal void CollapseFromHotkey() => SetExpanded(false);
@@ -51,6 +99,7 @@ public partial class MainWindow
     // For SetExpanded, on the change from open to closed.
     internal void HotkeyPanelCollapsed()
     {
+        ReleaseKeyboard(giveBack: true);
         _hotkeyPinned = false;
         if (!_hotkeyOpened) return;
         _hotkeyOpened = false;

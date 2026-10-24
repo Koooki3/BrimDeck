@@ -8,6 +8,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using BrimDeck.Core.Notices;
 using BrimDeck.Native;
 
 namespace BrimDeck;
@@ -20,7 +21,6 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _refresh = new() { Interval = TimeSpan.FromSeconds(60) };
     // Fires just after each minute boundary, when the clock text and the reset countdowns change.
     private readonly DispatcherTimer _clock = new();
-    private readonly DispatcherTimer _alertTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     // Compact hover follows the cursor position rather than window mouse messages, which reach
     // this per-pixel transparent window unreliably over the nearly invisible strip around the surface.
     private bool _cursorInCompact, _trackPointer;
@@ -109,7 +109,6 @@ public partial class MainWindow : Window
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
-        _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
         _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
         // The app under the same context changed. Only the app rules' answer can differ, so only a changed answer is
         // re-applied: collapsed, the shape crosses to it with the same animation a context change uses; expanded, it is
@@ -126,6 +125,8 @@ public partial class MainWindow : Window
             ApplySettings(!_expanded);
         };
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false)); };
+        // The user went to another window while a hotkey had given the panel the keyboard (MainWindow.Hotkeys.cs).
+        Deactivated += (_, _) => ReleaseKeyboard(giveBack: false);
         Loaded += async (_, _) =>
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
@@ -134,11 +135,12 @@ public partial class MainWindow : Window
             ApplySettings();
             Boot();
             _trackPointer = true; UpdatePointerTracking();
+            SubscribeNotices();
             ScheduleClock(); _clock.Start(); StartMusic();
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseWheel += PanelWheel;
@@ -159,6 +161,7 @@ public partial class MainWindow : Window
             return IntPtr.Zero;
         });
         Closed += (_, _) => DisposeMusic();
+        Closed += (_, _) => CloseNotices();
     }
 
     // Closes a panel whose monitor no longer shows one.
@@ -227,6 +230,10 @@ public partial class MainWindow : Window
         if (IsSuppressed)
         {
             _hover.Stop(); _leave.Stop(); _pointerInside = false;
+            // Nothing briefly shows on a hidden panel; what shows ends now, and arriving notices wait in the recent notices.
+            _app.Notices?.DeckHidden(this);
+            // Hiding is immediate, so the notice window goes at once too, rather than playing its return over a full-screen app.
+            _noticeWindow?.Vanish();
             // A boot cut short here never reaches its own reset: the dot's lift and squash would hold their last frame and
             // squash the whole surface once it shows again (without a boot).
             ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
@@ -242,6 +249,7 @@ public partial class MainWindow : Window
         }
         UpdatePointerTracking();
         RenderUsage();
+        NoticesLayoutChanged();
     }
     // Sizes are DIPs as they will be on the target monitor, and WPF turns Left and Top into pixels with the DPI the window
     // has now. A window on a monitor with another scale is therefore first moved onto the target in one step, which gives
@@ -377,6 +385,7 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
+        System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("最近通知", "Recent notices"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
     public void Preview(bool enabled, bool expanded = true)
@@ -442,15 +451,35 @@ public partial class MainWindow : Window
 
     internal void ShowAlert(AppEntry entry, string label, double used, DateTimeOffset? resetAt)
         => ShowAlert(new CompactAlertInfo(entry, entry.Name, label + " ", used, resetAt));
-    internal void ClearAlert() { _alertTimer.Stop(); _alert = null; RenderCompact(); }
+    internal void ClearAlert()
+    {
+        if (_alert is { } alert) _app.Notices?.Withdraw(QuotaKey(alert));
+        _alert = null; RenderCompact();
+    }
     // No alert while the panel is suppressed (full-screen rule or hidden by the user): it would not be seen, and it must not
-    // appear later when the panel shows again.
+    // appear later when the panel shows again. The coordinator decides when it shows (NoticeCenter.SubmitQuota) and for how
+    // long; PresentAlert and EndAlert follow it.
     private void ShowAlert(CompactAlertInfo alert)
     {
         if (IsSuppressed) return;
-        _alert = alert; _alertTimer.Stop(); _alertTimer.Start();
+        _app.Notices.SubmitQuota(this, alert, QuotaKey(alert));
+    }
+    private static string QuotaKey(CompactAlertInfo alert) => "quota:" + alert.Entry.InstanceId + ":" + alert.Label;
+    private void PresentAlert(CompactAlertInfo alert)
+    {
+        // Switched off or hidden since it was submitted: it ends at once instead of holding the island unseen.
+        if (IsSuppressed || !Settings.QuotaAlerts) { _app.Notices.Withdraw(QuotaKey(alert)); return; }
+        _alert = alert;
         RenderCompact();
         if (!_expanded && !IsSuppressed) SetExpanded(false);
+    }
+    // By key: submitting the same alert again while it shows replaces its payload (AttentionUpdated), so the item that ends
+    // may carry a newer one than PresentAlert received.
+    private void EndAlert(CompactAlertInfo alert)
+    {
+        if (_alert is null || QuotaKey(_alert) != QuotaKey(alert)) return;
+        _alert = null; RenderCompact();
+        if (!_expanded) SetExpanded(false);
     }
 
     private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
@@ -466,8 +495,13 @@ public partial class MainWindow : Window
         if (expanded && !_expanded && !_preview) ApplyDefaultMusicPage();
         // A hand-over cut short by closing the panel leaves nothing behind for the next opening.
         if (expanded && !_expanded) _handover.Drop();
+        // Opening over a notice, the panel grows on from the notice's outline (StartFromNotice) rather than from the island.
+        NoticeFrame? fromNotice = expanded && !_expanded && !instant && !_preview ? _noticeWindow?.HandOver() : null;
+        if (expanded) _noticeWindow?.Abort();
         bool wasExpanded = _expanded;
         _expanded = expanded;
+        // The coordinator hears of it after this call: it may start a waiting alert, which lays the island out again.
+        if (wasExpanded != expanded && !_preview) Dispatcher.BeginInvoke(() => _app.Notices?.DeckExpanded(this, _expanded));
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
         if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); _app.RequestTrim(); }
@@ -507,7 +541,19 @@ public partial class MainWindow : Window
         // Lay out in device-independent pixels. Column typography adapts to its available space.
         ContentCanvas.Width = _pageWidth;
         ContentCanvas.Height = ExpandedContent.Height;
+        // The recent notices page is drawn only while it shows (NoticesChanged), so notices that arrived while the panel was
+        // closed are not on it yet: it is drawn again before the panel opens, and what it lists counts as seen as on a page
+        // switch (the notices hotkey does that itself once open).
+        if (expanded && !wasExpanded && !_preview && CurrentPage == DeckPage.Notices && _app.Notices is not null)
+        {
+            // Marking the list seen raises Changed; the page is drawn here once, not again at background priority mid-opening.
+            bool queued = _noticesRenderQueued;
+            _noticesRenderQueued = true;
+            try { if (!_keepPageOnOpen) NoticesPageShown(); RenderNotices(); }
+            finally { _noticesRenderQueued = queued; }
+        }
         int duration = !instant && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
+        if (fromNotice is { } notice && duration > 0) StartFromNotice(notice);
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
@@ -678,6 +724,9 @@ public partial class MainWindow : Window
             else if (!_pointerInside && inside && _leave.IsEnabled) PointerChanged(true);
             return;
         }
+        // A notice over the island takes the pointer itself (NoticeWindow); the panel only keeps track, so that a notice ending
+        // under a resting pointer does not open the panel.
+        if (NoticeCovering) { _cursorInCompact = inCompact; if (_pointerInside) PointerChanged(false); return; }
         if (inCompact != _cursorInCompact) { _cursorInCompact = inCompact; PointerChanged(inCompact); }
         else if (!inCompact && _pointerInside) PointerChanged(false);
     }
@@ -685,6 +734,8 @@ public partial class MainWindow : Window
     {
         // Dragging an edge may take the pointer outside; the panel stays open until the drag ends.
         if (!inside && Resizing) return;
+        // A pointer reaching the island means someone is at the screen: a notice is looked for briskly again (C-L8).
+        if (inside && !_pointerInside) BrimDeck.Native.WindowsNoticeSource.Interacted();
         _pointerInside = inside; UpdateQuotaCarousel();
         if (inside) ReleaseHotkeyPin();
         if (inside)

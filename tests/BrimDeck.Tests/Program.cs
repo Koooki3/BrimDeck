@@ -14,6 +14,20 @@ Directory.CreateDirectory(root);
 try
 {
     ModelUsageTests.Run(Check);
+    await NoticeProtocolTests.Run(Check);
+    AuditWslTests.Run(Check);
+    await AuditWsl2Tests.Run(Check);
+    await NoticeWslOpsTests.Run(Check);
+    await NoticeWsl2OpsTests.Run(Check);
+    NoticeArchTests.Run(Check);
+    NoticeCoreTests.Run(root, Check);
+    NoticeWindowsAppTests.Run(Check);
+    NoticeTimeTests.Run(Check);
+    AuditUiTests.Run(Check);
+    AuditFollowupTests.Run(Check);
+    AuditWin2Tests.Run(Check);
+    NoticeOpsTests.Run(Check);
+    NoticeGlyphTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     EqualizerSignalTests.Run(Check);

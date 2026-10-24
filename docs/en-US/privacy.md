@@ -33,6 +33,8 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 | `kimi-quota.json` | The last Kimi Code quota read online (shares, reset times, extra usage and the membership level), so it still shows, also after a restart, while the sign-in has expired or the API is temporarily unavailable; no sign-in token or other account details; the account is recorded only as a one-way hash of its id together with the service address (never the id itself), and the file is used only while the same account on the same site is signed in; not used once older than 7 days, deleted when the sign-in is removed or the account has no Kimi Code plan |
 | `update-prompt.txt`, `updates\` | The last version you were told about, and downloaded installers |
 | `crash.log` | Error records; cleared when it exceeds 1 MB |
+| `notices\notices.dat`, `notices\icons\` | With dynamic notices on and kept: the recent notices (24 hours and at most 500 by default), encrypted for the current user with Windows encryption; application icons (from Windows, no notice content). **Kept by default in the `notices` folder of BrimDeck's install folder** (opened to the current user only), and here only when the install folder cannot be written to; the folder can be changed in settings, and uninstalling with "Delete user data" removes it |
+| `notices.log` | Dynamic notices' error records: error types, codes and code locations only, never titles or bodies; rotated past 256 KB |
 
 ## Network and security
 
@@ -40,6 +42,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 - Sign-in tokens are used only in memory and never written to disk; the sign-in caches of the Claude and Grok Bot desktop apps are decrypted in memory with Windows encryption for the current user.
 - Custom scripts run in a sandbox with no access to files, processes or .NET objects; see the limits in [Supported tools](ai-tools.md#custom-script).
 - The sound behind the equalizer is analyzed only in memory and never saved.
+- Dynamic notices (off by default) read only the current user's Windows notifications and use no network; the local channel accepts only the current user on this PC. WSL notices are off by default; an agent is installed in a distribution only once you switch it on. Time notices (alarms, mail, event reminders) are sorted on this PC by the application's id and the notice's text; no mailbox, calendar or Clock data is read, and the list of time sources in the settings only checks whether those applications are installed. See [Dynamic notices](notices.md#privacy).
 
 ## NetEase Cloud Music full control
 

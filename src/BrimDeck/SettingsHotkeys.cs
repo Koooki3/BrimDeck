@@ -8,7 +8,7 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The two global shortcuts: hide/show (on the Collapsed view page) and expand (on the Expanded view page). Each is recorded
+// The global shortcuts: hide/show (on the Collapsed view page), expand (on the Expanded view page) and notices (on the Dynamic notices page). Each is recorded
 // by clicking its box and pressing the combination; leaving the box cancels, and only the cross inside the box clears it. While a box records, the app's
 // registered shortcuts are suspended so pressing the current combination records it instead of acting on the panel.
 public sealed partial class SettingsWindow
@@ -26,18 +26,36 @@ public sealed partial class SettingsWindow
     private void HideHotkeySection()
     {
         SectionTitle(Loc.T("快捷键", "Shortcut"));
-        Group(HotkeyRow(true));
+        Group(HotkeyRow(HotkeyKind.Hide));
     }
 
-    private FrameworkElement HotkeyRow(bool hide)
+    private static string HotkeyName(HotkeyKind kind) => kind switch
     {
-        string title = hide ? Loc.T("隐藏/显示快捷键", "Hide/show shortcut") : Loc.T("展开快捷键", "Expand shortcut");
-        string help = hide
-            ? Loc.T("按下快捷键即可隐藏刘海、胶囊或指示条，再按一次恢复显示。", "Press the shortcut to hide the notch, capsule or indicator bar; press it again to show it.")
-            : Loc.T("按下快捷键即可展开面板，再按一次收起。", "Press the shortcut to expand the panel; press it again to collapse it.");
-        string otherName = hide ? Loc.T("“展开快捷键”", "the expand shortcut") : Loc.T("“隐藏/显示快捷键”", "the hide/show shortcut");
-        string Saved() => (hide ? S.HideHotkey : S.ExpandHotkey) ?? "";
-        string Other() => (hide ? S.ExpandHotkey : S.HideHotkey) ?? "";
+        HotkeyKind.Hide => Loc.T("“隐藏/显示快捷键”", "the hide/show shortcut"), HotkeyKind.Expand => Loc.T("“展开快捷键”", "the expand shortcut"),
+        _ => Loc.T("“通知快捷键”", "the notices shortcut")
+    };
+    private static string SavedHotkey(DeckSettings settings, HotkeyKind kind) => (kind switch
+    {
+        HotkeyKind.Hide => settings.HideHotkey, HotkeyKind.Expand => settings.ExpandHotkey, _ => settings.NoticeHotkey
+    }) ?? "";
+    private static void SetHotkey(DeckSettings settings, HotkeyKind kind, string value)
+    {
+        switch (kind) { case HotkeyKind.Hide: settings.HideHotkey = value; break; case HotkeyKind.Expand: settings.ExpandHotkey = value; break; default: settings.NoticeHotkey = value; break; }
+    }
+
+    private FrameworkElement HotkeyRow(HotkeyKind kind)
+    {
+        string title = kind switch { HotkeyKind.Hide => Loc.T("隐藏/显示快捷键", "Hide/show shortcut"), HotkeyKind.Expand => Loc.T("展开快捷键", "Expand shortcut"), _ => Loc.T("通知快捷键", "Notices shortcut") };
+        string help = kind switch
+        {
+            HotkeyKind.Hide => Loc.T("按下快捷键即可隐藏刘海、胶囊或指示条，再按一次恢复显示。", "Press the shortcut to hide the notch, capsule or indicator bar; press it again to show it."),
+            HotkeyKind.Expand => Loc.T("按下快捷键即可展开面板，再按一次收起。", "Press the shortcut to expand the panel; press it again to collapse it."),
+            _ => Loc.T("有提示时打开它的详情并可用键盘操作（Tab 切换、Enter 确认、Esc 关闭）；没有提示时打开最近通知。默认不设置，避免与其他程序冲突。",
+                "With a notice on screen, opens its details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise opens the recent notices. Unset by default, to avoid clashing with other programs.")
+        };
+        string Saved() => SavedHotkey(S, kind);
+        // The other shortcuts, with the names a clash message gives them.
+        IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>().Where(other => other != kind).Select(other => (SavedHotkey(S, other), HotkeyName(other)));
 
         // The box keeps one size and place in every state: the text on the left, trimmed before the clear button, which
         // always holds its slot on the right and is only dimmed while nothing is set. The record button spans the whole
@@ -86,7 +104,7 @@ public sealed partial class SettingsWindow
             box.ToolTip = !recording && saved.Length > 0 ? HotkeyDisplay(saved) : null;
             chrome.BorderBrush = UI.Brush(recording ? _palette.Accent : _palette.Border);
             clear.IsEnabled = saved.Length > 0; clear.Opacity = clear.IsEnabled ? 1 : .35;
-            if (!recording) Note(HotkeyProblem(hide, saved, Other(), otherName));
+            if (!recording) Note(HotkeyProblem(kind, saved, Others()));
             AutomationProperties.SetHelpText(box, (saved.Length == 0 ? Loc.T("未设置。", "Not set. ") : HotkeyDisplay(saved) + Loc.T("。", ". ")) + help);
         }
         Action stop = null!;
@@ -134,13 +152,13 @@ public sealed partial class SettingsWindow
                 text.Text = Loc.T("请按下组合键…", "Press a combination…"); text.Foreground = UI.Brush(TextSecondary);
                 return;
             }
-            if (SameHotkey(gesture, Other()))
+            if (Others().FirstOrDefault(other => SameHotkey(gesture, other.Text)) is { Name: { } clash })
             {
-                Note(Loc.T("与" + otherName + "重复，请换一个组合键。", "This is already " + otherName + ". Choose another combination."));
+                Note(Loc.T("与" + clash + "重复，请换一个组合键。", "This is already " + clash + ". Choose another combination."));
                 text.Text = Loc.T("请按下组合键…", "Press a combination…"); text.Foreground = UI.Brush(TextSecondary);
                 return;
             }
-            Change(s => { if (hide) s.HideHotkey = gesture; else s.ExpandHotkey = gesture; });
+            Change(s => SetHotkey(s, kind, gesture));
             swallowKeyUp = true; stop();
         };
         box.PreviewKeyUp += (_, e) =>
@@ -157,7 +175,7 @@ public sealed partial class SettingsWindow
         };
         // Leaving the box, the page or the window ends recording, so suspensions and resumptions stay paired.
         box.LostKeyboardFocus += (_, _) => { swallowKeyUp = false; stop(); };
-        clear.Click += (_, _) => { stop(); Change(s => { if (hide) s.HideHotkey = ""; else s.ExpandHotkey = ""; }); Note(""); Show(); };
+        clear.Click += (_, _) => { stop(); Change(s => SetHotkey(s, kind, "")); Note(""); Show(); };
 
         // Like Row, but the message takes the middle column, so a narrow window shrinks the message instead of pushing into the label.
         var row = new Grid { MinHeight = 44 };
@@ -177,16 +195,16 @@ public sealed partial class SettingsWindow
 
     // What is wrong with a saved shortcut, or "" when nothing is: the same combination as the other shortcut, or a
     // registration the app could not complete.
-    private string HotkeyProblem(bool hide, string saved, string other, string otherName)
+    private string HotkeyProblem(HotkeyKind kind, string saved, IEnumerable<(string Text, string Name)> others)
     {
         if (saved.Length == 0) return "";
-        if (SameHotkey(saved, other))
-            return Loc.T("与" + otherName + "重复，请换一个组合键。", "This is already " + otherName + ". Choose another combination.");
-        return AppHotkeyState(hide) switch
+        if (others.FirstOrDefault(other => SameHotkey(saved, other.Text)) is { Name: { } clash })
+            return Loc.T("与" + clash + "重复，请换一个组合键。", "This is already " + clash + ". Choose another combination.");
+        return AppHotkeyState(kind) switch
         {
             HotkeyStatus.InUse => Loc.T("这个组合键已被其他程序占用，未能生效。", "Another program already uses this combination, so it is not active."),
             HotkeyStatus.Invalid => Loc.T("无法识别这个组合键，请重新录制。", "This combination is not recognized. Record it again."),
-            HotkeyStatus.Duplicate => Loc.T("与" + otherName + "重复，请换一个组合键。", "This is already " + otherName + ". Choose another combination."),
+            HotkeyStatus.Duplicate => Loc.T("与其他快捷键重复，请换一个组合键。", "This is already another shortcut. Choose another combination."),
             _ => ""
         };
     }
@@ -232,7 +250,7 @@ public sealed partial class SettingsWindow
 
     private static bool ParseHotkey(string text, out ModifierKeys modifiers, out Key key) => HotkeyGesture.TryParse(text, out modifiers, out key);
     private static string FormatHotkey(ModifierKeys modifiers, Key key) => HotkeyGesture.Format(modifiers, key);
-    private HotkeyStatus AppHotkeyState(bool hide) => _app.StatusOf(hide ? HotkeyKind.Hide : HotkeyKind.Expand);
+    private HotkeyStatus AppHotkeyState(HotkeyKind kind) => _app.StatusOf(kind);
     private void SuspendAppHotkeys() => _app.SuspendHotkeys();
     private void ResumeAppHotkeys() => _app.ResumeHotkeys();
     private EventHandler? _hotkeysChanged;

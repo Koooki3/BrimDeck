@@ -90,20 +90,26 @@ public sealed class IslandBorder : Border
         var key = (RenderSize, ShoulderRadius, CornerRadius, Inset);
         if (_outlineKey == key) return _outline;
         _outlineKey = key;
-        double w = RenderSize.Width, h = RenderSize.Height;
-        if (w <= 0 || h <= 0) return _outline = Geometry.Empty;
+        return _outline = BuildOutline(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset);
+    }
+
+    // The island's outline for a size, shoulders, corners and inset; dynamic notices draw the same outline (NoticeSurface), so
+    // that they start and end exactly on the island. Frozen.
+    internal static Geometry BuildOutline(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy = 0)
+    {
+        if (!(w > 0) || !(h > 0)) return Geometry.Empty;
         // The shoulders are sized on the full bounds, so an inset outline has the same shoulders moved in by the inset: its
         // curves then lie inside the full outline's. The corners keep their centres and lose the inset from their radii.
-        double shoulder = Math.Clamp(ShoulderRadius, 0, Math.Min(w / 4, h / 2));
+        double shoulder = Math.Clamp(shoulderRadius, 0, Math.Min(w / 4, h / 2));
         double shoulderDepth = shoulder * (7d / 16);
-        double inset = Math.Clamp(Inset, 0, Math.Min(w, h) / 4), top = shoulder > 0 ? 0 : inset;
+        double inset = Math.Clamp(insetBy, 0, Math.Min(w, h) / 4), top = shoulder > 0 ? 0 : inset;
         w -= 2 * inset; h -= top + inset;
         double left = shoulder, right = w - shoulder;
         double limit = Math.Max(0, Math.Min(shoulder > 0 ? h - shoulderDepth : h / 2, (right - left) / 2));
-        double bl = Math.Clamp(CornerRadius.BottomLeft - inset, 0, limit);
-        double br = Math.Clamp(CornerRadius.BottomRight - inset, 0, limit);
-        double tl = Math.Clamp(CornerRadius.TopLeft - inset, 0, Math.Min(w, h) / 2);
-        double tr = Math.Clamp(CornerRadius.TopRight - inset, 0, Math.Min(w, h) / 2);
+        double bl = Math.Clamp(corners.BottomLeft - inset, 0, limit);
+        double br = Math.Clamp(corners.BottomRight - inset, 0, limit);
+        double tl = Math.Clamp(corners.TopLeft - inset, 0, Math.Min(w, h) / 2);
+        double tr = Math.Clamp(corners.TopRight - inset, 0, Math.Min(w, h) / 2);
         const double k = .5522847498307936; // Cubic approximation of a circular quadrant.
         var geometry = new StreamGeometry();
         using (var path = geometry.Open())
@@ -142,6 +148,6 @@ public sealed class IslandBorder : Border
         }
         if (inset > 0) geometry.Transform = new TranslateTransform(inset, top);
         geometry.Freeze();
-        return _outline = geometry;
+        return geometry;
     }
 }
