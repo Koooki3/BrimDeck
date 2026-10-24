@@ -76,7 +76,23 @@ public sealed class IslandBorder : Border
     }
 
     // The visible surface owns input; its decorative shadow is a separate, non-interactive sibling.
-    protected override Geometry? GetLayoutClip(Size layoutSlotSize) => Outline();
+    // At rest collapsed (SettledClip, set by the window), the content keeps clear of the corners and shoulders and is clipped to
+    // the bounds instead: a rounded clip made each frame of the scrolling title and the bars cost about a quarter more. The surface
+    // itself is still drawn as its outline (OnRender).
+    protected override Geometry? GetLayoutClip(Size layoutSlotSize) => _settledClip ? Bounds() : Outline();
+    private bool _settledClip;
+    public bool SettledClip
+    {
+        get => _settledClip;
+        set { if (_settledClip == value) return; _settledClip = value; InvalidateArrange(); InvalidateVisual(); }
+    }
+    private RectangleGeometry? _bounds;
+    private Geometry Bounds()
+    {
+        var rect = new Rect(RenderSize);
+        if (_bounds?.Rect != rect) { _bounds = new RectangleGeometry(rect); _bounds.Freeze(); }
+        return _bounds;
+    }
 
     private static Brush CreateRim()
     {

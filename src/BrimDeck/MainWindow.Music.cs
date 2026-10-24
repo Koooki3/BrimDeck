@@ -64,6 +64,9 @@ public partial class MainWindow
     private MusicEqualizer? _musicEqualizer, _compactEqualizer;
     private readonly double[] _flowLevels = new double[5];
     private MusicMarquee? _compactMarquee;
+    // The collapsed title that has scrolled its laps (MusicMarquee.Laps): a row built again for it keeps it resting, until the
+    // text changes or the pointer comes over the island.
+    private string? _compactTitleRested;
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
     private TimeSpan _quotaElapsed;
@@ -816,6 +819,8 @@ public partial class MainWindow
             }
         }
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
+        // Hidden, the bar keeps its last length: setting it four times a second laid the island out again for nothing.
+        if (MusicIndicator.Visibility != Visibility.Visible) return;
         // The progress runs along the indicator's own length, whatever length is set.
         double length = double.IsFinite(Collapsed.Surface.Width) ? Math.Max(0, Collapsed.Surface.Width) : 0;
         double progress = track.HasTimeline && track.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / track.Duration.TotalSeconds, 0, 1) : 0;
@@ -829,6 +834,19 @@ public partial class MainWindow
     }
     // The color taken from the playing song's cover; null without one, or when the cover gave no color.
     internal Color? CoverColor => _mediaCover is not null && _mediaTrack is { State: not MediaState.Stopped } ? _coverAccent : null;
+    // The collapsed title: it scrolls its laps once per text (MarqueeCycle.Laps) and, while it glides, lends the equalizer its
+    // frames (MusicGliding).
+    private MusicMarquee CompactTitle(string text, double width, CompactMusicLayout layout)
+    {
+        var title = new MusicMarquee { Text = text, Width = width, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
+            ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay,
+            Laps = true, Rested = text.Length > 0 && text == _compactTitleRested };
+        title.Finished += () => { if (ReferenceEquals(_compactMarquee, title)) _compactTitleRested = title.Text; };
+        title.Gliding += gliding => { if (ReferenceEquals(_compactMarquee, title)) MusicGliding(gliding); };
+        return title;
+    }
+    // The pointer came over the island: the title scrolls its laps again.
+    private void ReplayCompactTitle() { _compactTitleRested = null; _compactMarquee?.Replay(); }
     private void RenderCompactMusic()
     {
         // The collapsed shape gives the row's width in DIPs and the height scale; every size below follows from them.
@@ -923,8 +941,7 @@ public partial class MainWindow
             {
                 CompactPart.Rings => _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout, _quotaElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation),
                 // Too narrow for a meaningful stretch of text, the lyric rests at its start, cut at the edge.
-                CompactPart.Music => _compactMarquee = new MusicMarquee { Text = text, Width = end - start, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
-                    ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay },
+                CompactPart.Music => _compactMarquee = CompactTitle(text, end - start, layout),
                 _ => Readings(strip!, end - start)
             };
             // The carousels keep their own width and left fade; the margins put each element's slot at [start, end).
@@ -947,6 +964,21 @@ public partial class MainWindow
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
         return (used, PanelTheme.AppTheme(entry), tip);
     }).ToArray();
+    private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
+    private void MusicGliding(bool gliding) => UpdateMusicTimer();
+    // A display frame while the collapsed title glides (Motion): the bars move once at least a timer's interval has passed,
+    // and the timer takes over again once the glide has let go.
+    private double _musicFrameAt;
+    private bool MusicFrame(double now)
+    {
+        if (!TitleGliding || !_musicTick.Interval.Equals(TimeSpan.FromMilliseconds(33)))
+        {
+            UpdateMusicTimer();
+            return false;
+        }
+        if (now - _musicFrameAt >= .033 - .004) { _musicFrameAt = now; TickMusic(); }
+        return true;
+    }
     private void UpdateMusicTimer()
     {
         bool musicVisible = MusicPresentationVisible;
@@ -959,8 +991,13 @@ public partial class MainWindow
         UpdateQuotaCarousel();
         bool needed = IsVisible && !IsSuppressed && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
-        _musicTick.Interval = TimeSpan.FromMilliseconds(animations && MusicAudioActive && musicVisible ? 33 : 250);
-        if (needed) { if (!_musicTick.IsEnabled) { _lastMusicTick = DateTimeOffset.UtcNow; _musicTick.Start(); } }
+        bool bars = animations && MusicAudioActive && musicVisible;
+        _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? 33 : 250);
+        // While the collapsed title glides, WPF draws a frame every refresh for it; the bars move on those frames (MusicFrame),
+        // so the timer's own frames, which fell between them, are not drawn as well.
+        bool frames = needed && bars && TitleGliding;
+        if (frames) { _musicTick.Stop(); Motion.Start(_compactEqualizer!, MusicFrame); }
+        else if (needed) { if (!_musicTick.IsEnabled) { _lastMusicTick = DateTimeOffset.UtcNow; _musicTick.Start(); } }
         else _musicTick.Stop();
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }

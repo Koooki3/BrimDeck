@@ -30,6 +30,7 @@ try
     CompactReadingTests.Run(Check);
     CurvesTests.Run(Check);
     IdleCostTests.Run(Check);
+    MusicCostTests.Run(Check);
     DotMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     NeteaseLogTests.Run(Check);
