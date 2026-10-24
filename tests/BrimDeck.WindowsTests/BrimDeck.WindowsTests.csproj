@@ -13,5 +13,6 @@
     <Compile Include="..\..\src\BrimDeck\Native\SettingsChrome.cs" Link="SettingsChrome.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessLoopbackCapture.cs" Link="ProcessLoopbackCapture.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\NoticeProtection.cs" Link="NoticeProtection.cs" />
   </ItemGroup>
 </Project>
