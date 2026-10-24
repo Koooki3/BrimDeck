@@ -42,23 +42,26 @@ internal static class Program
         message.EventId ??= Guid.NewGuid().ToString("N");
         NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
         message.Distro ??= Environment.GetEnvironmentVariable("WSL_DISTRO_NAME");
-        return await ViaSocketAsync(message) ?? await ViaHelperAsync(message);
+        // Through Windows only when the message never reached the agent: once it has, the agent passes it on even when BrimDeck
+        // answers late, and sending it again would show it twice or start a second timer (W3).
+        var (reply, written) = await ViaSocketAsync(message);
+        if (written) return reply ?? NoticeProtocol.Reply(NoticeResults.Rejected, "no-reply", message.EventId);
+        return await ViaHelperAsync(message);
     }
 
-    private static async Task<NoticeMessage?> ViaSocketAsync(NoticeMessage message)
+    private static async Task<(NoticeMessage? Reply, bool Written)> ViaSocketAsync(NoticeMessage message)
     {
         var path = AgentPaths.Socket();
-        if (path is null || !File.Exists(path)) return null;
+        if (path is null || !File.Exists(path)) return (null, false);
         using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await socket.ConnectAsync(new UnixDomainSocketEndPoint(path), timeout.Token);
+            using (var connecting = new CancellationTokenSource(TimeSpan.FromSeconds(5))) await socket.ConnectAsync(new UnixDomainSocketEndPoint(path), connecting.Token);
             await using var stream = new NetworkStream(socket);
-            await NoticeFrames.WriteAsync(stream, message, timeout.Token);
-            return await NoticeFrames.ReadMessageAsync(stream, timeout.Token);
+            // Longer than the agent waits for BrimDeck, so that the agent's "no-reply" comes first (W3).
+            return await NoticeFrames.ExchangeAsync(stream, message, WslLink.CliReplyWait);
         }
-        catch (Exception ex) when (ex is SocketException or IOException or InvalidDataException or OperationCanceledException) { return null; }
+        catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException) { return (null, false); }
     }
 
     private static async Task<NoticeMessage?> ViaHelperAsync(NoticeMessage message)

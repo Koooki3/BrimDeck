@@ -166,6 +166,14 @@ public static class NoticeProtocol
         if (message.Progress is { } progress && !(double.IsFinite(progress) && progress >= 0 && progress <= 1)) return "bad-progress";
         if (message.DurationMs is < 0 or > MaxDurationMs) return "bad-duration";
         if (message.AgeMs is < 0 or > MaxDurationMs) return "bad-age";
+        ClipTexts(message);
+        return null;
+    }
+
+    // Cuts a message's texts to the limits, as BrimDeck does with each message it receives. brim-notify cuts them before it
+    // sends, so that a long body still fits in a frame and shows as BrimDeck would show it anyway (W7).
+    public static void ClipTexts(NoticeMessage message)
+    {
         message.Title = Clip(message.Title, MaxTitle);
         message.Body = Clip(message.Body, MaxBody);
         message.EventId = Clip(message.EventId, MaxField);
@@ -181,8 +189,10 @@ public static class NoticeProtocol
         if (message.Actions is { } actions)
             message.Actions = actions.Where(a => a is not null && !string.IsNullOrWhiteSpace(a.Key) && !string.IsNullOrWhiteSpace(a.Label))
                 .Take(MaxActions).Select(a => new NoticeActionInfo { Key = Clip(a.Key, 64)!, Label = Clip(a.Label, 64)! }).ToList();
-        return null;
     }
+
+    // Whether the message fits in one frame.
+    public static bool Fits(NoticeMessage message) => Serialize(message).Length <= MaxFrame;
 
     // Removes control characters other than line breaks and tabs, and the invisible characters Clean drops (the bidi overrides
     // and isolates among them), which could make a text read differently from what it is; line and paragraph separators
@@ -309,6 +319,23 @@ public static class NoticeFrames
         var payload = await ReadAsync(stream, cancellation).ConfigureAwait(false);
         if (payload is null) return null;
         return NoticeProtocol.Deserialize(payload) ?? throw new InvalidDataException("A frame did not hold a notice message.");
+    }
+
+    // One message and its reply, within wait. Reply is null when the exchange failed or ran out of time; Written says whether
+    // the whole message had gone out by then. Once it has, the receiver may act on it even without answering in time, so the
+    // sender must not send it again another way, which would show the notice twice or start a second timer (W3).
+    public static async Task<(NoticeMessage? Reply, bool Written)> ExchangeAsync(Stream stream, NoticeMessage message, TimeSpan wait, CancellationToken cancellation = default)
+    {
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        limit.CancelAfter(wait);
+        bool written = false;
+        try
+        {
+            await WriteAsync(stream, message, limit.Token).ConfigureAwait(false);
+            written = true;
+            return (await ReadMessageAsync(stream, limit.Token).ConfigureAwait(false), true);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException) { return (null, written); }
     }
 
     // True when the buffer was filled; false when the stream ended before its first byte.
