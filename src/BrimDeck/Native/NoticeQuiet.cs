@@ -20,7 +20,7 @@ internal sealed class NoticeQuiet : IDisposable
     public NoticeQuiet(System.Windows.Threading.Dispatcher dispatcher)
     {
         _dispatcher = dispatcher;
-        _sessionLocked = SessionLocked() ?? false;
+        _sessionLocked = MotionEnvironment.SessionLocked() ?? false;
         SystemEvents.SessionSwitch += SessionSwitch;
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621))
         {
@@ -66,7 +66,7 @@ internal sealed class NoticeQuiet : IDisposable
                 case SessionSwitchReason.SessionUnlock or SessionSwitchReason.SessionLogon: _sessionLocked = false; break;
                 case SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect: _away = true; break;
                 // Back on the screen, but perhaps at its lock screen (switching back to a locked session): Windows says which.
-                case SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect: _away = false; _sessionLocked = SessionLocked() ?? _sessionLocked; break;
+                case SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect: _away = false; _sessionLocked = MotionEnvironment.SessionLocked() ?? _sessionLocked; break;
                 default: return;
             }
             if (Locked != before) Changed?.Invoke();
@@ -77,23 +77,7 @@ internal sealed class NoticeQuiet : IDisposable
     // notices back for good. The caller recomputes the quiet state.
     public void Recheck()
     {
-        if (_sessionLocked && SessionLocked() == false) _sessionLocked = false;
-    }
-
-    // Whether this session's lock screen is up (WTSSessionInfoEx's session flags), or null when Windows does not say. Also for
-    // AmbientGlow, which must not stay paused after a remote connection (life-L14).
-    internal static bool? SessionLocked()
-    {
-        const int SessionInfoEx = 25, Level1 = 1, LockedFlag = 0, UnlockedFlag = 1;
-        const uint CurrentSession = uint.MaxValue;
-        if (!WTSQuerySessionInformationW(IntPtr.Zero, CurrentSession, SessionInfoEx, out var buffer, out int bytes)) return null;
-        try
-        {
-            // WTSINFOEXW: the level, then (8-byte aligned) the session id, its connect state and its flags.
-            if (bytes < 20 || Marshal.ReadInt32(buffer) != Level1) return null;
-            return Marshal.ReadInt32(buffer, 16) switch { LockedFlag => true, UnlockedFlag => false, _ => null };
-        }
-        finally { WTSFreeMemory(buffer); }
+        if (_sessionLocked && MotionEnvironment.SessionLocked() == false) _sessionLocked = false;
     }
 
     private void FocusChanged(Windows.UI.Shell.FocusSessionManager sender, object args) => _dispatcher.BeginInvoke(() => Changed?.Invoke());
@@ -107,9 +91,6 @@ internal sealed class NoticeQuiet : IDisposable
     }
 
     [DllImport("shell32")] private static extern int SHQueryUserNotificationState(out int state);
-    [DllImport("wtsapi32", SetLastError = true)]
-    private static extern bool WTSQuerySessionInformationW(IntPtr server, uint session, int infoClass, out IntPtr buffer, out int bytes);
-    [DllImport("wtsapi32")] private static extern void WTSFreeMemory(IntPtr memory);
 }
 
 // Window and monitor calls the notices need besides WindowsHost's.

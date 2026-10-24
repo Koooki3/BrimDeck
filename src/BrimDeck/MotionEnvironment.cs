@@ -113,7 +113,7 @@ internal static class MotionEnvironment
     }
 
     // Whether this session's lock screen is up (WTSSessionInfoEx's session flags), or null when Windows does not say.
-    // NoticeQuiet asks the same question for the notices.
+    // NoticeQuiet asks it too, for the notices.
     internal static bool? SessionLocked()
     {
         const int SessionInfoEx = 25, Level1 = 1, LockedFlag = 0, UnlockedFlag = 1;
