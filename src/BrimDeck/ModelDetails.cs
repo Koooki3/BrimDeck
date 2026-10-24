@@ -212,14 +212,26 @@ public partial class MainWindow
         popup.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { popup.Close(); SetExpanded(false); e.Handled = true; } };
         // Closing an active owned window also raises Deactivated. Do not close it
         // again from that nested native activation message.
-        bool closing = false;
-        popup.Closing += (_, _) => { closing = true; if (ReferenceEquals(_detailPopup, popup)) _detailPopup = null; };
+        // A closing pop-up leaves as the monitor page's card does (Soft.Leave), and the panel takes it as closed from the start of
+        // that: the result it was closed for shows at once, and another pop-up may open meanwhile.
+        bool closing = false, left = false;
+        popup.Closing += (_, e) =>
+        {
+            closing = true; if (ReferenceEquals(_detailPopup, popup)) _detailPopup = null;
+            if (left || _app.Exiting || popup.Content is not UIElement content || !Soft.Enabled) return;
+            e.Cancel = true; left = true; popup.IsHitTestVisible = false;
+            Soft.Leave(content, () => popup.Close());
+            RenderUsage();
+        };
         popup.Deactivated += (_, _) => { if (!closing && popup.IsVisible) popup.Close(); };
         popup.Closed += (_, _) =>
         {
-            _detailPopup = null; RenderUsage();
+            if (ReferenceEquals(_detailPopup, popup)) _detailPopup = null;
+            // A pop-up that faded out had the page brought up to date when it began to leave.
+            if (!left) RenderUsage();
             if (_expanded && !IsMouseOver) PointerChanged(false);
         };
+        Soft.Enter(popup.Content as UIElement);
         popup.Show(); popup.Activate();
     }
 

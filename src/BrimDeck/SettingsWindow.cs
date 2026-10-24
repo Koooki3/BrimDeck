@@ -394,7 +394,7 @@ public sealed partial class SettingsWindow : Window
         (string Value, string Name)[] languages = [(Loc.Chinese, "简体中文"), (Loc.English, "English")];
         var language = new ComboBox { Width=150,Style=(Style)FindResource("SettingsCombo"),ItemsSource=languages.Select(l=>l.Name).ToList(),
             SelectedIndex=Math.Max(0,Array.FindIndex(languages,l=>l.Value==S.Language)) };
-        AutomationProperties.SetName(language,Loc.T("语言", "Language")); AutomationProperties.SetAutomationId(language,"language");
+        AutomationProperties.SetName(language,Loc.T("语言", "Language")); AutomationProperties.SetAutomationId(language,"language"); PopupMotion.Attach(language);
         language.SelectionChanged+=(_,_)=>
         {
             if(language.SelectedIndex<0||languages[language.SelectedIndex].Value==S.Language) return;
@@ -483,7 +483,7 @@ public sealed partial class SettingsWindow : Window
         // reads as the last viewed page, which is what the panel does then, and returns when the page is shown again.
         // Switching a page on or off refills the list in place, so the page is not rebuilt and the switch keeps its animation.
         var start = new ComboBox { Width = 150, Style = (Style)FindResource("SettingsCombo") };
-        AutomationProperties.SetName(start, Loc.T("每次打开时显示", "Page shown on opening"));
+        AutomationProperties.SetName(start, Loc.T("每次打开时显示", "Page shown on opening")); PopupMotion.Attach(start);
         List<(DefaultDeckPage Value, string Label)> starts = [];
         bool filling = false;
         void FillStarts()
@@ -806,6 +806,10 @@ public sealed partial class SettingsWindow : Window
             item.Click += (_, _) =>
             {
                 menu.IsOpen = false;
+                PopupMotion.AfterClose(Choose);
+            };
+            void Choose()
+            {
                 if (id != selected) Change(s =>
                 {
                     var current = s.Entry(entry.InstanceId)!;
@@ -817,7 +821,7 @@ public sealed partial class SettingsWindow : Window
                 });
                 if (quota && !ProviderCatalog.IsBuiltIn(id)) { CollapseSourceRows(); _expandedSource = entry.InstanceId; }
                 RefreshAppRow(entry.InstanceId);
-            };
+            }
             AutomationProperties.SetName(item, Loc.T("选择 ", "Select ") + Label(id)); items.Children.Add(item);
         }
         // The list grows as sources are added; past the room on screen it scrolls instead of running off the screen.
@@ -870,6 +874,7 @@ public sealed partial class SettingsWindow : Window
     private static void TogglePopup(ButtonBase button, Popup popup)
     {
         popup.Opened += (_, _) => button.IsHitTestVisible = false;
+        PopupMotion.Attach(popup);
         popup.Closed += (_, _) => button.IsHitTestVisible = true;
         button.Click += (_, _) => popup.IsOpen = !popup.IsOpen;
     }
@@ -898,7 +903,7 @@ public sealed partial class SettingsWindow : Window
         // The column heading explains each color; the swatch itself carries no hover note.
         AutomationProperties.SetName(button, Loc.T($"{app} {label}颜色", $"{app} {label} color")); AutomationProperties.SetHelpText(button, color + (isDefault ? Loc.T("（默认）", " (default)") : ""));
         var popup = new Popup { PlacementTarget = button, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
-        popup.Child = ColorPicker(color, isDefault, value => { popup.IsOpen = false; apply(value); if (owner is { } id) RefreshAppRow(id); else ShowPage(3); });
+        popup.Child = ColorPicker(color, isDefault, value => { popup.IsOpen = false; PopupMotion.AfterClose(() => { apply(value); if (owner is { } id) RefreshAppRow(id); else ShowPage(3); }); });
         TogglePopup(button, popup);
         return button;
     }

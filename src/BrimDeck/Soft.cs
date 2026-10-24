@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using BrimDeck.Core;
 
@@ -32,6 +33,31 @@ internal static class Soft
 
     public static DoubleAnimation Fade(double from, double to, int milliseconds, IEasingFunction? easing = null) =>
         new(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = easing ?? Out };
+
+    // What opens below its anchor (a menu, a drop-down list, a pop-up) fades in while it drops the last few DIPs into place.
+    // The element's own transform is replaced only when it has none.
+    public static void Enter(UIElement? element, double drop = 6)
+    {
+        if (element is null || !Enabled) return;
+        var start = Fade(0, 1, Short); start.FillBehavior = FillBehavior.Stop;
+        element.BeginAnimation(UIElement.OpacityProperty, start);
+        if (element.RenderTransform is not (null or MatrixTransform { Matrix.IsIdentity: true } or TranslateTransform { IsFrozen: false })) return;
+        if (element.RenderTransform is not TranslateTransform shift) element.RenderTransform = shift = new TranslateTransform();
+        var fall = Fade(-drop, 0, Short + 60); fall.FillBehavior = FillBehavior.Stop;
+        shift.BeginAnimation(TranslateTransform.YProperty, fall);
+    }
+
+    // The way back: it fades as it rises the same few DIPs, a little quicker, as the monitor page's card leaves. done runs once
+    // it has gone.
+    public static void Leave(UIElement element, Action done, double rise = 4)
+    {
+        var fade = Fade(element.Opacity, 0, Quick, InOut);
+        fade.Completed += (_, _) => done();
+        element.BeginAnimation(UIElement.OpacityProperty, fade);
+        if (element.RenderTransform is not (null or MatrixTransform { Matrix.IsIdentity: true } or TranslateTransform { IsFrozen: false })) return;
+        if (element.RenderTransform is not TranslateTransform shift) element.RenderTransform = shift = new TranslateTransform();
+        shift.BeginAnimation(TranslateTransform.YProperty, Fade(shift.Y, -rise, Quick, InOut));
+    }
 
     private static IEasingFunction Frozen(Freezable ease) { ease.Freeze(); return (IEasingFunction)ease; }
 }
