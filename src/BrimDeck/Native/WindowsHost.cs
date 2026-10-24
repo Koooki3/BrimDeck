@@ -20,6 +20,10 @@ public sealed class WindowsHost : IDisposable
     private uint _identityPid;
     private string _identityName = "", _identityPath = "";
     public event Action<ScreenContext>? ContextChanged;
+    // The foreground app changed while the context stayed, carrying the app the last answer was resolved for. The app
+    // rules may now answer differently for the same context, but nothing about the panel's own state needs to change —
+    // the panel does not fold away for an app switch, only for a context switch.
+    public event Action<(string Name, string Path)>? AppChanged;
     public ScreenContext Current { get; private set; }
     // monitor gives the monitor whose foreground window decides the context. The context is reported with the app it was
     // detected for, and a change of either is a change: two apps can read as the same context with different app rules.
@@ -33,9 +37,12 @@ public sealed class WindowsHost : IDisposable
     private void Poll()
     {
         var context = DetectNow();
-        if (context == Current && _appName == _raisedName && _appPath == _raisedPath) return;
+        var change = ScreenPolicy.WhatChanged(context, _appName, _appPath, Current, _raisedName, _raisedPath);
+        if (change == ScreenPolicy.ForegroundChange.None) return;
+        var previous = (_raisedName, _raisedPath);
         Current = context; _raisedName = _appName; _raisedPath = _appPath;
-        ContextChanged?.Invoke(context);
+        if (change == ScreenPolicy.ForegroundChange.Context) ContextChanged?.Invoke(context);
+        else AppChanged?.Invoke(previous);
     }
     // The context right now, without raising ContextChanged; a caller applies it itself, for instance at startup.
     public ScreenContext DetectNow() => Detect(_monitor());

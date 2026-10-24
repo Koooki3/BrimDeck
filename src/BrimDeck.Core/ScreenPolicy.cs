@@ -2,6 +2,17 @@ namespace BrimDeck.Core;
 
 public static class ScreenPolicy
 {
+    // What changed between two polls of the foreground window: the context itself, only the app behind it, or nothing.
+    // The panel folds away only for a context change; an app change under the same context re-resolves the app rules
+    // without touching its shape.
+    public enum ForegroundChange { None, Context, App }
+
+    public static ForegroundChange WhatChanged(ScreenContext context, string appName, string appPath,
+        ScreenContext previousContext, string previousName, string previousPath)
+        => context != previousContext ? ForegroundChange.Context
+         : appName != previousName || appPath != previousPath ? ForegroundChange.App
+         : ForegroundChange.None;
+
     public static ScreenContext Classify(bool exclusive, bool coversMonitor, bool hasCaption, bool maximized)
     {
         if (exclusive) return ScreenContext.Exclusive;

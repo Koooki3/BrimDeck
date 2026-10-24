@@ -70,6 +70,13 @@ internal static class FullscreenRuleTests
         var copy = settings.Copy();
         copy.FullscreenRules.Add(new FullscreenRule("Extra"));
         check("A settings copy keeps its own rules", settings.FullscreenRules.Count == 2 && copy.FullscreenRules.Count == 3);
+        check("What changed: a context change outranks an app change",
+            ScreenPolicy.WhatChanged(ScreenContext.Maximized, "a", "p", ScreenContext.Desktop, "b", "q") == ScreenPolicy.ForegroundChange.Context);
+        check("What changed: the same context with another app is an app change",
+            ScreenPolicy.WhatChanged(ScreenContext.Maximized, "app2", "p", ScreenContext.Maximized, "app1", "p") == ScreenPolicy.ForegroundChange.App
+            && ScreenPolicy.WhatChanged(ScreenContext.Maximized, "app", "q", ScreenContext.Maximized, "app", "p") == ScreenPolicy.ForegroundChange.App);
+        check("What changed: identical readings change nothing",
+            ScreenPolicy.WhatChanged(ScreenContext.Desktop, "app", "p", ScreenContext.Desktop, "app", "p") == ScreenPolicy.ForegroundChange.None);
         var many = new DeckSettings { FullscreenRules = Enumerable.Range(0, 40).Select(i => new FullscreenRule("App" + i)).ToList() };
         many.Normalize();
         check("The rule list is capped", many.FullscreenRules.Count == AppPresets.MaximumFullscreenExceptions);
