@@ -134,8 +134,9 @@ internal sealed partial class FxSurface
         double e = Steps > 0 ? MotionCurve.Step(t, Steps) : Curves.Follow(t);
         var from = mark.GlideFrom;
         radius = mark.GlideFromRadius + (mark.Radius - mark.GlideFromRadius) * e;
-        return new Rect(from.X + (mark.Box.X - from.X) * e, from.Y + (mark.Box.Y - from.Y) * e,
-            Math.Max(0, from.Width + (mark.Box.Width - from.Width) * e), Math.Max(0, from.Height + (mark.Box.Height - from.Height) * e));
+        // On the way it stays on device pixels too, so its edges never blur as it moves.
+        return Grid(new Rect(from.X + (mark.Box.X - from.X) * e, from.Y + (mark.Box.Y - from.Y) * e,
+            Math.Max(0, from.Width + (mark.Box.Width - from.Width) * e), Math.Max(0, from.Height + (mark.Box.Height - from.Height) * e)));
     }
 
     // ----- Drawing -----
@@ -185,10 +186,10 @@ internal sealed partial class FxSurface
                     {
                         for (int i = 1; i <= 3; i++)
                         {
-                            var ring = r; ring.Inflate(i, i); ring.Offset(0, .4 + .5 * i * lift);
+                            var ring = r; ring.Inflate(Px(i), Px(i)); ring.Offset(0, Px(.4 + .5 * i * lift));
                             Edge(dc, _liftLine, ring, radius + i, ellipse, hs * (i == 1 ? 1.6 : i == 2 ? .9 : .4) * lift);
                         }
-                        if (!_darkSurface && !ellipse) Line(dc, _lightLine, r.Left + Math.Max(radius, 2), r.Top + _line / 2, r.Right - Math.Max(radius, 2), r.Top + _line / 2, .9 * lift);
+                        if (!_darkSurface && !ellipse) Line(dc, _lightLine, r.Left + Px(Math.Max(radius, 2)), r.Top + _line / 2, r.Right - Px(Math.Max(radius, 2)), r.Top + _line / 2, .9 * lift);
                     }
                     break;
                 }
@@ -242,7 +243,7 @@ internal sealed partial class FxSurface
                 Fill(dc, _second, r, radius, ellipse, ps * .25 * k);
                 if (!ellipse)
                 {
-                    double inset = Math.Max(radius, 3);
+                    double inset = Px(Math.Max(radius, 3));
                     Line(dc, _secondLine, r.Left + inset, r.Top + _line / 2, r.Right - inset, r.Top + _line / 2, ps * .9 * k);
                     Line(dc, _secondLine, r.Left + inset, r.Top + _line * 1.5, r.Right - inset, r.Top + _line * 1.5, ps * .35 * k);
                 }
@@ -256,7 +257,7 @@ internal sealed partial class FxSurface
                 // A selection sweeps out from the left edge, as text selected from the caret.
                 // A round button has no line to select across: it fills as a whole.
                 if (ellipse) Fill(dc, _high, r, radius, true, ps * .9 * k);
-                else if (k > .001) Box(dc, _high, new Rect(r.X, r.Y, r.Width * k, r.Height), Math.Min(radius, r.Width * k / 2), ps * .9);
+                else if (k > .001 && Px(r.Width * k) is var swept and > 0) Box(dc, _high, new Rect(r.X, r.Y, swept, r.Height), Math.Min(radius, swept / 2), ps * .9);
                 if (_motion.Hover != HoverFx.Caret) Box(dc, _main, Caret(r, k, ellipse), 0, k > 0 ? 1 : 0);
                 break;
             }
@@ -284,7 +285,7 @@ internal sealed partial class FxSurface
         double presence = _motion.Hover == HoverFx.Brackets ? Math.Max(h, k) : k;
         if (presence <= .001 && kick <= 0) return;
         double outset = 1 + 4 * (1 - h) * (1 - k) - 1.5 * k + kick;
-        double arm = Math.Clamp(Math.Min(r.Width, r.Height) * .3, 4, 9) + 2 * k;
+        double arm = Px(Math.Clamp(Math.Min(r.Width, r.Height) * .3, 4, 9) + 2 * k);
         if (k > .001)
         {
             // The chromatic ghost: the same brackets in the second color, a pixel or two aside.
@@ -313,7 +314,8 @@ internal sealed partial class FxSurface
         if (alpha <= .001) return;
         double w = pen.Thickness;
         double left = Snap(r.Left - outset + dx, w), right = Snap(r.Right + outset + dx, w), top = Snap(r.Top - outset + dy, w), bottom = Snap(r.Bottom + outset + dy, w);
-        arm = Math.Min(arm, Math.Min(right - left, bottom - top) / 2 - 1);
+        // Whole device pixels long, so the arms' square ends lie on pixel edges too.
+        arm = Px(Math.Min(arm, Math.Min(right - left, bottom - top) / 2 - 1));
         dc.PushOpacity(alpha);
         dc.DrawLine(pen, new Point(left, top), new Point(left + arm, top)); dc.DrawLine(pen, new Point(left, top), new Point(left, top + arm));
         dc.DrawLine(pen, new Point(right, top), new Point(right - arm, top)); dc.DrawLine(pen, new Point(right, top), new Point(right, top + arm));
@@ -327,10 +329,10 @@ internal sealed partial class FxSurface
     {
         var box = mark.Box;
         if (box.IsEmpty || box.Height < 6) { _sliceBand = Rect.Empty; return; }
-        double band = Math.Clamp(Math.Round(box.Height * .22), 3, 6);
+        double band = Px(Math.Clamp(Math.Round(box.Height * .22), 3, 6));
         // A different place on each press, but the same for the same press: a preview is repeatable.
         double place = .28 + .44 * ((mark.Serial * 0.6180339887) % 1);
-        _sliceBand = new Rect(0, Math.Round(box.Height * place - band / 2), box.Width, band);
+        _sliceBand = new Rect(0, Px(box.Height * place - band / 2), box.Width, band);
         // The band in the control's own coordinates, through the same transform the mark was placed with.
         try
         {
@@ -344,11 +346,11 @@ internal sealed partial class FxSurface
 
     private void DrawGlitch(DrawingContext dc, Rect r)
     {
-        var band = new Rect(r.X + 3, r.Y + _sliceBand.Y, r.Width, _sliceBand.Height);
+        var band = new Rect(r.X + Px(3), r.Y + _sliceBand.Y, r.Width, _sliceBand.Height);
         if (_slice.Viewport != band) _slice.Viewport = band;
         dc.DrawRectangle(_slice, null, band);
-        Line(dc, _mainLine, r.X - 2, Snap(band.Top, _line), r.Right - 2, Snap(band.Top, _line), .9);
-        Line(dc, _secondLine, r.X + 4, Snap(band.Bottom, _line), r.Right + 4, Snap(band.Bottom, _line), .9);
+        Line(dc, _mainLine, r.X - Px(2), Snap(band.Top, _line), r.Right - Px(2), Snap(band.Top, _line), .9);
+        Line(dc, _secondLine, r.X + Px(4), Snap(band.Bottom, _line), r.Right + Px(4), Snap(band.Bottom, _line), .9);
     }
 
     // A short accent where keyboard focus lands: it rises quickly, then fades, over the control's own focus outline.
@@ -365,14 +367,14 @@ internal sealed partial class FxSurface
         {
             case FocusFx.Ring:
             {
-                var ring = r; ring.Inflate(2, 2);
+                var ring = r; ring.Inflate(Px(2), Px(2));
                 Edge(dc, Pen2, ring, radius + 2, mark.Ellipse, .8 * a);
                 break;
             }
             case FocusFx.Glow:
                 for (int i = 1; i <= 3; i++)
                 {
-                    var ring = r; ring.Inflate(i, i);
+                    var ring = r; ring.Inflate(Px(i), Px(i));
                     Edge(dc, _mainLine, ring, radius + i, mark.Ellipse, (i == 1 ? .5 : i == 2 ? .25 : .1) * a);
                 }
                 break;
@@ -444,21 +446,31 @@ internal sealed partial class FxSurface
         double height = 2 * _line;
         double inset = Math.Max(radius, 3);
         double full = ellipse ? r.Width * .5 : Math.Max(4, r.Width - 2 * inset);
-        double width = Math.Round(full * Math.Clamp(share, 0, 1));
-        double y = ellipse ? r.Bottom + 1 : r.Bottom - height;
-        return new Rect(Math.Round(r.X + (r.Width - width) / 2), y, width, height);
+        double width = Px(full * Math.Clamp(share, 0, 1));
+        double y = ellipse ? r.Bottom + Px(1) : r.Bottom - height;
+        return new Rect(r.X + Px((r.Width - width) / 2), y, width, height);
     }
 
     // The caret: 2 px wide at the left inside edge, two thirds of the height; `travel` moves it across to the right edge.
     private Rect Caret(Rect r, double travel, bool ellipse = false)
     {
         // Inside a round button the caret stays within the circle, where its chord is tall enough.
-        double width = 2 * _line, height = Math.Max(8, Math.Round(r.Height * (ellipse ? .5 : .62)));
+        double width = 2 * _line, height = Px(Math.Max(8, r.Height * (ellipse ? .5 : .62)));
         double margin = ellipse ? r.Width * .2 : 3;
         double left = r.X + margin, right = r.Right - margin - width;
         double x = Snap(left + (right - left) * Math.Clamp(travel, 0, 1), width);
-        return new Rect(x - width / 2, Math.Round(r.Y + (r.Height - height) / 2), width, height);
+        return new Rect(x - width / 2, r.Y + Px((r.Height - height) / 2), width, height);
     }
 
     private double Snap(double at, double width) => FxShapes.SnapLine(at, width, Math.Max(.5, _dressedDpi));
+
+    // A length in whole device pixels, and a box with its edges on them: the marks' boxes are snapped (FxMark.Update), so
+    // whatever is placed from them by these stays on the pixel grid at 125, 150 or 175 percent as at 100.
+    private double Px(double dip) { double scale = Math.Max(.5, _dressedDpi); return FxShapes.Pixel(dip * scale) / scale; }
+    private Rect Grid(Rect r)
+    {
+        double scale = Math.Max(.5, _dressedDpi);
+        var snapped = FxShapes.Snap(new DipRect(r.X, r.Y, r.Width, r.Height), scale, scale);
+        return new Rect(snapped.X, snapped.Y, snapped.Width, snapped.Height);
+    }
 }

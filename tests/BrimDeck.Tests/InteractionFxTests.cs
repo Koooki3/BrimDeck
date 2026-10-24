@@ -87,6 +87,8 @@ internal static class InteractionFxTests
         static bool OnPixel(double dip) => Math.Abs(dip * 1.5 - Math.Round(dip * 1.5)) < 1e-9;
         check("Edges land on device pixels at 150 percent, within half a pixel", OnPixel(snapped.X) && OnPixel(snapped.Y) && OnPixel(snapped.Right) && OnPixel(snapped.Bottom)
             && Math.Abs(snapped.X - 10.2) <= .34 && Math.Abs(snapped.Right - 30.5) <= .34 && Math.Abs(snapped.Bottom - 15) <= .34);
+        var half = FxShapes.Snap(R(6, 0, 36, 36), 1.75, 1.75);
+        check("A shape on half pixels keeps its width in device pixels (175 percent: 63, not 64)", Math.Abs(half.Width * 1.75 - 63) < 1e-9 && Math.Abs(half.Height * 1.75 - 63) < 1e-9);
         check("A one pixel line sits on a pixel's middle, a two pixel line between pixels",
             Math.Abs(FxShapes.SnapLine(10.3, 1, 1) - 10.5) < 1e-9 && Math.Abs(FxShapes.SnapLine(10.3, 2, 1) - 10) < 1e-9 && Math.Abs(FxShapes.SnapLine(10.3, .5, 2) - 10.25) < 1e-9 && Math.Abs(FxShapes.SnapLine(10.3, 1, 2) - 10.5) < 1e-9);
         check("Clipped to the viewport; nothing when outside it", Near(FxShapes.Clip(R(0, 90, 50, 20), R(0, 0, 100, 100)), R(0, 90, 50, 10)) && FxShapes.Clip(R(0, 120, 50, 20), R(0, 0, 100, 100)).Width == 0);
