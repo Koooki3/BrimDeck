@@ -50,6 +50,8 @@ public sealed record ProviderResult(List<UsageMetric> Metrics, string Plan, stri
 {
     // JSON the script asked to receive again as ctx.memory on its next run for the same connection.
     public string? Memory { get; init; }
+    // The source text to show instead of the source's name, for a built-in reader that knows which service answered.
+    public string Source { get; init; } = "";
 }
 
 public static class MetricParser

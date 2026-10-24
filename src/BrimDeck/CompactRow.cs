@@ -5,8 +5,9 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The parts of the collapsed row, left to right.
-internal enum CompactPart { Cover, Rings, Text, Monitor, Equalizer, Clock }
+// The parts of the collapsed row. The cover comes first and the equalizer and the clock last; the rings, the title and the
+// readings stand between them in the order chosen for the style (Core's CompactPart, DeckSettings.CompactOrder).
+internal enum RowPart { Cover, Rings, Text, Monitor, Equalizer, Clock }
 
 // The collapsed row as CompactMusicLayout chose it: every part whole, every two neighbours the same gap apart, the system
 // readings included (CompactSpacing). Width the parts leave over goes to the title up to the width of its text, then to every
@@ -19,7 +20,8 @@ internal enum CompactPart { Cover, Rings, Text, Monitor, Equalizer, Clock }
 // A new line of the title eases its room to the new text's width, and a reading whose figure widens or narrows eases its own.
 internal sealed class CompactRow : Panel
 {
-    private static readonly CompactPart[] Order = Enum.GetValues<CompactPart>();
+    // Left to right.
+    private readonly RowPart[] _order;
     private sealed class Slot(FrameworkElement element, double width, bool shown)
     {
         public readonly FrameworkElement Element = element;
@@ -31,7 +33,7 @@ internal sealed class CompactRow : Panel
         public Eased Presence;
         public ScaleTransform? Zoom;
     }
-    private readonly Dictionary<CompactPart, Slot> _slots = [];
+    private readonly Dictionary<RowPart, Slot> _slots = [];
     private readonly double _gap, _dpi, _scale;
     private MonitorStrip? _strip;
     // The width the title's room eases to (its text's width, held a while when a shorter line follows a longer one, so lyrics do
@@ -42,21 +44,24 @@ internal sealed class CompactRow : Panel
     // What the row shows; rows with the same key carry their parts over.
     public object Key { get; }
 
-    public CompactRow(object key, double gap, double dpi, double scale)
+    // middle: the order of the rings, the title and the readings; parts it leaves out follow in their default order.
+    public CompactRow(object key, double gap, double dpi, double scale, IEnumerable<CompactPart>? middle = null)
     {
+        _order = [RowPart.Cover, .. (middle ?? CompactParts.Default).Select(part => part switch { CompactPart.Rings => RowPart.Rings, CompactPart.Music => RowPart.Text, _ => RowPart.Monitor })
+            .Concat([RowPart.Rings, RowPart.Text, RowPart.Monitor]).Distinct(), RowPart.Equalizer, RowPart.Clock];
         Key = key; _gap = Math.Max(0, gap); _dpi = dpi > 0 && double.IsFinite(dpi) ? dpi : 1; _scale = CompactMusicLayout.SafeScale(scale);
         VerticalAlignment = VerticalAlignment.Center; HorizontalAlignment = HorizontalAlignment.Left;
     }
 
     // A part the layout shows, width DIPs wide when fully present (the title's and the readings' widths follow the row).
     // A part the previous row already had keeps its presence; a new one starts from nothing when motion is on.
-    public void Show(CompactPart part, FrameworkElement element, double width, CompactRow? previous, bool motion)
+    public void Show(RowPart part, FrameworkElement element, double width, CompactRow? previous, bool motion)
     {
         var slot = new Slot(element, Math.Max(0, width), true);
         slot.Presence = previous is not null && previous._slots.TryGetValue(part, out var before) ? before.Presence : new Eased(previous is null || !motion ? 1 : 0);
         slot.Presence.Set(1, motion);
-        if (part == CompactPart.Monitor) _strip = element as MonitorStrip;
-        if (part == CompactPart.Text && previous is { _titleKnown: true }) { _title = previous._title; _titleHeld = previous._titleHeld; _titleKnown = true; }
+        if (part == RowPart.Monitor) _strip = element as MonitorStrip;
+        if (part == RowPart.Text && previous is { _titleKnown: true }) { _title = previous._title; _titleHeld = previous._titleHeld; _titleKnown = true; }
         _slots[part] = slot; Children.Add(element);
     }
 
@@ -65,13 +70,13 @@ internal sealed class CompactRow : Panel
     {
         if (previous is null || !motion) return;
         double now = Eased.Now;
-        foreach (var part in Order)
+        foreach (var part in _order)
         {
             // The readings fade inside their own strip, which the new row has whenever any is still present.
-            if (part == CompactPart.Monitor || _slots.ContainsKey(part) || !previous._slots.TryGetValue(part, out var old)) continue;
+            if (part == RowPart.Monitor || _slots.ContainsKey(part) || !previous._slots.TryGetValue(part, out var old)) continue;
             if (old.Presence.At(now) <= 0) continue;
             previous.Children.Remove(old.Element);
-            var slot = new Slot(old.Element, part == CompactPart.Text ? old.Room : old.Width, false) { Presence = old.Presence, Zoom = old.Zoom };
+            var slot = new Slot(old.Element, part == RowPart.Text ? old.Room : old.Width, false) { Presence = old.Presence, Zoom = old.Zoom };
             slot.Presence.Set(0, true);
             _slots[part] = slot; Children.Add(old.Element);
         }
@@ -104,14 +109,14 @@ internal sealed class CompactRow : Panel
     {
         double now = Eased.Now, width = finalSize.Width, height = finalSize.Height;
         // Every part of the row, the readings one by one, at its full width and how present it is (CompactSpacing).
-        var parts = new List<CompactSpacing.Part>(Order.Length + 6);
-        var owners = new List<CompactPart>(Order.Length + 6);
+        var parts = new List<CompactSpacing.Part>(_order.Length + 6);
+        var owners = new List<RowPart>(_order.Length + 6);
         int title = -1;
         double text = 0;
-        foreach (var part in Order)
+        foreach (var part in _order)
         {
             if (!_slots.TryGetValue(part, out var slot)) continue;
-            if (part == CompactPart.Monitor && _strip is { } strip)
+            if (part == RowPart.Monitor && _strip is { } strip)
             {
                 foreach (var (w, p) in strip.Readings(now)) { parts.Add(new(w, p)); owners.Add(part); }
                 continue;
@@ -124,8 +129,8 @@ internal sealed class CompactRow : Panel
                 slot.Element.Arrange(new Rect(0, 0, slot.Element.DesiredSize.Width, slot.Element.DesiredSize.Height));
                 continue;
             }
-            if (part == CompactPart.Text && slot.Shown) { title = parts.Count; text = TitleWidth(slot, now); }
-            parts.Add(new(part == CompactPart.Text ? slot.Room : slot.Width, presence)); owners.Add(part);
+            if (part == RowPart.Text && slot.Shown) { title = parts.Count; text = TitleWidth(slot, now); }
+            parts.Add(new(part == RowPart.Text ? slot.Room : slot.Width, presence)); owners.Add(part);
         }
         var placed = CompactSpacing.Arrange(parts, title, text, width, _gap, _scale, _dpi);
         double stripLeft = double.NaN, stripRight = 0;
@@ -135,7 +140,7 @@ internal sealed class CompactRow : Panel
             var part = owners[i];
             // How present the row placed it: less than its own presence when the row is too short to hold it as it comes or goes.
             double room = placed.Room[i], x = placed.Left[i], p = Math.Clamp(placed.Presence[i], 0, 1);
-            if (part == CompactPart.Monitor)
+            if (part == RowPart.Monitor)
             {
                 if (double.IsNaN(stripLeft)) stripLeft = x;
                 offsets.Add(x - stripLeft); shares.Add(p); stripRight = x + room;
@@ -144,7 +149,7 @@ internal sealed class CompactRow : Panel
             var slot = _slots[part];
             var element = slot.Element;
             // The title fills its room; the other parts keep their size and stand in the middle of their room.
-            bool fills = part == CompactPart.Text;
+            bool fills = part == RowPart.Text;
             if (fills && slot.Shown) slot.Room = room;
             double logical = fills ? room : slot.Width;
             double childWidth = fills ? room : element.DesiredSize.Width, childHeight = element.DesiredSize.Height;

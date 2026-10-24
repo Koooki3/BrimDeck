@@ -8,7 +8,7 @@ namespace BrimDeck;
 
 // Resizing by dragging, one gesture for both forms, as ftop's panel resizes and its strip fits:
 // - Open, on any page (AI usage, system monitor, media), the bottom edge changes the page's height, a side edge its width (both
-//   sides move, so the panel stays centred on the collapsed surface) and a bottom corner both. Each page keeps its own size
+//   sides move, so the panel keeps the centre it opened with; see SetExpanded) and a bottom corner both. Each page keeps its own size
 //   and lays itself out for it as it changes.
 // - Collapsed, either end of the notch, the capsule or the line changes its width. Pointing at an end shows the resize cursor
 //   instead of opening the panel. The content reflows as the width changes: the readings, the rings and the lyric take what

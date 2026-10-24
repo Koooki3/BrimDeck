@@ -25,7 +25,7 @@
             <DropShadowEffect Color="Black" BlurRadius="14" ShadowDepth="4" Direction="270" Opacity="0.28"/>
           </Grid.Effect>
           <local:IslandBorder Background="{Binding Background, ElementName=Island}" CornerRadius="{Binding CornerRadius, ElementName=Island}"
-                              ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}"/>
+                              ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}" Inset="1"/>
         </Grid>
       </Grid>
       <!-- In compact form this strip covers the whole bounding box from the screen edge down, including the notch shoulders,
@@ -77,11 +77,11 @@
                           Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
                   </Canvas></Viewbox>
                 </Button>
-                <Button x:Name="MonitorPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="MonitorPage_Click">
-                  <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="M 2,12.5 H 6.5 L 9.5,5 L 14.5,19 L 17.5,12.5 H 22" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox>
-                </Button>
                 <Button x:Name="MusicPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="MusicPage_Click">
                   <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="M 9,18 V 5.5 L 20,3.3 V 16 M 9,18 A 3,3 0 1 1 3,18 A 3,3 0 1 1 9,18 M 20,16 A 3,3 0 1 1 14,16 A 3,3 0 1 1 20,16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeLineJoin="Round"/></Canvas></Viewbox>
+                </Button>
+                <Button x:Name="MonitorPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="MonitorPage_Click">
+                  <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="M 2,12.5 H 6.5 L 9.5,5 L 14.5,19 L 17.5,12.5 H 22" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox>
                 </Button>
                 <!-- Recent notices; the dot counts notices not seen yet in BrimDeck. -->
                 <Button x:Name="NoticesPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="NoticesPage_Click" Visibility="Collapsed">

@@ -42,7 +42,7 @@ internal static class CompactRowTests
             {
                 var settings = new DeckSettings { NotchWidth = surface, NotchHeight = height, CapsuleWidth = surface, CapsuleHeight = height };
                 settings.Normalize();
-                var shape = CollapsedGeometry.Resolve(settings, style, screen, area, dpi, 0, requiredWidth);
+                var shape = CollapsedGeometry.Resolve(settings, style, screen, area, dpi, null, requiredWidth);
                 double content = style == CompactStyle.Notch ? Math.Min(shape.ContentWidth, shape.Surface.Width - 2 * (shape.Shoulder + shape.BottomRadius)) : shape.ContentWidth;
                 content = Math.Floor(content * dpi + .001) / dpi;
                 var l = CompactMusicLayout.Calculate(content, scale, true, 2, true, face, offered, inner);
@@ -193,7 +193,7 @@ internal static class CompactRowTests
             settings.Normalize();
             double scale = height / CollapsedLimits.BaseHeight, face = 33 * scale;
             double requiredWidth = CompactMusicLayout.Calculate(0, scale, true, 4, true, face).Required;
-            var shape = CollapsedGeometry.Resolve(settings, style, screen, area, 1.5, 0, Math.Ceiling(requiredWidth) + 1);
+            var shape = CollapsedGeometry.Resolve(settings, style, screen, area, 1.5, null, Math.Ceiling(requiredWidth) + 1);
             // As the window reads the content area (MainWindow.CompactContentWidth): clear of the notch's shoulders and corners.
             double content = style == CompactStyle.Notch ? Math.Min(shape.ContentWidth, shape.Surface.Width - 2 * (shape.Shoulder + shape.BottomRadius)) : shape.ContentWidth;
             content = Math.Floor(content * 1.5 + .001) / 1.5;
@@ -209,14 +209,14 @@ internal static class CompactRowTests
         check("Compact fit: the same inputs give the same row", same);
         check("Compact fit: a stretched notch shows the system readings beside the media, as the capsule does", notchReadings);
         var capsule = new DeckSettings { CapsuleWidth = 140, CapsuleHeight = 32 };
-        check("Compact fit: the surface grows to what it must show, never below the saved width", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 0, 152).Surface.Width == 184
-            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 0, 50).Surface.Width == 140
-            && CollapsedGeometry.Resolve(new DeckSettings { NotchHeight = 24 }, CompactStyle.Notch, screen, area, 1, 0, 300).Surface.Width == 356
-            && CollapsedGeometry.Resolve(capsule, CompactStyle.Line, screen, area, 1, 0, 300).Surface.Width == CollapsedLimits.LineLengthDefault);
+        check("Compact fit: the surface grows to what it must show, never below the saved width", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, null, 152).Surface.Width == 184
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, null, 50).Surface.Width == 140
+            && CollapsedGeometry.Resolve(new DeckSettings { NotchHeight = 24 }, CompactStyle.Notch, screen, area, 1, null, 300).Surface.Width == 356
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Line, screen, area, 1, null, 300).Surface.Width == CollapsedLimits.LineLengthDefault);
         check("Compact fit: surface width for a content width", CollapsedGeometry.SurfaceWidth(CompactStyle.Capsule, 32, 100) == 132 && CollapsedGeometry.SurfaceWidth(CompactStyle.Notch, 32, 100) == 160
             && CollapsedGeometry.SurfaceWidth(CompactStyle.Notch, 24, 100) == 156 && CollapsedGeometry.SurfaceWidth(CompactStyle.Line, 4, 100) == 0
             && CollapsedGeometry.SurfaceWidth(CompactStyle.Capsule, 32, 0) == 0 && CollapsedGeometry.SurfaceWidth(CompactStyle.Capsule, 32, double.NaN) == 0
-            && CollapsedGeometry.SurfaceWidth(CompactStyle.Capsule, 32, 5000) == CollapsedLimits.CapsuleWidthMax);
+            && CollapsedGeometry.SurfaceWidth(CompactStyle.Capsule, 32, 5000) == 5032 && CollapsedGeometry.SurfaceWidth(CompactStyle.Capsule, 32, 9000) == CollapsedLimits.CapsuleWidthMax);
     }
 
     // The quota notice: the used text always stays; the ring, the name and the reset time follow whole while they fit.

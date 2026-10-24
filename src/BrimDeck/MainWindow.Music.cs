@@ -193,7 +193,7 @@ public partial class MainWindow
         foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, NoticesPageButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
         PageSwitch.Visibility = _details && IsUsagePage ? Visibility.Collapsed : Visibility.Visible;
-        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MonitorPageButton, DeckPage.Monitor), (MusicPageButton, DeckPage.Music), (NoticesPageButton, DeckPage.Notices) })
+        foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (NoticesPageButton, DeckPage.Notices) })
         {
             bool current = CurrentPage == page;
             button.Visibility = DeckPages.Shown(Settings, page) ? Visibility.Visible : Visibility.Collapsed;
@@ -354,9 +354,10 @@ public partial class MainWindow
     internal static string SmtcHintWhy => Loc.T("开启网易云的 SMTC 后，才能在这里控制播放", "Turn on SMTC in NetEase to control playback here");
     // The English hint names the menu items as NetEase Cloud Music's Chinese interface shows them.
     internal static string SmtcHintHow => Loc.T("位置：网易云音乐 › 设置 › 系统 › 开启 SMTC", "Where: NetEase Cloud Music › 设置 › 系统 › 开启 SMTC");
-    // The song and the form (PageHandover) the media page was last built with: a new song swaps in, a new form (lyric lines,
-    // the title merged with the artist, the message or the entry shown) morphs in, as when a drag crosses a size step.
+    // The song and the form (PageHandover) the media page was last built with: a new song swaps in, a new form (the lyric lines
+    // the room holds, the title merged with the artist, the message or the entry shown) morphs in, as when a drag crosses a size step.
     private string _musicSong = "", _musicForm = "";
+    private bool _musicHadLyrics;
     private long _songArrived;
     private BitmapSource? _musicCoverShown;
     // The titles of a new song rise into place. A rebuild during the change continues it from where it is.
@@ -391,7 +392,8 @@ public partial class MainWindow
             && _media?.RestartingNetease != true && _media?.Error is null;
         string message = _media?.RestartingNetease == true ? Loc.T("正在重启网易云…", "Restarting NetEase Cloud Music…") : _media?.Error ?? "";
         var modes = track is null ? [] : MusicPlaybackModes.Supported(track);
-        var layout = MusicLayout.Calculate(w, h, hasLyrics, track?.HasTimeline == true, message.Length > 0, logMode, transport: !showSmtcHint);
+        var layout = MusicLayout.Calculate(w, h, hasLyrics, track?.HasTimeline == true, message.Length > 0, logMode, transport: !showSmtcHint,
+            lyricsExpected: Settings.LyricsEnabled);
         CurrentMusicLayout = layout;
         var c = layout.Metrics;
         // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
@@ -401,7 +403,11 @@ public partial class MainWindow
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
-        string form = $"{track is null}|{layout.LyricLines}|{layout.MergeTitle}|{layout.ShowFullControl}|{layout.ShowMessage}|{hasLyrics}|{showSmtcHint}|{track?.HasTimeline}";
+        // Lyrics that arrive after the song, or come and go with the player's line, only fade in their own lines (lyricsArrive):
+        // the form counts the lyric lines the room holds, not whether lyrics are there.
+        string form = $"{track is null}|{layout.LyricRoom}|{layout.MergeTitle}|{layout.ShowFullControl}|{layout.ShowMessage}|{Settings.LyricsEnabled}|{showSmtcHint}|{track?.HasTimeline}";
+        bool lyricsArrive = shown && hasLyrics && !_musicHadLyrics && Soft.Enabled;
+        _musicHadLyrics = hasLyrics;
         // A new song changes the titles and perhaps the cover; the rest of the page is the same and stays still. The titles
         // rise into place (RiseIn) and a new cover fades in. A player announces a song in a few updates (title, artist, and a
         // timeline that may go and come back); the first starts the change and the rest carry it on instead of starting it
@@ -450,15 +456,12 @@ public partial class MainWindow
         var right = new Grid(); Grid.SetColumn(right, 2); upper.Children.Add(right);
         bool synchronized = playerLyrics || _lyrics.CanSynchronize(track);
         int lyricLines = playerLyrics ? Math.Min(1, layout.LyricLines) : layout.LyricLines;
-        // With nothing under the titles (no lyrics, no message), the titles sit centred beside the cover instead of at its top,
-        // so a tall panel does not leave the space under them empty.
-        bool alone = !(hasLyrics && lyricLines > 0) && !layout.ShowMessage;
-        right.RowDefinitions.Add(new RowDefinition { Height = alone ? new GridLength(1, GridUnitType.Star) : new GridLength(layout.HeaderHeight) });
-        right.RowDefinitions.Add(new RowDefinition { Height = alone ? GridLength.Auto : new GridLength(1, GridUnitType.Star) });
+        right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.HeaderHeight) });
+        right.RowDefinitions.Add(new RowDefinition());
         double equalizerWidth = Math.Max(27, Math.Round(c.Equalizer * 1.7));
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(equalizerWidth + 16) });
-        var titles = new StackPanel { VerticalAlignment = alone ? VerticalAlignment.Center : VerticalAlignment.Top };
+        var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
         var title = UI.Fixed(track.Title, c.Title, c.TitleLine, UI.Primary, FontWeights.SemiBold);
         AutomationProperties.SetName(title, Loc.T("歌名 ", "Title ") + track.Title); titles.Children.Add(title);
         if (layout.MergeTitle)
@@ -475,7 +478,7 @@ public partial class MainWindow
         header.Children.Add(titles);
         if (shown && songChanging) RiseIn(titles);
         _musicEqualizer = new MusicEqualizer { Width = equalizerWidth, Height = c.Equalizer, Color = _musicAccent, HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = alone ? VerticalAlignment.Center : VerticalAlignment.Top, Margin = new Thickness(0, alone ? 0 : (c.TitleLine - c.Equalizer) / 2, 0, 0) };
+            VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, (c.TitleLine - c.Equalizer) / 2, 0, 0) };
         Grid.SetColumn(_musicEqualizer, 1); header.Children.Add(_musicEqualizer); right.Children.Add(header);
 
         var middle = new Grid(); Grid.SetRow(middle, 1); right.Children.Add(middle); _musicInfo = middle;
@@ -499,6 +502,7 @@ public partial class MainWindow
             RenderOptions.SetClearTypeHint(text, ClearTypeHint.Enabled);
             AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
         }
+        if (lyricsArrive) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; middle.BeginAnimation(OpacityProperty, fade); }
         if (layout.MiddleHeight >= c.MiddleGap + c.LyricLine)
         {
             // One line; a longer message (a failed full control connection) is read whole in its tooltip, like a cut title.
@@ -673,14 +677,7 @@ public partial class MainWindow
     {
         block.SetValue(SuppressMusicToolTipsProperty, false);
         block.ToolTip = text.Length > 0 ? text : null;
-        block.ToolTipOpening += (_, e) =>
-        {
-            double shown = block.ActualWidth;
-            block.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            bool cut = block.DesiredSize.Width > shown + .5;
-            block.InvalidateMeasure();
-            if (!cut) e.Handled = true;
-        };
+        block.ToolTipOpening += (_, e) => { if (!UI.IsCut(block)) e.Handled = true; };
     }
     private async Task CyclePlaybackMode(MediaTrack track)
     {
@@ -815,60 +812,59 @@ public partial class MainWindow
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
         // The clock keeps its own width at the right; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
-        // The system readings offer each chosen reading; the row admits those that fit whole (CompactMusicLayout).
-        var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactMonitor, Settings.CompactMonitorItems, MonitorThemeColors.For(Settings.MonitorPalette), scale,
+        // The system readings offer each chosen reading, in the order of the settings' table and in its colors; the row admits those
+        // that fit whole (CompactMusicLayout).
+        var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings.MonitorPalette, Settings.CompactReadings), scale,
             false, _stripPresence) : null;
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         double rowWidth = SnapDown(contentWidth, dpi);
         var layout = CompactMusicLayout.Calculate(rowWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.Candidates ?? [], strip?.Gap ?? 0);
         CurrentCompactLayout = layout;
         // Every row is at least as wide as what it must show (the clock; while media plays the cover, the equalizer and the
-        // title), with a DIP to spare for rounding to device pixels. With readings on, a row too short for all its content
-        // grows to it. A new width builds the row again.
-        double wanted = strip is null ? 0 : layout.Natural, required = layout.Required > 0 ? Math.Ceiling(layout.Required) + 1 : 0;
-        if (Math.Abs(wanted - _compactWanted) > .5 || Math.Abs(required - _compactRequired) > .5)
+        // title), with a DIP to spare for rounding to device pixels. An auto-width surface takes the width of everything the row
+        // can show, the title in its fixed slot (CompactMusicLayout.AutoWidth). Neither follows the width the surface has now, nor
+        // the track notice or the lyric's changing length, so the width changes only when the content itself does and never
+        // feeds back on itself. A new width builds the row again.
+        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
+        bool steadyText = media && Settings.MusicText != CompactMusicText.None;
+        double wanted = CompactMusicLayout.AutoWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.Candidates ?? [], strip?.Gap ?? 0);
+        double required = layout.Required > 0 ? Math.Ceiling(layout.Required) + 1 : 0;
+        if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5 || Math.Abs(required - _compactRequired) > .5)
         { _compactWanted = wanted; _compactRequired = required; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         // Parts carry over from the previous row while the row shows the same kind of content; see CompactRow.
+        var order = Settings.CompactOrder(EffectiveStyle);
+        string readings = string.Join(",", Settings.CompactReadings.Select(reading => $"{reading.Item}:{reading.Visible}:{reading.ShowValue}"));
         var key = (EffectiveStyle, scale, Settings.ShowsSummary(EffectiveStyle), Settings.ShowsMusic(EffectiveStyle), Settings.ShowsClock(EffectiveStyle), Settings.ShowsMonitor(EffectiveStyle),
-            Settings.MusicText, Settings.CompactMonitor, Settings.CompactMonitorItems, Settings.ClockStyle, PanelTheme.Generation);
+            Settings.MusicText, readings, string.Join(",", order), Settings.ClockStyle, PanelTheme.Generation);
         var previous = _compactRow is { } last && Equals(last.Key, key) ? last : null;
         bool motion = previous is not null && Soft.Enabled;
-        var grid = new CompactRow(key, layout.Gap, dpi, scale) { Width = rowWidth, Height = layout.RowHeight };
+        var grid = new CompactRow(key, layout.Gap, dpi, scale, order) { Width = rowWidth, Height = layout.RowHeight };
         if (media && layout.CoverWidth > 0)
         {
             var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
-            grid.Show(CompactPart.Cover, cover, layout.CoverWidth, previous, motion);
+            grid.Show(RowPart.Cover, cover, layout.CoverWidth, previous, motion);
         }
         // The readings are sampled only while one shows or is fading (UpdateMonitorDemand): with none fitting, the sampler rests.
         // It lingers for a while first (SystemSampler), so a row narrowed and widened again finds current figures.
         if (strip is not null && (layout.MonitorItems > 0 || _stripPresence.Any(Eased.Now)))
         {
             strip.Admit(layout.MonitorItems);
-            grid.Show(CompactPart.Monitor, strip, layout.MonitorWidth, previous, motion); _compactStrip = strip;
+            grid.Show(RowPart.Monitor, strip, layout.MonitorWidth, previous, motion); _compactStrip = strip;
         }
-        if (clock is not null && layout.ClockWidth > 0) { grid.Show(CompactPart.Clock, clock, layout.ClockWidth, previous, motion); _compactClock = clock; }
+        if (clock is not null && layout.ClockWidth > 0) { grid.Show(RowPart.Clock, clock, layout.ClockWidth, previous, motion); _compactClock = clock; }
         if (media && layout.EqualizerWidth > 0)
         {
             // The bars' levels carry over from the row before (EqualizerBars), so rebuilding the row while resizing never resets them.
             _compactEqualizer = new MusicEqualizer { Bars = 4, Levels = _compactBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
-            grid.Show(CompactPart.Equalizer, _compactEqualizer, layout.EqualizerWidth, previous, motion);
+            grid.Show(RowPart.Equalizer, _compactEqualizer, layout.EqualizerWidth, previous, motion);
         }
         if (layout.RingWidth > 0 && apps.Count > 0)
         {
-            var items = apps.Select(entry =>
-            {
-                var snapshot = DashboardUsage.Quota(entry, Snapshots);
-                var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
-                double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
-                string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
-                    : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-                return (used, PanelTheme.AppTheme(entry), tip);
-            }).ToArray();
             // Rotating rings show whole rings at rest; the carousel's right fade lies over the gap after them, where the next ring
             // waits (the region is one gap wider than the rings it shows).
             var rings = layout.ScrollRings ? layout with { RingWidth = layout.RingWidth + layout.RingGap } : layout;
-            _quotaCarousel = new QuotaCarousel(items, rings, _quotaElapsed, Soft.Enabled);
-            grid.Show(CompactPart.Rings, _quotaCarousel, layout.RingWidth, previous, motion);
+            _quotaCarousel = new QuotaCarousel(QuotaRings(apps), rings, _quotaElapsed, Soft.Enabled);
+            grid.Show(RowPart.Rings, _quotaCarousel, layout.RingWidth, previous, motion);
         }
         if (layout.TextWidth > 0)
         {
@@ -877,7 +873,7 @@ public partial class MainWindow
             // (MarqueeScroll).
             _compactMarquee = new MusicMarquee { Text = text, Scroll = _compactScroll, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
                 ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
-            grid.Show(CompactPart.Text, _compactMarquee, layout.TextWidth, previous, motion);
+            grid.Show(RowPart.Text, _compactMarquee, layout.TextWidth, previous, motion);
         }
         grid.Carry(previous, motion);
         _compactRow = grid;
@@ -885,6 +881,16 @@ public partial class MainWindow
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
+    // One ring per application: the highest used share among its quotas, with every quota in the tooltip.
+    private (double Used, string Color, string Tip)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
+    {
+        var snapshot = DashboardUsage.Quota(entry, Snapshots);
+        var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
+        double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
+        string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
+            : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
+        return (used, PanelTheme.AppTheme(entry), tip);
+    }).ToArray();
     private void UpdateMusicTimer()
     {
         bool musicVisible = MusicPresentationVisible;

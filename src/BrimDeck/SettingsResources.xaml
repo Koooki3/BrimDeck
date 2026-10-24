@@ -213,6 +213,29 @@
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- A card that adds something, in a theme card's frame (SettingsChoice): a plus in place of the preview, 84 high as a theme
+       preview is (CompactStylePreview.ThemeHeight), and the action as its name. -->
+  <Style x:Key="SettingsAddCard" TargetType="Button">
+    <Setter Property="Foreground" Value="{DynamicResource SettingsTextSecondary}"/><Setter Property="FontSize" Value="12.5"/>
+    <Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource SettingsCardFocus}"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <StackPanel Background="Transparent">
+        <Border x:Name="Chrome" CornerRadius="12" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="1.5" Padding="3">
+          <Border Height="84" CornerRadius="9" Background="Transparent">
+            <Path x:Name="Plus" Data="M 12,0 V 24 M 0,12 H 24" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.75" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+        </Border>
+        <Grid Height="30" Margin="8,4,8,0">
+          <TextBlock Text="{TemplateBinding Tag}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" HorizontalAlignment="Center" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+        </Grid>
+      </StackPanel>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#74747C"/><Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/></Trigger>
+        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Plus" Property="Opacity" Value="0.7"/></Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style x:Key="SettingsTileFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
     <Border BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1.5" CornerRadius="13" Margin="-3"/>
   </ControlTemplate></Setter.Value></Setter></Style>

@@ -26,9 +26,15 @@ public sealed class IslandBorder : Border
         nameof(RimBrush), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(DefaultRim, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._rim = null));
     public static readonly DependencyProperty RimWidthProperty = DependencyProperty.Register(
         nameof(RimWidth), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._rim = null));
+    // Draws the outline this far inside the element's bounds, for the copy that casts the island's shadow. The shadow effect
+    // also draws the copy itself; lying exactly under the island, its edge would double the coverage of the island's
+    // antialiased edge pixels and leave a stepped edge. A shape with shoulders reaches the screen edge at its top, where the
+    // shoulders flare out, so it keeps its top edge and moves in at the sides and the bottom only.
+    public static readonly DependencyProperty InsetProperty = DependencyProperty.Register(
+        nameof(Inset), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender));
 
     private Pen? _rim;
-    private (Size Size, double Shoulder, CornerRadius Corners)? _outlineKey;
+    private (Size Size, double Shoulder, CornerRadius Corners, double Inset)? _outlineKey;
     private Geometry _outline = Geometry.Empty;
 
     static IslandBorder() => CornerRadiusProperty.OverrideMetadata(typeof(IslandBorder),
@@ -49,6 +55,7 @@ public sealed class IslandBorder : Border
     public Brush? Pattern { get => (Brush?)GetValue(PatternProperty); set => SetValue(PatternProperty, value); }
     public Brush RimBrush { get => (Brush)GetValue(RimBrushProperty); set => SetValue(RimBrushProperty, value); }
     public double RimWidth { get => (double)GetValue(RimWidthProperty); set => SetValue(RimWidthProperty, value); }
+    public double Inset { get => (double)GetValue(InsetProperty); set => SetValue(InsetProperty, value); }
 
     protected override void OnRender(DrawingContext drawingContext)
     {
@@ -82,25 +89,29 @@ public sealed class IslandBorder : Border
 
     private Geometry Outline()
     {
-        var key = (RenderSize, ShoulderRadius, CornerRadius);
+        var key = (RenderSize, ShoulderRadius, CornerRadius, Inset);
         if (_outlineKey == key) return _outline;
         _outlineKey = key;
-        return _outline = BuildOutline(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius);
+        return _outline = BuildOutline(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset);
     }
 
     // The island's outline for a size, shoulder and corners; dynamic notices draw the same outline, so that they start and end
-    // exactly on the island. Frozen.
-    internal static Geometry BuildOutline(double w, double h, double shoulderRadius, CornerRadius corners)
+    // exactly on the island. insetBy draws it that far inside the bounds (Inset). Frozen.
+    internal static Geometry BuildOutline(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy = 0)
     {
         if (!(w > 0) || !(h > 0)) return Geometry.Empty;
+        // The shoulders are sized on the full bounds, so an inset outline has the same shoulders moved in by the inset: its
+        // curves then lie inside the full outline's. The corners keep their centres and lose the inset from their radii.
         double shoulder = Math.Clamp(shoulderRadius, 0, Math.Min(w / 4, h / 2));
         double shoulderDepth = shoulder * (7d / 16);
+        double inset = Math.Clamp(insetBy, 0, Math.Min(w, h) / 4), top = shoulder > 0 ? 0 : inset;
+        w -= 2 * inset; h -= top + inset;
         double left = shoulder, right = w - shoulder;
-        double limit = Math.Min(shoulder > 0 ? h - shoulderDepth : h / 2, (right - left) / 2);
-        double bl = Math.Clamp(corners.BottomLeft, 0, limit);
-        double br = Math.Clamp(corners.BottomRight, 0, limit);
-        double tl = Math.Clamp(corners.TopLeft, 0, Math.Min(w, h) / 2);
-        double tr = Math.Clamp(corners.TopRight, 0, Math.Min(w, h) / 2);
+        double limit = Math.Max(0, Math.Min(shoulder > 0 ? h - shoulderDepth : h / 2, (right - left) / 2));
+        double bl = Math.Clamp(corners.BottomLeft - inset, 0, limit);
+        double br = Math.Clamp(corners.BottomRight - inset, 0, limit);
+        double tl = Math.Clamp(corners.TopLeft - inset, 0, Math.Min(w, h) / 2);
+        double tr = Math.Clamp(corners.TopRight - inset, 0, Math.Min(w, h) / 2);
         const double k = .5522847498307936; // Cubic approximation of a circular quadrant.
         var geometry = new StreamGeometry();
         using (var path = geometry.Open())
@@ -137,6 +148,7 @@ public sealed class IslandBorder : Border
                 path.BezierTo(new Point(0, tl * (1 - k)), new Point(tl * (1 - k), 0),
                     new Point(tl, 0), true, true);
         }
+        if (inset > 0) geometry.Transform = new TranslateTransform(inset, top);
         geometry.Freeze();
         return geometry;
     }

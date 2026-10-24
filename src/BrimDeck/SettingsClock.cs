@@ -15,8 +15,9 @@ public sealed partial class SettingsWindow
     private readonly List<(RadioButton Tile, ClockStyle Style)> _clockTiles = [];
     private readonly Dictionary<CompactStyle, RadioButton> _styleCards = [];
 
-    // The title and its arrow open and close the options under the row; the switch only turns the clock on or off.
-    private FrameworkElement ClockRow(CompactStyle style)
+    // The title and its arrow open and close the options under the row; the switch only turns the clock on or off. The title
+    // starts after indent, in line with the names of the draggable rows above it.
+    private FrameworkElement ClockRow(CompactStyle style, double indent = 0)
     {
         bool notch = style == CompactStyle.Notch;
         string title = Loc.T("时间", "Clock");
@@ -32,7 +33,7 @@ public sealed partial class SettingsWindow
         void Flip() { _clockOpen = !_clockOpen; Show(_clockOpen); }
         arrow = ChevronButton(Loc.T("时间设置", "Clock settings"), Flip);
         arrow.Margin = new Thickness(2, 0, 0, 0);
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(indent, 0, 0, 0) };
         heading.Children.Add(SettingLabel(title)); heading.Children.Add(arrow);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.ShowsClock(style), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title);
@@ -56,13 +57,13 @@ public sealed partial class SettingsWindow
     {
         var panel = new StackPanel();
         var heading = TextLine(Loc.T("时间样式", "Clock style"), 11.5, TextSecondary); heading.Margin = new Thickness(0, 0, 0, 10); panel.Children.Add(heading);
-        // Each card shows only the time; its name is in the tooltip and read by screen readers.
+        // Each card shows only the time; its name is read by screen readers.
         var tiles = new UniformGrid { Columns = 3, Margin = new Thickness(-5, -5, -5, 9) };
         _clockTiles.Clear();
         foreach (var style in Enum.GetValues<ClockStyle>())
         {
             var tile = new RadioButton { Style = (Style)FindResource("SettingsClockTile"), GroupName = "ClockStyle" + compact, IsChecked = S.ClockStyle == style,
-                Margin = new Thickness(5), ToolTip = ClockFace.Title(style), Content = ClockPreview(style) };
+                Margin = new Thickness(5), Content = ClockPreview(style) };
             AutomationProperties.SetName(tile, Loc.T("时间样式 ", "Clock style ") + ClockFace.Title(style));
             tile.Checked += (_, _) => Change(s => s.ClockStyle = style);
             tiles.Children.Add(tile); _clockTiles.Add((tile, style));

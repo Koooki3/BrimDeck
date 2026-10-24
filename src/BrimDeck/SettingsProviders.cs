@@ -201,7 +201,12 @@ public sealed partial class SettingsWindow
                         var uri = ProviderCatalog.ValidateUrl(normalized, current.AllowHttp);
                         if (uri.Query.Length > 0) throw new InvalidDataException(Loc.T("站点地址不应包含查询参数。", "The site address must not contain query parameters."));
                     }
-                    catch (InvalidDataException ex) { SaveStatus(ex.Message, true); return false; }
+                    catch (InvalidDataException ex)
+                    {
+                        // HTTPS is already explained by the line under the field; other faults still go to the status bar.
+                        if (!string.Equals(ex.Message, ProviderCatalog.HttpsRequired, StringComparison.Ordinal)) SaveStatus(ex.Message, true);
+                        return false;
+                    }
                 }
                 if (normalized != current.Site) Change(s => s.Entry(entry.InstanceId)!.Site = normalized);
                 site.Text = normalized;
@@ -215,8 +220,8 @@ public sealed partial class SettingsWindow
             Line("", warning);
 
             string allowTitle = Loc.T("允许 HTTP", "Allow HTTP");
-            string allowHelp = Loc.T("开启后，此来源可以用 HTTP 访问任意地址，API 密钥会以明文发送。只在可信的网络中使用，例如家里的 NAS 或 Tailscale。",
-                "When on, this source may use HTTP to any address, and the API key is sent in plain text. Use it only on a trusted network, such as a NAS at home or Tailscale.");
+            string allowHelp = Loc.T("允许用 HTTP 访问，但 API 密钥会以明文发送。只建议在可信网络中开启，例如局域网。",
+                "HTTP is allowed, but the API key is sent in plain text. Turn this on only on a trusted network, such as a LAN.");
             var allow = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.AllowHttp, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(allow, allowTitle); AutomationProperties.SetHelpText(allow, allowHelp);
             AutomationProperties.SetAutomationId(allow, "allow-http-" + entry.InstanceId.ToString("N"));
@@ -245,6 +250,7 @@ public sealed partial class SettingsWindow
         {
             ProviderId.GlmChina or ProviderId.GlmGlobal => Loc.T("GLM 套餐密钥，加密保存在本机", "GLM plan key, stored encrypted on this PC"),
             ProviderId.DeepSeek => Loc.T("DeepSeek API 密钥，加密保存在本机", "DeepSeek API key, stored encrypted on this PC"),
+            ProviderId.KimiApi => Loc.T("Kimi Code API 密钥（sk-kimi-…），加密保存在本机", "Kimi Code API key (sk-kimi-…), stored encrypted on this PC"),
             ProviderId.Custom => Loc.T("可选，加密保存在本机", "Optional, stored encrypted on this PC"),
             _ => Loc.T("填写 API 密钥，加密保存在本机", "Enter the API key; it is stored encrypted on this PC")
         };

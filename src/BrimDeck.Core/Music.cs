@@ -64,7 +64,8 @@ public sealed record MediaTrack
 // the title at its shortest), then the quota rings one by one, then the system readings one by one in the order they stay
 // (CompactMonitor.Priority). The first part that does not fit ends the row, so a wider row only ever adds parts and a narrower
 // one only removes them. The title takes the space that is left; without a title that space is free. Where the parts then
-// stand, evenly spaced, is CompactSpacing's.
+// stand, evenly spaced, is CompactSpacing's. The quota rings, the title and the readings stand in the order chosen for the style
+// (CompactPart); the order only places them, and which parts show and their widths are the same in any order.
 // Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are whole or half DIPs.
 public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, double RingGap, int VisibleRings, double RingWidth, double TextWidth, bool ScrollRings)
 {
@@ -111,10 +112,21 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public static double SafeScale(double scale) => double.IsFinite(scale) && scale > 0 ? Math.Clamp(scale, .25, 8) : 1;
     private static double Safe(double width) => double.IsFinite(width) && width > 0 ? width : 0;
 
-    // The width a row with this content takes with every part shown and the title at its shortest. A row with system readings
-    // grows to it (CollapsedGeometry.Resolve), as ftop's strip fits its readings.
+    // The width a row with this content takes with every part shown and the title at its shortest.
     public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
         => Calculate(0, scale, media, rings, text, clockFace, monitorFace).Natural;
+
+    // The width an auto-width row keeps for the lyric or the title at scale 1. It does not follow the text, so the surface
+    // keeps its width from line to line; a longer line scrolls in it.
+    public const double TextSlot = 160;
+
+    // The width an auto-width surface takes (CollapsedGeometry.Resolve): every part shown, the title in its fixed slot
+    // (TextSlot) instead of at its shortest. monitorItems and monitorGap as for Calculate.
+    public static double AutoWidth(double scale, bool media, int rings, bool text, double clockFace, IReadOnlyList<double> monitorItems, double monitorGap)
+    {
+        double s = SafeScale(scale), natural = Calculate(0, scale, media, rings, text, clockFace, monitorItems, monitorGap).Natural;
+        return text ? natural + Math.Max(0, Whole(TextSlot * s) - Whole(MinimumText * s)) : natural;
+    }
 
     // contentWidth here excludes the clock, as before custom sizes: the cover, middle and equalizer share it.
     public static CompactMusicLayout Calculate(double contentWidth, bool media, int rings, bool text)
@@ -193,7 +205,8 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 // The quota notice that replaces the collapsed row: ring, application name, "used" text and reset time, centred.
 // As in the collapsed row, each part shows whole or not at all. The used text always stays; then the ring, the name and the
 // reset time are taken in turn while they fit, and the first that does not fit ends the row. Only a row too short for the used
-// text alone cuts it.
+// text alone cuts it. The window does not cut the notice this way: it measures it with unlimited width and scrolls it when it is
+// longer than the row (Scroll).
 public sealed record CompactAlertLayout(double Scale, double RingSize, double RingThickness, double FontSize, double LineHeight, double Gap,
     double RingWidth, double NameWidth, double TextWidth, double ResetWidth)
 {
@@ -217,6 +230,19 @@ public sealed record CompactAlertLayout(double Scale, double RingSize, double Ri
         }
         double ringR = Take(ring + gap), nameR = nameW > 0 ? Take(nameW + gap) : 0, resetR = Safe(reset) > 0 ? Take(gap + Safe(reset)) : 0;
         return new(s, ring, 2.2 * s, Math.Max(1, CompactMusicLayout.Half(11.5 * s)), Math.Max(1, CompactMusicLayout.Whole(16 * s)), gap, ringR, nameR, textR, resetR);
+    }
+
+    // DIP per second, the collapsed lyric's pace.
+    public const double ScrollSpeed = 24;
+    // A notice longer than its row scrolls once while it is shown: it rests at its start, glides until its end is in view and
+    // rests there. The glide keeps the lyric's pace when that leaves the end its rest, and is faster when it does not, so the
+    // whole notice has been seen before it goes. Returns when the glide starts and ends, in seconds from the notice's start.
+    public static (double Start, double End) Scroll(double overflow, double shown)
+    {
+        double time = double.IsFinite(shown) && shown > 0 ? shown : 0;
+        double hold = Math.Min(1, time / 5), glide = Math.Max(0, time - 2 * hold);
+        double distance = double.IsFinite(overflow) && overflow > 0 ? overflow : 0;
+        return (hold, hold + Math.Min(distance / ScrollSpeed, glide));
     }
 }
 

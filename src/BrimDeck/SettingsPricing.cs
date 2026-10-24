@@ -57,7 +57,10 @@ public sealed partial class SettingsWindow
         foreach(var column in new[]{(Loc.T("模型", "Model"),nameof(PriceRow.Name),modelWeight),(Loc.T("输入", "Input"),nameof(PriceRow.Input),1d),(Loc.T("输出", "Output"),nameof(PriceRow.Output),1d),(Loc.T("缓存读取", "Cache read"),nameof(PriceRow.Read),1d),(Loc.T("缓存写入", "Cache write"),nameof(PriceRow.Write),1d)})
         {
             var style=new Style(typeof(TextBlock));style.Setters.Add(new Setter(TextBlock.TextTrimmingProperty,TextTrimming.CharacterEllipsis));style.Setters.Add(new Setter(TextBlock.TextWrappingProperty,TextWrapping.NoWrap));
-            style.Setters.Add(new Setter(TextBlock.ToolTipProperty,new Binding(column.Item2)));
+            // A model ID cut off by its ellipsis shows whole on hover; whether it is cut is checked when the tooltip would open,
+            // so a resized column or a reused row is measured afresh. Prices have no tooltip.
+            if(column.Item2==nameof(PriceRow.Name)){style.Setters.Add(new Setter(TextBlock.ToolTipProperty,new Binding(column.Item2)));
+                style.Setters.Add(new EventSetter(ToolTipOpeningEvent,new ToolTipEventHandler((sender,e)=>{if(sender is TextBlock block&&!UI.IsCut(block))e.Handled=true;})));}
             if(column.Item2!=nameof(PriceRow.Name))style.Setters.Add(new Setter(TextBlock.TextAlignmentProperty,TextAlignment.Right));
             // The application's TextBlock style wraps; a heading stays on one line.
             _priceTable.Columns.Add(new DataGridTextColumn {Header=new TextBlock {Text=column.Item1,TextWrapping=TextWrapping.NoWrap},Binding=new Binding(column.Item2),Width=new DataGridLength(column.Item3,DataGridLengthUnitType.Star),ElementStyle=style,

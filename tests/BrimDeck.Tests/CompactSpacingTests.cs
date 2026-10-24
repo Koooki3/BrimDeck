@@ -178,7 +178,7 @@ internal static class CompactSpacingTests
             double scale = height / CollapsedLimits.BaseHeight, face = Math.Ceiling(33 * scale - .001);
             double[] readings = [.. Readings.Select(r => Math.Ceiling(r * scale))];
             double requiredWidth = CompactMusicLayout.Calculate(0, scale, true, 2, true, face).Required;
-            var shape = CollapsedGeometry.Resolve(settings, style, screen, area, 1.5, 0, Math.Ceiling(requiredWidth) + 1);
+            var shape = CollapsedGeometry.Resolve(settings, style, screen, area, 1.5, null, Math.Ceiling(requiredWidth) + 1);
             double content = style == CompactStyle.Notch ? Math.Min(shape.ContentWidth, shape.Surface.Width - 2 * (shape.Shoulder + shape.BottomRadius)) : shape.ContentWidth;
             content = Math.Floor(content * 1.5 + .001) / 1.5;
             var l = CompactMusicLayout.Calculate(content, shape.Scale, true, 2, true, face, readings, CompactMusicLayout.Whole(8 * scale));

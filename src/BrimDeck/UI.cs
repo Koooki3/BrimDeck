@@ -73,6 +73,16 @@ internal static class UI
         block.Height = lineHeight;
         return block;
     }
+    // Whether a single-line text is cut off by its ellipsis at its current width, checked when needed so that resizing and
+    // reused rows are always measured afresh.
+    public static bool IsCut(TextBlock block)
+    {
+        double shown = block.ActualWidth;
+        block.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        bool cut = block.DesiredSize.Width > shown + .5;
+        block.InvalidateMeasure();
+        return cut;
+    }
     // A progress ring: a faint track with a colored arc that starts at the top and runs counterclockwise.
     public static Grid Ring(double percent, string color, double size, double thickness, string? track = null)
     {

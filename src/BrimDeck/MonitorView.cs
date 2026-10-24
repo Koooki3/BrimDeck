@@ -14,8 +14,6 @@ internal static class MonitorThemeColors
     public static MonitorColors For(MonitorPalette palette)
     {
         var theme = PanelTheme.Current;
-        // Opaque "#RRGGBB" as drawn on the theme, which ColorMath needs for the core groups' shades and for telling colors apart.
-        static string Drawn(string color) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color)));
         if (palette == MonitorPalette.Theme)
             return MonitorColors.FromTheme(Drawn(theme["accent"].ToString()),
                 [.. new[] { ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Amber }.Select(color => Drawn(theme.ClockPreset(color).ToString()))],
@@ -23,6 +21,12 @@ internal static class MonitorThemeColors
         var colors = MonitorColors.For(palette, theme.IsDark);
         return new(Drawn(colors.Performance), Drawn(colors.Efficiency), Drawn(colors.Gpu), Drawn(colors.Normal), Drawn(colors.Warning), Drawn(colors.Critical));
     }
+    // Opaque "#RRGGBB" as drawn on the theme, which ColorMath needs for the core groups' shades and for telling colors apart.
+    private static string Drawn(string color) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color)));
+
+    // The collapsed readings' colors: the palette's, and each reading's own colors (normal, warning, critical) as drawn on the
+    // theme, as the app colors are.
+    public static StripColors Strip(MonitorPalette palette, IEnumerable<CompactReading> readings) => new(For(palette), readings, Drawn);
 }
 
 // The system monitor page, after ftop's panel: the main gauge large with its columns (the processor's cores, or the graphics

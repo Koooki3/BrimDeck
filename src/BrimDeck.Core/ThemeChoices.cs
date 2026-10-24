@@ -59,6 +59,26 @@ public static partial class PanelThemes
         else ApplyMatching(next, settings, previous);
     }
 
+    // The application list was replaced (the applications page's Restore defaults): each new application takes the colors the
+    // other themes saved for the old one with the same quota source, the first new for the first old, and saved colors of
+    // applications no longer listed are dropped. The new applications get new instances, so their keys do not carry over.
+    public static void CarryAppChoices(DeckSettings settings, IReadOnlyList<AppEntry> previous)
+    {
+        foreach (var choices in settings.ThemeChoices.Values)
+        {
+            var left = previous.ToList();
+            var apps = new Dictionary<string, ThemeChoices.AppColors>();
+            foreach (var app in settings.Apps)
+            {
+                int at = left.FindIndex(old => old.QuotaSource == app.QuotaSource);
+                if (at < 0) continue;
+                if (choices.Apps.TryGetValue(left[at].InstanceId.ToString("N"), out var colors)) apps[app.InstanceId.ToString("N")] = colors;
+                left.RemoveAt(at);
+            }
+            choices.Apps = apps;
+        }
+    }
+
     // A theme file deleted for good takes its saved choices with it.
     public static void ForgetTheme(DeckSettings settings, string id) => settings.ThemeChoices.Remove(NormalizeId(id));
 }

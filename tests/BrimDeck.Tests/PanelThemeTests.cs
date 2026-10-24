@@ -88,6 +88,20 @@ internal static class PanelThemeTests
             PanelThemes.ForgetTheme(kept, "DARK");
             check("A deleted theme takes its saved choices with it", !kept.ThemeChoices.ContainsKey("dark"));
         }
+        // Restoring the application list keeps the colors the other themes saved for the same quota sources.
+        {
+            var reset = new DeckSettings();
+            reset.Apps[0].ThemeColor = "#123456";
+            PanelThemes.SwitchTheme(reset, "dark", BuiltIn("dark"), "dracula", BuiltIn("dracula"));
+            reset.Apps[0].ThemeColor = "#ABCDEF";
+            var previous = reset.Apps; reset.Apps = new DeckSettings().Apps;
+            PanelThemes.CarryAppChoices(reset, previous);
+            check("The restored applications are new instances", reset.Apps[0].InstanceId != previous[0].InstanceId && reset.Apps[0].ThemeColor == "");
+            PanelThemes.SwitchTheme(reset, "dracula", BuiltIn("dracula"), "dark", BuiltIn("dark"));
+            check("Another theme's saved colors come back after the application list is restored", reset.Apps[0].ThemeColor == "#123456");
+            check("Saved colors of applications no longer listed are dropped",
+                reset.ThemeChoices["dracula"].Apps.Keys.All(key => reset.Apps.Any(app => app.InstanceId.ToString("N") == key)));
+        }
         // Renaming a theme file changes only its own name.
         {
             const string original = """

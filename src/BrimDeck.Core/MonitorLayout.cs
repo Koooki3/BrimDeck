@@ -38,6 +38,8 @@ public sealed record MonitorColors(string Performance, string Efficiency, string
     // kinds of core has a color for each.
     public string Core(int group, int groups) => ColorMath.Mix(Performance, Efficiency, groups > 1 ? Math.Clamp(group, 0, groups - 1) / (double)(groups - 1) : 0);
     public string Memory(MemoryLevel level) => level switch { MemoryLevel.Critical => Critical, MemoryLevel.Elevated => Warning, _ => Normal };
+    // The scheme's three main colors by number: 0 the performance color, 1 the efficiency color, 2 the GPU color.
+    public string Main(int index) => index switch { 1 => Efficiency, 2 => Gpu, _ => Performance };
 
     public static string Name(MonitorPalette palette) => palette switch
     {

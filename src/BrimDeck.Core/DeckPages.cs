@@ -5,7 +5,7 @@ namespace BrimDeck.Core;
 public static class DeckPages
 {
     // The page switch, left to right.
-    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Monitor, DeckPage.Music, DeckPage.Notices];
+    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Notices];
 
     // The recent notices page exists while dynamic notices are on.
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch

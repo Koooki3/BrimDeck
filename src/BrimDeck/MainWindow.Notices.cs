@@ -184,7 +184,7 @@ public partial class MainWindow
         SetImmediate(Island, IslandBorder.MaterialOpacityProperty, 1d);
         SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf("surface"));
         SetImmediate(Compact, OpacityProperty, 0d);
-        ResetDotScale();
+        ResetDotPose();
     }
 
     // The island moved or changed style, or the theme changed: a shown notice follows.
@@ -257,7 +257,7 @@ public partial class MainWindow
             if (index < 0) return false;
             _liveRows.RemoveAll(live => ReferenceEquals(live.Notice, notice));
             var row = Row(notice, now);
-            list.Children[index] = row;
+            list.Children.RemoveAt(index); list.Children.Insert(index, row);
             _pageRows[i] = (notice, notice.Revision, row);
         }
         WatchPageLive();

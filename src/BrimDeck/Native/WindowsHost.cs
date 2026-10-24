@@ -12,26 +12,30 @@ public sealed class WindowsHost : IDisposable
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly Func<IntPtr> _monitor;
-    private readonly Func<IReadOnlyList<FullscreenException>> _exceptions;
+    // The app the context was last detected for: the empty pair on the desktop. The app rules resolve by it.
+    private string _appName = "", _appPath = "";
+    public (string Name, string Path) App => (_appName, _appPath);
     // The foreground window changes rarely but is polled several times a second, so its process is read once per window.
     private IntPtr _identityWindow;
     private uint _identityPid;
     private string _identityName = "", _identityPath = "";
     public event Action<ScreenContext>? ContextChanged;
     public ScreenContext Current { get; private set; }
-    // monitor gives the monitor whose foreground window decides the context. exceptions gives the apps whose full-screen
-    // windows are ignored; it is read on every poll, so a list change applies without recreating the panel.
-    public WindowsHost(Func<IntPtr> monitor, Func<IReadOnlyList<FullscreenException>> exceptions)
+    // monitor gives the monitor whose foreground window decides the context. The context is reported with the app it was
+    // detected for, and a change of either is a change: two apps can read as the same context with different app rules.
+    public WindowsHost(Func<IntPtr> monitor)
     {
-        _monitor = monitor; _exceptions = exceptions;
+        _monitor = monitor;
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
     }
+    private string _raisedName = "", _raisedPath = "";
     private void Poll()
     {
         var context = DetectNow();
-        if (context == Current) return;
-        Current = context; ContextChanged?.Invoke(context);
+        if (context == Current && _appName == _raisedName && _appPath == _raisedPath) return;
+        Current = context; _raisedName = _appName; _raisedPath = _appPath;
+        ContextChanged?.Invoke(context);
     }
     // The context right now, without raising ContextChanged; a caller applies it itself, for instance at startup.
     public ScreenContext DetectNow() => Detect(_monitor());
@@ -74,20 +78,15 @@ public sealed class WindowsHost : IDisposable
     private ScreenContext Detect(IntPtr monitor)
     {
         var foreground = GetForegroundWindow();
-        if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) return ScreenContext.Desktop;
+        if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
         GetWindowThreadProcessId(foreground, out var pid);
-        if (pid == Environment.ProcessId) return ScreenContext.Desktop;
-        if (MonitorFromWindow(foreground, 2) != monitor) return ScreenContext.Desktop;
-        // The window's app decides first: a desktop beautification tool can cover the monitor and would otherwise read as a
-        // full-screen app, even though the user wants no part of the window rules applied to it.
-        if (_exceptions() is { Count: > 0 } exceptions)
-        {
-            Describe(foreground, pid, out var processName, out var imagePath);
-            if (ScreenPolicy.IsException(processName, imagePath, exceptions)) return ScreenContext.Desktop;
-        }
+        if (pid == Environment.ProcessId) { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
+        if (MonitorFromWindow(foreground, 2) != monitor) { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
         var name = new System.Text.StringBuilder(256);
         GetClassName(foreground, name, name.Capacity);
-        if (name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return ScreenContext.Desktop;
+        if (name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
+        // The window's app travels with its context, so the app rules can answer for it; the read is cached per window.
+        Describe(foreground, pid, out _appName, out _appPath);
         if (SHQueryUserNotificationState(out var state) == 0 && state == 3) return ScreenContext.Exclusive;
         var info = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
         GetMonitorInfo(monitor, ref info);
