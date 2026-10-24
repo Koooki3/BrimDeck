@@ -140,14 +140,14 @@ internal sealed class ModelDatePicker : Border
         { var label = UI.Centered(day, 10, Hex("textTertiary")); label.TextAlignment = TextAlignment.Center; weekdays.Children.Add(label); }
         _body.Children.Add(weekdays);
 
-        // The grid: the band and the markers' faces under the day buttons, the markers' figures above them; the picture of the
-        // month leaving lies beside the page in the clipped calendar.
+        // The grid: the band under the day buttons, the markers' faces over them and the markers' figures over the faces, so a
+        // theme's opaque hover (github-light) never covers a selected day; the picture of the month leaving lies beside the page
+        // in the clipped calendar.
         var band = new Canvas { IsHitTestVisible = false };
         var bandFill = BandFill();
         for (int i = 0; i < _band.Length; i++) { _band[i] = new Rectangle { Fill = bandFill, Opacity = 0 }; band.Children.Add(_band[i]); }
         _page.Children.Add(band);
         var faces = new Canvas { IsHitTestVisible = false };
-        _page.Children.Add(faces);
         var cells = new UniformGrid { Columns = DatePickerMotion.Columns, Rows = DatePickerMotion.Rows };
         for (int i = 0; i < DatePickerMotion.Cells; i++)
         {
@@ -159,6 +159,7 @@ internal sealed class ModelDatePicker : Border
             cells.Children.Add(button);
         }
         _page.Children.Add(cells);
+        _page.Children.Add(faces);
         for (int m = 0; m < 2; m++)
         {
             var face = new Border { Background = Brush("accent"), CornerRadius = new CornerRadius(Radius), Height = CellHeight, Opacity = 0, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
