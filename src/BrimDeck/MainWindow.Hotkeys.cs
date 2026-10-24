@@ -32,11 +32,11 @@ public partial class MainWindow
         if (_app.UserHidden && !_hotkeyOpened) { _hotkeyOpened = true; ApplySettings(); }
         _hover.Stop(); _leave.Stop();
         _hotkeyPinned = true;
-        SetExpanded(true);
+        SetExpanded(true, keyboard: true);
         if (!_expanded) { _hotkeyPinned = false; if (_hotkeyOpened) { _hotkeyOpened = false; ApplySettings(); } }
     }
 
-    internal void CollapseFromHotkey() => SetExpanded(false);
+    internal void CollapseFromHotkey() => SetExpanded(false, keyboard: true);
 
     // For TrackPointer while open: the pointer inside ends the pin. True while the pin holds the panel open.
     internal bool HotkeyPinned(bool inside)
@@ -55,8 +55,9 @@ public partial class MainWindow
         if (!_hotkeyOpened) return;
         _hotkeyOpened = false;
         if (!_app.UserHidden) return;
-        // Hide again once the closing animation has played. Never from inside SetExpanded: ApplySettings calls it.
-        int duration = Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
+        // Hide again once the closing animation has played (at most the pointer's closing; the keyboard's is shorter). Never
+        // from inside SetExpanded: ApplySettings calls it.
+        int duration = Settings.Animations && SystemParameters.ClientAreaAnimation ? PanelMotion.Length(Settings.AnimationDuration, closing: true, keyboard: false) : 0;
         _hotkeyRehide ??= new DispatcherTimer(DispatcherPriority.Normal, Dispatcher);
         _hotkeyRehide.Stop();
         _hotkeyRehide.Interval = TimeSpan.FromMilliseconds(Math.Max(1, duration));

@@ -209,7 +209,7 @@ public partial class MainWindow
         var (_, panelWork, _) = Native.WindowsHost.MonitorScreen(MonitorHandle) ?? Native.WindowsHost.PrimaryScreen();
         var work = new Rect(transform.Transform(panelWork.TopLeft), transform.Transform(panelWork.BottomRight));
         popup.Left = Math.Clamp(point.X - popup.Width, work.Left, Math.Max(work.Left, work.Right - popup.Width)); popup.Top = point.Y + 3;
-        popup.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { popup.Close(); SetExpanded(false); e.Handled = true; } };
+        popup.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { popup.Close(); SetExpanded(false, keyboard: true); e.Handled = true; } };
         // Closing an active owned window also raises Deactivated. Do not close it
         // again from that nested native activation message.
         // A closing pop-up leaves as the monitor page's card does (Soft.Leave), and the panel takes it as closed from the start of
