@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -33,9 +35,28 @@ public partial class MainWindow
         // nothing and in one measurement cost more (28 % of a core against 24 % in a continuous resize at 144 Hz): the shadow is
         // drawn directly until its size has held still for a moment.
         _shadowSettle = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
-        _shadowSettle.Tick += (_, _) => { _shadowSettle.Stop(); ShadowHost.CacheMode = _shadowCache; };
-        IslandShadow.SizeChanged += (_, _) => { ShadowHost.CacheMode = null; _shadowSettle.Stop(); _shadowSettle.Start(); };
+        // The same holds while what the picture shows changes in place: the surface color (Changed is raised on each frame
+        // of a color animation), the corners and the shoulders. The shadow fades on ShadowHost, outside the cache, so a fade
+        // only composes the kept picture; while it is not shown at all there is nothing to keep.
+        _shadowSettle.Tick += (_, _) => { _shadowSettle.Stop(); if (ShadowHost.Opacity > 0) ShadowHost.CacheMode = _shadowCache; };
+        IslandShadow.SizeChanged += (_, _) => ShadowChanging();
+        _surface.Changed += (_, _) => ShadowChanging();
+        DependencyPropertyDescriptor.FromProperty(Border.CornerRadiusProperty, typeof(IslandBorder)).AddValueChanged(Island, (_, _) => ShadowChanging());
+        DependencyPropertyDescriptor.FromProperty(IslandBorder.ShoulderRadiusProperty, typeof(IslandBorder)).AddValueChanged(Island, (_, _) => ShadowChanging());
+        // Hidden (the open panel, the line), the picture is let go; shown again, it is kept at once unless a change is under way.
+        DependencyPropertyDescriptor.FromProperty(OpacityProperty, typeof(Grid)).AddValueChanged(ShadowHost, (_, _) =>
+        {
+            if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
+            else if (ShadowHost.CacheMode is null && !_shadowSettle.IsEnabled) ShadowHost.CacheMode = _shadowCache;
+        });
+        if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
         Closed += (_, _) => _shadowSettle.Stop();
+    }
+
+    private void ShadowChanging()
+    {
+        if (_shadowSettle is null) return;
+        ShadowHost.CacheMode = null; _shadowSettle.Stop(); _shadowSettle.Start();
     }
 
     // Windows changed something motion depends on (lock, display, battery saver, animation effects, high contrast).
@@ -51,16 +72,21 @@ public partial class MainWindow
     // The shadow's cached picture (ShadowHost) is drawn at the display's scale, and reaches past the blur by whole device
     // pixels: a picture whose edge fell between pixels was resampled when drawn, and differed from the shadow drawn directly
     // by up to 44 levels along the island's edge at 125 %. Laid out with whole device pixels (UseLayoutRounding), the picture
-    // then matches the uncached shadow exactly at every scale (measured at 100 to 200 %).
+    // then matches the uncached shadow exactly at every scale (measured at 100 to 200 %). WPF already draws a cached picture
+    // at the system's DPI, so the cache is asked only for what this monitor's scale adds to it (#75 review).
     private void FitShadowCache(double scale = 0)
     {
         if (_shadowCache is not { } cache || IslandShadow.Effect is not DropShadowEffect effect) return;
         if (!(scale > 0)) scale = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
-        if (cache.RenderAtScale != scale) cache.RenderAtScale = scale;
+        double render = scale / SystemScale;
+        if (cache.RenderAtScale != render) cache.RenderAtScale = render;
         double reach = Math.Ceiling((effect.BlurRadius + effect.ShadowDepth + 2) * scale) / scale;
         var margin = new Thickness(-reach);
         if (ShadowBounds.Margin != margin) ShadowBounds.Margin = margin;
     }
+
+    private static readonly double SystemScale = GetDpiForSystem() is var dpi and > 0 ? dpi / 96d : 1;
+    [DllImport("user32")] private static extern uint GetDpiForSystem();
 
     private MotionConditions MotionState() => MotionEnvironment.Conditions(IsVisible, IsSuppressed, _poweringOff, _expanded || EffectiveStyle != CompactStyle.Line);
 
