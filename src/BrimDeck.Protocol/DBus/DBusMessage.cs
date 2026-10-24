@@ -76,7 +76,10 @@ public sealed class DBusMessage
 
     // Messages from other processes are untrusted: anything malformed in them is reported as InvalidDataException, never as
     // another exception that could end the reading loop.
-    public static DBusMessage Decode(ReadOnlySpan<byte> data)
+    // A span is copied first; an array is read in place, so a message is not held twice (sec-M3).
+    public static DBusMessage Decode(ReadOnlySpan<byte> data) => Decode(data.ToArray());
+
+    public static DBusMessage Decode(byte[] data)
     {
         try { return DecodeCore(data); }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException or InvalidCastException or NullReferenceException or FormatException)
@@ -85,9 +88,9 @@ public sealed class DBusMessage
         }
     }
 
-    private static DBusMessage DecodeCore(ReadOnlySpan<byte> data)
+    private static DBusMessage DecodeCore(byte[] data)
     {
-        var reader = new DBusReader(data.ToArray(), data[0] == (byte)'l');
+        var reader = new DBusReader(data, data[0] == (byte)'l');
         reader.ReadByte();
         var message = new DBusMessage { Type = (DBusMessageType)reader.ReadByte(), Flags = reader.ReadByte() };
         if (reader.ReadByte() != 1) throw new InvalidDataException("Unsupported protocol version.");
@@ -242,10 +245,12 @@ public sealed class DBusWriter
 
 public sealed class DBusReader(byte[] data, bool littleEndian)
 {
-    // Bodies from other processes are untrusted: nesting and element counts are bounded.
+    // Bodies from other processes are untrusted: nesting and the number of values in one message are bounded. Without the
+    // budget, a message of small array elements ("aq", "av") would become many times its size in objects (sec-M3).
     private const int MaxDepth = 32;
+    public const int MaxValues = 65536;
     public int Position { get; private set; }
-    private int _depth;
+    private int _depth, _values;
 
     public void Align(int alignment) => Position = (Position + alignment - 1) / alignment * alignment;
     private ReadOnlySpan<byte> Take(int count)
@@ -269,6 +274,7 @@ public sealed class DBusReader(byte[] data, bool littleEndian)
     public object ReadValue(string type)
     {
         if (++_depth > MaxDepth) throw new InvalidDataException("The message nests too deeply.");
+        if (++_values > MaxValues) throw new InvalidDataException("The message holds too many values.");
         try { return ReadValueCore(type); }
         finally { _depth--; }
     }
