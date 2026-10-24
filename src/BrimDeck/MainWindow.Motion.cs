@@ -41,16 +41,30 @@ public partial class MainWindow
         _shadowSettle.Tick += (_, _) => { _shadowSettle.Stop(); if (ShadowHost.Opacity > 0) ShadowHost.CacheMode = _shadowCache; };
         IslandShadow.SizeChanged += (_, _) => ShadowChanging();
         _surface.Changed += (_, _) => ShadowChanging();
-        DependencyPropertyDescriptor.FromProperty(Border.CornerRadiusProperty, typeof(IslandBorder)).AddValueChanged(Island, (_, _) => ShadowChanging());
-        DependencyPropertyDescriptor.FromProperty(IslandBorder.ShoulderRadiusProperty, typeof(IslandBorder)).AddValueChanged(Island, (_, _) => ShadowChanging());
+        // A descriptor's listener is held by a static table: each is removed when the window closes, or a panel closed with its
+        // monitor (or its panel turned off) would never be freed (#75 review).
+        var listeners = new List<(DependencyPropertyDescriptor Property, object Element, EventHandler Handler)>();
+        void Listen(DependencyProperty property, Type owner, object element, EventHandler handler)
+        {
+            var descriptor = DependencyPropertyDescriptor.FromProperty(property, owner);
+            descriptor.AddValueChanged(element, handler);
+            listeners.Add((descriptor, element, handler));
+        }
+        Listen(Border.CornerRadiusProperty, typeof(IslandBorder), Island, (_, _) => ShadowChanging());
+        Listen(IslandBorder.ShoulderRadiusProperty, typeof(IslandBorder), Island, (_, _) => ShadowChanging());
         // Hidden (the open panel, the line), the picture is let go; shown again, it is kept at once unless a change is under way.
-        DependencyPropertyDescriptor.FromProperty(OpacityProperty, typeof(Grid)).AddValueChanged(ShadowHost, (_, _) =>
+        Listen(OpacityProperty, typeof(Grid), ShadowHost, (_, _) =>
         {
             if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
             else if (ShadowHost.CacheMode is null && !_shadowSettle.IsEnabled) ShadowHost.CacheMode = _shadowCache;
         });
         if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
-        Closed += (_, _) => _shadowSettle.Stop();
+        Closed += (_, _) =>
+        {
+            _shadowSettle.Stop();
+            foreach (var (property, element, handler) in listeners) property.RemoveValueChanged(element, handler);
+            listeners.Clear();
+        };
     }
 
     private void ShadowChanging()
