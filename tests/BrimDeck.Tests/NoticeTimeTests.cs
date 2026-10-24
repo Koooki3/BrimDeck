@@ -206,6 +206,8 @@ internal static class NoticeTimeTests
         check("A reminder still to come stays past the retention", keeper.Notices.Contains(week));
         keeper.FireDue(TimeNow.AddDays(3));
         keeper.Prune(TimeNow.AddDays(3));
+        check("A reminder just given stays for the retention from when it rang", keeper.Notices.Contains(week) && week.ReceivedAt == TimeNow.AddDays(3));
+        keeper.Prune(TimeNow.AddDays(3) + keeper.Retention + TimeSpan.FromSeconds(1));
         check("Once given, it ages out as usual", !keeper.Notices.Contains(week));
 
         var alarm = new NoticeHub().Receive(new NoticeInput { Origin = NoticeOrigin.Windows, AppKey = "windows:clock", AppName = "时钟", InstanceKey = "w1", Title = "闹钟", Timing = new NoticeTiming { Kind = NoticeTimeKind.Alarm, EndsAt = TimeNow } }, TimeNow);

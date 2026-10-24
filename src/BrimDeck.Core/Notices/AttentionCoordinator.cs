@@ -19,7 +19,8 @@ public sealed class AttentionItem
     public int Count { get; set; } = 1;
     // An update that should keep the item on screen a little longer, such as a task's progress.
     public bool Refresh { get; init; }
-    // An alarm, a countdown that ended or an event's reminder (NoticeClock.Alerting): it is not held back by the rate limit.
+    // An alarm, a countdown that ended or an event's reminder (NoticeClock.Alerting): it is not held back by the rate limit,
+    // only by the wider UrgentLimit.
     public bool Urgent { get; init; }
     internal DateTimeOffset SubmittedAt { get; set; }
     internal DateTimeOffset LastMerge { get; set; }
@@ -42,7 +43,8 @@ public readonly record struct AttentionChange(string Lane, AttentionItem? Ended,
 
 // Decides what each panel's collapsed island briefly shows. One item shows at a time per lane, for its duration; others wait
 // in rank order. A higher-ranked item takes over unless the user is interacting with the current one (Hold). Notices are
-// limited to RateLimit shows per RateWindow (urgent ones, such as an alarm, still count but are never held back); a notice that has waited longer than Staleness is not shown at all (it stays in
+// limited to RateLimit shows per RateWindow (urgent ones, such as an alarm, still count but are held back only beyond
+// UrgentLimit per UrgentWindow); a notice that has waited longer than Staleness is not shown at all (it stays in
 // the recent notices). While suppressed (locked, paused, in a focus session) nothing shows and arriving notices are only
 // counted, so that one summary can follow. The coordinator keeps no timer: the caller ticks it at NextDeadline.
 public sealed class AttentionCoordinator
@@ -50,6 +52,10 @@ public sealed class AttentionCoordinator
     public static readonly TimeSpan AggregationWindow = TimeSpan.FromMilliseconds(800);
     public static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(10);
     public const int RateLimit = 3;
+    // Urgent notices are not held back by RateLimit, so that an alarm rings when it is due; a sender that sets off many at once
+    // still cannot keep the island ringing (sec-L5).
+    public static readonly TimeSpan UrgentWindow = TimeSpan.FromMinutes(1);
+    public const int UrgentLimit = 3;
     public static readonly TimeSpan Staleness = TimeSpan.FromSeconds(30);
     // High priority notices wait longer, but not for ever: after this they stay in the recent notices only.
     public static readonly TimeSpan HighStaleness = TimeSpan.FromMinutes(5);
@@ -67,7 +73,9 @@ public sealed class AttentionCoordinator
     }
 
     private readonly Dictionary<string, Lane> _lanes = new(StringComparer.Ordinal);
-    private readonly List<DateTimeOffset> _noticeShows = [];
+    private readonly List<DateTimeOffset> _noticeShows = [], _urgentShows = [];
+    // The notices counted for the summary: a notice updated while suppressed counts once (core-L7).
+    private readonly HashSet<string> _suppressedKeys = new(StringComparer.Ordinal);
 
     public bool Suppressed { get; private set; }
     // The last word before anything starts: an item it refuses is dropped instead (notices switched off, a notice deleted
@@ -77,7 +85,6 @@ public sealed class AttentionCoordinator
     public int SuppressedCount { get; private set; }
 
     public AttentionItem? Current(string lane) => _lanes.TryGetValue(lane, out var state) ? state.Current : null;
-    public bool IsHeld(string lane) => _lanes.TryGetValue(lane, out var state) && state.Held;
     public IReadOnlyList<AttentionItem> Queued(string lane) => _lanes.TryGetValue(lane, out var state) ? state.Queue : [];
 
     private Lane Get(string lane) { if (!_lanes.TryGetValue(lane, out var state)) _lanes[lane] = state = new Lane(); return state; }
@@ -85,7 +92,7 @@ public sealed class AttentionCoordinator
     public IReadOnlyList<AttentionChange> Submit(AttentionItem item, DateTimeOffset now)
     {
         var changes = new List<AttentionChange>();
-        if (Suppressed) { if (item.Kind == AttentionKind.Notice) SuppressedCount++; return changes; }
+        if (Suppressed) { if (item.Kind == AttentionKind.Notice && _suppressedKeys.Add(item.Key)) SuppressedCount++; return changes; }
         var lane = Get(item.Lane);
         if (lane.Current is { } current && current.Key == item.Key)
         {
@@ -136,7 +143,7 @@ public sealed class AttentionCoordinator
     public IReadOnlyList<AttentionChange> Tick(DateTimeOffset now)
     {
         var changes = new List<AttentionChange>();
-        _noticeShows.RemoveAll(time => now - time >= RateWindow);
+        Forget(now);
         foreach (var (name, lane) in _lanes)
         {
             if (lane.Current is not null && !lane.Held && now >= lane.Ends) End(lane, now, changes, requeue: false);
@@ -154,12 +161,9 @@ public sealed class AttentionCoordinator
         foreach (var lane in _lanes.Values)
         {
             if (lane.Current is not null && !lane.Held) Consider(lane.Ends);
-            if (lane.Current is null && !lane.Busy && lane.Queue.Count > 0)
-            {
-                // Waiting only for the rate limit: wake when the oldest show leaves the window.
-                if (lane.Queue.Any(item => !item.IsNotice || item.Urgent) || _noticeShows.Count < RateLimit) Consider(now);
-                else if (_noticeShows.Count > 0) Consider(_noticeShows.Min() + RateWindow);
-            }
+            // Waiting only for a rate limit: wake when the oldest show leaves its window.
+            if (lane.Current is null && !lane.Busy)
+                foreach (var item in lane.Queue) Consider(StartsFrom(item, now));
             foreach (var item in lane.Queue) if (StaleAfter(item) is { } limit) Consider(item.SubmittedAt + limit);
         }
         return next;
@@ -236,17 +240,17 @@ public sealed class AttentionCoordinator
         Suppressed = suppressed;
         if (suppressed)
         {
-            SuppressedCount = 0;
+            SuppressedCount = 0; _suppressedKeys.Clear();
             foreach (var lane in _lanes.Values)
             {
                 lane.Held = false;
                 if (lane.Current is not null) End(lane, now, changes, requeue: false);
                 // Notices that were waiting count toward the summary; nothing else is kept.
-                SuppressedCount += lane.Queue.Where(item => item.Kind == AttentionKind.Notice).Sum(item => item.Count);
+                foreach (var item in lane.Queue.Where(item => item.Kind == AttentionKind.Notice && _suppressedKeys.Add(item.Key))) SuppressedCount += item.Count;
                 lane.Queue.Clear();
             }
         }
-        else { arrived = SuppressedCount; SuppressedCount = 0; }
+        else { arrived = SuppressedCount; SuppressedCount = 0; _suppressedKeys.Clear(); }
         return changes;
     }
 
@@ -271,11 +275,21 @@ public sealed class AttentionCoordinator
         }
     }
 
-    private bool CanStart(AttentionItem item, DateTimeOffset now)
+    private bool CanStart(AttentionItem item, DateTimeOffset now) => StartsFrom(item, now) <= now;
+
+    // The earliest moment the rate limits let the item start.
+    private DateTimeOffset StartsFrom(AttentionItem item, DateTimeOffset now)
     {
-        if (!item.IsNotice || item.Urgent) return true;
+        if (!item.IsNotice) return now;
+        Forget(now);
+        var (shows, limit, window) = item.Urgent ? (_urgentShows, UrgentLimit, UrgentWindow) : (_noticeShows, RateLimit, RateWindow);
+        return shows.Count < limit ? now : shows.Min() + window;
+    }
+
+    private void Forget(DateTimeOffset now)
+    {
         _noticeShows.RemoveAll(time => now - time >= RateWindow);
-        return _noticeShows.Count < RateLimit;
+        _urgentShows.RemoveAll(time => now - time >= UrgentWindow);
     }
 
     private void Start(Lane lane, AttentionItem item, DateTimeOffset now, List<AttentionChange> changes)
@@ -286,6 +300,7 @@ public sealed class AttentionCoordinator
         item.StartedAt = now;
         lane.Ends = now + Positive(item.Remaining > TimeSpan.Zero ? item.Remaining : item.Duration);
         if (item.IsNotice) _noticeShows.Add(now);
+        if (item.IsNotice && item.Urgent) _urgentShows.Add(now);
         changes.Add(new(item.Lane, null, item, null));
     }
 

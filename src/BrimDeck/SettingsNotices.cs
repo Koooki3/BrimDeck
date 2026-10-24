@@ -314,6 +314,16 @@ public sealed partial class SettingsWindow
             var rebuild = ActionButton(Loc.T("清空并重建", "Clear and start again"), () => { center.ResetHistory(); ShowPage(NoticesSettingsPage); });
             rows.Add(Row(Loc.T("无法读取已保存的通知", "Saved notices unreadable"), rebuild, TextLine(NoticeHistory.Describe(center.HistoryState), 11, _palette.Dark ? "#F0A6AA" : "#B12E3A")));
         }
+        // Not reachable for now, or a folder BrimDeck will not use: said, with nothing to clear (the file may be fine).
+        else if (center.HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Refused)
+        {
+            // Follows a retry while the page shows.
+            var reason = StatusLine(() => center.HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Refused
+                ? (NoticeHistory.Describe(center.HistoryState), true) : (Loc.T("已读取。", "Read."), false));
+            rows.Add(center.HistoryState == NoticeHistoryState.Refused
+                ? Row(Loc.T("无法使用该文件夹", "Folder not used"), ActionButton(Loc.T("默认位置", "Default"), () => { Change(s => s.NoticeHistoryFolder = ""); ShowPage(NoticesSettingsPage); }), reason)
+                : Row(Loc.T("暂时无法读取已保存的通知", "Saved notices not reachable"), ActionButton(Loc.T("重试", "Retry"), center.RetryHistory), reason));
+        }
         Group([.. rows]);
     }
 

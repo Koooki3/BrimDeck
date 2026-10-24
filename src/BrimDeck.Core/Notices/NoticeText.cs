@@ -42,6 +42,35 @@ public static class NoticeText
         return string.Join(' ', line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
+    // Text as a sender wrote it, without the invisible characters that let it pass for something else (sec-L4): format
+    // characters (zero-width spaces, bidi marks, word joiners, the BOM, Unicode tags) are dropped, the zero-width joiner of
+    // emoji sequences excepted; line and paragraph separators, which WPF breaks lines on, become a line break, or a space
+    // in a single line.
+    public static string Clean(string text, bool singleLine = false)
+    {
+        int i = 0;
+        for (; i < text.Length; i++)
+            if (Unwanted(text, i, out _)) break;
+        if (i == text.Length) return text;
+        var builder = new System.Text.StringBuilder(text.Length);
+        builder.Append(text, 0, i);
+        for (; i < text.Length; i++)
+        {
+            bool pair = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]);
+            if (Unwanted(text, i, out bool breaks)) { if (breaks) builder.Append(singleLine ? ' ' : '\n'); }
+            else { builder.Append(text[i]); if (pair) builder.Append(text[i + 1]); }
+            if (pair) i++;
+        }
+        return builder.ToString();
+    }
+
+    private static bool Unwanted(string text, int index, out bool breaks)
+    {
+        var category = char.GetUnicodeCategory(text, index);
+        breaks = category is UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
+        return breaks || category == UnicodeCategory.Format && text[index] != '‍';
+    }
+
     public static string CategoryName(NoticeCategory category) => category switch
     {
         NoticeCategory.Task => Loc.T("任务", "Task"), NoticeCategory.Success => Loc.T("完成", "Done"), NoticeCategory.Warning => Loc.T("警告", "Warning"),

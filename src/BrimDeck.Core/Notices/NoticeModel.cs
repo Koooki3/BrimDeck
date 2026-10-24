@@ -63,6 +63,8 @@ public sealed record NoticeInput
     public NoticeTiming? Timing { get; init; }
     // Ends the timing of the earlier notice with the same AppKey and ReplaceKey (brim-notify stop) instead of adding one.
     public bool StopTiming { get; init; }
+    // Arrived while BrimDeck could not read its source (the PC slept): recorded, unviewed, but not shown as it arrives (core-M5).
+    public bool Missed { get; init; }
 }
 
 // A notice BrimDeck keeps. Id is BrimDeck's own; Revision counts updates, so a view can tell a changed notice apart.
