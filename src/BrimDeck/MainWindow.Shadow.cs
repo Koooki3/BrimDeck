@@ -29,30 +29,29 @@ public partial class MainWindow
         IslandShadow.SizeChanged += (_, _) => ShadowChanging(); ShadowHost.SizeChanged += (_, _) => ShadowChanging();
         // The color, corners and shoulders the shadow takes from the island; Changed is raised on each frame of a color animation.
         _surface.Changed += (_, _) => ShadowChanging();
-        // A descriptor's listener is held by a static table: each is removed when the window closes, or a panel closed with its
-        // monitor (or its panel turned off) would never be freed.
-        var listeners = new List<(DependencyPropertyDescriptor Property, object Element, EventHandler Handler)>();
-        void Listen(DependencyProperty property, Type owner, object element, EventHandler handler)
-        {
-            var descriptor = DependencyPropertyDescriptor.FromProperty(property, owner);
-            descriptor.AddValueChanged(element, handler);
-            listeners.Add((descriptor, element, handler));
-        }
-        Listen(Border.CornerRadiusProperty, typeof(IslandBorder), Island, (_, _) => ShadowChanging());
-        Listen(IslandBorder.ShoulderRadiusProperty, typeof(IslandBorder), Island, (_, _) => ShadowChanging());
+        var corners = DependencyPropertyDescriptor.FromProperty(Border.CornerRadiusProperty, typeof(IslandBorder));
+        var shoulders = DependencyPropertyDescriptor.FromProperty(IslandBorder.ShoulderRadiusProperty, typeof(IslandBorder));
+        var opacity = DependencyPropertyDescriptor.FromProperty(OpacityProperty, typeof(Grid));
+        void ShapeChanged(object? sender, EventArgs e) => ShadowChanging();
+        corners.AddValueChanged(Island, ShapeChanged);
+        shoulders.AddValueChanged(Island, ShapeChanged);
         // Hidden (the open panel, the line), the picture is let go; shown again, it is kept at once unless a change is under way.
-        Listen(OpacityProperty, typeof(Grid), ShadowHost, (_, _) =>
+        void OpacityChanged(object? sender, EventArgs e)
         {
             if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
             else if (ShadowHost.CacheMode is null && !_shadowSettle.IsEnabled) ShadowHost.CacheMode = _shadowCache;
-        });
+        }
+        opacity.AddValueChanged(ShadowHost, OpacityChanged);
         if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
         SourceInitialized += (_, _) => FitShadowCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
         Closed += (_, _) =>
         {
+            // Property descriptors retain their targets until the handlers are removed, even after the window closes.
+            corners.RemoveValueChanged(Island, ShapeChanged);
+            shoulders.RemoveValueChanged(Island, ShapeChanged);
+            opacity.RemoveValueChanged(ShadowHost, OpacityChanged);
             _shadowSettle.Stop();
-            foreach (var (property, element, handler) in listeners) property.RemoveValueChanged(element, handler);
-            listeners.Clear();
+            _shadowSettle = null;
         };
     }
 
