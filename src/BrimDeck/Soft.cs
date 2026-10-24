@@ -28,8 +28,10 @@ internal static class Soft
     // a glide between choices the monitor's sort pill (Choose), content that moves in or out the monitor's readings (Move).
     public const int Quick = 160, Short = 240, Hover = (int)(Eased.Hover * 1000), Choose = (int)(Eased.Seconds * 750), Move = (int)(Eased.Seconds * 1000);
 
-    // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects".
-    public static bool Enabled => SystemParameters.ClientAreaAnimation && (Application.Current as App)?.Settings.Animations != false;
+    // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects", and never in high contrast. The one
+    // rule for every animation in the app; MotionGate applies the same (MotionConditions.Allowed).
+    public static bool Enabled => MotionConditions.Allowed((Application.Current as App)?.Settings.Animations != false,
+        SystemParameters.ClientAreaAnimation, SystemParameters.HighContrast);
 
     public static DoubleAnimation Fade(double from, double to, int milliseconds, IEasingFunction? easing = null) =>
         new(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = easing ?? Out };
@@ -57,6 +59,28 @@ internal static class Soft
         if (element.RenderTransform is not (null or MatrixTransform { Matrix.IsIdentity: true } or TranslateTransform { IsFrozen: false })) return;
         if (element.RenderTransform is not TranslateTransform shift) element.RenderTransform = shift = new TranslateTransform();
         shift.BeginAnimation(TranslateTransform.YProperty, Fade(shift.Y, -rise, Quick, InOut));
+    }
+
+    // Sets a property to its new value and, when animate, glides there from where it was (Soft.Follow, Hover by default): the
+    // animation only covers the way and ends without holding the property, so the value set is what stays. Changes of at most
+    // tolerance are set at once.
+    public static void Glide<T>(T target, DependencyProperty property, double to, bool animate, int milliseconds = Hover, double tolerance = 0)
+        where T : DependencyObject, IAnimatable
+    {
+        double from = (double)target.GetValue(property);
+        target.BeginAnimation(property, null);
+        target.SetValue(property, to);
+        if (!animate || !double.IsFinite(from) || Math.Abs(from - to) <= tolerance) return;
+        target.BeginAnimation(property, new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = Follow, FillBehavior = FillBehavior.Stop });
+    }
+
+    // The same for a brush's color.
+    public static void Glide(SolidColorBrush brush, Color to, bool animate, int milliseconds = Hover)
+    {
+        var from = brush.Color;
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        brush.Color = to;
+        if (animate && from != to) brush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds)) { EasingFunction = Follow, FillBehavior = FillBehavior.Stop });
     }
 
     private static IEasingFunction Frozen(Freezable ease) { ease.Freeze(); return (IEasingFunction)ease; }

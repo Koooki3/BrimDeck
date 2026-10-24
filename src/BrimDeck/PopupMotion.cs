@@ -83,14 +83,7 @@ internal static class PopupMotion
         double width = content?.ActualWidth ?? 0, height = content?.ActualHeight ?? 0;
         // A pop-up closed with its window (the settings window closed or hidden) goes with it, without a picture left behind.
         if (!Soft.Enabled || content is null || window is not { IsVisible: true } || width < 1 || height < 1 || PresentationSource.FromVisual(image) is null) { ghost.IsOpen = false; return; }
-        var dpi = VisualTreeHelper.GetDpi(image);
-        var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
-        // Drawn one to one (PageHandover.Exactly), so neither the content's offset nor its entrance transform is part of the picture.
-        var drawing = new DrawingVisual();
-        using (var context = drawing.RenderOpen()) context.DrawRectangle(PageHandover.Exactly(content, width, height), null, new Rect(0, 0, width, height));
-        picture.Render(drawing);
-        picture.Freeze();
-        image.Width = width; image.Height = height; image.Source = picture;
+        image.Width = width; image.Height = height; image.Source = PageHandover.Snapshot(content, width, height, VisualTreeHelper.GetDpi(image));
         DependencyPropertyChangedEventHandler hidden = (_, _) => ghost.IsOpen = false;
         window.IsVisibleChanged += hidden;
         Soft.Leave(image, () => { window.IsVisibleChanged -= hidden; ghost.IsOpen = false; });
