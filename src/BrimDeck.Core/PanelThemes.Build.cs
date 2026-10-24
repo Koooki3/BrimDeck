@@ -7,23 +7,32 @@ namespace BrimDeck.Core;
 public static partial class PanelThemes
 {
     // Built-in palettes never change. A user file is resolved once per reading: an edited file is read again into a new entry.
-    private static readonly Dictionary<string, PanelPalette> ResolvedBuiltIns = new(StringComparer.Ordinal);
-    private static readonly ConditionalWeakTable<PanelThemeInfo, PanelPalette> ResolvedFiles = new();
-    public static PanelPalette Resolve(PanelThemeInfo theme)
+    // A theme with a night look resolves to two palettes, kept side by side.
+    private static readonly Dictionary<(string, bool), PanelPalette> ResolvedBuiltIns = [];
+    private static readonly ConditionalWeakTable<PanelThemeInfo, PanelPalette> ResolvedFiles = new(), ResolvedNights = new();
+    // The day look. The one-argument form stays so the method group still fits a Select (themes.Select(PanelThemes.Resolve)).
+    public static PanelPalette Resolve(PanelThemeInfo theme) => Resolve(theme, false);
+    public static PanelPalette Resolve(PanelThemeInfo theme, bool night)
     {
-        if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue(theme.Id, out var cached) : ResolvedFiles.TryGetValue(theme, out cached)) return cached;
-        var palette = Build(theme.Id, theme.File);
-        if (theme.BuiltIn) ResolvedBuiltIns[theme.Id] = palette; else ResolvedFiles.AddOrUpdate(theme, palette);
+        night &= theme.File.Night is not null;
+        var files = night ? ResolvedNights : ResolvedFiles;
+        if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue((theme.Id, night), out var cached) : files.TryGetValue(theme, out cached)) return cached;
+        var palette = Build(theme.Id, theme.File, night);
+        if (theme.BuiltIn) ResolvedBuiltIns[(theme.Id, night)] = palette; else files.AddOrUpdate(theme, palette);
         return palette;
     }
 
-    public static PanelPalette Build(string id, PanelThemeFile file)
+    // night lays the file's night look over it, when it has one.
+    public static PanelPalette Build(string id, PanelThemeFile file, bool night = false)
     {
         var colors = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var apps = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var effects = new PanelThemeEffects();
         PanelThemeClock? clock = null;
-        foreach (var layer in BaseChain(file))
+        var chain = BaseChain(file);
+        night &= file.Night is not null;
+        if (night) chain.Add(file.Night!);
+        foreach (var layer in chain)
         {
             foreach (var (key, value) in layer.Colors ?? [])
                 if (Tokens.FirstOrDefault(token => string.Equals(token.Key, key, StringComparison.OrdinalIgnoreCase)) is { } token && ThemeColor.TryParse(value, out var color)) colors[token.Key] = color;
@@ -79,7 +88,7 @@ public static partial class PanelThemes
         // A theme's own picker colors are offered as the panel draws them, like the ones derived from its palette.
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
             .OfType<ThemeColor>().Take(12).ToList();
-        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps);
+        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps) { IsNight = night };
     }
 
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.

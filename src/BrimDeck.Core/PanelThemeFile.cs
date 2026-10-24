@@ -23,6 +23,17 @@ public sealed class PanelThemeFile
     // The twelve preset colors of the color picker in settings. Unlike everything else these are not inherited: a theme without
     // its own list offers its own app, warning, critical and clock colors (see PanelPalette.Swatches).
     public List<string>? Swatches { get; set; }
+    // A theme with a day and a night look: Night is laid over the theme from Daylight's evening to its morning. Only its colors,
+    // apps, effects and clock are read; it has no base or name of its own.
+    public PanelThemeFile? Night { get; set; }
+    public PanelThemeDaylight? Daylight { get; set; }
+}
+
+// When the day look of a theme with a night look begins and ends, as "HH:mm" local time. The settings can move both.
+public sealed class PanelThemeDaylight
+{
+    public string Day { get; set; } = "";
+    public string Night { get; set; } = "";
 }
 
 public sealed class PanelThemeClock

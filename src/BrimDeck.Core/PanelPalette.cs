@@ -58,6 +58,8 @@ public sealed class PanelPalette
 
     public PanelThemeEffectValues Effects { get; }
     public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0;
+    // Whether this is a theme's night look (PanelThemes.Resolve).
+    public bool IsNight { get; init; }
     public IReadOnlyList<PanelThemeAdjustment> Adjustments { get; }
 
     // The theme's default color for an application column. The dark theme names every source, and every theme builds on it.
