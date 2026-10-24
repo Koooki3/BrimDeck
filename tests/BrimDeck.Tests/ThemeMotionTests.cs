@@ -95,7 +95,7 @@ internal static class ThemeMotionTests
 
         // Frames.
         var rest = cyber.Ambient.At(0);
-        check("The light starts at rest, so starting it never jumps", rest is { Rim: 1, Glow: 1, Drift: 0, Sweep: -1, SweepOpacity: 0 });
+        check("The light starts at rest, so starting it never jumps", rest is { Rim: 1, Drift: 0, Sweep: -1, SweepOpacity: 0 });
         double lowest = 1, highestSweep = 0, biggestStep = 0; bool sweepSeen = false, flickerSeen = false;
         var previous = rest;
         for (int i = 1; i <= 120 * 60; i++)

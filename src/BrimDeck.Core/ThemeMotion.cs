@@ -1,7 +1,7 @@
 namespace BrimDeck.Core;
 
-// The motion a theme gives BrimDeck's own windows: slow ambient light on the island (a breathing rim and glow, colors drifting
-// along the rim, a scan line now and then, a rare soft sag of the neon), and how the pointer is answered: a mark on the control
+// The motion a theme gives BrimDeck's own windows: slow ambient light on the island (a breathing rim, colors drifting
+// along it, a scan line now and then, a rare soft sag of the neon), and how the pointer is answered: a mark on the control
 // it hovers, drawn on the control's own visible shape; a press that answers on the button going down, holds while it is held
 // and completes (or backs out) on release; and a short accent where keyboard focus lands. Nothing follows the pointer.
 // The file's "motion" section is merged field by field along the base chain, like the effects, and every value is held to
@@ -55,20 +55,14 @@ public sealed record AmbientMotion(double Breathe, double BreatheDepth, double D
     public static readonly AmbientMotion None = new(0, 0, 0, 0, 0, 0, 0);
     public bool Any => Breathe > 0 && BreatheDepth > 0 || Drift > 0 || Sweep > 0 && SweepOpacity > 0 || Flicker > 0 && FlickerDepth > 0;
 
-    // The ambient light at a time in seconds. At time 0 every value is at rest (Rim and Glow 1, no sweep), so starting the clock
-    // never jumps. Allocation-free: it runs on every ambient frame.
+    // The ambient light at a time in seconds. At time 0 every value is at rest (Rim 1, no sweep), so starting the clock never
+    // jumps. Allocation-free: it runs on every ambient frame.
     public AmbientFrame At(double t)
     {
         if (!double.IsFinite(t) || t < 0) t = 0;
-        double rim = 1, glow = 1, drift = 0, sweep = -1, sweepOpacity = 0;
-        if (Breathe > 0 && BreatheDepth > 0)
-        {
-            // A cosine from the top, so the light only ever dims a little from its resting brightness and comes back. The glow
-            // trails the rim by an eighth of a breath, which reads as the light spilling outward rather than as both blinking.
-            double rimPhase = t / Breathe, glowPhase = Math.Max(0, rimPhase - .12);
-            rim = 1 - BreatheDepth * (.5 - .5 * Math.Cos(2 * Math.PI * rimPhase));
-            glow = 1 - Math.Min(.45, BreatheDepth * 1.2) * (.5 - .5 * Math.Cos(2 * Math.PI * glowPhase));
-        }
+        double rim = 1, drift = 0, sweep = -1, sweepOpacity = 0;
+        // A cosine from the top, so the light only ever dims a little from its resting brightness and comes back.
+        if (Breathe > 0 && BreatheDepth > 0) rim = 1 - BreatheDepth * (.5 - .5 * Math.Cos(2 * Math.PI * t / Breathe));
         if (Flicker > 0 && FlickerDepth > 0)
         {
             // One soft dip per interval, at a place in it that changes from one interval to the next.
@@ -77,7 +71,7 @@ public sealed record AmbientMotion(double Breathe, double BreatheDepth, double D
             if (t >= start && t < start + length)
             {
                 double s = Math.Sin(Math.PI * (t - start) / length), dip = FlickerDepth * s * s;
-                rim *= 1 - dip; glow *= 1 - dip * .6;
+                rim *= 1 - dip;
             }
         }
         // The rim's colors travel one width per Drift seconds; the brush reflects, so a loop of two widths is seamless.
@@ -93,7 +87,7 @@ public sealed record AmbientMotion(double Breathe, double BreatheDepth, double D
                 sweepOpacity = SweepOpacity * s * s;
             }
         }
-        return new AmbientFrame(rim, glow, drift, sweep, sweepOpacity);
+        return new AmbientFrame(rim, drift, sweep, sweepOpacity);
     }
 
     // A fixed pseudo-random fraction in [0.1, 0.9] for an interval index.
@@ -105,9 +99,10 @@ public sealed record AmbientMotion(double Breathe, double BreatheDepth, double D
     }
 }
 
-// Rim and Glow multiply the theme's rim and glow opacity; Drift moves the rim colors (0 to 2 widths); Sweep is where the scan
-// line is, from 0 (top) to 1 (bottom), or -1 while none passes, with SweepOpacity its strength.
-public readonly record struct AmbientFrame(double Rim, double Glow, double Drift, double Sweep, double SweepOpacity);
+// Rim multiplies the theme's rim opacity; Drift moves the rim colors (0 to 2 widths); Sweep is where the scan line is, from 0
+// (top) to 1 (bottom), or -1 while none passes, with SweepOpacity its strength. The glow (the island's shadow) never changes:
+// any change to it has WPF blur it again (AmbientGlow).
+public readonly record struct AmbientFrame(double Rim, double Drift, double Sweep, double SweepOpacity);
 
 // Colors are theme color keys ("accent", "rim", "shadow", ...), "#RRGGBB" colors, or "system" for the Windows accent color.
 // Color is the main mark (hover and focus); Secondary its second tone (a gradient's end, a shadow, a ghost, a neutral bar);
@@ -168,11 +163,11 @@ public static class MotionSafety
         a.Sweep > 0 && a.SweepOpacity > 0 ? 1 / SweepLength : 0);
 
     // The most flashes (a rise and a fall of at least `threshold`) in any one-second window over the given span, in the rim's
-    // brightness, the glow's or the scan line's, sampled at 120 Hz.
+    // brightness or the scan line's, sampled at 120 Hz.
     public static int PeakFlashes(AmbientMotion a, double seconds = 120, double threshold = .01)
     {
         int peak = 0;
-        foreach (var channel in new Func<AmbientFrame, double>[] { f => f.Rim, f => f.Glow, f => f.SweepOpacity })
+        foreach (var channel in new Func<AmbientFrame, double>[] { f => f.Rim, f => f.SweepOpacity })
             peak = Math.Max(peak, PeakFlashes(a, channel, seconds, threshold));
         return peak;
     }
@@ -208,16 +203,23 @@ public static class MotionSafety
     }
 }
 
-// Whether motion may run now. Ambient light is a loop, so it needs the island on screen, the session in front of the user and
-// power to spare; the answers to the pointer only need motion to be allowed.
+// Whether motion may run now. Animations, SystemAnimations and HighContrast make the app-wide rule (Soft.Enabled): BrimDeck's
+// setting, Windows' "animation effects", and no motion in high contrast. Ambient light is a loop, so it also needs the island
+// on screen, the session in front of the user with its display on, and power to spare; the answers to the pointer only need
+// motion to be allowed.
 public readonly record struct MotionConditions(bool Animations, bool SystemAnimations, bool HighContrast, bool Visible, bool Suppressed,
-    bool PoweringOff, bool Locked, bool BatterySaver, bool HasMaterial);
+    bool PoweringOff, bool Locked, bool BatterySaver, bool HasMaterial, bool DisplayOff = false)
+{
+    public bool MotionAllowed => Allowed(Animations, SystemAnimations, HighContrast);
+    // The rule itself, for Soft.Enabled and these conditions alike.
+    public static bool Allowed(bool animations, bool systemAnimations, bool highContrast) => animations && systemAnimations && !highContrast;
+}
 
 public static class MotionGate
 {
-    public static bool Interaction(in MotionConditions c, ThemeMotion motion) => c.Animations && c.SystemAnimations && !c.HighContrast && motion.AnyInteraction;
-    public static bool Ambient(in MotionConditions c, ThemeMotion motion) => c.Animations && c.SystemAnimations && !c.HighContrast
-        && c.Visible && !c.Suppressed && !c.PoweringOff && !c.Locked && !c.BatterySaver && c.HasMaterial && motion.Ambient.Any;
+    public static bool Interaction(in MotionConditions c, ThemeMotion motion) => c.MotionAllowed && motion.AnyInteraction;
+    public static bool Ambient(in MotionConditions c, ThemeMotion motion) => c.MotionAllowed
+        && c.Visible && !c.Suppressed && !c.PoweringOff && !c.Locked && !c.DisplayOff && !c.BatterySaver && c.HasMaterial && motion.Ambient.Any;
 }
 
 // The interaction durations in milliseconds, from the animation length chosen in settings (100 to 1000 ms, 360 by default) and
@@ -229,11 +231,21 @@ public readonly record struct MotionTiming(int HoverIn, int HoverOut, int Glide,
 {
     public static MotionTiming From(int animationDuration, double pace)
     {
-        double d = Math.Clamp(animationDuration, 100, 1000) * Math.Clamp(double.IsFinite(pace) ? pace : 1, MotionSafety.PaceMin, MotionSafety.PaceMax);
-        static int Ms(double value, double min, double max) => (int)Math.Round(Math.Clamp(value, min, max));
+        double d = AnimationLength.Clamp(animationDuration) * Math.Clamp(double.IsFinite(pace) ? pace : 1, MotionSafety.PaceMin, MotionSafety.PaceMax);
+        static int Ms(double value, double min, double max) => AnimationLength.Ms(value, min, max);
         return new(Ms(d * .45, 80, 450), Ms(d * .75, 120, 700), Ms(d * .6, 90, 600), Ms(d * 1.4, 240, 1400), Ms(d * 1.6, 300, 1600),
             Ms(d * .22, 40, 200), Ms(d * .5, 80, 450), Ms(d * .2, 50, 90));
     }
+}
+
+// The animation length chosen in settings (DeckSettings.AnimationDuration), in milliseconds: its default and its range, and the
+// rounding every duration derived from it takes. The one place these numbers live.
+public static class AnimationLength
+{
+    public const int Default = 360, Min = 100, Max = 1000;
+    public static int Clamp(int milliseconds) => Math.Clamp(milliseconds, Min, Max);
+    // A derived duration held to its own range, in whole milliseconds.
+    public static int Ms(double value, double min, double max) => (int)Math.Round(Math.Clamp(value, min, max));
 }
 
 // Progress along a timeline: smooth, or in hard steps that jump at the start of each step (so the first frame already moves).
