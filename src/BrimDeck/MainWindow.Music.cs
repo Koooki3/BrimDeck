@@ -123,7 +123,7 @@ public partial class MainWindow
         if (!DeckPages.Shown(Settings, page)) return;
         bool changed = CurrentPage != page;
         // What the pointer lit belongs to the page that leaves.
-        if (changed) { CloseSourceMenu(); _fx?.Reset(); }
+        if (changed) { CloseSourceMenu(); _fx?.Reset(); PageToolTips.CloseWithin(PageContent(CurrentPage)); }
         if (changed && _expanded && !_preview)
         {
             // Start before resizing: the shrinking surface can immediately fire MouseLeave.

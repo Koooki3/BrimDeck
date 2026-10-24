@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Shell;
 using BrimDeck.Native;
@@ -16,6 +17,7 @@ internal static class Program
             CheckWindowChrome();
             CheckSettledClip();
             NoticeProtectionTests.Run(Check);
+            CheckPageToolTips();
             BrimDeck.MainWindow.CheckShadowLifetime();
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();
             Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
@@ -88,6 +90,32 @@ internal static class Program
                     Check($"the {name}{(look.Length > 0 ? " with a " + look : "")} at rest draws nothing past its rounded outline at {scale * 100:0}% ({outside} faint edge pixels, strongest alpha {strongest})",
                         strongest <= 64 && outside <= 16);
                 }
+    }
+
+    // A page left without the pointer moving closes the tooltips opened over it, and only those (BrimDeck.PageToolTips).
+    private static void CheckPageToolTips()
+    {
+        var left = new Border { Width = 40, Height = 20 }; var kept = new Border { Width = 40, Height = 20 };
+        var page = new StackPanel(); page.Children.Add(left);
+        var other = new StackPanel(); other.Children.Add(kept);
+        var root = new StackPanel(); root.Children.Add(page); root.Children.Add(other);
+        // Off screen and never activated: nothing shows where the tests run.
+        var window = new Window { Content = root, Left = -20000, Top = -20000, Width = 120, Height = 80, ShowInTaskbar = false, ShowActivated = false, WindowStyle = WindowStyle.None };
+        try
+        {
+            window.Show();
+            var leftTip = new ToolTip { Content = "page", PlacementTarget = left, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+            var keptTip = new ToolTip { Content = "other", PlacementTarget = kept, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+            left.ToolTip = leftTip; kept.ToolTip = keptTip;
+            leftTip.IsOpen = true; keptTip.IsOpen = true;
+            Check("tooltips open for the page check", leftTip.IsOpen && keptTip.IsOpen);
+            int closed = BrimDeck.PageToolTips.CloseWithin(page);
+            Check("leaving a page closes the tooltip opened over it", closed == 1 && !leftTip.IsOpen);
+            Check("leaving a page keeps a tooltip opened elsewhere", keptTip.IsOpen);
+            keptTip.IsOpen = false;
+            Check("nothing open over the page closes nothing", BrimDeck.PageToolTips.CloseWithin(page) == 0);
+        }
+        finally { window.Close(); }
     }
 
     private static void Check(string name, bool condition)
