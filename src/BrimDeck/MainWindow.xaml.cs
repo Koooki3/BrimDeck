@@ -413,7 +413,7 @@ public partial class MainWindow : Window
         FitShadowCache(dpi);
         ApplyThemeMotion();
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
-        SetImmediate(_surface, SolidColorBrush.ColorProperty, !_expanded && Collapsed.Style == CompactStyle.Line ? PanelTheme.ColorOf("indicator") : PanelTheme.SurfaceColor);
+        SetImmediate(_surface, SolidColorBrush.ColorProperty, !_expanded && Collapsed.Style == CompactStyle.Line ? PanelTheme.ColorOf("indicator") : _expanded ? PanelTheme.PanelSurfaceColor : PanelTheme.SurfaceColor);
         ApplyMaterial();
         _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent);
         _musicRenderKey = ""; _compactRendered = null; _alertRendered = null;
@@ -703,7 +703,7 @@ public partial class MainWindow : Window
         Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
-        var tone = indicator ? PanelTheme.ColorOf("indicator") : PanelTheme.SurfaceColor;
+        var tone = indicator ? PanelTheme.ColorOf("indicator") : expanded ? PanelTheme.PanelSurfaceColor : PanelTheme.SurfaceColor;
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
         // indicator's color.

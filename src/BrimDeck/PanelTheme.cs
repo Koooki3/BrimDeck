@@ -220,6 +220,17 @@ internal static class PanelTheme
     private static bool GlassShownFor(PanelPalette palette) => palette.IsGlass && MotionEnvironment.Transparency && !SystemParameters.HighContrast;
     // The island's base color: the glass tint over the desktop, or the surface. The indicator line keeps its own color.
     public static Color SurfaceColor => GlassShown ? ToColor(Current.Effects.Glass!.Tint) : ColorOf("surface");
+    // The open panel's base color: glass a little thicker than on the small island, as a large sheet of glass is (Apple's
+    // materials thicken with their size). Only denser, so every contrast the tint keeps still holds.
+    public static Color PanelSurfaceColor
+    {
+        get
+        {
+            var color = SurfaceColor;
+            if (GlassShown) color.A = (byte)Math.Min(255, color.A + (255 - color.A) * .35);
+            return color;
+        }
+    }
     // What the panel's text asks for: ClearType over an opaque surface; over glass, where the layered window has no opaque
     // pixels under the text, ClearType would wash the text out, so WPF chooses (grayscale there).
     public static ClearTypeHint ClearType => GlassShown ? ClearTypeHint.Auto : ClearTypeHint.Enabled;

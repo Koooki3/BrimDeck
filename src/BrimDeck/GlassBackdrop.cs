@@ -26,7 +26,8 @@ namespace BrimDeck;
 // Windows, any failure) there is no blur and the glass stays clear.
 internal sealed class GlassBackdrop : IDisposable
 {
-    private const int SettleMs = 120, FadeInMs = 180, FadeOutMs = 90;
+    // The blur comes back as the island's own motion lands (Soft.Out's curve), soon after it has held still.
+    private const int SettleMs = 90, FadeInMs = 200, FadeOutMs = 90;
     private readonly Window _owner;
     // The surface the blur lies under (the island, a notice) and its shape now: corners, shoulder, and whether its material is
     // fully there (not fading into the indicator or out of sight).
@@ -181,7 +182,9 @@ internal sealed class GlassBackdrop : IDisposable
     {
         if (_sprite is null || Composition.Compositor is not { } compositor) return;
         var animation = compositor.CreateScalarKeyFrameAnimation();
-        animation.InsertKeyFrame(1, to);
+        // In: the soft landing the island's motion uses (Soft.Out); out: quick and even, it only steps aside.
+        if (to > 0) animation.InsertKeyFrame(1, to, compositor.CreateCubicBezierEasingFunction(new Vector2(.22f, .8f), new Vector2(.28f, 1)));
+        else animation.InsertKeyFrame(1, to, compositor.CreateLinearEasingFunction());
         animation.Duration = TimeSpan.FromMilliseconds(milliseconds);
         _sprite.StartAnimation("Opacity", animation);
     }
