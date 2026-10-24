@@ -27,6 +27,7 @@ try
     NoticeGlyphTests.Run(Check);
     ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");
     ThemeMotionTests.Run(Check);
+    DatePickerMotionTests.Run(Check);
     InteractionFxTests.Run(Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);

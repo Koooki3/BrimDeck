@@ -220,6 +220,8 @@ public partial class MainWindow
             closing = true; if (ReferenceEquals(_detailPopup, popup)) _detailPopup = null;
             if (left || _app.Exiting || popup.Content is not UIElement content || !Soft.Enabled) return;
             e.Cancel = true; left = true; popup.IsHitTestVisible = false;
+            // The theme's answers end with the pop-up rather than play on over buttons that are going.
+            InteractionFx.Clear(popup);
             Soft.Leave(content, () => popup.Close());
             RenderUsage();
         };
@@ -231,7 +233,13 @@ public partial class MainWindow
             if (!left) RenderUsage();
             if (_expanded && !IsMouseOver) PointerChanged(false);
         };
-        Soft.Enter(popup.Content as UIElement);
+        // The pop-up enters once its first frame has been drawn: a layered window takes a frame or two to come up, and an
+        // entrance started before Show lost its beginning to them and popped in. Until then its content is held out of sight.
+        if (Soft.Enabled && popup.Content is UIElement entering)
+        {
+            entering.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 0, TimeSpan.Zero));
+            popup.ContentRendered += (_, _) => Soft.Enter(entering);
+        }
         popup.Show(); popup.Activate();
     }
 
