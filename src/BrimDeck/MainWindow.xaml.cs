@@ -71,7 +71,7 @@ public partial class MainWindow : Window
     private CompactAlertInfo? _alert;
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
-    public bool IsSuppressed => !_preview && (Settings.Behavior(_context) == WindowBehavior.Hide || HiddenByUser);
+    public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Hide || HiddenByUser);
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     public string? LastRefreshError { get; private set; }
 
@@ -80,7 +80,7 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainWindow? lead = null)
     {
         _app = app; _lead = lead;
-        _host = new WindowsHost(() => MonitorHandle, () => Settings.FullscreenExceptions);
+        _host = new WindowsHost(() => MonitorHandle);
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
         {
@@ -438,7 +438,7 @@ public partial class MainWindow : Window
         if (!_expanded && !IsSuppressed) SetExpanded(false);
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
     public void SetExpanded(bool expanded, bool instant = false)

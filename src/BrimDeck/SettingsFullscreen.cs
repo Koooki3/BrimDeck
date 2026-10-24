@@ -65,8 +65,8 @@ public sealed partial class SettingsWindow
 
     private FrameworkElement ExceptionsContent()
     {
-        string title = Loc.T("全屏检测例外应用", "Full-screen detection exceptions");
-        var exceptions = S.FullscreenExceptions;
+        string title = Loc.T("应用程序规则", "App rules");
+        var exceptions = S.FullscreenRules;
         // With no apps there is nothing open: a leftover open flag would expand the list the moment the first app is added.
         // A reserved height from earlier on this visit is kept so the page does not jump.
         if (exceptions.Count == 0) _exceptionsOpen = false;
@@ -80,8 +80,8 @@ public sealed partial class SettingsWindow
         // space instead of pulling the rest of the page up.
         var space = new Border { Child = list, MinHeight = _exceptionsReservedHeight };
         var label = TextLine(title, 13, TextPrimary, FontWeights.SemiBold); label.VerticalAlignment = VerticalAlignment.Center;
-        var info = HelpIcon(title, () => Loc.T("这些应用全屏或最大化时，上面三项设置不生效，面板保持原有样式。",
-            "While these apps are full screen or maximized, the three settings above do not apply and the panel keeps its original style."), 14);
+        var info = HelpIcon(title, () => Loc.T("为单个应用分别指定三种情境下面板的行为；选“跟随全局”的情境沿用上面的三项设置。",
+            "Chooses what the panel does in each of the three contexts for one app; a context left on Follow follows the three settings above."), 14);
         // Pointing at the icon shows the description; a click on it should not also open the row.
         info.MouseLeftButtonDown += (_, e) => e.Handled = true;
         var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -109,7 +109,7 @@ public sealed partial class SettingsWindow
         }
         if (exceptions.Count > 0)
         {
-            arrow = ChevronButton(Loc.T("展开全屏检测例外应用", "Show full-screen detection exceptions"), Flip);
+            arrow = ChevronButton(Loc.T("展开应用程序规则", "Show app rules"), Flip);
             arrow.Margin = new Thickness(2, 0, 0, 0);
             heading.Children.Add(arrow);
         }
@@ -121,7 +121,7 @@ public sealed partial class SettingsWindow
         addContent.Children.Add(new TextBlock { Text = Loc.T("添加应用", "Add app"), VerticalAlignment = VerticalAlignment.Center });
         var addChevron = Chevron(); addChevron.Margin = new Thickness(6, 1, 0, -1); addContent.Children.Add(addChevron);
         add.Content = addContent;
-        AutomationProperties.SetName(add, Loc.T("添加全屏例外应用", "Add a full-screen exception"));
+        AutomationProperties.SetName(add, Loc.T("添加应用程序规则", "Add an app rule"));
         add.Click += (_, _) => ExceptionMenu(add);
         var controls = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         controls.Children.Add(count); controls.Children.Add(add);
@@ -134,20 +134,24 @@ public sealed partial class SettingsWindow
         var row = new StackPanel(); row.Children.Add(header); row.Children.Add(space); return row;
     }
 
-    // One app under the row: its icon, the name its executable gives, and the file name; the full path shows on hover.
-    private FrameworkElement ExceptionRow(FullscreenException exception)
+    // One app under the row: its icon, the name its executable gives, the file name, and under them one behaviour pick
+    // per context, each offering the global rules' three behaviours and a fourth choice that follows them.
+    private FrameworkElement ExceptionRow(FullscreenRule rule)
     {
+        string name = AppName(rule.Name, rule.Path);
+        string key = ScreenPolicy.Key(rule);
+        int At(DeckSettings settings) => settings.FullscreenRules.FindIndex(entry => string.Equals(ScreenPolicy.Key(entry), key, StringComparison.OrdinalIgnoreCase));
+        var column = new StackPanel();
         var row = new Grid { MinHeight = 40, Background = Brushes.Transparent };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition());
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        if (exception.Path.Length > 0) row.ToolTip = exception.Path;
-        row.Children.Add(AppIcon(exception.Path));
-        string name = AppName(exception.Name, exception.Path);
+        if (rule.Path.Length > 0) row.ToolTip = rule.Path;
+        row.Children.Add(AppIcon(rule.Path));
         var labels = new Grid { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
         labels.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); labels.ColumnDefinitions.Add(new ColumnDefinition());
         var title = TextLine(name, 13, TextPrimary); title.VerticalAlignment = VerticalAlignment.Center; title.TextTrimming = TextTrimming.CharacterEllipsis;
-        var file = TextLine(FileName(exception.Name, exception.Path), 11.5, TextTertiary);
+        var file = TextLine(FileName(rule.Name, rule.Path), 11.5, TextTertiary);
         file.VerticalAlignment = VerticalAlignment.Center; file.Margin = new Thickness(8, 1, 0, 0); file.TextTrimming = TextTrimming.CharacterEllipsis;
         Grid.SetColumn(file, 1);
         labels.Children.Add(title); labels.Children.Add(file);
@@ -157,14 +161,38 @@ public sealed partial class SettingsWindow
         cross.SetBinding(Shape.StrokeProperty, new Binding("Foreground") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1) });
         remove.Content = cross;
         AutomationProperties.SetName(remove, Loc.T("移除 ", "Remove ") + name);
-        remove.Click += (_, _) =>
-        {
-            Change(s => s.FullscreenExceptions.RemoveAll(entry => string.Equals(ScreenPolicy.Key(entry), ScreenPolicy.Key(exception), StringComparison.OrdinalIgnoreCase)));
-            RefreshExceptions();
-        };
+        remove.Click += (_, _) => { Change(s => s.FullscreenRules.RemoveAll(entry => string.Equals(ScreenPolicy.Key(entry), key, StringComparison.OrdinalIgnoreCase))); RefreshExceptions(); };
         Grid.SetColumn(remove, 2);
         row.Children.Add(remove);
-        return row;
+        column.Children.Add(row);
+        var picks = new StackPanel { Margin = new Thickness(26, 0, 0, 8) };
+        picks.Children.Add(RulePick(name, Loc.T("窗口最大化时", "Maximized"), rule.Maximized,
+            choice => Change(s => { var i = At(s); if (i >= 0) s.FullscreenRules[i] = s.FullscreenRules[i] with { Maximized = choice }; })));
+        picks.Children.Add(RulePick(name, Loc.T("无边框全屏时", "Borderless full screen"), rule.Borderless,
+            choice => Change(s => { var i = At(s); if (i >= 0) s.FullscreenRules[i] = s.FullscreenRules[i] with { Borderless = choice }; })));
+        picks.Children.Add(RulePick(name, Loc.T("独占全屏时", "Exclusive full screen"), rule.Exclusive,
+            choice => Change(s => { var i = At(s); if (i >= 0) s.FullscreenRules[i] = s.FullscreenRules[i] with { Exclusive = choice }; })));
+        column.Children.Add(picks);
+        return column;
+    }
+
+    // One context's pick: the label, then a four-way segment — Follow and the three behaviours the global rules offer.
+    private FrameworkElement RulePick(string app, string title, WindowBehavior? selected, Action<WindowBehavior?> changed)
+    {
+        var options = new UniformGrid { Columns = 4, Width = 428 };
+        foreach (var choice in new (WindowBehavior? Value, string Label)[]
+        {
+            (null, Loc.T("跟随全局", "Follow")), (WindowBehavior.Normal, BehaviorName(WindowBehavior.Normal)),
+            (WindowBehavior.Line, BehaviorName(WindowBehavior.Line)), (WindowBehavior.Hide, BehaviorName(WindowBehavior.Hide))
+        })
+        {
+            var option = new RadioButton { Content = choice.Label, Style = (Style)FindResource("SettingsSegment"), GroupName = "Rule" + app + title, IsChecked = selected == choice.Value };
+            AutomationProperties.SetName(option, app + " · " + title + " · " + choice.Label);
+            WindowBehavior? picked = choice.Value;
+            option.Checked += (_, _) => changed(picked);
+            options.Children.Add(option);
+        }
+        return Row(title, SegmentBorder(options));
     }
 
     // Runs as the button's menu, so the menu is anchored to the button that opened it.
@@ -179,7 +207,7 @@ public sealed partial class SettingsWindow
         menu.Resources["MenuHover"] = UI.Brush(_palette.Dark ? "#25252B" : "#E8E9EF");
         menu.Resources["MenuRule"] = UI.Brush(_palette.Divider);
         var apps = RunningApps.WithWindows()
-            .Where(app => !S.FullscreenExceptions.Any(exception => ScreenPolicy.Matches(exception, app.Name, app.Path)))
+            .Where(app => !S.FullscreenRules.Any(exception => ScreenPolicy.Matches(exception, app.Name, app.Path)))
             .Select(app => (App: app, Name: AppName(app.Name, app.Path)))
             .OrderBy(entry => entry.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -191,7 +219,8 @@ public sealed partial class SettingsWindow
             line.Children.Add(new TextBlock { Text = FileName(app.Name, app.Path), Opacity = .55, FontSize = 11.5, Margin = new Thickness(10, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center });
             var item = new MenuItem { Header = line, ToolTip = app.Path.Length > 0 ? app.Path : null };
             AutomationProperties.SetName(item, name);
-            item.Click += (_, _) => AddException(new FullscreenException(app.Name, app.Path));
+            item.Click += (_, _) => AddException(new FullscreenRule(app.Name, app.Path)
+                { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal });
             menu.Items.Add(item);
         }
         if (apps.Count == 0) menu.Items.Add(new MenuItem { Header = Loc.T("没有可添加的应用", "No apps to add"), IsEnabled = false });
@@ -211,13 +240,14 @@ public sealed partial class SettingsWindow
             CheckFileExists = true
         };
         if (dialog.ShowDialog(this) != true) return;
-        AddException(new FullscreenException(System.IO.Path.GetFileNameWithoutExtension(dialog.FileName), dialog.FileName));
+        AddException(new FullscreenRule(System.IO.Path.GetFileNameWithoutExtension(dialog.FileName), dialog.FileName)
+            { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal });
     }
 
     // The list stays open or closed as it was; the count beside the button shows the app was added.
-    private void AddException(FullscreenException exception)
+    private void AddException(FullscreenRule rule)
     {
-        Change(s => s.FullscreenExceptions.Add(exception));
+        Change(s => s.FullscreenRules.Add(rule));
         RefreshExceptions();
     }
 
