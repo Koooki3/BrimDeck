@@ -171,7 +171,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _clipSettle?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseWheel += PanelWheel;
@@ -412,6 +412,8 @@ public partial class MainWindow : Window
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
         FitShadowCache(dpi);
         ApplyThemeMotion();
+        // A theme whose scan line crosses the whole surface keeps the rounded clip (SettleClip).
+        if (ThemeSweeps) Island.SettledClip = false;
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
         SetImmediate(_surface, SolidColorBrush.ColorProperty, !_expanded && Collapsed.Style == CompactStyle.Line ? PanelTheme.ColorOf("indicator") : PanelTheme.SurfaceColor);
         ApplyMaterial();
@@ -528,10 +530,33 @@ public partial class MainWindow : Window
     }
 
     private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
+    // corners and shoulders, and a rounded clip made every frame of the title and the bars cost a quarter more. The rounded clip
+    // comes back before anything changes the surface; the rectangle only once the closing has had its whole length. A theme whose
+    // scan line passes across the whole surface (AmbientGlow) keeps the rounded clip, which shapes that line at the corners.
+    private DispatcherTimer? _clipSettle;
+    private void SettleClip(int after)
+    {
+        if (_clipSettle is null)
+        {
+            _clipSettle = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
+            _clipSettle.Tick += (_, _) =>
+            {
+                _clipSettle.Stop();
+                if (!_expanded && !_poweringOff && !_booting && !_bootWaiting && !_bootDot && !Resizing && !ThemeSweeps) Island.SettledClip = true;
+            };
+        }
+        _clipSettle.Stop();
+        _clipSettle.Interval = TimeSpan.FromMilliseconds(Math.Max(1, after) + 100);
+        _clipSettle.Start();
+    }
+    private static bool ThemeSweeps => PanelTheme.Current.Motion.Ambient is { Sweep: > 0, SweepOpacity: > 0 };
     // keyboard: a hotkey or Escape asked for it (motion-review C4), so the move is quicker and has no give.
     public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
+        // Whatever this changes, the surface moves under its rounded clip; a collapse settles again below (SettleClip).
+        Island.SettledClip = false; _clipSettle?.Stop();
         if (expanded && !_expanded) EndBoot();
         // Only the panel under the pointer is open; the others close at once and give up the Escape key.
         if (expanded && !_preview)
@@ -636,6 +661,7 @@ public partial class MainWindow : Window
         _booting = false; _morphingShape = false;
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
+        if (!expanded) SettleClip(duration);
         if (turning) _turn.Started(now, duration, expanded, width, height);
         // The opening and closing tracks are NoticeMotion's Panel* (a notice moves on the same ones); the boot's, the style
         // morph's and the indicator's own variations stay here.
