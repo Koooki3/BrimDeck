@@ -137,8 +137,8 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
         }
     }
 
-    // A protector for tests and for platforms without data protection: it only marks the data, it does not hide it.
-    public sealed class PlainProtector : INoticeProtector
+    // A protector for the tests (BrimDeck.Tests): it only marks the data, it does not hide it.
+    internal sealed class PlainProtector : INoticeProtector
     {
         public byte[] Protect(byte[] data) => [.. "PLAIN"u8, .. data];
         public byte[] Unprotect(byte[] data) => data.AsSpan().StartsWith("PLAIN"u8) ? data[5..] : throw new System.Security.Cryptography.CryptographicException("Not plain data.");

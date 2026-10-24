@@ -44,14 +44,6 @@ internal sealed record NoticeLook(
             Hex(SystemColors.HighlightColor), Hex(SystemColors.HighlightTextColor), text, Glow: false, HighContrast: true);
     }
 
-    // The small mark beside an icon for a notice's state; empty for plain messages. On the theme's surface, as the panel draws
-    // its own warning and error colors.
-    public string StatusColor(NoticeCategory category) => HighContrast ? category is NoticeCategory.Message ? "" : Primary : category switch
-    {
-        NoticeCategory.Success => PanelTheme.Readable("#34C759"), NoticeCategory.Error => Danger,
-        NoticeCategory.Warning => PanelTheme.Readable(PanelTheme.WarningDefault), NoticeCategory.Info => Accent, _ => ""
-    };
-
     // An application's color as drawn on this theme.
     public Color AppColor(Color color) => HighContrast ? SystemColors.HighlightColor : PanelTheme.Readable(color);
 }

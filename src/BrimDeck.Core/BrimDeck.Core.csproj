@@ -12,6 +12,8 @@
     <EmbeddedResource Include="Themes\*.json" LogicalName="BrimDeck.Core.Themes.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Templates\theme-template.json" LogicalName="BrimDeck.Core.Templates.theme-template.json" />
     <ProjectReference Include="..\BrimDeck.Protocol\BrimDeck.Protocol.csproj" />
+    <!-- NoticeHistory.PlainProtector is for the tests only. -->
+    <InternalsVisibleTo Include="BrimDeck.Tests" />
   </ItemGroup>
 
   <ItemGroup>

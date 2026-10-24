@@ -79,7 +79,7 @@
     "shadowOpacity": 0.6,
     "scanlines": 0.04
   },
-  // Living neon: the rim and glow breathe over 6.5 s, the rim's cyan and magenta drift along it, a faint scan line
+  // Living neon: the rim breathes over 6.5 s, the rim's cyan and magenta drift along it, a faint scan line
   // passes every 16 s and the tube sags softly about once in 41 s; never faster than one change a second. The pointer is
   // answered as cyberware: cyan HUD brackets snap onto the hovered control in three hard steps; a press clamps them on with
   // a magenta ghost and a short glitch slice, and on release a yellow scan line ticks down the control. No soft blooms.
