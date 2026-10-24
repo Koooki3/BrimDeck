@@ -62,7 +62,7 @@
               <Grid x:Name="Toolbar" Height="{Binding Height.Value, ElementName=ToolbarRow}" VerticalAlignment="Top">
                 <!-- The clock is centered on the whole panel; the switches and the settings button sit inside their own insets. -->
                 <TextBlock x:Name="ClockLabel" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="12" Foreground="{DynamicResource PanelTertiary}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
-                <Border x:Name="PageSwitch" Background="{DynamicResource PanelSwitchFill}" CornerRadius="8" Padding="2" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0">
+                <Border x:Name="PageSwitch" Background="{DynamicResource PanelSwitchFill}" CornerRadius="{DynamicResource PanelR8}" Padding="2" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0">
                  <Grid>
                  <!-- The chosen page's fill glides between the buttons, as the monitor page's sort pill does (MainWindow.PlacePageCapsule). -->
                  <Border x:Name="PageCapsule" Background="{DynamicResource PanelFillSelected}" HorizontalAlignment="Left" VerticalAlignment="Center"
