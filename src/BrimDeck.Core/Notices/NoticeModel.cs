@@ -48,6 +48,8 @@ public sealed record NoticeInput
     public string Body { get; init; } = "";
     public string? IconRef { get; init; }
     public DateTimeOffset? CreatedAt { get; init; }
+    // How long the message had waited before it was sent, by the sender's clock (NoticeMessage.AgeMs); null when not told.
+    public TimeSpan? Age { get; init; }
     public NoticeCategory Category { get; init; } = NoticeCategory.Message;
     public NoticePriority PriorityHint { get; init; } = NoticePriority.Normal;
     public double? Progress { get; init; }
@@ -74,6 +76,9 @@ public sealed class Notice
     public NoticeOrigin Origin { get; set; }
     public string? Distro { get; set; }
     public string? ReplaceKey { get; set; }
+    // The sender's id of the message that last added or changed the notice. Kept with the notice, so that a retry is
+    // recognized after a restart too.
+    public string? EventId { get; set; }
     public string Title { get; set; } = "";
     public string Body { get; set; } = "";
     public string? IconRef { get; set; }

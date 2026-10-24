@@ -52,7 +52,7 @@ internal static class Program
     private static async Task<NoticeMessage?> SendAsync(NoticeMessage message)
     {
         message.EventId ??= Guid.NewGuid().ToString("N");
-        message.CreatedAt ??= DateTimeOffset.UtcNow;
+        NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
         await using var pipe = await ConnectAsync();
         if (pipe is null) return null;
         try

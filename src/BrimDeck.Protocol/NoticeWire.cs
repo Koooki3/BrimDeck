@@ -42,6 +42,9 @@ public sealed class NoticeMessage
     public long? DurationMs { get; set; }
     public string? Command { get; set; }
     public DateTimeOffset? CreatedAt { get; set; }
+    // How long the message had waited since CreatedAt when it was sent, by the sender's own clock (see Stamp). BrimDeck
+    // judges a late notice by it, since a distribution's clock may differ from Windows'.
+    public long? AgeMs { get; set; }
     // Time-kind notices (see NoticeTimes): alarm, stopwatch, countdown, mail or event. At is a time and InMs a duration from
     // when BrimDeck receives the message (a countdown's end, an event's start); Until an event's end; LeadMs how long before
     // an event's start BrimDeck reminds. Stop ends the stopwatch, countdown or event sent before with the same ReplaceId.
@@ -123,6 +126,14 @@ public static class NoticeProtocol
         try { return JsonSerializer.Deserialize(json, NoticeJson.Default.NoticeMessage); }
         catch (JsonException) { return null; }
     }
+    // Gives a message about to be sent its creation time (now, unless it has one) and its age by the same clock. Only the
+    // sender stamps a message: a relay on another machine's clock (BrimDeck.Notify.exe --stdio for WSL) passes it on as it is.
+    public static void Stamp(NoticeMessage message, DateTimeOffset now)
+    {
+        message.CreatedAt ??= now;
+        message.AgeMs = Math.Clamp((long)(now - message.CreatedAt.Value).TotalMilliseconds, 0, MaxDurationMs);
+    }
+
     public static NoticeMessage Reply(string result, string? reason = null, string? id = null)
         => new() { Type = NoticeTypes.Reply, Result = result, Detail = reason, EventId = id };
 
@@ -142,6 +153,7 @@ public static class NoticeProtocol
         if (NoticeTimes.Check(message, DateTimeOffset.UtcNow, TimeZoneInfo.Local) is { } timeProblem) return timeProblem;
         if (message.Progress is { } progress && !(double.IsFinite(progress) && progress >= 0 && progress <= 1)) return "bad-progress";
         if (message.DurationMs is < 0 or > MaxDurationMs) return "bad-duration";
+        if (message.AgeMs is < 0 or > MaxDurationMs) return "bad-age";
         message.Title = Clip(message.Title, MaxTitle);
         message.Body = Clip(message.Body, MaxBody);
         message.EventId = Clip(message.EventId, MaxField);

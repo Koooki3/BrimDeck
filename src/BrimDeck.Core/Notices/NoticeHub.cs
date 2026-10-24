@@ -57,7 +57,8 @@ public sealed class NoticeHub
         {
             ForgetEvents(now);
             var key = input.AppKey + "\n" + eventId;
-            if (_events.ContainsKey(key)) return new(NoticeReceipt.Duplicate, null, false);
+            // A retry of a message already recorded, also one recorded before BrimDeck restarted (the saved notice keeps its id).
+            if (_events.ContainsKey(key) || _notices.Any(n => n.EventId == eventId && n.AppKey == input.AppKey)) return new(NoticeReceipt.Duplicate, null, false);
             _events[key] = now;
         }
         if (input.StopTiming) return StopByKey(input, now);
@@ -65,6 +66,7 @@ public sealed class NoticeHub
         var (title, body) = Words(input);
         var priority = NoticeClock.Alerting(input.Timing) ? AlertPriority(rule, input.PriorityHint) : EffectivePriority(rule, input.PriorityHint);
         bool quiet = rule?.Muted == true || priority == NoticePriority.Low;
+        bool late = Late(input, priority, now);
         var existing = FindInstance(input.InstanceKey)
             ?? (input.Replaces is { Length: > 0 } replaced && FindInstance(replaced) is { } previous && previous.AppKey == input.AppKey ? previous : null)
             ?? (input.ReplaceKey is { Length: > 0 } replace ? _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == replace) : null);
@@ -77,24 +79,40 @@ public sealed class NoticeHub
             existing.IconRef = input.IconRef ?? existing.IconRef; existing.Category = input.Category; existing.Priority = priority;
             existing.Progress = input.Progress; existing.Actions = [.. input.Actions]; existing.Capabilities = input.Capabilities;
             existing.Timing = input.Timing?.Copy();
+            existing.EventId = input.EventId ?? existing.EventId;
+            // The notice now says what the latest message said, so it is as old as that message: an update shown as it arrives
+            // must not read "38 min ago" from the first notice it replaced. It also keeps the list's order after a restart.
+            existing.CreatedAt = input.CreatedAt ?? now; existing.ReceivedAt = now;
             existing.UpdatedAt = now; existing.SourcePresent = true; existing.Revision++;
             if (significant) existing.Viewed = false;
             // An update moves the notice to the top, as a new one would arrive there.
             _notices.Remove(existing); _notices.Insert(0, existing);
             Recount(); Changed?.Invoke(); Persist?.Invoke();
-            return new(NoticeReceipt.Updated, existing, significant && !quiet);
+            return new(NoticeReceipt.Updated, existing, significant && !quiet && !late, late ? "late" : null);
         }
         var notice = new Notice
         {
             InstanceKey = input.InstanceKey, AppKey = input.AppKey, AppName = input.AppName, AppId = input.AppId, Origin = input.Origin,
-            Distro = input.Distro, ReplaceKey = input.ReplaceKey, Title = title, Body = body, IconRef = input.IconRef,
+            Distro = input.Distro, ReplaceKey = input.ReplaceKey, EventId = input.EventId, Title = title, Body = body, IconRef = input.IconRef,
             CreatedAt = input.CreatedAt ?? now, ReceivedAt = now, UpdatedAt = now, Category = input.Category, Priority = priority,
             Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy()
         };
         _notices.Insert(0, notice);
         Prune(now, notify: false);
         Recount(); Changed?.Invoke(); Persist?.Invoke();
-        return new(NoticeReceipt.Accepted, notice, !quiet);
+        return new(NoticeReceipt.Accepted, notice, !quiet && !late, late ? "late" : null);
+    }
+
+    // A message that reached BrimDeck long after it was written: it is recorded (unviewed) in the recent notices but not
+    // shown as it arrives, by the same limits as a notice waiting its turn (AttentionCoordinator.Staleness). Its age is the
+    // sender's own measure (NoticeInput.Age); without one, only a sender on Windows' own clock (no distribution) is judged
+    // by its creation time, since a distribution's clock may be off. Windows' notices keep their own rules (the list read at
+    // start-up is only a baseline), and time-kind notices their reminders (NoticeClock).
+    public static bool Late(NoticeInput input, NoticePriority priority, DateTimeOffset now)
+    {
+        if (input.Origin is not (NoticeOrigin.Cli or NoticeOrigin.Wsl) || input.Timing is { Kind: not NoticeTimeKind.Mail }) return false;
+        var age = input.Age ?? (input.Distro is null && input.CreatedAt is { } created ? now - created : null);
+        return age > (priority == NoticePriority.High ? AttentionCoordinator.HighStaleness : AttentionCoordinator.Staleness);
     }
 
     // brim-notify stop: ends the earlier timer, stopwatch or event with the same key. Nothing new shows.
