@@ -109,15 +109,25 @@
       "flicker": 0,                 // 20 to 300: the neon sags softly once per period (taking 1.2 s)
       "flickerDepth": 0             // 0 to 0.15
     },
-    "hover": "spot",                // none, spot (a light under the pointer), edge (a thin outline), lift (a soft shadow ring), neon (light and outline)
-    "hoverStrength": 0.1,           // 0 to 0.3
-    "press": "pulse",               // none, pulse (one glow), ripple (a spreading disc), ring (a spreading ring)
-    "pressStrength": 0.16,          // 0 to 0.35
-    "trail": 0.3,                   // 0 to 0.6: how strongly the particles a click throws show (0: none)
-    "particles": "dust",            // dust, pixel, spark, star, firefly, neon: the look of the particles a click throws, drawn under the content
-    "focus": "glow",                // none, ring, glow, neon: a bloom where keyboard focus lands
+    // How the pointer is answered: a mark drawn on the control's own visible shape (never around its box, never following the
+    // pointer), a press that answers as the button goes down, holds while it is held and completes on release, and a short
+    // accent where keyboard focus lands. The settings window keeps its own styles.
+    "hover": "reveal",              // none, reveal (faint fill, edge lit from the top), lift (soft shadow outside, light top edge),
+                                    // underline (subtle fill, 2 px bar along the bottom), caret (line highlight, caret bar at the left),
+                                    // brackets (HUD corner brackets), sheen (two-color tint and edge), glow (warm inner glow, a glint)
+    "hoverStrength": 0.12,          // 0 to 0.3
+    "press": "shade",               // none, shade (the shape shades and its edge firms), sink (the shadow collapses, pushed in),
+                                    // indicator (the bottom bar takes the highlight), select (a selection sweeps from the caret),
+                                    // lock (brackets clamp on, a chromatic ghost, a glitch slice; a scan line on release),
+                                    // sparkle (the tint deepens; stars on release), ember (a warm glow swells; fireflies on release)
+    "pressStrength": 0.18,          // 0 to 0.35
+    "trail": 0,                     // 0 to 0.6: how strongly the particles a completed press leaves show (0: none)
+    "particles": "none",            // none, dust, pixel, spark, star, firefly, neon: from the control's edges, above the content
+    "focus": "ring",                // none, ring, glow, brackets, caret: a short accent where keyboard focus lands
     "pace": 1,                      // 0.6 to 1.6: scales the animation length chosen in settings
-    "color": "accent",              // A color key above, a "#RRGGBB" color, or "system" (the Windows accent color)
-    "secondary": "accent"           // The second color of the neon styles and rings
+    "steps": 0,                     // 0 (smooth) or 2 to 8: moves in that many hard steps, for a mechanical feel
+    "color": "accent",              // The main mark: a color key above, a "#RRGGBB" color, or "system" (the Windows accent color)
+    "secondary": "accent",          // Its second tone: a gradient's end, a shadow, a ghost or a neutral bar
+    "highlight": "accent"           // The color of the moment of a press: an indicator, a selection, a scan line, sparkles
   }
 }

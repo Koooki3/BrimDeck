@@ -27,10 +27,11 @@ public partial class MainWindow
     // After the theme has dressed the island: the light takes the new theme, and whatever the pointer had lit ends.
     private void ApplyThemeMotion() { _ambient?.Apply(); _fx?.Reset(); }
 
-    // After anything that can show, hide, open or close the panel.
+    // After anything that can show, hide, open or close the panel: closed, whatever the pointer had lit fades with the content;
+    // opened under a pointer that has not moved, the control under it is answered at once.
     private void UpdateAmbient()
     {
         _ambient?.Update();
-        if (!_expanded) _fx?.Release();
+        if (!_expanded) _fx?.Release(); else _fx?.Refresh();
     }
 }
