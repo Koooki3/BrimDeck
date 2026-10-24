@@ -153,12 +153,13 @@ public partial class MainWindow
         { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
     }
     private bool _capsulePending;
-    // The wheel walks the shown pages: down moves along the switch, up moves back. A wheel that a scrolling part of a
-    // page uses (the lyrics, the model details) never arrives, as those mark it handled on the way up; an open menu or
-    // the detail popup keeps the wheel to itself as well.
+    // The wheel walks the shown pages (down moves along the switch, up moves back) or steps the system volume. A wheel that
+    // a scrolling part of a page uses (the lyrics, the model details) never arrives, as those mark it handled on the way up;
+    // an open menu or the detail popup keeps the wheel to itself as well.
     private void PanelWheel(object sender, MouseWheelEventArgs e)
     {
-        if (!Settings.MouseWheelPages || !_expanded || _preview || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
+        if (Settings.MouseWheel == MouseWheelAction.None || !_expanded || _preview || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
+        if (Settings.MouseWheel == MouseWheelAction.Volume) { WheelVolume(e.Delta); e.Handled = true; return; }
         var shown = DeckPages.Visible(Settings);
         if (shown.Count < 2) return;
         int at = shown.ToList().IndexOf(CurrentPage);
@@ -167,6 +168,17 @@ public partial class MainWindow
         if (next < 0 || next >= shown.Count) return;
         SelectPage(shown[next]);
         e.Handled = true;
+    }
+    // A precision touchpad sends parts of a notch; they add up until a whole notch (120) presses the volume key once.
+    private int _wheelVolumeRest;
+    private void WheelVolume(int delta)
+    {
+        if (Math.Sign(delta) != Math.Sign(_wheelVolumeRest)) _wheelVolumeRest = 0;
+        _wheelVolumeRest += delta;
+        int notches = _wheelVolumeRest / Mouse.MouseWheelDeltaForOneLine;
+        if (notches == 0) return;
+        _wheelVolumeRest -= notches * Mouse.MouseWheelDeltaForOneLine;
+        Native.VolumeKeys.Press(notches > 0, Math.Abs(notches));
     }
 
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);

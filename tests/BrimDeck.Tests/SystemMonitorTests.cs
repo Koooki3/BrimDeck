@@ -284,8 +284,14 @@ static class SystemMonitorTests
         check("Pages: the music page alone", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Music);
         settings.MusicPage = false;
         check("Pages: with every page off the usage page says so", DeckPages.Resolve(settings, DeckPage.Music) == DeckPage.Usage && DeckPages.Visible(settings).Count == 0);
-        check("The wheel's page switch is on by default and saved with the settings",
-            settings.MouseWheelPages && !System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":false}""")!.MouseWheelPages);
+        check("The wheel switches pages by default and its choice is saved with the settings",
+            settings.MouseWheel == MouseWheelAction.Pages && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheel":2}""")!.MouseWheel == MouseWheelAction.Volume);
+        var wheelOff = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":false}""")!; wheelOff.Normalize();
+        var wheelOn = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":true}""")!; wheelOn.Normalize();
+        check("The wheel: an older file's switch is carried across and then left out of the file",
+            wheelOff.MouseWheel == MouseWheelAction.None && wheelOn.MouseWheel == MouseWheelAction.Pages
+            && !System.Text.Json.JsonSerializer.Serialize(wheelOff).Contains("MouseWheelPages"));
+        check("The wheel: enum values stay saved as before", (int)MouseWheelAction.None == 0 && (int)MouseWheelAction.Pages == 1 && (int)MouseWheelAction.Volume == 2);
         check("Pages: opening choices", DeckPages.Opening(DefaultDeckPage.Monitor) == DeckPage.Monitor && DeckPages.Opening(DefaultDeckPage.Last) is null
             && DeckPages.Opening(DefaultDeckPage.Usage) == DeckPage.Usage && DeckPages.Opening(DefaultDeckPage.Music) == DeckPage.Music);
         var sizes = new DeckSettings { Width = 500, Height = 150, MusicWidth = 700, MusicHeight = 180, MonitorWidth = 600, MonitorHeight = 300 };

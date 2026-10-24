@@ -34,6 +34,8 @@ public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
 public enum DeckPage { Usage, Music, Monitor }
 public enum DefaultDeckPage { Last, Usage, Music, Monitor }
+// What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
+public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left and the
 // equalizer and the clock at the right; Music places only the title or lyric. Saved as numbers, so new members go at the end.
@@ -249,8 +251,12 @@ public sealed class DeckSettings
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;
-    // The mouse wheel walks the shown pages while the panel is expanded; scrolling parts of a page keep their wheel.
-    public bool MouseWheelPages { get; set; } = true;
+    // What the mouse wheel does while the panel is expanded; scrolling parts of a page keep their wheel.
+    public MouseWheelAction MouseWheel { get; set; } = MouseWheelAction.Pages;
+    // Read only to carry the switch of a file saved before MouseWheel existed; Normalize moves it across and the member
+    // then disappears from the saved file.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? MouseWheelPages { get; set; }
     public DeckPage LastPage { get; set; }
     public double Width { get; set; } = 520;
     public double Height { get; set; } = 200;
@@ -477,6 +483,10 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
+        // A file saved before MouseWheel had the page switch turned off as MouseWheelPages = false.
+        if (MouseWheelPages is false) MouseWheel = MouseWheelAction.None;
+        MouseWheelPages = null;
+        if (!Enum.IsDefined(MouseWheel)) MouseWheel = MouseWheelAction.Pages;
         // A file saved before app rules carried plain exceptions: each becomes a rule that keeps the panel's own style in
         // all three contexts, which is what an exception did.
         if (FullscreenExceptions is { Count: > 0 } legacy)

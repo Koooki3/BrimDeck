@@ -510,9 +510,7 @@ public sealed partial class SettingsWindow : Window
         Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start),
             Toggle(Loc.T("右键点击打开设置", "Right-click opens settings"), S.RightClickSettings, value => Change(s => s.RightClickSettings = value),
                 help: Loc.T("面板展开时，在面板内任意位置单击右键即可打开设置。", "When the panel is expanded, right-click anywhere inside it to open settings.")),
-            Toggle(Loc.T("滚轮切换页面", "Roll the wheel to switch pages"), S.MouseWheelPages, value => Change(s => s.MouseWheelPages = value),
-                help: Loc.T("面板展开时，在面板上滚动鼠标滚轮即可在显示的页面之间切换；歌词、明细等会滚动的区域不受影响。",
-                    "With the panel expanded, rolling the mouse wheel over it moves between the shown pages; areas that scroll, such as the lyrics and the details, keep their scrolling.")),
+            MouseWheelRow(),
             HotkeyRow(false));
     }
     private FrameworkElement SizeRow(string title, string name, DeckPage page, bool shown, Action<bool> show, StackPanel sizes)
@@ -591,7 +589,7 @@ public sealed partial class SettingsWindow : Window
                     s.NotchMonitor=defaults.NotchMonitor;s.CapsuleMonitor=defaults.CapsuleMonitor;s.NotchOrder=defaults.NotchOrder;s.CapsuleOrder=defaults.CapsuleOrder;
                     // The clock goes back to the one the panel theme suggests, as choosing the theme gives.
                     PanelThemes.ApplyClock(PanelTheme.Current,s);break;
-                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;s.MouseWheelPages=defaults.MouseWheelPages;
+                case 2:s.UsagePage=true;s.MusicPage=defaults.MusicPage;s.DefaultPage=defaults.DefaultPage;s.RightClickSettings=defaults.RightClickSettings;s.Width=defaults.Width;s.Height=defaults.Height;s.QuickSize=null;s.MusicWidth=defaults.MusicWidth;s.MusicHeight=defaults.MusicHeight;s.ExpandHotkey=defaults.ExpandHotkey;s.MouseWheel=defaults.MouseWheel;
                     s.MonitorPage=defaults.MonitorPage;s.MonitorWidth=defaults.MonitorWidth;s.MonitorHeight=defaults.MonitorHeight;break;
                 case MonitorSettingsPage:s.MonitorPalette=defaults.MonitorPalette;s.MonitorInterval=defaults.MonitorInterval;s.MonitorProcesses=defaults.MonitorProcesses;s.MonitorSort=defaults.MonitorSort;s.MonitorMain=defaults.MonitorMain;s.MonitorProcessView=defaults.MonitorProcessView;
                     s.CompactMonitor=defaults.CompactMonitor;s.CompactMonitorItems=defaults.CompactMonitorItems;s.CompactReadings=defaults.CompactReadings;s.NotchAutoWidth=defaults.NotchAutoWidth;s.CapsuleAutoWidth=defaults.CapsuleAutoWidth;break;
@@ -1083,6 +1081,20 @@ public sealed partial class SettingsWindow : Window
         row.Children.Add(SettingLabel(title, help is null ? null : () => help));
         var controls=NumericControls(title,value,min,max,tick,unit,changed);controls.Slider.Margin=new Thickness(0,0,18,0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
         return row;
+    }
+
+    private FrameworkElement MouseWheelRow()
+    {
+        var title = Loc.T("鼠标滚轮", "Mouse wheel");
+        var options = new UniformGrid { Columns = 3, Width = 324 };
+        foreach (var (action, label) in new[] { (MouseWheelAction.None, Loc.T("不做任何事", "Nothing")),
+            (MouseWheelAction.Pages, Loc.T("切换页面", "Switch pages")), (MouseWheelAction.Volume, Loc.T("调整音量", "Volume")) })
+        {
+            var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "MouseWheel", IsChecked = S.MouseWheel == action };
+            AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.MouseWheel = action); options.Children.Add(option);
+        }
+        return Row(title, SegmentBorder(options), help: () => Loc.T("仅在展开的面板区域内滚动时生效；歌词、明细等会滚动的区域不受影响。",
+            "Works only when the wheel is rolled over the expanded panel; areas that scroll, such as the lyrics and the details, are not affected."));
     }
 
     private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed)
