@@ -135,7 +135,8 @@ internal static class AuditCoreTests
 
     private static AttentionItem Alarm(string key) => new()
     {
-        Lane = "main", Kind = AttentionKind.Notice, Key = key, Group = "g" + key, Priority = NoticePriority.High, Urgent = true, Duration = TimeSpan.FromSeconds(1)
+        // One script naming each timer differently (core2 S4: command-line senders share one urgent limit).
+        Lane = "main", Kind = AttentionKind.Notice, Key = key, Group = "cli:g" + key, Priority = NoticePriority.High, Urgent = true, Duration = TimeSpan.FromSeconds(1)
     };
 
     private static void Urgent(Action<string, bool> check)

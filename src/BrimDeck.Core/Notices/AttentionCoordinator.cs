@@ -53,7 +53,8 @@ public sealed class AttentionCoordinator
     public static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(10);
     public const int RateLimit = 3;
     // Urgent notices are not held back by RateLimit, so that an alarm rings when it is due; a sender that sets off many at once
-    // still cannot keep the island ringing (sec-L5).
+    // still cannot keep the island ringing (sec-L5). The limit is per source (UrgentBucket): a flood of timers from one script
+    // does not hold back another application's alarm (S4).
     public static readonly TimeSpan UrgentWindow = TimeSpan.FromMinutes(1);
     public const int UrgentLimit = 3;
     public static readonly TimeSpan Staleness = TimeSpan.FromSeconds(30);
@@ -73,7 +74,8 @@ public sealed class AttentionCoordinator
     }
 
     private readonly Dictionary<string, Lane> _lanes = new(StringComparer.Ordinal);
-    private readonly List<DateTimeOffset> _noticeShows = [], _urgentShows = [];
+    private readonly List<DateTimeOffset> _noticeShows = [];
+    private readonly List<(DateTimeOffset At, string Group)> _urgentShows = [];
     // The notices counted for the summary: a notice updated while suppressed counts once (core-L7).
     private readonly HashSet<string> _suppressedKeys = new(StringComparer.Ordinal);
 
@@ -282,14 +284,25 @@ public sealed class AttentionCoordinator
     {
         if (!item.IsNotice) return now;
         Forget(now);
-        var (shows, limit, window) = item.Urgent ? (_urgentShows, UrgentLimit, UrgentWindow) : (_noticeShows, RateLimit, RateWindow);
-        return shows.Count < limit ? now : shows.Min() + window;
+        if (!item.Urgent) return _noticeShows.Count < RateLimit ? now : _noticeShows.Min() + RateWindow;
+        string bucket = UrgentBucket(item.Group);
+        var own = _urgentShows.Where(show => show.Group == bucket).Select(show => show.At).ToList();
+        return own.Count < UrgentLimit ? now : own.Min() + UrgentWindow;
+    }
+
+    // Each Windows application has its own urgent limit; senders that name themselves freely (brim-notify, WSL applications)
+    // share one per kind, so a script cannot get round the limit by changing its name (S4).
+    private static string UrgentBucket(string group)
+    {
+        if (group.StartsWith("windows:", StringComparison.Ordinal)) return group;
+        int colon = group.IndexOf(':');
+        return colon < 0 ? group : group[..colon];
     }
 
     private void Forget(DateTimeOffset now)
     {
         _noticeShows.RemoveAll(time => now - time >= RateWindow);
-        _urgentShows.RemoveAll(time => now - time >= UrgentWindow);
+        _urgentShows.RemoveAll(show => now - show.At >= UrgentWindow);
     }
 
     private void Start(Lane lane, AttentionItem item, DateTimeOffset now, List<AttentionChange> changes)
@@ -300,7 +313,7 @@ public sealed class AttentionCoordinator
         item.StartedAt = now;
         lane.Ends = now + Positive(item.Remaining > TimeSpan.Zero ? item.Remaining : item.Duration);
         if (item.IsNotice) _noticeShows.Add(now);
-        if (item.IsNotice && item.Urgent) _urgentShows.Add(now);
+        if (item.IsNotice && item.Urgent) _urgentShows.Add((now, UrgentBucket(item.Group)));
         changes.Add(new(item.Lane, null, item, null));
     }
 

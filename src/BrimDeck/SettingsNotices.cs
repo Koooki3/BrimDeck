@@ -309,20 +309,38 @@ public sealed partial class SettingsWindow
             Row(Loc.T("保存位置", "Location"), folderButtons, where),
             Row(Loc.T("最近通知", "Recent notices"), clear, TextLine(Loc.T($"{center.Hub.Notices.Count} 条 · 只清除 BrimDeck 中的记录，Windows 通知中心不受影响。", $"{center.Hub.Notices.Count} kept · clears BrimDeck's list only; Windows' notification center is not affected."), 11, TextTertiary))
         };
-        if (center.HistoryState == NoticeHistoryState.Unreadable)
-        {
-            var rebuild = ActionButton(Loc.T("清空并重建", "Clear and start again"), () => { center.ResetHistory(); ShowPage(NoticesSettingsPage); });
-            rows.Add(Row(Loc.T("无法读取已保存的通知", "Saved notices unreadable"), rebuild, TextLine(NoticeHistory.Describe(center.HistoryState), 11, _palette.Dark ? "#F0A6AA" : "#B12E3A")));
-        }
-        // Not reachable for now, or a folder BrimDeck will not use: said, with nothing to clear (the file may be fine).
-        else if (center.HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Refused)
+        Button Rebuild() => ActionButton(Loc.T("清空并重建", "Clear and start again"), () => { center.ResetHistory(); ShowPage(NoticesSettingsPage); });
+        // The folder's own refusal (a link, another account's, open to others) says which; otherwise the file's state does.
+        string Reason() => center.HistoryState == NoticeHistoryState.Refused && center.HistoryRefusal is { } refusal ? NoticeStorage.Describe(refusal) : NoticeHistory.Describe(center.HistoryState);
+        if (center.HistoryState == NoticeHistoryState.Unreadable
+            // A notices file that is a link, in a folder BrimDeck may use: clearing removes the link itself.
+            || center.HistoryState == NoticeHistoryState.Refused && center.HistoryRefusal is null)
+            rows.Add(Row(Loc.T("无法读取已保存的通知", "Saved notices unreadable"), Rebuild(), TextLine(Reason(), 11, _palette.Dark ? "#F0A6AA" : "#B12E3A")));
+        // Not reachable for now, not readable by this account, or a folder BrimDeck will not use: said, and only a file this
+        // account cannot read may be cleared from here (C-L15); an unreachable one may be fine.
+        else if (center.HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Refused or NoticeHistoryState.Denied)
         {
             // Follows a retry while the page shows.
-            var reason = StatusLine(() => center.HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Refused
-                ? (NoticeHistory.Describe(center.HistoryState), true) : (Loc.T("已读取。", "Read."), false));
-            rows.Add(center.HistoryState == NoticeHistoryState.Refused
-                ? Row(Loc.T("无法使用该文件夹", "Folder not used"), ActionButton(Loc.T("默认位置", "Default"), () => { Change(s => s.NoticeHistoryFolder = ""); ShowPage(NoticesSettingsPage); }), reason)
-                : Row(Loc.T("暂时无法读取已保存的通知", "Saved notices not reachable"), ActionButton(Loc.T("重试", "Retry"), center.RetryHistory), reason));
+            var reason = StatusLine(() => center.HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Refused or NoticeHistoryState.Denied
+                ? (Reason(), true) : (Loc.T("已读取。", "Read."), false));
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+            void Add(Button button) { if (buttons.Children.Count > 0) button.Margin = new Thickness(8, 0, 0, 0); buttons.Children.Add(button); }
+            string title;
+            if (center.HistoryState == NoticeHistoryState.Refused)
+            {
+                title = Loc.T("无法使用该文件夹", "Folder not used");
+                // A folder of the user's own that others may write in can be closed to them, as BrimDeck's own folder is.
+                if (center.HistoryRefusal == NoticeStorage.FolderTrust.Shared)
+                    Add(ActionButton(Loc.T("仅限本人访问", "Make it mine only"), async () => { await center.CloseHistoryFolderAsync(); ShowPage(NoticesSettingsPage); }));
+                Add(ActionButton(Loc.T("默认位置", "Default"), () => { Change(s => s.NoticeHistoryFolder = ""); ShowPage(NoticesSettingsPage); }));
+            }
+            else
+            {
+                title = center.HistoryState == NoticeHistoryState.Denied ? Loc.T("没有权限读取已保存的通知", "Saved notices not readable") : Loc.T("暂时无法读取已保存的通知", "Saved notices not reachable");
+                Add(ActionButton(Loc.T("重试", "Retry"), center.RetryHistory));
+                if (center.HistoryState == NoticeHistoryState.Denied) Add(Rebuild());
+            }
+            rows.Add(Row(title, buttons, reason));
         }
         Group([.. rows]);
     }

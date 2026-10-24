@@ -14,8 +14,16 @@ public static class NoticeIntake
         string name = Name(message.AppName, "brim-notify");
         // Only a name WSL itself allows is taken as a label (sec-L4).
         string? distro = Blank(message.Distro) is { } named && IsDistroName(named) ? named : null;
-        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, name), name, distro, CliInstance(distro, name, message), NoticeCapabilities.None, now, zone);
+        // Its instance keys are marked as the pipe's, apart from those the distribution's agent delivers (S3).
+        string instance = CliInstance(distro, name, message);
+        if (distro is not null) instance = PipePrefix + instance["cli:".Length..];
+        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, name), name, distro, instance, NoticeCapabilities.None, now, zone);
     }
+
+    private const string PipePrefix = "pipe:";
+
+    // Whether a command-line notice naming a distribution came over the pipe rather than from that distribution's agent.
+    public static bool ViaPipe(string instanceKey) => instanceKey.StartsWith(PipePrefix, StringComparison.Ordinal);
 
     // A message from a distribution's agent. Desktop notifications get the agent's capabilities: actions and dismissal reach
     // the application only while the agent is the session's notification service.
@@ -40,12 +48,13 @@ public static class NoticeIntake
     private static NoticeInput Build(NoticeMessage message, NoticeOrigin origin, string appKey, string appName, string? distro, string instance, NoticeCapabilities capabilities,
         DateTimeOffset? now, TimeZoneInfo? zone) => new()
     {
-        Origin = origin, AppKey = appKey, AppName = appName, AppId = message.AppId ?? "", Distro = distro, InstanceKey = instance,
+        Origin = origin, AppKey = appKey, AppName = appName, AppId = NoticeText.Clean(message.AppId ?? "", singleLine: true), Distro = distro, InstanceKey = instance,
         ReplaceKey = Blank(message.ReplaceId), EventId = Blank(message.EventId),
         Title = message.Title ?? "", Body = message.Body ?? "", IconRef = IconRef(message.Icon, origin, distro),
         CreatedAt = message.CreatedAt, Age = message.AgeMs is >= 0 and var age ? TimeSpan.FromMilliseconds(age) : null, Category = NoticeKeys.Category(message.Category), PriorityHint = NoticeKeys.Priority(message.Priority),
         Progress = message.Progress, Capabilities = capabilities,
-        Actions = (capabilities & NoticeCapabilities.Actions) != 0 && message.Actions is { } actions ? actions.Select(a => new NoticeAction(a.Key, a.Label)).ToList() : [],
+        // Action labels show as buttons: cleaned as a title is (C-L11).
+        Actions = (capabilities & NoticeCapabilities.Actions) != 0 && message.Actions is { } actions ? actions.Select(a => new NoticeAction(a.Key, Name(a.Label, a.Key))).ToList() : [],
         ExitCode = message.ExitCode, DurationMs = message.DurationMs, Command = Blank(message.Command),
         Timing = NoticeTimeIntake.Resolve(message, now ?? DateTimeOffset.UtcNow, zone ?? TimeZoneInfo.Local),
         StopTiming = message.Stop == true

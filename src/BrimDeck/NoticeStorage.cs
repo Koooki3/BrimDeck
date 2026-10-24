@@ -1,6 +1,8 @@
 using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using BrimDeck.Core;
+using BrimDeck.Core.Notices;
 
 namespace BrimDeck;
 
@@ -15,56 +17,126 @@ internal static class NoticeStorage
 
     public static string DefaultFolder => _default ??= Choose();
 
-    // An existing "notices" folder is used only while it is the current user's own (or the administrators' or the system's)
-    // and not a link: one another account made could lead the writes elsewhere or swap the file (sec-M1).
+    // An existing "notices" folder is used only while it is the current user's own (or the administrators' or the system's),
+    // no link, and no other account may change what is in it: one another account can write to could lead the writes
+    // elsewhere or swap the file (sec-M1, S1). One of the user's own that an earlier version left open is closed first.
+    // Read once, on the install folder (a local drive).
     private static string Choose()
     {
         var installed = Path.Combine(AppContext.BaseDirectory, "notices");
-        if (Directory.Exists(installed)) return Trusted(installed, unknown: false) ? installed : LegacyFolder;
+        if (Directory.Exists(installed)) return Check(installed, unknown: false, repair: true) == FolderTrust.Trusted ? installed : LegacyFolder;
         return Writable(AppContext.BaseDirectory) ? installed : LegacyFolder;
     }
 
-    // Whether BrimDeck may read and write in the folder: it does not exist yet (BrimDeck creates it), or it is no link and is
-    // owned by the current user, the administrators or the system. unknown answers for a drive without owners (FAT, exFAT).
-    public static bool Trusted(string folder, bool unknown)
+    // What BrimDeck makes of a folder. Linked: it is a link (junction, symbolic link). Foreign: another account owns it.
+    // Shared: the user's own, but other accounts may also create, replace or delete files in it. Unreachable: it could not be
+    // checked now (a network share that failed for a moment); it is checked again later.
+    public enum FolderTrust { Trusted, Linked, Foreign, Shared, Unreachable }
+
+    // Whether BrimDeck may read and write in the folder: it does not exist yet (BrimDeck creates it), or it is no link, is
+    // owned by the current user, the administrators or the system, and no one else may write in it. unknown answers for a
+    // drive without owners (FAT, exFAT). On a network share the owner and the rights are the server's accounts (a NAS, Samba),
+    // which mean nothing here: only links are refused there (C-M2). repair closes a folder of the user's own that others may
+    // write in (see MakePrivate) before judging it. Reads the disk: never on the UI thread for a folder the user chose.
+    public static FolderTrust Check(string folder, bool unknown, bool repair = false)
     {
         try
         {
             var info = new DirectoryInfo(folder);
-            if (!info.Exists) return true;
-            if ((info.Attributes & FileAttributes.ReparsePoint) != 0) return false;
-            if (info.GetAccessControl(AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner) return unknown;
-            return owner == WindowsIdentity.GetCurrent().User || owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid) || owner.IsWellKnown(WellKnownSidType.LocalSystemSid);
+            if (!info.Exists) return FolderTrust.Trusted;
+            if ((info.Attributes & FileAttributes.ReparsePoint) != 0) return FolderTrust.Linked;
+            if (OnNetwork(folder)) return FolderTrust.Trusted;
+            var security = info.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
+            if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner) return unknown ? FolderTrust.Trusted : FolderTrust.Foreign;
+            var user = WindowsIdentity.GetCurrent().User;
+            if (owner != user && !owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid) && !owner.IsWellKnown(WellKnownSidType.LocalSystemSid)) return FolderTrust.Foreign;
+            if (!OthersMayWrite(security, user)) return FolderTrust.Trusted;
+            if (!repair || owner != user) return FolderTrust.Shared;
+            MakePrivate(folder);
+            return OthersMayWrite(info.GetAccessControl(AccessControlSections.Access), user) ? FolderTrust.Shared : FolderTrust.Trusted;
         }
-        catch (Exception ex) when (ex is PlatformNotSupportedException or NotSupportedException or InvalidOperationException) { return unknown; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { return false; }
+        catch (Exception ex) when (ex is PlatformNotSupportedException or NotSupportedException or InvalidOperationException) { return unknown ? FolderTrust.Trusted : FolderTrust.Foreign; }
+        catch (IOException) { return FolderTrust.Unreachable; }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or ArgumentException) { return FolderTrust.Foreign; }
     }
 
-    // Whether a file can be created in the folder; nothing is left behind.
+    // A UNC path or a mapped network drive.
+    private static bool OnNetwork(string folder)
+    {
+        try
+        {
+            var full = Path.GetFullPath(folder);
+            if (full.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return true;
+            if (full.StartsWith(@"\\", StringComparison.Ordinal) && !full.StartsWith(@"\\?\", StringComparison.Ordinal) && !full.StartsWith(@"\\.\", StringComparison.Ordinal)) return true;
+            return Path.GetPathRoot(full) is { Length: > 0 } root && new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException) { return false; }
+    }
+
+    // The rights that let an account put another file, folder or link in place of BrimDeck's, or change who may.
+    private const FileSystemRights WriteRights = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.Delete
+        | FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+
+    // Whether an account other than the user, the system, the administrators or the folder's owner (CREATOR OWNER, OWNER
+    // RIGHTS) is allowed to write in the folder or in what is created in it.
+    private static bool OthersMayWrite(FileSystemSecurity security, SecurityIdentifier? user)
+    {
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType != AccessControlType.Allow || (rule.FileSystemRights & WriteRights) == 0) continue;
+            if (rule.IdentityReference is not SecurityIdentifier sid || sid == user) continue;
+            if (sid.IsWellKnown(WellKnownSidType.LocalSystemSid) || sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)
+                || sid.IsWellKnown(WellKnownSidType.CreatorOwnerSid) || sid.Value == "S-1-3-4" || sid.Value.StartsWith(TrustedInstaller, StringComparison.Ordinal)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private const string TrustedInstaller = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+
+    // Whether a file can be created in the folder; nothing is left behind. A new random name, created only if nothing has
+    // that name, so a link planted under a name BrimDeck would use is never written through (S2).
     private static bool Writable(string folder)
     {
         try
         {
-            var probe = Path.Combine(folder, ".brimdeck-write-test-" + Environment.ProcessId);
-            File.WriteAllBytes(probe, []);
-            File.Delete(probe);
+            using var probe = new FileStream(Path.Combine(folder, ".brimdeck-write-test-" + Guid.NewGuid().ToString("N")), FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
 
-    // Checks the folder before anything is read from or written to it, and creates the default one private to the current
-    // user. False when BrimDeck must leave the folder alone (see Trusted): a folder the user chose is reported, not used.
-    // Only when notices are kept.
-    public static bool Prepare(string folder, bool create = true)
+    // Checks the folder before anything is read from or written to it, and creates it private to the current user (the
+    // default one is closed again if it was opened up). Anything but Trusted means BrimDeck leaves the folder alone: a folder
+    // the user chose is reported, not used. Reads the disk (on a network share, it may wait for it): call it in the background,
+    // once per folder. A folder whose drive is missing is not created; reading it reports that.
+    public static FolderTrust Prepare(string folder, bool create = true)
     {
         bool isDefault = string.Equals(folder, DefaultFolder, StringComparison.OrdinalIgnoreCase);
-        if (!Trusted(folder, unknown: !isDefault)) return false;
-        if (!create || !isDefault || Directory.Exists(folder)) return true;
-        try { Directory.CreateDirectory(folder); MakePrivate(folder); }
+        var trust = Check(folder, unknown: !isDefault, repair: isDefault);
+        if (trust != FolderTrust.Trusted || !create || Directory.Exists(folder) || !NoticeHistory.Reachable(folder)) return trust;
+        try { Directory.CreateDirectory(folder); if (!OnNetwork(folder)) MakePrivate(folder); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        return true;
+        return trust;
     }
+
+    // Lets the user close a folder of their own that others may write in (the settings page), as BrimDeck's own is.
+    public static bool Close(string folder)
+    {
+        MakePrivate(folder);
+        return Check(folder, unknown: true) == FolderTrust.Trusted;
+    }
+
+    public static string Describe(FolderTrust trust) => trust switch
+    {
+        FolderTrust.Linked => Loc.T("该文件夹是链接，BrimDeck 不会在其中读写。请选择自己的文件夹。",
+            "This folder is a link, so BrimDeck neither reads nor writes there. Choose a folder of your own."),
+        FolderTrust.Foreign => Loc.T("该文件夹属于其他账户，BrimDeck 不会在其中读写。请选择自己的文件夹。",
+            "This folder belongs to another account, so BrimDeck neither reads nor writes there. Choose a folder of your own."),
+        FolderTrust.Shared => Loc.T("其他账户也可以改动该文件夹中的文件，BrimDeck 不会在其中读写。可以设为仅限本人访问，或选择其他文件夹。",
+            "Other accounts can change the files in this folder, so BrimDeck neither reads nor writes there. Make it yours only, or choose another folder."),
+        _ => ""
+    };
 
     // A folder BrimDeck creates outside the user's profile (an install folder on another drive usually lets every signed-in
     // user change what is in it) is opened to the current user and the system only, without inheriting the parent's rights.

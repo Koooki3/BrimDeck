@@ -20,6 +20,7 @@ internal static class NoticeCoreTests
         Pages(check);
         SettingsValues(root, check);
         AuditCoreTests.Run(root, check);
+        AuditCore2Tests.Run(root, check);
     }
 
     private static NoticeInput Input(string instance, string app = "windows:Chat", string title = "Hi", string body = "Body", string? replace = null,

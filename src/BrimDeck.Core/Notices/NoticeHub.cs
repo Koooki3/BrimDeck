@@ -12,6 +12,9 @@ public sealed record NoticeOutcome(NoticeReceipt Receipt, Notice? Notice, bool P
 public sealed class NoticeHub
 {
     public const int DefaultMaxCount = 500;
+    // Reminders still to come and running stopwatches stay past MaxCount, but not without end: a script that starts timers
+    // in a loop would otherwise grow the list (and the file) for ever. Beyond this the oldest created go (C-M3).
+    public const int MaxPending = 200;
     private static readonly TimeSpan EventMemory = TimeSpan.FromMinutes(10);
     // Senders choose application names freely; at most this many are remembered, the least recently seen go first.
     public const int MaxKnownApps = 200;
@@ -22,6 +25,10 @@ public sealed class NoticeHub
     private readonly Dictionary<string, NoticeKnownApp> _apps = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _events = new(StringComparer.Ordinal);
     private readonly Func<string, NoticeAppRule?> _rule;
+    // What was deleted or cleared before the saved file was read in (C-L2): a file read later must not bring it back.
+    private readonly HashSet<string> _deleted = new(StringComparer.Ordinal);
+    private DateTimeOffset? _clearedAt, _doneClearedAt;
+    private bool _trackRemovals;
 
     public NoticeHub(Func<string, NoticeAppRule?>? rule = null) => _rule = rule ?? (_ => null);
 
@@ -36,6 +43,20 @@ public sealed class NoticeHub
     // Raised for changes worth saving; marking notices viewed is included, so a restart keeps that state. The argument is
     // true for a change that may wait for a later save: a task's progress, notices marked viewed (perf-7).
     public event Action<bool>? Persist;
+    // Raised with how many reminders or stopwatches went beyond MaxPending, for the log.
+    public event Action<int>? PendingDropped;
+
+    // True while the saved file has not been read into the list (still reading, unreachable, damaged): deletions and
+    // clearings are remembered so that Load leaves them out (C-L2). Setting it false forgets them.
+    public bool TrackRemovals
+    {
+        get => _trackRemovals;
+        set
+        {
+            _trackRemovals = value;
+            if (!value) { _deleted.Clear(); _clearedAt = _doneClearedAt = null; }
+        }
+    }
 
     public Notice? Find(string id) => _byId.GetValueOrDefault(id);
     public Notice? FindInstance(string instanceKey) => _notices.FirstOrDefault(n => n.InstanceKey == instanceKey);
@@ -45,6 +66,13 @@ public sealed class NoticeHub
     // 1 again when it restarts, so a number seen before BrimDeck or the agent restarted names another notification (core-H2).
     private Notice? SameInstance(string instanceKey, NoticeInput input)
         => _notices.FirstOrDefault(n => n.InstanceKey == instanceKey && n.AppKey == input.AppKey && (n.Origin != NoticeOrigin.Wsl || n.SourcePresent));
+
+    // Whether two command-line notices came over the same link. Any Windows process can name a distribution on the pipe
+    // (NoticeIntake.FromPipe), so its notices share that distribution's application rules but never its --id, -r or stop
+    // keys with what the distribution's agent delivered (S3).
+    private static bool SameLink(Notice notice, NoticeInput input) => NoticeIntake.ViaPipe(notice.InstanceKey) == NoticeIntake.ViaPipe(input.InstanceKey);
+
+    private Notice? Replacing(NoticeInput input, string key) => _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key && SameLink(n, input));
 
     public static NoticePriority EffectivePriority(NoticeAppRule? rule, NoticePriority hint)
     {
@@ -65,9 +93,10 @@ public sealed class NoticeHub
         if (input.EventId is { Length: > 0 } eventId)
         {
             ForgetEvents(now);
-            var key = input.AppKey + "\n" + eventId;
-            // A retry of a message already recorded, also one recorded before BrimDeck restarted (the saved notice keeps its id).
-            if (_events.ContainsKey(key) || _notices.Any(n => n.EventId == eventId && n.AppKey == input.AppKey)) return new(NoticeReceipt.Duplicate, null, false);
+            var key = (NoticeIntake.ViaPipe(input.InstanceKey) ? "pipe\n" : "") + input.AppKey + "\n" + eventId;
+            // A retry of a message already recorded, also one recorded before BrimDeck restarted (the saved notice keeps its id,
+            // whatever form its instance key had then: C-L4).
+            if (_events.ContainsKey(key) || _notices.Any(n => n.EventId == eventId && n.AppKey == input.AppKey && SameLink(n, input))) return new(NoticeReceipt.Duplicate, null, false);
             _events[key] = now;
         }
         if (input.StopTiming) return StopByKey(input, now);
@@ -78,7 +107,7 @@ public sealed class NoticeHub
         bool late = Late(input, priority, now);
         var existing = SameInstance(input.InstanceKey, input)
             ?? (input.Replaces is { Length: > 0 } replaced ? SameInstance(replaced, input) : null)
-            ?? (input.ReplaceKey is { Length: > 0 } replace ? _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == replace) : null);
+            ?? (input.ReplaceKey is { Length: > 0 } replace ? Replacing(input, replace) : null);
         if (existing is not null)
         {
             bool significant = existing.Title != title || existing.Category != input.Category || existing.TimeKind != (input.Timing?.Kind ?? NoticeTimeKind.None)
@@ -119,16 +148,25 @@ public sealed class NoticeHub
     // start-up is only a baseline), and time-kind notices their reminders (NoticeClock).
     public static bool Late(NoticeInput input, NoticePriority priority, DateTimeOffset now)
     {
-        if (input.Missed) return true;
+        if (input.Missed) return !DueNow(input, now);
         if (input.Origin is not (NoticeOrigin.Cli or NoticeOrigin.Wsl) || input.Timing is { Kind: not NoticeTimeKind.Mail }) return false;
         var age = input.Age ?? (input.Distro is null && input.CreatedAt is { } created ? now - created : null);
         return age > (priority == NoticePriority.High ? AttentionCoordinator.HighStaleness : AttentionCoordinator.Staleness);
     }
 
+    // A reminder that arrived during sleep and is read on waking still rings when it is due now (C-L14): it was raised, or
+    // its event starts, within NoticeClock.MissedLimit. Older ones, and every other kind, are only recorded.
+    private static bool DueNow(NoticeInput input, DateTimeOffset now)
+    {
+        if (!NoticeClock.Alerting(input.Timing, now)) return false;
+        bool Near(DateTimeOffset? time) => time is { } at && (now - at).Duration() <= NoticeClock.MissedLimit;
+        return Near(input.CreatedAt) || Near(input.Timing!.StartsAt);
+    }
+
     // brim-notify stop: ends the earlier timer, stopwatch or event with the same key. Nothing new shows.
     private NoticeOutcome StopByKey(NoticeInput input, DateTimeOffset now)
     {
-        var target = input.ReplaceKey is { Length: > 0 } key ? _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key) : null;
+        var target = input.ReplaceKey is { Length: > 0 } key ? Replacing(input, key) : null;
         if (target is null || !StopTimer(target.Id, now)) return new(NoticeReceipt.Filtered, null, false, "no-timer");
         return new(NoticeReceipt.Updated, target, false);
     }
@@ -214,12 +252,15 @@ public sealed class NoticeHub
     {
         int index = _notices.FindIndex(n => n.Id == id);
         if (index < 0) return false;
+        if (_trackRemovals) _deleted.Add(id);
         _byId.Remove(id); _notices.RemoveAt(index); Recount(); Changed?.Invoke(); Persist?.Invoke(false);
         return true;
     }
     // Clears BrimDeck's own list only; nothing is removed from Windows' notification center or any other source.
-    public void Clear()
+    // now: when, for a file read later (TrackRemovals); what it saved from before then stays cleared.
+    public void Clear(DateTimeOffset? now = null)
     {
+        if (_trackRemovals) _clearedAt = now ?? DateTimeOffset.UtcNow;
         if (_notices.Count == 0) return;
         _notices.Clear(); _byId.Clear(); Recount(); Changed?.Invoke(); Persist?.Invoke(false);
     }
@@ -228,6 +269,7 @@ public sealed class NoticeHub
     // lost without a word (core-L2).
     public void ClearDone(DateTimeOffset now)
     {
+        if (_trackRemovals) _doneClearedAt = now;
         if (_notices.RemoveAll(n => !Pending(n, now)) == 0) return;
         Reindex(); Recount(); Changed?.Invoke(); Persist?.Invoke(false);
     }
@@ -244,9 +286,17 @@ public sealed class NoticeHub
         // A notice ages from its last change (a timer that rang, a stopwatch stopped: core-H1). A reminder BrimDeck still has
         // to give and a stopwatch still running stay past the retention and past the count limit; beyond the limit the oldest
         // of the others go (core-L2).
-        _notices.RemoveAll(n => (n.ReceivedAt > n.UpdatedAt ? n.ReceivedAt : n.UpdatedAt) < limit && !Pending(n, now));
+        _notices.RemoveAll(n => LastChange(n) < limit && !Pending(n, now));
         for (int i = _notices.Count - 1; i >= 0 && _notices.Count > MaxCount; i--)
             if (!Pending(_notices[i], now)) _notices.RemoveAt(i);
+        // The pending ones have their own limit (C-M3).
+        var pending = _notices.Where(n => Pending(n, now)).ToList();
+        if (pending.Count > MaxPending)
+        {
+            var dropped = pending.OrderByDescending(n => n.CreatedAt).Skip(MaxPending).ToHashSet();
+            _notices.RemoveAll(dropped.Contains);
+            PendingDropped?.Invoke(dropped.Count);
+        }
         foreach (var stale in _apps.Values.Where(app => app.LastSeen < now - TimeSpan.FromDays(30)).Select(app => app.Key).ToList()) _apps.Remove(stale);
         bool changed = _notices.Count != before;
         if (changed) Reindex();
@@ -254,13 +304,20 @@ public sealed class NoticeHub
         return changed;
     }
 
+    private static DateTimeOffset LastChange(Notice notice) => notice.ReceivedAt > notice.UpdatedAt ? notice.ReceivedAt : notice.UpdatedAt;
+
+    // Whether a saved notice was deleted or cleared away before the file was read (TrackRemovals).
+    private bool Removed(Notice notice, DateTimeOffset now)
+        => _deleted.Contains(notice.Id) || LastChange(notice) <= _clearedAt || LastChange(notice) <= _doneClearedAt && !Pending(notice, now);
+
     // Adds saved notices (see NoticeHistory) to those that arrived before the file was read: it is read in the background,
-    // and sometimes only later (a drive that was not there at start-up). What arrived since is newer and wins. Notices from
-    // before are kept as not present at their sources: BrimDeck cannot know what happened to them while it was not running.
+    // and sometimes only later (a drive that was not there at start-up). What arrived since is newer and wins, and what was
+    // deleted or cleared meanwhile stays gone (C-L2). Notices from before are kept as not present at their sources: BrimDeck
+    // cannot know what happened to them while it was not running.
     public void Load(IEnumerable<Notice> notices, IEnumerable<NoticeKnownApp> apps, DateTimeOffset now)
     {
         var saved = new List<Notice>();
-        foreach (var notice in notices.Where(n => n is not null && n.Id is { Length: > 0 } && !_byId.ContainsKey(n.Id)).DistinctBy(n => n.Id))
+        foreach (var notice in notices.Where(n => n is not null && n.Id is { Length: > 0 } && !_byId.ContainsKey(n.Id) && !Removed(n, now)).DistinctBy(n => n.Id))
         {
             // BrimDeck is the source of the timers it keeps; every other source may have changed meanwhile.
             notice.SourcePresent = notice.Timing is { Native: true };
@@ -310,7 +367,8 @@ public sealed class NoticeHub
         string title = NoticeText.Clean(input.Title, singleLine: true).Trim(), body = NoticeText.Clean(input.Body).Trim();
         if (input.ExitCode is { } code)
         {
-            string command = string.IsNullOrWhiteSpace(input.Command) ? Loc.T("命令", "Command") : input.Command!;
+            // The command goes into the title, so it is cleaned as a title is (C-L11).
+            string command = NoticeText.Clean(input.Command ?? "", singleLine: true).Trim() is { Length: > 0 } run ? run : Loc.T("命令", "Command");
             if (title.Length == 0) title = code == 0 ? Loc.T($"{command} 已完成", $"{command} finished") : Loc.T($"{command} 失败", $"{command} failed");
             if (body.Length == 0)
             {

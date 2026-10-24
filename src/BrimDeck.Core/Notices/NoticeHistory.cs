@@ -12,9 +12,10 @@ public interface INoticeProtector
 
 // Unreadable: the file is there but damaged (not BrimDeck's, not decryptable); "clear" replaces it. Unavailable: the file or
 // its folder cannot be reached right now (in use, offline, a drive not mounted); BrimDeck reads it again later and writes
-// nothing over it meanwhile (core-M4). Refused: the folder is a link or belongs to another account (sec-M1); nothing is read
-// from or written to it.
-public enum NoticeHistoryState { Empty, Loaded, Unreadable, Unavailable, Refused }
+// nothing over it meanwhile (core-M4). Denied: the file is there but this account may not read it (made by BrimDeck running
+// as administrator, say); it is read again later like Unavailable, and "clear" may replace it (C-L15). Refused: the folder,
+// or the file in it, is a link, or the folder is not the user's own (sec-M1, S1); nothing is read from or written to it.
+public enum NoticeHistoryState { Empty, Loaded, Unreadable, Unavailable, Refused, Denied }
 
 // The recent notices on disk: one encrypted file, written whole and atomically. The app batches changes before saving, so a
 // task's progress does not write the file on every step. Only the notices' own fields are kept: no notification XML, attachments or pictures. A file that cannot be
@@ -46,7 +47,18 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
         notices = []; apps = [];
         try
         {
-            if (!File.Exists(FilePath)) return Reachable(DirectoryPath) ? NoticeHistoryState.Empty : NoticeHistoryState.Unavailable;
+            // Checked again right before reading: the folder was checked when it was chosen, but may have been swapped for a
+            // link since; and a notices.dat that is a link is never followed (it could lead to another account's share, S1).
+            if (Linked(DirectoryPath)) return NoticeHistoryState.Refused;
+            FileAttributes attributes;
+            // Not found only counts as no file yet while the folder can be seen; a network share that failed for a moment
+            // reports missing files too, and the full file must not be written over then (C-L3).
+            try { attributes = File.GetAttributes(FilePath); }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return Reachable(DirectoryPath) ? NoticeHistoryState.Empty : NoticeHistoryState.Unavailable;
+            }
+            if ((attributes & FileAttributes.ReparsePoint) != 0) return NoticeHistoryState.Refused;
             byte[] data;
             using (var stream = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
@@ -61,8 +73,13 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
             notices = contents.Notices ?? []; apps = contents.Apps ?? [];
             return NoticeHistoryState.Loaded;
         }
-        // Not reachable now (in use by another program, a cloud file while offline, no access): read again later.
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        // This account may not read it: retrying alone may never help (C-L15).
+        catch (UnauthorizedAccessException)
+        {
+            return NoticeHistoryState.Denied;
+        }
+        // Not reachable now (in use by another program, a cloud file while offline): read again later.
+        catch (IOException)
         {
             return NoticeHistoryState.Unavailable;
         }
@@ -70,6 +87,14 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
         {
             return NoticeHistoryState.Unreadable;
         }
+    }
+
+    // Whether the path is a link (symbolic link, junction, any reparse point): one attribute read. A path that cannot be read
+    // is no link; what follows fails on it by itself.
+    public static bool Linked(string path)
+    {
+        try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
     }
 
     // Whether the folder could hold the file now: its drive or network share is there. A folder that does not exist on a
@@ -88,9 +113,10 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
     // The list is serialized as it is: a save in the background is given copies no other thread changes (perf-7).
     // wanted is asked again just before writing, under the writer lock: a save that started before keeping notices was
     // switched off (or the folder changed) then writes nothing, instead of putting back the file Delete just removed.
-    // order comes from NextOrder when the list was copied; without one, the list counts as copied now. durable waits until the
-    // file is on the disk itself, for the last save on exit; the replace is atomic either way.
-    public bool Save(IEnumerable<Notice> notices, IEnumerable<NoticeKnownApp> apps, Func<bool>? wanted = null, long? order = null, bool durable = false)
+    // order comes from NextOrder when the list was copied; without one, the list counts as copied now. The new file is on the
+    // disk itself before it replaces the old one, so a power cut cannot leave a file of the new length full of zeros (C-L1);
+    // the app saves in the background, and only the last save on exit waits for this.
+    public bool Save(IEnumerable<Notice> notices, IEnumerable<NoticeKnownApp> apps, Func<bool>? wanted = null, long? order = null)
     {
         long own = order ?? NextOrder();
         var contents = new Contents { Notices = notices.ToList(), Apps = apps.ToList() };
@@ -100,6 +126,8 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
         {
             if (wanted?.Invoke() == false || own < _written) return false;
             Directory.CreateDirectory(DirectoryPath);
+            // The folder may have been swapped for a link since it was checked (S1).
+            if (Linked(DirectoryPath)) return false;
             // A new name each time, created only if nothing has that name: an existing file or link there is never followed
             // and written through (sec-M1).
             var temporary = Path.Combine(DirectoryPath, TemporaryPattern.Replace("*", Guid.NewGuid().ToString("N"), StringComparison.Ordinal));
@@ -108,7 +136,7 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
                 using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
                     stream.Write(Magic); stream.Write(protectedData);
-                    if (durable) stream.Flush(true);
+                    stream.Flush(true);
                 }
                 File.Move(temporary, FilePath, true);
             }
@@ -128,6 +156,8 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
     {
         lock (_write)
         {
+            // Never inside a folder that became a link: the files where it leads are not BrimDeck's (S1).
+            if (Linked(DirectoryPath)) return;
             var paths = new List<string> { FilePath, FilePath + ".tmp" };
             try { if (Directory.Exists(DirectoryPath)) paths.AddRange(Directory.EnumerateFiles(DirectoryPath, TemporaryPattern)); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
@@ -149,8 +179,10 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
         NoticeHistoryState.Unreadable => Loc.T("已保存的通知无法读取，可以清空后重新开始。", "The saved notices could not be read. Clear them to start again."),
         NoticeHistoryState.Unavailable => Loc.T("暂时无法访问保存的通知（文件被占用，或文件夹所在的盘、网络位置不可用），稍后会自动重试；在此之前不会写入。",
             "The saved notices cannot be reached right now (the file is in use, or the folder's drive or network location is not available). BrimDeck tries again later and writes nothing until then."),
-        NoticeHistoryState.Refused => Loc.T("该文件夹是链接，或属于其他账户，BrimDeck 不会在其中读写。请选择自己的文件夹。",
-            "This folder is a link or belongs to another account, so BrimDeck neither reads nor writes there. Choose a folder of your own."),
+        NoticeHistoryState.Denied => Loc.T("当前账户没有读取已保存通知的权限（可能是以管理员身份运行的 BrimDeck 创建的）。可以重试，或清空后重新开始。",
+            "This account may not read the saved notices (BrimDeck running as administrator may have made the file). Try again, or clear them to start again."),
+        NoticeHistoryState.Refused => Loc.T("该文件夹或其中的通知文件是链接，或文件夹属于其他账户，BrimDeck 不会在其中读写。请选择自己的文件夹。",
+            "This folder, or the notices file in it, is a link, or the folder belongs to another account, so BrimDeck neither reads nor writes there. Choose a folder of your own."),
         _ => ""
     };
 }
