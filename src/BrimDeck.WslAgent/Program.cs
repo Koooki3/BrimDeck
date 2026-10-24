@@ -14,63 +14,25 @@ namespace BrimDeck.WslAgent;
 // brimdeck-agent [notify] ARGS...   brim-notify inside WSL (the brim-notify script runs this)
 internal static class Program
 {
-    private const int Usage = 1, Refused = 2, Unreachable = 3;
-
     private static async Task<int> Main(string[] args)
     {
         if (args is ["serve", ..]) return await AgentHost.RunAsync();
         var command = NotifyCommandLine.Parse(args is ["notify", .. var rest] ? rest : args);
-        switch (command.Kind)
-        {
-            case NotifyCommandKind.Help: Console.WriteLine(NotifyCommandLine.Usage); return 0;
-            case NotifyCommandKind.Version: Console.WriteLine(Version); return 0;
-            case NotifyCommandKind.Error: Console.Error.WriteLine("brim-notify: " + command.Error); Console.Error.WriteLine("Try brim-notify --help."); return Usage;
-            case NotifyCommandKind.Stdio: Console.Error.WriteLine("brim-notify: --stdio is for the Windows sender."); return Usage;
-            case NotifyCommandKind.Status:
-            {
-                var reply = await SendAsync(new NoticeMessage { Type = NoticeTypes.Status });
-                if (reply is null) { Console.WriteLine("BrimDeck is not receiving notices from this distribution."); return Unreachable; }
-                Console.WriteLine("BrimDeck is receiving notices." + (reply.Detail is { Length: > 0 } detail ? " " + detail : ""));
-                return 0;
-            }
-            case NotifyCommandKind.Run: return await RunAsync(command);
-            default:
-            {
-                int code = Report(await SendAsync(command.Message!));
-                // A timer, stopwatch or event: its key, for "brim-notify stop KEY".
-                if (code == 0 && NotifyCommandLine.PrintsKey(command.Message!)) Console.WriteLine(command.Message!.ReplaceId);
-                return code;
-            }
-        }
+        return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
+            Unreachable: "BrimDeck could not be reached (is it running, with this distribution switched on under dynamic notices?).",
+            NotReceiving: "BrimDeck is not receiving notices from this distribution."));
     }
 
     internal static string Version => typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0";
 
-    private static int Report(NoticeMessage? reply)
+    // "run"'s program as the shell finds it; 127 when it is not found or cannot start, as in the shell.
+    private static (Process? Process, int Failure) Start(IReadOnlyList<string> program)
     {
-        if (reply is null) { Console.Error.WriteLine("brim-notify: BrimDeck could not be reached (is it running, with this distribution switched on under dynamic notices?)."); return Unreachable; }
-        if (reply.Result == NoticeResults.Rejected) { Console.Error.WriteLine("brim-notify: BrimDeck refused the notice: " + (reply.Detail ?? "unknown reason")); return Refused; }
-        if (reply.Result == NoticeResults.Filtered) Console.Error.WriteLine("brim-notify: received; BrimDeck's rules keep this source quiet.");
-        return 0;
-    }
-
-    private static async Task<int> RunAsync(NotifyCommand command)
-    {
-        var program = command.Program!;
-        if (Native.FindProgram(program[0]) is not { } path) { Console.Error.WriteLine("brim-notify: " + program[0] + ": command not found"); return 127; }
+        if (Native.FindProgram(program[0]) is not { } path) { Console.Error.WriteLine("brim-notify: " + program[0] + ": command not found"); return (null, 127); }
         var start = new ProcessStartInfo(path) { UseShellExecute = false };
         foreach (var argument in program.Skip(1)) start.ArgumentList.Add(argument);
-        var watch = Stopwatch.StartNew();
-        Process? process;
-        try { process = Process.Start(start); }
-        catch (Win32Exception ex) { Console.Error.WriteLine("brim-notify: could not start " + program[0] + ": " + ex.Message); return 127; }
-        if (process is null) return 127;
-        Console.CancelKeyPress += (_, e) => e.Cancel = true;
-        await process.WaitForExitAsync();
-        int code = process.ExitCode;
-        if (await SendAsync(NotifyCommandLine.RunResult(command.Message!, code, watch.Elapsed)) is null)
-            Console.Error.WriteLine("brim-notify: the program finished, but BrimDeck could not be reached.");
-        return code;
+        try { return (Process.Start(start), 127); }
+        catch (Win32Exception ex) { Console.Error.WriteLine("brim-notify: could not start " + program[0] + ": " + ex.Message); return (null, 127); }
     }
 
     // Through the running agent's socket; without it, through BrimDeck.Notify.exe on Windows (WSL interop), whose path BrimDeck
@@ -113,18 +75,28 @@ internal static class Program
         if (string.IsNullOrEmpty(helper) || !Path.IsPathRooted(helper) || !File.Exists(helper)) return null;
         var start = new ProcessStartInfo(helper) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true };
         start.ArgumentList.Add("--stdio");
-        try
+        Process? process;
+        try { process = Process.Start(start); }
+        catch (Win32Exception) { return null; }
+        if (process is null) return null;
+        using (process)
         {
-            using var process = Process.Start(start);
-            if (process is null) return null;
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await NoticeFrames.WriteAsync(process.StandardInput.BaseStream, message, timeout.Token);
-            process.StandardInput.Close();
-            var reply = await NoticeFrames.ReadMessageAsync(process.StandardOutput.BaseStream, timeout.Token);
-            await process.WaitForExitAsync(timeout.Token);
-            return reply is { Result: NoticeResults.Rejected, Detail: "unreachable" } ? null : reply;
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await NoticeFrames.WriteAsync(process.StandardInput.BaseStream, message, timeout.Token);
+                process.StandardInput.Close();
+                var reply = await NoticeFrames.ReadMessageAsync(process.StandardOutput.BaseStream, timeout.Token);
+                await process.WaitForExitAsync(timeout.Token);
+                return reply is { Result: NoticeResults.Rejected, Detail: "unreachable" } ? null : reply;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException)
+            {
+                // A helper that did not answer in time is ended, not left behind (life-L10).
+                try { if (!process.HasExited) process.Kill(true); } catch (Exception kill) when (kill is InvalidOperationException or Win32Exception) { }
+                return null;
+            }
         }
-        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidDataException or OperationCanceledException) { return null; }
     }
 }
 
