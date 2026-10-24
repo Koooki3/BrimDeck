@@ -55,6 +55,7 @@ internal sealed partial class NoticeWindow : Window
     private ColumnDefinition? _progressDone, _progressLeft;
     private FrameworkElement? _progressTrack;
     private bool _dressed;
+    private readonly GlassBackdrop _blur;
     // The surface's last opening (Arrive, GrowIntoDetail), so that a move back can tell it turns one around while it is still
     // under way (motion-review F1, F2); and whether the next move was asked for by the keyboard (C4).
     private readonly MoveTurn _turn = new();
@@ -70,8 +71,12 @@ internal sealed partial class NoticeWindow : Window
         _stage.Children.Add(_glow); _stage.Children.Add(_surface);
         _surface.Child = _content;
         _content.Children.Add(_toast); _content.Children.Add(_detail);
-        // The text sits on the theme's opaque surface, as the island's does, so ClearType stays on for it.
+        // The text sits on the theme's opaque surface, as the island's does, so ClearType stays on for it; over glass WPF chooses
+        // (PanelTheme.ClearType, set when the window is dressed).
         RenderOptions.SetClearTypeHint(_content, ClearTypeHint.Enabled);
+        // The blur under a glass notice, as under the island: off while the notice is still the indicator's color or moving.
+        _blur = new GlassBackdrop(this, _surface, () => (new CornerRadius(_surface.TopRadius, _surface.TopRadius, _surface.BottomRadius, _surface.BottomRadius),
+            _surface.Shoulder, _surface.IslandOpacity <= .001));
         AutomationProperties.SetName(_surface, Loc.T("灵动提示", "Dynamic notice"));
         _toast.HorizontalAlignment = HorizontalAlignment.Center; _toast.VerticalAlignment = VerticalAlignment.Center;
         _detail.HorizontalAlignment = HorizontalAlignment.Center; _detail.VerticalAlignment = VerticalAlignment.Top;
@@ -380,6 +385,9 @@ internal sealed partial class NoticeWindow : Window
         _dressed = true;
         _look = look;
         _surface.Look = _look;
+        RenderOptions.SetClearTypeHint(_content, _look.Glass ? ClearTypeHint.Auto : ClearTypeHint.Enabled);
+        if (_look.Pixel > 0) TextOptions.SetTextRenderingMode(_surface, TextRenderingMode.Aliased); else _surface.ClearValue(TextOptions.TextRenderingModeProperty);
+        _blur.Update();
         // An opaque surface casts its shadow from a copy of its shape behind it. A translucent one (a theme file may make the
         // surface see-through) would show that copy, so its shadow comes from its outline alone.
         bool translucent = _look.Surface.A < 255;
@@ -554,7 +562,7 @@ internal sealed partial class NoticeWindow : Window
     {
         if (_item is { Count: > 1 } item)
         {
-            var chip = new Border { MinWidth = 22, Height = 18, CornerRadius = new CornerRadius(9), Background = UI.Brush(_look.Fill), Padding = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+            var chip = new Border { MinWidth = 22, Height = 18, CornerRadius = new CornerRadius(PanelTheme.Corner(9)), Background = UI.Brush(_look.Fill), Padding = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
             chip.Child = _countText = new TextBlock { Text = item.Count > 99 ? "99+" : item.Count.ToString(Loc.Culture), FontFamily = UI.PanelFont, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(chip, NoticeText.Count(item.Count));
             return chip;
@@ -589,7 +597,7 @@ internal sealed partial class NoticeWindow : Window
     private FrameworkElement Plate(Notice? notice, double size)
     {
         var plate = new Grid { Width = size, Height = size };
-        plate.Children.Add(new Border { CornerRadius = new CornerRadius(size * .28), Background = UI.Brush(_look.Fill) });
+        plate.Children.Add(new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(size * .28)), Background = UI.Brush(_look.Fill) });
         BitmapSource? image = _item?.Kind == AttentionKind.Summary ? null : Center.Icons.Get(notice?.IconRef, out _);
         if (image is not null)
         {
@@ -720,10 +728,10 @@ internal sealed partial class NoticeWindow : Window
                 _progressLeft = new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) };
                 track.ColumnDefinitions.Add(_progressDone); track.ColumnDefinitions.Add(_progressLeft);
                 _progressTrack = track;
-                var rail = new Border { Background = UI.Brush(PanelTheme.Hex("track")), CornerRadius = new CornerRadius(2) };
+                var rail = new Border { Background = UI.Brush(PanelTheme.Hex("track")), CornerRadius = new CornerRadius(PanelTheme.Corner(2)) };
                 Grid.SetColumnSpan(rail, 2);
                 track.Children.Add(rail);
-                track.Children.Add(new Border { Background = UI.Brush(AccentHex), CornerRadius = new CornerRadius(2) });
+                track.Children.Add(new Border { Background = UI.Brush(AccentHex), CornerRadius = new CornerRadius(PanelTheme.Corner(2)) });
                 AutomationProperties.SetName(track, Loc.T($"进度 {progress:P0}", $"Progress {progress:P0}"));
                 stack.Children.Add(track);
             }
@@ -794,7 +802,7 @@ internal sealed partial class NoticeWindow : Window
     private Button TextButton(string text, Action click, bool primary, bool flat = false)
     {
         string rest = primary ? _look.Accent : flat ? "Transparent" : _look.Fill;
-        var face = new Border { CornerRadius = new CornerRadius(8), Background = UI.Brush(rest), Padding = new Thickness(12, 0, 12, 0), MinHeight = 32, BorderBrush = UI.Brush(primary ? _look.OnAccent : _look.Accent) };
+        var face = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(8)), Background = UI.Brush(rest), Padding = new Thickness(12, 0, 12, 0), MinHeight = 32, BorderBrush = UI.Brush(primary ? _look.OnAccent : _look.Accent) };
         face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal, Foreground = UI.Brush(primary ? _look.OnAccent : _look.Primary), VerticalAlignment = VerticalAlignment.Center };
         var button = new Button { Content = face, Margin = new Thickness(8, 0, 0, 0), MinHeight = 32, Cursor = Cursors.Hand, FocusVisualStyle = null,
             Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };

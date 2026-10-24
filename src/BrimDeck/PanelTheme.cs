@@ -154,6 +154,9 @@ internal static class PanelTheme
         if (resources is null) return;
         var next = new ResourceDictionary();
         foreach (var (resource, token) in Resources) next[resource] = UI.Brush(Hex(token));
+        // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
+        for (int r = 1; r <= 16; r++) next["PanelR" + r] = new CornerRadius(Corner(r));
+        next["SegmentCorner"] = new CornerRadius(Corner(5));
         var merged = resources.MergedDictionaries;
         int at = _published is not null ? merged.IndexOf(_published) : -1;
         if (at < 0) for (int i = 0; i < merged.Count && at < 0; i++) if (merged[i].Contains("PanelSurface")) at = i;
@@ -198,6 +201,18 @@ internal static class PanelTheme
         island.Pixel = palette.Effects.Pixel; island.BevelBrush = BevelBrush(palette);
         island.EdgeBrush = GlassShownFor(palette) ? EdgeBrush(palette) : null;
     }
+
+    // The text of a window or pop-up of the panel's (a menu, a tooltip, the date picker): unsmoothed in a pixel theme, as on the
+    // island. Menus and tooltips get it as they open (App.ApplyPanelText).
+    public static void Text(FrameworkElement root)
+    {
+        if (Current.Effects.Pixel > 0) TextOptions.SetTextRenderingMode(root, TextRenderingMode.Aliased);
+        else root.ClearValue(TextOptions.TextRenderingModeProperty);
+    }
+
+    // A corner of the panel's own drawing as the theme draws it: square in a pixel theme, where the island's steps are the only
+    // curve, and as given otherwise.
+    public static double Corner(double radius) => Current.Effects.Pixel > 0 ? 0 : radius;
 
     // Glass shows as glass only where Windows' transparency effects are on and high contrast is off; otherwise its surface
     // color is drawn, opaque, like any other theme's.

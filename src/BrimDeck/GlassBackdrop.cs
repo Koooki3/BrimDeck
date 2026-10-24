@@ -11,7 +11,7 @@ using WinRT;
 
 namespace BrimDeck;
 
-// The blur under a glass island (PanelTheme.GlassShown): a window of its own, just below the panel's window, the size of the
+// The blur under a glass island or notice (PanelTheme.GlassShown): a window of its own, just below the panel's window, the size of the
 // island, showing the desktop behind it blurred (Windows.UI.Composition's host backdrop brush, which DWM blurs). The panel's
 // window is layered, and Windows can neither blur behind a layered window nor cut a blur to a shape there, so the blur lives in
 // this window instead: its content is clipped to the island's outline with an antialiased rounded rectangle, and its window
@@ -28,7 +28,10 @@ internal sealed class GlassBackdrop : IDisposable
 {
     private const int SettleMs = 120, FadeInMs = 180, FadeOutMs = 90;
     private readonly Window _owner;
-    private readonly IslandBorder _island;
+    // The surface the blur lies under (the island, a notice) and its shape now: corners, shoulder, and whether its material is
+    // fully there (not fading into the indicator or out of sight).
+    private readonly FrameworkElement _island;
+    private readonly Func<(CornerRadius Corners, double Shoulder, bool Solid)> _shape;
     private readonly DispatcherTimer _settle;
     private HwndSource? _window;
     private SpriteVisual? _sprite;
@@ -41,12 +44,14 @@ internal sealed class GlassBackdrop : IDisposable
 
     private readonly record struct Key(int X, int Y, int Width, int Height, CornerRadius Corners, double Shoulder, double Scale);
 
-    public GlassBackdrop(Window owner, IslandBorder island)
+    public GlassBackdrop(Window owner, IslandBorder island) : this(owner, island, () => (island.CornerRadius, island.ShoulderRadius, island.MaterialOpacity >= .999)) { }
+
+    public GlassBackdrop(Window owner, FrameworkElement surface, Func<(CornerRadius Corners, double Shoulder, bool Solid)> shape)
     {
-        _owner = owner; _island = island;
+        _owner = owner; _island = surface; _shape = shape;
         _settle = new DispatcherTimer(DispatcherPriority.Render, owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(SettleMs) };
         _settle.Tick += (_, _) => Settle();
-        island.LayoutUpdated += (_, _) => Update();
+        surface.LayoutUpdated += (_, _) => Update();
         owner.IsVisibleChanged += (_, _) => Update();
         owner.Closed += (_, _) => Dispose();
         if (PresentationSource.FromVisual(owner) is HwndSource main) main.AddHook(OwnerMessage); else owner.SourceInitialized += (_, _) => (PresentationSource.FromVisual(owner) as HwndSource)?.AddHook(OwnerMessage);
@@ -75,7 +80,7 @@ internal sealed class GlassBackdrop : IDisposable
 
     private bool Wanted()
     {
-        if (!Available || !_owner.IsVisible || !_island.IsVisible || _island.MaterialOpacity < .999 || _island.ActualWidth < 4 || _island.ActualHeight < 4) return false;
+        if (!Available || !_owner.IsVisible || !_island.IsVisible || !_shape().Solid || _island.ActualWidth < 4 || _island.ActualHeight < 4) return false;
         // A fade of the island or the window (booting, powering off, a notice taking its place) has no blur under it.
         for (DependencyObject? node = _island; node is not null; node = VisualTreeHelper.GetParent(node))
             if (node is UIElement element && element.Opacity < .999) return false;
@@ -88,8 +93,9 @@ internal sealed class GlassBackdrop : IDisposable
         {
             double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
             var at = _island.PointToScreen(new Point());
+            var shape = _shape();
             return new Key((int)Math.Round(at.X), (int)Math.Round(at.Y), (int)Math.Round(_island.ActualWidth * scale), (int)Math.Round(_island.ActualHeight * scale),
-                _island.CornerRadius, _island.ShoulderRadius, scale);
+                shape.Corners, shape.Shoulder, scale);
         }
         catch (InvalidOperationException) { return null; }
     }

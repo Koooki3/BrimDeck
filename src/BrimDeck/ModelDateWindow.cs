@@ -17,7 +17,7 @@ internal sealed class ModelDateWindow : Window
 
     internal ModelDateWindow(UsageDateRange range)
     {
-        Title = Loc.T("按时间", "By date"); Width = 246; WindowStyle = WindowStyle.None;
+        Title = Loc.T("按时间", "By date"); Width = 246; WindowStyle = WindowStyle.None; PanelTheme.Text(this);
         ResizeMode = ResizeMode.NoResize; AllowsTransparency = true; Background = Brushes.Transparent; ShowInTaskbar = false; Topmost = true;
         FontFamily = UI.PanelFont;
         Picker = new ModelDatePicker(range) { VerticalAlignment = VerticalAlignment.Top };

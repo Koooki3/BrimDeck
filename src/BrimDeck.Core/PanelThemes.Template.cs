@@ -17,7 +17,8 @@ public static partial class PanelThemes
 
     // Writes a new custom theme from the template into the folder and returns its path; the file name does not overwrite another.
     // With a starting palette the template's values are that palette's, so the new theme starts out looking like it.
-    public static string CreateFromTemplate(string folder, PanelPalette? start = null, string? baseId = null)
+    // source: the theme the start palette comes from; its night look and hours go into the new file too (FillTemplate).
+    public static string CreateFromTemplate(string folder, PanelPalette? start = null, string? baseId = null, PanelThemeFile? source = null)
     {
         Directory.CreateDirectory(folder);
         // Neither the file nor the id may already exist: a renamed file can still carry the id "my-theme".
@@ -26,7 +27,7 @@ public static partial class PanelThemes
         string path; int n = 1;
         do { path = Path.Combine(folder, n == 1 ? TemplateId + ".json" : $"{TemplateId}-{n}.json"); n++; }
         while (File.Exists(path) || Directory.Exists(Path.ChangeExtension(path, null)) || ids.Contains(Path.GetFileNameWithoutExtension(path)));
-        File.WriteAllText(path, FillTemplate(Path.GetFileNameWithoutExtension(path), start, baseId));
+        File.WriteAllText(path, FillTemplate(Path.GetFileNameWithoutExtension(path), start, baseId, source));
         // Themes are listed in the order they were added (InAddedOrder). Windows gives a file made under the name of one deleted
         // moments before that file's creation time, so the time is set to now.
         File.SetCreationTimeUtc(path, DateTime.UtcNow);
@@ -36,7 +37,7 @@ public static partial class PanelThemes
     // The template with its id, name and base set, and, with a starting palette, every value taken from it. The replacements rely
     // on the template's layout: one "key": "#color" per match, and the palette, gradients and effect arrays as the template writes
     // them. The test "A theme made from another starts out identical" guards this.
-    public static string FillTemplate(string id, PanelPalette? start = null, string? baseId = null)
+    public static string FillTemplate(string id, PanelPalette? start = null, string? baseId = null, PanelThemeFile? source = null)
     {
         // "my-theme-2" is named "我的主题 2", so several new themes can be told apart on their cards; the descriptions start empty.
         string number = Regex.Match(id, @"-(\d+)$") is { Success: true } suffix ? " " + suffix.Groups[1].Value : "";
@@ -61,7 +62,33 @@ public static partial class PanelThemes
                 .Replace("\"texture\": 0 ", "\"texture\": 0,", StringComparison.Ordinal);
         foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines), ("pixel", effects.Pixel), ("texture", effects.Texture) })
             text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {value.ToString("0.###", CultureInfo.InvariantCulture)}");
-        return FillMotion(text, start.Motion);
+        text = FillMotion(text, start.Motion);
+        // A theme with a night look keeps it, and its hours, after everything the template lists (start is its day look).
+        return source?.Night is { } night ? AppendNight(text, night, source.Daylight) : text;
+    }
+
+    // The night look as the theme file writes it: only what it sets, as "daylight" and "night" members at the end of the file.
+    private static string AppendNight(string text, PanelThemeFile night, PanelThemeDaylight? daylight)
+    {
+        var layer = new PanelThemeFile { Colors = night.Colors, Apps = night.Apps, Effects = night.Effects, Motion = night.Motion, Clock = night.Clock };
+        if (JsonSerializer.SerializeToNode(layer, Json) is not System.Text.Json.Nodes.JsonObject json) return text;
+        // Only what the layer sets: no format, empty strings (an id, a name, an unset clock style) or names made for display.
+        json.Remove("formatVersion");
+        static void Trim(System.Text.Json.Nodes.JsonNode? node)
+        {
+            if (node is System.Text.Json.Nodes.JsonArray array) { foreach (var item in array) Trim(item); return; }
+            if (node is not System.Text.Json.Nodes.JsonObject members) return;
+            foreach (var key in members.Where(pair => pair.Key == "displayName" || pair.Value is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var text) && text.Length == 0)
+                .Select(pair => pair.Key).ToList()) members.Remove(key);
+            foreach (var (_, value) in members) Trim(value);
+        }
+        Trim(json);
+        string Indent(string member) => member.ReplaceLineEndings("\n  ");
+        var members = new List<string>();
+        if (daylight is { } hours) members.Add($"\"daylight\": {{ \"day\": {Quote(hours.Day)}, \"night\": {Quote(hours.Night)} }}");
+        members.Add("\"night\": " + Indent(json.ToJsonString(Json)));
+        int end = text.LastIndexOf('}');
+        return end < 0 ? text : text[..end].TrimEnd() + ",\n  " + string.Join(",\n  ", members) + "\n}\n";
     }
 
     // Every palette has every token and, from the dark theme it is built on, every app color.

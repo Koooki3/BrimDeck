@@ -90,11 +90,8 @@ public sealed class IslandBorder : Border
         if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
         if (EdgeBrush is { } edge)
         {
-            // Pens twice each band's width, as the rim's: the layout clip removes the outer half.
-            _edge ??= [.. EdgeBands.Select(band => { var pen = new Pen(edge, band * 2); if (edge.IsFrozen) pen.Freeze(); return pen; })];
-            drawingContext.PushOpacity(1d / EdgeBands.Length);
-            foreach (var pen in _edge) drawingContext.DrawGeometry(null, pen, outline);
-            drawingContext.Pop();
+            _edge ??= EdgePens(edge);
+            DrawEdge(drawingContext, _edge, outline);
         }
         if (RimWidth > 0)
         {
@@ -137,12 +134,27 @@ public sealed class IslandBorder : Border
         var key = (RenderSize, ShoulderRadius, CornerRadius, Inset, step, RimWidth);
         if (_outlineKey == key) return _outline;
         _outlineKey = key;
-        if (step <= 0) { _bevel = null; return _outline = BuildOutline(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset); }
-        var stairs = BuildStairs(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset, step);
-        // The bevel is a whole number of device pixels thick, never thinner than one.
-        double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        _bevel = RimWidth > 0 ? Bevel(stairs, Math.Max(1, Math.Round(RimWidth * dpi, MidpointRounding.AwayFromZero)) / dpi) : null;
-        return _outline = Polygon(stairs);
+        (_outline, _bevel) = Shape(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset, step, RimWidth, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        return _outline;
+    }
+
+    // A surface drawn as the island (the island, a notice): its outline, stepped for a pixel theme, and then its bevel, a whole
+    // number of device pixels thick and never thinner than one.
+    internal static (Geometry Outline, (Geometry Light, Geometry Shade)? Bevel) Shape(double w, double h, double shoulder, CornerRadius corners, double inset, double step, double rimWidth, double dpi)
+    {
+        if (step <= 0) return (BuildOutline(w, h, shoulder, corners, inset), null);
+        var stairs = BuildStairs(w, h, shoulder, corners, inset, step);
+        return (Polygon(stairs), rimWidth > 0 ? Bevel(stairs, Math.Max(1, Math.Round(rimWidth * dpi, MidpointRounding.AwayFromZero)) / dpi) : null);
+    }
+
+    // The glass's edge light (EdgeBrush): pens twice each band's width, as the rim's, since the clip removes the outer half; each
+    // band adds an equal share of the light.
+    internal static Pen[] EdgePens(Brush edge) => [.. EdgeBands.Select(band => { var pen = new Pen(edge, band * 2); if (edge.IsFrozen) pen.Freeze(); return pen; })];
+    internal static void DrawEdge(DrawingContext dc, Pen[] pens, Geometry outline)
+    {
+        dc.PushOpacity(1d / pens.Length);
+        foreach (var pen in pens) dc.DrawGeometry(null, pen, outline);
+        dc.Pop();
     }
 
     // A pixel size in DIP as whole device pixels (at least one) on the visual's display, or 0 for none.

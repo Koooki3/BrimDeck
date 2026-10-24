@@ -258,7 +258,8 @@ public sealed partial class SettingsWindow
             {
                 // The theme on screen, which is the last good version while the chosen file has an error.
                 var current = PanelTheme.ShownTheme;
-                var path = PanelThemes.CreateFromTemplate(PanelTheme.Folder, PanelTheme.Current, current.BuiltIn ? current.Id : null);
+                // A theme with a night look starts from its day look and carries its night look along, whichever is on screen.
+                var path = PanelThemes.CreateFromTemplate(PanelTheme.Folder, current.File.Night is null ? PanelTheme.Current : PanelThemes.Resolve(current), current.BuiltIn ? current.Id : null, current.File);
                 PanelTheme.Reload();
                 // The new theme copies the current one, so it starts with what was changed under the current one.
                 ChooseOwnTheme(path);

@@ -65,7 +65,7 @@ internal sealed class NeteaseControlWindow : Window
             StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         heading.Children.Add(shield); heading.Children.Add(Text(Loc.T("只在您信任的电脑上启用", "Enable it only on a PC you trust"), 13.5, palette.Primary, true)); notice.Children.Add(heading);
         var warning = Text(SecurityNotice, 13, palette.Secondary, lineHeight: 21); warning.Margin = new Thickness(0, 6, 0, 0); notice.Children.Add(warning);
-        body.Children.Add(new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(14, 12, 14, 13), Margin = new Thickness(0, 20, 0, 0),
+        body.Children.Add(new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(8)), Padding = new Thickness(14, 12, 14, 13), Margin = new Thickness(0, 20, 0, 0),
             Background = UI.Brush(palette.Inset), BorderBrush = UI.Brush(palette.RowDivider), BorderThickness = new Thickness(1), Child = notice });
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 22, 0, 0) };
