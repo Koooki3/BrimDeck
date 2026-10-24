@@ -208,14 +208,16 @@ public static class NoticeTimeIntake
 // companions and Teams. Used to sort their notifications into kinds and to list what this PC has in the settings.
 public enum NoticeTimeRole
 {
-    // Every notification is an alarm, a timer that finished or the end of a focus session (also a task's reminder in To Do).
+    // Every notification is an alarm, a timer that finished or the end of a focus session.
     Clock,
     // Every notification is an event's reminder.
     Calendar,
     // Mail, unless the notification reads as a reminder of an event.
     MailAndCalendar,
     // Only notifications that read as a meeting's reminder or start; the rest (chat) stay as they are.
-    Meetings
+    Meetings,
+    // Every notification is the reminder of a task the user set (Microsoft To Do): it rings as an alarm does.
+    Reminders
 }
 
 public sealed record NoticeTimeSource(string Id, string Name, string NameEn, NoticeTimeRole Role, string? PackageFamily, IReadOnlyList<string> AppIds, string? Program = null)
@@ -223,7 +225,7 @@ public sealed record NoticeTimeSource(string Id, string Name, string NameEn, Not
     public string DisplayName => Loc.T(Name, NameEn);
     public IReadOnlyList<NoticeTimeKind> Kinds => Role switch
     {
-        NoticeTimeRole.Clock => [NoticeTimeKind.Alarm],
+        NoticeTimeRole.Clock or NoticeTimeRole.Reminders => [NoticeTimeKind.Alarm],
         NoticeTimeRole.Calendar or NoticeTimeRole.Meetings => [NoticeTimeKind.Event],
         _ => [NoticeTimeKind.Mail, NoticeTimeKind.Event]
     };
@@ -237,7 +239,7 @@ public static partial class NoticeTimeSources
         new("outlook", "Outlook（新）", "Outlook (new)", NoticeTimeRole.MailAndCalendar, "Microsoft.OutlookForWindows_8wekyb3d8bbwe", ["Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows"]),
         new("outlook-classic", "Outlook（经典）", "Outlook (classic)", NoticeTimeRole.MailAndCalendar, null, ["Microsoft.Office.OUTLOOK.EXE.15", "Microsoft.Office.OUTLOOK.EXE.16"], "OUTLOOK.EXE"),
         new("m365-calendar", "Microsoft 365 日历", "Microsoft 365 Calendar", NoticeTimeRole.Calendar, "Microsoft.M365Companions_8wekyb3d8bbwe", ["Microsoft.M365Companions_8wekyb3d8bbwe!Calendar"]),
-        new("todo", "Microsoft To Do", "Microsoft To Do", NoticeTimeRole.Clock, "Microsoft.Todos_8wekyb3d8bbwe", ["Microsoft.Todos_8wekyb3d8bbwe!App"]),
+        new("todo", "Microsoft To Do", "Microsoft To Do", NoticeTimeRole.Reminders, "Microsoft.Todos_8wekyb3d8bbwe", ["Microsoft.Todos_8wekyb3d8bbwe!App"]),
         new("teams", "Microsoft Teams", "Microsoft Teams", NoticeTimeRole.Meetings, "MSTeams_8wekyb3d8bbwe", ["MSTeams_8wekyb3d8bbwe!MSTeams"]),
         new("windows-mail", "邮件和日历", "Mail and Calendar", NoticeTimeRole.MailAndCalendar, "microsoft.windowscommunicationsapps_8wekyb3d8bbwe",
             ["microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.mail", "microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.calendar"])
@@ -270,7 +272,7 @@ public static partial class NoticeTimeSources
         bool calendarApp = source.Role == NoticeTimeRole.Calendar || input.AppId.EndsWith("windowslive.calendar", StringComparison.OrdinalIgnoreCase);
         switch (source.Role)
         {
-            case NoticeTimeRole.Clock:
+            case NoticeTimeRole.Clock or NoticeTimeRole.Reminders:
                 return input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Alarm, EndsAt = created } };
             case NoticeTimeRole.Meetings when !ReadsAsMeeting(text):
                 return input;

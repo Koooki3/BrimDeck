@@ -120,7 +120,7 @@ public partial class MainWindow : Window
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
-        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false)); };
+        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false, keyboard: true)); };
         Loaded += async (_, _) =>
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
@@ -138,7 +138,7 @@ public partial class MainWindow : Window
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseRightButtonUp += (_, e) => { if (!_expanded || !Settings.RightClickSettings) return; _app.OpenSettings(); e.Handled = true; };
-        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetExpanded(false); e.Handled = true; } };
+        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { SetExpanded(false, keyboard: true); e.Handled = true; } };
         // A scale change moves the window to a rectangle Windows suggests; the island is centred again.
         // DpiChanged is a bubbling event: every Image raises it when its own DPI changes. Once the window has moved to a
         // monitor with another scale, each image the panel rebuilds while it is laid out reports a change, and laying out
@@ -288,6 +288,8 @@ public partial class MainWindow : Window
     // Where the pointer was when hovering opened the panel, in DIPs from the monitor's left edge; null when the panel was opened
     // another way (the hotkey) or is closed.
     private double? _openCentre;
+    // The panel's last opening or closing, so that one turned back part way can tell (SetExpanded; motion-review F1, F2).
+    private readonly MoveTurn _turn = new();
     // The content changed what it asks for: the collapsed surface moves to the new width with its usual animation, and the window
     // grows first when the surface would be wider than it.
     private void FitCompactToContent()
@@ -482,7 +484,8 @@ public partial class MainWindow : Window
     }
 
     private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
-    public void SetExpanded(bool expanded, bool instant = false)
+    // keyboard: a hotkey or Escape asked for it (motion-review C4), so the move is quicker and has no give.
+    public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
         if (expanded && !_expanded) EndBoot();
@@ -549,8 +552,16 @@ public partial class MainWindow : Window
             try { if (!_keepPageOnOpen) NoticesPageShown(); RenderNotices(); }
             finally { _noticesRenderQueued = queued; }
         }
-        int duration = !instant && Soft.Enabled ? Settings.AnimationDuration : 0;
+        // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it.
+        bool turning = wasExpanded != expanded;
+        int duration = !instant && Soft.Enabled ? NoticeMotion.PanelLength(Settings.AnimationDuration, closing: turning && !expanded, keyboard: keyboard && turning) : 0;
         if (fromNotice is { } notice && duration > 0) StartFromNotice(notice);
+        // motion-review F1, F2: turned back while the last move is still under way (the pointer left an opening panel, or came
+        // back to a closing one), the surface starts back from where it is at once, in the share of the move it has to undo.
+        // Only an opening or closing still under way counts; the panel laid out again in place never does.
+        long now = Environment.TickCount64;
+        bool redirect = turning && duration > 0 && fromNotice is null && _turn.Turns(now, expanded);
+        if (redirect) duration = (int)Math.Round(duration * _turn.Share(now, expanded, Island.Width, Island.Height, width, height));
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
@@ -570,8 +581,8 @@ public partial class MainWindow : Window
         // Collapsing runs in three stages: the content leaves first, the surface settles with a slow start, the compact content lands last.
         // Expanding must feel immediate: the surface grows from the first frame on the opening spring, the compact content vanishes
         // quickly, and the content fades in once the surface is about two thirds open.
-        // Open already (a page switch, a new page size), the surface reshapes over the whole of a slightly longer time, easing in
-        // and out, so the change of size reads as one soft move rather than a jump.
+        // Open already (a page switch, a new page size), the surface reshapes over the whole of the move, easing in and out, so
+        // the change of size reads as one soft move rather than a jump (motion-review C8: no longer 1.25 times as long).
         // Booting (MainWindow.Lifecycle.cs), after the round dot's jumps the surface swells from that resting circle into the
         // collapsed shape on the opening spring, the compact content arriving once the shape has nearly settled.
         // A new collapsed style chosen in the settings (MorphShape), the surface changes from one form into the other over the
@@ -579,13 +590,13 @@ public partial class MainWindow : Window
         // once the form has nearly settled.
         bool reshaping = expanded && wasExpanded, booting = _booting && !expanded && duration > 0, morphing = _morphingShape && !expanded && duration > 0;
         _booting = false; _morphingShape = false;
-        if (reshaping) duration = (int)(duration * 1.25);
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
+        if (turning) _turn.Started(now, duration, expanded, width, height);
         // The opening and closing tracks are NoticeMotion's Panel* (a notice moves on the same ones); the boot's, the style
         // morph's and the indicator's own variations stay here.
         Track content = expanded ? NoticeMotion.PanelOpenContent : NoticeMotion.PanelCloseContent;
-        Track surface = reshaping || morphing || booting || expanded ? NoticeMotion.PanelOpenSurface : line ? new(.12, .92) : NoticeMotion.PanelCloseSurface;
+        Track surface = reshaping || morphing || booting || expanded ? NoticeMotion.PanelOpenSurface : line ? new(redirect ? 0 : .12, .92) : NoticeMotion.ReturnSurfaceFor(redirect);
         // Between forms the corners turn early: a notch becoming a capsule rounds its flat top long before it has its new size,
         // rather than showing a square top over round bottom corners for most of the move.
         Track cornerTrack = morphing ? new(0, .4) : surface;
@@ -598,18 +609,19 @@ public partial class MainWindow : Window
         if (morphing && !line && Compact.Visibility == Visibility.Visible && Compact.Opacity > .5)
         {
             SetImmediate(Compact, OpacityProperty, 0d);
-            SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, .9); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, .9);
+            SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk);
         }
         // Opening, the size and place spring past their end by under 2 percent of the move and settle back; the corners never
         // bounce (a radius would pass zero). A panel that has no room in the window for that give opens on the plain curve.
         // Booting does not use that give: Bounce on Margin and Height would bob the whole capsule or line after the round
         // dot has already finished its jumps (the notch sits at the top edge, so the same overshoot is barely seen).
-        bool bounce = !booting && expanded && !reshaping && duration > 0 && HasRoomToBounce(width, height, left, gap);
-        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Settle;
+        bool bounce = !booting && expanded && !reshaping && !keyboard && duration > 0 && HasRoomToBounce(width, height, left, gap);
+        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting || redirect ? Soft.Out : Soft.Settle;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
-        Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
-        Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, expanded ? easeOut : easeInOut);
+        // motion-review F13: what leaves eases out as what arrives does; InOut is for what changes in place.
+        Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, easeOut);
+        Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, easeOut);
         Animate(Island, WidthProperty, width, duration, surface, settle);
         Animate(Island, HeightProperty, height, duration, surface, settle);
         Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, surface, corners);
@@ -640,8 +652,8 @@ public partial class MainWindow : Window
         }
         bool compactGone = expanded || line;
         Animate(Compact, OpacityProperty, compactGone ? 0 : 1, duration, compact, easeOut, () => { if (_expanded || ShapeFor(EffectiveStyle).Style == CompactStyle.Line) Compact.Visibility = Visibility.Hidden; });
-        Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
-        Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
+        Animate(CompactScale, ScaleTransform.ScaleXProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
+        Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
         Animate(IslandShadow, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);

@@ -67,7 +67,7 @@
                  <!-- The chosen page's fill glides between the buttons, as the monitor page's sort pill does (MainWindow.PlacePageCapsule). -->
                  <Border x:Name="PageCapsule" Background="{DynamicResource PanelFillSelected}" HorizontalAlignment="Left" VerticalAlignment="Center"
                          Width="28" Height="24" CornerRadius="6" IsHitTestVisible="False">
-                   <Border.RenderTransform><TranslateTransform x:Name="PageCapsuleShift"/></Border.RenderTransform>
+                   <Border.RenderTransform><TransformGroup><ScaleTransform x:Name="PageCapsuleStretch"/><TranslateTransform x:Name="PageCapsuleShift"/></TransformGroup></Border.RenderTransform>
                  </Border>
                  <StackPanel Orientation="Horizontal">
                 <Button x:Name="AIUsageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24"

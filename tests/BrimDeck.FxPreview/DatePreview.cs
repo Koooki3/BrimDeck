@@ -46,7 +46,7 @@ internal static class DatePreview
     {
         var picker = new ModelDatePicker(new UsageDateRange(Day(5), Day(12)), palette)
         {
-            Preview = new() { Clock = () => _now, Moves = () => true, AnimationDuration = 360 }, VerticalAlignment = VerticalAlignment.Top, Width = Width
+            Preview = new() { Clock = () => _now, Moves = () => true }, VerticalAlignment = VerticalAlignment.Top, Width = Width
         };
         double height = picker.FullHeight(Width);
         var stage = new Grid { Width = Width, Height = height, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(Pad) };
@@ -55,7 +55,7 @@ internal static class DatePreview
         {
             Preview = new()
             {
-                Clock = () => _now, Palette = () => palette, SystemTheme = false, AnimationDuration = 360,
+                Clock = () => _now, Palette = () => palette, SystemTheme = false,
                 Conditions = () => new MotionConditions(true, true, false, true, false, false, false, false, true)
             }
         };

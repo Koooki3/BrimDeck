@@ -49,7 +49,8 @@ public sealed partial class SettingsWindow
         var line = TextLine("", 11.5, TextSecondary);
         line.TextWrapping = TextWrapping.Wrap; line.TextTrimming = TextTrimming.None; line.Margin = new Thickness(0, 2, 0, 0);
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
-        void Update() { var (text, problem) = read(); line.Text = text; line.Foreground = UI.Brush(problem ? _palette.Dark ? "#F0A6AA" : "#B12E3A" : TextSecondary); }
+        // An empty line takes no room, so a line whose state may come later (the local channel failing) can always be on the page.
+        void Update() { var (text, problem) = read(); line.Text = text; line.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed; line.Foreground = UI.Brush(problem ? _palette.Dark ? "#F0A6AA" : "#B12E3A" : TextSecondary); }
         Update();
         _noticeStatusLines.Add(Update);
         return line;
@@ -105,8 +106,8 @@ public sealed partial class SettingsWindow
             rows.Add(new Border { Child = none, MinHeight = 44, Padding = new Thickness(0, 13, 0, 13) });
         }
         SectionTitle(Loc.T("WSL（默认关闭）", "WSL (off by default)"));
-        Note(Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
-            "Once a distribution is on, BrimDeck copies its notice agent to ~/.local/share/brimdeck there and adds ~/.local/bin/brim-notify. The agent starts only while the distribution runs; a distribution is never started for notices. Without a notification service, the agent becomes the session's standard desktop notification service (notify-send and others work as usual); with one, it watches it, and where the bus does not allow watching only brim-notify works."));
+        Note(Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。代理运行时发行版和 WSL 虚拟机不会自动停止，所以发行版中你的程序（终端、后台任务等）全部结束 5 分钟后，代理会自行退出，让 WSL 照常停止发行版并释放内存，发行版下次运行时再自动接入。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
+            "Once a distribution is on, BrimDeck copies its notice agent to ~/.local/share/brimdeck there and adds ~/.local/bin/brim-notify. The agent starts only while the distribution runs; a distribution is never started for notices. While the agent runs, WSL does not stop the distribution or its virtual machine, so the agent ends by itself 5 minutes after the last of your programs there (terminals, background jobs) ended; WSL then stops the distribution and frees its memory as usual, and the agent connects again the next time it runs. Without a notification service, the agent becomes the session's standard desktop notification service (notify-send and others work as usual); with one, it watches it, and where the bus does not allow watching only brim-notify works."));
         Group([.. rows]);
 
         // The command line, for Windows and for scripts.
@@ -118,7 +119,7 @@ public sealed partial class SettingsWindow
             () => Loc.T("Windows 上使用 BrimDeck 安装目录中的 BrimDeck.Notify.exe；WSL 中开启发行版后使用 brim-notify。run 会运行命令并在结束后提示结果；同一 --replace 键会更新同一条提示。",
                 "On Windows use BrimDeck.Notify.exe in BrimDeck's folder; in WSL use brim-notify once the distribution is on. run runs a command and shows its result when it ends; the same --replace key updates the same notice.")));
         var pipe = StatusLine(() => center.PipeError is { } error ? (Loc.T("本地通道不可用：", "The local channel is unavailable: ") + error, true) : ("", false));
-        if (pipe.Text.Length > 0) Target.Children.Add(pipe);
+        Target.Children.Add(pipe);
         NoticeTimeSection(center);
     }
 
@@ -144,6 +145,7 @@ public sealed partial class SettingsWindow
             {
                 NoticeTimeRole.Clock => Loc.T("闹钟、计时器结束（时钟内正在运行的计时 Windows 不对外提供）", "Alarms and finished timers (Windows does not share the Clock's running timers)"),
                 NoticeTimeRole.Calendar => Loc.T("日程提醒", "Event reminders"),
+                NoticeTimeRole.Reminders => Loc.T("任务提醒，到点时像闹钟一样弹出", "Task reminders, shown like an alarm when due"),
                 NoticeTimeRole.Meetings => Loc.T("会议提醒和开始；其他消息照常", "Meeting reminders and starts; other messages as usual"),
                 _ => Loc.T("新邮件、日程提醒", "New mail, event reminders")
             }, 11.5, TextSecondary);
@@ -161,6 +163,9 @@ public sealed partial class SettingsWindow
     private static (string, bool) WslStatus(NoticeCenter center, string name)
     {
         if (!center.WslStates.TryGetValue(name, out var state)) return (Loc.T("未开启", "Off"), false);
+        // The agent ended by itself (W2); said apart from the states below, which are the agent's own.
+        if (state.State == WslAgentState.Idle)
+            return (Loc.T("发行版中已没有你的程序在运行，代理已退出，让 WSL 可以停止它；发行版下次运行时自动接入。", "Nothing of yours runs in the distribution any more, so the agent ended to let WSL stop it; it connects again the next time the distribution runs."), false);
         var (text, warning) = state.State switch
         {
             WslAgentState.NotRunning => (Loc.T("发行版未运行；它运行后自动接入。", "The distribution is not running; it connects once it runs."), false),
@@ -171,7 +176,7 @@ public sealed partial class SettingsWindow
             WslAgentState.Monitor => (Loc.T("正在接收：旁路观察已有的通知服务（不提供其按钮）。", "Receiving: watching the existing notification service (its buttons are not offered)."), false),
             WslAgentState.MonitorDenied => (Loc.T("已有通知服务，且总线不允许监视；brim-notify 仍可用。", "Another notification service runs and the bus does not allow watching it; brim-notify still works."), true),
             WslAgentState.NoBus => (Loc.T("没有可用的会话总线；brim-notify 仍可用。", "No session bus is available; brim-notify still works."), true),
-            WslAgentState.Failed => (Loc.T("连接失败，稍后重试", "Connection failed; trying again later") + (state.Detail.Length > 0 ? "（" + state.Detail + "）" : ""), true),
+            WslAgentState.Failed => (Loc.T("连接失败，稍后重试", "Connection failed; trying again later") + (state.Detail.Length > 0 ? Loc.T("（", " (") + state.Detail + Loc.T("）", ")") : ""), true),
             _ => (Loc.T("未开启", "Off"), false)
         };
         if (!state.Conflict) return (text, warning);
@@ -205,7 +210,10 @@ public sealed partial class SettingsWindow
     private void NoticeBehavior(NoticeCenter center)
     {
         SectionTitle(Loc.T("提醒方式", "Behavior"));
-        var pause = ActionButton(center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停 1 小时", "Pause for 1 hour"), () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); ShowPage(NoticesSettingsPage); });
+        static string PauseLabel(NoticeCenter center) => center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停 1 小时", "Pause for 1 hour");
+        var pause = ActionButton(PauseLabel(center), () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); ShowPage(NoticesSettingsPage); });
+        // A pause that runs out while the page is open turns the button back as the status line changes.
+        _noticeStatusLines.Add(() => pause.Content = PauseLabel(center));
         var pauseStatus = StatusLine(() => center.Paused && S.NoticesPausedUntil is { } until
             ? (Loc.T($"已暂停至 {until.ToLocalTime():HH:mm}，期间的通知只进入最近通知。", $"Paused until {until.ToLocalTime():HH:mm}; notices meanwhile only go to the recent notices."), false)
             : center.Quiet ? (Loc.T("Windows 正处于专注、演示或锁定状态，提示暂时不显示。", "Windows is in focus, presentation or locked state; notices are held back for now."), false) : ("", false));

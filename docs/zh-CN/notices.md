@@ -41,6 +41,7 @@ Windows 通知里的应用标识有时看不出是哪个应用，BrimDeck 会这
 - **默认分类**：Windows 通知不带分类。Claude、Codex（ChatGPT）、Gemini 桌面版和 Cursor 的通知标为“任务”；Windows 系统提醒、Windows 安全中心、NVIDIA App、Adobe Creative Cloud、Clash Party/Clash Verge、截图工具、联想和英特尔的工具等标为“提示”；聊天、邮件和浏览器保持“消息”。
 - **来电**：聊天应用（QQ、微信、Teams、WhatsApp、Discord 等）和手机连接的通知如果是语音/视频通话邀请（“邀请你进行语音通话”“Incoming call”“is calling you”等），显示来电标记，并像闹钟一样立即弹出（该应用设为低优先级时除外）；“未接来电”不算。
 - **被替换的通知**：应用用同一条通知更新内容时（比如 QQ 把新消息合并成一条），Windows 会删掉旧通知、加入新通知。如果两者来自同一应用、标题相同，并且在同一次读取中出现，BrimDeck 会更新原来那条提示，不会留下两条。
+- **emoji 的显示**：WPF 不支持彩色字体，emoji 显示为单色；由多个 emoji 组合成的序列（如家庭、彩虹旗）可能显示为方框，国旗显示为两个字母。这是平台限制，文字本身不受影响。
 
 ### WSL
 
@@ -48,7 +49,10 @@ Windows 通知里的应用标识有时看不出是哪个应用，BrimDeck 会这
 
 - 把通知代理复制到该发行版默认用户的 `~/.local/share/brimdeck/brimdeck-agent`，并写入 `bridge.json` 与版本记录；
 - 添加 `~/.local/bin/brim-notify`。只有内容与 BrimDeck 写入的完全一致时才会更新它；同名的其他文件或符号链接一律保持不动，并在设置中提示冲突（此时可直接用 `~/.local/share/brimdeck/brimdeck-agent notify`）。所有文件都先写到新建的临时文件再改名替换，不会顺着符号链接写到别处；
-- 只在发行版**已运行**时通过 `wsl.exe` 启动代理，绝不为了接收通知而启动发行版，也不修改 WSL 配置或替换系统的 `notify-send`。WSL 1 与 WSL 2 发行版都支持。
+- 只在发行版**已运行**时通过 `wsl.exe` 启动代理，绝不为了接收通知而启动发行版，也不修改 WSL 配置或替换系统的 `notify-send`。WSL 1 与 WSL 2 发行版都支持；
+- 代理本身是一个 `wsl.exe` 会话，它运行时 WSL 不会自动停止发行版和虚拟机。因此代理每分钟检查一次：发行版中该用户除代理自身、WSL 的 init/中继进程和会话组件（`systemd --user`、`(sd-pam)`、`dbus-daemon`/`dbus-broker`）以外已没有任何进程（终端、后台任务都算在内），并且持续 5 分钟，代理就自行退出，让 WSL 照常停止发行版、释放内存。设置中显示为“代理已退出”。之后发行版停止、再次运行时，代理自动重新接入；如果发行版因为其他原因一直没有停止，BrimDeck 最多每 30 分钟再启动一次代理，不会反复重启。
+
+代理按 `DBUS_SESSION_BUS_ADDRESS`、`$XDG_RUNTIME_DIR/bus`、`/run/user/<uid>/bus`（后两者须属于该用户）、`~/.dbus/session-bus/<machine-id>-<显示编号>`（无 systemd 时由 X11 自动启动的总线）的顺序查找会话总线；暂时没有总线时每 3 秒检查一次。
 
 代理按会话总线的情况自动选择：
 
@@ -58,6 +62,8 @@ Windows 通知里的应用标识有时看不出是哪个应用，BrimDeck 会这
 | 已有通知服务且允许监视 | 旁路观察，不替换原服务；原服务的按钮不提供 |
 | 已有通知服务且不允许监视 | 显示限制；`brim-notify` 仍可用 |
 | 没有会话总线 | 显示限制；`brim-notify` 仍可用 |
+
+作为通知服务时，代理声明 `body-markup`：正文中的标记按纯文本显示（去掉标签、解码 `&lt;` 等），标题始终原样显示。带 `x-canonical-private-synchronous`、`synchronous` 或 `x-dunst-stack-tag` 提示的通知（音量、亮度等）按同一应用、同一标签更新同一条提示；带 `transient` 提示的通知照常显示，但不保存到已保存的通知中。图标是 `/usr/share/icons` 或 `/usr/share/pixmaps` 内的符号链接、且链接一直指向这两个目录内时，按实际文件显示（Debian/Ubuntu 的主题图标多为链接）；其他符号链接仍不读取。
 
 移除：在设置中关闭该发行版，然后在发行版中删除 `~/.local/share/brimdeck` 与 `~/.local/bin/brim-notify`。
 

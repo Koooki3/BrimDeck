@@ -19,9 +19,7 @@ public partial class MainWindow
         void Press(bool down)
         {
             pressed = down;
-            bool animate = Soft.Enabled;
-            Soft.Glide(press, ScaleTransform.ScaleXProperty, down ? .94 : 1, animate);
-            Soft.Glide(press, ScaleTransform.ScaleYProperty, down ? .94 : 1, animate);
+            Soft.Pressed(press, down, Soft.Enabled);
         }
         art.MouseLeftButtonDown += (_, e) =>
         {

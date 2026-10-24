@@ -31,7 +31,7 @@ public sealed partial class SettingsWindow
         var incoming = Collect(() => { StyleOptions(style); CollapsedSizeOptions(style); });
         var outgoing = host.Children.OfType<FrameworkElement>().LastOrDefault();
         double width = host.ActualWidth;
-        if (outgoing is null || previous is not { } from || from == style || width <= 0 || !SystemParameters.ClientAreaAnimation)
+        if (outgoing is null || previous is not { } from || from == style || width <= 0 || !Soft.Enabled)
         { host.Children.Clear(); host.Children.Add(incoming); return; }
         // A panel still leaving from an earlier choice is dropped; the one arriving becomes the one leaving.
         foreach (var leaving in host.Children.OfType<FrameworkElement>().Where(child => child != outgoing).ToList()) host.Children.Remove(leaving);

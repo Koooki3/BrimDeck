@@ -39,7 +39,7 @@ public static partial class WindowsNoticeApps
 
     // Sites whose notices are mail, and sites whose notices are calendar reminders (NoticeTimeSources.Classify).
     private static readonly string[] MailSites = ["mail.google.com", "outlook.live.com", "outlook.office.com", "outlook.office365.com", "outlook.cloud.microsoft",
-        "mail.qq.com", "exmail.qq.com", "mail.163.com", "mail.126.com", "mail.yahoo.com", "mail.proton.me", "icloud.com"];
+        "mail.qq.com", "exmail.qq.com", "mail.163.com", "mail.126.com", "mail.yahoo.com", "mail.proton.me"];
     private static readonly string[] CalendarSites = ["calendar.google.com"];
 
     // Names for application ids Windows often gives no display name for: desktop programs whose notifications are not tied to
@@ -109,7 +109,8 @@ public static partial class WindowsNoticeApps
         // Squirrel installs Electron apps (Discord, Slack, GitHub Desktop, the classic Teams) as "com.squirrel.<package>.<exe>".
         if (appId.StartsWith("com.squirrel.", StringComparison.OrdinalIgnoreCase) && appId.LastIndexOf('.') is int dot && dot < appId.Length - 1
             && appId[(dot + 1)..] is { } exe && exe.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-'))
-            return exe;
+            // An all lower-case program name ("slack") reads better capitalized.
+            return exe.Any(char.IsAsciiLetterUpper) ? exe : char.ToUpperInvariant(exe[0]) + exe[1..];
         // A desktop program without a registered id is named by its path, "{known folder GUID}\folder\app.exe".
         int slash = appId.LastIndexOf('\\');
         if (slash >= 0 && slash < appId.Length - 1 && appId.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return appId[(slash + 1)..^4];
@@ -175,15 +176,20 @@ public static partial class WindowsNoticeApps
     private static bool Matches(string host, string[] sites) => sites.Any(known => host == known || host.EndsWith("." + known, StringComparison.Ordinal));
 
     // An incoming call, by the words chat applications use for one ("邀请你语音通话", "Incoming video call", "is calling you").
-    // Only applications that read as chat or phone apps are looked at: a mail or news app mentioning a call is not one.
+    // Only applications that read as chat or phone apps are looked at: a mail or news app mentioning a call is not one. Only the
+    // title and the body's first line, where a call notice says so: a chat message about calling is in the body's text.
     public static bool ReadsAsCall(string appKey, string appName, string title, string body)
     {
         if (NoticeGlyphs.App(appKey, appName) is not (NoticeGlyph.Chat or NoticeGlyph.Phone)) return false;
-        return CallWords().IsMatch(title) || CallWords().IsMatch(body.Length > 200 ? body[..200] : body);
+        int end = body.IndexOf('\n');
+        string first = (end < 0 ? body : body[..end]).Trim();
+        return CallWords().IsMatch(title.Trim()) || first.Length <= 120 && CallWords().IsMatch(first);
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"(?:邀请你(?:进行)?(?:语音|视频)通话|(?:语音|视频)通话邀请|发起了?(?:语音|视频)通话|正在呼叫你|向你发起(?:语音|视频)?通话|^来电$|^(?:语音|视频)?来电|\bincoming (?:voice |video |audio )?call\b|\bis calling you\b|\bcalling you\b)",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Multiline)]
+    // "来电" only as the whole line ("来电", "语音来电", "来电：Alice"): "来电了" is power coming back. English only at the line's
+    // start, so "Missed incoming call" is not one, and "is calling you" (not "I'll be calling you later").
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?:邀请你(?:进行)?(?:语音|视频)通话|(?:语音|视频)通话邀请|发起了?(?:语音|视频)通话|正在呼叫你|向你发起(?:语音|视频)?通话|^(?:语音|视频)?来电(?:$|[:：])|^incoming (?:voice |video |audio )?call\b|\bis calling you\b)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
     private static partial System.Text.RegularExpressions.Regex CallWords();
 
     public static NoticeCategory Category(string appId)

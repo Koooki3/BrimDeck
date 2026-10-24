@@ -44,6 +44,18 @@ public static class NoticeText
 
     // Text as a sender wrote it, without the invisible characters that let it pass for something else (sec-L4). The rules
     // live with the protocol, whose Clip drops the same characters (NoticeProtocol.Clean).
+    // Whether a text reads right to left: its first letter is Hebrew, Arabic or another right-to-left script, so that a
+    // notice in such a language is laid out and aligned as its readers expect (break-ui test). Digits and punctuation decide nothing.
+    public static bool RightToLeft(string text)
+    {
+        foreach (char c in text)
+        {
+            if (c is >= '\u0590' and <= '\u08FF' or >= '\uFB1D' and <= '\uFDFF' or >= '\uFE70' and <= '\uFEFF') { if (char.IsLetter(c)) return true; continue; }
+            if (char.IsLetter(c)) return false;
+        }
+        return false;
+    }
+
     public static string Clean(string text, bool singleLine = false) => BrimDeck.Protocol.NoticeProtocol.Clean(text, singleLine);
 
     public static string CategoryName(NoticeCategory category) => category switch

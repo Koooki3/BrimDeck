@@ -67,6 +67,8 @@ public sealed record NoticeInput
     public bool Missed { get; init; }
     // An incoming call, as BrimDeck reads a Windows notification (WindowsNoticeApps.ReadsAsCall); never taken from a sender.
     public bool Call { get; init; }
+    // A desktop notification its application marked "transient" (NoticeMessage.Transient): shown and listed, never saved.
+    public bool Transient { get; init; }
 }
 
 // A notice BrimDeck keeps. Id is BrimDeck's own; Revision counts updates, so a view can tell a changed notice apart.
@@ -104,6 +106,9 @@ public sealed class Notice
     // An incoming call (NoticeInput.Call): shown with the call mark and as urgent as a ringing alarm. A plain flag, so that
     // an older BrimDeck still reads the saved notices.
     public bool Call { get; set; }
+    // Not to be saved (NoticeInput.Transient): NoticeHistory.Save leaves it out, so it is gone once BrimDeck restarts. A
+    // plain flag, as Call is.
+    public bool Transient { get; set; }
     [JsonIgnore] public bool HasProgress => Progress is not null;
     [JsonIgnore] public NoticeTimeKind TimeKind => Timing?.Kind ?? NoticeTimeKind.None;
     public Notice Copy() { var copy = (Notice)MemberwiseClone(); copy.Actions = [.. Actions]; copy.Timing = Timing?.Copy(); return copy; }

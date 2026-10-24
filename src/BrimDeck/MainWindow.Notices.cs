@@ -162,7 +162,7 @@ public partial class MainWindow
         if (duration <= 0) return;
         var land = new Track(0, 1);
         SetImmediate(Compact, OpacityProperty, 0d);
-        SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, .85); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, .85);
+        SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk);
         Animate(Compact, OpacityProperty, 1, duration, land, Soft.Out);
         Animate(CompactScale, ScaleTransform.ScaleXProperty, 1, duration, land, Soft.Out);
         Animate(CompactScale, ScaleTransform.ScaleYProperty, 1, duration, land, Soft.Out);
@@ -199,13 +199,14 @@ public partial class MainWindow
     }
 
     // Opens the panel on the recent notices page, as the expand hotkey opens it: it stays open until the pointer has been in it.
-    internal void OpenNoticesPage()
+    // byKey: the notices hotkey, rather than a click on "View all" (motion-review C4).
+    internal void OpenNoticesPage(bool byKey = true)
     {
         if (!DeckPages.Shown(Settings, DeckPage.Notices)) return;
         if (_expanded) { SelectPage(DeckPage.Notices); return; }
         SelectPage(DeckPage.Notices, remember: false);
         _keepPageOnOpen = true;
-        try { OpenFromHotkey(); } finally { _keepPageOnOpen = false; }
+        try { OpenFromHotkey(byKey); } finally { _keepPageOnOpen = false; }
         if (_expanded) NoticesPageShown();
     }
 
@@ -372,11 +373,11 @@ public partial class MainWindow
         grid.Children.Add(plate);
         var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
         Grid.SetColumn(texts, 1); grid.Children.Add(texts);
-        texts.Children.Add(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold));
+        texts.Children.Add(NoticeWindow.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold)));
         if (NoticeTimeLine(notice, now) is { } timeLine) texts.Children.Add(timeLine);
         if (notice.Body.Length > 0)
         {
-            var body = UI.Line(open ? notice.Body : NoticeText.Summary(notice.Body), 11.5, UI.Secondary);
+            var body = NoticeWindow.Directed(UI.Line(open ? notice.Body : NoticeText.Summary(notice.Body), 11.5, UI.Secondary));
             body.FontFamily = UI.PanelFont;
             if (open) { body.TextWrapping = TextWrapping.Wrap; body.TextTrimming = TextTrimming.None; }
             texts.Children.Add(body);
@@ -423,15 +424,6 @@ public partial class MainWindow
             if (e.OriginalSource is DependencyObject source && FindButton(source)) return;
             _expandedNotice = open ? null : notice.Id; RenderNotices(); e.Handled = true;
         };
-        // From the keyboard too (review 7c): Enter or Space opens or closes the row, which keeps the focus after the page is
-        // built again, so its buttons are the next Tab stops.
-        row.Focusable = true;
-        row.KeyDown += (_, e) =>
-        {
-            if (e.Key is not (Key.Enter or Key.Space) || e.OriginalSource != row) return;
-            _expandedNotice = open ? null : notice.Id; RenderNotices(); e.Handled = true;
-            Dispatcher.BeginInvoke(() => _pageRows.FirstOrDefault(r => r.Notice.Id == notice.Id).Row?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
-        };
         AutomationProperties.SetName(row, notice.AppName + ", " + notice.Title + ", " + NoticeText.Relative(notice.ReceivedAt, now));
         return row;
     }
@@ -445,7 +437,7 @@ public partial class MainWindow
     {
         var center = _app.Notices;
         return string.Join('\u0001', notice.Title, notice.Body, notice.AppName, notice.Origin, notice.Distro, notice.IconRef, notice.SourcePresent, notice.Category,
-            notice.TimeKind, NoticeClock.IsLive(notice.Timing, now), notice.ReceivedAt.UtcTicks, notice.Capabilities, center.CanOpen(notice), _expandedNotice == notice.Id,
+            notice.TimeKind, NoticeClock.IsLive(notice.Timing, now), NoticeText.Relative(notice.ReceivedAt, now), notice.Capabilities, center.CanOpen(notice), _expandedNotice == notice.Id,
             _freshNotices.Contains(notice.Id), string.Join('\u0002', notice.Actions.Select(a => a.Key + "=" + a.Label)), string.Join('\u0002', center.TimeActions(notice).Select(a => a.Key)));
     }
 

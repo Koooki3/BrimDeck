@@ -241,6 +241,18 @@ public readonly record struct MotionTiming(int HoverIn, int HoverOut, int Glide,
         return new(Ms(d * .45, 80, 450), Ms(d * .75, 120, 700), Ms(d * .6, 90, 600), Ms(d * 1.4, 240, 1400), Ms(d * 1.6, 300, 1600),
             Ms(d * .22, 40, 200), Ms(d * .5, 80, 450), Ms(d * .2, 50, 90));
     }
+
+    // What the windows use (motion-review C5): the answers to the pointer and the keyboard keep their own pace, whatever the
+    // panel's animation length, as the monitor page's hover does: the timings at the default length, with a smooth theme's
+    // hover coming and going in the monitor's hover time (Eased.Hover) times its pace. A stepped theme keeps its quick arrival
+    // and its slower, stepped way out (F14), so it still reads as mechanical.
+    public static MotionTiming For(double pace, int steps)
+    {
+        var timing = From(AnimationLength.Default, pace);
+        if (steps >= MotionSafety.StepsMin) return timing;
+        int hover = AnimationLength.Ms(Eased.Hover * 1000 * Math.Clamp(double.IsFinite(pace) ? pace : 1, MotionSafety.PaceMin, MotionSafety.PaceMax), 80, 450);
+        return timing with { HoverIn = hover, HoverOut = hover };
+    }
 }
 
 // The animation length chosen in settings (DeckSettings.AnimationDuration), in milliseconds: its default and its range, and the
@@ -262,6 +274,9 @@ public static class MotionCurve
     public static double Ease(double t, int steps) => steps >= MotionSafety.StepsMin ? Step(t, steps) : Curves.Bezier(.22, .8, .28, 1, Math.Clamp(t, 0, 1));
     // For what fades out: the slow start of Soft.InOut, or steps.
     public static double EaseOut(double t, int steps) => steps >= MotionSafety.StepsMin ? Step(t, steps) : Curves.Bezier(.45, 0, .25, 1, Math.Clamp(t, 0, 1));
+    // A hover mark leaving (motion-review F13): the soft landing what arrives takes, leaving at once, or steps. Its flat end is
+    // taken as the end, so the mark is gone exactly when its time is up rather than a rounding error later.
+    public static double HoverOut(double t, int steps) { double e = Ease(t, steps); return e > 1 - 1e-9 ? 1 : e; }
 }
 
 // Rations what reads as a flash (a glitch slice, a scan line): at most MotionSafety.PressFlashes start in any one second,

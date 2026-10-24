@@ -27,6 +27,13 @@ internal static class Soft
     // BrimDeck.Core.Eased.Seconds, and the panel itself the duration chosen in the settings. Hover is the monitor's (Eased.Hover),
     // a glide between choices the monitor's sort pill (Choose), content that moves in or out the monitor's readings (Move).
     public const int Quick = 160, Short = 240, Hover = (int)(Eased.Hover * 1000), Choose = (int)(Eased.Seconds * 750), Move = (int)(Eased.Seconds * 1000);
+    // A press (motion-review F11, F12): what shrinks under the button goes down in Press to PressScale, a pressed fill or glyph
+    // in PressFill, so the press is felt at once; both let go in Quick.
+    public const int Press = 100, PressFill = 70;
+    public const double PressScale = .96;
+    // How small content is as it steps out of or into its place (the island's compact content, motion-review F15): never so
+    // small that it reads as coming from nothing.
+    public const double Shrunk = .94;
 
     // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects", and never in high contrast. The one
     // rule for every animation in the app; MotionGate applies the same (MotionConditions.Allowed).
@@ -50,15 +57,22 @@ internal static class Soft
     }
 
     // The way back: it fades as it rises the same few DIPs, a little quicker, as the monitor page's card leaves. done runs once
-    // it has gone.
+    // it has gone. It leaves at full speed and slows, as what arrives does (motion-review F13).
     public static void Leave(UIElement element, Action done, double rise = 4)
     {
-        var fade = Fade(element.Opacity, 0, Quick, InOut);
+        var fade = Fade(element.Opacity, 0, Quick);
         fade.Completed += (_, _) => done();
         element.BeginAnimation(UIElement.OpacityProperty, fade);
         if (element.RenderTransform is not (null or MatrixTransform { Matrix.IsIdentity: true } or TranslateTransform { IsFrozen: false })) return;
         if (element.RenderTransform is not TranslateTransform shift) element.RenderTransform = shift = new TranslateTransform();
-        shift.BeginAnimation(TranslateTransform.YProperty, Fade(shift.Y, -rise, Quick, InOut));
+        shift.BeginAnimation(TranslateTransform.YProperty, Fade(shift.Y, -rise, Quick));
+    }
+
+    // A scale that answers a press: down to PressScale in Press, back in Quick.
+    public static void Pressed(ScaleTransform scale, bool down, bool animate)
+    {
+        Glide(scale, ScaleTransform.ScaleXProperty, down ? PressScale : 1, animate, down ? Press : Quick);
+        Glide(scale, ScaleTransform.ScaleYProperty, down ? PressScale : 1, animate, down ? Press : Quick);
     }
 
     // Sets a property to its new value and, when animate, glides there from where it was (Soft.Follow, Hover by default): the

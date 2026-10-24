@@ -18,6 +18,7 @@ try
     AuditWslTests.Run(Check);
     await AuditWsl2Tests.Run(Check);
     await NoticeWslOpsTests.Run(Check);
+    await NoticeWsl2OpsTests.Run(Check);
     NoticeCoreTests.Run(root, Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeTimeTests.Run(Check);
@@ -37,6 +38,7 @@ try
     ThemeMotionTests.Run(Check);
     DatePickerMotionTests.Run(Check);
     InteractionFxTests.Run(Check);
+    MotionReviewTests.Run(Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);

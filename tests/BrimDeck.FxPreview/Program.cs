@@ -180,7 +180,7 @@ internal static class Program
         {
             Preview = new()
             {
-                Clock = () => _now, Palette = () => palette, SystemTheme = system, AnimationDuration = 360,
+                Clock = () => _now, Palette = () => palette, SystemTheme = system,
                 Conditions = () => new MotionConditions(true, true, false, true, false, false, false, false, true)
             }
         };
@@ -489,7 +489,8 @@ internal static class Program
     {
         var scene = Build(palette, system);
         var fx = scene.Fx;
-        var timing = MotionTiming.From(360, system ? palette.Motion.ForSystem().Pace : palette.Motion.Pace);
+        var motion = system ? palette.Motion.ForSystem() : palette.Motion;
+        var timing = MotionTiming.For(motion.Pace, motion.Steps);
         double hi = timing.HoverIn / 1000.0, ho = timing.HoverOut / 1000.0, gl = timing.Glide / 1000.0, pin = timing.PressIn / 1000.0, pout = timing.PressOut / 1000.0, flourish = timing.Press / 1000.0;
 
         // Hover: a page button, gliding to its neighbor, then leaving; the glyph button; a list row; a media button; the card's button.

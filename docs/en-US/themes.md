@@ -110,7 +110,7 @@ How the theme moves on BrimDeck's own windows: slow ambient light on the island,
 | `sweep` `sweepOpacity` | A faint scan line passes down the surface once per period (taking 2.4 s); its strength | 6–120, 0–0.12 |
 | `flicker` `flickerDepth` | The neon sags softly once per period (taking 1.2 s); how deep | 20–300, 0–0.15 |
 
-The answers to the pointer are drawn on the control's own visible shape, never around its layout box and never following the pointer. A press answers as the button goes down, holds while it is held and completes on release (or backs out when released elsewhere); Space and Enter on a focused control press it too.
+The answers to the pointer are drawn on the control's own visible shape, never around its layout box and never following the pointer. A press answers as the button goes down, holds while it is held and completes on release (or backs out when released elsewhere); Space and Enter on a focused control press it too, without particles.
 
 | Key | Effect | Values |
 | --- | --- | --- |
@@ -120,8 +120,8 @@ The answers to the pointer are drawn on the control's own visible shape, never a
 | `pressStrength` | How strongly the press shows | 0–0.35 |
 | `particles` | What a completed press leaves for a moment, from the control's edges: `none`, `dust`, `pixel`, `spark`, `star`, `firefly`, `neon` | |
 | `trail` | How strongly those particles show; 0 shows none | 0–0.6 |
-| `focus` | A short accent where keyboard focus lands: `none`, `ring`, `glow`, `brackets`, `caret` | earlier name: `neon` = brackets |
-| `pace` | Scales the animation length chosen in settings | 0.6–1.6 |
+| `focus` | A short accent where keyboard focus lands (Tab after Tab plays it only on the first move after a pause; the others show the static focus frame): `none`, `ring`, `glow`, `brackets`, `caret` | earlier name: `neon` = brackets |
+| `pace` | Scales the pace of the theme's answers to the pointer and the keyboard (hover, press, focus, particles); independent of the expand and collapse duration in settings | 0.6–1.6 |
 | `steps` | 0 moves smoothly; 2 to 8 moves in that many hard steps, for a mechanical feel. Glitch slices and scan lines are rationed to two a second however fast the clicks come | 0, 2–8 |
 | `color` | The main mark (hover and focus) | a color key, `#RRGGBB`, or `system` (the Windows accent) |
 | `secondary` | Its second tone: a gradient's end, a shadow, a ghost or a neutral bar | as `color` |

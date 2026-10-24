@@ -123,7 +123,7 @@ public sealed class NoticeHub
             existing.AppName = input.AppName; existing.Title = title; existing.Body = body;
             existing.IconRef = input.IconRef ?? existing.IconRef; existing.Category = input.Category; existing.Priority = priority;
             existing.Progress = input.Progress; existing.Actions = [.. input.Actions]; existing.Capabilities = input.Capabilities;
-            existing.Timing = input.Timing?.Copy(); existing.Call = input.Call;
+            existing.Timing = input.Timing?.Copy(); existing.Call = input.Call; existing.Transient = input.Transient;
             existing.EventId = input.EventId ?? existing.EventId;
             // The notice now says what the latest message said, so it is as old as that message: an update shown as it arrives
             // must not read "38 min ago" from the first notice it replaced. It also keeps the list's order after a restart.
@@ -145,7 +145,8 @@ public sealed class NoticeHub
             InstanceKey = input.InstanceKey, AppKey = input.AppKey, AppName = input.AppName, AppId = input.AppId, Origin = input.Origin,
             Distro = input.Distro, ReplaceKey = input.ReplaceKey, EventId = input.EventId, Title = title, Body = body, IconRef = input.IconRef,
             CreatedAt = input.CreatedAt ?? now, ReceivedAt = now, UpdatedAt = now, Category = input.Category, Priority = priority,
-            Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy(), Call = input.Call
+            Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy(), Call = input.Call,
+            Transient = input.Transient
         };
         _notices.Insert(0, notice); _byId[notice.Id] = notice;
         Prune(now, notify: false, keep: notice);

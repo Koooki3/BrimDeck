@@ -140,7 +140,7 @@ internal static class NoticeProtocolTests
     {
         var server = new NotificationServer("1.2.0", () => "abc");
         var caps = server.Handle(Call("GetCapabilities"));
-        check("The service lists only what it implements", caps.Bus is [{ Type: DBusMessageType.MethodReturn } r] && ((IEnumerable<object>)r.Body[0]).Cast<string>().SequenceEqual(["body", "actions"]) && r.ReplySerial == 5 && r.Destination == ":1.9");
+        check("The service lists only what it implements", caps.Bus is [{ Type: DBusMessageType.MethodReturn } r] && ((IEnumerable<object>)r.Body[0]).Cast<string>().SequenceEqual(["body", "body-markup", "actions"]) && r.ReplySerial == 5 && r.Destination == ":1.9");
         var first = server.Handle(Call("Notify", FreedesktopNotifications.NotifySignature, NotifyBody()));
         var notice = first.ToBrimDeck.Single();
         check("Notify answers with a new id and passes the notice on", first.Bus.Single().Body[0] is 1u && notice.NativeId == "1" && notice.Title == "Build"

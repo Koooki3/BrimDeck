@@ -27,9 +27,16 @@ internal sealed class AgentHost
     private readonly SemaphoreSlim _expiring = new(0, 1);
     private readonly uint _uid = Native.UserId();
     private DBusConnection? _bus, _monitorBus;
+    // The address the bus connection was made to; the monitor connection goes to the same bus.
+    private string? _address;
     private string _state = AgentStates.NoBus, _detail = "";
+    // Set from just before RequestName until its answer is handled: the bus may route an application's Notify to the agent
+    // before the reply has been read, and that call is served instead of dropped (W10). Under _gate.
+    private bool _claiming;
 
-    public static async Task<int> RunAsync()
+    // idleLimit: how long the user may run nothing in the distribution before the agent ends with WslLink.IdleExitCode (W2);
+    // zero or less keeps it running until BrimDeck stops it.
+    public static async Task<int> RunAsync(TimeSpan idleLimit)
     {
         var host = new AgentHost();
         // Only frames go to standard output; anything else written there would corrupt the stream.
@@ -40,10 +47,28 @@ internal sealed class AgentHost
         var bus = host.KeepBusAsync();
         var flush = host.FlushMonitorAsync();
         var expire = host.ExpireAsync();
-        await input;
+        var idle = host.WatchIdleAsync(idleLimit);
+        bool idled = await Task.WhenAny(input, idle) == idle && await idle;
         host._stop.Cancel();
-        await Task.WhenAll(socket, bus, flush, expire).WaitAsync(TimeSpan.FromSeconds(3)).ContinueWith(_ => { });
-        return 0;
+        await Task.WhenAll(socket, bus, flush, expire, input).WaitAsync(TimeSpan.FromSeconds(3)).ContinueWith(_ => { });
+        return idled ? WslLink.IdleExitCode : 0;
+    }
+
+    // True once the user ran nothing but plumbing in the distribution at every check for limit (WslIdle); false when the
+    // agent stops first. A check that fails counts as busy: the agent never ends on what it could not read.
+    private async Task<bool> WatchIdleAsync(TimeSpan limit)
+    {
+        var clock = new IdleClock(limit);
+        int self = Environment.ProcessId;
+        while (true)
+        {
+            try { await Task.Delay(limit > TimeSpan.Zero ? WslLink.IdleCheck : Timeout.InfiniteTimeSpan, _stop.Token); }
+            catch (OperationCanceledException) { return false; }
+            bool busy;
+            try { busy = _uid == Native.Unknown || WslIdle.Busy(Native.Processes(), self, _uid); }
+            catch (Exception ex) { Console.Error.WriteLine("idle: " + ex.GetType().Name + ": " + ex.Message); busy = true; }
+            if (clock.Due(busy, DateTimeOffset.UtcNow)) return true;
+        }
     }
 
     private static string Nonce() => Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(6)).ToLowerInvariant();
@@ -52,7 +77,12 @@ internal sealed class AgentHost
     {
         // A notice's age by this distribution's clock, the same one its creation time was read from; BrimDeck cannot compare
         // that time with Windows' clock.
-        if (message.Type == NoticeTypes.Notify) NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
+        if (message.Type == NoticeTypes.Notify)
+        {
+            NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
+            // A theme icon installed as a link within the icon folders, as the file it leads to: BrimDeck reads no links (I1).
+            message.Icon = LinuxIcons.Resolve(message.Icon, Native.LinkTarget, File.Exists);
+        }
         await _outputLock.WaitAsync();
         try { await NoticeFrames.WriteAsync(_output, message); }
         catch (IOException) { _stop.Cancel(); }
@@ -108,36 +138,51 @@ internal sealed class AgentHost
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or SocketException) { }
     }
 
-    // Connects to the session bus and keeps the connection; a lost bus is tried again every 30 seconds.
+    // Connects to the session bus and keeps the connection. While there is none, the agent looks for one every BusCheck,
+    // which only reads a few file names (W6); a bus that is there but cannot be reached is tried again after 30 seconds.
     private async Task KeepBusAsync()
     {
+        const string Missing = "no session bus: DBUS_SESSION_BUS_ADDRESS is not set, and neither $XDG_RUNTIME_DIR/bus, /run/user/<uid>/bus nor ~/.dbus/session-bus has one";
         while (!_stop.IsCancellationRequested)
         {
-            var address = DBusConnection.SessionAddress(_uid);
-            if (address is null) await ReportAsync(AgentStates.NoBus, "DBUS_SESSION_BUS_ADDRESS is not set and $XDG_RUNTIME_DIR/bus does not exist");
+            var wait = WslLink.BusCheck;
+            var address = DBusConnection.SessionAddress(_uid, Native.BusLookup);
+            if (address is null)
+            {
+                // Said once, not at every look.
+                bool said;
+                lock (_gate) said = _state == AgentStates.NoBus && _detail == Missing;
+                if (!said) await ReportAsync(AgentStates.NoBus, Missing);
+            }
             else
             {
                 try
                 {
+                    _address = address;
                     _bus = await DBusConnection.ConnectAsync(address, _uid, _stop.Token);
                     _bus.Received = HandleBusAsync;
                     _bus.HandlerFailed = ex => Console.Error.WriteLine("handler: " + ex.GetType().Name + ": " + ex.Message);
                     await _bus.CallBusAsync("AddMatch", "s", NameOwnerRule);
                     await _claimLock.WaitAsync(_stop.Token);
                     try { await ClaimOrWatchAsync(); } finally { _claimLock.Release(); }
+                    long connected = Environment.TickCount64;
                     await _bus.Completion.WaitAsync(_stop.Token);
-                    // The bus went away (a restarted session bus): nothing is received until it is reached again.
+                    // The bus went away (a restarted session bus): nothing is received until it is reached again, which is
+                    // looked for again within BusCheck.
                     await ReportAsync(AgentStates.NoBus, "the session bus closed the connection");
+                    // A bus that drops the agent again at once is not asked every few seconds.
+                    if (Environment.TickCount64 - connected < 30_000) wait = TimeSpan.FromSeconds(30);
                 }
                 catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
                 // Whatever went wrong (an address that cannot be parsed included), the agent says so and tries again later.
                 catch (Exception ex)
                 {
                     await ReportAsync(AgentStates.NoBus, ex.GetType().Name + ": " + ex.Message);
+                    wait = TimeSpan.FromSeconds(30);
                 }
                 finally { await DisposeBusesAsync(); }
             }
-            try { await Task.Delay(TimeSpan.FromSeconds(30), _stop.Token); } catch (OperationCanceledException) { break; }
+            try { await Task.Delay(wait, _stop.Token); } catch (OperationCanceledException) { break; }
         }
         await DisposeBusesAsync();
     }
@@ -163,9 +208,17 @@ internal sealed class AgentHost
         // The bus may have closed meanwhile (a reclaim runs beside the reconnecting loop); the loop connects again.
         var bus = _bus ?? throw new IOException("The session bus closed.");
         const uint DoNotQueue = 4, PrimaryOwner = 1;
-        var reply = await bus.CallBusAsync("RequestName", "su", FreedesktopNotifications.Name, DoNotQueue);
-        if (reply.Body is [uint result, ..] && result == PrimaryOwner) { await ReportAsync(AgentStates.Server); return; }
-        await WatchAsync();
+        bool owner;
+        lock (_gate) _claiming = true;
+        try
+        {
+            var reply = await bus.CallBusAsync("RequestName", "su", FreedesktopNotifications.Name, DoNotQueue);
+            owner = reply.Body is [uint result, ..] && result == PrimaryOwner;
+            // Server before the claim ends, so that no call falls between the two.
+            if (owner) await ReportAsync(AgentStates.Server);
+        }
+        finally { lock (_gate) _claiming = false; }
+        if (!owner) await WatchAsync();
     }
 
     private async Task WatchAsync()
@@ -179,7 +232,7 @@ internal sealed class AgentHost
         DBusConnection? monitor = null;
         try
         {
-            var address = DBusConnection.SessionAddress(_uid) ?? throw new IOException("The session bus address is gone.");
+            var address = _address ?? throw new IOException("The session bus address is gone.");
             monitor = await DBusConnection.ConnectAsync(address, _uid, _stop.Token);
             // A new session for each service watched: a restarted service hands out its ids again (core-H2).
             lock (_gate) { _monitor.Owner = owner; _monitor.Session = "monitor-" + Nonce(); }
@@ -194,6 +247,12 @@ internal sealed class AgentHost
             await monitor.CallAsync(DBusMessage.Call(DBusConnection.BusName, DBusConnection.BusPath, "org.freedesktop.DBus.Monitoring", "BecomeMonitor", "asu",
                 NotificationMonitor.Rules.Append(NotificationMonitor.ReplyRule(owner)).Cast<object>().ToList(), 0u));
             _monitorBus = monitor;
+            // The monitor connection can end on its own while the main one stays (the bus drops a monitor that reads too
+            // slowly): watching starts again instead of reporting Monitor while nothing is seen (W13). One the agent closed
+            // itself (a reclaim, a lost bus, the agent stopping) is no longer _monitorBus by then.
+            var watched = monitor;
+            _ = watched.Completion.ContinueWith(_ => { if (!_stop.IsCancellationRequested && _monitorBus == watched) _ = RewatchAsync(watched, bus); },
+                CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             monitor = null;
             await ReportAsync(AgentStates.Monitor, owner);
         }
@@ -203,6 +262,31 @@ internal sealed class AgentHost
         }
         // A connection that did not become the monitor is released, whatever stopped it (life-L7).
         finally { if (monitor is not null) await monitor.DisposeAsync(); }
+    }
+
+    // Watches again after the monitor connection ended on its own, after a pause that grows while it keeps failing. It gives
+    // up once anything else changed: another monitor took its place, the agent became the service or was refused watching,
+    // or the main connection went (KeepBusAsync starts over then).
+    private async Task RewatchAsync(DBusConnection ended, DBusConnection bus)
+    {
+        var pause = TimeSpan.FromSeconds(2);
+        while (true)
+        {
+            try { await Task.Delay(pause, _stop.Token); await _claimLock.WaitAsync(_stop.Token); }
+            catch (OperationCanceledException) { return; }
+            try
+            {
+                string state;
+                lock (_gate) state = _state;
+                if (_bus != bus || state != AgentStates.Monitor || _monitorBus is { } current && current != ended) return;
+                await WatchAsync();
+                return;
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) { Console.Error.WriteLine("rewatch: " + ex.GetType().Name + ": " + ex.Message); }
+            finally { _claimLock.Release(); }
+            pause = TimeSpan.FromSeconds(Math.Min(60, pause.TotalSeconds * 2));
+        }
     }
 
     // Passes on the watched calls whose reply did not come in time. It sleeps while no call is held, instead of waking every
@@ -242,10 +326,12 @@ internal sealed class AgentHost
                 var wait = TimeSpan.FromMilliseconds(Math.Clamp((due.Value - DateTimeOffset.UtcNow).TotalMilliseconds, 0, int.MaxValue - 1));
                 if (wait > TimeSpan.Zero && await _expiring.WaitAsync(wait, _stop.Token)) continue;
                 // Taken off the list even while the agent is not the service (its bus lost), so the loop never spins on them.
-                IReadOnlyList<DBusMessage> closed;
+                ServiceOutput closed;
                 bool server;
                 lock (_gate) { closed = _server.Expire(DateTimeOffset.UtcNow); server = _state == AgentStates.Server; }
-                if (server && _bus is { } bus) foreach (var signal in closed) await SendBusAsync(bus, signal);
+                if (server && _bus is { } bus) foreach (var signal in closed.Bus) await SendBusAsync(bus, signal);
+                // BrimDeck hears of it either way: the notice's buttons no longer reach the application.
+                await ForwardAsync(closed.ToBrimDeck);
             }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
             catch (Exception ex) { Console.Error.WriteLine("expire: " + ex.GetType().Name + ": " + ex.Message); }
@@ -269,7 +355,12 @@ internal sealed class AgentHost
         if (message.Type != DBusMessageType.MethodCall) return;
         ServiceOutput output;
         bool expiring;
-        lock (_gate) { output = _state == AgentStates.Server ? _server.Handle(message) : ServiceOutput.None; expiring = message.Member == "Notify" && _server.NextExpiry is not null; }
+        lock (_gate)
+        {
+            // While claiming the name too (W10): the bus may route a Notify here before RequestName's reply was read.
+            output = _state == AgentStates.Server || _claiming ? _server.Handle(message) : NotificationServer.NotServing(message);
+            expiring = message.Member == "Notify" && _server.NextExpiry is not null;
+        }
         if (expiring) { try { _expiring.Release(); } catch (SemaphoreFullException) { } }
         // A reply has nowhere to go once the bus closed; the application asks again on the new connection.
         if (_bus is { } bus) foreach (var reply in output.Bus) await SendBusAsync(bus, reply);
