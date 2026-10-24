@@ -218,8 +218,8 @@ internal sealed partial class NoticeWindow : Window
         return frame;
     }
 
-    // ui-2: the panel powers off (it is hidden, or BrimDeck exits): a notice that still shows or leaves goes at once, so the
-    // island it covers draws back into the dot in sight.
+    // ui-2: the panel is hidden, or BrimDeck exits and the panel powers off: a notice that still shows or leaves goes at once,
+    // so it never plays on over a hidden panel and the island it covers draws back into the dot in sight.
     public void Vanish() { if (IsVisible) HandOver(); }
 
     private void Finish(bool reveal = false)
@@ -635,9 +635,15 @@ internal sealed partial class NoticeWindow : Window
             }
             if (notice.Progress is { } progress)
             {
+                // The fill is a share of the track itself; the card's width, padding included, overshot it.
+                double done = Math.Clamp(progress, 0, 1);
                 var track = new Grid { Height = 4, Margin = new Thickness(0, 10, 0, 0) };
-                track.Children.Add(new Border { Background = UI.Brush(PanelTheme.Hex("track")), CornerRadius = new CornerRadius(2) });
-                track.Children.Add(new Border { Background = UI.Brush(AccentHex), CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left, Width = Math.Max(4, (_detail.Width is var w && double.IsFinite(w) ? w : 364) * progress) });
+                track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 4 });
+                track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) });
+                var rail = new Border { Background = UI.Brush(PanelTheme.Hex("track")), CornerRadius = new CornerRadius(2) };
+                Grid.SetColumnSpan(rail, 2);
+                track.Children.Add(rail);
+                track.Children.Add(new Border { Background = UI.Brush(AccentHex), CornerRadius = new CornerRadius(2) });
                 AutomationProperties.SetName(track, Loc.T($"进度 {progress:P0}", $"Progress {progress:P0}"));
                 stack.Children.Add(track);
             }

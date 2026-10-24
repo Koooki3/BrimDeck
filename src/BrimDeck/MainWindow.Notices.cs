@@ -375,9 +375,16 @@ public partial class MainWindow
         texts.Children.Add(UI.Fixed(meta, 10.5, 16, UI.Tertiary));
         if (notice.Progress is { } progress)
         {
-            var track = new Grid { Height = 3, Margin = new Thickness(0, 4, 0, 0) };
-            track.Children.Add(new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(1.5) });
-            track.Children.Add(new Border { Background = UI.Brush(UI.Accent), CornerRadius = new CornerRadius(1.5), HorizontalAlignment = HorizontalAlignment.Left, Width = Math.Max(3, 200 * progress) });
+            // The fill is a share of the track, which is as wide as the row's texts: a fixed 200 DIP left a finished task
+            // two thirds full.
+            double done = Math.Clamp(progress, 0, 1);
+            var track = new Grid { Height = 3, Margin = new Thickness(0, 4, 0, 0), MinWidth = 3 };
+            track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 3 });
+            track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) });
+            var rail = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(1.5) };
+            Grid.SetColumnSpan(rail, 2);
+            track.Children.Add(rail);
+            track.Children.Add(new Border { Background = UI.Brush(UI.Accent), CornerRadius = new CornerRadius(1.5) });
             texts.Children.Add(track);
         }
         if (open)

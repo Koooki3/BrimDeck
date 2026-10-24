@@ -236,8 +236,11 @@ public sealed partial class SettingsWindow
         popup.Child = ColorPicker(color, own is null, value =>
         {
             popup.IsOpen = false;
-            Change(s => Reading(s, item).SetColor(level, value.Length > 0 ? value : null, channel));
-            refreshed();
+            PopupMotion.AfterClose(() =>
+            {
+                Change(s => Reading(s, item).SetColor(level, value.Length > 0 ? value : null, channel));
+                refreshed();
+            });
         });
         TogglePopup(button, popup);
         return button;

@@ -202,7 +202,7 @@ public sealed partial class SettingsWindow
         // A menu opened from code is not in the window's tree and would take the application's dark menu colors; it takes
         // the settings palette instead, as the settings' drop-down lists do.
         menu.Resources["MenuSurface"] = UI.Brush(_palette.Popup);
-        menu.Resources["MenuInk"] = UI.Brush(_palette.Primary);
+        menu.Resources["MenuInk"] = menu.Resources["MenuInkHover"] = UI.Brush(_palette.Primary);
         menu.Resources["MenuEdge"] = UI.Brush(_palette.Border);
         menu.Resources["MenuHover"] = UI.Brush(_palette.Dark ? "#25252B" : "#E8E9EF");
         menu.Resources["MenuRule"] = UI.Brush(_palette.Divider);

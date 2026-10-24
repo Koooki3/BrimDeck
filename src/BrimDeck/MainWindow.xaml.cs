@@ -218,6 +218,8 @@ public partial class MainWindow : Window
             _hover.Stop(); _leave.Stop(); _pointerInside = false;
             // Nothing briefly shows on a hidden panel; what shows ends now, and arriving notices wait in the recent notices.
             _app.Notices?.DeckHidden(this);
+            // Hiding is immediate, so the notice window goes at once too, rather than playing its return over a full-screen app.
+            _noticeWindow?.Vanish();
             // A boot cut short here never reaches its own reset: the dot's lift and squash would hold their last frame and
             // squash the whole surface once it shows again (without a boot).
             ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
