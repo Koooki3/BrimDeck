@@ -148,6 +148,9 @@ public static partial class PanelThemes
             merged.Glass.Tint = glass.Tint ?? merged.Glass.Tint;
             merged.Glass.Edge = glass.Edge ?? merged.Glass.Edge;
             merged.Glass.Highlight = glass.Highlight ?? merged.Glass.Highlight;
+            merged.Glass.BlurOpacity = glass.BlurOpacity ?? merged.Glass.BlurOpacity;
+            merged.Glass.Backdrop = glass.Backdrop ?? merged.Glass.Backdrop;
+            merged.Glass.Saturation = glass.Saturation ?? merged.Glass.Saturation;
         }
     }
 
@@ -160,6 +163,13 @@ public static partial class PanelThemes
         PanelGlass? glass = effects.Glass is { Tint: { } tintText } glassFile && ThemeColor.TryParse(tintText, out var tint) && tint.A is > 0 and < 255
             ? new PanelGlass(tint, Fit(glassFile.Edge, 0, 1, .5), glassFile.Highlight is { } light && ThemeColor.TryParse(light, out var highlight) ? highlight : ThemeColor.White)
             : null;
+        // The held blur: a band of at least a tenth, and a tint thinner over it.
+        if (glass is not null && effects.Glass!.BlurOpacity is { } blurOpacity && double.IsFinite(blurOpacity) && blurOpacity < 1
+            && effects.Glass.Backdrop is [var low, var high] && double.IsFinite(low) && double.IsFinite(high))
+        {
+            low = Math.Clamp(low, 0, .9); high = Math.Clamp(high, low + .1, 1);
+            glass = glass with { BlurOpacity = Math.Clamp(blurOpacity, 0, 1), Low = low, High = high, Saturation = Fit(effects.Glass.Saturation, 1, 2, 1) };
+        }
         double pixel = Math.Round(Fit(effects.Pixel, 0, 4, 0));
         // The texture is part of pixel art: without blocks there is nothing to mottle.
         double texture = pixel > 0 ? Fit(effects.Texture, 0, .12, 0) : 0;

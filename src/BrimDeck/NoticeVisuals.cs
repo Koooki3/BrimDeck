@@ -69,6 +69,9 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public static readonly DependencyProperty BottomRadiusProperty = Register(nameof(BottomRadius), 0d);
     public static readonly DependencyProperty ShoulderProperty = Register(nameof(Shoulder), 0d);
     public static readonly DependencyProperty IslandOpacityProperty = Register(nameof(IslandOpacity), 0d);
+    // The surface's opacity: below 1 while a held blur lies under glass (GlassBackdrop.HeldChanged).
+    public static readonly DependencyProperty FillOpacityProperty = DependencyProperty.Register(nameof(FillOpacity), typeof(double), typeof(NoticeSurface),
+        new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty IslandColorProperty = DependencyProperty.Register(nameof(IslandColor), typeof(Color), typeof(NoticeSurface),
         new FrameworkPropertyMetadata(Colors.Black, FrameworkPropertyMetadataOptions.AffectsRender));
     private static DependencyProperty Register(string name, double value) => DependencyProperty.Register(name, typeof(double), typeof(NoticeSurface),
@@ -78,6 +81,7 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public double BottomRadius { get => (double)GetValue(BottomRadiusProperty); set => SetValue(BottomRadiusProperty, value); }
     public double Shoulder { get => (double)GetValue(ShoulderProperty); set => SetValue(ShoulderProperty, value); }
     public double IslandOpacity { get => (double)GetValue(IslandOpacityProperty); set => SetValue(IslandOpacityProperty, value); }
+    public double FillOpacity { get => (double)GetValue(FillOpacityProperty); set => SetValue(FillOpacityProperty, value); }
     public Color IslandColor { get => (Color)GetValue(IslandColorProperty); set => SetValue(IslandColorProperty, value); }
     // Drawn with the look's material, or only its fill (Shadow: the black copy that casts a shadow behind the notice).
     public NoticeLook? Look { get => _look; set { _look = value; _fill = null; _rim = null; _edge = null; _key = null; InvalidateArrange(); InvalidateVisual(); } }
@@ -128,7 +132,10 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
         var outline = Outline();
         if (outline.IsEmpty() || _look is not { } look) return;
         _fill ??= Freeze(_fillOverride ?? new SolidColorBrush(look.Surface));
+        double fillOpacity = Math.Clamp(FillOpacity, 0, 1);
+        if (fillOpacity < 1) drawing.PushOpacity(fillOpacity);
         drawing.DrawGeometry(_fill, null, outline);
+        if (fillOpacity < 1) drawing.Pop();
         if (!MaterialHidden)
         {
             if (look.Gradient is { } gradient) drawing.DrawGeometry(gradient, null, outline);

@@ -102,6 +102,9 @@
     // Glass: remove the "//" to make the surface a tint over the desktop instead of a solid color. Text is held to its minimums
     // over the tint on both a black and a white desktop, so a light tint needs to be fairly dense (about 75 %). "surface" above
     // is drawn instead where Windows' transparency effects are off. edge: 0 to 1, the light along the inner edge.
+    // Over Windows' blur the glass can be clearer: "backdrop": [low, high] (0 to 1) holds the blurred desktop to that band of
+    // brightness, "saturation" (1 to 2) deepens its colors, and "blurOpacity" (0 to 1) is the part of the tint's alpha kept
+    // over it. Text is held to its minimums over that thinner tint on the band too, so a light glass wants a high band.
     // , "glass": { "tint": "#C2F7F9FC", "edge": 0.6, "highlight": "#FFFFFF" }
   },
 

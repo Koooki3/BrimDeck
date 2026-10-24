@@ -58,7 +58,7 @@ public static partial class PanelThemes
         text = Regex.Replace(text, @"""rimGradient"": \[\]", "\"rimGradient\": " + ColorList(effects.RimGradient));
         // Glass is written out in place of the template's commented example.
         if (effects.Glass is { } glass)
-            text = Regex.Replace(text, @"// , ""glass"": \{[^}]*\}", $"\"glass\": {{ \"tint\": \"{glass.Tint}\", \"edge\": {glass.Edge.ToString("0.###", CultureInfo.InvariantCulture)}, \"highlight\": \"{glass.Highlight}\" }}")
+            text = Regex.Replace(text, @"// , ""glass"": \{[^}]*\}", GlassJson(glass))
                 .Replace("\"texture\": 0 ", "\"texture\": 0,", StringComparison.Ordinal);
         foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines), ("pixel", effects.Pixel), ("texture", effects.Texture) })
             text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {value.ToString("0.###", CultureInfo.InvariantCulture)}");
@@ -89,6 +89,14 @@ public static partial class PanelThemes
         members.Add("\"night\": " + Indent(json.ToJsonString(Json)));
         int end = text.LastIndexOf('}');
         return end < 0 ? text : text[..end].TrimEnd() + ",\n  " + string.Join(",\n  ", members) + "\n}\n";
+    }
+
+    private static string GlassJson(PanelGlass glass)
+    {
+        static string N(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+        var text = $"\"glass\": {{ \"tint\": \"{glass.Tint}\", \"edge\": {N(glass.Edge)}, \"highlight\": \"{glass.Highlight}\"";
+        if (glass.Held) text += $", \"blurOpacity\": {N(glass.BlurOpacity)}, \"backdrop\": [{N(glass.Low)}, {N(glass.High)}], \"saturation\": {N(glass.Saturation)}";
+        return text + " }";
     }
 
     // Every palette has every token and, from the dark theme it is built on, every app color.

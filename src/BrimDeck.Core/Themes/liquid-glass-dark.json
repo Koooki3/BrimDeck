@@ -75,7 +75,9 @@
     "shadowBlur": 24,
     "shadowDepth": 6,
     "shadowOpacity": 0.42,
-    "glass": { "tint": "#C8121419", "edge": 0.45, "highlight": "#E8F2FF" }
+    // Over Windows' blur the backdrop is held dark (at most 28 % brightness) with its colors half again as saturated, so the
+    // tint keeps under a sixth of its alpha there and what lies behind glows through as deep color.
+    "glass": { "tint": "#C8121419", "edge": 0.45, "highlight": "#E8F2FF", "blurOpacity": 0.15, "backdrop": [0, 0.28], "saturation": 1.5 }
   },
   "motion": {
     "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 26, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },

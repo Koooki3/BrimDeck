@@ -24,6 +24,10 @@ namespace BrimDeck;
 // Nothing here draws while the island is still: the composition content is static, and only DWM's own blur of the desktop
 // behind runs. Where Windows cannot draw it (transparency effects off, high contrast, battery saver, a remote session, an older
 // Windows, any failure) there is no blur and the glass stays clear.
+//
+// A theme may hold the blur to a band of brightness (PanelGlass.Held, GlassEffect): its tint can then be thinner over the blur
+// than over the bare desktop. HeldChanged tells the island when the blur is there for that, as it fades in and before it goes, so
+// the tint thins and thickens with it.
 internal sealed class GlassBackdrop : IDisposable
 {
     // The blur comes back as the island's own motion lands (Soft.Out's curve), soon after it has held still.
@@ -42,6 +46,13 @@ internal sealed class GlassBackdrop : IDisposable
     // is shown or on its way in.
     private Key? _placed, _pending;
     private bool _visible, _disposed;
+    // The glass the sprite's brush was made for, and whether that brush holds the blur to its band (the effect may be refused).
+    private Core.PanelGlass? _brushFor;
+    private bool _brushHolds, _held;
+
+    // The blur is (true) or is no longer (false) held under the island, over the given milliseconds: the tint may thin to
+    // PanelTheme.HeldOpacity, or must be whole again. False comes as the blur starts to go, at 0 ms when it goes at once.
+    public event Action<bool, int>? HeldChanged;
 
     private readonly record struct Key(int X, int Y, int Width, int Height, CornerRadius Corners, double Shoulder, double Scale);
 
@@ -68,6 +79,8 @@ internal sealed class GlassBackdrop : IDisposable
         if (_disposed) return;
         var key = Wanted() ? Measure() : null;
         if (key is null) { _pending = null; _settle.Stop(); Hide(); return; }
+        // Another glass (a theme change): the blur is made again for it.
+        if (_placed is not null && !Equals(_brushFor, PanelTheme.Current.Effects.Glass)) Hide();
         if (key == _pending || key == _placed && _visible && !_settle.IsEnabled) return;
         // The island moved or changed shape: out of the way now, back when it holds still. A blur still lying inside the new
         // shape fades; one that would stick out goes at once.
@@ -117,7 +130,8 @@ internal sealed class GlassBackdrop : IDisposable
         {
             Place(key);
             _placed = key;
-            if (!_visible) { _visible = true; Fade(1, FadeInMs); }
+            Dress();
+            if (!_visible) { _visible = true; Fade(1, FadeInMs); Held(_brushHolds, FadeInMs); }
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException)
         {
@@ -166,12 +180,40 @@ internal sealed class GlassBackdrop : IDisposable
     {
         if (!_visible) return;
         _visible = false;
+        Held(false, FadeOutMs);
         Fade(0, FadeOutMs);
+    }
+
+    private void Held(bool held, int milliseconds)
+    {
+        if (held == _held) return;
+        _held = held;
+        HeldChanged?.Invoke(held, Soft.Enabled ? milliseconds : 0);
+    }
+
+    // The sprite's brush for the theme's glass: the blur held to its band where the theme asks for it and Windows takes the
+    // effect, else the blur as it comes.
+    private void Dress()
+    {
+        var glass = PanelTheme.Current.Effects.Glass;
+        if (_sprite is null || Equals(glass, _brushFor) && _sprite.Brush is not null || Composition.Compositor is not { } compositor) return;
+        _brushFor = glass;
+        _brushHolds = false;
+        if (glass is { Held: true })
+            try
+            {
+                _sprite.Brush = GlassEffect.Brush(compositor, glass.Low, glass.High, glass.Saturation);
+                _brushHolds = true;
+                return;
+            }
+            catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or InvalidCastException) { }
+        _sprite.Brush = compositor.CreateHostBackdropBrush();
     }
 
     private void Hide()
     {
         _visible = false;
+        Held(false, 0);
         if (_placed is null) return;
         _placed = null;
         if (_sprite is not null) { _sprite.StopAnimation("Opacity"); _sprite.Opacity = 0; }
@@ -214,7 +256,6 @@ internal sealed class GlassBackdrop : IDisposable
             _target = Composition.Target(_window.Handle);
             var root = compositor.CreateContainerVisual(); root.RelativeSizeAdjustment = Vector2.One;
             _sprite = compositor.CreateSpriteVisual(); _sprite.RelativeSizeAdjustment = Vector2.One; _sprite.Opacity = 0;
-            _sprite.Brush = compositor.CreateHostBackdropBrush();
             _clip = compositor.CreateRoundedRectangleGeometry();
             _sprite.Clip = compositor.CreateGeometricClip(_clip);
             root.Children.InsertAtTop(_sprite);

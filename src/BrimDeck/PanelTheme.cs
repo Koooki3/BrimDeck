@@ -227,9 +227,19 @@ internal static class PanelTheme
         get
         {
             var color = SurfaceColor;
-            if (GlassShown) color.A = (byte)Math.Min(255, color.A + (255 - color.A) * .35);
+            if (GlassShown) color.A = (byte)Math.Min(255, color.A + (255 - color.A) * Thicker);
             return color;
         }
+    }
+    private const double Thicker = .35;
+    // Over a held blur (GlassBackdrop.HeldChanged) the tint thins to the theme's blur opacity: the opacity of the brush drawing
+    // SurfaceColor (or PanelSurfaceColor when open) that gives it. 1 for a theme without a held blur.
+    public static double HeldOpacity(bool open)
+    {
+        if (!GlassShown || Current.Effects.Glass is not { Held: true } glass) return 1;
+        double whole = glass.Tint.A / 255d, thin = glass.BlurTint.A / 255d;
+        if (open) { whole += (1 - whole) * Thicker; thin += (1 - thin) * Thicker; }
+        return whole > 0 ? thin / whole : 1;
     }
     // What the panel's text asks for: ClearType over an opaque surface; over glass, where the layered window has no opaque
     // pixels under the text, ClearType would wash the text out, so WPF chooses (grayscale there).

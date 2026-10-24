@@ -91,4 +91,11 @@ public sealed class PanelThemeGlass
     public string? Tint { get; set; }
     public double? Edge { get; set; }
     public string? Highlight { get; set; }
+    // Over Windows' blur the backdrop can be held to a band of brightness, so the glass can be clearer there: the blur's colors
+    // are saturated by Saturation (1 to 2) and its brightness brought into Backdrop [low, high] (0 to 1), and the tint over it
+    // keeps BlurOpacity (0 to 1) of its alpha. Text is held to its minimums over that thinner tint on that band too. Without
+    // these the blur is used as it comes, under the whole tint.
+    public double? BlurOpacity { get; set; }
+    public List<double>? Backdrop { get; set; }
+    public double? Saturation { get; set; }
 }

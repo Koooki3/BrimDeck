@@ -76,7 +76,9 @@
     "shadowBlur": 22,
     "shadowDepth": 4,
     "shadowOpacity": 0.2,
-    "glass": { "tint": "#E0F8FAFD", "edge": 0.6, "highlight": "#FFFFFF" }
+    // Over Windows' blur the backdrop is held bright (85 % to full brightness) and its colors doubled in saturation, so the tint
+    // keeps a fifth of its alpha there: what lies behind shows through as soft color, never darker than the glass over black.
+    "glass": { "tint": "#E0F8FAFD", "edge": 0.6, "highlight": "#FFFFFF", "blurOpacity": 0.2, "backdrop": [0.85, 1], "saturation": 2 }
   },
   // The glint drifts once around the rim in about half a minute; nothing else moves on its own. A hovered control catches
   // light at its top like a glass bead, a press squashes that light like a drop of glass and springs it back, and keyboard

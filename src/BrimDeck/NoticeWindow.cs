@@ -77,6 +77,7 @@ internal sealed partial class NoticeWindow : Window
         // The blur under a glass notice, as under the island: off while the notice is still the indicator's color or moving.
         _blur = new GlassBackdrop(this, _surface, () => (new CornerRadius(_surface.TopRadius, _surface.TopRadius, _surface.BottomRadius, _surface.BottomRadius),
             _surface.Shoulder, _surface.IslandOpacity <= .001));
+        _blur.HeldChanged += (held, milliseconds) => Tracks.Animate(_surface, NoticeSurface.FillOpacityProperty, held ? PanelTheme.HeldOpacity(false) : 1, milliseconds, new(0, 1), Soft.Out);
         AutomationProperties.SetName(_surface, Loc.T("灵动提示", "Dynamic notice"));
         _toast.HorizontalAlignment = HorizontalAlignment.Center; _toast.VerticalAlignment = VerticalAlignment.Center;
         _detail.HorizontalAlignment = HorizontalAlignment.Center; _detail.VerticalAlignment = VerticalAlignment.Top;
