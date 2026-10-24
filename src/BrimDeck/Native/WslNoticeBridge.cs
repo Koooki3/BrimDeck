@@ -372,7 +372,8 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
             }
             _lastError = null;
             // A line at a time, each held to 200 characters however long the agent makes it (S8).
-            _ = BoundedLines.ReadAsync(process.StandardError.BaseStream, 200, line => _lastError = line);
+            // Shown on the settings page: cleaned as other text from the distribution is (L9).
+            _ = BoundedLines.ReadAsync(process.StandardError.BaseStream, 200, line => _lastError = NoticeProtocol.Clip(line, 200));
             _ = ReadAsync(process);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -455,11 +456,12 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
     }
 
     // Says why the install script failed (C-L7), and waits RepeatedInstallFailure when it failed the same way for the same
-    // agent file last time (P3).
+    // agent file last time (P3). Only a failure that will recur by itself counts (M4): the folder refused (3), the copy differing
+    // (4), no hashing tool (5). A timeout (a cold start of WSL) or another code (a full disk, a failed read) is retried as usual.
     private void InstallFailed(string hash, int? code)
     {
         bool repeated;
-        lock (_gate) { repeated = _installFailure == (hash, code); _installFailure = (hash, code); }
+        lock (_gate) { repeated = code is 3 or 4 or 5 && _installFailure == (hash, code); _installFailure = (hash, code); }
         Retry(InstallFailure(code), repeated ? RepeatedInstallFailure : null);
     }
 
