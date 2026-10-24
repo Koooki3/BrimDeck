@@ -147,5 +147,5 @@ internal static class MusicTests
         }
     }
     // The collapsed row and the quota notice: see CompactRowTests.
-    private static void CompactLayout(Action<string, bool> check) => CompactRowTests.Run(check);
+    private static void CompactLayout(Action<string, bool> check) { CompactRowTests.Run(check); CompactSpacingTests.Run(check); }
 }

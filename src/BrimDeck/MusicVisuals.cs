@@ -156,8 +156,16 @@ internal sealed class MusicMarquee : FrameworkElement
     public string Text
     {
         get => _text;
-        set { if (_text == value) return; _text = value; _scroll.Follow(value); ResetText(); AutomationProperties.SetName(this, value); }
+        set
+        {
+            if (_text == value) return;
+            _text = value; _scroll.Follow(value); ResetText(); AutomationProperties.SetName(this, value);
+            // The collapsed row sizes the title's room to its text (TextWidth), so a new line places the row again.
+            (VisualTreeHelper.GetParent(this) as UIElement)?.InvalidateArrange();
+        }
     }
+    // The width the text takes on one line, in DIPs.
+    public double TextWidth => _text.Length == 0 ? 0 : Formatted.Width;
     public double FontSize
     {
         get => _fontSize;
