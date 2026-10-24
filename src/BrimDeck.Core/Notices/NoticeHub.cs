@@ -299,20 +299,21 @@ public sealed class NoticeHub
         // A notice ages from its last change (a timer that rang, a stopwatch stopped: core-H1). A reminder BrimDeck still has
         // to give and a stopwatch still running stay past the retention and past the count limit; beyond the limit the oldest
         // of the others go (core-L2).
-        _notices.RemoveAll(n => LastChange(n) < limit && !Pending(n, now));
+        // Each dropped notice leaves the index as it goes (review 9: with a full list every notice of a burst re-indexed it all).
+        bool Drop(Notice notice) { _byId.Remove(notice.Id); return true; }
+        _notices.RemoveAll(n => LastChange(n) < limit && !Pending(n, now) && Drop(n));
         for (int i = _notices.Count - 1; i >= 0 && _notices.Count > MaxCount; i--)
-            if (!Pending(_notices[i], now) && _notices[i] != keep) _notices.RemoveAt(i);
+            if (!Pending(_notices[i], now) && _notices[i] != keep) { Drop(_notices[i]); _notices.RemoveAt(i); }
         // The pending ones have their own limit (C-M3).
         var pending = _notices.Where(n => Pending(n, now)).ToList();
         if (pending.Count > MaxPending)
         {
             var dropped = Excess(pending, pending.Count - MaxPending, keep);
-            _notices.RemoveAll(dropped.Contains);
+            _notices.RemoveAll(n => dropped.Contains(n) && Drop(n));
             PendingDropped?.Invoke(dropped.Count);
         }
         foreach (var stale in _apps.Values.Where(app => app.LastSeen < now - TimeSpan.FromDays(30)).Select(app => app.Key).ToList()) _apps.Remove(stale);
         bool changed = _notices.Count != before;
-        if (changed) Reindex();
         if (changed && notify) { Recount(); Changed?.Invoke(); Persist?.Invoke(false); }
         return changed;
     }

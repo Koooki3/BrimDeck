@@ -679,7 +679,9 @@ internal sealed partial class NoticeWindow : Window
             if (notice.Body.Length > 0)
             {
                 var body = Wrapped(notice.Body, 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0));
-                stack.Children.Add(new ScrollViewer { Content = body, MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 4, 0, 0), Focusable = false });
+                stack.Children.Add(new ScrollViewer { Content = body, MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 4, 0, 0),
+                    // Reachable with Tab in keyboard mode, so a long body scrolls with the arrows and page keys (review 7b).
+                    Focusable = true, IsTabStop = true });
             }
             if (notice.Progress is { } progress)
             {
@@ -742,6 +744,12 @@ internal sealed partial class NoticeWindow : Window
         var block = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = size, FontWeight = weight, Foreground = UI.Brush(color), TextWrapping = TextWrapping.Wrap, Margin = margin, LineHeight = Math.Round(size * 1.4) };
         if (maxLines > 0) { block.MaxHeight = block.LineHeight * maxLines; block.TextTrimming = TextTrimming.CharacterEllipsis; }
         return block;
+    }
+
+    private void AnnounceNow(object? sender, EventArgs e)
+    {
+        _announceLater?.Stop();
+        if (_item is not null && !_leaving) Announce();
     }
 
     private Button GlyphButton(string glyph, string name, Action click)
@@ -939,9 +947,24 @@ internal sealed partial class NoticeWindow : Window
     }
 
     // Screen readers hear the new notice once, politely, without the window taking focus.
+    // A burst would queue dozens of announcements that go on long after the notice left (review 9): at most one a second,
+    // and the latest words once the burst pauses.
+    private static readonly TimeSpan AnnounceSpacing = TimeSpan.FromSeconds(1);
+    private DateTime _announcedAt;
+    private System.Windows.Threading.DispatcherTimer? _announceLater;
+
     private void Announce()
     {
         if (_announced is null || !AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged)) return;
+        var wait = _announcedAt + AnnounceSpacing - DateTime.UtcNow;
+        if (wait > TimeSpan.Zero)
+        {
+            _announceLater ??= new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background, Dispatcher);
+            _announceLater.Tick -= AnnounceNow; _announceLater.Tick += AnnounceNow;
+            if (!_announceLater.IsEnabled) { _announceLater.Interval = wait; _announceLater.Start(); }
+            return;
+        }
+        _announcedAt = DateTime.UtcNow;
         (UIElementAutomationPeer.FromElement(_announced) ?? UIElementAutomationPeer.CreatePeerForElement(_announced))?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }
 }

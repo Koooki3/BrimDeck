@@ -68,6 +68,16 @@ internal static class NoticeOpsTests
             && hub.Notices[1].ReceivedAt == T0 && hub.Notices[1].UpdatedAt == T0.AddSeconds(2));
         hub.Receive(Task("a", 1), T0.AddSeconds(3));
         check("Notices ops: a finished task moves to the top", hub.Notices[0].Title == "a" && hub.Notices[0].ReceivedAt == T0.AddSeconds(3));
+
+        // Review 9: pruning keeps the index right without rebuilding it.
+        var full = new NoticeHub { MaxCount = 3 };
+        var ids = new List<string>();
+        for (int i = 0; i < 6; i++)
+            ids.Add(full.Receive(new NoticeInput { Origin = NoticeOrigin.Cli, AppKey = "cli:x", AppName = "x", InstanceKey = "cli:n" + i, Title = "n" + i }, T0.AddSeconds(i)).Notice!.Id);
+        check("Notices ops: notices dropped over the limit leave the index, kept ones stay", full.Notices.Count == 3
+            && ids.Take(3).All(id => full.Find(id) is null) && ids.Skip(3).All(id => full.Find(id) is not null));
+        full.Prune(T0.AddDays(2));
+        check("Notices ops: notices past the retention leave the index", full.Notices.Count == 0 && ids.All(id => full.Find(id) is null));
     }
 
     private static NoticeInput Toast(uint id) => new()
