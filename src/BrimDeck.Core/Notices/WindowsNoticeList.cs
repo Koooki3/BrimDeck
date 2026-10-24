@@ -44,6 +44,9 @@ public sealed class WindowsNoticeList(TimeSpan longestUnknownWait)
         if (baseline != WindowsNoticeBaseline.None) UnknownWait = FirstUnknownWait;
     }
 
+    // The ids of a reading not seen yet, the ones Compare will ask to read.
+    public List<uint> Unknown(IEnumerable<uint> ids) => ids.Where(id => !_known.ContainsKey(id)).Distinct().ToList();
+
     // Compares a reading (the listed ids in Windows' order) with what was seen. read gives a new id's notice, or null for one
     // that cannot be read or is not handed over; it is called once per new id. Arrived and Missed are oldest first, so the
     // newest ends up on top of the recent notices; a notice that took the place of a removed one names it (Replaces).

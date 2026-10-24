@@ -50,6 +50,8 @@ internal sealed partial class NoticeWindow : Window
     // What the details were built from apart from a task's progress (DetailKey), and the progress track's two columns, so that
     // progress alone changes in place: rebuilding the card under the pointer lost clicks, focus and the body's scroll.
     private string? _detailKey;
+    // The window that had the keyboard before the notices hotkey (EnterKeyboard), to give it back.
+    private IntPtr _previousForeground;
     private ColumnDefinition? _progressDone, _progressLeft;
     private FrameworkElement? _progressTrack;
     private bool _dressed;
@@ -408,11 +410,14 @@ internal sealed partial class NoticeWindow : Window
         if (Indicator) height -= 4;
         var (padding, plate) = ToastMetrics(height);
         double text = Math.Max(Measure(title, 12.5, FontWeights.SemiBold), summary.Length > 0 ? Measure(summary, 11.5, FontWeights.Normal) : 0);
-        // In 16 DIP steps, so that titles of nearly the same length give the same width.
-        return new Size(Math.Ceiling((padding * 2 + plate + 10 + text + TrailingWidth()) / 16) * 16, height);
+        // In 16 DIP steps, so that titles of nearly the same length give the same width. The text column has 10 DIP before it
+        // and 6 after it (BuildToast).
+        return new Size(Math.Ceiling((padding * 2 + plate + 16 + text + TrailingWidth()) / 16) * 16, height);
     }
 
-    private double TrailingWidth() => _item is { Count: > 1 } ? 30 : Notice?.Progress is not null || HasCountdownRing(Notice) ? 26 : 12;
+    // The count chip is as wide as its number with its padding (at least 22); the progress ring and the dot take fixed room.
+    private double TrailingWidth() => _item is { Count: > 1 } item ? Math.Max(22, Measure(item.Count > 99 ? "99+" : item.Count.ToString(Loc.Culture), 11, FontWeights.SemiBold) + 12)
+        : Notice?.Progress is not null || HasCountdownRing(Notice) ? 26 : 12;
 
     // Live says the summary is the live words about the notice's time (NoticeWindow.Time.cs), worked out once here: read twice,
     // a second could pass between the two and the countdown would stop (ui-7).
@@ -428,10 +433,11 @@ internal sealed partial class NoticeWindow : Window
         return (title, summary, live is not null);
     }
 
-    private static double Measure(string text, double size, FontWeight weight)
+    // Measured at the window's own scale: the window draws text in display mode, whose glyph widths round to device pixels.
+    private double Measure(string text, double size, FontWeight weight)
     {
         if (text.Length == 0) return 0;
-        var formatted = new FormattedText(text, Loc.Culture, FlowDirection.LeftToRight, new Typeface(UI.PanelFont, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.White, 1.25);
+        var formatted = new FormattedText(text, Loc.Culture, FlowDirection.LeftToRight, new Typeface(UI.PanelFont, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip);
         return Math.Ceiling(formatted.WidthIncludingTrailingWhitespace);
     }
 
@@ -757,9 +763,18 @@ internal sealed partial class NoticeWindow : Window
         var button = new Button { Content = face, Margin = new Thickness(8, 0, 0, 0), MinHeight = 32, Cursor = Cursors.Hand, FocusVisualStyle = null,
             Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
         // One hover look at a time: the theme's mark (InteractionFx) when it answers, else this one (q-P5).
-        button.MouseEnter += (_, _) => { if (InteractionFx.AnswersHover(this)) return; if (!primary) face.Background = UI.Brush(_look.Hover); else face.Opacity = .88; };
-        button.MouseLeave += (_, _) => { face.Background = UI.Brush(rest); face.Opacity = 1; };
-        button.PreviewMouseLeftButtonDown += (_, _) => { if (!primary) face.Background = UI.Brush(_look.Pressed); };
+        // High contrast lights hover and press in the highlight color, so the label takes the highlight's text color (review 5);
+        // the glyph button's label is set after this, hence looked up when lit.
+        Brush? unlit = null;
+        void Lit(bool lit)
+        {
+            if (primary || !_look.HighContrast || face.Child is not TextBlock label) return;
+            if (lit) { unlit ??= label.Foreground; label.Foreground = UI.Brush(_look.OnAccent); }
+            else if (unlit is not null) label.Foreground = unlit;
+        }
+        button.MouseEnter += (_, _) => { if (InteractionFx.AnswersHover(this)) return; if (!primary) { face.Background = UI.Brush(_look.Hover); Lit(true); } else face.Opacity = .88; };
+        button.MouseLeave += (_, _) => { face.Background = UI.Brush(rest); face.Opacity = 1; Lit(false); };
+        button.PreviewMouseLeftButtonDown += (_, _) => { if (!primary) { face.Background = UI.Brush(_look.Pressed); Lit(true); } };
         // Only for focus moved by the keyboard: a button takes focus when clicked too, and should not then wear a ring.
         button.GotKeyboardFocus += (_, _) => { if (InputManager.Current.MostRecentInputDevice is KeyboardDevice) face.BorderThickness = new Thickness(1.5); };
         button.LostKeyboardFocus += (_, _) => face.BorderThickness = new Thickness(0);
@@ -882,7 +897,9 @@ internal sealed partial class NoticeWindow : Window
         if (!_showingDetail) OpenDetail();
         Center.Hold(_deck, true);
         _escape?.SetEnabled(false);
-        NoticeNative.SetActivatable(new WindowInteropHelper(this).Handle, true);
+        var own = new WindowInteropHelper(this).Handle;
+        if (NoticeNative.Foreground() is var previous && previous != own) _previousForeground = previous;
+        NoticeNative.SetActivatable(own, true);
         Activate();
         Dispatcher.BeginInvoke(() => (_actions?.Children.OfType<Button>().LastOrDefault() ?? FirstButton(_detail))?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
@@ -890,7 +907,11 @@ internal sealed partial class NoticeWindow : Window
     private void EndKeyboard()
     {
         _keyboard = false;
-        NoticeNative.SetActivatable(new WindowInteropHelper(this).Handle, false);
+        var own = new WindowInteropHelper(this).Handle;
+        NoticeNative.SetActivatable(own, false);
+        // At once, not after the notice's way out: keys typed meanwhile go to where the user was (review 7a).
+        NoticeNative.ReturnForeground(own, _previousForeground);
+        _previousForeground = IntPtr.Zero;
         if (_item is not null && !_surface.IsMouseOver) { LeaveDetail(); Center.Hold(_deck, false); }
     }
 

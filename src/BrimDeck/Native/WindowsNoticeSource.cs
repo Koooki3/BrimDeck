@@ -275,12 +275,18 @@ internal sealed class WindowsNoticeSource : IDisposable
             try { id = notification.Id; } catch (COMException) { continue; }
             listed.Add(id); byId.TryAdd(id, notification);
         }
+        // New notifications are read outside the lock (review 8): reading one takes several WinRT calls and the registry, and the
+        // UI thread takes the lock for every notice it shows (SetQuiet). A baseline reading after starting reads them all.
+        List<uint> fresh;
+        lock (_gate) fresh = _list.Unknown(listed);
+        var read = new Dictionary<uint, NoticeInput?>(fresh.Count);
+        foreach (var id in fresh) read[id] = Read(byId[id], id);
         WindowsNoticeList.Changes changes;
         lock (_gate)
         {
             // Stopped (and perhaps started again) while reading: this reading belongs to no run any more.
             if (_run != run) return;
-            changes = _list.Compare(listed, id => Read(byId[id], id));
+            changes = _list.Compare(listed, id => read.TryGetValue(id, out var input) ? input : Read(byId[id], id));
             if (changes.Arrived.Count + changes.Missed.Count > 0) _lastActivity = DateTimeOffset.UtcNow;
             if (_list.SkippedProbe) run.WideUntil = DateTimeOffset.UtcNow + WindowsNoticePace.WideFor;
         }
