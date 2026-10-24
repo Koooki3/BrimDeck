@@ -76,7 +76,7 @@ public partial class MainWindow
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         double font = Math.Max(1, CompactMusicLayout.Half(11.5 * scale)), line = Math.Max(1, CompactMusicLayout.Whole(16 * scale));
         var name = UI.Fixed(alert.Name, font, line, UI.Primary, FontWeights.SemiBold); name.ToolTip = alert.Name;
-        // The name keeps its 76 DIP cap with an ellipsis; below that, its region cuts it.
+        // The name keeps its 76 DIP cap with an ellipsis.
         name.MaxWidth = CompactMusicLayout.Whole(76 * scale);
         var used = UI.Fixed(Loc.T($"{alert.Label}已用 {alert.Used:0}%", $"{alert.Label}{alert.Used:0}% used"), font, line, UI.Secondary);
         string shortReset = UI.ShortReset(alert.ResetAt);

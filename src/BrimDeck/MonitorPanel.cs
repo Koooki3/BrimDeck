@@ -27,7 +27,8 @@ public partial class MainWindow
     private void UpdateMonitorDemand()
     {
         bool page = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
-        bool strip = !_expanded && _compactStrip is not null && IsVisible && !IsSuppressed && _alert is null && EffectiveStyle != CompactStyle.Line;
+        // The collapsed readings are read only while the row admits one or one is still fading out (MonitorStrip.Showing).
+        bool strip = !_expanded && _compactStrip?.Showing(Eased.Now) == true && IsVisible && !IsSuppressed && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!page)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -48,7 +49,13 @@ public partial class MainWindow
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
         Motion.Enabled = MonitorMotion;
-        if (!_expanded) { _compactStrip?.Update(snapshot); return; }
+        if (!_expanded)
+        {
+            _compactStrip?.Update(snapshot);
+            // The last reading has faded out of a row that stays as it is: the sampler may rest.
+            if (_stripShowing && _compactStrip?.Showing(Eased.Now) != true) UpdateMonitorDemand();
+            return;
+        }
         if (!IsMonitorPage || _monitorView is null) return;
         if (MonitorKey() != _monitorKey) { RenderMonitor(); return; }
         _monitorView.Update(snapshot, MonitorMotion);

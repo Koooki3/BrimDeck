@@ -212,8 +212,16 @@ internal sealed class MusicMarquee : FrameworkElement
     public string Text
     {
         get => _text;
-        set { if (_text == value) return; _text = value; ResetText(); AutomationProperties.SetName(this, value); }
+        set
+        {
+            if (_text == value) return;
+            _text = value; ResetText(); AutomationProperties.SetName(this, value);
+            // The collapsed row sizes the title's room to its text (TextWidth), so a new line places the row again.
+            (VisualTreeHelper.GetParent(this) as UIElement)?.InvalidateArrange();
+        }
     }
+    // The width the text takes on one line, in DIPs.
+    public double TextWidth => _text.Length == 0 ? 0 : Formatted.Width;
     public double FontSize
     {
         get => _fontSize;
@@ -414,7 +422,7 @@ internal sealed class MusicMarquee : FrameworkElement
 }
 
 // A region whose content is wider than it scrolls like the lyric marquee: rest at the start, glide until the end is in
-// view, rest there, then fade back to the start and begin again. The quota rings and the system readings use it.
+// view, rest there, then fade back to the start and begin again. The quota rings use it.
 internal abstract class GlideCarousel : Grid
 {
     internal const double StartHold = GlideCycle.StartHold, EndHold = GlideCycle.EndHold, Speed = GlideCycle.Speed, Fade = GlideCycle.Fade, FadeEdge = 3;
@@ -616,34 +624,5 @@ internal sealed class QuotaCarousel : GlideCarousel
         // whole at the left edge, and the last is whole before the right fade. Since the fade is at most span - ring, this
         // never moves the last ring out of the region.
         Glide(_strip, Math.Ceiling((full + fade - span) / step - 1e-6) * step, elapsed, animate);
-    }
-}
-
-// System readings wider than their region scroll through it instead of dropping readings. The strip is drawn tight (each
-// figure at its own width, MonitorStrip.Tight), so it scrolls no blanks; its width and the travel follow the readings. The
-// left fade lies outside the region, over the gap before it, so the first reading is whole at rest, and the right fade lies
-// inside, so nothing is drawn past the region toward the equalizer or the clock.
-internal sealed class ReadingsCarousel : GlideCarousel
-{
-    public ReadingsCarousel(MonitorStrip strip, double span, double edge, TimeSpan elapsed, bool animate)
-    {
-        span = Math.Max(0, span); edge = Math.Max(0, edge);
-        Rotates = span > 0;
-        Width = span + edge; Height = strip.Height; ClipToBounds = true;
-        strip.Tight = true;
-        strip.Width = strip.TightWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
-        strip.RenderTransform = new TranslateTransform();
-        Canvas.SetLeft(strip, edge);
-        // A Canvas measures the strip at its full width, as for the rings.
-        var host = new Canvas(); host.Children.Add(strip); Children.Add(host);
-        Margin = new Thickness(-edge, 0, 0, 0);
-        double fade = Math.Min(edge, span / 2);
-        OpacityMask = new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), new(Colors.White, edge / Width),
-            new(Colors.White, (Width - fade) / Width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(Width, 0)) { MappingMode = BrushMappingMode.Absolute };
-        Background = Brushes.Transparent;
-        // At the end the last reading stands whole before the right fade.
-        double TravelFor(double full) => Math.Ceiling(full + fade - span);
-        Glide(strip, TravelFor(strip.Width), elapsed, animate);
-        strip.TightWidthChanged += () => { strip.Width = strip.TightWidth; Retarget(TravelFor(strip.Width)); };
     }
 }

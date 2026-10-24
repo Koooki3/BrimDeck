@@ -193,8 +193,8 @@ static class SystemMonitorTests
             foreach (var (media, text, clock) in new[] { (false, false, 0d), (true, true, 0d), (true, true, 60d), (false, false, 60d) })
             {
                 var row = CompactMusicLayout.Calculate(CompactMusicLayout.NaturalWidth(1, media, 0, text, clock, wanted), 1, media, 0, text, clock, wanted);
-                double region = DevicePixels.Down(Math.Max(0, row.MonitorWidth - (row.MonitorAlone ? 0 : 8)), dpi);
-                fits &= CompactMonitor.Fit(chosen, Strip, 10, region) == chosen;
+                // The row admits the readings whole at its natural width (CompactMusicLayout) and places them itself.
+                fits &= row is { MonitorItems: 1 } && row.MonitorWidth == wanted;
             }
             check($"Compact monitor: every reading stays after snapping at {dpi:P0}", fits);
             check($"Compact monitor: a short row still drops upload at {dpi:P0}", CompactMonitor.Fit(chosen, Strip, 10, DevicePixels.Down(260, dpi)) == (chosen & ~CompactMonitorItems.Upload));
@@ -213,24 +213,12 @@ static class SystemMonitorTests
         }
         check("Compact rates: at most five characters", five);
         var alone = CompactMusicLayout.Calculate(300, 1, false, 0, false, 0, 120);
-        check("Compact row: readings alone take the row, centred", alone is { MonitorAlone: true, MonitorWidth: 120 });
+        check("Compact row: readings alone show whole, the rest of the row free", alone is { MonitorItems: 1, MonitorWidth: 120, Free: 180 });
         var withRings = CompactMusicLayout.Calculate(300, 1, false, 2, false, 0, 120);
-        check("Compact row: readings after the rings, with a gap", withRings is { MonitorAlone: false, MonitorWidth: 128 } && withRings.MiddleWidth == 172);
+        check("Compact row: readings after the rings, with a gap", withRings is { MonitorWidth: 120, RingWidth: 32, Free: 140 });
         var tight = CompactMusicLayout.Calculate(100, 1, false, 2, true, 0, 400);
-        // The readings keep half of the middle; one ring and the shortest lyric (30 DIP) stay in any case.
-        check("Compact row: one ring and the shortest lyric stay", tight.MonitorWidth == 50 && tight.MiddleWidth == 50
-            && CompactMusicLayout.Calculate(40, 1, false, 2, true, 0, 400) is { MonitorWidth: 10, MiddleWidth: 30 });
+        check("Compact row: readings that do not fit whole leave, the rings and the title stay", tight is { MonitorWidth: 0, MonitorItems: 0, RingWidth: 32, TextWidth: 60, MiddleWidth: 100 });
         check("Compact row: no readings, no region", CompactMusicLayout.Calculate(300, 1, true, 2, true, 40).MonitorWidth == 0);
-        bool steady = true;
-        for (double width = 60; width < 400; width++)
-            steady &= Math.Abs(CompactMusicLayout.Calculate(width + 1, 1, true, 3, true, 30, 150).MonitorWidth - CompactMusicLayout.Calculate(width, 1, true, 3, true, 30, 150).MonitorWidth) <= 1 + 1e-9;
-        check("Compact row: a DIP of width moves the readings by at most a DIP", steady);
-        // 269 DIP of readings and a 160 DIP lyric slot: the readings narrow first, then both share the middle evenly.
-        var lyricWhole = CompactMusicLayout.Calculate(400, 1, true, 0, true, 0, content);
-        var shared = CompactMusicLayout.Calculate(330, 1, true, 0, true, 0, content);
-        check("Compact row: a short middle narrows the readings before the lyric", lyricWhole.TextWidth == CompactMusicLayout.TextSlot && lyricWhole.MonitorWidth == 186);
-        check("Compact row: a shorter middle splits evenly between the readings and the lyric", shared.MonitorWidth == 138 && shared.TextWidth == 138);
-        check("Compact row: a middle wide enough gives the readings all they want", CompactMusicLayout.Calculate(600, 1, true, 0, true, 0, content).MonitorWidth == 277);
         var screen = new DipRect(0, 0, 2560, 1440); var area = new DipRect(0, 0, 2560, 1392);
         var capsule = new DeckSettings { CapsuleWidth = 196, CapsuleHeight = 32 };
         check("Compact fit: a capsule grows to its content plus its insets", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 300).Surface.Width == 332);
@@ -245,17 +233,19 @@ static class SystemMonitorTests
         check("Compact fit: the notch grows centred, the line keeps its length", CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Notch, screen, area, 1, 400) is { Surface: { Width: 460, X: 1050 } }
             && CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Line, screen, area, 1, 400).Surface.Width == CollapsedLimits.LineLengthDefault);
         var clockAndReadings = CompactMusicLayout.Calculate(300, 1, false, 0, false, 40, 120);
-        check("Compact row: beside readings the clock is not alone", clockAndReadings is { ClockAlone: false, MonitorAlone: false } && clockAndReadings.MonitorWidth == 128 && clockAndReadings.ClockWidth == 48);
+        check("Compact row: the clock and the readings side by side", clockAndReadings is { MonitorWidth: 120, ClockWidth: 40, Free: 132 });
         var low = new DeckSettings { NotchHeight = 24 };
         check("Compact fit: a low notch keeps the content clear of its shoulders", CollapsedGeometry.Resolve(low, CompactStyle.Notch, screen, area, 1, 300).Surface.Width == 356);
         double natural = CompactMusicLayout.NaturalWidth(1, true, 3, true, 40, 150);
         var fitted = CompactMusicLayout.Calculate(natural, 1, true, 3, true, 40, 150);
-        check("Compact fit: at its natural width the row shows every reading and every ring", fitted.MonitorWidth == 158 && !fitted.ScrollRings && fitted.TextWidth >= CompactMusicLayout.TextSlot);
-        check("Compact fit: the lyric keeps a fixed slot, and each piece of content adds its width",
-            CompactMusicLayout.NaturalWidth(1, true, 0, true, 0, 0) - CompactMusicLayout.NaturalWidth(1, true, 0, false, 0, 0) == CompactMusicLayout.TextSlot
-            && CompactMusicLayout.NaturalWidth(1, true, 2, true, 0, 0) > CompactMusicLayout.NaturalWidth(1, true, 1, true, 0, 0)
-            && CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 0) > CompactMusicLayout.NaturalWidth(1, true, 2, true, 0, 0)
-            && CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 150) > CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 0));
+        check("Compact fit: at its natural width the row shows every reading and every ring", fitted.MonitorWidth == 150 && !fitted.ScrollRings && fitted.TextWidth >= 48);
+        check("Compact fit: an auto-width row keeps the title a fixed slot, and each piece of content adds its width",
+            CompactMusicLayout.AutoWidth(1, true, 0, true, 0, [], 0) - CompactMusicLayout.AutoWidth(1, true, 0, false, 0, [], 0) == CompactMusicLayout.TextSlot + 8
+            && CompactMusicLayout.AutoWidth(1, true, 2, true, 0, [], 0) > CompactMusicLayout.AutoWidth(1, true, 1, true, 0, [], 0)
+            && CompactMusicLayout.AutoWidth(1, true, 2, true, 40, [], 0) > CompactMusicLayout.AutoWidth(1, true, 2, true, 0, [], 0)
+            && CompactMusicLayout.AutoWidth(1, true, 2, true, 40, [150], 8) > CompactMusicLayout.AutoWidth(1, true, 2, true, 40, [], 0));
+        var auto = CompactMusicLayout.Calculate(CompactMusicLayout.AutoWidth(1, true, 3, true, 40, [150], 8), 1, true, 3, true, 40, [150], 8);
+        check("Compact fit: at its auto width the row shows every part, the title in its slot", auto is { MonitorItems: 1, VisibleRings: 3, TextWidth: CompactMusicLayout.TextSlot });
         var engines = GpuEngines.Order([new("Copy", .1), new("3D", .4), new("Compute_0", .2), new("Compute_1", .5), new("Foo", .3)]);
         check("GPU engines: kinds folded and ordered as Task Manager", engines.Select(e => e.Kind).SequenceEqual(["3D", "Compute", "Copy", "Foo"]) && engines[1].Usage == .5);
         check("GPU engine kinds", GpuEngines.Kind("Compute_1") == "Compute" && GpuEngines.Kind("VideoDecode") == "VideoDecode" && GpuEngines.Kind("Engine_x") == "Engine_x"
