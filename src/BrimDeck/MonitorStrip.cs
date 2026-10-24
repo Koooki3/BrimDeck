@@ -22,11 +22,20 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly double _scale, _font, _dial, _gap, _row, _dpi;
     private readonly Func<CompactMonitorItems, double> _width;
     private MonitorSnapshot? _snapshot;
+    // Made once, as the strip measures and draws on every reading: the readings in order, each once, the delegates it hands to
+    // CompactMonitor (a method group or a lambda passed each time would be allocated each time), and the list they are
+    // arranged into.
+    private readonly CompactMonitorItems[] _orderOnce;
+    private readonly Func<CompactMonitorItems, double> _itemWidth, _presenceNow;
+    private readonly List<(CompactMonitorItems Item, double X, double Width, double Presence)> _arranged = [];
+    private double _now;
 
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi)
     {
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered;
         _order = [.. readings.Select(reading => reading.Item)];
+        _orderOnce = [.. _order.Distinct()];
+        _itemWidth = ItemWidth; _presenceNow = item => _presence.At(item, _now);
         _shown = CompactMonitor.Shown(readings); _values = CompactMonitor.Values(readings);
         _scale = CompactMusicLayout.SafeScale(scale);
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
@@ -79,23 +88,26 @@ internal sealed class MonitorStrip : FrameworkElement
         _actual.Clear();
         if (!_tight) return;
         var s = _snapshot;
-        double text(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace);
-        foreach (var item in CompactMonitor.Order)
+        for (int i = 0; i < CompactMonitor.Order.Count; i++)
         {
+            var item = CompactMonitor.Order[i];
             if ((Shown & item) == 0) continue;
             double? share = item switch { CompactMonitorItems.Cpu => s?.Cpu.OrDefault?.Usage, CompactMonitorItems.Memory => s?.Memory.OrDefault?.UsedFraction, CompactMonitorItems.Gpu => s?.Gpu.OrDefault?.Usage, _ => null };
             _actual[item] = item switch
             {
-                CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu when (_values & item) != 0 => _dial + Math.Round(4 * _scale) + text(GaugeFigure(share)),
-                CompactMonitorItems.Download => Math.Round(9 * _scale) + Math.Round(3 * _scale) + text(RateFigure(s?.Network.OrDefault?.DownBytesPerSecond)),
-                CompactMonitorItems.Upload => Math.Round(9 * _scale) + Math.Round(3 * _scale) + text(RateFigure(s?.Network.OrDefault?.UpBytesPerSecond)),
+                CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu when (_values & item) != 0 => _dial + Math.Round(4 * _scale) + FigureWidth(GaugeFigure(share)),
+                CompactMonitorItems.Download => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.DownBytesPerSecond)),
+                CompactMonitorItems.Upload => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.UpBytesPerSecond)),
                 _ => _width(item)
             };
         }
-        _tightWidth = DevicePixels.Up(CompactMonitor.Width(Shown, ItemWidth, _gap), _dpi);
+        _tightWidth = DevicePixels.Up(CompactMonitor.Width(Shown, _itemWidth, _gap), _dpi);
     }
+    private double FigureWidth(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace);
 
-    private static string GaugeFigure(double? share) => share is { } v ? MonitorFormat.Percent(v) + "%" : "—";
+    // Every whole percent's figure, made once: the gauges show one on every reading.
+    private static readonly string[] Percents = [.. Enumerable.Range(0, 101).Select(percent => MonitorFormat.Percent(percent / 100d) + "%")];
+    private static string GaugeFigure(double? share) => share is { } v ? Percents[MonitorFormat.WholePercent(v)] : "—";
     private static string RateFigure(double? rate)
     {
         var q = rate is { } r ? MonitorFormat.CompactRate(r) : new MonitorFormat.Quantity("—", "");
@@ -106,7 +118,7 @@ internal sealed class MonitorStrip : FrameworkElement
     // carries it on, as the old row no longer draws.
     protected override Size ArrangeOverride(Size finalSize)
     {
-        if (_presence.Set(Shown, CompactMonitor.Fit(Shown, ItemWidth, _gap, finalSize.Width)) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
+        if (_presence.Set(Shown, CompactMonitor.Fit(Shown, _itemWidth, _gap, finalSize.Width)) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
         return finalSize;
     }
     private bool Step(double now) { InvalidateVisual(); return _presence.Moving(now); }
@@ -115,11 +127,12 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), center = _row / 2, now = Eased.Now;
         // Each reading takes its width and the gap after it in proportion to how present it is, so the row closes up smoothly.
-        var (items, total) = CompactMonitor.Arrange(_order, Shown, ItemWidth, _gap, item => _presence.At(item, now));
+        _now = now;
+        double total = CompactMonitor.Arrange(_orderOnce, Shown, _itemWidth, _gap, _presenceNow, _arranged);
         if (total <= 0) return;
         double start = _centered ? (w - total) / 2 : w - total;
         var s = _snapshot;
-        foreach (var (item, at, width, presence) in items)
+        foreach (var (item, at, width, presence) in _arranged)
         {
             double x = start + at;
             // A reading on its way in or out is drawn smaller and fainter, centred in the room it has.
@@ -164,8 +177,15 @@ internal sealed class MonitorStrip : FrameworkElement
             var core = cpu.Cores[i];
             double cx = x + i * (column + gap), fill = Math.Max(1.5, core.Usage * height);
             drawing.DrawRectangle(UI.Brush(UI.Fill), null, new Rect(cx, top, column, height));
-            drawing.DrawRectangle(UI.Brush(_colors.Core(core.Group, groups, ReadingLevels.OfShare(core.Usage))), null, new Rect(cx, top + height - fill, column, fill));
+            drawing.DrawRectangle(UI.Brush(CoreColor(core.Group, groups, ReadingLevels.OfShare(core.Usage))), null, new Rect(cx, top + height - fill, column, fill));
         }
+    }
+    // A core's color is mixed from the strip's colors, which it keeps: each is mixed once, not for every core on every reading.
+    private readonly Dictionary<(int Group, int Groups, MemoryLevel Level), string> _coreColors = [];
+    private string CoreColor(int group, int groups, MemoryLevel level)
+    {
+        if (!_coreColors.TryGetValue((group, groups, level), out var color)) _coreColors[(group, groups, level)] = color = _colors.Core(group, groups, level);
+        return color;
     }
 
     // A dial open at the bottom with the reading's letter inside, and the figure after it when it shows one: the gap tells it from
@@ -216,5 +236,10 @@ internal sealed class StripPresence
     }
 
     public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
-    public bool Moving(double now) => _items.Values.Any(eased => eased.Moving(now));
+    public bool Moving(double now)
+    {
+        // Asked on every frame of a transition; the dictionary's own enumerator allocates nothing.
+        foreach (var eased in _items.Values) if (eased.Moving(now)) return true;
+        return false;
+    }
 }
