@@ -83,14 +83,15 @@ public partial class MainWindow : Window
         _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip);
         Rect? IslandStrip()
         {
-            if (!IsVisible || PresentationSource.FromVisual(this) is null) return null;
-            var surface = Collapsed.Surface;
-            double scale = _pixelsPerDip;
+            // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size
+            // and place are the layout's, so PointToScreen carries the window offset, the shape's own offset, the DPI
+            // and the open panel's own extent all at once.
+            if (!IsVisible || PresentationSource.FromVisual(this) is null || PresentationSource.FromVisual(Island) is null) return null;
+            if (!(Island.ActualWidth > 0) || !(Island.ActualHeight > 0)) return null;
+            double scale = VisualTreeHelper.GetDpi(Island).DpiScaleX;
             if (!(scale > 0) || !double.IsFinite(scale)) scale = 1;
-            // The island's drawn band in screen physical pixels: the window's own top edge plus the surface it draws.
-            var top = (int)Math.Round(Top * scale);
-            var left = (int)Math.Round((Left + _windowOffset + surface.X) * scale);
-            return new Rect(left, top, surface.Width * scale, surface.Height * scale);
+            var origin = Island.PointToScreen(new Point(0, 0));
+            return new Rect(origin.X, origin.Y, Island.ActualWidth * scale, Island.ActualHeight * scale);
         }
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
