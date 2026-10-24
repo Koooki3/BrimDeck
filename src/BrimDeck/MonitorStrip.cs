@@ -185,8 +185,23 @@ internal sealed class MonitorStrip : FrameworkElement
         DialArc(drawing, c, radius, ring, 1, PanelTheme.Hex("ringTrack"));
         if (share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
         var text = MonitorDraw.Text(letter, Math.Max(1, 7 * _scale), UI.Primary, ppd, strong: true);
-        var bounds = text.BuildGeometry(new Point()).Bounds;
-        if (!bounds.IsEmpty) drawing.DrawText(text, new Point(c.X - bounds.X - bounds.Width / 2, c.Y - bounds.Y - bounds.Height / 2));
+        // Filled as its outline rather than drawn as text: WPF puts a glyph run's baseline on whole device pixels and hints the
+        // glyph to them, which at a fractional scale left the letter up to a pixel above the ring's centre (0.7 px at 150 %). The
+        // outline is rasterised exactly where it lies, as the ring is, so the two share their centre at any scale. Unhinted, it
+        // comes out lighter than the text did (about two thirds of its ink at 150 %); a stroke around it gives the weight back
+        // evenly on every side, so the centre stays. The text renderer darkens a letter by a fraction of a pixel that grows much
+        // more slowly than the letter, so the stroke follows the square root of its size in device pixels (about half a pixel at
+        // 150 %, and close to the text's weight up to 300 %); below 8 px it shrinks with the letter, which keeps the
+        // counters of a 100 % letter open.
+        var glyph = text.BuildGeometry(new Point());
+        var bounds = glyph.Bounds;
+        if (bounds.IsEmpty) return;
+        double pixels = Math.Max(1, 7 * _scale) * ppd;
+        var weight = new Pen(UI.Brush(UI.Primary), Math.Min(.06 * pixels, .17 * Math.Sqrt(pixels)) / ppd) { LineJoin = PenLineJoin.Round };
+        weight.Freeze();
+        drawing.PushTransform(new TranslateTransform(c.X - bounds.X - bounds.Width / 2, c.Y - bounds.Y - bounds.Height / 2));
+        drawing.DrawGeometry(UI.Brush(UI.Primary), weight, glyph);
+        drawing.Pop();
     }
 
     private static void DialArc(DrawingContext drawing, Point c, double radius, double thickness, double fraction, string color)
