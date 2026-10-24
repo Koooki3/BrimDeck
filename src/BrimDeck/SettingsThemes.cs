@@ -183,13 +183,16 @@ public sealed partial class SettingsWindow
         }
         var from = Pick(day, Loc.T("白天开始", "Day begins"));
         var to = Pick(night, Loc.T("夜晚开始", "Night begins"));
-        void Save()
+        // A day of no length is no choice: the box just changed goes back to what it showed, so the row never shows unsaved hours.
+        int shownFrom = from.SelectedIndex, shownTo = to.SelectedIndex;
+        void Save(ComboBox changed)
         {
             var (d, n) = (times[Math.Max(0, from.SelectedIndex)], times[Math.Max(0, to.SelectedIndex)]);
-            if (d == n) return;
+            if (d == n) { changed.SelectedIndex = ReferenceEquals(changed, from) ? shownFrom : shownTo; return; }
+            shownFrom = from.SelectedIndex; shownTo = to.SelectedIndex;
             Change(s => s.ThemeDaylight = (d, n) == PanelThemes.DaylightHours(file) ? "" : PanelThemes.FormatDaylight(d, n));
         }
-        from.SelectionChanged += (_, _) => Save(); to.SelectionChanged += (_, _) => Save();
+        from.SelectionChanged += (_, _) => Save(from); to.SelectionChanged += (_, _) => Save(to);
         var pair = new StackPanel { Orientation = Orientation.Horizontal };
         pair.Children.Add(from); pair.Children.Add(TextLine("–", 12, TextSecondary)); pair.Children.Add(to);
         ((TextBlock)pair.Children[1]).Margin = new Thickness(8, 0, 8, 0); ((TextBlock)pair.Children[1]).VerticalAlignment = VerticalAlignment.Center;
@@ -258,7 +261,8 @@ public sealed partial class SettingsWindow
             {
                 // The theme on screen, which is the last good version while the chosen file has an error.
                 var current = PanelTheme.ShownTheme;
-                var path = PanelThemes.CreateFromTemplate(PanelTheme.Folder, PanelTheme.Current, current.BuiltIn ? current.Id : null);
+                // A theme with a night look starts from its day look and carries its night look along, whichever is on screen.
+                var path = PanelThemes.CreateFromTemplate(PanelTheme.Folder, current.File.Night is null ? PanelTheme.Current : PanelThemes.Resolve(current), current.BuiltIn ? current.Id : null, current.File);
                 PanelTheme.Reload();
                 // The new theme copies the current one, so it starts with what was changed under the current one.
                 ChooseOwnTheme(path);

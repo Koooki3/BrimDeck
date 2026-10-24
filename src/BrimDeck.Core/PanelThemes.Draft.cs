@@ -85,7 +85,7 @@ public static partial class PanelThemes
     // file's path.
     public static string SaveDraftAsNew(string folder, PanelThemeInfo theme, PanelThemeDraft draft)
     {
-        var path = CreateFromTemplate(folder, Resolve(theme), theme.BuiltIn ? theme.Id : null);
+        var path = CreateFromTemplate(folder, Resolve(theme), theme.BuiltIn ? theme.Id : null, theme.File);
         try { File.WriteAllText(path, WriteDraft(File.ReadAllText(path), draft)); }
         catch { File.Delete(path); throw; }
         return path;

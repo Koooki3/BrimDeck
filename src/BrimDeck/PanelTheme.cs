@@ -154,6 +154,9 @@ internal static class PanelTheme
         if (resources is null) return;
         var next = new ResourceDictionary();
         foreach (var (resource, token) in Resources) next[resource] = UI.Brush(Hex(token));
+        // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
+        for (int r = 1; r <= 16; r++) next["PanelR" + r] = new CornerRadius(Corner(r));
+        next["SegmentCorner"] = new CornerRadius(Corner(5));
         var merged = resources.MergedDictionaries;
         int at = _published is not null ? merged.IndexOf(_published) : -1;
         if (at < 0) for (int i = 0; i < merged.Count && at < 0; i++) if (merged[i].Contains("PanelSurface")) at = i;
@@ -199,12 +202,46 @@ internal static class PanelTheme
         island.EdgeBrush = GlassShownFor(palette) ? EdgeBrush(palette) : null;
     }
 
+    // The text of a window or pop-up of the panel's (a menu, a tooltip, the date picker): unsmoothed in a pixel theme, as on the
+    // island. Menus and tooltips get it as they open (App.ApplyPanelText).
+    public static void Text(FrameworkElement root)
+    {
+        if (Current.Effects.Pixel > 0) TextOptions.SetTextRenderingMode(root, TextRenderingMode.Aliased);
+        else root.ClearValue(TextOptions.TextRenderingModeProperty);
+    }
+
+    // A corner of the panel's own drawing as the theme draws it: square in a pixel theme, where the island's steps are the only
+    // curve, and as given otherwise.
+    public static double Corner(double radius) => Current.Effects.Pixel > 0 ? 0 : radius;
+
     // Glass shows as glass only where Windows' transparency effects are on and high contrast is off; otherwise its surface
     // color is drawn, opaque, like any other theme's.
     public static bool GlassShown => GlassShownFor(Current);
     private static bool GlassShownFor(PanelPalette palette) => palette.IsGlass && MotionEnvironment.Transparency && !SystemParameters.HighContrast;
     // The island's base color: the glass tint over the desktop, or the surface. The indicator line keeps its own color.
     public static Color SurfaceColor => GlassShown ? ToColor(Current.Effects.Glass!.Tint) : ColorOf("surface");
+    // The open panel's base color: glass a little thicker than on the small island, as a large sheet of glass is (Apple's
+    // materials thicken with their size). Only denser, so every contrast the tint keeps still holds.
+    public static Color PanelSurfaceColor
+    {
+        get
+        {
+            var color = SurfaceColor;
+            if (GlassShown) color.A = (byte)Math.Min(255, color.A + (255 - color.A) * Thicker);
+            return color;
+        }
+    }
+    private const double Thicker = .35;
+    // Over a held blur (GlassBackdrop.Held) the tint thins to the theme's blur opacity: the opacity of the brush drawing glass
+    // of the given alpha (the tint, thickened toward PanelSurfaceColor as the panel opens) that gives the thinner tint thickened
+    // alike. 1 for a theme without a held blur.
+    public static double HeldOpacity(double alpha)
+    {
+        if (!GlassShown || Current.Effects.Glass is not { Held: true } glass || alpha <= 0) return 1;
+        double whole = glass.Tint.A / 255d, thin = glass.BlurTint.A / 255d;
+        double thickened = whole < 1 ? Math.Clamp((alpha - whole) / (1 - whole), 0, 1) : 0;
+        return Math.Min(1, (thin + thickened * (1 - thin)) / alpha);
+    }
     // What the panel's text asks for: ClearType over an opaque surface; over glass, where the layered window has no opaque
     // pixels under the text, ClearType would wash the text out, so WPF chooses (grayscale there).
     public static ClearTypeHint ClearType => GlassShown ? ClearTypeHint.Auto : ClearTypeHint.Enabled;

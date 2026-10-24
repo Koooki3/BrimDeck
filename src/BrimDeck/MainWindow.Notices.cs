@@ -368,7 +368,7 @@ public partial class MainWindow
     {
         var center = _app.Notices;
         bool open = _expandedNotice == notice.Id;
-        var row = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 7, 8, 7), Margin = new Thickness(0, 0, 0, 2), Background = UI.Brush(open ? UI.Fill : "Transparent"), Cursor = Cursors.Hand };
+        var row = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8, 7, 8, 7), Margin = new Thickness(0, 0, 0, 2), Background = UI.Brush(open ? UI.Fill : "Transparent"), Cursor = Cursors.Hand };
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -400,10 +400,10 @@ public partial class MainWindow
             var leftColumn = new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) };
             track.ColumnDefinitions.Add(doneColumn); track.ColumnDefinitions.Add(leftColumn);
             _rowProgress.AddOrUpdate(row, new RowProgress(RowKey(notice, now), doneColumn, leftColumn));
-            var rail = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(1.5) };
+            var rail = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(PanelTheme.Corner(1.5)) };
             Grid.SetColumnSpan(rail, 2);
             track.Children.Add(rail);
-            track.Children.Add(new Border { Background = UI.Brush(UI.Accent), CornerRadius = new CornerRadius(1.5) });
+            track.Children.Add(new Border { Background = UI.Brush(UI.Accent), CornerRadius = new CornerRadius(PanelTheme.Corner(1.5)) });
             texts.Children.Add(track);
         }
         if (open)
@@ -508,7 +508,7 @@ public partial class MainWindow
     {
         double size = plate.Width;
         plate.Children.Clear();
-        plate.Children.Add(new Border { CornerRadius = new CornerRadius(size * .28), Background = UI.Brush(UI.Fill) });
+        plate.Children.Add(new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(size * .28)), Background = UI.Brush(UI.Fill) });
         var image = _app.Notices.Icons.Get(notice.IconRef, out _);
         if (image is not null) plate.Children.Add(new Image { Source = image, Width = size * .84, Height = size * .84, Stretch = Stretch.Uniform });
         else if (NoticeBadges.AppGlyph(notice, size, _app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey))) is { } glyph) plate.Children.Add(glyph);
@@ -525,7 +525,7 @@ public partial class MainWindow
     // A small flat button of the panel's kind.
     private static Button PageButton(string text, Action click)
     {
-        var face = new Border { CornerRadius = new CornerRadius(6), Background = UI.Brush(UI.Fill), Padding = new Thickness(9, 0, 9, 0), Height = 22, Margin = new Thickness(4, 0, 0, 0) };
+        var face = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Background = UI.Brush(UI.Fill), Padding = new Thickness(9, 0, 9, 0), Height = 22, Margin = new Thickness(4, 0, 0, 0) };
         face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 11.5, Foreground = UI.Brush(UI.Secondary), VerticalAlignment = VerticalAlignment.Center };
         var button = new Button { Content = face, Cursor = Cursors.Hand, FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
         button.MouseEnter += (_, _) => face.Background = UI.Brush(UI.FillSelected);

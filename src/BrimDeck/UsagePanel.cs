@@ -240,11 +240,11 @@ public partial class MainWindow
             AutomationProperties.SetName(button, item.Name);
             strip.Children.Add(button);
         }
-        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
         // motion-review F8: the fill is laid out once at its new width; a change of width is drawn by stretching it from its
         // left edge, so the glide lays nothing out again.
         var shift = new TranslateTransform(); var stretch = new ScaleTransform();
-        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(5), HorizontalAlignment = HorizontalAlignment.Left,
+        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(PanelTheme.Corner(5)), HorizontalAlignment = HorizontalAlignment.Left,
             IsHitTestVisible = false, RenderTransform = new TransformGroup { Children = { stretch, shift } }, Visibility = Visibility.Hidden };
         var host = new Grid { Children = { fill, strip } };
         int chosen = items.ToList().FindIndex(item => item.Active);
@@ -265,7 +265,7 @@ public partial class MainWindow
                 stretch.BeginAnimation(ScaleTransform.ScaleXProperty, widen);
             }
         };
-        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
     }
     // Where each gliding strip's fill was last, by its key.
     private static readonly Dictionary<string, (double X, double Width, long At)> SegmentFills = [];
@@ -455,7 +455,7 @@ public partial class MainWindow
         var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, UI.Tertiary);
         return new Border
         {
-            Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
+            Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(4)),
             Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(6, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center
         };

@@ -237,6 +237,30 @@ internal static class PanelThemeTests
                 && original.HasOwnSwatches == copy.HasOwnSwatches && original.Swatches.SequenceEqual(copy.Swatches);
         }
         check("A theme made from another starts out identical: colors, effects, apps, clock and swatches", reproduced);
+        // Glass over a held blur: the band and saturation are fitted, the thinner tint is the tint's color at part of its alpha,
+        // and text is held to its minimums over that tint on the band's grays as well as over black and white.
+        PanelGlass? Held(string glass) => PanelThemes.Build("held", PanelThemes.Parse($$"""{ "formatVersion": 1, "id": "held", "base": "light", "effects": { "glass": {{glass}} } }""")).Effects.Glass;
+        check("The built-in glass themes hold their blur",
+            BuiltIn(PanelThemes.GlassLight).Effects.Glass is { Held: true, Low: .85, High: 1 } light && light.Extremes.Count == 4
+            && BuiltIn(PanelThemes.GlassDark).Effects.Glass is { Held: true, Low: 0, High: .28 });
+        check("A held blur's tint is the tint at part of its alpha",
+            Held("""{ "tint": "#E0F8FAFD", "blurOpacity": 0.5, "backdrop": [0.6, 1] }""") is { BlurTint: var thin } glass && thin == glass.Tint with { A = 0x70 });
+        check("A held blur's band is at least a tenth and its saturation 1 to 2",
+            Held("""{ "tint": "#E0F8FAFD", "blurOpacity": 0.5, "backdrop": [0.95, 0.2], "saturation": 9 }""") is { Low: .9, High: 1, Saturation: 2 });
+        check("Glass without a band or with an opacity of 1 is not held",
+            Held("""{ "tint": "#E0F8FAFD", "blurOpacity": 0.5 }""") is { Held: false, Extremes.Count: 2 } && Held("""{ "tint": "#E0F8FAFD", "blurOpacity": 1, "backdrop": [0.6, 1] }""") is { Held: false });
+        var badBand = PanelThemes.LoadFolder(Folder("held-bad", ("band.json", """{ "formatVersion": 1, "id": "band", "effects": { "glass": { "tint": "#E0F8FAFD", "backdrop": [0.5] } } }"""),
+            ("opacity.json", """{ "formatVersion": 1, "id": "opacity", "effects": { "glass": { "tint": "#E0F8FAFD", "blurOpacity": 2 } } }""")));
+        check("A glass band that is not two numbers from 0 to 1, or an opacity outside 0 to 1, is refused", badBand.Count == 2 && badBand.All(theme => theme.Error is not null));
+        // A theme with a night look keeps it, with its hours: the copy's night look is the original's.
+        var island = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
+        var islandCopy = PanelThemes.Parse(PanelThemes.FillTemplate("copy", PanelThemes.Resolve(island), PanelThemes.IslandHoliday, island.File));
+        var nightCopy = PanelThemes.Build("copy", islandCopy, night: true);
+        var nightOriginal = PanelThemes.Resolve(island, true);
+        check("A theme made from one with a night look keeps the night look and its hours",
+            islandCopy.Night is not null && islandCopy.Daylight is { Day: "06:30", Night: "18:30" } && nightCopy.Adjustments.Count == 0
+            && nightOriginal.Colors.All(pair => nightCopy[pair.Key] == pair.Value) && nightOriginal.Effects.SurfaceGradient.SequenceEqual(nightCopy.Effects.SurfaceGradient)
+            && nightOriginal.Motion == nightCopy.Motion && PanelThemes.Build("copy", islandCopy).Colors.All(pair => PanelThemes.Resolve(island)[pair.Key] == pair.Value));
         var nightOwl = BuiltIn("night-owl");
         // No built-in theme suggests a gradient clock, so a theme of its own carries one.
         var glow = PanelThemes.Build("glow", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "neon", Color = "gradient", Gradient = ["#C792EA", "#82AAFF", "#7FDBCA"] } });

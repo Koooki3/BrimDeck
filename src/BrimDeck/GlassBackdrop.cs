@@ -11,42 +11,73 @@ using WinRT;
 
 namespace BrimDeck;
 
-// The blur under a glass island (PanelTheme.GlassShown): a window of its own, just below the panel's window, the size of the
-// island, showing the desktop behind it blurred (Windows.UI.Composition's host backdrop brush, which DWM blurs). The panel's
+// The blur under a glass island or notice (PanelTheme.GlassShown): a window of its own, just below the panel's window and the
+// size of it, showing the desktop behind it blurred (Windows.UI.Composition's host backdrop brush, which DWM blurs). The panel's
 // window is layered, and Windows can neither blur behind a layered window nor cut a blur to a shape there, so the blur lives in
-// this window instead: its content is clipped to the island's outline with an antialiased rounded rectangle, and its window
-// region (the outline, a pixel larger) keeps it from taking clicks or showing outside the island.
+// this window instead: its content is clipped to the island's body with an antialiased rounded rectangle, and its window region
+// (that rectangle) keeps it from taking clicks or showing anywhere else.
 //
-// The two windows are drawn by different compositors, so they cannot change shape on the same frame. While the island changes
-// shape or place (opening, closing, a page of another size, booting, a resize) the blur therefore steps aside, the glass shows
-// as clear glass meanwhile, and the blur fades back once the island has held still for SettleMs: it fades out when the island
-// grows (the old shape lies inside the new one) and goes at once when it shrinks or moves, so it never shows outside the island.
-// Nothing here draws while the island is still: the composition content is static, and only DWM's own blur of the desktop
-// behind runs. Where Windows cannot draw it (transparency effects off, high contrast, battery saver, a remote session, an older
-// Windows, any failure) there is no blur and the glass stays clear.
+// The blur follows the island frame by frame while anything about it changes (opening, closing, a page of another size, the
+// boot's dot and swell, the power-off, a fade into the indicator), so it is there all through the motion and never steps aside:
+// its clip takes the island's shape as drawn (render transforms included) and its opacity the island's. The two windows are
+// drawn by different compositors, and the blur's reaches the screen sooner: measured, about two frames before WPF shows the
+// same frame of the island (a blur 70 px inside a power-off moving 33 px a frame). So the blur takes the island's shape from
+// Lag frames back, and the clip is the part common to that shape and the ones a frame either side of it, so a lag a frame
+// longer or shorter still never shows the blur outside the island. Once the island has held still for a few frames it stops following, and nothing here draws: the
+// composition content is static, and only DWM's own blur of the desktop behind runs. Where Windows cannot draw it
+// (transparency effects off, high contrast, battery saver, a remote session, an older Windows, any failure) there is no blur
+// and the glass stays clear.
+//
+// A theme may hold the blur to a band of brightness (PanelGlass.Held, GlassEffect): its tint can then be thinner over the blur
+// than over the bare desktop. Held reports, on every frame the blur is followed, how much of the held blur lies under the
+// island's material (0 to 1), so the tint thins with it in the same frame. That lag between the compositors still varies by
+// a frame, so while an edge moves fast (the power-off, the start of an opening) the blur may lie a few pixels off it: the
+// tint stays whole while the island moves fast and thins as it slows, smoothly, so those pixels never show.
 internal sealed class GlassBackdrop : IDisposable
 {
-    private const int SettleMs = 120, FadeInMs = 180, FadeOutMs = 90;
+    // The shapes the clip keeps inside: the island's last frames, so a frame between the two compositors never shows the blur
+    // outside it. Frames held still before following stops.
+    private const int Lag = 2, StillFrames = 12;
+    // Movement of the island's edges, in device pixels a frame, at which the tint is thin (Slow) and whole (Fast); how much of
+    // the way the tint goes toward that each frame.
+    private const double Slow = 4, Fast = 24, Ease = .35;
+    private double _moving;
     private readonly Window _owner;
-    private readonly IslandBorder _island;
-    private readonly DispatcherTimer _settle;
+    // The surface the blur lies under (the island, a notice) and its shape now: corners, shoulder, and how much of its material
+    // is there (0 while it is the indicator's color, 1 when it is all glass).
+    private readonly FrameworkElement _island;
+    private readonly Func<(CornerRadius Corners, double Shoulder, double Material)> _shape;
     private HwndSource? _window;
     private SpriteVisual? _sprite;
     private CompositionRoundedRectangleGeometry? _clip;
     private DesktopWindowTarget? _target;
-    // The shape the window has now, in device pixels (null while it is hidden); the shape waiting to settle; whether the blur
-    // is shown or on its way in.
-    private Key? _placed, _pending;
-    private bool _visible, _disposed;
+    private bool _following, _shown, _disposed;
+    private int _still;
+    // Following goes on at least until then (Environment.TickCount64): motion that moves no layout, the boot's dot, asks for it.
+    private long _followUntil;
+    private Frame? _last;
+    // The island's last frames, newest last.
+    private readonly List<Frame> _recent = [];
+    private (int X, int Y, int Width, int Height)? _windowRect;
+    private (int Left, int Top, int Right, int Bottom, int Radius)? _region;
+    private double _reported = -1;
+    // The glass the sprite's brush was made for, and whether that brush holds the blur to its band (the effect may be refused).
+    private PanelGlass? _brushFor;
+    private bool _brushHolds;
 
-    private readonly record struct Key(int X, int Y, int Width, int Height, CornerRadius Corners, double Shoulder, double Scale);
+    // How much of the held blur lies under the island's material now (0 to 1): the tint thins to PanelTheme.HeldOpacity by as much.
+    public event Action<double>? Held;
 
-    public GlassBackdrop(Window owner, IslandBorder island)
+    // The island as drawn, in device pixels from the panel window's corner: its bounds, corners and shoulder at that size, its
+    // opacity (its own and its parents') and its material.
+    private readonly record struct Frame(double Left, double Top, double Right, double Bottom, CornerRadius Corners, double Shoulder, double Opacity, double Material);
+
+    public GlassBackdrop(Window owner, IslandBorder island) : this(owner, island, () => (island.CornerRadius, island.ShoulderRadius, island.MaterialOpacity)) { }
+
+    public GlassBackdrop(Window owner, FrameworkElement surface, Func<(CornerRadius Corners, double Shoulder, double Material)> shape)
     {
-        _owner = owner; _island = island;
-        _settle = new DispatcherTimer(DispatcherPriority.Render, owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(SettleMs) };
-        _settle.Tick += (_, _) => Settle();
-        island.LayoutUpdated += (_, _) => Update();
+        _owner = owner; _island = surface; _shape = shape;
+        surface.LayoutUpdated += (_, _) => Update();
         owner.IsVisibleChanged += (_, _) => Update();
         owner.Closed += (_, _) => Dispose();
         if (PresentationSource.FromVisual(owner) is HwndSource main) main.AddHook(OwnerMessage); else owner.SourceInitialized += (_, _) => (PresentationSource.FromVisual(owner) as HwndSource)?.AddHook(OwnerMessage);
@@ -59,148 +90,209 @@ internal sealed class GlassBackdrop : IDisposable
     // After anything that can change the island's shape, place or look; cheap when nothing changed.
     public void Update()
     {
-        if (_disposed) return;
-        var key = Wanted() ? Measure() : null;
-        if (key is null) { _pending = null; _settle.Stop(); Hide(); return; }
-        if (key == _pending || key == _placed && _visible && !_settle.IsEnabled) return;
-        // The island moved or changed shape: out of the way now, back when it holds still. A blur still lying inside the new
-        // shape fades; one that would stick out goes at once.
-        if (_placed is { } placed && key != placed)
-        {
-            if (Contains(key.Value, placed)) FadeOut(); else Hide();
-        }
-        _pending = key;
-        _settle.Stop(); _settle.Start();
+        if (_disposed || _following) return;
+        if (!Available || !_owner.IsVisible) { Hide(); return; }
+        if (Measure() is { } now && now == _last && Equals(_brushFor, PanelTheme.Current.Effects.Glass)) return;
+        Follow(0);
     }
 
-    private bool Wanted()
+    // Follows the island frame by frame for at least the given milliseconds, and after that until it holds still: for motion
+    // that changes no layout (a render transform, an opacity), which Update does not see.
+    public void Follow(double milliseconds)
     {
-        if (!Available || !_owner.IsVisible || !_island.IsVisible || _island.MaterialOpacity < .999 || _island.ActualWidth < 4 || _island.ActualHeight < 4) return false;
-        // A fade of the island or the window (booting, powering off, a notice taking its place) has no blur under it.
-        for (DependencyObject? node = _island; node is not null; node = VisualTreeHelper.GetParent(node))
-            if (node is UIElement element && element.Opacity < .999) return false;
-        return PresentationSource.FromVisual(_island) is not null;
+        if (_disposed) return;
+        _followUntil = Math.Max(_followUntil, Environment.TickCount64 + (long)Math.Max(0, milliseconds));
+        _still = 0;
+        if (_following) return;
+        _following = true;
+        System.Windows.Media.CompositionTarget.Rendering += OnRendering;
+        Step();
     }
 
-    private Key? Measure()
+    private void Stop()
+    {
+        if (!_following) return;
+        _following = false;
+        System.Windows.Media.CompositionTarget.Rendering -= OnRendering;
+    }
+
+    private void OnRendering(object? sender, EventArgs e) => Step();
+
+    private void Step()
+    {
+        if (_disposed) { Stop(); return; }
+        if (!Available || !_owner.IsVisible || Measure() is not { } frame) { Hide(); Stop(); return; }
+        bool changed = frame != _last || !Equals(_brushFor, PanelTheme.Current.Effects.Glass);
+        if (!changed && _moving == 0 && ++_still >= StillFrames && Environment.TickCount64 >= _followUntil) { Stop(); return; }
+        if (changed) _still = 0;
+        _last = frame;
+        if (!EnsureWindow()) { Stop(); return; }
+        try
+        {
+            Dress();
+            Show(frame);
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException)
+        {
+            Composition.Fail(); Hide(); Stop();
+        }
+    }
+
+    private Frame? Measure()
     {
         try
         {
+            if (!_island.IsVisible || PresentationSource.FromVisual(_island) is null || PresentationSource.FromVisual(_owner) is null) return null;
             double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
-            var at = _island.PointToScreen(new Point());
-            return new Key((int)Math.Round(at.X), (int)Math.Round(at.Y), (int)Math.Round(_island.ActualWidth * scale), (int)Math.Round(_island.ActualHeight * scale),
-                _island.CornerRadius, _island.ShoulderRadius, scale);
+            var bounds = _island.TransformToAncestor(_owner).TransformBounds(new Rect(_island.RenderSize));
+            if (bounds.Width < 1 || bounds.Height < 1) return null;
+            // The render transforms (the boot's squash) scale the corners with the shape.
+            double squash = Math.Min(bounds.Width / Math.Max(1, _island.ActualWidth), bounds.Height / Math.Max(1, _island.ActualHeight));
+            var shape = _shape();
+            double opacity = 1;
+            for (DependencyObject? node = _island; node is not null && !ReferenceEquals(node, _owner); node = VisualTreeHelper.GetParent(node))
+                if (node is UIElement element) opacity *= element.Opacity;
+            var c = shape.Corners;
+            return new Frame(bounds.Left * scale, bounds.Top * scale, bounds.Right * scale, bounds.Bottom * scale,
+                new CornerRadius(c.TopLeft * squash * scale, c.TopRight * squash * scale, c.BottomRight * squash * scale, c.BottomLeft * squash * scale),
+                shape.Shoulder * squash * scale, Math.Clamp(opacity, 0, 1), Math.Clamp(shape.Material, 0, 1));
         }
         catch (InvalidOperationException) { return null; }
     }
 
-    private static bool Contains(Key outer, Key inner) => inner.X >= outer.X && inner.Y >= outer.Y && inner.X + inner.Width <= outer.X + outer.Width && inner.Y + inner.Height <= outer.Y + outer.Height;
-
-    // The island has held still: the blur takes its shape and fades in.
-    private void Settle()
+    // The blur for this frame: the window over the panel's, the clip and region inside the island's recent shapes, the
+    // island's opacity.
+    private void Show(Frame frame)
     {
-        _settle.Stop();
-        if (_disposed || _pending is not { } key) return;
-        // Still the same shape (a frame may have come between the last change and the tick)?
-        var now = Wanted() ? Measure() : null;
-        if (now != key) { Update(); return; }
-        _pending = null;
-        if (!EnsureWindow()) return;
-        try
-        {
-            Place(key);
-            _placed = key;
-            if (!_visible) { _visible = true; Fade(1, FadeInMs); }
-        }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException)
-        {
-            Composition.Fail(); Hide();
-        }
-    }
-
-    private void Place(Key key)
-    {
+        _recent.Add(frame);
+        if (_recent.Count > Lag + 2) _recent.RemoveAt(0);
+        // The frames Lag back and one either side, as far as there are any; the newest only on the first frame.
+        int end = _recent.Count - 1, at = Math.Max(0, end - Lag);
+        var shapes = _recent.Skip(Math.Max(0, at - 1)).Take(Math.Min(end, at + 1) - Math.Max(0, at - 1) + 1).ToList();
+        var shown = _recent[at];
+        double opacity = shown.Opacity * shown.Material;
+        double speed = 0;
+        if (_recent.Count > 1 && _recent[^2] is var before)
+            speed = new[] { frame.Left - before.Left, frame.Top - before.Top, frame.Right - before.Right, frame.Bottom - before.Bottom }.Max(Math.Abs);
+        double fast = Math.Clamp((speed - Slow) / (Fast - Slow), 0, 1);
+        _moving += (fast * fast * (3 - 2 * fast) - _moving) * Ease;
+        if (_moving < .002) _moving = 0;
+        Report(_brushHolds ? frame.Material * (1 - _moving) : 0);
+        if (opacity < .002) { Conceal(); return; }
         var handle = _window!.Handle;
         var owner = new WindowInteropHelper(_owner).Handle;
-        // Just below the panel's window: above whatever the panel stands over, never above the panel itself.
-        SetWindowPos(handle, owner, key.X, key.Y, key.Width, key.Height, NoActivate | ShowWindow | NoOwnerZOrder);
-        // Shown for the first time, a topmost window goes to the top whatever it was placed after (seen on Windows 11): a
-        // second call, z-order only, puts it under the panel.
-        SetWindowPos(handle, owner, 0, 0, 0, 0, NoActivate | NoMove | NoSize | NoOwnerZOrder);
-        // The clip: the island's body as an antialiased rounded rectangle, a device pixel inside its edge, which the island's own
-        // edge and rim cover. A shape square at the top (the open panel, the notch) has its rectangle reach above the window, so
-        // only the bottom corners round. The notch's shoulders, thinner than its corners, stay clear glass.
-        var c = key.Corners;
-        bool squareTop = c.TopLeft < .5 && c.TopRight < .5;
-        double radius = (squareTop ? Math.Max(c.BottomLeft, c.BottomRight) : Math.Max(Math.Max(c.TopLeft, c.TopRight), Math.Max(c.BottomLeft, c.BottomRight))) * key.Scale;
-        double shoulder = Math.Clamp(key.Shoulder, 0, Math.Min(key.Width / key.Scale / 4, key.Height / key.Scale / 2)) * key.Scale;
-        float inset = 1, top = squareTop ? -(float)radius - 2 : inset;
-        _clip!.Offset = new Vector2((float)shoulder + inset, top);
-        _clip.Size = new Vector2(Math.Max(0, key.Width - 2 * (float)shoulder - 2 * inset), Math.Max(0, key.Height - inset - top));
-        _clip.CornerRadius = new Vector2((float)Math.Max(0, radius - inset));
-        // The window region: the outline, so the corners outside it neither show nor take clicks.
-        var outline = IslandBorder.BuildOutline(key.Width / key.Scale, key.Height / key.Scale, key.Shoulder, key.Corners, 0).GetFlattenedPathGeometry(.25, ToleranceType.Absolute);
-        var points = new List<POINT>();
-        foreach (var figure in outline.Figures)
+        GetWindowRect(owner, out var rect);
+        var place = (rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        if (!_shown || place != _windowRect)
         {
-            points.Add(Device(figure.StartPoint, key.Scale));
-            foreach (var segment in figure.Segments)
-                if (segment is System.Windows.Media.PolyLineSegment poly) points.AddRange(poly.Points.Select(p => Device(p, key.Scale)));
-                else if (segment is System.Windows.Media.LineSegment line) points.Add(Device(line.Point, key.Scale));
+            // Just below the panel's window: above whatever the panel stands over, never above the panel itself. Shown for
+            // the first time, a topmost window goes to the top whatever it was placed after (seen on Windows 11): a second
+            // call, z-order only, puts it under the panel.
+            SetWindowPos(handle, owner, place.Left, place.Top, Math.Max(1, place.Item3), Math.Max(1, place.Item4), NoActivate | ShowWindow | NoOwnerZOrder);
+            if (!_shown) SetWindowPos(handle, owner, 0, 0, 0, 0, NoActivate | NoMove | NoSize | NoOwnerZOrder);
+            _windowRect = place; _shown = true;
         }
-        var region = points.Count >= 3 ? CreatePolygonRgn([.. points], points.Count, 2) : IntPtr.Zero;
-        // The window owns the region from here on.
-        if (region != IntPtr.Zero && SetWindowRgn(handle, region, true) == 0) DeleteObject(region);
+        // The body common to the recent shapes, a device pixel inside its edge, which the island's own edge and rim cover. A
+        // shape square at the top (the open panel, the notch) has its rectangle reach above, so only the bottom corners round.
+        // The notch's shoulders, thinner than its corners, stay clear glass.
+        double left = double.MinValue, top = double.MinValue, right = double.MaxValue, bottom = double.MaxValue, radius = 0, shoulder = 0;
+        bool squareTop = true;
+        foreach (var shape in shapes)
+        {
+            var c = shape.Corners;
+            bool square = c.TopLeft < .5 && c.TopRight < .5;
+            squareTop &= square;
+            radius = Math.Max(radius, square ? Math.Max(c.BottomLeft, c.BottomRight) : Math.Max(Math.Max(c.TopLeft, c.TopRight), Math.Max(c.BottomLeft, c.BottomRight)));
+            double width = shape.Right - shape.Left, height = shape.Bottom - shape.Top;
+            shoulder = Math.Max(shoulder, Math.Clamp(shape.Shoulder, 0, Math.Min(width / 4, height / 2)));
+            left = Math.Max(left, shape.Left); top = Math.Max(top, shape.Top); right = Math.Min(right, shape.Right); bottom = Math.Min(bottom, shape.Bottom);
+        }
+        const double inset = 1;
+        left += shoulder + inset; right -= shoulder + inset; bottom -= inset;
+        double clipTop = squareTop ? top - radius - 2 : top + inset;
+        double corner = Math.Max(0, radius - inset);
+        if (right - left < 1 || bottom - Math.Max(top, clipTop) < 1) { Conceal(); return; }
+        _clip!.Offset = new Vector2((float)left, (float)clipTop);
+        _clip.Size = new Vector2((float)(right - left), (float)(bottom - clipTop));
+        _clip.CornerRadius = new Vector2((float)corner);
+        _sprite!.Opacity = (float)opacity;
+        // The window region: the clip's rectangle, rounded alike, so the window takes no clicks and shows nothing outside it.
+        var region = ((int)Math.Floor(left), (int)Math.Floor(Math.Max(0, clipTop)), (int)Math.Ceiling(right), (int)Math.Ceiling(bottom), (int)Math.Round(corner));
+        if (region != _region)
+        {
+            _region = region;
+            var handleRegion = CreateRoundRectRgn(region.Item1, region.Item2, region.Item3 + 1, region.Item4 + 1, 2 * region.Item5, 2 * region.Item5);
+            // The window owns the region from here on.
+            if (handleRegion != IntPtr.Zero && SetWindowRgn(handle, handleRegion, true) == 0) DeleteObject(handleRegion);
+        }
     }
 
-    private static POINT Device(Point p, double scale) => new((int)Math.Round(p.X * scale), (int)Math.Round(p.Y * scale));
-
-    private void FadeOut()
+    // On every frame followed: the island's tint may be changing too (thickening as the panel opens).
+    private void Report(double held, bool always = true)
     {
-        if (!_visible) return;
-        _visible = false;
-        Fade(0, FadeOutMs);
+        if (!always && Math.Abs(held - _reported) < .001) return;
+        _reported = held;
+        Held?.Invoke(held);
     }
 
+    // The sprite's brush for the theme's glass: the blur held to its band where the theme asks for it and Windows takes the
+    // effect, else the blur as it comes.
+    private void Dress()
+    {
+        var glass = PanelTheme.Current.Effects.Glass;
+        if (_sprite is null || Equals(glass, _brushFor) && _sprite.Brush is not null || Composition.Compositor is not { } compositor) return;
+        _brushFor = glass;
+        _brushHolds = false;
+        if (glass is { Held: true })
+            try
+            {
+                _sprite.Brush = GlassEffect.Brush(compositor, glass.Low, glass.High, glass.Saturation);
+                _brushHolds = true;
+                return;
+            }
+            catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or InvalidCastException) { }
+        _sprite.Brush = compositor.CreateHostBackdropBrush();
+    }
+
+    // No blur now, the window kept for the next time.
+    private void Conceal()
+    {
+        if (_sprite is not null) _sprite.Opacity = 0;
+        if (_shown && _window is not null) ShowWindowNative(_window.Handle, Hidden);
+        _shown = false;
+    }
+
+    // No blur and nothing remembered: the next frame starts afresh.
     private void Hide()
     {
-        _visible = false;
-        if (_placed is null) return;
-        _placed = null;
-        if (_sprite is not null) { _sprite.StopAnimation("Opacity"); _sprite.Opacity = 0; }
-        if (_window is not null) ShowWindowNative(_window.Handle, Hidden);
+        Report(0, always: false);
+        Conceal();
+        _recent.Clear(); _last = null; _moving = 0;
     }
 
-    private void Fade(float to, int milliseconds)
-    {
-        if (_sprite is null || Composition.Compositor is not { } compositor) return;
-        var animation = compositor.CreateScalarKeyFrameAnimation();
-        animation.InsertKeyFrame(1, to);
-        animation.Duration = TimeSpan.FromMilliseconds(milliseconds);
-        _sprite.StartAnimation("Opacity", animation);
-    }
-
-    // The window, its composition target and the blurred sprite, made on first use.
+    // The window, its composition target and the blurred sprite, made on first use, where the panel's window is: made
+    // elsewhere (another monitor at another scale) and moved over, it would be resized for the change of scale.
     private bool EnsureWindow()
     {
         if (_window is not null) return true;
         if (Composition.Compositor is not { } compositor) return false;
         try
         {
+            GetWindowRect(new WindowInteropHelper(_owner).Handle, out var rect);
             var parameters = new HwndSourceParameters("BrimDeck glass")
             {
                 WindowStyle = unchecked((int)0x80000000), // WS_POPUP
                 // A tool window that never takes focus or a taskbar button, with no redirection surface: composition draws it.
                 ExtendedWindowStyle = 0x80 | 0x08000000 | 0x00200000 | 0x08, // TOOLWINDOW | NOACTIVATE | NOREDIRECTIONBITMAP | TOPMOST
-                Width = 1, Height = 1, PositionX = -32000, PositionY = -32000
+                Width = Math.Max(1, rect.Right - rect.Left), Height = Math.Max(1, rect.Bottom - rect.Top), PositionX = rect.Left, PositionY = rect.Top
             };
             _window = new HwndSource(parameters);
+            _window.AddHook(OwnMessage);
             int on = 1;
             DwmSetWindowAttribute(_window.Handle, UseHostBackdropBrush, ref on, sizeof(int));
             _target = Composition.Target(_window.Handle);
             var root = compositor.CreateContainerVisual(); root.RelativeSizeAdjustment = Vector2.One;
             _sprite = compositor.CreateSpriteVisual(); _sprite.RelativeSizeAdjustment = Vector2.One; _sprite.Opacity = 0;
-            _sprite.Brush = compositor.CreateHostBackdropBrush();
             _clip = compositor.CreateRoundedRectangleGeometry();
             _sprite.Clip = compositor.CreateGeometricClip(_clip);
             root.Children.InsertAtTop(_sprite);
@@ -214,12 +306,29 @@ internal sealed class GlassBackdrop : IDisposable
         }
     }
 
-    // The panel's window moved in the z-order (it is put back on top now and then): the blur goes back just under it.
+    // The window is placed in device pixels and never follows a change of scale: WPF would resize it for the new scale (seen with
+    // the blur ending short of a notice on a second monitor at 125 %). It is placed again for the panel as it is now.
+    private IntPtr OwnMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int DpiChanged = 0x02E0;
+        if (message != DpiChanged) return IntPtr.Zero;
+        handled = true;
+        _windowRect = null;
+        _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () => Follow(0));
+        return IntPtr.Zero;
+    }
+
+    // The panel's window moved in the z-order (it is put back on top now and then): the blur goes back just under it; moved or
+    // resized, the blur follows.
     private IntPtr OwnerMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         const int WindowPosChanged = 0x0047;
-        if (message == WindowPosChanged && _placed is not null && _window is not null)
+        if (message == WindowPosChanged && _shown && _window is not null)
+        {
             SetWindowPos(_window.Handle, hwnd, 0, 0, 0, 0, NoActivate | NoMove | NoSize | NoOwnerZOrder);
+            GetWindowRect(hwnd, out var rect);
+            if ((rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top) != _windowRect) _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () => Follow(0));
+        }
         return IntPtr.Zero;
     }
 
@@ -227,7 +336,7 @@ internal sealed class GlassBackdrop : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _settle.Stop();
+        Stop();
         Release();
     }
 
@@ -235,7 +344,7 @@ internal sealed class GlassBackdrop : IDisposable
     {
         _target?.Dispose(); _target = null; _sprite = null; _clip = null;
         _window?.Dispose(); _window = null;
-        _visible = false; _placed = null;
+        _shown = false; _windowRect = null; _region = null; _recent.Clear(); _last = null; _brushFor = null;
     }
 
     // One compositor for the UI thread, on a dispatcher queue of its own that WPF's message loop pumps. Started on first use;
@@ -287,13 +396,14 @@ internal sealed class GlassBackdrop : IDisposable
     private const int RemoteSession = 0x1000, UseHostBackdropBrush = 17, Hidden = 0;
     private const uint NoSize = 0x1, NoMove = 0x2, NoActivate = 0x10, ShowWindow = 0x40, NoOwnerZOrder = 0x200;
     [StructLayout(LayoutKind.Sequential)] private struct DispatcherQueueOptions { public int Size, Type, Apartment; }
-    [StructLayout(LayoutKind.Sequential)] private readonly record struct POINT(int X, int Y);
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
     [DllImport("CoreMessaging.dll")] private static extern int CreateDispatcherQueueController(DispatcherQueueOptions options, out IntPtr controller);
     [DllImport("dwmapi")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
     [DllImport("user32")] private static extern int GetSystemMetrics(int index);
     [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32", EntryPoint = "ShowWindow")] private static extern bool ShowWindowNative(IntPtr window, int command);
     [DllImport("user32")] private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
-    [DllImport("gdi32")] private static extern IntPtr CreatePolygonRgn(POINT[] points, int count, int mode);
+    [DllImport("gdi32")] private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
+    [DllImport("user32")] private static extern bool GetWindowRect(IntPtr window, out RECT rect);
     [DllImport("gdi32")] private static extern bool DeleteObject(IntPtr handle);
 }

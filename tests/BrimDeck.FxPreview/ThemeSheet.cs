@@ -260,6 +260,12 @@ internal static class ThemeSheet
         buttons.Children.Add(new Border { CornerRadius = new CornerRadius(pixel ? 0 : 8), Padding = new Thickness(12, 4, 12, 4), Background = UI.Brush(look.Accent), Child = new TextBlock { Text = "打开", FontSize = 12, Foreground = UI.Brush(look.OnAccent) } });
         buttons.Children.Add(new Border { CornerRadius = new CornerRadius(pixel ? 0 : 8), Padding = new Thickness(12, 4, 12, 4), Background = UI.Brush(look.Fill), Margin = new Thickness(8, 0, 0, 0), Child = new TextBlock { Text = "稍后", FontSize = 12, Foreground = UI.Brush(look.Primary) } });
         content.Children.Add(buttons);
-        return Island(palette, 320, 104, new CornerRadius(22), 0, content);
+        // The notice window's own surface and its glow copy, dressed as NoticeWindow.Dress dresses them.
+        var surface = new NoticeSurface { Width = 320, Height = 104, TopRadius = 22, BottomRadius = 22, Look = look, Child = content };
+        bool translucent = look.Surface.A < 255;
+        var glow = new NoticeSurface { Width = 320, Height = 104, TopRadius = 22, BottomRadius = 22, FillOverride = translucent ? Brushes.Transparent : null, MaterialHidden = !translucent, Look = look,
+            Effect = look.ShadowOpacity <= 0 ? null : new DropShadowEffect { Color = look.Shadow, BlurRadius = look.ShadowBlur, ShadowDepth = look.ShadowDepth, Direction = 270, Opacity = look.ShadowOpacity } };
+        if (look.Pixel > 0) TextOptions.SetTextRenderingMode(surface, TextRenderingMode.Aliased);
+        return new Grid { Children = { glow, surface } };
     }
 }

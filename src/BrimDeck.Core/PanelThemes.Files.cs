@@ -110,6 +110,10 @@ public static partial class PanelThemes
         var glass = file.Effects?.Glass;
         foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []).Concat(new[] { glass?.Tint, glass?.Highlight }.OfType<string>()))
             if (!ThemeColor.TryParse(value, out _)) return Loc.T($"效果中的颜色“{value}”无效", $"The effect color \"{value}\" is invalid");
+        if (glass?.Backdrop is { } band && (band.Count != 2 || band.Any(v => !double.IsFinite(v) || v < 0 || v > 1)))
+            return Loc.T("玻璃的 backdrop 必须是 0 到 1 之间的两个数", "The glass backdrop must be two numbers from 0 to 1");
+        if (glass?.BlurOpacity is { } blurOpacity && (!double.IsFinite(blurOpacity) || blurOpacity < 0 || blurOpacity > 1))
+            return Loc.T("玻璃的 blurOpacity 必须在 0 到 1 之间", "The glass blurOpacity must be from 0 to 1");
         return file.Clock is { } clock ? ClockProblem(clock) : null;
     }
 

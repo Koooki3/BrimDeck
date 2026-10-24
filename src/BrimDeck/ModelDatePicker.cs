@@ -100,7 +100,7 @@ internal sealed class ModelDatePicker : Border
 
         System.Windows.Documents.TextElement.SetFontFamily(this, UI.PanelFont);
         Child = _body; Background = Brush("popup"); BorderBrush = Brush("popupBorder"); BorderThickness = new Thickness(1);
-        CornerRadius = new CornerRadius(10); Padding = new Thickness(8);
+        CornerRadius = new CornerRadius(PanelTheme.Corner(10)); Padding = new Thickness(8);
 
         // The fields, with the active one's outline lying over both and gliding between them.
         var fields = new Grid { Margin = new Thickness(0, 0, 0, 5) };
@@ -120,7 +120,7 @@ internal sealed class ModelDatePicker : Border
             Grid.SetColumn(field, end ? 2 : 0); fields.Children.Add(field);
             _fields[end ? 1 : 0] = field; _fieldValues[end ? 1 : 0] = value;
         }
-        _fieldMark = new Border { BorderBrush = Brush("accent"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(Radius), IsHitTestVisible = false,
+        _fieldMark = new Border { BorderBrush = Brush("accent"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius)), IsHitTestVisible = false,
             HorizontalAlignment = HorizontalAlignment.Left, Width = (Inner - FieldGap) / 2, RenderTransform = _fieldShift };
         Grid.SetColumnSpan(_fieldMark, 3); fields.Children.Add(_fieldMark);
         _body.Children.Add(fields);
@@ -163,7 +163,7 @@ internal sealed class ModelDatePicker : Border
         _page.Children.Add(cells);
         for (int m = 0; m < 2; m++)
         {
-            var face = new Border { Background = Brush("accent"), CornerRadius = new CornerRadius(Radius), Height = CellHeight, Opacity = 0, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+            var face = new Border { Background = Brush("accent"), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius)), Height = CellHeight, Opacity = 0, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
             var ink = new Grid { IsHitTestVisible = false, Opacity = 0 };
             var marker = new Marker { Face = face, Ink = ink, Column = new(0, timing.Glide / 1000.0), Row = new(0, timing.Glide / 1000.0), Presence = new(0, timing.Glide / 1000.0) };
             face.RenderTransform = marker.Shift; ink.Clip = marker.Clip;
