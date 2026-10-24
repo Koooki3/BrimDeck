@@ -621,8 +621,11 @@ public sealed partial class SettingsWindow : Window
     private void Interaction()
     {
         SectionTitle(Loc.T("悬停与动画", "Hover and animation"));
-        var duration = SliderRow(Loc.T("展开与收起动画时长", "Animation duration"), S.AnimationDuration, AnimationLength.Min, AnimationLength.Max, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value),
-            Loc.T("设置每次展开或收起动画的持续时间。时间越短，动画越快。", "How long each expand or collapse animation lasts. The shorter the time, the faster the animation."));
+        // motion-review F20: the length covers the panel's expanding and collapsing and the dynamic notices; hover and press
+        // feedback keep their own pace (C5).
+        var duration = SliderRow(Loc.T("展开与收起动画时长", "Expand and collapse duration"), S.AnimationDuration, AnimationLength.Min, AnimationLength.Max, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value),
+            Loc.T("面板展开、收起和灵动提示出现、收回的动画时长。时间越短，动画越快；收起比展开略快。悬停、按压等反馈有各自固定的节奏，不受此项影响。",
+                "How long the panel takes to expand and collapse, and dynamic notices to appear and go back. The shorter the time, the faster the animation; collapsing is a little quicker than expanding. Hover and press feedback keep their own pace and are not affected."));
         void EnableDuration(bool enabled)
         {
             foreach (var control in duration.Children.OfType<FrameworkElement>().Where(control => Grid.GetColumn(control) > 0)) control.IsEnabled = enabled;
@@ -634,9 +637,9 @@ public sealed partial class SettingsWindow : Window
             SliderRow(Loc.T("收起延迟", "Collapse delay"), S.CloseDelay, 0, 2000, 50, Loc.T("毫秒", "ms"), value => Change(s => s.CloseDelay = (int)value),
                 Loc.T("鼠标离开 BrimDeck 的展开面板范围多久后，开始收起。0 毫秒表示立即开始收起。",
                     "How long after the pointer leaves BrimDeck's expanded panel it starts to collapse. 0 ms collapses immediately.")),
-            Toggle(Loc.T("启用展开与收起动画", "Animate expanding and collapsing"), S.Animations, value => { Change(s => s.Animations = value); EnableDuration(value); },
-                help: Loc.T("开启后，BrimDeck 展开和收起时播放过渡动画；关闭后直接切换形态。",
-                    "When on, BrimDeck plays a transition animation as it expands and collapses; when off, it changes shape at once.")), duration);
+            Toggle(Loc.T("启用动画", "Animations"), S.Animations, value => { Change(s => s.Animations = value); EnableDuration(value); },
+                help: Loc.T("开启后，BrimDeck 的展开与收起、灵动提示、换页、悬停与按压反馈和主题动效都有过渡动画；关闭后一切直接切换。Windows 关闭了动画效果或处于高对比度时，同样不播放动画。",
+                    "When on, BrimDeck animates expanding and collapsing, dynamic notices, page switches, hover and press feedback and the theme's motion; when off, everything changes at once. Nothing is animated either while Windows' animation effects are off or in high contrast.")), duration);
     }
 
     private void WindowRules()

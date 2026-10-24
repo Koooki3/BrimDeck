@@ -124,7 +124,7 @@
     "trail": 0,                     // 0 to 0.6: how strongly the particles a completed press leaves show (0: none)
     "particles": "none",            // none, dust, pixel, spark, star, firefly, neon: from the control's edges, above the content
     "focus": "ring",                // none, ring, glow, brackets, caret: a short accent where keyboard focus lands
-    "pace": 1,                      // 0.6 to 1.6: scales the animation length chosen in settings
+    "pace": 1,                      // 0.6 to 1.6: scales the pace of hover, press and focus feedback
     "steps": 0,                     // 0 (smooth) or 2 to 8: moves in that many hard steps, for a mechanical feel
     "color": "accent",              // The main mark: a color key above, a "#RRGGBB" color, or "system" (the Windows accent color)
     "secondary": "accent",          // Its second tone: a gradient's end, a shadow, a ghost or a neutral bar

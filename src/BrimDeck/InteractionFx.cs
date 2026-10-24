@@ -16,8 +16,8 @@ namespace BrimDeck;
 // visible shape (FxMark), never around its layout box and never following the pointer, on one layer above the content that
 // takes no input: thin lines and brackets above the content cover nothing that matters, and the tints are faint enough that
 // text shows through. Durations come from
-// the animation length in settings and the theme's pace; with animations off (BrimDeck's or Windows'), or in high contrast,
-// nothing is drawn. The settings window has its own hover and focus styles and gets none of this.
+// the theme's pace alone, not the panel's animation length (MotionTiming.For); with animations off (BrimDeck's or Windows'), or
+// in high contrast, nothing is drawn. The settings window has its own hover and focus styles and gets none of this.
 internal static class InteractionFx
 {
     private static readonly List<FxSurface> Surfaces = [];
@@ -152,6 +152,7 @@ internal sealed partial class FxSurface : FrameworkElement
     private readonly PressTrack _press = new();
     private readonly FlashBudget _flashes = new();
     private double _focusAt = double.NaN;
+    private readonly FocusAccentGate _focusGate = new();
     private int _serial;
     private DependencyObject? _lastSource;
     private FrameworkElement? _lastTarget;
@@ -204,7 +205,6 @@ internal sealed partial class FxSurface : FrameworkElement
     private bool Allowed => !_detached && MotionGate.Interaction(Preview?.Conditions?.Invoke() ?? MotionEnvironment.Conditions(), _motion);
     private bool Active => Allowed && _interactive();
     private double Clock() => Preview?.Clock() ?? Eased.Now;
-    private int AnimationDuration => Preview?.AnimationDuration ?? Settings?.AnimationDuration ?? AnimationLength.Default;
 
     // Whether this layer marks the control under the pointer now: a window that has its own hover look shows it only when not
     // (NoticeWindow.TextButton), so a control never wears two.
@@ -229,8 +229,8 @@ internal sealed partial class FxSurface : FrameworkElement
             _motion = system ? palette.Motion.ForSystem() : palette.Motion;
             Dress(palette, system);
         }
-        // The animation length can change in settings without a new theme; the theme's pace with one. Worked out once.
-        _timing = MotionTiming.From(AnimationDuration, _motion.Pace);
+        // The theme's pace and steps, worked out once; the panel's animation length plays no part (motion-review C5).
+        _timing = MotionTiming.For(_motion.Pace, _motion.Steps);
     }
 
     // ----- Pointer -----
@@ -240,7 +240,8 @@ internal sealed partial class FxSurface : FrameworkElement
         if (_detached) return;
         EnsureDressed();
         if (!Active) { Release(); return; }
-        HoverOn(TargetOf(e.OriginalSource as DependencyObject));
+        // Touch and a pen stand in for the pointer only while they press: they leave no hover mark (motion-review F4).
+        HoverOn(e.StylusDevice is null ? TargetOf(e.OriginalSource as DependencyObject) : null);
         if (_press.Down && _pressed is not null) _press.Arm(Clock(), Inside(_pressed.Control, e.GetPosition(_pressed.Control)), _timing, _motion.Steps);
         Wake();
     }
@@ -390,11 +391,13 @@ internal sealed partial class FxSurface : FrameworkElement
     {
         if (_pressed is null || !_press.Down) return;
         double now = Clock();
+        // A press from the keyboard answers as a click does but leaves no particles (motion-review C7).
+        bool byKey = _keyPress;
         _keyPress = false;
         Unwatch();
         bool scan = inside && _motion.Press == PressFx.Lock && _flashes.TryTake(now);
         _press.Release(now, inside, scan, _timing, _motion.Steps);
-        if (_press.Committed && _motion.Particles != ParticleFx.None && _motion.ParticleStrength > 0 && _pressed.Valid) Burst(_pressed, now);
+        if (_press.Committed && !byKey && _motion.Particles != ParticleFx.None && _motion.ParticleStrength > 0 && _pressed.Valid) Burst(_pressed, now);
         Wake();
     }
 
@@ -414,7 +417,11 @@ internal sealed partial class FxSurface : FrameworkElement
         if (_detached || InputManager.Current.MostRecentInputDevice is not KeyboardDevice) return;
         EnsureDressed();
         if (!Active || _motion.Focus == FocusFx.None) return;
-        if (e.NewFocus is FrameworkElement element && element.IsVisible && IsWithin(element)) FocusOn(element);
+        if (e.NewFocus is not FrameworkElement element || !element.IsVisible || !IsWithin(element)) return;
+        // motion-review C7: Tab after Tab shows the control's own focus frame; only the first move after a pause plays the
+        // accent, and an accent still playing on the control left goes with it.
+        if (_focusGate.Take(Clock())) FocusOn(element);
+        else if (_focus is not null) { _focus = null; Wake(); }
     }
 
     internal void FocusOn(FrameworkElement element)
@@ -515,7 +522,7 @@ internal sealed partial class FxSurface : FrameworkElement
     {
         Unwatch();
         _hover = _leaving = _pressed = _focus = null;
-        _press.Clear(); _flashes.Clear(); _slice.Visual = null; _keyPress = false;
+        _press.Clear(); _flashes.Clear(); _focusGate.Clear(); _slice.Visual = null; _keyPress = false;
         _lastSource = null; _lastTarget = null;
         ClearParticles();
         Sleep(); WatchLayout(false);

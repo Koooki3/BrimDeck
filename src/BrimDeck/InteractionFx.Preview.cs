@@ -5,15 +5,14 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // What the frame-strip previews and their pixel checks (tests/BrimDeck.FxPreview) need from the pointer layer (FxSurface) and the
-// date range picker (ModelDatePicker), kept apart from what the app uses: a clock, a palette, the "system" choice, an animation
-// length, the motion conditions and whether anything moves, instead of the app's; and a look at what was drawn. In the app
+// date range picker (ModelDatePicker), kept apart from what the app uses: a clock, a palette, the "system" choice, the motion
+// conditions and whether anything moves, instead of the app's; and a look at what was drawn. In the app
 // Preview is null and none of this is read.
 internal sealed class PreviewHooks
 {
     public Func<double> Clock { get; set; } = () => Eased.Now;
     public Func<PanelPalette>? Palette { get; set; }
     public bool? SystemTheme { get; set; }
-    public int? AnimationDuration { get; set; }
     public Func<MotionConditions>? Conditions { get; set; }
     public Func<bool>? Moves { get; set; }
 }
