@@ -12,6 +12,7 @@ using System.Windows.Shapes;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
+using static BrimDeck.Tracks;
 
 namespace BrimDeck;
 
@@ -101,9 +102,9 @@ internal sealed partial class NoticeWindow : Window
             // the notice starts in its flat color and takes the theme's surface as it grows.
             SetFrame(_collapsed, 0, NoticeMotion.Surface);
             _surface.IslandColor = PanelTheme.ColorOf("indicator");
-            Set(_surface, NoticeSurface.IslandOpacityProperty, Indicator ? 1d : 0d);
-            Set(_toast, OpacityProperty, 0d); Set(_detail, OpacityProperty, 0d); _detail.Visibility = Visibility.Collapsed; _toast.Visibility = Visibility.Visible;
-            Set(_glow, OpacityProperty, 0d);
+            SetImmediate(_surface, NoticeSurface.IslandOpacityProperty, Indicator ? 1d : 0d);
+            SetImmediate(_toast, OpacityProperty, 0d); SetImmediate(_detail, OpacityProperty, 0d); _detail.Visibility = Visibility.Collapsed; _toast.Visibility = Visibility.Visible;
+            SetImmediate(_glow, OpacityProperty, 0d);
             Show();
             // Shown on a monitor with another scale, Windows has just given the window that scale; it is placed again in it.
             Place();
@@ -275,8 +276,8 @@ internal sealed partial class NoticeWindow : Window
         foreach (var element in new FrameworkElement[] { _surface, _glow })
         {
             double left = Canvas.GetLeft(element), top = Canvas.GetTop(element);
-            Set(element, Canvas.LeftProperty, (double.IsNaN(left) ? 0 : left) + dx);
-            Set(element, Canvas.TopProperty, (double.IsNaN(top) ? 0 : top) + dy);
+            SetImmediate(element, Canvas.LeftProperty, (double.IsNaN(left) ? 0 : left) + dx);
+            SetImmediate(element, Canvas.TopProperty, (double.IsNaN(top) ? 0 : top) + dy);
         }
     }
 
@@ -326,27 +327,6 @@ internal sealed partial class NoticeWindow : Window
     // glide between choices (Soft.Choose). Without animations (BrimDeck's setting or Windows' own), nothing moves.
     private double Duration() => NoticeMotion.Length(Settings.AnimationDuration, Soft.Enabled);
     private static double InPlace => Soft.Enabled ? Soft.Choose : 0;
-
-    private static void Animate(IAnimatable target, DependencyProperty property, double value, double duration, NoticeMotion.Track track, IEasingFunction easing, Action? completed = null) =>
-        Animate(target, property, value, duration, track.Start, track.End, easing, completed);
-
-    private static void Animate(IAnimatable target, DependencyProperty property, double value, double duration, double start, double end, IEasingFunction easing, Action? completed = null)
-    {
-        if (duration <= 0 || !double.IsFinite(value)) { Set(target, property, double.IsFinite(value) ? value : 0d); completed?.Invoke(); return; }
-        var animation = new DoubleAnimation
-        {
-            To = value, EasingFunction = easing,
-            BeginTime = TimeSpan.FromMilliseconds(duration * start), Duration = TimeSpan.FromMilliseconds(Math.Max(1, duration * (end - start)))
-        };
-        if (completed is not null) animation.Completed += (_, _) => completed();
-        target.BeginAnimation(property, animation, HandoffBehavior.SnapshotAndReplace);
-    }
-
-    private static void Set(IAnimatable target, DependencyProperty property, object value)
-    {
-        target.BeginAnimation(property, null);
-        ((DependencyObject)target).SetValue(property, value);
-    }
 
     // The theme as it is now, for the surface and the shadow or glow behind it.
     private void Dress()

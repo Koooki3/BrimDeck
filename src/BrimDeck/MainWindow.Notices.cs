@@ -7,6 +7,8 @@ using System.Windows.Shapes;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
+using static BrimDeck.Tracks;
+using Track = BrimDeck.Core.Notices.NoticeMotion.Track;
 
 namespace BrimDeck;
 

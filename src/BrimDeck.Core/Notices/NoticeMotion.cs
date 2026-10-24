@@ -14,22 +14,33 @@ public static class NoticeMotion
         public double Length => End - Start;
     }
 
-    // From the island (or the details) to the arriving notice, and into the details: the panel's opening tracks.
-    public static readonly Track Surface = new(0, 1);
+    // The panel's own opening and closing tracks (MainWindow.SetExpanded), the one place they are written down: the notice's
+    // moves below take them wherever it moves as the panel does (q-P1.1).
+    public static readonly Track PanelOpenSurface = new(0, 1);
+    // The opening spring is most of the way there within a fifth of the move, so the page follows soon after it.
+    public static readonly Track PanelOpenContent = new(.12, .8);
+    public static readonly Track PanelOpenTint = new(0, .12);
+    public static readonly Track PanelCloseContent = new(0, .3);
+    public static readonly Track PanelCloseSurface = new(.12, 1);
+    public static readonly Track PanelCloseTint = new(.85, 1);
+    public static readonly Track PanelLandCompact = new(.62, 1);
+
+    // From the island (or the details) to the arriving notice, and into the details: the panel's opening tracks. The toast's
+    // text keeps its own, slightly later track (ArriveContent, against the page's PanelOpenContent).
+    public static readonly Track Surface = PanelOpenSurface;
     public static readonly Track ArriveContent = new(.2, .85);
-    public static readonly Track ArriveTint = new(0, .12);
+    public static readonly Track ArriveTint = PanelOpenTint;
     public static readonly Track ArriveGlow = new(.3, 1);
     // A notice that follows another in place: what showed leaves before the new text arrives.
     public static readonly Track FollowContent = new(.3, .9);
 
-    // Back into the island, and from the details back to the notice: the panel's closing tracks (content (0, .3), surface
-    // (.12, 1), the indicator's tint (.85, 1)).
-    public static readonly Track ReturnContent = new(0, .3);
-    public static readonly Track ReturnSurface = new(.12, 1);
+    // Back into the island, and from the details back to the notice: the panel's closing tracks.
+    public static readonly Track ReturnContent = PanelCloseContent;
+    public static readonly Track ReturnSurface = PanelCloseSurface;
     public static readonly Track ReturnGlow = new(0, .6);
-    public static readonly Track ReturnTint = new(.85, 1);
+    public static readonly Track ReturnTint = PanelCloseTint;
     // What arrives as something closes (the notice's text as the details close) lands as the panel's compact content does.
-    public static readonly Track Landing = new(.62, 1);
+    public static readonly Track Landing = PanelLandCompact;
 
     // Into the details: the notice's text goes quickly, the details arrive once the card is mostly open.
     public static readonly Track OpenOut = new(0, .2);

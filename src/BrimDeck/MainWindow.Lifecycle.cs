@@ -5,6 +5,8 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using static BrimDeck.Tracks;
+using Track = BrimDeck.Core.Notices.NoticeMotion.Track;
 
 namespace BrimDeck;
 
