@@ -16,8 +16,11 @@ internal static class Soft
     public static readonly IEasingFunction Out = Frozen(new BezierEase(.22, .8, .28, 1));
     // For what turns or swaps in place.
     public static readonly IEasingFunction InOut = Frozen(new BezierEase(.45, 0, .25, 1));
-    // The collapsing surface: a slow start, then it settles.
+    // The surface drawing back into the dot as BrimDeck powers off: a slow start, then it settles.
     public static readonly IEasingFunction Settle = Frozen(new BezierEase(.45, 0, .12, 1));
+    // The collapsing panel and a notice going back (motion-review C2, option B, for an A/B comparison with Settle): a drawer's
+    // curve, which leaves at once and lands softly; the surface still starts a little after the content (PanelCloseSurface).
+    public static readonly IEasingFunction Drawer = Frozen(new BezierEase(.32, .72, 0, 1));
     // The system monitor's move (Curves.Follow): content that moves or swaps, selections that glide, hover feedback.
     public static readonly IEasingFunction Follow = Frozen(new FollowEase());
     // The opening surface: a fast attack that passes its size by under 2 percent and settles back (Curves.Bounce).
