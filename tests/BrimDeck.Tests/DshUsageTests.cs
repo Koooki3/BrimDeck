@@ -165,6 +165,41 @@ static class DshUsageTests
         longReader.Read(snapshot, longHome, start.AddDays(-36), start.AddDays(2));
         check("An earlier start date reads the earlier batches", snapshot.Entries.Select(e => e.Key).SequenceEqual(["dsh:early", "dsh:before", "dsh:inside"]));
 
+        // C03: a line over the length limit is dropped up to its end instead of growing the buffer without end. Only a dropped
+        // line that held usage counts as unreadable; a large tool result is dropped quietly. Lines after it are read.
+        var bigHome = Path.Combine(root, "dsh-long-lines");
+        var bigSession = Path.Combine(DshSessions.Folder(bigHome), "--C-work--", "session-d");
+        Directory.CreateDirectory(bigSession);
+        var bigLog = Path.Combine(bigSession, "session.v4.jsonl");
+        string tool = $$$"""{"type":"tool/result","time":{{{At(1)}}},"data":"{{{new string('x', 5000)}}}"}""";
+        string hugeUsage = Message("huge", At(2), 1, 1).Replace("\"stream\":[]", "\"stream\":[\"" + new string('y', 5000) + "\"]", StringComparison.Ordinal);
+        File.WriteAllText(bigLog, header + "\n" + Message("a", At(1), 1, 1) + "\n" + tool + "\n" + Message("b", At(2), 2, 2) + "\n");
+        var limited = new DshSessions(maxLine: 1024);
+        snapshot = new ProviderSnapshot(ProviderId.Dsh);
+        limited.Read(snapshot, bigHome, start, start.AddDays(1));
+        check("A line over the limit without usage is dropped quietly and the lines after it are read",
+            snapshot.UsageComplete && snapshot.Entries.Select(e => e.Key).SequenceEqual(["dsh:a", "dsh:b"]));
+        File.AppendAllText(bigLog, hugeUsage + "\n" + Message("c", At(3), 3, 3) + "\n");
+        snapshot = new ProviderSnapshot(ProviderId.Dsh);
+        limited.Read(snapshot, bigHome, start, start.AddDays(1));
+        check("A dropped line that held usage marks the statistics incomplete, and reading goes on after it",
+            !snapshot.UsageComplete && snapshot.Entries.Select(e => e.Key).SequenceEqual(["dsh:a", "dsh:b", "dsh:c"]));
+        // Half of a long line is on disk: it is dropped across the two refreshes and counted once, when its end arrives.
+        var halfHome = Path.Combine(root, "dsh-half-line");
+        var halfSession = Path.Combine(DshSessions.Folder(halfHome), "--C-work--", "session-e");
+        Directory.CreateDirectory(halfSession);
+        var halfLog = Path.Combine(halfSession, "session.v4.jsonl");
+        File.WriteAllText(halfLog, header + "\n" + hugeUsage[..3000]);
+        var halfReader = new DshSessions(maxLine: 1024);
+        snapshot = new ProviderSnapshot(ProviderId.Dsh);
+        halfReader.Read(snapshot, halfHome, start, start.AddDays(1));
+        bool waiting = snapshot.UsageComplete;
+        File.AppendAllText(halfLog, hugeUsage[3000..] + "\n" + Message("d", At(4), 4, 4) + "\n");
+        snapshot = new ProviderSnapshot(ProviderId.Dsh);
+        halfReader.Read(snapshot, halfHome, start, start.AddDays(1));
+        check("A long line written in two parts is dropped once, when its end arrives", waiting && !snapshot.UsageComplete
+            && snapshot.Entries.Select(e => e.Key).SequenceEqual(["dsh:d"]));
+
         snapshot = new ProviderSnapshot(ProviderId.Dsh);
         new DshSessions().Read(snapshot, Path.Combine(root, "dsh-missing"), start, start.AddDays(1));
         check("Without DeepSeek Harness sessions the statistics are unavailable", !snapshot.UsageAvailable && snapshot.Entries.Count == 0);
