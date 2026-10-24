@@ -144,7 +144,7 @@ internal sealed partial class NoticeWindow : Window
         // The notice now stands exactly where the island is; the island underneath is hidden while it does.
         if (!continuing) _deck.SetIslandCovered(true);
         double duration = Duration();
-        Opening(_toastFrame, duration);
+        _turn.Started(Environment.TickCount64, duration, opening: true, _toastFrame.Rect.Width, _toastFrame.Rect.Height);
         SetFrame(_toastFrame, duration, NoticeMotion.Surface, Soft.Bounce);
         Animate(_surface, NoticeSurface.IslandOpacityProperty, 0, duration, NoticeMotion.ArriveTint, Soft.Out);
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out, () => { if (!_showingDetail && _detailFor is null) _detail.Visibility = Visibility.Collapsed; });
@@ -193,15 +193,16 @@ internal sealed partial class NoticeWindow : Window
         // As the panel closes: the content leaves first, the surface settles into the island with a slow start, and the
         // indicator's color comes back only once the surface is nearly the line. The shadow or glow ends as the island's own
         // (none for the line), so nothing about it changes when the island takes over.
-        // Escape takes it back in the keyboard's shorter time (motion-review C4); content that leaves eases out (F13).
-        double duration = Duration() * (_keyMove ? NoticeMotion.KeyFactor : 1);
+        // It goes back as the panel closes, in three quarters of the time (motion-review C1), or in the keyboard's shorter time
+        // for Escape (C4); content that leaves eases out (F13).
+        double duration = NoticeMotion.ReturnLength(Duration(), _keyMove);
         _keyMove = false;
-        bool redirect = Redirect(_collapsed, ref duration);
+        bool redirect = Turn(opening: false, _collapsed, ref duration);
         Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
         Animate(_glow, OpacityProperty, Indicator ? 0 : 1, duration, NoticeMotion.ReturnGlow, Soft.Out);
         if (Indicator) Animate(_surface, NoticeSurface.IslandOpacityProperty, 1, duration, NoticeMotion.ReturnTint, Soft.InOut);
-        SetFrame(_collapsed, duration, NoticeMotion.ReturnSurfaceFor(redirect), Soft.Settle, () => { if (generation == _generation && _item is null) Finish(reveal: true); });
+        SetFrame(_collapsed, duration, NoticeMotion.ReturnSurfaceFor(redirect), redirect ? Soft.Out : Soft.Settle, () => { if (generation == _generation && _item is null) Finish(reveal: true); });
     }
 
     // The panel opens over the island: a notice still on its way out is removed at once, so the panel is never hidden.
@@ -354,18 +355,15 @@ internal sealed partial class NoticeWindow : Window
     // glide between choices (Soft.Choose). Without animations (BrimDeck's setting or Windows' own), nothing moves.
     private double Duration() => NoticeMotion.Length(Settings.AnimationDuration, Soft.Enabled);
 
-    private void Opening(NoticeFrame to, double duration) => _turn.Started(Environment.TickCount64, duration, to.Rect.Width, to.Rect.Height);
-
-    // motion-review F1, F2: a move back that turns around an opening still under way starts its surface at once (true) and
-    // takes the share of the move it has to undo.
-    private bool Redirect(NoticeFrame to, ref double duration)
+    // motion-review F1, F2: a move that turns around one the other way still under way (true) takes the share of the move it
+    // has to undo, and starts its surface at once; either way it is the last move from now on.
+    private bool Turn(bool opening, NoticeFrame to, ref double duration)
     {
         long now = Environment.TickCount64;
-        if (duration <= 0 || !_turn.Turns(now)) return false;
-        duration *= _turn.Share(now, _surface.Width, _surface.Height, to.Rect.Width, to.Rect.Height);
-        // This move back is not an opening: a later one does not count as turning that opening back.
-        _turn.Started(now, 0, double.NaN, double.NaN);
-        return true;
+        bool turns = duration > 0 && _turn.Turns(now, opening);
+        if (turns) duration *= _turn.Share(now, opening, _surface.Width, _surface.Height, to.Rect.Width, to.Rect.Height);
+        _turn.Started(now, duration, opening, to.Rect.Width, to.Rect.Height);
+        return turns;
     }
     private static double InPlace => Soft.Enabled ? Soft.Choose : 0;
 
@@ -837,7 +835,8 @@ internal sealed partial class NoticeWindow : Window
     private void GrowIntoDetail(bool byKey = false)
     {
         double duration = Duration() * (byKey ? NoticeMotion.KeyFactor : 1);
-        Opening(_detailFrame, duration);
+        // Opened again while it still goes back from its details, it only has that way to come (motion-review F2).
+        Turn(opening: true, _detailFrame, ref duration);
         SetFrame(_detailFrame, duration, NoticeMotion.Surface, byKey ? Soft.Out : Soft.Bounce);
         Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.OpenOut, Soft.Out, () => { if (_showingDetail) _toast.Visibility = Visibility.Hidden; });
         Animate(_detail, OpacityProperty, 1, duration, NoticeMotion.OpenIn, Soft.Out);
@@ -852,9 +851,10 @@ internal sealed partial class NoticeWindow : Window
         _toast.Visibility = Visibility.Visible;
         var toast = Frame(NoticeForm.Toast, ToastSize());
         if (toast != _toastFrame) { _toastFrame = toast; BuildToast(); }
-        double duration = Duration();
-        bool redirect = Redirect(_toastFrame, ref duration);
-        SetFrame(_toastFrame, duration, NoticeMotion.ReturnSurfaceFor(redirect), Soft.Settle);
+        // As the panel closes, in three quarters of the time (motion-review C1).
+        double duration = NoticeMotion.ReturnLength(Duration(), keyboard: false);
+        bool redirect = Turn(opening: false, _toastFrame, ref duration);
+        SetFrame(_toastFrame, duration, NoticeMotion.ReturnSurfaceFor(redirect), redirect ? Soft.Out : Soft.Settle);
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out, () => { if (!_showingDetail && _detail.Children.Count > 0) _detail.Visibility = Visibility.Hidden; });
         Animate(_toast, OpacityProperty, 1, duration, NoticeMotion.Landing, Soft.Out);
         _escape?.SetEnabled(false);

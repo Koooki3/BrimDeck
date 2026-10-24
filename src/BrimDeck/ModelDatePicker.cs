@@ -466,6 +466,8 @@ internal sealed class ModelDatePicker : Border
             moving |= marker.Column.Moving(now) || marker.Row.Moving(now) || marker.Presence.Moving(now);
         }
         double open = _messageOpen.At(now);
+        // The slot's height is animated on purpose (motion-review F8 leaves it): the message pushes the rows below it down and
+        // the face grows with it; a scale or a clip would leave them where they are and the message over them.
         _messageSlot.Height = _messageHeight * open;
         _message.Opacity = open; _messageShift.Y = -MessageRise * (1 - open);
         moving |= _messageOpen.Moving(now);

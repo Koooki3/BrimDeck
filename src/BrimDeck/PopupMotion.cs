@@ -7,6 +7,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using BrimDeck.Core;
 
 namespace BrimDeck;
 
@@ -16,17 +17,15 @@ namespace BrimDeck;
 // own that is opened as soon as the real one has been laid out: a pop-up created at the moment of closing came up some 50 ms
 // later, after a blank. It lies right beneath the real one and is kept up to date while that is open, so it already shows
 // when WPF takes the real one away: given its picture only on closing, it was drawn a frame late and the list blinked out
-// and back before it left. It is taken again only when the list can have changed (motion-review F7): the pointer moved onto
-// another element, a button or key went down or up, or the list scrolled; once right after (the change's own frame) and once
-// more when a hover's fade has settled. Taken 20 times a second while open, it kept the list rendering in software.
+// and back before it left. It is first taken once the list has entered, and then again only when the list can have changed
+// (motion-review F7, BrimDeck.Core.PopupPicture): the pointer moved onto another element, a button or key went down or up, or
+// the list scrolled; once right after (the change's own frame) and once more when a hover's fade has settled. Taken 20 times a
+// second while open, it kept the list rendering in software.
 internal static class PopupMotion
 {
     private static readonly ConditionalWeakTable<object, Placed> Places = new();
     // The waiting picture's pop-up for the opening under way, null between openings.
     private sealed class Placed { public Popup? Ghost; public Image? Picture; public Window? Window; public DispatcherTimer? Refresh; public Action? Unhook; }
-
-    // After a change, the picture is taken again once a hover's fade (Soft.Hover) has had time to settle.
-    private static readonly TimeSpan Settled = TimeSpan.FromMilliseconds(Soft.Hover + 40);
 
     public static void Attach(Popup popup)
     {
@@ -75,11 +74,16 @@ internal static class PopupMotion
             var ghost = placed.Ghost = new Popup { PlacementTarget = window, Placement = PlacementMode.Relative, HorizontalOffset = at.X, VerticalOffset = at.Y,
                 AllowsTransparency = true, StaysOpen = true, IsHitTestVisible = false, Focusable = false, Child = picture, IsOpen = true };
             if (PresentationSource.FromVisual(picture) is HwndSource own) Native.WindowsHost.PlaceBelow(own.Handle, real.Handle);
-            // First once the content has entered, then again only after something that can change it.
+            // First once the content has entered, then again only after something that can change it. After a change it is taken
+            // again once the theme's hover fade has had time to settle.
+            var schedule = new PopupPicture();
+            var motion = PanelTheme.Current.Motion;
+            var settled = TimeSpan.FromMilliseconds(PopupPicture.SettleMilliseconds(MotionTiming.For(motion.Pace, motion.Steps)));
             var refresh = placed.Refresh = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(Soft.Short + 80) };
             refresh.Tick += (_, _) =>
             {
                 refresh.Stop();
+                schedule.Enter();
                 if (placed.Ghost == ghost && element.IsVisible) Take(element, picture);
             };
             refresh.Start();
@@ -87,14 +91,16 @@ internal static class PopupMotion
             object? over = null;
             void Changed()
             {
-                if (placed.Ghost != ghost) return;
+                // Before it has entered, the first picture is still to come: taken now, it would lie opaque under the list
+                // fading in, and the timer would not wait for the entrance.
+                if (placed.Ghost != ghost || !schedule.Changed()) return;
                 // The change's own frame, once its layout is done; a burst of changes queues it once.
                 if (!queued)
                 {
                     queued = true;
                     element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { queued = false; if (placed.Ghost == ghost && element.IsVisible) Take(element, picture); });
                 }
-                refresh.Stop(); refresh.Interval = Settled; refresh.Start();
+                refresh.Stop(); refresh.Interval = settled; refresh.Start();
             }
             MouseEventHandler moved = (_, _) => { if (!ReferenceEquals(Mouse.DirectlyOver, over)) { over = Mouse.DirectlyOver; Changed(); } };
             MouseEventHandler left = (_, _) => { over = null; Changed(); };

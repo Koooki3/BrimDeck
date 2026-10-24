@@ -37,17 +37,33 @@ internal static class MotionReviewTests
 
         // F1, F2: only an opening or closing still under way is turned back (the panel's and a notice's own record, MoveTurn).
         var turn = new MoveTurn();
-        turn.Started(1000, 360, 480, 300);
-        check("Motion review: closing well after the opening has ended is a plain closing", !turn.Turns(1000 + 360 + 300) && !turn.Turns(1360)
-            && turn.Share(1660, 480, 300, 200, 36) == 1);
+        turn.Started(1000, 360, opening: true, 480, 300);
+        check("Motion review: closing well after the opening has ended is a plain closing", !turn.Turns(1000 + 360 + 300, false) && !turn.Turns(1360, false)
+            && turn.Share(1660, false, 480, 300, 200, 36) == 1);
         check("Motion review: closing while the opening is under way turns it back, in the share it has to undo",
-            turn.Turns(1150) && Math.Abs(turn.Share(1150, 340, 168, 200, 36) - .5) < 1e-9);
-        turn.Started(2000, NoticeMotion.PanelLength(360, closing: true, keyboard: false), 200, 36);
-        check("Motion review: opening after the closing has ended is a plain opening", !turn.Turns(2000 + 270) && !turn.Turns(2600)
-            && turn.Share(2600, 200, 36, 480, 300) == 1);
-        check("Motion review: opening while the closing is under way turns it back", turn.Turns(2100) && turn.Share(2100, 400, 250, 480, 300) is >= .4 and < 1);
-        turn.Started(3000, 0, 480, 300);
-        check("Motion review: a move without animation leaves nothing to turn back", !turn.Turns(3000));
+            turn.Turns(1150, false) && Math.Abs(turn.Share(1150, false, 340, 168, 200, 36) - .5) < 1e-9);
+        check("Motion review: a move the same way as the one under way turns nothing back", !turn.Turns(1150, true) && turn.Share(1150, true, 340, 168, 480, 300) == 1);
+        turn.Started(2000, NoticeMotion.PanelLength(360, closing: true, keyboard: false), opening: false, 200, 36);
+        check("Motion review: opening after the closing has ended is a plain opening", !turn.Turns(2000 + 270, true) && !turn.Turns(2600, true)
+            && turn.Share(2600, true, 200, 36, 480, 300) == 1);
+        check("Motion review: opening while the closing is under way turns it back (a notice's details opened again too)",
+            turn.Turns(2100, true) && turn.Share(2100, true, 400, 250, 480, 300) is >= .4 and < 1);
+        turn.Started(3000, 0, opening: true, 480, 300);
+        check("Motion review: a move without animation leaves nothing to turn back", !turn.Turns(3000, false));
+
+        // C1 for notices: a notice goes back as the panel closes, and Escape's way back is the keyboard's.
+        check("Motion review: a notice goes back in three quarters of the time, Escape in 0.6 of it",
+            NoticeMotion.ReturnLength(360, keyboard: false) == 270 && NoticeMotion.ReturnLength(360, keyboard: true) == 216 && NoticeMotion.ReturnLength(0, false) == 0
+            && NoticeMotion.ReturnLength(360, false) == NoticeMotion.PanelLength(360, closing: true, keyboard: false));
+
+        // F7: the picture beneath a pop-up waits for its entrance, and then follows changes after the theme's hover time.
+        var popup = new PopupPicture();
+        bool early = popup.Changed();
+        popup.Enter();
+        check("Motion review: a pop-up's picture is not taken before it has entered, and is after", !early && popup.Changed() && popup.Entered);
+        check("Motion review: a pop-up's picture is taken again once the theme's hover has settled",
+            PopupPicture.SettleMilliseconds(MotionTiming.For(1, 0)) == 200 && PopupPicture.SettleMilliseconds(MotionTiming.For(1.2, 0)) == 232
+            && PopupPicture.SettleMilliseconds(MotionTiming.For(.8, 3)) == MotionTiming.For(.8, 3).HoverIn + 40);
 
         // C5, F14: the pointer's answers keep their own pace, whatever the panel's animation length.
         var smooth = MotionTiming.For(1, 0);
@@ -64,9 +80,11 @@ internal static class MotionReviewTests
         check("Motion review: a pace out of range is held to it", MotionTiming.For(double.NaN, 0) == smooth && MotionTiming.For(9, 0).HoverIn == 256);
 
         // F13: what fades out leaves at once and slows, and is gone exactly at its end.
-        check("Motion review: a fade out leaves at once", MotionCurve.EaseOut(.1, 0) > .3 && MotionCurve.EaseOut(.5, 0) > .8);
-        check("Motion review: a fade out ends exactly at its end", MotionCurve.EaseOut(1, 0) == 1 && MotionCurve.EaseOut((14 + .18 - 14) / .18, 0) == 1
-            && MotionCurve.EaseOut(.5, 3) == MotionCurve.Step(.5, 3));
+        check("Motion review: a hover mark leaves at once", MotionCurve.HoverOut(.1, 0) > .3 && MotionCurve.HoverOut(.5, 0) > .8);
+        check("Motion review: a hover mark is gone exactly at its end", MotionCurve.HoverOut(1, 0) == 1 && MotionCurve.HoverOut((14 + .18 - 14) / .18, 0) == 1
+            && MotionCurve.HoverOut(.5, 3) == MotionCurve.Step(.5, 3));
+        check("Motion review: a press letting go and the focus accent fading keep their slow start",
+            MotionCurve.EaseOut(.1, 0) < .1 && Math.Abs(MotionCurve.EaseOut(.3, 0) - Curves.Bezier(.45, 0, .25, 1, .3)) < 1e-12 && MotionCurve.EaseOut(1, 0) == 1);
 
         // C7: the focus accent only on the first move after a pause.
         var gate = new FocusAccentGate();

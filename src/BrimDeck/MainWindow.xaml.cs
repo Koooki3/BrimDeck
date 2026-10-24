@@ -552,8 +552,8 @@ public partial class MainWindow : Window
         // back to a closing one), the surface starts back from where it is at once, in the share of the move it has to undo.
         // Only an opening or closing still under way counts; the panel laid out again in place never does.
         long now = Environment.TickCount64;
-        bool redirect = turning && duration > 0 && fromNotice is null && _turn.Turns(now);
-        if (redirect) duration = (int)Math.Round(duration * _turn.Share(now, Island.Width, Island.Height, width, height));
+        bool redirect = turning && duration > 0 && fromNotice is null && _turn.Turns(now, expanded);
+        if (redirect) duration = (int)Math.Round(duration * _turn.Share(now, expanded, Island.Width, Island.Height, width, height));
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
@@ -584,7 +584,7 @@ public partial class MainWindow : Window
         _booting = false; _morphingShape = false;
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
-        if (turning) _turn.Started(now, duration, width, height);
+        if (turning) _turn.Started(now, duration, expanded, width, height);
         // The opening and closing tracks are NoticeMotion's Panel* (a notice moves on the same ones); the boot's, the style
         // morph's and the indicator's own variations stay here.
         Track content = expanded ? NoticeMotion.PanelOpenContent : NoticeMotion.PanelCloseContent;
@@ -608,7 +608,7 @@ public partial class MainWindow : Window
         // Booting does not use that give: Bounce on Margin and Height would bob the whole capsule or line after the round
         // dot has already finished its jumps (the notch sits at the top edge, so the same overshoot is barely seen).
         bool bounce = !booting && expanded && !reshaping && !keyboard && duration > 0 && HasRoomToBounce(width, height, left, gap);
-        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Settle;
+        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting || redirect ? Soft.Out : Soft.Settle;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         // motion-review F13: what leaves eases out as what arrives does; InOut is for what changes in place.

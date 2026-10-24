@@ -79,15 +79,14 @@ internal sealed class PageHandover
     {
         double width = page.ActualWidth, height = page.ActualHeight;
         if (!page.IsVisible || width < 1 || height < 1 || PresentationSource.FromVisual(page) is null) return null;
-        // A page still arriving is pictured as it is drawn now: as faint and as far along as its arrival has brought it.
-        double x = page.RenderTransform is TranslateTransform shift ? shift.X : 0;
+        // A page still arriving is pictured as it is drawn now: the brush takes the page's own opacity and shift with it
+        // (checked: a page at half opacity and moved 10 DIP comes out so), so the picture leaves from where the page was.
         return new Image { Source = Snapshot(page, width, height, VisualTreeHelper.GetDpi(page)), Width = width, Height = height, Stretch = Stretch.None,
-            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Opacity = page.Opacity,
-            RenderTransform = Math.Abs(x) < .01 ? Transform.Identity : new TranslateTransform(x, 0) };
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
     }
 
-    // A frozen picture of an element's own area at the given scale, drawn one to one (Exactly), so neither its offset in its
-    // parent nor a transform it is entering with is part of it.
+    // A frozen picture of an element's own area at the given scale, drawn one to one (Exactly), so its offset in its parent is
+    // not part of it. Its own opacity and render transform are: the brush draws the element as it is drawn.
     public static BitmapSource Snapshot(Visual element, double width, double height, DpiScale dpi)
     {
         var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);

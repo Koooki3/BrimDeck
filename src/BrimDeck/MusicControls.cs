@@ -79,7 +79,7 @@ public sealed class MusicSeekSlider : Slider
     // layout. The rail and the track (the played part) share the scale.
     private readonly ScaleTransform _barScale = new(1, 1);
     private bool _touched;
-    protected override void OnMouseEnter(MouseEventArgs e) { _touched = e.StylusDevice is not null; base.OnMouseEnter(e); }
+    protected override void OnMouseEnter(MouseEventArgs e) { _touched = e.StylusDevice is not null; base.OnMouseEnter(e); UpdateState(); }
     private void UpdateState(bool animate = true)
     {
         animate &= AnimationsEnabled && IsLoaded;

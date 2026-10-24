@@ -160,6 +160,8 @@ internal sealed partial class FxSurface : FrameworkElement
     // Pressed by the keyboard (Space or Enter on a focused control) rather than by the mouse button; or by touch or a pen, which
     // the mouse button's own state does not show.
     private bool _keyPress, _stylusPress;
+    // The pointer last moved by touch or a pen: a panel that opens under it marks nothing as hovered (motion-review F4).
+    private bool _stylusMoved;
     // A release seen only on the physical button waits for the queued input before it lets the press go (Frame).
     private bool _liftCheck;
 
@@ -241,7 +243,8 @@ internal sealed partial class FxSurface : FrameworkElement
         EnsureDressed();
         if (!Active) { Release(); return; }
         // Touch and a pen stand in for the pointer only while they press: they leave no hover mark (motion-review F4).
-        HoverOn(e.StylusDevice is null ? TargetOf(e.OriginalSource as DependencyObject) : null);
+        _stylusMoved = e.StylusDevice is not null;
+        HoverOn(_stylusMoved ? null : TargetOf(e.OriginalSource as DependencyObject));
         if (_press.Down && _pressed is not null) _press.Arm(Clock(), Inside(_pressed.Control, e.GetPosition(_pressed.Control)), _timing, _motion.Steps);
         Wake();
     }
@@ -279,6 +282,7 @@ internal sealed partial class FxSurface : FrameworkElement
         if (!Active) return;
         if (TargetOf(e.OriginalSource as DependencyObject) is not { } target) return;
         _stylusPress = e.StylusDevice is not null;
+        _stylusMoved = _stylusPress;
         PressOn(target);
     }
 
@@ -303,7 +307,8 @@ internal sealed partial class FxSurface : FrameworkElement
         if (_detached || !_input.IsMouseOver) return;
         EnsureDressed();
         if (!Active) { Release(); return; }
-        HoverOn(TargetOf(Mouse.DirectlyOver as DependencyObject));
+        bool stylus = _stylusMoved || InputManager.Current.MostRecentInputDevice is StylusDevice;
+        HoverOn(stylus ? null : TargetOf(Mouse.DirectlyOver as DependencyObject));
         Wake();
     }
 

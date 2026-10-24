@@ -157,10 +157,11 @@ public partial class MainWindow
         PageCapsule.Height = height;
         // motion-review F8: the width is set at once and the change is drawn by stretching the capsule from its left edge, so
         // the glide lays nothing out again.
-        double was = PageCapsule.Width;
+        // A stretch still under way goes on from the width it draws now, not from its laid-out width.
+        double was = PageCapsule.Width * PageCapsuleStretch.ScaleX;
         PageCapsule.Width = width;
         PageCapsuleStretch.BeginAnimation(ScaleTransform.ScaleXProperty, null); PageCapsuleStretch.ScaleX = 1;
-        if (glide && double.IsFinite(was) && was > 0 && Math.Abs(was - width) > .5)
+        if (glide && double.IsFinite(was) && was > 0 && width > 0 && Math.Abs(was - width) > .5)
             PageCapsuleStretch.BeginAnimation(ScaleTransform.ScaleXProperty, new System.Windows.Media.Animation.DoubleAnimation(was / width, 1, TimeSpan.FromMilliseconds(Soft.Choose))
             { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
         double from = PageCapsuleShift.X;

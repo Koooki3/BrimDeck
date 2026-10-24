@@ -58,6 +58,8 @@ public static class NoticeMotion
     public const double CloseFactor = .75, KeyFactor = .6;
     public static int PanelLength(int length, bool closing, bool keyboard)
         => length <= 0 ? 0 : (int)Math.Round(length * (keyboard ? KeyFactor : closing ? CloseFactor : 1));
+    // A notice going back (into the island, or from its details to the notice) closes as the panel does.
+    public static double ReturnLength(double length, bool keyboard) => PanelLength((int)Math.Round(length), closing: true, keyboard);
 
     // motion-review F1: a closing that turns back a move still under way starts its surface at once (no slow, delayed start
     // from where the opening was still going), on the whole of its shorter move.
@@ -82,27 +84,29 @@ public static class NoticeMotion
     }
 }
 
-// The last opening or closing of the panel (or a notice's opening), so that the next one can tell whether it turns that one
-// back while it is still under way (motion-review F1, F2). Only those moves count: the panel laid out again while it rests
-// open or closed (a page's new size, a window coming to the front, a reading) never makes the next closing look turned back,
-// which cut a closing after such a lay-out short. Times are milliseconds on one clock (Environment.TickCount64).
+// The last opening or closing of the panel or of a notice, so that the next one can tell whether it turns that one back while
+// it is still under way (motion-review F1, F2). Only those moves count: the panel laid out again while it rests open or closed
+// (a page's new size, a window coming to the front, a reading) never makes the next closing look turned back, which cut a
+// closing after such a lay-out short; and only a move the other way turns one back (a notice going into the island while it
+// still leaves its details does not). Times are milliseconds on one clock (Environment.TickCount64).
 public sealed class MoveTurn
 {
     private long _ends;
+    private bool _opening;
     private double _width = double.NaN, _height = double.NaN;
 
-    // An opening or closing of the given length toward the given size starts at now.
-    public void Started(long now, double length, double width, double height)
+    // An opening (or a closing) of the given length toward the given size starts at now.
+    public void Started(long now, double length, bool opening, double width, double height)
     {
         _ends = length > 0 ? now + (long)Math.Ceiling(length) : 0;
-        _width = width; _height = height;
+        _opening = opening; _width = width; _height = height;
     }
 
-    // Whether a move starting at now turns back the last one: only while that one is still under way.
-    public bool Turns(long now) => now < _ends;
+    // Whether an opening (or a closing) starting at now turns back the last move: only one the other way, still under way.
+    public bool Turns(long now, bool opening) => now < _ends && opening != _opening;
 
     // The share of a whole move the turning move takes (NoticeMotion.RemainingShare), from the size the surface has now to the
     // new target; 1 when it turns nothing back.
-    public double Share(long now, double width, double height, double toWidth, double toHeight)
-        => Turns(now) ? NoticeMotion.RemainingShare((width, _width, toWidth), (height, _height, toHeight)) : 1;
+    public double Share(long now, bool opening, double width, double height, double toWidth, double toHeight)
+        => Turns(now, opening) ? NoticeMotion.RemainingShare((width, _width, toWidth), (height, _height, toHeight)) : 1;
 }

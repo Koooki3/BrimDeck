@@ -122,7 +122,7 @@ internal sealed partial class FxSurface
     {
         // A mechanical theme drops its mark in half the time.
         double length = _timing.HoverOut / 1000.0 * (Steps > 0 ? .5 : 1);
-        return mark.LeftFrom * (1 - MotionCurve.EaseOut(MotionCurve.Linear(now - mark.LeftAt, length), Steps));
+        return mark.LeftFrom * (1 - MotionCurve.HoverOut(MotionCurve.Linear(now - mark.LeftAt, length), Steps));
     }
 
     // Where a mark is drawn: on its control, or on the way there from the previous control.

@@ -268,9 +268,11 @@ public static class MotionCurve
     public static double Step(double t, int steps) => steps < MotionSafety.StepsMin || t <= 0 || t >= 1 ? Math.Clamp(t, 0, 1) : Math.Ceiling(t * steps) / steps;
     // The theme's curve: steps (linear within them) or the soft landing the rest of BrimDeck uses (Soft.Out).
     public static double Ease(double t, int steps) => steps >= MotionSafety.StepsMin ? Step(t, steps) : Curves.Bezier(.22, .8, .28, 1, Math.Clamp(t, 0, 1));
-    // For what fades out: the same soft landing, leaving at once (motion-review F13; it started slowly, as Soft.InOut), or steps.
-    // Its flat end is taken as the end, so what fades is gone exactly when its time is up rather than a rounding error later.
-    public static double EaseOut(double t, int steps) { double e = Ease(t, steps); return e > 1 - 1e-9 ? 1 : e; }
+    // For what fades out: the slow start of Soft.InOut, or steps.
+    public static double EaseOut(double t, int steps) => steps >= MotionSafety.StepsMin ? Step(t, steps) : Curves.Bezier(.45, 0, .25, 1, Math.Clamp(t, 0, 1));
+    // A hover mark leaving (motion-review F13): the soft landing what arrives takes, leaving at once, or steps. Its flat end is
+    // taken as the end, so the mark is gone exactly when its time is up rather than a rounding error later.
+    public static double HoverOut(double t, int steps) { double e = Ease(t, steps); return e > 1 - 1e-9 ? 1 : e; }
 }
 
 // Rations what reads as a flash (a glitch slice, a scan line): at most MotionSafety.PressFlashes start in any one second,
