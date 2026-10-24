@@ -55,10 +55,9 @@ internal sealed partial class NoticeWindow : Window
     private ColumnDefinition? _progressDone, _progressLeft;
     private FrameworkElement? _progressTrack;
     private bool _dressed;
-    // When the surface's last opening (Arrive, GrowIntoDetail) ends (Environment.TickCount64) and where it was going, so that a
-    // move back can tell it turns one around (motion-review F1, F2); and whether the next move was asked for by the keyboard (C4).
-    private long _moveEnds;
-    private NoticeFrame? _moveTo;
+    // The surface's last opening (Arrive, GrowIntoDetail), so that a move back can tell it turns one around while it is still
+    // under way (motion-review F1, F2); and whether the next move was asked for by the keyboard (C4).
+    private readonly MoveTurn _turn = new();
     private bool _keyMove;
 
     public NoticeWindow(MainWindow deck, App app)
@@ -355,15 +354,17 @@ internal sealed partial class NoticeWindow : Window
     // glide between choices (Soft.Choose). Without animations (BrimDeck's setting or Windows' own), nothing moves.
     private double Duration() => NoticeMotion.Length(Settings.AnimationDuration, Soft.Enabled);
 
-    private void Opening(NoticeFrame to, double duration) { _moveEnds = duration > 0 ? Environment.TickCount64 + (long)duration : 0; _moveTo = to; }
+    private void Opening(NoticeFrame to, double duration) => _turn.Started(Environment.TickCount64, duration, to.Rect.Width, to.Rect.Height);
 
     // motion-review F1, F2: a move back that turns around an opening still under way starts its surface at once (true) and
     // takes the share of the move it has to undo.
     private bool Redirect(NoticeFrame to, ref double duration)
     {
-        if (duration <= 0 || Environment.TickCount64 >= _moveEnds || _moveTo is not { } from) return false;
-        _moveEnds = 0;
-        duration *= NoticeMotion.RemainingShare((_surface.Width, from.Rect.Width, to.Rect.Width), (_surface.Height, from.Rect.Height, to.Rect.Height));
+        long now = Environment.TickCount64;
+        if (duration <= 0 || !_turn.Turns(now)) return false;
+        duration *= _turn.Share(now, _surface.Width, _surface.Height, to.Rect.Width, to.Rect.Height);
+        // This move back is not an opening: a later one does not count as turning that opening back.
+        _turn.Started(now, 0, double.NaN, double.NaN);
         return true;
     }
     private static double InPlace => Soft.Enabled ? Soft.Choose : 0;

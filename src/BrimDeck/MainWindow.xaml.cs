@@ -281,10 +281,8 @@ public partial class MainWindow : Window
     // Where the pointer was when hovering opened the panel, in DIPs from the monitor's left edge; null when the panel was opened
     // another way (the hotkey) or is closed.
     private double? _openCentre;
-    // When the panel's last move ends (Environment.TickCount64) and the size it was going to, so that a move turned back part
-    // way can tell (SetExpanded; motion-review F1, F2).
-    private long _moveEnds;
-    private Size _moveTarget = new(double.NaN, double.NaN);
+    // The panel's last opening or closing, so that one turned back part way can tell (SetExpanded; motion-review F1, F2).
+    private readonly MoveTurn _turn = new();
     // The content changed what it asks for: the collapsed surface moves to the new width with its usual animation, and the window
     // grows first when the surface would be wider than it.
     private void FitCompactToContent()
@@ -552,8 +550,10 @@ public partial class MainWindow : Window
         if (fromNotice is { } notice && duration > 0) StartFromNotice(notice);
         // motion-review F1, F2: turned back while the last move is still under way (the pointer left an opening panel, or came
         // back to a closing one), the surface starts back from where it is at once, in the share of the move it has to undo.
-        bool redirect = turning && duration > 0 && fromNotice is null && Environment.TickCount64 < _moveEnds;
-        if (redirect) duration = (int)Math.Round(duration * NoticeMotion.RemainingShare((Island.Width, _moveTarget.Width, width), (Island.Height, _moveTarget.Height, height)));
+        // Only an opening or closing still under way counts; the panel laid out again in place never does.
+        long now = Environment.TickCount64;
+        bool redirect = turning && duration > 0 && fromNotice is null && _turn.Turns(now);
+        if (redirect) duration = (int)Math.Round(duration * _turn.Share(now, Island.Width, Island.Height, width, height));
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
@@ -584,7 +584,7 @@ public partial class MainWindow : Window
         _booting = false; _morphingShape = false;
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
-        _moveEnds = duration > 0 ? Environment.TickCount64 + duration : 0; _moveTarget = new Size(width, height);
+        if (turning) _turn.Started(now, duration, width, height);
         // The opening and closing tracks are NoticeMotion's Panel* (a notice moves on the same ones); the boot's, the style
         // morph's and the indicator's own variations stay here.
         Track content = expanded ? NoticeMotion.PanelOpenContent : NoticeMotion.PanelCloseContent;

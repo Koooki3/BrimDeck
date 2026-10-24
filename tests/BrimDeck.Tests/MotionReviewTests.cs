@@ -35,6 +35,20 @@ internal static class MotionReviewTests
         check("Motion review: with nothing to compare, the whole move", NoticeMotion.RemainingShare((36, 36, 36)) == 1
             && NoticeMotion.RemainingShare((double.NaN, double.NaN, 200)) == 1 && NoticeMotion.RemainingShare() == 1);
 
+        // F1, F2: only an opening or closing still under way is turned back (the panel's and a notice's own record, MoveTurn).
+        var turn = new MoveTurn();
+        turn.Started(1000, 360, 480, 300);
+        check("Motion review: closing well after the opening has ended is a plain closing", !turn.Turns(1000 + 360 + 300) && !turn.Turns(1360)
+            && turn.Share(1660, 480, 300, 200, 36) == 1);
+        check("Motion review: closing while the opening is under way turns it back, in the share it has to undo",
+            turn.Turns(1150) && Math.Abs(turn.Share(1150, 340, 168, 200, 36) - .5) < 1e-9);
+        turn.Started(2000, NoticeMotion.PanelLength(360, closing: true, keyboard: false), 200, 36);
+        check("Motion review: opening after the closing has ended is a plain opening", !turn.Turns(2000 + 270) && !turn.Turns(2600)
+            && turn.Share(2600, 200, 36, 480, 300) == 1);
+        check("Motion review: opening while the closing is under way turns it back", turn.Turns(2100) && turn.Share(2100, 400, 250, 480, 300) is >= .4 and < 1);
+        turn.Started(3000, 0, 480, 300);
+        check("Motion review: a move without animation leaves nothing to turn back", !turn.Turns(3000));
+
         // C5, F14: the pointer's answers keep their own pace, whatever the panel's animation length.
         var smooth = MotionTiming.For(1, 0);
         check("Motion review: a smooth theme's hover comes and goes in the monitor's hover time",
