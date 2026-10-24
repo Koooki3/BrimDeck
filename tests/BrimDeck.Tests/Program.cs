@@ -22,6 +22,7 @@ try
     await MusicTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     CompactMotionTests.Run(Check);
+    AuditPerfTests.Run(Check);
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     NoticeGlyphTests.Run(Check);

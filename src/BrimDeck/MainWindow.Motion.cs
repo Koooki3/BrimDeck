@@ -29,8 +29,8 @@ public partial class MainWindow
         _shadowCache = ShadowHost.CacheMode as BitmapCache;
         SourceInitialized += (_, _) => FitShadowCache();
         DpiChanged += (_, e) => { if (ReferenceEquals(e.OriginalSource, this)) FitShadowCache(e.NewDpi.DpiScaleX); };
-        // While the island changes size (opening, closing, a resize) the picture would be made again on every frame, which cost
-        // more than blurring the shadow directly (28 % of a core against 24 % in a continuous resize at 144 Hz): the shadow is
+        // While the island changes size (opening, closing, a resize) the picture would be made again on every frame, which saved
+        // nothing and in one measurement cost more (28 % of a core against 24 % in a continuous resize at 144 Hz): the shadow is
         // drawn directly until its size has held still for a moment.
         _shadowSettle = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
         _shadowSettle.Tick += (_, _) => { _shadowSettle.Stop(); ShadowHost.CacheMode = _shadowCache; };
