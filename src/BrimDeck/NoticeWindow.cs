@@ -47,6 +47,11 @@ internal sealed partial class NoticeWindow : Window
     private int _generation;
     // The item the details were last built for; opening them for the same item only moves the surface.
     private AttentionItem? _detailFor;
+    // What the details were built from apart from a task's progress (DetailKey), and the progress track's two columns, so that
+    // progress alone changes in place: rebuilding the card under the pointer lost clicks, focus and the body's scroll.
+    private string? _detailKey;
+    private ColumnDefinition? _progressDone, _progressLeft;
+    private FrameworkElement? _progressTrack;
     private bool _dressed;
 
     public NoticeWindow(MainWindow deck, App app)
@@ -157,8 +162,8 @@ internal sealed partial class NoticeWindow : Window
         // again only when what it is made of changes. Screen readers hear it again only when its words change.
         bool spoken = moved || !RefreshToast();
         if (spoken) BuildToast();
-        // A change in place glides as the monitor's selections do.
-        if (_showingDetail) ShowDetailFrame(InPlace, Soft.Follow);
+        // A change in place glides as the monitor's selections do. Progress alone changes the open details in place.
+        if (_showingDetail && !UpdateDetailInPlace()) ShowDetailFrame(InPlace, Soft.Follow);
         else if (moved) SetFrame(_toastFrame, InPlace, NoticeMotion.Surface, Soft.Follow);
         if (spoken || _toastWordsChanged) Announce();
         WatchLive();
@@ -596,9 +601,46 @@ internal sealed partial class NoticeWindow : Window
     private double DetailPadding() => _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(18, _deck.Collapsed.Shoulder + 14) : 18;
     private const double DetailTop = 14, DetailBottom = 16;
 
+    // Everything the details show except a task's progress and the live time words (which follow their own tick).
+    private string DetailKey()
+    {
+        var notice = Notice;
+        var key = new System.Text.StringBuilder();
+        key.Append(_item?.Key).Append('\u0001').Append(_item?.Kind).Append('\u0001').Append(_item?.Payload is int count ? count : -1).Append('\u0001').Append(_openFailed).Append('\u0001').Append(Loc.Language);
+        if (notice is not null)
+        {
+            key.Append('\u0001').Append(notice.Id).Append('\u0001').Append(notice.AppName).Append('\u0001').Append(notice.Title).Append('\u0001').Append(notice.Body)
+                .Append('\u0001').Append(notice.Category).Append('\u0001').Append(notice.Origin).Append('\u0001').Append(notice.Distro).Append('\u0001').Append(notice.IconRef)
+                .Append('\u0001').Append(notice.ReceivedAt.UtcTicks).Append('\u0001').Append(notice.SourcePresent).Append('\u0001').Append(notice.Capabilities)
+                .Append('\u0001').Append(notice.Progress is not null).Append('\u0001').Append(notice.Call).Append('\u0001').Append(notice.TimeKind)
+                .Append('\u0001').Append(NoticeClock.IsLive(notice.Timing, DateTimeOffset.UtcNow)).Append('\u0001').Append(Center.CanOpen(notice));
+            foreach (var action in notice.Actions) key.Append('\u0001').Append(action.Key).Append('\u0002').Append(action.Label);
+            foreach (var action in Center.TimeActions(notice)) key.Append('\u0001').Append(action.Key);
+        }
+        return key.ToString();
+    }
+
+    // The open details for the same item, changed only in a task's progress: the track follows, nothing is built again and
+    // the frame does not move. False when the details must be built again.
+    private bool UpdateDetailInPlace()
+    {
+        if (_detail.Children.Count == 0 || _detailKey is null || _detailKey != DetailKey()) return false;
+        if (Notice?.Progress is { } progress && _progressDone is not null && _progressLeft is not null && _progressTrack is not null)
+        {
+            double done = Math.Clamp(progress, 0, 1);
+            _progressDone.Width = new GridLength(done, GridUnitType.Star);
+            _progressLeft.Width = new GridLength(1 - done, GridUnitType.Star);
+            AutomationProperties.SetName(_progressTrack, Loc.T($"进度 {progress:P0}", $"Progress {progress:P0}"));
+        }
+        _detailFor = _item;
+        return true;
+    }
+
     private void BuildDetail()
     {
         _detail.Children.Clear();
+        _progressDone = _progressLeft = null; _progressTrack = null;
+        _detailKey = DetailKey();
         double padding = DetailPadding();
         _detail.Margin = new Thickness(padding, DetailTop, padding, DetailBottom);
         var notice = Notice;
@@ -638,8 +680,10 @@ internal sealed partial class NoticeWindow : Window
                 // The fill is a share of the track itself; the card's width, padding included, overshot it.
                 double done = Math.Clamp(progress, 0, 1);
                 var track = new Grid { Height = 4, Margin = new Thickness(0, 10, 0, 0) };
-                track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 4 });
-                track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) });
+                _progressDone = new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 4 };
+                _progressLeft = new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) };
+                track.ColumnDefinitions.Add(_progressDone); track.ColumnDefinitions.Add(_progressLeft);
+                _progressTrack = track;
                 var rail = new Border { Background = UI.Brush(PanelTheme.Hex("track")), CornerRadius = new CornerRadius(2) };
                 Grid.SetColumnSpan(rail, 2);
                 track.Children.Add(rail);

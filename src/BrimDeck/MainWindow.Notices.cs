@@ -253,9 +253,19 @@ public partial class MainWindow
         {
             var (notice, revision, old) = _pageRows[i];
             if (notice.Revision == revision) continue;
+            // A task's progress alone moves the row's track: replacing the row under the pointer lost clicks on its buttons.
+            if (_rowProgress.TryGetValue(old, out var shown) && shown.Key == RowKey(notice, now) && notice.Progress is { } progress)
+            {
+                double done = Math.Clamp(progress, 0, 1);
+                shown.Done.Width = new GridLength(done, GridUnitType.Star); shown.Left.Width = new GridLength(1 - done, GridUnitType.Star);
+                _pageRows[i] = (notice, notice.Revision, old);
+                continue;
+            }
             int index = list.Children.IndexOf(old);
             if (index < 0) return false;
             _liveRows.RemoveAll(live => ReferenceEquals(live.Notice, notice));
+            // The old row's plates no longer wait for an icon (review 10: they piled up with every rebuilt row).
+            foreach (var plates in _waitingPlates.Values) plates.RemoveAll(waiting => ReferenceEquals(waiting.Notice, notice));
             var row = Row(notice, now);
             list.Children.RemoveAt(index); list.Children.Insert(index, row);
             _pageRows[i] = (notice, notice.Revision, row);
@@ -379,8 +389,10 @@ public partial class MainWindow
             // two thirds full.
             double done = Math.Clamp(progress, 0, 1);
             var track = new Grid { Height = 3, Margin = new Thickness(0, 4, 0, 0), MinWidth = 3 };
-            track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 3 });
-            track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) });
+            var doneColumn = new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 3 };
+            var leftColumn = new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) };
+            track.ColumnDefinitions.Add(doneColumn); track.ColumnDefinitions.Add(leftColumn);
+            _rowProgress.AddOrUpdate(row, (RowKey(notice, now), doneColumn, leftColumn));
             var rail = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(1.5) };
             Grid.SetColumnSpan(rail, 2);
             track.Children.Add(rail);
@@ -413,6 +425,18 @@ public partial class MainWindow
         };
         AutomationProperties.SetName(row, notice.AppName + ", " + notice.Title + ", " + NoticeText.Relative(notice.ReceivedAt, now));
         return row;
+    }
+
+    // The rows that show a task's progress, with what else they show (RowKey) and their track's columns (UpdateNoticeRows).
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, (string Key, ColumnDefinition Done, ColumnDefinition Left)> _rowProgress = [];
+
+    // Everything a row shows apart from a task's progress.
+    private string RowKey(Notice notice, DateTimeOffset now)
+    {
+        var center = _app.Notices;
+        return string.Join('\u0001', notice.Title, notice.Body, notice.AppName, notice.Origin, notice.Distro, notice.IconRef, notice.SourcePresent, notice.Category,
+            notice.TimeKind, NoticeClock.IsLive(notice.Timing, now), notice.ReceivedAt.UtcTicks, notice.Capabilities, center.CanOpen(notice), _expandedNotice == notice.Id,
+            _freshNotices.Contains(notice.Id), string.Join('\u0002', notice.Actions.Select(a => a.Key + "=" + a.Label)), string.Join('\u0002', center.TimeActions(notice).Select(a => a.Key)));
     }
 
     private static bool FindButton(DependencyObject node)
