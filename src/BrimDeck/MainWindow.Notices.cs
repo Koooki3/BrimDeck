@@ -162,7 +162,7 @@ public partial class MainWindow
         if (duration <= 0) return;
         var land = new Track(0, 1);
         SetImmediate(Compact, OpacityProperty, 0d);
-        SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, .85); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, .85);
+        SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk);
         Animate(Compact, OpacityProperty, 1, duration, land, Soft.Out);
         Animate(CompactScale, ScaleTransform.ScaleXProperty, 1, duration, land, Soft.Out);
         Animate(CompactScale, ScaleTransform.ScaleYProperty, 1, duration, land, Soft.Out);
@@ -199,13 +199,14 @@ public partial class MainWindow
     }
 
     // Opens the panel on the recent notices page, as the expand hotkey opens it: it stays open until the pointer has been in it.
-    internal void OpenNoticesPage()
+    // byKey: the notices hotkey, rather than a click on "View all" (motion-review C4).
+    internal void OpenNoticesPage(bool byKey = true)
     {
         if (!DeckPages.Shown(Settings, DeckPage.Notices)) return;
         if (_expanded) { SelectPage(DeckPage.Notices); return; }
         SelectPage(DeckPage.Notices, remember: false);
         _keepPageOnOpen = true;
-        try { OpenFromHotkey(); } finally { _keepPageOnOpen = false; }
+        try { OpenFromHotkey(byKey); } finally { _keepPageOnOpen = false; }
         if (_expanded) NoticesPageShown();
     }
 

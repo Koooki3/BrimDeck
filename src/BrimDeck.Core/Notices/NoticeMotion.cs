@@ -51,4 +51,33 @@ public static class NoticeMotion
 
     // The length of a move in milliseconds: the panel's duration (kept to the settings' range), or 0 without animations.
     public static int Length(int animationDuration, bool animate) => animate ? AnimationLength.Clamp(animationDuration) : 0;
+
+    // motion-review C1: the panel closes in three quarters of the time it takes to open, as it draws back into the dot on
+    // powering off. C4: a move the keyboard asked for (a hotkey, Escape, the notices hotkey) takes 0.6 of it and lands without
+    // the opening spring's give.
+    public const double CloseFactor = .75, KeyFactor = .6;
+    public static int PanelLength(int length, bool closing, bool keyboard)
+        => length <= 0 ? 0 : (int)Math.Round(length * (keyboard ? KeyFactor : closing ? CloseFactor : 1));
+
+    // motion-review F1: a closing that turns back a move still under way starts its surface at once (no slow, delayed start
+    // from where the opening was still going), on the whole of its shorter move.
+    public static readonly Track Redirected = new(0, 1);
+    public static Track ReturnSurfaceFor(bool redirected) => redirected ? Redirected : ReturnSurface;
+
+    // motion-review F2: a move turned back part way only has the way already covered to go back: its length is that share of a
+    // whole move (the distance left over the distance between the two ends), never under RedirectMin of it, so a turn just
+    // after the start still reads as a move. Each pair is (now, the target being left, the new target); the largest share of
+    // the sizes that change counts. Nothing changing at all takes the whole move.
+    public const double RedirectMin = .4;
+    public static double RemainingShare(params (double Now, double Left, double Target)[] sizes)
+    {
+        double share = -1;
+        foreach (var (now, left, target) in sizes)
+        {
+            double whole = Math.Abs(left - target);
+            if (!double.IsFinite(whole) || !double.IsFinite(now) || whole < 1) continue;
+            share = Math.Max(share, Math.Abs(now - target) / whole);
+        }
+        return share < 0 ? 1 : Math.Clamp(share, RedirectMin, 1);
+    }
 }
