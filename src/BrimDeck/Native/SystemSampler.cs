@@ -38,11 +38,17 @@ internal sealed class SystemSampler : IDisposable
     private const double ProcessSeconds = 1.5;
     private double _processesAt = double.NegativeInfinity;
     private readonly Queue<(double Down, double Up)> _history = new(HistoryLength);
-    private readonly Queue<double> _cpuHistory = new(HistoryLength), _gpuHistory = new(HistoryLength);
+    private readonly Queue<double> _cpuHistory = new(HistoryLength);
+    // Each graphics adapter's usage, by LUID, so the page shows the history of whichever adapter it shows.
+    private readonly Dictionary<ulong, Queue<double>> _gpuHistories = [];
+    // The saved choice of graphics adapter (DeckSettings.MonitorGpu and MonitorGpuName), and the adapter 自动 showed last, so that
+    // it stays (GpuChoice.Auto). The LUID is written on the sampling thread and read on the UI thread by ShowGpuChoice.
+    private readonly Func<(string? Key, string? Name)> _gpuChoice;
+    private ulong _autoGpu;
 
-    public SystemSampler(Dispatcher dispatcher)
+    public SystemSampler(Dispatcher dispatcher, Func<(string? Key, string? Name)> gpuChoice)
     {
-        _dispatcher = dispatcher;
+        _dispatcher = dispatcher; _gpuChoice = gpuChoice;
         _linger = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = Linger };
         // Once paused the readings grow old, so they are dropped: a page opened later shows dashes until new ones arrive
         // instead of old figures as if they were current.
@@ -93,7 +99,7 @@ internal sealed class SystemSampler : IDisposable
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _wake.WaitOne(); continue; }
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _wake.WaitOne(); continue; }
                 if (!primed || _primeProcesses)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
@@ -138,13 +144,46 @@ internal sealed class SystemSampler : IDisposable
             if (_history.Count == HistoryLength) _history.Dequeue();
             _history.Enqueue((rates.DownBytesPerSecond, rates.UpBytesPerSecond));
         }
-        var cpu = _cpu!.Sample(pdh); var gpu = _gpu!.Sample(pdh);
-        Remember(_cpuHistory, cpu.OrDefault?.Usage); Remember(_gpuHistory, gpu.OrDefault?.Usage);
-        return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network, gpu, _lastProcesses)
+        var cpu = _cpu!.Sample(pdh); var gpus = _gpu!.Sample(pdh);
+        Remember(_cpuHistory, cpu.OrDefault?.Usage);
+        var adapters = gpus.TryGet(out var read) ? Remember(read) : [];
+        var snapshot = new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network,
+            Reading<GpuSample>.Unavailable(gpus.Reason), _lastProcesses)
         {
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
-            CpuHistory = _cpuHistory.ToArray(), GpuHistory = _gpuHistory.ToArray()
+            CpuHistory = _cpuHistory.ToArray(), Gpus = adapters
         };
+        var shown = WithGpu(snapshot, _autoGpu, out bool automatic);
+        if (automatic && shown.Gpu.TryGet(out var gpu)) Volatile.Write(ref _autoGpu, gpu.Luid);
+        return shown;
+    }
+    // Each adapter with its own history; adapters that went away take theirs with them.
+    private List<GpuSample> Remember(IReadOnlyList<GpuSample> gpus)
+    {
+        var adapters = new List<GpuSample>(gpus.Count);
+        foreach (var gpu in gpus)
+        {
+            if (!_gpuHistories.TryGetValue(gpu.Luid, out var history)) _gpuHistories[gpu.Luid] = history = new Queue<double>(HistoryLength);
+            Remember(history, gpu.Usage);
+            adapters.Add(gpu with { History = history.ToArray() });
+        }
+        if (_gpuHistories.Count > adapters.Count)
+            foreach (var luid in _gpuHistories.Keys.ToList()) if (!adapters.Exists(gpu => gpu.Luid == luid)) _gpuHistories.Remove(luid);
+        return adapters;
+    }
+    // The snapshot showing the chosen graphics adapter, or why no adapter can be shown.
+    // automatic: 自动 chose it, as asked or because the chosen adapter is not there.
+    private MonitorSnapshot WithGpu(MonitorSnapshot snapshot, ulong previousAuto, out bool automatic)
+    {
+        var (key, name) = _gpuChoice();
+        return GpuChoice.Resolve(snapshot.Gpus, key, name, previousAuto, out automatic) is { } gpu ? snapshot with { Gpu = gpu, GpuHistory = gpu.History } : snapshot;
+    }
+    // Shows the newest readings again for a new choice of graphics adapter, at once instead of with the next reading.
+    public void ShowGpuChoice()
+    {
+        if (_disposed || Latest is not { } latest) return;
+        Latest = WithGpu(latest, Volatile.Read(ref _autoGpu), out _);
+        Updated?.Invoke(Latest);
     }
     private static void Remember(Queue<double> history, double? usage)
     {
@@ -161,20 +200,6 @@ internal sealed class SystemSampler : IDisposable
         // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
         if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _processes.Dispose(); _network.Dispose(); _wake.Dispose(); }
     }
-}
-
-// Why a reading is missing, worded in the interface language when the reading is taken.
-internal static class Why
-{
-    public static string Waiting => Loc.T("等待第二次读数", "waiting for a second reading");
-    public static string NoCounters => Loc.T("系统性能计数器不可用", "the system's performance counters are unavailable");
-    public static string NoFrequency => Loc.T("处理器未报告频率", "the processor reports no frequency");
-    public static string NoMemory => Loc.T("无法读取内存状态", "the memory status could not be read");
-    public static string NoNetwork => Loc.T("无法读取网卡", "the network adapters could not be read");
-    public static string NoAdapter => Loc.T("未找到物理网卡", "no physical network adapter was found");
-    public static string NoGpu => Loc.T("显卡驱动未提供 GPU 计数器", "the graphics driver provides no GPU counters");
-    public static string NoGpuMemory => Loc.T("显卡驱动未报告显存占用", "the graphics driver reports no memory in use");
-    public static string NoProcesses => Loc.T("无法读取进程列表", "the process list could not be read");
 }
 
 // Per logical processor: usage, and the current frequency against the highest seen so far. Usage is the processor
@@ -436,121 +461,6 @@ internal sealed class NetworkProvider : IDisposable
     [DllImport("iphlpapi.dll")] private static extern int GetIfTable2(out IntPtr table);
     [DllImport("iphlpapi.dll")] private static extern int GetIfEntry2(IntPtr row);
     [DllImport("iphlpapi.dll")] private static extern void FreeMibTable(IntPtr memory);
-}
-
-// The graphics engines as Task Manager reads them: per adapter and kind of engine, every process's share summed; the adapter's
-// usage is its busiest kind. The page shows the busiest adapter: its engines, its dedicated and shared memory, and its name
-// and dedicated memory size from DXGI.
-internal sealed class GpuProvider
-{
-    private const string EnginePath = @"\GPU Engine(*)\Utilization Percentage";
-    private const string MemoryPath = @"\GPU Adapter Memory(*)\Dedicated Usage";
-    private const string SharedPath = @"\GPU Adapter Memory(*)\Shared Usage";
-    private readonly PdhQuery? _pdh;
-    private readonly bool _engines, _memory, _shared;
-    // By the "luid_0x…_0x…" key the counters use; read once, as adapters rarely change while BrimDeck runs.
-    private readonly Dictionary<string, (string Name, ulong Dedicated)> _adapters = GpuAdapters.Read();
-
-    public GpuProvider(PdhQuery? pdh)
-    {
-        _pdh = pdh;
-        _engines = pdh?.Add(EnginePath) == true;
-        _memory = pdh?.Add(MemoryPath) == true;
-        _shared = pdh?.Add(SharedPath) == true;
-    }
-
-    public Reading<GpuSample> Sample(bool collected)
-    {
-        if (!_engines) return Reading<GpuSample>.Unavailable(_pdh?.IsOpen == true ? Why.NoGpu : Why.NoCounters);
-        if (!collected) return Reading<GpuSample>.Unavailable(Why.NoCounters);
-        var engines = _pdh!.Read(EnginePath);
-        if (engines.Count == 0) return Reading<GpuSample>.Unavailable(Why.Waiting);
-        // pid_1234_luid_0x00000000_0x0000C5E2_phys_0_eng_0_engtype_3D
-        var sums = new Dictionary<(string Adapter, string Type), double>();
-        foreach (var (instance, value) in engines)
-        {
-            if (Adapter(instance) is not { } adapter) continue;
-            int type = instance.IndexOf("engtype_", StringComparison.Ordinal);
-            var key = (adapter, type < 0 ? "" : instance[(type + 8)..]);
-            sums[key] = sums.GetValueOrDefault(key) + value;
-        }
-        if (sums.Count == 0) return Reading<GpuSample>.Unavailable(Why.NoGpu);
-        var busiest = sums.GroupBy(pair => pair.Key.Adapter).Select(group => (Adapter: group.Key, Usage: group.Max(pair => pair.Value)))
-            .OrderByDescending(adapter => adapter.Usage).First();
-        var kinds = GpuEngines.Order(sums.Where(pair => pair.Key.Adapter == busiest.Adapter && pair.Key.Type.Length > 0)
-            .Select(pair => new GpuEngine(pair.Key.Type, pair.Value / 100)));
-        var info = _adapters.TryGetValue(busiest.Adapter, out var known) ? known : default;
-        return new GpuSample(Math.Clamp(busiest.Usage / 100, 0, 1), AdapterMemory(_memory ? MemoryPath : null, busiest.Adapter))
-        {
-            Engines = kinds, SharedBytes = AdapterMemory(_shared ? SharedPath : null, busiest.Adapter),
-            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null
-        };
-    }
-
-    // The adapter's memory counter, or the adapter using the most when its own is not listed.
-    private Reading<ulong> AdapterMemory(string? path, string adapter)
-    {
-        if (path is null) return Reading<ulong>.Unavailable(Why.NoGpuMemory);
-        var memory = _pdh!.Read(path).Select(item => (Adapter: Adapter(item.Instance), item.Value)).Where(item => item.Adapter is not null).ToList();
-        var match = memory.Where(item => item.Adapter == adapter).ToList();
-        double? bytes = match.Count > 0 ? match.Sum(item => item.Value) : memory.Count > 0 ? memory.Max(item => item.Value) : null;
-        return bytes is { } used ? (ulong)Math.Max(0, used) : Reading<ulong>.Unavailable(Why.NoGpuMemory);
-    }
-
-    // "luid_0x00000000_0x0000C5E2" from an engine or adapter instance name.
-    private static string? Adapter(string instance)
-    {
-        int start = instance.IndexOf("luid_", StringComparison.Ordinal);
-        if (start < 0) return null;
-        int end = instance.IndexOf("_phys", start, StringComparison.Ordinal);
-        return end < 0 ? instance[start..] : instance[start..end];
-    }
-}
-
-// The graphics adapters' names and dedicated memory from DXGI, keyed as the performance counters name adapters. A machine
-// without DXGI, or a failure on the way, gives no names; the page then shows "GPU" and no memory size.
-internal static class GpuAdapters
-{
-    public static Dictionary<string, (string Name, ulong Dedicated)> Read()
-    {
-        var adapters = new Dictionary<string, (string, ulong)>(StringComparer.OrdinalIgnoreCase);
-        var iid = new Guid("770aae78-f26f-4dba-a829-253c83d1b387");
-        IntPtr factory = IntPtr.Zero, description = Marshal.AllocHGlobal(512);
-        try
-        {
-            if (CreateDXGIFactory1(ref iid, out factory) < 0 || factory == IntPtr.Zero) return adapters;
-            // IDXGIFactory1::EnumAdapters1 is the 13th method (index 12); IDXGIAdapter1::GetDesc1 the 11th (index 10).
-            var enumerate = Method<EnumAdapters1>(factory, 12);
-            for (uint index = 0; index < 16 && enumerate(factory, index, out var adapter) >= 0 && adapter != IntPtr.Zero; index++)
-            {
-                try
-                {
-                    if (Method<GetDesc1>(adapter, 10)(adapter, description) < 0) continue;
-                    // DXGI_ADAPTER_DESC1: Description[128] WCHAR, four UINT ids, three SIZE_T memory sizes, the LUID, Flags.
-                    uint flags = (uint)Marshal.ReadInt32(description, 304);
-                    if ((flags & 2) != 0) continue; // the software rasterizer
-                    string name = Marshal.PtrToStringUni(description, 128).TrimEnd('\0').Trim();
-                    ulong dedicated = (ulong)Marshal.ReadInt64(description, 272);
-                    uint low = (uint)Marshal.ReadInt32(description, 296), high = (uint)Marshal.ReadInt32(description, 300);
-                    adapters[$"luid_0x{high:X8}_0x{low:X8}"] = (name, dedicated);
-                }
-                finally { Method<Release>(adapter, 2)(adapter); }
-            }
-        }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or COMException or AccessViolationException) { Debug.WriteLine(ex); }
-        finally
-        {
-            if (factory != IntPtr.Zero) Method<Release>(factory, 2)(factory);
-            Marshal.FreeHGlobal(description);
-        }
-        return adapters;
-    }
-    private static T Method<T>(IntPtr instance, int slot) where T : Delegate
-        => Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(instance), slot * IntPtr.Size));
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int EnumAdapters1(IntPtr factory, uint index, out IntPtr adapter);
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetDesc1(IntPtr adapter, IntPtr description);
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate uint Release(IntPtr instance);
-    [DllImport("dxgi.dll")] private static extern int CreateDXGIFactory1(ref Guid riid, out IntPtr factory);
 }
 
 // Every process from one kernel call, which covers other users' processes without opening them. Processes of one
