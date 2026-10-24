@@ -32,8 +32,9 @@ internal static class AuditFollowupTests
 
     private static void ClipCleans(Action<string, bool> check)
     {
+        // The right-to-left mark stays (core2 C-L11: right-to-left text needs it); overrides and isolates go.
         check("followup: Clip drops zero-width, bidi, BOM and tag characters",
-            NoticeProtocol.Clip("a\u200Bb\u2066c\u2069\uFEFFd\u202Ee\u200Ff\U000E0041g", 100) == "abcdefg");
+            NoticeProtocol.Clip("a\u200Bb\u2066c\u2069\uFEFFd\u202Ee\u200Ff\U000E0041g", 100) == "abcde\u200Ffg");
         check("followup: Clip turns line and paragraph separators into line breaks", NoticeProtocol.Clip("x\u2028y\u2029z", 100) == "x\ny\nz");
         check("followup: Clip keeps an emoji sequence's joiner, and still its line breaks, tabs and control rules",
             NoticeProtocol.Clip(Coder, 100) == Coder && NoticeProtocol.Clip("a\u0007b\r\nc\td", 100) == "a b\nc\td");
