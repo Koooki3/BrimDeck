@@ -93,16 +93,13 @@ internal static class AuditWslTests
         check("cmd's own commands are known", WindowsPrograms.IsBuiltin("echo") && WindowsPrograms.IsBuiltin("DIR") && !WindowsPrograms.IsBuiltin("git"));
     }
 
-    // sec-L1: what goes through cmd is quoted for cmd, or refused when cmd would misread it.
+    // sec-L1: what goes through cmd keeps cmd's special characters literal (escaping in full: AuditWsl2Tests, C-M1).
     private static void CmdQuoting(Action<string, bool> check)
     {
-        check("Every part is quoted, keeping cmd's special characters literal",
-            WindowsPrograms.CmdArguments(@"C:\scripts\build.bat", ["a & calc", "x|y", "(z)^"], false) == "/d /v:off /s /c \"\"C:\\scripts\\build.bat\" \"a & calc\" \"x|y\" \"(z)^\"\"");
-        check("A quote in an argument is refused", WindowsPrograms.CmdArguments(@"C:\b.bat", ["x\" & calc & \""], false) is null);
-        check("Percent signs, exclamation marks and line breaks are refused",
-            WindowsPrograms.CmdArguments(@"C:\b.bat", ["%PATH%"], false) is null && WindowsPrograms.CmdArguments(@"C:\b.bat", ["!x!"], false) is null
-            && WindowsPrograms.CmdArguments(@"C:\b.bat", ["a\nb"], false) is null);
-        check("A builtin's name stays bare", WindowsPrograms.CmdArguments("echo", ["hi there"], true) == "/d /v:off /s /c \"echo \"hi there\"\"");
+        check("An argument with cmd's special characters is quoted, keeping them literal",
+            WindowsPrograms.CmdArguments(@"C:\scripts\build.bat", ["a & calc", "x|y", "(z)^"], false) == "/e:on /d /v:off /s /c \"\"C:\\scripts\\build.bat\" \"a & calc\" \"x|y\" \"(z)^\"\"");
+        check("Line breaks are refused", WindowsPrograms.CmdArguments(@"C:\b.bat", ["a\nb"], false) is null);
+        check("A builtin's name stays bare", WindowsPrograms.CmdArguments("echo", ["hi there"], true) == "/e:on /d /v:off /s /c \"echo \"hi there\"\"");
     }
 
     private static void ExitCodes(Action<string, bool> check)

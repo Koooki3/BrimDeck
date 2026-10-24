@@ -59,19 +59,20 @@ internal static class Program
         catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException) { return null; }
     }
 
-    // "run"'s program, found and started as WindowsPrograms describes (sec-L1).
-    private static (Process? Process, int Failure) Start(IReadOnlyList<string> program)
+    // "run"'s program, found and started as WindowsPrograms describes (sec-L1). A program that is not found exits with cmd's
+    // 9009 and is still reported to BrimDeck as a finished run, as it was when cmd looked for it (C-M1).
+    private static (Process? Process, int Failure, bool Report) Start(IReadOnlyList<string> program)
     {
         string name = program[0];
         string? path = Environment.GetEnvironmentVariable("PATH"), pathExt = Environment.GetEnvironmentVariable("PATHEXT");
-        var file = WindowsPrograms.Find(name, path, pathExt, File.Exists);
+        var file = WindowsPrograms.Find(name, path, pathExt, File.Exists, skip: AppContext.BaseDirectory);
         bool builtin = file is null && WindowsPrograms.IsBuiltin(name);
         if (file is null && !builtin)
         {
             // The current folder is not searched; say so when that is where the program is.
             bool here = WindowsPrograms.Find(Path.Combine(".", name), path, pathExt, File.Exists) is not null;
             Console.Error.WriteLine("brim-notify: " + name + ": command not found" + (here ? " (a program in the current folder is run as ." + Path.DirectorySeparatorChar + name + ")" : ""));
-            return (null, NotifyCli.Usage);
+            return (null, WindowsPrograms.NotFound, true);
         }
         ProcessStartInfo start;
         if (file is not null && WindowsPrograms.RunsDirectly(file))
@@ -85,8 +86,8 @@ internal static class Program
             // name is looked for in the current directory first.
             if (WindowsPrograms.CmdArguments(file ?? name, program.Skip(1), builtin) is not { } arguments)
             {
-                Console.Error.WriteLine("brim-notify: " + name + " runs through cmd, which would misread an argument with \", %, ! or a line break; refused.");
-                return (null, NotifyCli.Usage);
+                Console.Error.WriteLine("brim-notify: " + name + " runs through cmd, which cannot be given a line break in an argument; refused.");
+                return (null, NotifyCli.Usage, false);
             }
             start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), arguments) { UseShellExecute = false };
         }
@@ -94,9 +95,9 @@ internal static class Program
         {
             var process = Process.Start(start);
             if (process is null) Console.Error.WriteLine("brim-notify: could not start " + name);
-            return (process, NotifyCli.Usage);
+            return (process, NotifyCli.Usage, false);
         }
-        catch (Win32Exception ex) { Console.Error.WriteLine("brim-notify: could not start " + name + ": " + ex.Message); return (null, NotifyCli.Usage); }
+        catch (Win32Exception ex) { Console.Error.WriteLine("brim-notify: could not start " + name + ": " + ex.Message); return (null, NotifyCli.Usage, false); }
     }
 
     // --stdio: frames from standard input go to BrimDeck one by one; each reply goes to standard output. Used by brim-notify in

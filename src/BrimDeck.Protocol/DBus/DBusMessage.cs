@@ -28,6 +28,8 @@ public sealed class DBusMessage
     public string? Sender { get; set; }
     public string Signature { get; set; } = "";
     public object[] Body { get; set; } = [];
+    // Received too large to hold even without its large byte arrays: only the header was read, and Body is empty (C-L6).
+    public bool Oversized { get; set; }
 
     public static DBusMessage Call(string destination, string path, string @interface, string member, string signature = "", params object[] body)
         => new() { Type = DBusMessageType.MethodCall, Destination = destination, Path = path, Interface = @interface, Member = member, Signature = signature, Body = body };
@@ -79,16 +81,21 @@ public sealed class DBusMessage
     // A span is copied first; an array is read in place, so a message is not held twice (sec-M3).
     public static DBusMessage Decode(ReadOnlySpan<byte> data) => Decode(data.ToArray());
 
-    public static DBusMessage Decode(byte[] data)
+    public static DBusMessage Decode(byte[] data) => Decode(data, body: true);
+
+    // The fixed header and the header fields alone (data ends after them), with an empty Body.
+    public static DBusMessage DecodeHeader(byte[] data) => Decode(data, body: false);
+
+    private static DBusMessage Decode(byte[] data, bool body)
     {
-        try { return DecodeCore(data); }
+        try { return DecodeCore(data, body); }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException or InvalidCastException or NullReferenceException or FormatException)
         {
             throw new InvalidDataException("Malformed message.", ex);
         }
     }
 
-    private static DBusMessage DecodeCore(byte[] data)
+    private static DBusMessage DecodeCore(byte[] data, bool body)
     {
         var reader = new DBusReader(data, data[0] == (byte)'l');
         reader.ReadByte();
@@ -112,6 +119,7 @@ public sealed class DBusMessage
                 case 8: message.Signature = value.ToString() ?? ""; break;
             }
         }
+        if (!body) return message;
         reader.Align(8);
         if (reader.Position + bodyLength > data.Length) throw new InvalidDataException("The body is cut off.");
         message.Body = message.Signature.Length == 0 ? [] : reader.ReadValues(message.Signature);

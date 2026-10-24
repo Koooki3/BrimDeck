@@ -26,6 +26,9 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
     {
         if (call.Type != DBusMessageType.MethodCall) return ServiceOutput.None;
         bool wantsReply = (call.Flags & DBusMessage.NoReplyExpected) == 0;
+        // Too large to read even without its image: the sender hears so at once instead of waiting for the bus's timeout (C-L6).
+        if (call.Oversized)
+            return wantsReply ? new([call.ErrorFor(DBusConnection.LimitsExceeded, "The message is too large for BrimDeck.")], []) : ServiceOutput.None;
         DBusMessage? reply;
         var forward = new List<NoticeMessage>();
         var bus = new List<DBusMessage>();
@@ -77,6 +80,11 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
         return new(bus, forward);
     }
 
+    // Whether BrimDeck's action or dismissal is about this run's notices. One for another session is about an earlier run's
+    // notice, whose id this run may have handed out again (C-L5); one without a session comes from a BrimDeck that does not
+    // send it yet, and is taken as before.
+    public bool Addresses(NoticeMessage request) => request.Session is null || request.Session == Session;
+
     // The user chose an action in BrimDeck: the application learns which, and the notice closes as dismissed.
     public IReadOnlyList<DBusMessage> ActionInvoked(uint id, string key)
     {
@@ -120,6 +128,8 @@ public sealed class NotificationMonitor
     public IReadOnlyList<NoticeMessage> Observe(DBusMessage message, DateTimeOffset now)
     {
         var result = Flush(now);
+        // Only the header of a message too large to read; the watched service answers it itself.
+        if (message.Oversized) return result;
         if (message.Type == DBusMessageType.MethodCall && message.Interface == FreedesktopNotifications.Interface && message.Member == "Notify"
             && message.Signature == FreedesktopNotifications.NotifySignature)
         {

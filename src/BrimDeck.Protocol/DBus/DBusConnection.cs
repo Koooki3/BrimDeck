@@ -15,9 +15,10 @@ public sealed class DBusException(string name, string message) : Exception(messa
 public sealed class DBusConnection : IAsyncDisposable
 {
     public const string BusName = "org.freedesktop.DBus", BusPath = "/org/freedesktop/DBus", BusInterface = "org.freedesktop.DBus";
-    // Notifications are small; a larger message (a huge image hint, which the agent drops anyway) is read past and dropped
-    // instead of held in memory (sec-M3).
+    // Notifications are small; a larger message (a huge image hint, which the agent does not use) is not held in memory
+    // whole (sec-M3): DBusOversized reads it without its large byte arrays (C-L6).
     public const int MaxMessage = 2 * 1024 * 1024;
+    public const string LimitsExceeded = "org.freedesktop.DBus.Error.LimitsExceeded";
     // A call the bus does not answer in this time fails, so that no caller waits forever on a connection that stopped
     // answering (life-L8).
     public static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(10);
@@ -147,18 +148,31 @@ public sealed class DBusConnection : IAsyncDisposable
             {
                 await _stream.ReadExactlyAsync(start, _closed.Token).ConfigureAwait(false);
                 int total = DBusMessage.TotalLength(start);
-                if (total > MaxMessage) { await DiscardAsync(total - start.Length).ConfigureAwait(false); continue; }
-                var data = new byte[total];
-                start.CopyTo(data, 0);
-                await _stream.ReadExactlyAsync(data.AsMemory(16), _closed.Token).ConfigureAwait(false);
                 DBusMessage message;
-                try { message = DBusMessage.Decode(data); }
-                catch (InvalidDataException) { continue; }
+                if (total > MaxMessage)
+                {
+                    // Read without its large byte arrays (an image hint), or as its header alone, which still lets a call be
+                    // answered at once instead of leaving its sender waiting for the bus's timeout (C-L6).
+                    var (slim, header) = await DBusOversized.ReadAsync(_stream, start, total, MaxMessage, _closed.Token).ConfigureAwait(false);
+                    if (header is null) continue;
+                    header.Oversized = true;
+                    message = header;
+                    if (slim is not null) try { message = DBusMessage.Decode(slim); } catch (InvalidDataException) { }
+                }
+                else
+                {
+                    var data = new byte[total];
+                    start.CopyTo(data, 0);
+                    await _stream.ReadExactlyAsync(data.AsMemory(16), _closed.Token).ConfigureAwait(false);
+                    try { message = DBusMessage.Decode(data); }
+                    catch (InvalidDataException) { continue; }
+                }
                 // A monitor connection also receives replies addressed to other connections; only those to this one answer a call.
                 bool ours = message.Destination is null || message.Destination == UniqueName || UniqueName.Length == 0;
                 if (ours && message.Type is DBusMessageType.MethodReturn or DBusMessageType.Error && message.ReplySerial is { } serial && _pending.TryRemove(serial, out var waiter))
                 {
-                    if (message.Type == DBusMessageType.Error)
+                    if (message.Oversized) waiter.TrySetException(new DBusException(LimitsExceeded, "The reply is too large."));
+                    else if (message.Type == DBusMessageType.Error)
                         waiter.TrySetException(new DBusException(message.ErrorName ?? "", message.Body.FirstOrDefault() as string ?? message.ErrorName ?? ""));
                     else waiter.TrySetResult(message);
                     continue;
@@ -175,17 +189,6 @@ public sealed class DBusConnection : IAsyncDisposable
             _ended = true;
             foreach (var waiter in _pending.Values) waiter.TrySetException(new IOException("The bus connection closed."));
             _pending.Clear();
-        }
-    }
-
-    private async Task DiscardAsync(long count)
-    {
-        var buffer = new byte[64 * 1024];
-        while (count > 0)
-        {
-            int read = await _stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, count)), _closed.Token).ConfigureAwait(false);
-            if (read == 0) throw new EndOfStreamException();
-            count -= read;
         }
     }
 

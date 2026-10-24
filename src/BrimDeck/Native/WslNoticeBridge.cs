@@ -23,6 +23,9 @@ internal sealed class WslNoticeBridge : IDisposable
     // All agents stopped together get this long, in total, to end on their own before they are ended (life-L3).
     public static readonly TimeSpan StopWait = TimeSpan.FromMilliseconds(1500);
     private readonly Dictionary<string, WslNoticeAgent> _agents = new(StringComparer.OrdinalIgnoreCase);
+    // The agents still ending, by distribution, under the lock of _agents: a distribution switched off and quickly on again
+    // starts its new agent only once the old one is gone, which otherwise still holds the notification service (C-L12).
+    private readonly Dictionary<string, Task> _stopping = new(StringComparer.OrdinalIgnoreCase);
     // Only cancelled, never disposed: the loop and starting agents may still read its token after Dispose (life-L6).
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _wake = new(0, 1);
@@ -56,9 +59,10 @@ internal sealed class WslNoticeBridge : IDisposable
         {
             foreach (var name in _agents.Keys.Where(name => !distributions.Contains(name, StringComparer.OrdinalIgnoreCase)).ToList())
             { stopped.Add(_agents[name]); _agents.Remove(name); }
+            foreach (var name in _stopping.Where(pair => pair.Value.IsCompleted).Select(pair => pair.Key).ToList()) _stopping.Remove(name);
             foreach (var name in distributions.Where(name => !_agents.ContainsKey(name)))
             {
-                var agent = new WslNoticeAgent(name);
+                var agent = new WslNoticeAgent(name, _stopping.GetValueOrDefault(name));
                 agent.Received += message => Received?.Invoke(name, message);
                 agent.StateChanged += () => StateChanged?.Invoke();
                 _agents[name] = agent;
@@ -70,8 +74,12 @@ internal sealed class WslNoticeBridge : IDisposable
         // Outside the lock and off the calling (UI) thread: the agents end together, within StopWait in total (life-L3).
         if (stopped.Count > 0)
         {
-            var processes = stopped.Select(agent => agent.BeginStop()).OfType<Process>().ToList();
-            if (processes.Count > 0) _ = Task.Run(() => WslNoticeAgent.FinishStop(processes, StopWait));
+            var ending = stopped.Select(agent => (agent.Distribution, Process: agent.BeginStop())).Where(pair => pair.Process is not null).ToList();
+            if (ending.Count > 0)
+            {
+                var finish = Task.Run(() => WslNoticeAgent.FinishStop(ending.Select(pair => pair.Process!).ToList(), StopWait));
+                lock (_agents) foreach (var (name, _) in ending) _stopping[name] = finish;
+            }
         }
         Wake();
         StateChanged?.Invoke();
@@ -175,25 +183,29 @@ internal sealed class WslNoticeBridge : IDisposable
     }
 
     internal static async Task<string?> RunWslAsync(IEnumerable<string> arguments, CancellationToken token, Encoding? encoding = null, TimeSpan? timeout = null)
+        => await RunWslWithCodeAsync(arguments, token, encoding, timeout) is (0, var text) ? text : null;
+
+    // wsl.exe's exit code and output; a null code when it could not start or ran out of time.
+    internal static async Task<(int? Code, string Output)> RunWslWithCodeAsync(IEnumerable<string> arguments, CancellationToken token, Encoding? encoding = null, TimeSpan? timeout = null)
     {
         var start = new ProcessStartInfo(WslExe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = encoding ?? Encoding.UTF8 };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         try
         {
             using var process = Process.Start(start);
-            if (process is null) return null;
+            if (process is null) return (null, "");
             using var limit = CancellationTokenSource.CreateLinkedTokenSource(token);
             limit.CancelAfter(timeout ?? TimeSpan.FromSeconds(20));
             var read = process.StandardOutput.ReadToEndAsync(limit.Token);
-            // Drained and dropped: nothing reads it, and a task left reading it would fail once the process is released.
-            process.BeginErrorReadLine();
+            // Drained and dropped, a line at a time held to a bound (S8).
+            _ = BoundedLines.ReadAsync(process.StandardError.BaseStream, 200, _ => { });
             try { await process.WaitForExitAsync(limit.Token); }
-            catch (OperationCanceledException) { try { process.Kill(true); } catch (InvalidOperationException) { } return null; }
+            catch (OperationCanceledException) { try { process.Kill(true); } catch (InvalidOperationException) { } return (null, ""); }
             var text = await read;
-            return process.ExitCode == 0 ? text : null;
+            return (process.ExitCode, text);
         }
         // The time limit may also end the reading just after the process exited (life-L5).
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException or OperationCanceledException) { return null; }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException or OperationCanceledException) { return (null, ""); }
     }
 
     // The version stamp of the packaged agent, BrimDeck's version and the start of the file's hash, so a rebuilt agent is
@@ -221,8 +233,12 @@ internal sealed class WslNoticeBridge : IDisposable
 }
 
 // One distribution's agent: installs it when needed and runs it through wsl.exe as the distribution's default user.
-internal sealed class WslNoticeAgent(string distribution)
+// previous is the ending of this distribution's earlier agent, if one was stopped a moment ago (C-L12).
+internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
 {
+    // The same install failure again for the same agent file: the distribution is not going to change by itself soon, so the
+    // next try waits this long instead of copying the agent again every two minutes (P3).
+    public static readonly TimeSpan RepeatedInstallFailure = TimeSpan.FromMinutes(30);
     // brim-notify in ~/.local/bin. BrimDeck treats the file as its own only while it is exactly this text: a file of that name
     // with anything else in it, or a link, belongs to the user and is left alone (reported as a conflict).
     private const string WrapperLines = "'#!/bin/sh' '# brim-notify, installed by BrimDeck: shows a notice in BrimDeck on Windows. BrimDeck replaces this file only while it is unchanged.' 'exec \"$HOME/.local/share/brimdeck/brimdeck-agent\" notify \"$@\"'";
@@ -230,25 +246,38 @@ internal sealed class WslNoticeAgent(string distribution)
     private const string EarlierWrapperLines = "'#!/bin/sh' '# Installed by BrimDeck: shows a notice in BrimDeck on Windows.' 'exec \"$HOME/.local/share/brimdeck/brimdeck-agent\" notify \"$@\"'";
     // Copies the agent from Windows (path as $1, converted by wslpath), records how brim-notify reaches Windows without the
     // agent ($2), adds brim-notify (see WrapperLines) and writes the stamp ($3) last. BrimDeck's folder must be the user's own
-    // and not a link; every file is written to a new temporary file (mktemp creates it, so nothing is followed) and renamed
-    // into place, which replaces a link instead of writing through it. The agent's copy must have the SHA-256 BrimDeck read
-    // ($4): a file replaced on Windows after BrimDeck read it is not installed (sec-M2). Prints "conflict" when brim-notify
-    // was left alone.
+    // and not a link, and is made private (0700) and checked to be so: nobody else may swap a checked file in it before it is
+    // moved into place (S6). Every file is written to a new temporary file in it (mktemp creates it, so nothing is followed)
+    // and renamed into place, which replaces a link instead of writing through it. The agent's copy must have the SHA-256
+    // BrimDeck read ($4): a file replaced on Windows after BrimDeck read it is not installed (sec-M2). The hash is taken with
+    // whichever of sha256sum, busybox, openssl and python3 the distribution has (C-L7). Everything that can refuse is checked
+    // before the agent is copied, so a refusal costs no copy (P3). Prints "conflict" when brim-notify was left alone. Exit
+    // codes: 3 the folder is refused, 4 the copy's hash differs, 5 no tool can take the hash (InstallFailure).
     // sh needs plain line feeds; a raw string takes the source file's line endings, which Git on Windows checks out as CRLF.
     private static readonly string InstallScript = $$"""
         set -eu
         umask 022
         dir="$HOME/.local/share/brimdeck"
         bin="$HOME/.local/bin"
+        sha() {
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"
+          elif command -v busybox >/dev/null 2>&1 && busybox sha256sum /dev/null >/dev/null 2>&1; then busybox sha256sum "$1"
+          elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 -r "$1"
+          elif command -v python3 >/dev/null 2>&1; then python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
+          else return 1; fi
+        }
+        if ! sha /dev/null >/dev/null 2>&1; then echo "refused: no sha256sum, busybox, openssl or python3" >&2; exit 5; fi
         mkdir -p "$dir"
         if [ -L "$dir" ] || [ ! -O "$dir" ]; then echo "refused: $dir is a link or not owned by $(id -un)" >&2; exit 3; fi
+        chmod 700 "$dir"
+        case $(ls -ld "$dir") in d????-??-*) ;; *) echo "refused: others can write to $dir" >&2; exit 3;; esac
         # A step that fails leaves no temporary file of BrimDeck's behind.
-        trap 'rm -f "$dir"/.new.?????? "$bin"/.brim-notify.??????' EXIT
+        trap 'rm -f "$dir"/.new.??????' EXIT
         put() { t=$(mktemp "$dir/.new.XXXXXX"); cat > "$t"; chmod "$2" "$t"; mv -f "$t" "$1"; }
         src=$(wslpath -u "$1")
         t=$(mktemp "$dir/.new.XXXXXX")
         cat < "$src" > "$t"
-        sum=$(sha256sum "$t")
+        sum=$(sha "$t")
         if [ "${sum%% *}" != "$4" ]; then echo "refused: the agent changed while it was copied" >&2; exit 4; fi
         chmod 755 "$t"
         mv -f "$t" "$dir/brimdeck-agent"
@@ -260,10 +289,7 @@ internal sealed class WslNoticeAgent(string distribution)
         if [ -L "$b" ] || { [ -e "$b" ] && ! ours "$b"; }; then
           echo conflict
         else
-          t=$(mktemp "$bin/.brim-notify.XXXXXX")
-          printf '%s\n' {{WrapperLines}} > "$t"
-          chmod 755 "$t"
-          mv -f "$t" "$b"
+          printf '%s\n' {{WrapperLines}} | put "$b" 755
           echo ok
         fi
         printf '%s' "$3" | put "$dir/agent.version" 644
@@ -287,6 +313,8 @@ internal sealed class WslNoticeAgent(string distribution)
     private volatile string? _lastError;
     private DateTimeOffset _retryAt = DateTimeOffset.MinValue;
     private TimeSpan _backoff = TimeSpan.FromSeconds(5);
+    // The last failed install: the agent file's hash and the script's exit code (null: it did not finish).
+    private (string Hash, int? Code)? _installFailure;
 
     public string Distribution { get; } = distribution;
     public WslAgentState State { get; private set; } = WslAgentState.Off;
@@ -309,6 +337,13 @@ internal sealed class WslNoticeAgent(string distribution)
         lock (_gate) { if (_disposed || _process is not null) return; installed = _installed; }
         try
         {
+            // The earlier agent may still own the notification service and the CLI socket; this one would only watch it
+            // (C-L12). Its stop ends within StopWait, killing it if need be.
+            if (previous is { IsCompleted: false })
+            {
+                SetState(WslAgentState.Starting, "");
+                try { await previous.WaitAsync(WslNoticeBridge.StopWait * 2, token); } catch (TimeoutException) { }
+            }
             if (!installed)
             {
                 SetState(WslAgentState.Installing, "");
@@ -318,12 +353,12 @@ internal sealed class WslNoticeAgent(string distribution)
                 string wrapper = check.Length > 1 ? check[1] : "";
                 if (check[0] != stamp || wrapper is "missing" or "stale")
                 {
-                    var result = await WslNoticeBridge.RunWslAsync(["-d", Distribution, "--exec", "/bin/sh", "-c", InstallScript, "sh", WslNoticeBridge.AgentPath, WslNoticeBridge.HelperPath, stamp, hash], token, timeout: TimeSpan.FromSeconds(60));
-                    if (result is null) { Retry("install"); return; }
+                    var (code, result) = await WslNoticeBridge.RunWslWithCodeAsync(["-d", Distribution, "--exec", "/bin/sh", "-c", InstallScript, "sh", WslNoticeBridge.AgentPath, WslNoticeBridge.HelperPath, stamp, hash], token, timeout: TimeSpan.FromSeconds(60));
+                    if (code != 0) { InstallFailed(hash, code); return; }
                     wrapper = result.Contains("conflict", StringComparison.Ordinal) ? "conflict" : "ok";
                 }
                 Conflict = wrapper == "conflict";
-                lock (_gate) _installed = true;
+                lock (_gate) { _installed = true; _installFailure = null; }
             }
             SetState(WslAgentState.Starting, "");
             var start = new ProcessStartInfo(WslNoticeBridge.WslExe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -336,8 +371,8 @@ internal sealed class WslNoticeAgent(string distribution)
                 _process = process;
             }
             _lastError = null;
-            process.ErrorDataReceived += (_, line) => { if (!string.IsNullOrWhiteSpace(line.Data)) _lastError = NoticeProtocol.Clip(line.Data, 200); };
-            process.BeginErrorReadLine();
+            // A line at a time, each held to 200 characters however long the agent makes it (S8).
+            _ = BoundedLines.ReadAsync(process.StandardError.BaseStream, 200, line => _lastError = line);
             _ = ReadAsync(process);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -408,16 +443,34 @@ internal sealed class WslNoticeAgent(string distribution)
 
     // A failed start or an agent that ended is tried again after a growing pause, up to two minutes; it also has to wait for
     // the distribution to run, so a distribution shut down meanwhile is not started again.
-    private void Retry(string detail)
+    private void Retry(string detail, TimeSpan? wait = null)
     {
         // Under the lock NeedsStart reads them with: retries come from the loop and from an agent's reading task.
         lock (_gate)
         {
-            _retryAt = DateTimeOffset.UtcNow + _backoff;
+            _retryAt = DateTimeOffset.UtcNow + (wait ?? _backoff);
             _backoff = TimeSpan.FromSeconds(Math.Min(120, _backoff.TotalSeconds * 2));
         }
         SetState(WslAgentState.Failed, detail);
     }
+
+    // Says why the install script failed (C-L7), and waits RepeatedInstallFailure when it failed the same way for the same
+    // agent file last time (P3).
+    private void InstallFailed(string hash, int? code)
+    {
+        bool repeated;
+        lock (_gate) { repeated = _installFailure == (hash, code); _installFailure = (hash, code); }
+        Retry(InstallFailure(code), repeated ? RepeatedInstallFailure : null);
+    }
+
+    internal static string InstallFailure(int? code) => code switch
+    {
+        3 => Loc.T("无法安装：~/.local/share/brimdeck 是链接、不属于该用户，或其他用户可写入", "cannot install: ~/.local/share/brimdeck is a link, not the user's own, or writable by others"),
+        4 => Loc.T("无法安装：复制后的代理与 BrimDeck 读到的不一致", "cannot install: the copied agent differs from the one BrimDeck read"),
+        5 => Loc.T("无法安装：发行版中没有 sha256sum、busybox、openssl 或 python3", "cannot install: the distribution has no sha256sum, busybox, openssl or python3"),
+        null => Loc.T("安装超时或无法运行 wsl.exe", "install timed out, or wsl.exe could not run"),
+        _ => "install (" + code + ")"
+    };
 
     private void SetState(WslAgentState state, string detail)
     {
