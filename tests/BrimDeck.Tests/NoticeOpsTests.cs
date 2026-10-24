@@ -42,5 +42,11 @@ internal static class NoticeOpsTests
         list.ExpectBaseline(WindowsNoticeBaseline.Resume);
         list.Compare([10u, 11u, 13u, 14u, 16u, 30u], id => Toast(id));
         check("Notices ops: what arrived during sleep is no skipped id", !list.SkippedProbe);
+
+        check("Notices ops: a reading may start when none is out", WindowsNoticePace.MayRead([], T0));
+        check("Notices ops: a reading waits for one still out", !WindowsNoticePace.MayRead([T0.AddMinutes(-1)], T0));
+        check("Notices ops: a reading hung for minutes no longer blocks (L4)", WindowsNoticePace.MayRead([T0 - WindowsNoticePace.StuckAfter], T0));
+        check("Notices ops: hung readings never pile up", !WindowsNoticePace.MayRead([T0.AddHours(-2), T0.AddHours(-1)], T0)
+            && !WindowsNoticePace.MayRead([T0.AddHours(-2), T0.AddMinutes(-1)], T0.AddMinutes(1)));
     }
 }

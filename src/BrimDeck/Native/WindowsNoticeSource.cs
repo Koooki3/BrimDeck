@@ -65,9 +65,10 @@ internal sealed class WindowsNoticeSource : IDisposable
     // counts for every source (Interacted), hence static.
     private DateTimeOffset _lastActivity = DateTimeOffset.UtcNow;
     private static long s_lastInteraction;
-    // win2 P2: a reading Windows has not finished, even one given up on. A new one waits for it, so readings that never
-    // return cannot pile up (UserNotificationListener.Current is one object for every run).
-    private Task? _reading;
+    // win2 P2: readings Windows has not finished, even ones given up on, with when each started. A new one waits for them, so
+    // readings that never return cannot pile up (UserNotificationListener.Current is one object for every run); after one has
+    // hung for WindowsNoticePace.StuckAfter another may start, at most WindowsNoticePace.MostOutstanding at a time (L4).
+    private readonly List<(Task Task, DateTimeOffset Started)> _reading = [];
 
     public NoticeSourceState State { get; private set; } = NoticeSourceState.Off;
     public string Detail { get; private set; } = "";
@@ -251,10 +252,12 @@ internal sealed class WindowsNoticeSource : IDisposable
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(token);
         lock (_gate)
         {
-            if (_reading is { IsCompleted: false }) throw new TimeoutException("An earlier reading of the notification list has not finished.");
+            _reading.RemoveAll(r => r.Task.IsCompleted);
+            var now = DateTimeOffset.UtcNow;
+            if (!WindowsNoticePace.MayRead(_reading.Select(r => r.Started), now)) throw new TimeoutException("An earlier reading of the notification list has not finished.");
             limit.CancelAfter(ReadLimit);
             read = listener.GetNotificationsAsync(NotificationKinds.Toast).AsTask(limit.Token);
-            _reading = read;
+            _reading.Add((read, now));
         }
         // A reading given up on may still fail later; that is seen here rather than as an unobserved task exception.
         _ = read.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);

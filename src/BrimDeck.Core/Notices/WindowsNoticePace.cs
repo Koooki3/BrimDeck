@@ -27,6 +27,17 @@ public static class WindowsNoticePace
         for (uint i = 1; i <= count && newest <= uint.MaxValue - i; i++) yield return newest + i;
     }
 
+    // A reading of the list that Windows never finishes (seen after waking) blocks new ones, but not for ever (audit L4): once
+    // the oldest still out has hung for StuckAfter, one more may start, up to MostOutstanding hung readings in all.
+    public static readonly TimeSpan StuckAfter = TimeSpan.FromMinutes(5);
+    public const int MostOutstanding = 2;
+
+    public static bool MayRead(IEnumerable<DateTimeOffset> outstanding, DateTimeOffset now)
+    {
+        var started = outstanding.ToList();
+        return started.Count == 0 || started.Count < MostOutstanding && started.All(at => now - at >= StuckAfter);
+    }
+
     public static TimeSpan Retry(int failures)
         => failures <= 1 ? FirstRetry : TimeSpan.FromTicks(Math.Min(LongestRetry.Ticks, FirstRetry.Ticks << Math.Min(failures - 1, 16)));
 }
