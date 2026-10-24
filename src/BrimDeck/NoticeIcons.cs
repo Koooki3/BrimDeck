@@ -182,19 +182,46 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         using var stream = new MemoryStream(bytes);
         // Nothing is decoded yet: the frames' sizes come from their headers, and only the chosen frame is decoded, below.
         if (DecoderFor(stream, bytes) is not { } decoder) return null;
-        // The frame closest to 64 pixels: icon files hold several sizes.
-        var frame = decoder.Frames.OrderBy(f => Math.Abs(f.PixelWidth - 64) + (f.PixelWidth < 32 ? 1000 : 0)).FirstOrDefault();
+        // The frame closest to 128 pixels: icon files hold several sizes, and the transparent margin trimmed below leaves less.
+        var frame = decoder.Frames.OrderBy(f => Math.Abs(f.PixelWidth - 128) + (f.PixelWidth < 32 ? 1000 : 0)).FirstOrDefault();
         if (frame is null || frame.PixelWidth == 0 || frame.PixelHeight == 0 || frame.PixelWidth > MaxPixels || frame.PixelHeight > MaxPixels) return null;
-        BitmapSource result = frame;
-        if (Math.Max(frame.PixelWidth, frame.PixelHeight) > 96)
+        BitmapSource result = Trim(new FormatConvertedBitmap(frame, PixelFormats.Pbgra32, null, 0));
+        if (Math.Max(result.PixelWidth, result.PixelHeight) > 128)
         {
-            double scale = 96d / Math.Max(frame.PixelWidth, frame.PixelHeight);
-            result = new TransformedBitmap(frame, new ScaleTransform(scale, scale));
+            double scale = 128d / Math.Max(result.PixelWidth, result.PixelHeight);
+            result = new TransformedBitmap(result, new ScaleTransform(scale, scale));
         }
-        result = new FormatConvertedBitmap(result, PixelFormats.Pbgra32, null, 0);
         var copy = new WriteableBitmap(result);
         copy.Freeze();
         return copy;
+    }
+
+    // Windows' application logos (a Store app's square logo especially) draw their mark small in the middle of a transparent
+    // square, so on a plate the mark would be a few pixels. The square is cut to the drawn part with a little margin, kept square
+    // and centred; a picture that already fills its square is left as it is.
+    internal static BitmapSource Trim(BitmapSource source)
+    {
+        int w = source.PixelWidth, h = source.PixelHeight;
+        if (w < 8 || h < 8) return source;
+        var pixels = new byte[w * h * 4];
+        source.CopyPixels(pixels, w * 4, 0);
+        int minX = w, minY = h, maxX = -1, maxY = -1;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                if (pixels[(y * w + x) * 4 + 3] > 12)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+        if (maxX < 0) return source;
+        int drawnW = maxX - minX + 1, drawnH = maxY - minY + 1;
+        if (drawnW >= w * .85 && drawnH >= h * .85) return source;
+        int side = Math.Max(drawnW, drawnH);
+        side = Math.Min(Math.Min(w, h), side + 2 * (int)Math.Ceiling(side * .06));
+        int x0 = Math.Clamp((minX + maxX + 1) / 2 - side / 2, 0, w - side), y0 = Math.Clamp((minY + maxY + 1) / 2 - side / 2, 0, h - side);
+        return new CroppedBitmap(source, new System.Windows.Int32Rect(x0, y0, side, side));
     }
 
     // WPF's own decoder for the picture's format, told by its first bytes: PNG, ICO, JPEG or BMP. Other formats, and the

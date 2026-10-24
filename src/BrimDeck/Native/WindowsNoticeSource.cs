@@ -298,7 +298,7 @@ internal sealed class WindowsNoticeSource : IDisposable
         try
         {
             // Desktop applications may have no display information or no logo at all.
-            if (app.DisplayInfo?.GetLogo(new Windows.Foundation.Size(64, 64)) is not { } logo) return null;
+            if (app.DisplayInfo?.GetLogo(new Windows.Foundation.Size(128, 128)) is not { } logo) return null;
             using var stream = await logo.OpenReadAsync();
             if (stream is null) return null;
             if (stream.Size == 0 || stream.Size > 2_000_000) return null;
