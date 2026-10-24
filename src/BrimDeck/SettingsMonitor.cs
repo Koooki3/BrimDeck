@@ -131,10 +131,10 @@ public sealed partial class SettingsWindow
         double share = critical ? ReadingLevels.CriticalShare : ReadingLevels.ElevatedShare,
             commit = critical ? MemorySample.CriticalCommit : MemorySample.ElevatedCommit,
             rate = (critical ? ReadingLevels.CriticalRate : ReadingLevels.ElevatedRate) / 1_000_000;
-        // The commit charge is named only where its threshold differs from the shares'.
+        // The memory commit charge is always named: by its own threshold where it differs from the shares', else as part of memory.
         bool apart = commit != share;
-        return Loc.T($"占用达到 {share * 100:0}%{(apart ? $"（内存提交量为 {commit * 100:0}%）" : "")}或网速达到 {rate:0} MB/s 时的颜色。",
-            $"The color when usage reaches {share * 100:0}%{(apart ? $" ({commit * 100:0}% for the memory commit charge)" : "")} or the network rate reaches {rate:0} MB/s.");
+        return Loc.T($"占用达到 {share * 100:0}%{(apart ? $"（内存提交量为 {commit * 100:0}%）" : "（内存包括内存提交量）")}或网速达到 {rate:0} MB/s 时的颜色。",
+            $"The color when usage reaches {share * 100:0}%{(apart ? $" ({commit * 100:0}% for the memory commit charge)" : " (for memory, including the commit charge)")} or the network rate reaches {rate:0} MB/s.");
     }
 
     // A color column's level: the reading's normal color, then the warning and critical ones of a reading with levels.
