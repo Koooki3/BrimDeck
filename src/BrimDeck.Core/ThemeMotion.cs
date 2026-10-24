@@ -1,6 +1,6 @@
 namespace BrimDeck.Core;
 
-// The motion a theme gives BrimDeck's own windows: slow ambient light on the island (a breathing rim and glow, colors drifting
+// The motion a theme gives BrimDeck's own windows: slow ambient light on the island (a breathing rim, colors drifting
 // along the rim, a scan line now and then, a rare soft sag of the neon), and how the pointer is answered: a mark on the control
 // it hovers, drawn on the control's own visible shape; a press that answers on the button going down, holds while it is held
 // and completes (or backs out) on release; and a short accent where keyboard focus lands. Nothing follows the pointer.
@@ -112,21 +112,24 @@ public readonly record struct AmbientFrame(double Rim, double Glow, double Drift
 // Colors are theme color keys ("accent", "rim", "shadow", ...), "#RRGGBB" colors, or "system" for the Windows accent color.
 // Color is the main mark (hover and focus); Secondary its second tone (a gradient's end, a shadow, a ghost, a neutral bar);
 // Highlight the color of the moment of a press (a scan line, an indicator, a selection, sparkles, fireflies).
-// Trail is how strongly the particles show (0: none). Pace scales every interaction duration. Steps quantizes the motion into
-// that many hard steps (0: smooth), for a mechanical theme.
+// ParticleStrength is how strongly the particles a completed press leaves show (0: none); the theme file calls it "trail".
+// Pace scales every interaction duration. Steps quantizes the motion into that many hard steps (0: smooth), for a mechanical
+// theme.
 public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double HoverStrength, PressFx Press, double PressStrength,
-    double Trail, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent")
+    double ParticleStrength, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent")
 {
     public const string SystemAccent = "system";
     public static readonly ThemeMotion Default = new(AmbientMotion.None, HoverFx.Reveal, .12, PressFx.Shade, .18, 0, FocusFx.Ring, 1, "accent", "accent");
-    public bool AnyInteraction => Hover != HoverFx.None && HoverStrength > 0 || Press != PressFx.None && PressStrength > 0 || Trail > 0 && Particles != ParticleFx.None || Focus != FocusFx.None;
+    // The same value under the theme file's key, for the template writer and the tests that read it by that name.
+    public double Trail => ParticleStrength;
+    public bool AnyInteraction => Hover != HoverFx.None && HoverStrength > 0 || Press != PressFx.None && PressStrength > 0 || ParticleStrength > 0 && Particles != ParticleFx.None || Focus != FocusFx.None;
 
     // "system" follows Windows: its accent color and the quiet Fluent answers (a light theme's lift and sink stay), with no
     // ambient light, particles or steps. The base theme's strengths and pace stay.
     public ThemeMotion ForSystem() => this with
     {
         Ambient = AmbientMotion.None, Hover = Hover == HoverFx.Lift ? HoverFx.Lift : HoverFx.Reveal, Press = Press == PressFx.Sink ? PressFx.Sink : PressFx.Shade,
-        Trail = 0, Particles = ParticleFx.None, Steps = 0, Focus = FocusFx.Ring, Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
+        ParticleStrength = 0, Particles = ParticleFx.None, Steps = 0, Focus = FocusFx.Ring, Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
     };
 
     // A motion color as the palette draws it: a key of the palette, a color, or the Windows accent (systemAccent; the palette's
@@ -402,7 +405,7 @@ public static partial class PanelThemes
                 HoverStrength = MotionSafety.Amount(motion.HoverStrength, MotionSafety.HoverMax, m.HoverStrength),
                 Press = MotionStyles.Press(motion.Press, m.Press),
                 PressStrength = MotionSafety.Amount(motion.PressStrength, MotionSafety.PressMax, m.PressStrength),
-                Trail = MotionSafety.Amount(motion.Trail, MotionSafety.TrailMax, m.Trail),
+                ParticleStrength = MotionSafety.Amount(motion.Trail, MotionSafety.TrailMax, m.ParticleStrength),
                 Particles = MotionStyles.Particles(motion.Particles, m.Particles),
                 Focus = MotionStyles.Focus(motion.Focus, m.Focus),
                 Pace = motion.Pace is { } pace && double.IsFinite(pace) ? Math.Clamp(pace, MotionSafety.PaceMin, MotionSafety.PaceMax) : m.Pace,

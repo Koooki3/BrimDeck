@@ -5,6 +5,8 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using static BrimDeck.Tracks;
+using Track = BrimDeck.Core.Notices.NoticeMotion.Track;
 
 namespace BrimDeck;
 
@@ -139,6 +141,7 @@ public partial class MainWindow
         if (_poweringOff) { _whenGone += gone; return; }
         if (!CanAnimateLifecycle) { gone(); return; }
         int boot = ++_boot; _bootWaiting = false; _bootEnds = 0;
+        _noticeWindow?.Vanish();
         if (_expanded) SetExpanded(false, instant: true);
         _hover.Stop(); _leave.Stop(); _pointerInside = false; _cursorInCompact = false;
         _poweringOff = true; _whenGone = gone;
@@ -174,16 +177,23 @@ public partial class MainWindow
         hop.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(bounce)), Soft.InOut));
         hop.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(bounce + drop * .55)), new BezierEase(.55, 0, .9, .5)));
         hop.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(bounce + drop))));
-        hop.Completed += (_, _) =>
+        int total = after + bounce + drop;
+        // life-L12: the hop's end is what lets the panel go, and a hop whose clock was replaced, or whose frames stopped (a
+        // locked session), never ends; the panel then ignored every later ApplySettings. It goes anyway a little after.
+        var fallback = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher) { Interval = TimeSpan.FromMilliseconds(total + 500) };
+        void Gone()
         {
+            fallback.Stop();
             if (boot != _boot || !_poweringOff) return;
             HideRipple();
             _poweringOff = false;
             var whenGone = _whenGone; _whenGone = null;
             whenGone?.Invoke();
-        };
+        }
+        hop.Completed += (_, _) => Gone();
+        fallback.Tick += (_, _) => Gone();
+        fallback.Start();
         ScaleDot(hop);
-        int total = after + bounce + drop;
         HoverZone.BeginAnimation(OpacityProperty, Timed(new DoubleAnimation { To = 0, EasingFunction = Soft.InOut }, total, new((after + bounce + drop * .35) / total, (after + bounce + drop * .6) / total)), HandoffBehavior.SnapshotAndReplace);
         Ripple(shape, after + bounce + (int)(drop * .2), drop);
     }

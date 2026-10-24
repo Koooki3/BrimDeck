@@ -18,9 +18,6 @@ internal sealed partial class NoticeWindow
     // The words about a time-kind notice's time; they replace its summary. Null keeps the notice's own summary.
     private static string? LiveWords(Notice? notice) => NoticeClock.Live(notice?.Timing, DateTimeOffset.UtcNow, TimeZoneInfo.Local);
 
-    // The summary's line, when it shows the live words, so that the tick changes its text only.
-    private void KeepLiveLine(TextBlock? line) => _liveLine = line is not null && LiveWords(Notice) is { } words && line.Text == words ? line : null;
-
     // A countdown's ring: how far it has run.
     private FrameworkElement? CountdownRing(Notice? notice)
     {
@@ -77,9 +74,7 @@ internal sealed partial class NoticeWindow
         // The ring stays in place; only its arc is drawn anew, so the toast around it is not laid out again.
         if (_liveRing is Grid shown && NoticeClock.Fraction(notice.Timing, DateTimeOffset.UtcNow) is { } fraction)
         {
-            var fresh = UI.Ring(fraction * 100, AccentHex, shown.Width, 2.2);
-            shown.Children.Clear();
-            while (fresh.Children.Count > 0) { var part = fresh.Children[0]; fresh.Children.RemoveAt(0); shown.Children.Add(part); }
+            RedrawRing(shown, fraction);
             AutomationProperties.SetName(shown, words ?? "");
         }
         // Ended (the countdown reached its end, the event started): the last words stay; the tick is let go.

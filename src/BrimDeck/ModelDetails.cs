@@ -223,6 +223,11 @@ public partial class MainWindow
             // The theme's answers end with the pop-up rather than play on over buttons that are going.
             InteractionFx.Clear(popup);
             Soft.Leave(content, () => popup.Close());
+            // ui-1: the leave is the only thing that closes it now, and an animation replaced on the same property never completes,
+            // so the pop-up closes on its own a little after the leave should have ended.
+            var fallback = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Soft.Quick + 250) };
+            fallback.Tick += (_, _) => { fallback.Stop(); if (popup.IsLoaded) popup.Close(); };
+            fallback.Start();
             RenderUsage();
         };
         popup.Deactivated += (_, _) => { if (!closing && popup.IsVisible) popup.Close(); };
@@ -238,7 +243,11 @@ public partial class MainWindow
         if (Soft.Enabled && popup.Content is UIElement entering)
         {
             entering.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 0, TimeSpan.Zero));
-            popup.ContentRendered += (_, _) => Soft.Enter(entering);
+            // ui-1: once only, and not when it was closed before its first frame: the entrance would replace the leave's fade,
+            // whose end is what closes it.
+            EventHandler? enter = null;
+            enter = (_, _) => { popup.ContentRendered -= enter; if (!left && popup.IsVisible) Soft.Enter(entering); };
+            popup.ContentRendered += enter;
         }
         popup.Show(); popup.Activate();
     }

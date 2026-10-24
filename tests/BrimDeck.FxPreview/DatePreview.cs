@@ -46,15 +46,18 @@ internal static class DatePreview
     {
         var picker = new ModelDatePicker(new UsageDateRange(Day(5), Day(12)), palette)
         {
-            Clock = () => _now, Motion = () => true, AnimationDuration = 360, VerticalAlignment = VerticalAlignment.Top, Width = Width
+            Preview = new() { Clock = () => _now, Moves = () => true, AnimationDuration = 360 }, VerticalAlignment = VerticalAlignment.Top, Width = Width
         };
         double height = picker.FullHeight(Width);
         var stage = new Grid { Width = Width, Height = height, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(Pad) };
         stage.Children.Add(picker);
         var fx = new FxSurface(stage, stage, () => true)
         {
-            Clock = () => _now, Palette = () => palette, SystemTheme = false, AnimationDuration = 360,
-            Conditions = () => new MotionConditions(true, true, false, true, false, false, false, false, true)
+            Preview = new()
+            {
+                Clock = () => _now, Palette = () => palette, SystemTheme = false, AnimationDuration = 360,
+                Conditions = () => new MotionConditions(true, true, false, true, false, false, false, false, true)
+            }
         };
         stage.Children.Add(fx);
         // A desktop behind the pop-up: dark for a dark theme, light for a light one.
@@ -94,32 +97,32 @@ internal static class DatePreview
 
         // The end field becomes active (its outline glides), then a later end day: the marker glides and the band grows.
         rows.Add(Run(scene, [
-            (0, "选结束栏", s => Click(s.Picker.Field(true))), (glide / 3, "1/3", null), (glide, "到位", null),
-            (glide + .1, "选 20 日", s => Click(s.Picker.DayButton(Day(20)))), (glide + .1 + glide / 4, "1/4", null), (glide + .1 + glide / 2, "1/2", null),
+            (0, "选结束栏", s => Click(Named(s, "选择结束日期", "Choose the end date"))), (glide / 3, "1/3", null), (glide, "到位", null),
+            (glide + .1, "选 20 日", s => Click(DayButton(s, Day(20)))), (glide + .1 + glide / 4, "1/4", null), (glide + .1 + glide / 2, "1/2", null),
             (glide + .1 + glide * 3 / 4, "3/4", null), (glide * 2 + .15, "到位", null)]));
         // The start field, then an earlier start day: the start marker glides back.
         rows.Add(Run(scene, [
-            (0, "选开始栏", s => Click(s.Picker.Field(false))), (glide / 2, "1/2", null), (glide + .05, "选 2 日", s => Click(s.Picker.DayButton(Day(2)))),
+            (0, "选开始栏", s => Click(Named(s, "选择开始日期", "Choose the start date"))), (glide / 2, "1/2", null), (glide + .05, "选 2 日", s => Click(DayButton(s, Day(2)))),
             (glide + .05 + glide / 3, "1/3", null), (glide + .05 + glide * 2 / 3, "2/3", null), (glide * 2 + .1, "到位", null)]));
 
         // A month change back and forward again.
         rows.Add(Run(scene, [
-            (0, "上个月", s => Click(s.Picker.PreviousButton)), (.001, "首帧", null), (leave / 2, "旧月离开", null), (delay, "交接", null),
+            (0, "上个月", s => Click(Named(s, "上个月", "Previous month"))), (.001, "首帧", null), (leave / 2, "旧月离开", null), (delay, "交接", null),
             (delay + t.Arrive / 3000.0, "新月 1/3", null), (delay + t.Arrive * 2 / 3000.0, "2/3", null), (month + .02, "到位", null)]));
         var before = Probe(scene);
         rows.Add(Run(scene, [
-            (0, "下个月", s => Click(NextButton(s))), (.001, "首帧", null), (delay, "交接", null), (delay + t.Arrive / 2000.0, "1/2", null), (month + .02, "到位", null)]));
+            (0, "下个月", s => Click(Named(s, "下个月", "Next month"))), (.001, "首帧", null), (delay, "交接", null), (delay + t.Arrive / 2000.0, "1/2", null), (month + .02, "到位", null)]));
 
         // An end before the start: the message opens, the buttons below move down, Apply eases to unavailable; then a valid end.
         rows.Add(Run(scene, [
-            (0, "选结束栏", s => Click(s.Picker.Field(true))), (glide + .05, "结束早于开始", s => Click(s.Picker.DayButton(Day(1)))), (glide + .05 + message / 3, "1/3", null),
+            (0, "选结束栏", s => Click(Named(s, "选择结束日期", "Choose the end date"))), (glide + .05, "结束早于开始", s => Click(DayButton(s, Day(1)))), (glide + .05 + message / 3, "1/3", null),
             (glide + .05 + message * 2 / 3, "2/3", null), (glide + .05 + message + .05, "展开", null),
-            (glide + message + .3, "改为有效", s => Click(s.Picker.DayButton(Day(15)))), (glide + message + .3 + message / 2, "1/2", null), (glide + message * 2 + .4, "收起", null)]));
+            (glide + message + .3, "改为有效", s => Click(DayButton(s, Day(15)))), (glide + message + .3 + message / 2, "1/2", null), (glide + message * 2 + .4, "收起", null)]));
 
         // The theme's answers: a day hovered, gliding to its neighbour, and Apply pressed and released.
         rows.Add(Run(scene, [
-            (0, "悬停日期", s => Hover(s, s.Picker.DayButton(Day(8)))), (.08, "+80ms", null), (.2, "滑到相邻", s => Hover(s, s.Picker.DayButton(Day(9)))), (.3, "到位", null),
-            (.5, "按下应用", s => { Hover(s, s.Picker.ApplyButton); s.Fx.PressOn(s.Picker.ApplyButton); }), (.6, "按住", null), (.7, "松开", s => s.Fx.LiftOff(true)), (.85, "+150ms", null)]));
+            (0, "悬停日期", s => Hover(s, DayButton(s, Day(8)))), (.08, "+80ms", null), (.2, "滑到相邻", s => Hover(s, DayButton(s, Day(9)))), (.3, "到位", null),
+            (.5, "按下应用", s => { Hover(s, Named(s, "应用日期筛选", "Apply the date filter")); s.Fx.PressOn(Named(s, "应用日期筛选", "Apply the date filter")); }), (.6, "按住", null), (.7, "松开", s => s.Fx.LiftOff(true)), (.85, "+150ms", null)]));
 
         Check("the month change slides and returns to the same place", (before - Probe(scene)).Length < .5);
         Save(rows, palette, id + " · 日期范围选择", Path.Combine(folder, id + "-date.png"));
@@ -128,22 +131,26 @@ internal static class DatePreview
     }
 
     // Where the grid lies, to see it come back to the same place after a month change.
-    private static Point Probe(Scene scene) => scene.Picker.Cell(0).TransformToVisual(scene.Root).Transform(new Point());
+    private static Point Probe(Scene scene) => First(scene, name => DateTime.TryParseExact(name, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+        .TransformToVisual(scene.Root).Transform(new Point());
 
-    private static Button NextButton(Scene scene)
+    // The picker's controls, found as a screen reader finds them: by their names (Chinese or English, as the UI language is).
+    private static Button Named(Scene scene, params string[] names) => First(scene, names.Contains);
+    private static Button DayButton(Scene scene, DateTime day) => Named(scene, day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+
+    private static Button First(Scene scene, Func<string, bool> match)
     {
-        Button? found = null;
-        void Walk(DependencyObject node)
+        Button? Walk(DependencyObject node)
         {
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
             {
                 var child = VisualTreeHelper.GetChild(node, i);
-                if (child is Button b && System.Windows.Automation.AutomationProperties.GetName(b) is "下个月" or "Next month") found = b;
-                Walk(child);
+                if (child is Button b && match(System.Windows.Automation.AutomationProperties.GetName(b))) return b;
+                if (Walk(child) is { } found) return found;
             }
+            return null;
         }
-        Walk(scene.Picker);
-        return found!;
+        return Walk(scene.Picker) ?? throw new InvalidOperationException("No such control in the picker");
     }
 
     private static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent, button));

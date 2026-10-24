@@ -24,6 +24,7 @@ try
     EqualizerSignalTests.Run(Check);
     CompactMotionTests.Run(Check);
     ColorMathTests.Run(Check);
+    AuditUiTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     NoticeGlyphTests.Run(Check);
     ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");

@@ -10,6 +10,8 @@ using System.Windows.Threading;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
+using static BrimDeck.Tracks;
+using Track = BrimDeck.Core.Notices.NoticeMotion.Track;
 
 namespace BrimDeck;
 
@@ -454,8 +456,6 @@ public partial class MainWindow : Window
     }
 
     private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
-    // One animated track: where it starts and ends, as fractions of the configured duration.
-    private readonly record struct Track(double Start, double End);
     public void SetExpanded(bool expanded, bool instant = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
@@ -547,18 +547,19 @@ public partial class MainWindow : Window
         if (reshaping) duration = (int)(duration * 1.25);
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
-        // The opening spring is most of the way there within a fifth of the move, so the content follows soon after it.
-        Track content = expanded ? new(.12, .8) : new(0, .30);
-        Track surface = reshaping || morphing || booting || expanded ? new(0, 1) : new(.12, line ? .92 : 1);
+        // The opening and closing tracks are NoticeMotion's Panel* (a notice moves on the same ones); the boot's, the style
+        // morph's and the indicator's own variations stay here.
+        Track content = expanded ? NoticeMotion.PanelOpenContent : NoticeMotion.PanelCloseContent;
+        Track surface = reshaping || morphing || booting || expanded ? NoticeMotion.PanelOpenSurface : line ? new(.12, .92) : NoticeMotion.PanelCloseSurface;
         // Between forms the corners turn early: a notch becoming a capsule rounds its flat top long before it has its new size,
         // rather than showing a square top over round bottom corners for most of the move.
         Track cornerTrack = morphing ? new(0, .4) : surface;
-        Track compact = booting ? new(.5, 1) : expanded ? new(0, .15) : line ? new(0, morphing ? .25 : .35) : morphing ? new(.55, 1) : new(.62, 1);
+        Track compact = booting ? new(.5, 1) : expanded ? new(0, .15) : line ? new(0, morphing ? .25 : .35) : morphing ? new(.55, 1) : NoticeMotion.PanelLandCompact;
         Track shadow = booting ? new(.35, 1) : expanded ? new(0, .3) : morphing ? new(.2, .9) : new(.5, 1);
         Track rim = expanded ? new(.2, .5) : morphing ? new(.2, .7) : new(.5, .8);
         // The indicator's color only ever shows at the line's size, never as a larger block: into the indicator it comes once the
         // surface has nearly narrowed to the line, and out of it (a style morph from the line) it goes at once.
-        Track tint = expanded ? new(0, .12) : indicator ? morphing ? new(.65, 1) : new(.85, 1) : morphing ? new(0, .15) : new(.68, 1);
+        Track tint = expanded ? NoticeMotion.PanelOpenTint : indicator ? morphing ? new(.65, 1) : NoticeMotion.PanelCloseTint : morphing ? new(0, .15) : new(.68, 1);
         if (morphing && !line && Compact.Visibility == Visibility.Visible && Compact.Opacity > .5)
         {
             SetImmediate(Compact, OpacityProperty, 0d);
@@ -620,24 +621,6 @@ public partial class MainWindow : Window
         UpdateMonitorDemand();
         UpdateGrips();
         UpdateAmbient();
-    }
-    private static T Timed<T>(T animation, int duration, Track track) where T : AnimationTimeline
-    {
-        animation.BeginTime = TimeSpan.FromMilliseconds(duration * track.Start);
-        animation.Duration = TimeSpan.FromMilliseconds(duration * (track.End - track.Start));
-        return animation;
-    }
-    private static void Animate(IAnimatable target, DependencyProperty property, double value, int duration, Track track, IEasingFunction easing, Action? completed = null)
-    {
-        if (duration == 0) { SetImmediate(target, property, value); completed?.Invoke(); return; }
-        var animation = Timed(new DoubleAnimation { To = value, EasingFunction = easing }, duration, track);
-        if (completed is not null) animation.Completed += (_, _) => completed();
-        target.BeginAnimation(property, animation, HandoffBehavior.SnapshotAndReplace);
-    }
-    private static void SetImmediate(IAnimatable target, DependencyProperty property, object value)
-    {
-        target.BeginAnimation(property, null);
-        ((DependencyObject)target).SetValue(property, value);
     }
     // While compact, TrackPointer alone decides; an extra enter or leave message would restart the open delay.
     private void Island_MouseEnter(object sender, MouseEventArgs e)

@@ -42,7 +42,7 @@ internal sealed partial class FxSurface
         _lastBurst = now;
         uint seed = (uint)mark.Serial * 2654435761u;
         double Next() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed & 0xFFFFFF) / (double)0x1000000; }
-        double scale = Math.Clamp((AnimationDuration ?? Settings?.AnimationDuration ?? 360) / 360d, .6, 1.6) * Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
+        double scale = Math.Clamp(AnimationLength / 360d, .6, 1.6) * Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
         switch (_motion.Particles)
         {
             case ParticleFx.Star:
@@ -99,7 +99,7 @@ internal sealed partial class FxSurface
 
     private void DrawParticles(DrawingContext dc, double now)
     {
-        double strength = _motion.Trail;
+        double strength = _motion.ParticleStrength;
         for (int i = 0; i < MoteCount; i++)
         {
             ref var m = ref _motes[i];

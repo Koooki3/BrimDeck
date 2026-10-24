@@ -12,6 +12,7 @@ using System.Windows.Shapes;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
+using static BrimDeck.Tracks;
 
 namespace BrimDeck;
 
@@ -74,6 +75,8 @@ internal sealed partial class NoticeWindow : Window
         Deactivated += (_, _) => { if (_keyboard) EndKeyboard(); };
         _app.Notices.Icons.Loaded += IconLoaded;
         Closed += (_, _) => { _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
+        // ui-3: moved to a monitor with another scale while it shows, the material is made again for that scale.
+        DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
 
     // True while a notice covers the island: the panel then leaves hovering to this window.
@@ -101,12 +104,15 @@ internal sealed partial class NoticeWindow : Window
             // the notice starts in its flat color and takes the theme's surface as it grows.
             SetFrame(_collapsed, 0, NoticeMotion.Surface);
             _surface.IslandColor = PanelTheme.ColorOf("indicator");
-            Set(_surface, NoticeSurface.IslandOpacityProperty, Indicator ? 1d : 0d);
-            Set(_toast, OpacityProperty, 0d); Set(_detail, OpacityProperty, 0d); _detail.Visibility = Visibility.Collapsed; _toast.Visibility = Visibility.Visible;
-            Set(_glow, OpacityProperty, 0d);
+            SetImmediate(_surface, NoticeSurface.IslandOpacityProperty, Indicator ? 1d : 0d);
+            SetImmediate(_toast, OpacityProperty, 0d); SetImmediate(_detail, OpacityProperty, 0d); _detail.Visibility = Visibility.Collapsed; _toast.Visibility = Visibility.Visible;
+            SetImmediate(_glow, OpacityProperty, 0d);
             Show();
-            // Shown on a monitor with another scale, Windows has just given the window that scale; it is placed again in it.
+            // Shown on a monitor with another scale, Windows has just given the window that scale; it is placed again in it,
+            // and its material (the scan lines are drawn per device pixel) made for it if the scale it was made for was not it
+            // (ui-3; an unchanged look is kept, so this costs nothing then).
             Place();
+            Dress();
             NoticeNative.BringToTop(new WindowInteropHelper(this).Handle);
         }
         var cursor = CursorInStage();
@@ -147,11 +153,14 @@ internal sealed partial class NoticeWindow : Window
         bool moved = frame != _toastFrame;
         _toastFrame = frame;
         if (!_showingDetail) _detailFor = null;
-        BuildToast();
+        // perf-7: a task's progress or a burst's count changes only those parts of the toast, in place; the toast is built
+        // again only when what it is made of changes. Screen readers hear it again only when its words change.
+        bool spoken = moved || !RefreshToast();
+        if (spoken) BuildToast();
         // A change in place glides as the monitor's selections do.
         if (_showingDetail) ShowDetailFrame(InPlace, Soft.Follow);
         else if (moved) SetFrame(_toastFrame, InPlace, NoticeMotion.Surface, Soft.Follow);
-        Announce();
+        if (spoken || _toastWordsChanged) Announce();
         WatchLive();
     }
 
@@ -209,6 +218,10 @@ internal sealed partial class NoticeWindow : Window
         return frame;
     }
 
+    // ui-2: the panel powers off (it is hidden, or BrimDeck exits): a notice that still shows or leaves goes at once, so the
+    // island it covers draws back into the dot in sight.
+    public void Vanish() { if (IsVisible) HandOver(); }
+
     private void Finish(bool reveal = false)
     {
         _leaving = false; _showingDetail = false; _detailFor = null;
@@ -219,7 +232,7 @@ internal sealed partial class NoticeWindow : Window
         // The surface keeps no stale animations, so the next notice starts from the island again.
         foreach (var property in new[] { Canvas.LeftProperty, Canvas.TopProperty, WidthProperty, HeightProperty })
         { _surface.BeginAnimation(property, null); _glow.BeginAnimation(property, null); }
-        _toast.Children.Clear(); _detail.Children.Clear();
+        _toast.Children.Clear(); _detail.Children.Clear(); _toastShape = null;
     }
 
     // The icon of the shown notice arrived after it was drawn: the content is drawn again in place, the frame stays.
@@ -275,8 +288,8 @@ internal sealed partial class NoticeWindow : Window
         foreach (var element in new FrameworkElement[] { _surface, _glow })
         {
             double left = Canvas.GetLeft(element), top = Canvas.GetTop(element);
-            Set(element, Canvas.LeftProperty, (double.IsNaN(left) ? 0 : left) + dx);
-            Set(element, Canvas.TopProperty, (double.IsNaN(top) ? 0 : top) + dy);
+            SetImmediate(element, Canvas.LeftProperty, (double.IsNaN(left) ? 0 : left) + dx);
+            SetImmediate(element, Canvas.TopProperty, (double.IsNaN(top) ? 0 : top) + dy);
         }
     }
 
@@ -327,31 +340,12 @@ internal sealed partial class NoticeWindow : Window
     private double Duration() => NoticeMotion.Length(Settings.AnimationDuration, Soft.Enabled);
     private static double InPlace => Soft.Enabled ? Soft.Choose : 0;
 
-    private static void Animate(IAnimatable target, DependencyProperty property, double value, double duration, NoticeMotion.Track track, IEasingFunction easing, Action? completed = null) =>
-        Animate(target, property, value, duration, track.Start, track.End, easing, completed);
-
-    private static void Animate(IAnimatable target, DependencyProperty property, double value, double duration, double start, double end, IEasingFunction easing, Action? completed = null)
-    {
-        if (duration <= 0 || !double.IsFinite(value)) { Set(target, property, double.IsFinite(value) ? value : 0d); completed?.Invoke(); return; }
-        var animation = new DoubleAnimation
-        {
-            To = value, EasingFunction = easing,
-            BeginTime = TimeSpan.FromMilliseconds(duration * start), Duration = TimeSpan.FromMilliseconds(Math.Max(1, duration * (end - start)))
-        };
-        if (completed is not null) animation.Completed += (_, _) => completed();
-        target.BeginAnimation(property, animation, HandoffBehavior.SnapshotAndReplace);
-    }
-
-    private static void Set(IAnimatable target, DependencyProperty property, object value)
-    {
-        target.BeginAnimation(property, null);
-        ((DependencyObject)target).SetValue(property, value);
-    }
-
-    // The theme as it is now, for the surface and the shadow or glow behind it.
+    // The theme as it is now, for the surface and the shadow or glow behind it. Before the window is first shown it has no scale
+    // of its own yet; the monitor it will show on gives it (ui-3).
     private void Dress()
     {
-        double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
+        double dpi = PresentationSource.FromVisual(this) is null ? (WindowsHost.MonitorScreen(_deck.HotkeyMonitor) ?? WindowsHost.PrimaryScreen()).Scale
+            : VisualTreeHelper.GetDpi(this).DpiScaleX;
         var look = NoticeLook.Current(dpi);
         // The look is cached per theme and scale: an unchanged one keeps its brushes and shadow, so a notice that arrives does
         // not build them again as its move starts.
@@ -404,7 +398,7 @@ internal sealed partial class NoticeWindow : Window
 
     private Size ToastSize()
     {
-        var (title, summary) = ToastTexts();
+        var (title, summary, _) = ToastTexts();
         double height = summary.Length > 0 ? 52 : 44;
         if (Indicator) height -= 4;
         var (padding, plate) = ToastMetrics(height);
@@ -415,15 +409,18 @@ internal sealed partial class NoticeWindow : Window
 
     private double TrailingWidth() => _item is { Count: > 1 } ? 30 : Notice?.Progress is not null || HasCountdownRing(Notice) ? 26 : 12;
 
-    private (string Title, string Summary) ToastTexts()
+    // Live says the summary is the live words about the notice's time (NoticeWindow.Time.cs), worked out once here: read twice,
+    // a second could pass between the two and the countdown would stop (ui-7).
+    private (string Title, string Summary, bool Live) ToastTexts()
     {
         if (_item is { Kind: AttentionKind.Summary, Payload: int count })
-            return (NoticeText.Count(count), Loc.T("在 BrimDeck 安静期间收到", "Arrived while BrimDeck kept quiet"));
-        if (Notice is not { } notice) return ("", "");
+            return (NoticeText.Count(count), Loc.T("在 BrimDeck 安静期间收到", "Arrived while BrimDeck kept quiet"), false);
+        if (Notice is not { } notice) return ("", "", false);
         var (title, summary) = NoticeText.Presented(notice, Privacy(notice));
-        summary = LiveWords(notice) ?? summary;
+        var live = LiveWords(notice);
+        summary = live ?? summary;
         if (_item is { Count: > 1 } && summary.Length == 0) summary = notice.AppName;
-        return (title, summary);
+        return (title, summary, live is not null);
     }
 
     private static double Measure(string text, double size, FontWeight weight)
@@ -433,9 +430,64 @@ internal sealed partial class NoticeWindow : Window
         return Math.Ceiling(formatted.WidthIncludingTrailingWhitespace);
     }
 
+    // What the toast was built from (ToastShape), and the parts an update in place changes.
+    private object? _toastShape;
+    private TextBlock? _summaryLine, _countText;
+    private Grid? _progressRing;
+    private bool _toastWordsChanged;
+
+    // Everything the toast's build depends on besides its words, the count it shows and how far a task has come.
+    private object ToastShape(Notice? notice, bool summary) => (_item?.Kind, notice?.IconRef, notice?.AppKey, notice?.AppName, notice?.Origin, notice?.Category,
+        notice?.TimeKind, _accent, TrailingKind(notice), summary, (_toastFrame.Rect.Width, _toastFrame.Rect.Height, _look));
+
+    private int TrailingKind(Notice? notice) => _item is { Count: > 1 } ? 1 : HasCountdownRing(notice) ? 2 : notice?.Progress is not null ? 3 : notice is not null ? 4 : 0;
+
+    private Color AccentFor(Notice? notice) => _look.AppColor(notice is null ? PanelTheme.ColorOf("accent") : Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
+
+    // Changes the shown toast's words, count and progress in place; false when it has to be built again (BuildToast).
+    private bool RefreshToast()
+    {
+        var notice = Notice;
+        var accent = AccentFor(notice);
+        var (title, summary, live) = ToastTexts();
+        var previous = _accent;
+        _accent = accent;
+        if (_announced is null || _toastShape is null || !_toastShape.Equals(ToastShape(notice, summary.Length > 0))) { _accent = previous; return false; }
+        string name = SpokenName(notice, title, summary);
+        _toastWordsChanged = AutomationProperties.GetName(_announced) != name;
+        _announced.Text = title;
+        AutomationProperties.SetName(_announced, name);
+        if (_summaryLine is not null) _summaryLine.Text = summary;
+        _liveLine = live ? _summaryLine : null;
+        if (_countText is not null && _item is { } item)
+        {
+            _countText.Text = item.Count > 99 ? "99+" : item.Count.ToString(Loc.Culture);
+            if (_countText.Parent is FrameworkElement chip) AutomationProperties.SetName(chip, NoticeText.Count(item.Count));
+        }
+        if (_progressRing is not null && notice?.Progress is { } progress)
+        {
+            RedrawRing(_progressRing, progress);
+            AutomationProperties.SetName(_progressRing, Loc.T($"进度 {progress:P0}", $"Progress {progress:P0}"));
+        }
+        if (_liveRing is Grid ring && NoticeClock.Fraction(notice?.Timing, DateTimeOffset.UtcNow) is { } fraction) RedrawRing(ring, fraction);
+        return true;
+    }
+
+    // A ring's arc drawn anew inside the shown ring, so the toast around it is not laid out again.
+    private void RedrawRing(Grid shown, double fraction)
+    {
+        var fresh = UI.Ring(fraction * 100, AccentHex, shown.Width, 2.2);
+        shown.Children.Clear();
+        while (fresh.Children.Count > 0) { var part = fresh.Children[0]; fresh.Children.RemoveAt(0); shown.Children.Add(part); }
+    }
+
+    private static string SpokenName(Notice? notice, string title, string summary) =>
+        (notice?.AppName is { Length: > 0 } app ? app + ": " : "") + (summary.Length > 0 ? title + ", " + summary : title);
+
     private void BuildToast()
     {
         _toast.Children.Clear(); _toast.ColumnDefinitions.Clear();
+        _countText = null; _progressRing = null;
         var size = new Size(_toastFrame.Rect.Width, _toastFrame.Rect.Height);
         var (padding, plate) = ToastMetrics(size.Height);
         _toast.Margin = new Thickness(padding, 0, padding, 0);
@@ -444,23 +496,25 @@ internal sealed partial class NoticeWindow : Window
         _toast.ColumnDefinitions.Add(new ColumnDefinition());
         _toast.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var notice = Notice;
-        _accent = _look.AppColor(notice is null ? PanelTheme.ColorOf("accent") : Center.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey)));
+        _accent = AccentFor(notice);
         var icon = Plate(notice, plate);
         icon.VerticalAlignment = VerticalAlignment.Center;
         _toast.Children.Add(icon);
-        var (title, summary) = ToastTexts();
+        var (title, summary, live) = ToastTexts();
         var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 6, 0) };
         // The title carries the whole notice for screen readers and is the live region they announce.
         _announced = Line(title, 12.5, _look.Primary, FontWeights.SemiBold);
-        AutomationProperties.SetName(_announced, (notice?.AppName is { Length: > 0 } app ? app + ": " : "") + (summary.Length > 0 ? title + ", " + summary : title));
+        AutomationProperties.SetName(_announced, SpokenName(notice, title, summary));
         AutomationProperties.SetLiveSetting(_announced, AutomationLiveSetting.Polite);
         texts.Children.Add(_announced);
-        var summaryLine = summary.Length > 0 ? Line(summary, 11.5, _look.Secondary, FontWeights.Normal) : null;
-        if (summaryLine is not null) texts.Children.Add(summaryLine);
-        KeepLiveLine(summaryLine);
+        _summaryLine = summary.Length > 0 ? Line(summary, 11.5, _look.Secondary, FontWeights.Normal) : null;
+        if (_summaryLine is not null) texts.Children.Add(_summaryLine);
+        // The tick changes the summary's text only while it shows the live words.
+        _liveLine = live ? _summaryLine : null;
         Grid.SetColumn(texts, 1); _toast.Children.Add(texts);
         var trailing = Trailing(notice);
         if (trailing is not null) { Grid.SetColumn(trailing, 2); _toast.Children.Add(trailing); }
+        _toastShape = ToastShape(notice, summary.Length > 0);
     }
 
     // The count of notices this one stands for, a task's progress ring, or a dot in the application's color.
@@ -469,7 +523,7 @@ internal sealed partial class NoticeWindow : Window
         if (_item is { Count: > 1 } item)
         {
             var chip = new Border { MinWidth = 22, Height = 18, CornerRadius = new CornerRadius(9), Background = UI.Brush(_look.Fill), Padding = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
-            chip.Child = new TextBlock { Text = item.Count > 99 ? "99+" : item.Count.ToString(Loc.Culture), FontFamily = UI.PanelFont, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            chip.Child = _countText = new TextBlock { Text = item.Count > 99 ? "99+" : item.Count.ToString(Loc.Culture), FontFamily = UI.PanelFont, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(chip, NoticeText.Count(item.Count));
             return chip;
         }
@@ -479,6 +533,7 @@ internal sealed partial class NoticeWindow : Window
             var ring = UI.Ring(progress * 100, AccentHex, 18, 2.2);
             ring.VerticalAlignment = VerticalAlignment.Center;
             AutomationProperties.SetName(ring, Loc.T($"进度 {progress:P0}", $"Progress {progress:P0}"));
+            _progressRing = ring;
             return ring;
         }
         if (notice is null) return null;
@@ -516,7 +571,7 @@ internal sealed partial class NoticeWindow : Window
     {
         if (notice is null)
         {
-            var bell = NoticeBadges.Glyph(NoticeGlyph.Bell, Math.Round(size * .6), NoticeBadges.Wpf(NoticeBadges.Colors.Primary));
+            var bell = NoticeBadges.Glyph(NoticeGlyph.Bell, Math.Round(size * .6), PanelTheme.ToColor(NoticeBadges.Colors.Primary));
             bell.HorizontalAlignment = HorizontalAlignment.Center; bell.VerticalAlignment = VerticalAlignment.Center;
             return bell;
         }
@@ -651,7 +706,8 @@ internal sealed partial class NoticeWindow : Window
         face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal, Foreground = UI.Brush(primary ? _look.OnAccent : _look.Primary), VerticalAlignment = VerticalAlignment.Center };
         var button = new Button { Content = face, Margin = new Thickness(8, 0, 0, 0), MinHeight = 32, Cursor = Cursors.Hand, FocusVisualStyle = null,
             Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
-        button.MouseEnter += (_, _) => { if (!primary) face.Background = UI.Brush(_look.Hover); else face.Opacity = .88; };
+        // One hover look at a time: the theme's mark (InteractionFx) when it answers, else this one (q-P5).
+        button.MouseEnter += (_, _) => { if (InteractionFx.AnswersHover(this)) return; if (!primary) face.Background = UI.Brush(_look.Hover); else face.Opacity = .88; };
         button.MouseLeave += (_, _) => { face.Background = UI.Brush(rest); face.Opacity = 1; };
         button.PreviewMouseLeftButtonDown += (_, _) => { if (!primary) face.Background = UI.Brush(_look.Pressed); };
         // Only for focus moved by the keyboard: a button takes focus when clicked too, and should not then wear a ring.

@@ -46,7 +46,6 @@ internal static class NoticeBadges
         }
     }
 
-    public static Color Wpf(ThemeColor color) => Color.FromArgb(color.A, color.R, color.G, color.B);
     private static ThemeColor Theme(Color color) => new(color.A, color.R, color.G, color.B);
 
     internal static SolidColorBrush Brush(Color color)
@@ -87,7 +86,7 @@ internal static class NoticeBadges
     public static FrameworkElement? AppGlyph(Notice notice, double plateSize, Color appColor)
     {
         if (NoticeGlyphs.App(notice.AppKey, notice.AppName, notice.Origin) is not { } glyph) return null;
-        var color = Wpf(Colors.OnPlate(Theme(appColor)));
+        var color = PanelTheme.ToColor(Colors.OnPlate(Theme(appColor)));
         var element = Glyph(glyph, Math.Round(plateSize * .66), color);
         element.HorizontalAlignment = HorizontalAlignment.Center; element.VerticalAlignment = VerticalAlignment.Center;
         return element;
@@ -105,7 +104,7 @@ internal static class NoticeBadges
         double size = Math.Max(12, Math.Round(plateSize * .4));
         var badge = new NoticeGlyphElement
         {
-            Glyph = glyph, Badge = true, Ink = Wpf(colors.BadgeInk), Disc = Wpf(colors.Tone(NoticeGlyphs.Tone(glyph))), Ring = Wpf(colors.Surface),
+            Glyph = glyph, Badge = true, Ink = PanelTheme.ToColor(colors.BadgeInk), Disc = PanelTheme.ToColor(colors.Tone(NoticeGlyphs.Tone(glyph))), Ring = PanelTheme.ToColor(colors.Surface),
             Glowing = glow && !colors.HighContrast, Width = size, Height = size, IsHitTestVisible = false,
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -size * .3, -size * .3)
         };
@@ -129,7 +128,7 @@ internal static class NoticeBadges
         double size = Math.Max(12, Math.Round(plateSize * .4));
         var badge = new NoticeGlyphElement
         {
-            Glyph = glyph, Badge = true, Ink = Wpf(colors.Secondary), Disc = Wpf(colors.Plate), Ring = Wpf(colors.Surface), Width = size, Height = size, IsHitTestVisible = false,
+            Glyph = glyph, Badge = true, Ink = PanelTheme.ToColor(colors.Secondary), Disc = PanelTheme.ToColor(colors.Plate), Ring = PanelTheme.ToColor(colors.Surface), Width = size, Height = size, IsHitTestVisible = false,
             HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-size * .3, 0, 0, -size * .3)
         };
         AutomationProperties.SetName(badge, NoticeGlyphs.Name(glyph));
