@@ -12,28 +12,17 @@ namespace BrimDeck.Notify;
 // 3 BrimDeck is not running or its notices are off; "run" exits with the program's own code.
 internal static class Program
 {
-    private const int Usage = 1, Refused = 2, Unreachable = 3;
+    // How long BrimDeck may take to answer one message; a BrimDeck that hangs must not hang a script with it (life-L10).
+    private static readonly TimeSpan ReplyWait = TimeSpan.FromSeconds(10);
 
     private static async Task<int> Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         var command = NotifyCommandLine.Parse(args);
-        switch (command.Kind)
-        {
-            case NotifyCommandKind.Help: Console.WriteLine(NotifyCommandLine.Usage); return 0;
-            case NotifyCommandKind.Version: Console.WriteLine(Version); return 0;
-            case NotifyCommandKind.Error: Console.Error.WriteLine("brim-notify: " + command.Error); Console.Error.WriteLine("Try brim-notify --help."); return Usage;
-            case NotifyCommandKind.Status: return await StatusAsync();
-            case NotifyCommandKind.Stdio: return await RelayAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
-            case NotifyCommandKind.Run: return await RunAsync(command);
-            default:
-            {
-                int code = Report(await SendAsync(command.Message!));
-                // A timer, stopwatch or event: its key, for "brim-notify stop KEY".
-                if (code == 0 && NotifyCommandLine.PrintsKey(command.Message!)) Console.WriteLine(command.Message!.ReplaceId);
-                return code;
-            }
-        }
+        if (command.Kind == NotifyCommandKind.Stdio) return await RelayAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
+        return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
+            Unreachable: "BrimDeck is not running, or dynamic notices are switched off in its settings.",
+            NotReceiving: "BrimDeck is not receiving notices (not running, or dynamic notices are off)."));
     }
 
     private static string Version => typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0";
@@ -55,64 +44,59 @@ internal static class Program
         NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
         await using var pipe = await ConnectAsync();
         if (pipe is null) return null;
+        return await ExchangeAsync(pipe, message);
+    }
+
+    // One message to BrimDeck and its reply, or null when the pipe failed or BrimDeck did not answer in time.
+    private static async Task<NoticeMessage?> ExchangeAsync(NamedPipeClientStream pipe, NoticeMessage message)
+    {
+        using var limit = new CancellationTokenSource(ReplyWait);
         try
         {
-            await NoticeFrames.WriteAsync(pipe, message);
-            return await NoticeFrames.ReadMessageAsync(pipe);
+            await NoticeFrames.WriteAsync(pipe, message, limit.Token);
+            return await NoticeFrames.ReadMessageAsync(pipe, limit.Token);
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException) { return null; }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException) { return null; }
     }
 
-    private static int Report(NoticeMessage? reply)
+    // "run"'s program, found and started as WindowsPrograms describes (sec-L1).
+    private static (Process? Process, int Failure) Start(IReadOnlyList<string> program)
     {
-        if (reply is null)
+        string name = program[0];
+        string? path = Environment.GetEnvironmentVariable("PATH"), pathExt = Environment.GetEnvironmentVariable("PATHEXT");
+        var file = WindowsPrograms.Find(name, path, pathExt, File.Exists);
+        bool builtin = file is null && WindowsPrograms.IsBuiltin(name);
+        if (file is null && !builtin)
         {
-            Console.Error.WriteLine("brim-notify: BrimDeck is not running, or dynamic notices are switched off in its settings.");
-            return Unreachable;
+            // The current folder is not searched; say so when that is where the program is.
+            bool here = WindowsPrograms.Find(Path.Combine(".", name), path, pathExt, File.Exists) is not null;
+            Console.Error.WriteLine("brim-notify: " + name + ": command not found" + (here ? " (a program in the current folder is run as ." + Path.DirectorySeparatorChar + name + ")" : ""));
+            return (null, NotifyCli.Usage);
         }
-        if (reply.Result == NoticeResults.Rejected)
+        ProcessStartInfo start;
+        if (file is not null && WindowsPrograms.RunsDirectly(file))
         {
-            Console.Error.WriteLine("brim-notify: BrimDeck refused the notice: " + (reply.Detail ?? "unknown reason"));
-            return Refused;
+            start = new ProcessStartInfo(file) { UseShellExecute = false };
+            foreach (var argument in program.Skip(1)) start.ArgumentList.Add(argument);
         }
-        if (reply.Result == NoticeResults.Filtered) Console.Error.WriteLine("brim-notify: received; BrimDeck's rules keep this source quiet.");
-        return 0;
-    }
-
-    private static async Task<int> StatusAsync()
-    {
-        var reply = await SendAsync(new NoticeMessage { Type = NoticeTypes.Status });
-        if (reply is null) { Console.WriteLine("BrimDeck is not receiving notices (not running, or dynamic notices are off)."); return Unreachable; }
-        Console.WriteLine("BrimDeck is receiving notices." + (reply.Detail is { Length: > 0 } detail ? " " + detail : ""));
-        return 0;
-    }
-
-    private static async Task<int> RunAsync(NotifyCommand command)
-    {
-        var program = command.Program!;
-        var start = new ProcessStartInfo(program[0]) { UseShellExecute = false };
-        foreach (var argument in program.Skip(1)) start.ArgumentList.Add(argument);
-        var watch = Stopwatch.StartNew();
-        Process? process;
-        try { process = Process.Start(start); }
-        catch (Win32Exception)
+        else
         {
-            // Batch files and shell built-ins are not executables; cmd runs them the way a prompt would.
-            // cmd by its full path: a bare name is looked for in the current directory first.
-            start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe")) { UseShellExecute = false };
-            start.ArgumentList.Add("/d"); start.ArgumentList.Add("/c");
-            foreach (var argument in program) start.ArgumentList.Add(argument);
-            try { process = Process.Start(start); }
-            catch (Win32Exception ex) { Console.Error.WriteLine("brim-notify: could not start " + program[0] + ": " + ex.Message); return Usage; }
+            // Batch files, scripts and cmd's own commands run the way a prompt would run them. cmd by its full path: a bare
+            // name is looked for in the current directory first.
+            if (WindowsPrograms.CmdArguments(file ?? name, program.Skip(1), builtin) is not { } arguments)
+            {
+                Console.Error.WriteLine("brim-notify: " + name + " runs through cmd, which would misread an argument with \", %, ! or a line break; refused.");
+                return (null, NotifyCli.Usage);
+            }
+            start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), arguments) { UseShellExecute = false };
         }
-        if (process is null) { Console.Error.WriteLine("brim-notify: could not start " + program[0]); return Usage; }
-        // Ctrl+C reaches the program too; brim-notify waits for it to finish and still reports the result.
-        Console.CancelKeyPress += (_, e) => e.Cancel = true;
-        await process.WaitForExitAsync();
-        int code = process.ExitCode;
-        var reply = await SendAsync(NotifyCommandLine.RunResult(command.Message!, code, watch.Elapsed));
-        if (reply is null) Console.Error.WriteLine("brim-notify: the program finished, but BrimDeck could not be reached.");
-        return code;
+        try
+        {
+            var process = Process.Start(start);
+            if (process is null) Console.Error.WriteLine("brim-notify: could not start " + name);
+            return (process, NotifyCli.Usage);
+        }
+        catch (Win32Exception ex) { Console.Error.WriteLine("brim-notify: could not start " + name + ": " + ex.Message); return (null, NotifyCli.Usage); }
     }
 
     // --stdio: frames from standard input go to BrimDeck one by one; each reply goes to standard output. Used by brim-notify in
@@ -126,15 +110,14 @@ internal static class Program
             {
                 NoticeMessage? message;
                 try { message = await NoticeFrames.ReadMessageAsync(input); }
-                catch (InvalidDataException) { return Refused; }
+                catch (InvalidDataException) { return NotifyCli.Refused; }
                 if (message is null) return 0;
                 NoticeMessage? reply = null;
                 for (int attempt = 0; attempt < 2 && reply is null; attempt++)
                 {
                     pipe ??= await ConnectAsync();
                     if (pipe is null) break;
-                    try { await NoticeFrames.WriteAsync(pipe, message); reply = await NoticeFrames.ReadMessageAsync(pipe); }
-                    catch (Exception ex) when (ex is IOException or InvalidDataException) { reply = null; }
+                    reply = await ExchangeAsync(pipe, message);
                     if (reply is null) { await pipe.DisposeAsync(); pipe = null; }
                 }
                 await NoticeFrames.WriteAsync(output, reply ?? NoticeProtocol.Reply(NoticeResults.Rejected, "unreachable"));

@@ -12,9 +12,12 @@ public sealed record ServiceOutput(IReadOnlyList<DBusMessage> Bus, IReadOnlyList
     public static readonly ServiceOutput None = new([], []);
 }
 
-public sealed class NotificationServer(string version, Func<string>? machineId = null)
+// session names this run of the service in the notices it passes on: its ids start again at 1 each run, so BrimDeck keys a
+// notice by the session and the id, and a new run's notice 1 never updates an earlier run's (core-H2).
+public sealed class NotificationServer(string version, Func<string>? machineId = null, string session = "server")
 {
     private uint _next;
+    public string Session { get; } = session;
     // Ids handed out and still open, so that CloseNotification and BrimDeck's dismissals only signal real notices.
     private readonly HashSet<uint> _open = [];
     public const int MaxOpen = 4096;
@@ -39,7 +42,7 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
                     uint replaces = (uint)call.Body[1];
                     uint id = replaces != 0 && _open.Contains(replaces) ? replaces : NextId();
                     var message = FreedesktopNotifications.ToNotice(call.Body, id);
-                    message.Session = "server";
+                    message.Session = Session;
                     forward.Add(message);
                     reply = call.ReturnFor("u", id);
                     break;
@@ -50,7 +53,7 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
                     if (_open.Remove(id))
                     {
                         bus.Add(Closed(id, FreedesktopNotifications.ClosedByCall));
-                        forward.Add(new NoticeMessage { Type = NoticeTypes.Close, Origin = "dbus", Session = "server", NativeId = Id(id), Reason = (int)FreedesktopNotifications.ClosedByCall });
+                        forward.Add(new NoticeMessage { Type = NoticeTypes.Close, Origin = "dbus", Session = Session, NativeId = Id(id), Reason = (int)FreedesktopNotifications.ClosedByCall });
                     }
                     reply = call.ReturnFor();
                     break;
@@ -108,6 +111,11 @@ public sealed class NotificationMonitor
     private readonly Dictionary<(string Sender, uint Serial), (NoticeMessage Message, DateTimeOffset At)> _pending = [];
     // The notification service's unique bus name; replies from anyone else are ignored.
     public string Owner { get; set; } = "";
+    // Names the watched service in the notices passed on, since its ids start again when it restarts; the agent gives each
+    // service it watches a new one (core-H2).
+    public string Session { get; set; } = "monitor";
+    // When the oldest held call is to be passed on without an id; null while none is held, so nothing needs to wake (perf-12).
+    public DateTimeOffset? NextDue => _pending.Count == 0 ? null : _pending.Values.Min(pending => pending.At) + Patience;
 
     public IReadOnlyList<NoticeMessage> Observe(DBusMessage message, DateTimeOffset now)
     {
@@ -117,7 +125,7 @@ public sealed class NotificationMonitor
         {
             uint replaces = message.Body[1] is uint r ? r : 0;
             var notice = FreedesktopNotifications.ToNotice(message.Body, replaces);
-            notice.Session = "monitor";
+            notice.Session = Session;
             // Actions belong to the other service; BrimDeck cannot invoke them.
             notice.Actions = null;
             if (replaces != 0) { result.Add(notice); return result; }
@@ -141,7 +149,7 @@ public sealed class NotificationMonitor
         }
         if (message.Type == DBusMessageType.Signal && message.Interface == FreedesktopNotifications.Interface && message.Member == "NotificationClosed"
             && message.Sender == Owner && message.Body is [uint closed, uint reason])
-            result.Add(new NoticeMessage { Type = NoticeTypes.Close, Origin = "dbus", Session = "monitor", NativeId = NotificationServer.Id(closed), Reason = (int)reason });
+            result.Add(new NoticeMessage { Type = NoticeTypes.Close, Origin = "dbus", Session = Session, NativeId = NotificationServer.Id(closed), Reason = (int)reason });
         return result;
     }
 

@@ -37,7 +37,8 @@ public static partial class FreedesktopNotifications
         """;
 
     // A Notify call's arguments as a notice. The id is the one the service gives (or gave, for a replacement); the sender is
-    // the caller's unique bus name, which with the id identifies the notice for later updates.
+    // the caller's unique bus name, which with the id identifies the notice for later updates. Texts are cut to the protocol's
+    // limits here, as BrimDeck would cut them: a long body must not make the notice too large for a frame (sec-L3).
     public static NoticeMessage ToNotice(object[] body, uint id)
     {
         string appName = body[0] as string ?? "", icon = body[2] as string ?? "", summary = body[3] as string ?? "", text = body[4] as string ?? "";
@@ -46,9 +47,10 @@ public static partial class FreedesktopNotifications
         var message = new NoticeMessage
         {
             Origin = "dbus", NativeId = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            AppName = appName.Length > 0 ? appName : null, Title = PlainText(summary), Body = PlainText(text),
-            Icon = icon.Length > 0 ? icon : Hint<string>(hints, "image-path") ?? Hint<string>(hints, "image_path"),
-            AppId = Hint<string>(hints, "desktop-entry"),
+            AppName = appName.Length > 0 ? NoticeProtocol.Clip(appName, NoticeProtocol.MaxField) : null,
+            Title = NoticeProtocol.Clip(PlainText(summary), NoticeProtocol.MaxTitle), Body = NoticeProtocol.Clip(PlainText(text), NoticeProtocol.MaxBody),
+            Icon = NoticeProtocol.Clip(icon.Length > 0 ? icon : Hint<string>(hints, "image-path") ?? Hint<string>(hints, "image_path"), 1024),
+            AppId = NoticeProtocol.Clip(Hint<string>(hints, "desktop-entry"), NoticeProtocol.MaxField),
             CreatedAt = DateTimeOffset.UtcNow,
             Category = CategoryOf(Hint<string>(hints, "category")),
             // Mail clients (Thunderbird, Evolution) mark new mail with this category; it is shown as a mail notice.
@@ -56,8 +58,9 @@ public static partial class FreedesktopNotifications
             Priority = Hint<byte?>(hints, "urgency") switch { 0 => "low", 2 => "high", _ => null }
         };
         var pairs = new List<NoticeActionInfo>();
-        for (int i = 0; i + 1 < actions.Count; i += 2)
-            if (actions[i] is string key && actions[i + 1] is string label && key.Length > 0) pairs.Add(new() { Key = key, Label = label.Length > 0 ? label : key });
+        for (int i = 0; i + 1 < actions.Count && pairs.Count < NoticeProtocol.MaxActions; i += 2)
+            if (actions[i] is string key && actions[i + 1] is string label && key.Length > 0)
+                pairs.Add(new() { Key = NoticeProtocol.Clip(key, 64)!, Label = NoticeProtocol.Clip(label.Length > 0 ? label : key, 64)! });
         if (pairs.Count > 0) message.Actions = pairs;
         if (Hint<int?>(hints, "value") is { } value && value is >= 0 and <= 100) message.Progress = value / 100d;
         return message;

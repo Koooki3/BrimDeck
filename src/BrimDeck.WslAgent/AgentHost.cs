@@ -17,8 +17,12 @@ internal sealed class AgentHost
     private readonly ConcurrentDictionary<string, TaskCompletionSource<NoticeMessage>> _replies = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly object _gate = new();
-    private readonly NotificationServer _server = new(Program.Version, Native.MachineId);
+    // The service's ids start at 1 in every run of the agent; the session sent with them is new each run, so BrimDeck never
+    // takes a new notice for an earlier run's with the same id (core-H2).
+    private readonly NotificationServer _server = new(Program.Version, Native.MachineId, "server-" + Nonce());
     private readonly NotificationMonitor _monitor = new();
+    // Released when the monitor holds a call for its reply; FlushMonitorAsync sleeps until then (perf-12).
+    private readonly SemaphoreSlim _held = new(0, 1);
     private readonly uint _uid = Native.UserId();
     private DBusConnection? _bus, _monitorBus;
     private string _state = AgentStates.NoBus, _detail = "";
@@ -32,11 +36,14 @@ internal sealed class AgentHost
         var input = host.ReadBrimDeckAsync();
         var socket = host.ServeSocketAsync();
         var bus = host.KeepBusAsync();
+        var flush = host.FlushMonitorAsync();
         await input;
         host._stop.Cancel();
-        await Task.WhenAll(socket, bus).WaitAsync(TimeSpan.FromSeconds(3)).ContinueWith(_ => { });
+        await Task.WhenAll(socket, bus, flush).WaitAsync(TimeSpan.FromSeconds(3)).ContinueWith(_ => { });
         return 0;
     }
+
+    private static string Nonce() => Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(6)).ToLowerInvariant();
 
     private async Task SendAsync(NoticeMessage message)
     {
@@ -46,6 +53,8 @@ internal sealed class AgentHost
         await _outputLock.WaitAsync();
         try { await NoticeFrames.WriteAsync(_output, message); }
         catch (IOException) { _stop.Cancel(); }
+        // Too large for a frame even after ToNotice cut its texts: that one message is lost, said on standard error (sec-L3).
+        catch (InvalidDataException ex) { Console.Error.WriteLine("send: " + ex.Message); }
         finally { _outputLock.Release(); }
     }
 
@@ -162,42 +171,55 @@ internal sealed class AgentHost
         try { owner = (string)(await bus.CallBusAsync("GetNameOwner", "s", FreedesktopNotifications.Name)).Body[0]; }
         catch (DBusException) { await ClaimOrWatchAsync(); return; }
         if (owner == bus.UniqueName) { await ReportAsync(AgentStates.Server); return; }
+        DBusConnection? monitor = null;
         try
         {
             var address = DBusConnection.SessionAddress(_uid) ?? throw new IOException("The session bus address is gone.");
-            var monitor = await DBusConnection.ConnectAsync(address, _uid, _stop.Token);
-            lock (_gate) _monitor.Owner = owner;
+            monitor = await DBusConnection.ConnectAsync(address, _uid, _stop.Token);
+            // A new session for each service watched: a restarted service hands out its ids again (core-H2).
+            lock (_gate) { _monitor.Owner = owner; _monitor.Session = "monitor-" + Nonce(); }
             monitor.Received = message =>
             {
                 List<NoticeMessage> notices;
-                lock (_gate) notices = [.. _monitor.Observe(message, DateTimeOffset.UtcNow)];
+                bool held;
+                lock (_gate) { notices = [.. _monitor.Observe(message, DateTimeOffset.UtcNow)]; held = _monitor.NextDue is not null; }
+                if (held) { try { _held.Release(); } catch (SemaphoreFullException) { } }
                 return ForwardAsync(notices);
             };
             await monitor.CallAsync(DBusMessage.Call(DBusConnection.BusName, DBusConnection.BusPath, "org.freedesktop.DBus.Monitoring", "BecomeMonitor", "asu",
                 NotificationMonitor.Rules.Append(NotificationMonitor.ReplyRule(owner)).Cast<object>().ToList(), 0u));
             _monitorBus = monitor;
-            _ = FlushMonitorAsync(monitor);
+            monitor = null;
             await ReportAsync(AgentStates.Monitor, owner);
         }
         catch (DBusException ex)
         {
             await ReportAsync(AgentStates.MonitorDenied, ex.Name);
         }
+        // A connection that did not become the monitor is released, whatever stopped it (life-L7).
+        finally { if (monitor is not null) await monitor.DisposeAsync(); }
     }
 
-    private async Task FlushMonitorAsync(DBusConnection monitor)
+    // Passes on the watched calls whose reply did not come in time. It sleeps while no call is held, instead of waking every
+    // second (perf-12), and goes on after any failure, which it reports on standard error (sec-L3).
+    private async Task FlushMonitorAsync()
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        try
+        while (!_stop.IsCancellationRequested)
         {
-            while (_monitorBus == monitor && await timer.WaitForNextTickAsync(_stop.Token))
+            try
             {
+                DateTimeOffset? due;
+                lock (_gate) due = _monitor.NextDue;
+                if (due is null) { await _held.WaitAsync(_stop.Token); continue; }
+                var wait = due.Value - DateTimeOffset.UtcNow;
+                if (wait > TimeSpan.Zero) await Task.Delay(wait, _stop.Token);
                 List<NoticeMessage> late;
                 lock (_gate) late = _monitor.Flush(DateTimeOffset.UtcNow);
                 await ForwardAsync(late);
             }
+            catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
+            catch (Exception ex) { Console.Error.WriteLine("flush: " + ex.GetType().Name + ": " + ex.Message); }
         }
-        catch (OperationCanceledException) { }
     }
 
     private async Task HandleBusAsync(DBusMessage message)
@@ -227,21 +249,31 @@ internal sealed class AgentHost
         foreach (var notice in notices) { notice.Distro = null; await SendAsync(notice); }
     }
 
-    // brim-notify inside the distribution connects here; each frame goes to BrimDeck and its reply comes back.
+    // brim-notify inside the distribution connects here; each frame goes to BrimDeck and its reply comes back. A socket that
+    // fails (its file deleted, say) is set up again after a growing pause; meanwhile brim-notify goes through Windows (life-L9).
     private async Task ServeSocketAsync()
     {
-        if (AgentPaths.Socket() is not { } path) return;
+        var pause = TimeSpan.FromSeconds(10);
+        while (!_stop.IsCancellationRequested)
+        {
+            if (AgentPaths.Socket() is not { } path) return;
+            try { await ListenAsync(path); }
+            catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
+            catch (Exception ex) { Console.Error.WriteLine("socket: " + ex.GetType().Name + ": " + ex.Message); }
+            try { await Task.Delay(pause, _stop.Token); } catch (OperationCanceledException) { return; }
+            pause = TimeSpan.FromSeconds(Math.Min(300, pause.TotalSeconds * 2));
+        }
+    }
+
+    private async Task ListenAsync(string path)
+    {
         try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { }
         using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        listener.Bind(new UnixDomainSocketEndPoint(path));
         try
         {
-            listener.Bind(new UnixDomainSocketEndPoint(path));
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             listener.Listen(16);
-        }
-        catch (Exception ex) when (ex is SocketException or IOException or UnauthorizedAccessException) { return; }
-        try
-        {
             while (!_stop.IsCancellationRequested)
             {
                 var client = await listener.AcceptAsync(_stop.Token);
@@ -250,7 +282,6 @@ internal sealed class AgentHost
                 _ = ServeClientAsync(client);
             }
         }
-        catch (OperationCanceledException) { }
         finally { try { File.Delete(path); } catch (IOException) { } }
     }
 
@@ -284,8 +315,11 @@ internal sealed class AgentHost
     private async Task<NoticeMessage> RelayAsync(NoticeMessage message)
     {
         message.Origin = "cli";
+        // The distribution is the one this agent runs in; BrimDeck takes it from the link, never from the sender (sec-L4).
         message.Distro = null;
-        message.EventId ??= Guid.NewGuid().ToString("N");
+        // As BrimDeck will read the id, so that its reply finds this waiter; a blank id would make concurrent sends collide.
+        message.EventId = NoticeProtocol.Clip(message.EventId, NoticeProtocol.MaxField);
+        if (string.IsNullOrWhiteSpace(message.EventId)) message.EventId = Guid.NewGuid().ToString("N");
         var waiter = new TaskCompletionSource<NoticeMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         // A retry with the same id while the first is still on its way is the same notice; it must not take the first's reply.
         if (!_replies.TryAdd(message.EventId, waiter)) return NoticeProtocol.Reply(NoticeResults.Duplicate, null, message.EventId);

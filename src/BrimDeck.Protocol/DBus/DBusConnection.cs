@@ -15,8 +15,12 @@ public sealed class DBusException(string name, string message) : Exception(messa
 public sealed class DBusConnection : IAsyncDisposable
 {
     public const string BusName = "org.freedesktop.DBus", BusPath = "/org/freedesktop/DBus", BusInterface = "org.freedesktop.DBus";
-    // Notifications are small; a larger message (a huge image hint) is read past and dropped instead of held in memory.
-    public const int MaxMessage = 16 * 1024 * 1024;
+    // Notifications are small; a larger message (a huge image hint, which the agent drops anyway) is read past and dropped
+    // instead of held in memory (sec-M3).
+    public const int MaxMessage = 2 * 1024 * 1024;
+    // A call the bus does not answer in this time fails, so that no caller waits forever on a connection that stopped
+    // answering (life-L8).
+    public static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(10);
     private readonly Socket _socket;
     private readonly NetworkStream _stream;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
@@ -24,6 +28,8 @@ public sealed class DBusConnection : IAsyncDisposable
     private readonly CancellationTokenSource _closed = new();
     private int _serial;
     private Task _reader = Task.CompletedTask;
+    // Set when the reading task stops answering calls; a call made after that fails at once instead of waiting.
+    private volatile bool _ended;
 
     public string UniqueName { get; private set; } = "";
     // Called on the reading task, one message at a time; a slow handler delays the next message.
@@ -78,19 +84,32 @@ public sealed class DBusConnection : IAsyncDisposable
         foreach (var endpoint in Endpoints(address))
         {
             var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            DBusConnection? connection = null;
+            // A bus that accepts the connection but never answers must not hold the caller (life-L8).
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            limit.CancelAfter(CallTimeout);
             try
             {
-                await socket.ConnectAsync(endpoint, cancellation).ConfigureAwait(false);
-                var connection = new DBusConnection(socket);
-                await connection.AuthenticateAsync(uid, cancellation).ConfigureAwait(false);
+                await socket.ConnectAsync(endpoint, limit.Token).ConfigureAwait(false);
+                connection = new DBusConnection(socket);
+                await connection.AuthenticateAsync(uid, limit.Token).ConfigureAwait(false);
                 connection._reader = Task.Run(connection.ReadLoopAsync, CancellationToken.None);
                 var hello = await connection.CallAsync(DBusMessage.Call(BusName, BusPath, BusInterface, "Hello"), cancellation).ConfigureAwait(false);
                 connection.UniqueName = (string)hello.Body[0];
                 return connection;
             }
-            catch (Exception ex) when (ex is SocketException or IOException or InvalidDataException or DBusException)
+            catch (Exception ex) when (ex is SocketException or IOException or InvalidDataException or DBusException or TimeoutException
+                || ex is OperationCanceledException && !cancellation.IsCancellationRequested)
             {
-                socket.Dispose(); last = ex;
+                if (connection is not null) await connection.DisposeAsync().ConfigureAwait(false);
+                else socket.Dispose();
+                last = ex;
+            }
+            catch
+            {
+                if (connection is not null) await connection.DisposeAsync().ConfigureAwait(false);
+                else socket.Dispose();
+                throw;
             }
         }
         throw new IOException("No session bus could be reached at " + address + ".", last);
@@ -153,6 +172,7 @@ public sealed class DBusConnection : IAsyncDisposable
         catch (Exception ex) when (ex is IOException or EndOfStreamException or OperationCanceledException or ObjectDisposedException or SocketException or InvalidDataException) { }
         finally
         {
+            _ended = true;
             foreach (var waiter in _pending.Values) waiter.TrySetException(new IOException("The bus connection closed."));
             _pending.Clear();
         }
@@ -183,9 +203,14 @@ public sealed class DBusConnection : IAsyncDisposable
         call.Serial = (uint)Interlocked.Increment(ref _serial);
         var waiter = new TaskCompletionSource<DBusMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[call.Serial] = waiter;
-        using var registration = cancellation.Register(() => { if (_pending.TryRemove(call.Serial, out var w)) w.TrySetCanceled(); });
-        await SendAsync(call, cancellation).ConfigureAwait(false);
-        return await waiter.Task.ConfigureAwait(false);
+        try
+        {
+            // Registered after the reading task failed the waiting calls: nothing would answer this one (life-L8).
+            if (_ended) throw new IOException("The bus connection closed.");
+            await SendAsync(call, cancellation).ConfigureAwait(false);
+            return await waiter.Task.WaitAsync(CallTimeout, cancellation).ConfigureAwait(false);
+        }
+        finally { _pending.TryRemove(call.Serial, out _); }
     }
 
     public Task<DBusMessage> CallBusAsync(string member, string signature = "", params object[] body)
