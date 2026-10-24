@@ -479,9 +479,9 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
         // A file saved before app rules carried plain exceptions: each becomes a rule that keeps the panel's own style in
         // all three contexts, which is what an exception did.
-        if ((FullscreenExceptions ?? []).Count > 0)
+        if (FullscreenExceptions is { Count: > 0 } legacy)
         {
-            var carried = FullscreenExceptions.Where(entry => entry is not null)
+            var carried = legacy.Where(entry => entry is not null)
                 .Select(entry => new FullscreenRule(ScreenPolicy.NormalizeName(entry.Name), ScreenPolicy.NormalizePath(entry.Path))
                     { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal });
             FullscreenRules = carried.Concat(FullscreenRules ?? []).ToList();
