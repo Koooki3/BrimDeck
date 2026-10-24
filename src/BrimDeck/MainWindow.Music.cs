@@ -670,14 +670,7 @@ public partial class MainWindow
     {
         block.SetValue(SuppressMusicToolTipsProperty, false);
         block.ToolTip = text.Length > 0 ? text : null;
-        block.ToolTipOpening += (_, e) =>
-        {
-            double shown = block.ActualWidth;
-            block.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            bool cut = block.DesiredSize.Width > shown + .5;
-            block.InvalidateMeasure();
-            if (!cut) e.Handled = true;
-        };
+        block.ToolTipOpening += (_, e) => { if (!UI.IsCut(block)) e.Handled = true; };
     }
     private async Task CyclePlaybackMode(MediaTrack track)
     {
