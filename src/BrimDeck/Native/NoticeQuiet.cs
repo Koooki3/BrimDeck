@@ -80,8 +80,9 @@ internal sealed class NoticeQuiet : IDisposable
         if (_sessionLocked && SessionLocked() == false) _sessionLocked = false;
     }
 
-    // Whether this session's lock screen is up (WTSSessionInfoEx's session flags), or null when Windows does not say.
-    private static bool? SessionLocked()
+    // Whether this session's lock screen is up (WTSSessionInfoEx's session flags), or null when Windows does not say. Also for
+    // AmbientGlow, which must not stay paused after a remote connection (life-L14).
+    internal static bool? SessionLocked()
     {
         const int SessionInfoEx = 25, Level1 = 1, LockedFlag = 0, UnlockedFlag = 1;
         const uint CurrentSession = uint.MaxValue;

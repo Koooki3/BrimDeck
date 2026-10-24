@@ -19,9 +19,15 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
     // Enough for the rows the notices page lists at once and the apps in the settings; an icon let go of is read again when
     // asked for, and only its own plate is filled then (MainWindow.NoticeIconLoaded), so nothing loops.
     private const int Capacity = 160;
-    private readonly Dictionary<string, (BitmapSource? Image, Color? Accent)> _cache = new(StringComparer.Ordinal);
+    // Icons kept in icons/ at most; the least recently used go first (sec-L6: tray programs make up a new id each run).
+    private const int StoredCapacity = 200;
+    // Most recently used first; each entry knows its node, so using an icon costs no search (perf-11).
+    private readonly Dictionary<string, (BitmapSource? Image, Color? Accent, LinkedListNode<string> Node)> _cache = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _order = new();
     private readonly HashSet<string> _loading = new(StringComparer.Ordinal);
+    // Parsed colors: the user's chosen ones and each application's fallback, asked for on every row the notices page draws.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Color> s_colors = new(StringComparer.Ordinal);
+    private static readonly Color[] s_palette = AppPresets.Palette.Take(9).Select(hex => (Color)ColorConverter.ConvertFromString(hex)).ToArray();
     public string Folder { get; set; } = "";
     public event Action<string>? Loaded;
 
@@ -30,12 +36,14 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
     {
         accent = null;
         if (string.IsNullOrEmpty(iconRef)) return null;
-        if (_cache.TryGetValue(iconRef, out var entry)) { Touch(iconRef); accent = entry.Accent; return entry.Image; }
+        if (_cache.TryGetValue(iconRef, out var entry))
+        {
+            _order.Remove(entry.Node); _order.AddFirst(entry.Node);
+            accent = entry.Accent; return entry.Image;
+        }
         if (_loading.Add(iconRef)) _ = LoadAsync(iconRef);
         return null;
     }
-
-    private void Touch(string key) { _order.Remove(key); _order.AddFirst(key); }
 
     private async Task LoadAsync(string iconRef)
     {
@@ -44,8 +52,12 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         try
         {
             var bytes = await Task.Run(() => ReadAsync(iconRef));
-            if (bytes is not null) image = await Task.Run(() => Decode(bytes));
-            if (image is not null) accent = AccentOf(image);
+            // Decoding and the costly part of finding the color (scaling to the sample) stay off the UI thread (perf-11);
+            // the color is finished there, since it follows the theme.
+            BitmapSource? sample = null;
+            if (bytes is not null)
+                (image, sample) = await Task.Run<(BitmapSource?, BitmapSource?)>(() => Decode(bytes) is { } decoded ? (decoded, Sample(decoded)) : (null, null));
+            if (sample is not null) accent = AccentOf(sample);
         }
         // A damaged or unsupported picture (WIC reports those as format, COM or overflow errors) leaves the initial instead.
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or InvalidOperationException
@@ -59,7 +71,8 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
             // A WSL icon that could not be read while its distribution was stopped is tried again later; one its running
             // distribution does not have is remembered as missing, like any other.
             if (image is null && WslDistribution(iconRef) is { } distro && !distributionRunning(distro)) return;
-            _cache[iconRef] = (image, accent); _order.AddFirst(iconRef);
+            if (_cache.Remove(iconRef, out var earlier)) _order.Remove(earlier.Node);
+            _cache[iconRef] = (image, accent, _order.AddFirst(iconRef));
             while (_order.Count > Capacity) { _cache.Remove(_order.Last!.Value); _order.RemoveLast(); }
             Loaded?.Invoke(iconRef);
         });
@@ -163,25 +176,64 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
+    // Written to a new file of a random name, then moved into place (sec-M1): a file or link someone placed at the predictable
+    // name is replaced, never written through, and the icons folder must not be a link either. The time of last writing marks
+    // when an icon was last used, for TrimStored.
     private static void TryWrite(string path, byte[] bytes)
     {
+        string? temporary = null;
         try
         {
-            if (File.Exists(path) && new FileInfo(path).Length == bytes.Length) return;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllBytes(path, bytes);
+            var folder = Path.GetDirectoryName(path)!;
+            Directory.CreateDirectory(folder);
+            if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0) return;
+            var existing = new FileInfo(path);
+            if (existing.Exists && (existing.Attributes & FileAttributes.ReparsePoint) == 0 && existing.Length == bytes.Length)
+            {
+                existing.LastWriteTimeUtc = DateTime.UtcNow;
+                return;
+            }
+            temporary = Path.Combine(folder, ".icon." + Guid.NewGuid().ToString("N") + ".tmp");
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) stream.Write(bytes);
+            File.Move(temporary, path, overwrite: true);
+            temporary = null;
+            if (!existing.Exists) TrimStored(folder);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        finally
+        {
+            if (temporary is not null) try { File.Delete(temporary); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    // Keeps the StoredCapacity most recently used icons; also removes temporary files a write left behind.
+    private static void TrimStored(string folder)
+    {
+        var stored = new List<FileInfo>();
+        foreach (var file in new DirectoryInfo(folder).EnumerateFiles())
+        {
+            if (file.Name.StartsWith(".icon.", StringComparison.Ordinal) && file.Extension == ".tmp" && file.LastWriteTimeUtc < DateTime.UtcNow.AddMinutes(-1)) file.Delete();
+            else if (file.Extension == ".png" && Path.GetFileNameWithoutExtension(file.Name) is { Length: 24 } name && name.All(Uri.IsHexDigit)) stored.Add(file);
+        }
+        foreach (var file in stored.OrderByDescending(f => f.LastWriteTimeUtc).Skip(StoredCapacity)) file.Delete();
     }
 
     // An icon larger than this on either side is not decoded: a small file can declare a huge picture.
     private const int MaxPixels = 1024;
 
+    // An icon file listing more pictures than this is not read: a small file can list a hundred thousand (sec-L6).
+    internal const int MaxFrames = 64;
+
+    // Whether an icon file's header lists at most MaxFrames pictures; other formats hold one.
+    internal static bool FewFrames(ReadOnlySpan<byte> bytes)
+        => bytes is not [0x00, 0x00, 0x01, 0x00, ..] || bytes.Length >= 6 && System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes[4..]) <= MaxFrames;
+
     private static BitmapSource? Decode(byte[] bytes)
     {
+        if (!FewFrames(bytes)) return null;
         using var stream = new MemoryStream(bytes);
         // Nothing is decoded yet: the frames' sizes come from their headers, and only the chosen frame is decoded, below.
-        if (DecoderFor(stream, bytes) is not { } decoder) return null;
+        if (DecoderFor(stream, bytes) is not { } decoder || decoder.Frames.Count > MaxFrames) return null;
         // The frame closest to 128 pixels: icon files hold several sizes, and the transparent margin trimmed below leaves less.
         var frame = decoder.Frames.OrderBy(f => Math.Abs(f.PixelWidth - 128) + (f.PixelWidth < 32 ? 1000 : 0)).FirstOrDefault();
         if (frame is null || frame.PixelWidth == 0 || frame.PixelHeight == 0 || frame.PixelWidth > MaxPixels || frame.PixelHeight > MaxPixels) return null;
@@ -240,23 +292,35 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         };
     }
 
+    // The icon scaled to the 16 by 16 pixels MusicVisuals.Accent averages, frozen, so the color is found from it at once.
+    private static BitmapSource Sample(BitmapSource image)
+    {
+        var scaled = new TransformedBitmap(image, new ScaleTransform(16d / image.PixelWidth, 16d / image.PixelHeight));
+        var sample = new WriteableBitmap(new FormatConvertedBitmap(scaled, PixelFormats.Bgra32, null, 0));
+        sample.Freeze();
+        return sample;
+    }
+
     // The icon's main color, made readable; null for icons without a clear color (white, grey or transparent ones).
     private static Color? AccentOf(BitmapSource image)
         => MusicVisuals.Accent(image) is SolidColorBrush { Color: var color } && !(color.R == color.G && color.G == color.B) ? color : null;
 
     // A color for an application without one: the same application always gets the same color from the shared palette.
     public static Color Fallback(string appKey)
-    {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(appKey));
-        var palette = AppPresets.Palette.Take(9).ToArray();
-        return (Color)ColorConverter.ConvertFromString(palette[hash[0] % palette.Length]);
-    }
+        => Remembered("app\n" + appKey, key => s_palette[SHA256.HashData(Encoding.UTF8.GetBytes(key[4..]))[0] % s_palette.Length]);
 
     // The accent of a notice: the user's color for the application, the icon's, or the fallback.
     public Color AccentFor(Notice notice, NoticeAppRule? rule)
     {
-        if (rule?.AccentColor is { Length: > 0 } chosen) return (Color)ColorConverter.ConvertFromString(chosen);
+        if (rule?.AccentColor is { Length: > 0 } chosen) return Remembered(chosen, text => (Color)ColorConverter.ConvertFromString(text));
         Get(notice.IconRef, out var accent);
         return accent ?? Fallback(notice.AppKey);
+    }
+
+    private static Color Remembered(string key, Func<string, Color> make)
+    {
+        if (s_colors.TryGetValue(key, out var known)) return known;
+        if (s_colors.Count >= 512) s_colors.Clear();
+        return s_colors[key] = make(key);
     }
 }
