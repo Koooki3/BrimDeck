@@ -36,6 +36,13 @@ public static class NotifyCli
             {
                 var reply = await sender.Send(new NoticeMessage { Type = NoticeTypes.Status });
                 if (reply is null) { Console.WriteLine(sender.NotReceiving); return Unreachable; }
+                // Written but not answered ("no-reply": an agent ending, or an old one still holding the socket), or refused:
+                // not confirmed, so not reported as receiving (review-batch1 item 6).
+                if (reply.Result != NoticeResults.Accepted)
+                {
+                    Console.WriteLine("BrimDeck did not confirm that it is receiving notices" + (reply.Detail is { Length: > 0 } why ? " (" + why + ")." : "."));
+                    return Unreachable;
+                }
                 Console.WriteLine("BrimDeck is receiving notices." + (reply.Detail is { Length: > 0 } detail ? " " + detail : ""));
                 return 0;
             }
