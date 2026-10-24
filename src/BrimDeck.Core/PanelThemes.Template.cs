@@ -55,8 +55,8 @@ public static partial class PanelThemes
         // Glass is written out in place of the template's commented example.
         if (effects.Glass is { } glass)
             text = Regex.Replace(text, @"// , ""glass"": \{[^}]*\}", $"\"glass\": {{ \"tint\": \"{glass.Tint}\", \"edge\": {glass.Edge.ToString("0.###", CultureInfo.InvariantCulture)}, \"highlight\": \"{glass.Highlight}\" }}")
-                .Replace("\"pixel\": 0 ", "\"pixel\": 0,", StringComparison.Ordinal);
-        foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines), ("pixel", effects.Pixel) })
+                .Replace("\"texture\": 0 ", "\"texture\": 0,", StringComparison.Ordinal);
+        foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines), ("pixel", effects.Pixel), ("texture", effects.Texture) })
             text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {value.ToString("0.###", CultureInfo.InvariantCulture)}");
         return FillMotion(text, start.Motion);
     }

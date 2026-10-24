@@ -21,7 +21,7 @@ public sealed record PanelThemeAdjustment(string Key, string Before, string Afte
 }
 
 public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGradient, IReadOnlyList<ThemeColor> RimGradient, double RimWidth,
-    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, PanelGlass? Glass = null, double Pixel = 0);
+    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, PanelGlass? Glass = null, double Pixel = 0, double Texture = 0);
 
 // The glass a theme's surface is made of (PanelThemeGlass, fitted): the tint over the backdrop, the strength of the light along
 // its inner edge and the color of that light.
@@ -44,7 +44,7 @@ public sealed class PanelPalette
         IReadOnlyList<PanelThemeAdjustment> adjustments, PanelThemeClock? clock, IReadOnlyList<ThemeColor>? swatches)
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
-        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. effects.Glass?.Extremes ?? []];
+        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. effects.Glass?.Extremes ?? [], .. PanelThemes.TextureStops(effects, colors, Surface)];
         IsDark = SurfaceStops.Average(stop => stop.Luminance) < .18;
     }
 
@@ -62,7 +62,7 @@ public sealed class PanelPalette
     // How the theme moves: ambient light and the answers to the pointer, held to MotionSafety's limits.
     public ThemeMotion Motion { get; init; } = ThemeMotion.Default;
     // A glass surface shows the desktop through it, so like a gradient it has no single color to fade text into.
-    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Glass is not null;
+    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Glass is not null || Effects.Texture > 0;
     public bool IsGlass => Effects.Glass is not null;
     // Whether this is a theme's night look (PanelThemes.Resolve).
     public bool IsNight { get; init; }

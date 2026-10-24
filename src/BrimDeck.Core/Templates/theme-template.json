@@ -95,9 +95,10 @@
     "shadowDepth": 4,               // 0 to 12; 0 spreads the shadow evenly around the surface
     "shadowOpacity": 0.28,          // 0 to 1
     "scanlines": 0,                 // 0 to 0.12: horizontal lines in the primary text color at this opacity
-    "pixel": 0                      // 0, or 1 to 4: pixel art. Corners become steps of this many DIP, text is drawn unsmoothed,
+    "pixel": 0,                     // 0, or 1 to 4: pixel art. Corners become steps of this many DIP, text is drawn unsmoothed,
                                     // and with a rimGradient the rim is a bevel: its first color lights the edges facing up and
                                     // left, its last shades the others
+    "texture": 0                    // 0 to 0.12, with pixel art: squares a little lighter or darker than the surface, a block's grain
     // Glass: remove the "//" to make the surface a tint over the desktop instead of a solid color. Text is held to its minimums
     // over the tint on both a black and a white desktop, so a light tint needs to be fairly dense (about 75 %). "surface" above
     // is drawn instead where Windows' transparency effects are off. edge: 0 to 1, the light along the inner edge.

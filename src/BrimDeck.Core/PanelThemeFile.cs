@@ -77,6 +77,9 @@ public sealed class PanelThemeEffects
     public PanelThemeGlass? Glass { get; set; }
     // Pixel art: corners become steps of this many DIP (1 to 4), the rim a bevel and the text unsmoothed. 0 turns it off.
     public double? Pixel { get; set; }
+    // A pixel theme's block texture: squares of the pixel size a little lighter or darker than the surface, at most this opacity
+    // (0 to 0.12), as a stone or dirt block is mottled.
+    public double? Texture { get; set; }
 }
 
 // The glass material (see PanelThemes.Glass). Tint is the color laid over the blurred backdrop; text is held to its minimums

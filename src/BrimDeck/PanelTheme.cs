@@ -98,7 +98,7 @@ internal static class PanelTheme
         var e = palette.Effects;
         var clock = palette.Clock;
         return string.Join("|", theme.Id, palette.IsNight, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
-            string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}"),
+            string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}/{e.Glass}"),
             $"{clock?.Style}/{clock?.Color}/{clock?.Custom}/{string.Join(",", clock?.Gradient ?? [])}",
             string.Join(",", ClockColors.Swatches.Select(palette.ClockPreset)), string.Join(";", palette.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops))),
             string.Join(",", palette.Swatches), palette.Motion.ToString());
@@ -165,7 +165,7 @@ internal static class PanelTheme
     public static void Dress(IslandBorder island, PanelPalette? palette = null, double dpiScale = 1)
     {
         palette ??= Current;
-        island.Gradient = SurfaceGradient(palette); island.Pattern = Scanlines(palette, dpiScale);
+        island.Gradient = SurfaceGradient(palette); island.Pattern = Texture(palette, dpiScale) ?? Scanlines(palette, dpiScale);
         island.RimBrush = RimBrush(palette); island.RimWidth = palette.Effects.RimWidth;
         island.Pixel = palette.Effects.Pixel; island.BevelBrush = BevelBrush(palette);
         island.EdgeBrush = GlassShownFor(palette) ? EdgeBrush(palette) : null;
@@ -238,6 +238,35 @@ internal static class PanelTheme
         brush.Freeze();
         return brush;
     }
+    // A pixel theme's grain: an 8 x 8 tile of squares the pixel size (in whole device pixels), each a little lighter or darker
+    // than the surface or left plain, in a fixed scatter so the tile does not read as a grid. Cached like the scan lines.
+    public static Brush? Texture(PanelPalette? palette = null, double dpiScale = 1)
+    {
+        palette ??= Current;
+        var effects = palette.Effects;
+        if (effects.Texture <= 0 || effects.Pixel <= 0) return null;
+        if (!(dpiScale > 0) || !double.IsFinite(dpiScale)) dpiScale = 1;
+        double cell = Math.Max(1, Math.Round(effects.Pixel * dpiScale)) / dpiScale, size = 8 * cell;
+        var light = ToColor(palette["textPrimary"]);
+        var tile = new DrawingGroup();
+        tile.Children.Add(new GeometryDrawing(Brushes.Transparent, null, new RectangleGeometry(new Rect(0, 0, size, size))));
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++)
+            {
+                // A fixed hash per square: a third plain, the rest lighter or darker in three strengths.
+                uint h = (uint)(x * 73856093 ^ y * 19349663) * 2654435761u;
+                int kind = (int)(h >> 29);
+                if (kind < 3) continue;
+                double strength = effects.Texture * ((h >> 20 & 3) + 1) / 4;
+                var color = kind < 6 ? Color.FromArgb((byte)Math.Round(255 * strength), light.R, light.G, light.B) : Color.FromArgb((byte)Math.Round(255 * strength), 0, 0, 0);
+                tile.Children.Add(new GeometryDrawing(new SolidColorBrush(color), null, new RectangleGeometry(new Rect(x * cell, y * cell, cell, cell))));
+            }
+        var brush = new DrawingBrush(tile) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, size, size), ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.None };
+        RenderOptions.SetCachingHint(brush, CachingHint.Cache);
+        brush.Freeze();
+        return brush;
+    }
+
     public static Brush RimBrush(PanelPalette? palette = null)
     {
         palette ??= Current;

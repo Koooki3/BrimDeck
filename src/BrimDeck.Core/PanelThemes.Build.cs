@@ -49,7 +49,7 @@ public static partial class PanelThemes
         colors["bubble"] = colors["bubble"].Over(surface);
         var values = EffectValues(effects);
         // Glass is read over the darkest and the lightest backdrop it can stand on; its surface color is what shows without it.
-        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? []];
+        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? [], .. TextureStops(values, colors, surface)];
 
         var adjustments = new List<PanelThemeAdjustment>();
         var popup = colors["popup"].Over(surface);
@@ -88,6 +88,15 @@ public static partial class PanelThemes
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
             .OfType<ThemeColor>().Take(12).ToList();
         return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches) { Motion = MotionValues(chain), IsNight = night };
+    }
+
+    // A texture's lightest and darkest squares (PanelTheme.Texture), which text must read on as on the surface.
+    internal static IEnumerable<ThemeColor> TextureStops(PanelThemeEffectValues values, Dictionary<string, ThemeColor> colors, ThemeColor surface)
+    {
+        if (values.Texture <= 0) yield break;
+        var light = colors["textPrimary"]; var alpha = (byte)Math.Round(255 * values.Texture);
+        yield return new ThemeColor(alpha, light.R, light.G, light.B).Over(surface);
+        yield return new ThemeColor(alpha, 0, 0, 0).Over(surface);
     }
 
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.
@@ -130,6 +139,7 @@ public static partial class PanelThemes
         merged.ShadowOpacity = layer.ShadowOpacity ?? merged.ShadowOpacity;
         merged.Scanlines = layer.Scanlines ?? merged.Scanlines;
         merged.Pixel = layer.Pixel ?? merged.Pixel;
+        merged.Texture = layer.Texture ?? merged.Texture;
         if (layer.Glass is { } glass)
         {
             merged.Glass ??= new PanelThemeGlass();
@@ -149,9 +159,11 @@ public static partial class PanelThemes
             ? new PanelGlass(tint, Fit(glassFile.Edge, 0, 1, .5), glassFile.Highlight is { } light && ThemeColor.TryParse(light, out var highlight) ? highlight : ThemeColor.White)
             : null;
         double pixel = Math.Round(Fit(effects.Pixel, 0, 4, 0));
+        // The texture is part of pixel art: without blocks there is nothing to mottle.
+        double texture = pixel > 0 ? Fit(effects.Texture, 0, .12, 0) : 0;
         return new(surfaceGradient.Count >= 2 ? surfaceGradient : [], rimGradient.Count >= 2 ? rimGradient : [],
             Fit(effects.RimWidth, 0, 3, 1), Fit(effects.ShadowBlur, 0, 40, 14), Fit(effects.ShadowDepth, 0, 12, 4), Fit(effects.ShadowOpacity, 0, 1, .28), Fit(effects.Scanlines, 0, .12, 0),
-            glass, pixel);
+            glass, pixel, texture);
     }
     private static List<ThemeColor> Stops(List<string>? values) => values is null ? [] : values.Select(value => ThemeColor.TryParse(value, out var c) ? c : (ThemeColor?)null).OfType<ThemeColor>().Take(8).ToList();
     private static double Fit(double? value, double min, double max, double fallback) => value is { } v && double.IsFinite(v) ? Math.Clamp(v, min, max) : fallback;

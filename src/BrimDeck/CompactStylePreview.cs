@@ -88,7 +88,8 @@ internal static class CompactStylePreview
         string Hex(string key) => palette[key].ToString();
         IslandBorder Shape() => new()
         {
-            Background = UI.Brush(Hex("surface")), MaterialOpacity = 1, Width = width, Height = height, CornerRadius = new CornerRadius(height / 2),
+            // Glass shows its tint over the card, as it would over the desktop.
+            Background = UI.Brush(palette.Effects.Glass?.Tint.ToString() ?? Hex("surface")), MaterialOpacity = 1, Width = width, Height = height, CornerRadius = new CornerRadius(height / 2),
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
         };
         var shadow = Shadow(Shape(), palette);

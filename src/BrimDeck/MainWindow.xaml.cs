@@ -366,7 +366,7 @@ public partial class MainWindow : Window
         _themeGeneration = PanelTheme.Generation; _themeDpi = dpi; _glassShown = PanelTheme.GlassShown;
         // The resize hints take the theme's colors when they are drawn.
         _grips?.InvalidateVisual();
-        if (sameTheme) { Island.Pattern = PanelTheme.Scanlines(dpiScale: dpi); return; }
+        if (sameTheme) { Island.Pattern = PanelTheme.Texture(dpiScale: dpi) ?? PanelTheme.Scanlines(dpiScale: dpi); return; }
         Foreground = UI.Brush(UI.Primary);
         PanelTheme.Dress(Island, dpiScale: dpi);
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
