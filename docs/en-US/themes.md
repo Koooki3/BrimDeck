@@ -86,6 +86,38 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `shadowBlur` `shadowDepth` `shadowOpacity` | Blur, offset and opacity of the shadow | 0–40, 0–12, 0–1 |
 | `scanlines` | Horizontal scan lines in the primary text color at this opacity | 0–0.12 |
 
+### Motion (motion)
+
+How the theme moves on BrimDeck's own windows: slow ambient light on the island, and how the pointer and the keyboard are answered. Like the effects, the section is merged key by key along the base chain, so a theme only writes what it changes. Every value is held to the range below (a value outside it is moved to its nearest end), so no theme file can make anything flash: brightness never changes more than three times a second. Nothing moves while animations are off in BrimDeck's settings or in Windows, or in high contrast; the ambient light also stops while the island is hidden or powering off, the session is locked, or battery saver is on. The settings window keeps its own hover and focus styles.
+
+`ambient`: periods are seconds, and 0 turns an effect off.
+
+| Key | Effect | Range |
+| --- | --- | --- |
+| `breathe` `breatheDepth` | The rim dims a little and comes back once per period; how far it dims | 3–30, 0–0.35 |
+| `drift` | The rim gradient's colors travel one width in this time | 4–60 |
+| `sweep` `sweepOpacity` | A faint scan line passes down the surface once per period (taking 2.4 s); its strength | 6–120, 0–0.12 |
+| `flicker` `flickerDepth` | The neon sags softly once per period (taking 1.2 s); how deep | 20–300, 0–0.15 |
+
+The answers to the pointer are drawn on the control's own visible shape, never around its layout box and never following the pointer. A press answers as the button goes down, holds while it is held and completes on release (or backs out when released elsewhere); Space and Enter on a focused control press it too.
+
+| Key | Effect | Values |
+| --- | --- | --- |
+| `hover` | The mark on a hovered control: `none`, `reveal` (faint fill, edge lit from the top), `lift` (soft shadow outside, light top edge), `underline` (subtle fill, 2 px bar along the bottom), `caret` (line highlight, caret bar at the left), `brackets` (HUD corner brackets), `sheen` (two-color tint and edge), `glow` (warm inner glow and a glint) | earlier names: `spot` = reveal, `edge` = underline, `neon` = brackets |
+| `hoverStrength` | How strongly the mark shows | 0–0.3 |
+| `press` | The press: `none`, `shade` (the shape shades, its edge firms), `sink` (the shadow collapses, pushed in), `indicator` (the bottom bar takes the highlight), `select` (a selection sweeps from the caret), `lock` (brackets clamp on with a chromatic ghost and a glitch slice; a scan line on release), `sparkle` (the tint deepens; stars on release), `ember` (a warm glow swells; fireflies on release) | earlier names: `pulse` and `ripple` = shade, `ring` = lock |
+| `pressStrength` | How strongly the press shows | 0–0.35 |
+| `particles` | What a completed press leaves for a moment, from the control's edges: `none`, `dust`, `pixel`, `spark`, `star`, `firefly`, `neon` | |
+| `trail` | How strongly those particles show; 0 shows none | 0–0.6 |
+| `focus` | A short accent where keyboard focus lands: `none`, `ring`, `glow`, `brackets`, `caret` | earlier name: `neon` = brackets |
+| `pace` | Scales the animation length chosen in settings | 0.6–1.6 |
+| `steps` | 0 moves smoothly; 2 to 8 moves in that many hard steps, for a mechanical feel. Glitch slices and scan lines are rationed to two a second however fast the clicks come | 0, 2–8 |
+| `color` | The main mark (hover and focus) | a color key, `#RRGGBB`, or `system` (the Windows accent) |
+| `secondary` | Its second tone: a gradient's end, a shadow, a ghost or a neutral bar | as `color` |
+| `highlight` | The color of the moment of a press: an indicator, a selection, a scan line, sparkles, fireflies | as `color` |
+
+Motion colors are kept readable on the surface like any other color chosen outside the theme. The "system" theme uses Windows' accent color and the quiet Fluent answers (`reveal` and `shade`, or `lift` and `sink` on a light base), with no ambient light, particles or steps; its base theme's strengths and pace stay. `Templates/theme-template.json` lists every key with its default.
+
 ## Readability
 
 A theme decides how the panel looks, never whether it can be read:
