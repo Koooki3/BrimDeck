@@ -177,14 +177,17 @@ public sealed partial class SettingsWindow
         }
         var from = Pick(day, Loc.T("白天开始", "Day begins"));
         var to = Pick(night, Loc.T("夜晚开始", "Night begins"));
-        void Save()
+        // A day of no length would never end, so it is no choice: the box just changed goes back to what it showed, and the row
+        // never shows unsaved hours.
+        int shownFrom = from.SelectedIndex, shownTo = to.SelectedIndex;
+        void Save(ComboBox changed)
         {
             var (d, n) = (times[Math.Max(0, from.SelectedIndex)], times[Math.Max(0, to.SelectedIndex)]);
-            // A day of no length would never end; the choice waits for the other time to move.
-            if (d == n) return;
+            if (d == n) { changed.SelectedIndex = ReferenceEquals(changed, from) ? shownFrom : shownTo; return; }
+            shownFrom = from.SelectedIndex; shownTo = to.SelectedIndex;
             Change(s => s.ThemeDaylight = (d, n) == PanelThemes.DaylightHours(file) ? "" : PanelThemes.FormatDaylight(d, n));
         }
-        from.SelectionChanged += (_, _) => Save(); to.SelectionChanged += (_, _) => Save();
+        from.SelectionChanged += (_, _) => Save(from); to.SelectionChanged += (_, _) => Save(to);
         var dash = TextLine("–", 12, TextSecondary);
         dash.Margin = new Thickness(8, 0, 8, 0); dash.VerticalAlignment = VerticalAlignment.Center;
         var pair = new StackPanel { Orientation = Orientation.Horizontal };
