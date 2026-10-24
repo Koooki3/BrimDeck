@@ -20,8 +20,9 @@ public enum HoverFx { None, Reveal, Lift, Underline, Caret, Brackets, Sheen, Glo
 // caret; lock: the brackets clamp onto the shape with a chromatic ghost and a short glitch slice, and a scan line passes on
 // release; sparkle: the tint deepens and a few stars twinkle on the corners on release; ember: a warm glow swells from the
 // middle and fireflies rise from the top on release; bevel: the block's bevel turns over, shaded on top and lit below, as a
-// pixel-art button pressed in.
-public enum PressFx { None, Shade, Sink, Indicator, Select, Lock, Sparkle, Ember, Bevel }
+// pixel-art button pressed in; jelly: the light on the shape squashes wider and lower as a drop of glass pressed, shaded only
+// along its bottom so the top keeps its highlight, and springs back past its shape once on release (liquid glass).
+public enum PressFx { None, Shade, Sink, Indicator, Select, Lock, Sparkle, Ember, Bevel, Jelly }
 // A short accent where keyboard focus lands, over the focus outline the control keeps: a ring, a soft glow, brackets or a caret.
 public enum FocusFx { None, Ring, Glow, Brackets, Caret }
 // What a completed press leaves for a moment, from the control's own edges (never where the pointer is): dust (soft motes),
@@ -365,7 +366,7 @@ public sealed class PanelThemeMotion
     // none, reveal, lift, underline, caret, brackets, sheen, glow, lens, wave, slot (HoverFx); earlier names: spot, edge, neon
     public string? Hover { get; set; }
     public double? HoverStrength { get; set; }
-    // none, shade, sink, indicator, select, lock, sparkle, ember, bevel (PressFx); earlier names: pulse, ripple, ring
+    // none, shade, sink, indicator, select, lock, sparkle, ember, bevel, jelly (PressFx); earlier names: pulse, ripple, ring
     public string? Press { get; set; }
     public double? PressStrength { get; set; }
     // 0 to 0.6: how strongly the particles a completed press leaves show (0: none)

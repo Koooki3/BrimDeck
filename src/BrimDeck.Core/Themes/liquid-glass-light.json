@@ -1,7 +1,7 @@
 {
   // Liquid glass, light: the island is a pane of frosted glass over the desktop rather than a painted surface.
   //   Material: a milky white tint over the desktop, dense enough that dark text keeps 7:1 even where the desktop behind is
-  //   black. It does not blur what lies behind (see docs/zh-CN/themes.md, "玻璃"). With transparency effects off or in high
+  //   black. What lies behind is blurred where Windows can (GlassBackdrop) and shows faintly where it cannot. With transparency effects off or in high
   //   contrast the surface is the pale frosted color below.
   //   Light: a specular rim, bright at the top left and the bottom right, and light gathered along the inner edge as a thick
   //   lens gathers it. The glint travels slowly around the rim; a hovered control catches light like a glass bead.
@@ -9,13 +9,13 @@
   "id": "liquid-glass-light",
   "name": "液态玻璃（浅色）",
   "nameEn": "Liquid Glass (light)",
-  "description": "乳白色的清透玻璃：岛下方的桌面淡淡透出，镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的磨砂底色。",
-  "descriptionEn": "Milky clear glass through which the desktop shows faintly, with a specular glint gliding along its rim; opaque frost when Windows turns transparency off.",
+  "description": "乳白色的玻璃：模糊岛下方的桌面（系统不支持时为清透玻璃），镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的磨砂底色。",
+  "descriptionEn": "Milky glass that blurs the desktop behind the island (clear where Windows cannot), with a specular glint gliding along its rim; opaque frost when Windows turns transparency off.",
   "author": "BrimDeck",
   "license": "Apache-2.0",
   "base": "light",
   "colors": {
-    "surface": "#E9EDF3",
+    "surface": "#F1F4F8",
     "textPrimary": "#101217",
     "textSecondary": "#AD000000",
     "textTertiary": "#85000000",
@@ -76,13 +76,14 @@
     "shadowBlur": 22,
     "shadowDepth": 4,
     "shadowOpacity": 0.2,
-    "glass": { "tint": "#C2F7F9FC", "edge": 0.6, "highlight": "#FFFFFF" }
+    "glass": { "tint": "#E0F8FAFD", "edge": 0.6, "highlight": "#FFFFFF" }
   },
   // The glint drifts once around the rim in about half a minute; nothing else moves on its own. A hovered control catches
-  // light at its top like a glass bead, a press sinks it like a pane pushed in, and keyboard focus glows.
+  // light at its top like a glass bead, a press squashes that light like a drop of glass and springs it back, and keyboard
+  // focus glows.
   "motion": {
     "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 28, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
-    "hover": "lens", "hoverStrength": 0.14, "press": "sink", "pressStrength": 0.16, "trail": 0, "particles": "none", "focus": "glow", "pace": 1.1, "steps": 0,
+    "hover": "lens", "hoverStrength": 0.14, "press": "jelly", "pressStrength": 0.16, "trail": 0, "particles": "none", "focus": "glow", "pace": 1.1, "steps": 0,
     "color": "accent", "secondary": "accent", "highlight": "accent"
   }
 }

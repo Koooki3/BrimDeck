@@ -124,6 +124,9 @@ internal sealed class GlassBackdrop : IDisposable
         var owner = new WindowInteropHelper(_owner).Handle;
         // Just below the panel's window: above whatever the panel stands over, never above the panel itself.
         SetWindowPos(handle, owner, key.X, key.Y, key.Width, key.Height, NoActivate | ShowWindow | NoOwnerZOrder);
+        // Shown for the first time, a topmost window goes to the top whatever it was placed after (seen on Windows 11): a
+        // second call, z-order only, puts it under the panel.
+        SetWindowPos(handle, owner, 0, 0, 0, 0, NoActivate | NoMove | NoSize | NoOwnerZOrder);
         // The clip: the island's body as an antialiased rounded rectangle, a device pixel inside its edge, which the island's own
         // edge and rim cover. A shape square at the top (the open panel, the notch) has its rectangle reach above the window, so
         // only the bottom corners round. The notch's shoulders, thinner than its corners, stay clear glass.

@@ -14,7 +14,9 @@ namespace BrimDeck;
 //     magenta ghost, a yellow corner and a glitch slice of the control itself, and a completed press ticks a scan line down it.
 //   sheen / sparkle (Dracula): a purple-to-pink tint and fine gradient edge; a press deepens it, then stars twinkle (particles).
 //   glow / ember (Night Owl): a warm glow inside the shape and a glint at its corner; a press swells it, then fireflies rise.
-//   lens (liquid glass): light gathered at the top of the shape as on a glass bead, and a rim bright at the top.
+//   lens / jelly (liquid glass): light gathered at the top of the shape as on a glass bead, and a rim bright at the top; a press
+//     squashes that light wider and lower (1.05 x 0.93), shades only the bottom edge, and springs back once on release
+//     (1 - e^-5t cos 9t, after xiaofangstudio/liquid-glass-web, MIT).
 //   wave (island holiday): a faint tint and a gentle wave that rolls in along the bottom and settles.
 //   slot / bevel (pixel blocks): a square highlight with a solid inner edge, as an inventory slot; a press turns the block's
 //     bevel over, shaded at the top left and lit at the bottom right, as a pixel-art button pushed in.
@@ -300,6 +302,24 @@ internal sealed partial class FxSurface
             case PressFx.Ember:
                 Fill(dc, _ember, r, radius, ellipse, Math.Min(1, ps * 1.5) * k);
                 break;
+            case PressFx.Jelly:
+            {
+                // Held, the squash follows the press; let go, a damped spring takes it back and once past its shape.
+                double squash = press.Release >= 0 ? Math.Exp(-5 * press.Release) * Math.Cos(9 * press.Release) * Math.Max(k, .6) : k;
+                if (Math.Abs(squash) < .002 && k <= .001) break;
+                double cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2, w = r.Width * (1 + .05 * squash), hgt = r.Height * (1 - .07 * squash);
+                var drop = Grid(new Rect(cx - w / 2, cy - hgt / 2, w, hgt));
+                double presence = Math.Min(1, Math.Abs(squash) + k);
+                Fill(dc, _lens, drop, radius, ellipse, Math.Min(1, ps * 2.2) * presence);
+                Edge(dc, _lensEdge, drop, radius, ellipse, Math.Min(1, ps * 3) * presence);
+                // Pressed down: a shade along the bottom only; the top keeps its light.
+                if (!ellipse && k > .001)
+                {
+                    double inset = Px(Math.Max(radius, 3));
+                    Line(dc, _secondLine, drop.Left + inset, drop.Bottom - _line / 2, drop.Right - inset, drop.Bottom - _line / 2, ps * 1.4 * k);
+                }
+                break;
+            }
             case PressFx.Bevel:
                 if (k > .001)
                 {

@@ -1,15 +1,15 @@
 {
   // Liquid glass, dark: smoked glass over the desktop, the night counterpart of liquid-glass-light.
   //   Material: a graphite tint over the desktop, dense enough that white text keeps 7:1 even where the desktop behind is white.
-  //   It does not blur what lies behind. With transparency effects off or in high contrast the surface is the graphite below.
+  //   What lies behind is blurred where Windows can (GlassBackdrop). With transparency effects off or in high contrast the surface is the graphite below.
   //   Light: a cool specular rim that is brightest at the top left, light gathered along the inner edge, and a glint that
-  //   travels slowly around the rim. Hovered controls catch light like a glass bead, presses shade, keyboard focus glows.
+  //   travels slowly around the rim. Hovered controls catch light like a glass bead, presses squash it like a drop and spring back, keyboard focus glows.
   "formatVersion": 1,
   "id": "liquid-glass-dark",
   "name": "液态玻璃（深色）",
   "nameEn": "Liquid Glass (dark)",
-  "description": "烟熏色的清透玻璃：岛下方的桌面淡淡透出，冷色镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的石墨底色。",
-  "descriptionEn": "Smoked clear glass through which the desktop shows faintly, with a cool glint gliding along its rim; opaque graphite when Windows turns transparency off.",
+  "description": "烟熏色的玻璃：模糊岛下方的桌面（系统不支持时为清透玻璃），冷色镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的石墨底色。",
+  "descriptionEn": "Smoked glass that blurs the desktop behind the island (clear where Windows cannot), with a cool glint gliding along its rim; opaque graphite when Windows turns transparency off.",
   "author": "BrimDeck",
   "license": "Apache-2.0",
   "base": "dark",
@@ -79,7 +79,7 @@
   },
   "motion": {
     "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 26, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
-    "hover": "lens", "hoverStrength": 0.16, "press": "shade", "pressStrength": 0.2, "trail": 0, "particles": "none", "focus": "glow", "pace": 1.1, "steps": 0,
+    "hover": "lens", "hoverStrength": 0.16, "press": "jelly", "pressStrength": 0.2, "trail": 0, "particles": "none", "focus": "glow", "pace": 1.1, "steps": 0,
     "color": "accent", "secondary": "textPrimary", "highlight": "accent"
   }
 }

@@ -20,7 +20,7 @@ internal static class ThemeMotionTests
         check("Glass: only a slow drifting glint, no breathing, sweep or flicker; a lens on hover, no particles",
             new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion is { Hover: HoverFx.Lens, Particles: ParticleFx.None, Steps: 0 } m
                 && m.Ambient is { Drift: >= 20, Breathe: 0, Sweep: 0, Flicker: 0 })
-            && Palette(PanelThemes.GlassLight).Motion.Press == PressFx.Sink && Palette(PanelThemes.GlassDark).Motion.Press == PressFx.Shade);
+            && new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion.Press == PressFx.Jelly));
         var islandDay = Palette(PanelThemes.IslandHoliday).Motion;
         var islandNight = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!, true).Motion;
         check("Island holiday: a swell and waves; sun glints by day, glowing plankton by night",
@@ -43,7 +43,8 @@ internal static class ThemeMotionTests
         check("Dracula sparkles in purple and pink; Night Owl glows warm with fireflies",
             Palette("dracula").Motion is { Hover: HoverFx.Sheen, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Secondary: "liked" }
             && Palette("night-owl").Motion is { Hover: HoverFx.Glow, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 });
-        check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 1
+        // The GitHub pair and the glass pair are one material each in two tones, and share their answers.
+        check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 2
             && Palette("github-dark").Motion.Hover == Palette("github-light").Motion.Hover);
         check("Only the mechanical and pixel themes move in steps", builtIns.All(id => (Palette(id).Motion.Steps > 0) == (id is PanelThemes.Demo or PanelThemes.PixelBlocks)));
         check("Particle styles inherit and unknown ones keep the base's",
