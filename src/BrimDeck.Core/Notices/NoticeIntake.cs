@@ -12,8 +12,9 @@ public static class NoticeIntake
     public static NoticeInput FromPipe(NoticeMessage message, DateTimeOffset? now = null, TimeZoneInfo? zone = null)
     {
         string name = Name(message.AppName, "brim-notify");
-        string? distro = Blank(message.Distro);
-        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, name), name, distro, $"cli:{distro}:" + (message.EventId ?? Guid.NewGuid().ToString("N")), NoticeCapabilities.None, now, zone);
+        // Only a name WSL itself allows is taken as a label (sec-L4).
+        string? distro = Blank(message.Distro) is { } named && IsDistroName(named) ? named : null;
+        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, name), name, distro, CliInstance(distro, name, message), NoticeCapabilities.None, now, zone);
     }
 
     // A message from a distribution's agent. Desktop notifications get the agent's capabilities: actions and dismissal reach
@@ -28,8 +29,13 @@ public static class NoticeIntake
             return Build(message, NoticeOrigin.Wsl, NoticeKeys.Wsl(distro, name), name, distro, instance, capabilities, now, zone);
         }
         string cliName = Name(message.AppName, "brim-notify");
-        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, cliName), cliName, distro, $"cli:{distro}:" + (message.EventId ?? Guid.NewGuid().ToString("N")), NoticeCapabilities.None, now, zone);
+        return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, cliName), cliName, distro, CliInstance(distro, cliName, message), NoticeCapabilities.None, now, zone);
     }
+
+    // A command-line notice's instance at its source: the sender's event id within its own name (core-M1), so the same
+    // --id from another -s is another notice; a blank id is no id, and the notice is its own.
+    private static string CliInstance(string? distro, string name, NoticeMessage message)
+        => $"cli:{distro}:{name}:" + (Blank(message.EventId) ?? Guid.NewGuid().ToString("N"));
 
     private static NoticeInput Build(NoticeMessage message, NoticeOrigin origin, string appKey, string appName, string? distro, string instance, NoticeCapabilities capabilities,
         DateTimeOffset? now, TimeZoneInfo? zone) => new()
@@ -80,6 +86,6 @@ public static class NoticeIntake
     public static bool IsDistroName(string name)
         => name.Length is > 0 and <= 64 && name is not ("." or "..") && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-');
 
-    private static string Name(string? name, string fallback) => string.IsNullOrWhiteSpace(name) ? fallback : name.Trim();
+    private static string Name(string? name, string fallback) => NoticeText.Clean(name ?? "", singleLine: true).Trim() is { Length: > 0 } clean ? clean : fallback;
     private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }

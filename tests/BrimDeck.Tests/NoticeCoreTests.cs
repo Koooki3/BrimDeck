@@ -19,6 +19,7 @@ internal static class NoticeCoreTests
         Intake(check);
         Pages(check);
         SettingsValues(root, check);
+        AuditCoreTests.Run(root, check);
     }
 
     private static NoticeInput Input(string instance, string app = "windows:Chat", string title = "Hi", string body = "Body", string? replace = null,
@@ -32,7 +33,7 @@ internal static class NoticeCoreTests
     {
         var rules = new Dictionary<string, NoticeAppRule>();
         var hub = new NoticeHub(key => rules.GetValueOrDefault(key));
-        int changes = 0, saves = 0; hub.Changed += () => changes++; hub.Persist += () => saves++;
+        int changes = 0, saves = 0; hub.Changed += () => changes++; hub.Persist += _ => saves++;
         var first = hub.Receive(Input("a"), T0);
         check("A new notice is accepted and shown", first.Receipt == NoticeReceipt.Accepted && first.Present && hub.Notices.Count == 1 && hub.UnviewedCount == 1 && changes == 1 && saves == 1);
         hub.Receive(Input("b", eventId: "e1"), T0);
@@ -406,7 +407,7 @@ internal static class NoticeCoreTests
         check("Distribution names are WSL's own characters only", NoticeIntake.IsDistroName("Ubuntu-24.04") && NoticeIntake.IsDistroName("my_distro")
             && !NoticeIntake.IsDistroName("..") && !NoticeIntake.IsDistroName(@"..\server") && !NoticeIntake.IsDistroName("a/b") && !NoticeIntake.IsDistroName("Ubuntu 24")
             && !NoticeIntake.IsDistroName("") && !NoticeIntake.IsDistroName(new string('a', 65)));
-        check("File URLs become paths", NoticeIntake.IconRef("file:///C:/icons/a.png", NoticeOrigin.Cli, null) == "file:C:/icons/a.png" || NoticeIntake.IconRef("file:///C:/icons/a.png", NoticeOrigin.Cli, null) == @"file:C:\icons\a.png");
+        check("File URLs become paths", NoticeIntake.IconRef("file:///C:/icons/a.png", NoticeOrigin.Cli, null) == @"file:C:\icons\a.png");
     }
 
     private static void Pages(Action<string, bool> check)

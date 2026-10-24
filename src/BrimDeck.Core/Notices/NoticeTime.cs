@@ -79,6 +79,11 @@ public static class NoticeClock
         _ => false
     };
 
+    // Alerting as of now: an event BrimDeck is told of only well after it started (entered afterwards) is recorded as an
+    // ordinary notice, not rung as high priority (core-L1). A reminder BrimDeck gives late keeps MissedLimit, as FireDue does.
+    public static bool Alerting(NoticeTiming? timing, DateTimeOffset now) => Alerting(timing)
+        && !(timing is { Kind: NoticeTimeKind.Event, Native: true, Stage: 2, StartsAt: { } start } && now - start > MissedLimit);
+
     // How far a countdown has run, 0 to 1, for its ring.
     public static double? Fraction(NoticeTiming? timing, DateTimeOffset now)
     {
