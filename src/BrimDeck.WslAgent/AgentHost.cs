@@ -23,6 +23,8 @@ internal sealed class AgentHost
     private readonly NotificationMonitor _monitor = new();
     // Released when the monitor holds a call for its reply; FlushMonitorAsync sleeps until then (perf-12).
     private readonly SemaphoreSlim _held = new(0, 1);
+    // Released when a notice with an expire_timeout arrives; ExpireAsync sleeps until then or until the next one is due.
+    private readonly SemaphoreSlim _expiring = new(0, 1);
     private readonly uint _uid = Native.UserId();
     private DBusConnection? _bus, _monitorBus;
     private string _state = AgentStates.NoBus, _detail = "";
@@ -37,9 +39,10 @@ internal sealed class AgentHost
         var socket = host.ServeSocketAsync();
         var bus = host.KeepBusAsync();
         var flush = host.FlushMonitorAsync();
+        var expire = host.ExpireAsync();
         await input;
         host._stop.Cancel();
-        await Task.WhenAll(socket, bus, flush).WaitAsync(TimeSpan.FromSeconds(3)).ContinueWith(_ => { });
+        await Task.WhenAll(socket, bus, flush, expire).WaitAsync(TimeSpan.FromSeconds(3)).ContinueWith(_ => { });
         return 0;
     }
 
@@ -224,6 +227,31 @@ internal sealed class AgentHost
         }
     }
 
+    // Closes the notices whose expire_timeout ran out, for the applications waiting for that (W12). It sleeps until the next
+    // one is due, or a new one arrives, and goes on after any failure, as FlushMonitorAsync does.
+    private async Task ExpireAsync()
+    {
+        while (!_stop.IsCancellationRequested)
+        {
+            try
+            {
+                DateTimeOffset? due;
+                lock (_gate) due = _server.NextExpiry;
+                if (due is null) { await _expiring.WaitAsync(_stop.Token); continue; }
+                // At most about 24 days, the longest a timeout (milliseconds in an int) can be; a new notice wakes it sooner.
+                var wait = TimeSpan.FromMilliseconds(Math.Clamp((due.Value - DateTimeOffset.UtcNow).TotalMilliseconds, 0, int.MaxValue - 1));
+                if (wait > TimeSpan.Zero && await _expiring.WaitAsync(wait, _stop.Token)) continue;
+                // Taken off the list even while the agent is not the service (its bus lost), so the loop never spins on them.
+                IReadOnlyList<DBusMessage> closed;
+                bool server;
+                lock (_gate) { closed = _server.Expire(DateTimeOffset.UtcNow); server = _state == AgentStates.Server; }
+                if (server && _bus is { } bus) foreach (var signal in closed) await SendBusAsync(bus, signal);
+            }
+            catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
+            catch (Exception ex) { Console.Error.WriteLine("expire: " + ex.GetType().Name + ": " + ex.Message); }
+        }
+    }
+
     private async Task HandleBusAsync(DBusMessage message)
     {
         if (message.Type == DBusMessageType.Signal && message.Member == "NameOwnerChanged" && message.Body is [string name, string _, string newOwner]
@@ -240,7 +268,9 @@ internal sealed class AgentHost
         }
         if (message.Type != DBusMessageType.MethodCall) return;
         ServiceOutput output;
-        lock (_gate) output = _state == AgentStates.Server ? _server.Handle(message) : ServiceOutput.None;
+        bool expiring;
+        lock (_gate) { output = _state == AgentStates.Server ? _server.Handle(message) : ServiceOutput.None; expiring = message.Member == "Notify" && _server.NextExpiry is not null; }
+        if (expiring) { try { _expiring.Release(); } catch (SemaphoreFullException) { } }
         // A reply has nowhere to go once the bus closed; the application asks again on the new connection.
         if (_bus is { } bus) foreach (var reply in output.Bus) await SendBusAsync(bus, reply);
         await ForwardAsync(output.ToBrimDeck);
@@ -251,22 +281,30 @@ internal sealed class AgentHost
         foreach (var notice in notices) { notice.Distro = null; await SendAsync(notice); }
     }
 
-    // brim-notify inside the distribution connects here; each frame goes to BrimDeck and its reply comes back. A socket that
-    // fails (its file deleted, say) is set up again after a growing pause; meanwhile brim-notify goes through Windows (life-L9).
+    // brim-notify inside the distribution connects here; each frame goes to BrimDeck and its reply comes back; meanwhile
+    // brim-notify goes through Windows (life-L9). A socket whose file went (the runtime directory cleaned when the user's last
+    // session ended) is set up again within SocketCheck; without a runtime directory yet (logind not done when the agent
+    // started) the agent looks again every SocketCheck (W4); a socket that fails otherwise is tried again after a growing pause.
     private async Task ServeSocketAsync()
     {
         var pause = TimeSpan.FromSeconds(10);
         while (!_stop.IsCancellationRequested)
         {
-            if (AgentPaths.Socket() is not { } path) return;
-            try { await ListenAsync(path); }
-            catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
-            catch (Exception ex) { Console.Error.WriteLine("socket: " + ex.GetType().Name + ": " + ex.Message); }
-            try { await Task.Delay(pause, _stop.Token); } catch (OperationCanceledException) { return; }
-            pause = TimeSpan.FromSeconds(Math.Min(300, pause.TotalSeconds * 2));
+            var wait = WslLink.SocketCheck;
+            if (AgentPaths.Socket() is { } path)
+            {
+                // The file went: set up again at once, which a listening of at least one SocketCheck came before.
+                try { await ListenAsync(path); pause = TimeSpan.FromSeconds(10); continue; }
+                catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return; }
+                catch (Exception ex) { Console.Error.WriteLine("socket: " + ex.GetType().Name + ": " + ex.Message); }
+                wait = pause;
+                pause = TimeSpan.FromSeconds(Math.Min(300, pause.TotalSeconds * 2));
+            }
+            try { await Task.Delay(wait, _stop.Token); } catch (OperationCanceledException) { return; }
         }
     }
 
+    // Listens until the agent stops, or returns once the socket's file is gone.
     private async Task ListenAsync(string path)
     {
         // An agent still listening there (one stopping while BrimDeck already started this one) keeps its socket: deleting it
@@ -279,19 +317,22 @@ internal sealed class AgentHost
         }
         using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         listener.Bind(new UnixDomainSocketEndPoint(path));
+        bool gone = false;
         try
         {
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             listener.Listen(16);
             while (!_stop.IsCancellationRequested)
             {
-                var client = await listener.AcceptAsync(_stop.Token);
+                var client = await WslLink.AcceptWhileThereAsync(token => listener.AcceptAsync(token).AsTask(), () => File.Exists(path), WslLink.SocketCheck, _stop.Token);
+                if (client is null) { gone = true; return; }
                 // Only the user's own processes may send; the socket's directory already keeps others out.
                 if (Native.PeerUser(client) != _uid) { client.Dispose(); continue; }
                 _ = ServeClientAsync(client);
             }
         }
-        finally { try { File.Delete(path); } catch (IOException) { } }
+        // A file that went is not deleted: what is there now is another agent's.
+        finally { if (!gone) try { File.Delete(path); } catch (IOException) { } }
     }
 
     private static async Task<bool> AnswersAsync(string path)
@@ -343,7 +384,8 @@ internal sealed class AgentHost
         // A retry with the same id while the first is still on its way is the same notice; it must not take the first's reply.
         if (!_replies.TryAdd(message.EventId, waiter)) return NoticeProtocol.Reply(NoticeResults.Duplicate, null, message.EventId);
         await SendAsync(message);
-        try { return await waiter.Task.WaitAsync(TimeSpan.FromSeconds(5), _stop.Token); }
+        // Shorter than brim-notify's own wait, so that it hears "no-reply" instead of sending the notice again (W3).
+        try { return await waiter.Task.WaitAsync(WslLink.AgentReplyWait, _stop.Token); }
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException) { return NoticeProtocol.Reply(NoticeResults.Rejected, "no-reply"); }
         finally { _replies.TryRemove(message.EventId, out _); }
     }

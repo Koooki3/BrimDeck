@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using BrimDeck.Core;
+using BrimDeck.Core.Notices;
 using BrimDeck.Protocol;
 
 namespace BrimDeck.Native;
@@ -190,6 +191,8 @@ internal sealed class WslNoticeBridge : IDisposable
     {
         var start = new ProcessStartInfo(WslExe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = encoding ?? Encoding.UTF8 };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        // "wsl --list" writes UTF-16 only without the user's WSL_UTF8 (W1).
+        WslLink.ClearOutputVariables(start.Environment);
         try
         {
             using var process = Process.Start(start);
@@ -312,7 +315,11 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
     // The agent's last line on standard error, for the failure's detail; nothing more of it is kept (sec-L3).
     private volatile string? _lastError;
     private DateTimeOffset _retryAt = DateTimeOffset.MinValue;
-    private TimeSpan _backoff = TimeSpan.FromSeconds(5);
+    // Starts over only after an agent kept running a while, not at its first status report (W14).
+    private readonly RetryBackoff _backoff = new();
+    // This distribution's notices, counted before they are queued for the UI thread (W5). Above NoticeCenter.Admit's own
+    // limit, which still decides which are shown.
+    private readonly IntakeGate _intake = new(300, TimeSpan.FromSeconds(10));
     // The last failed install: the agent file's hash and the script's exit code (null: it did not finish).
     private (string Hash, int? Code)? _installFailure;
 
@@ -363,6 +370,8 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
             SetState(WslAgentState.Starting, "");
             var start = new ProcessStartInfo(WslNoticeBridge.WslExe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var argument in new[] { "-d", Distribution, "--cd", "~", "--exec", "/bin/sh", "-c", "exec \"$HOME/.local/share/brimdeck/brimdeck-agent\" serve" }) start.ArgumentList.Add(argument);
+            // As every wsl.exe BrimDeck starts: whatever wsl.exe itself says comes out the same way (W1).
+            WslLink.ClearOutputVariables(start.Environment);
             var process = Process.Start(start);
             if (process is null) { Retry("start"); return; }
             lock (_gate)
@@ -389,6 +398,7 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
     {
         var stream = process.StandardOutput.BaseStream;
         bool reported = false;
+        long started = Environment.TickCount64;
         try
         {
             while (await NoticeFrames.ReadMessageAsync(stream) is { } message)
@@ -407,7 +417,11 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
                         AgentStates.Server => WslAgentState.Server, AgentStates.Monitor => WslAgentState.Monitor,
                         AgentStates.MonitorDenied => WslAgentState.MonitorDenied, AgentStates.NoBus => WslAgentState.NoBus, _ => WslAgentState.Failed
                     }, message.Detail ?? "");
-                    lock (_gate) _backoff = TimeSpan.FromSeconds(5);
+                    continue;
+                }
+                if (!NoticeIntake.AdmitFromAgent(_intake, message, Environment.TickCount64, out var refusal))
+                {
+                    if (refusal is not null) Send(refusal);
                     continue;
                 }
                 Received?.Invoke(message);
@@ -421,6 +435,7 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
             // An agent that ended before it said anything did not start: the distribution may have been installed again or
             // the agent removed, so the next start checks the installation again (core-M3).
             if (!reported) _installed = false;
+            _backoff.Ran(TimeSpan.FromMilliseconds(Environment.TickCount64 - started));
         }
         try { process.Dispose(); } catch (InvalidOperationException) { }
         if (!_disposed) Retry(_lastError is { } error && !reported ? "exited: " + error : "exited");
@@ -442,15 +457,15 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
         });
     }
 
-    // A failed start or an agent that ended is tried again after a growing pause, up to two minutes; it also has to wait for
-    // the distribution to run, so a distribution shut down meanwhile is not started again.
+    // A failed start or an agent that ended is tried again after a growing pause, up to two minutes (RetryBackoff); it also
+    // has to wait for the distribution to run, so a distribution shut down meanwhile is not started again.
     private void Retry(string detail, TimeSpan? wait = null)
     {
         // Under the lock NeedsStart reads them with: retries come from the loop and from an agent's reading task.
         lock (_gate)
         {
-            _retryAt = DateTimeOffset.UtcNow + (wait ?? _backoff);
-            _backoff = TimeSpan.FromSeconds(Math.Min(120, _backoff.TotalSeconds * 2));
+            var next = _backoff.Next();
+            _retryAt = DateTimeOffset.UtcNow + (wait ?? next);
         }
         SetState(WslAgentState.Failed, detail);
     }

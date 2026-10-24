@@ -24,7 +24,7 @@ public static class NotifyCommandLine
         Options:
           -b, --body TEXT        Body text
           -s, --source NAME      Name the notice comes from (default: brim-notify)
-          -i, --icon PATH        Local icon file
+          -i, --icon PATH        Local icon file (a relative path is from the current folder)
           -c, --category KIND    message, task, success, warning, error or info
           -p, --priority LEVEL   low, normal or high (a hint; BrimDeck's rules decide)
           -r, --replace KEY      Update the earlier notice sent with the same key
@@ -184,6 +184,24 @@ public static class NotifyCommandLine
         message.ReplaceId ??= timeKind + "-" + Guid.NewGuid().ToString("N")[..8];
         message.AppName ??= "brim-notify";
         return new(NotifyCommandKind.Send, message);
+    }
+
+    // -i as BrimDeck can use it (W9): BrimDeck takes only a full path, which a relative one is made into from the current
+    // folder. On Windows every relative path is; in WSL a name with a slash is, and a bare name only when such a file is in the
+    // current folder, since otherwise it is an icon name of the desktop's theme ("dialog-information"). Web addresses and
+    // file:// links are left as they are, for BrimDeck to refuse or read.
+    public static string? ResolveIcon(string? icon, bool windows, Func<string, string> fullPath, Func<string, bool> exists)
+    {
+        if (string.IsNullOrWhiteSpace(icon) || icon.Contains("://", StringComparison.Ordinal)) return icon;
+        try
+        {
+            if (windows) return Path.IsPathFullyQualified(icon) ? icon : fullPath(icon);
+            if (icon.StartsWith('/')) return icon;
+            if (icon.Contains('/')) return fullPath(icon);
+            return exists(icon) ? fullPath(icon) : icon;
+        }
+        // A path that cannot be made full (invalid characters) goes as given; BrimDeck refuses it.
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return icon; }
     }
 
     // A send whose key the sender prints, so that a script can stop it later ("brim-notify stop KEY").
