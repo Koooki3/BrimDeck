@@ -35,9 +35,6 @@ public sealed class MusicControlButton : Button
             Soft.Glide(scale, ScaleTransform.ScaleYProperty, value, false);
         }
     }
-    // Kept for MainWindow.CoverFocus until it calls Soft.Glide itself.
-    internal static void Animate(Animatable target, DependencyProperty property, double value, bool animate, int milliseconds)
-        => Soft.Glide(target, property, value, animate, milliseconds);
 }
 
 public sealed class MusicSeekSlider : Slider

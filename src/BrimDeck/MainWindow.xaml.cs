@@ -514,7 +514,7 @@ public partial class MainWindow : Window
             try { if (!_keepPageOnOpen) NoticesPageShown(); RenderNotices(); }
             finally { _noticesRenderQueued = queued; }
         }
-        int duration = !instant && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
+        int duration = !instant && Soft.Enabled ? Settings.AnimationDuration : 0;
         if (fromNotice is { } notice && duration > 0) StartFromNotice(notice);
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;

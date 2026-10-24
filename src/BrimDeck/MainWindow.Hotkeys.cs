@@ -56,7 +56,7 @@ public partial class MainWindow
         _hotkeyOpened = false;
         if (!_app.UserHidden) return;
         // Hide again once the closing animation has played. Never from inside SetExpanded: ApplySettings calls it.
-        int duration = Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
+        int duration = Soft.Enabled ? Settings.AnimationDuration : 0;
         _hotkeyRehide ??= new DispatcherTimer(DispatcherPriority.Normal, Dispatcher);
         _hotkeyRehide.Stop();
         _hotkeyRehide.Interval = TimeSpan.FromMilliseconds(Math.Max(1, duration));

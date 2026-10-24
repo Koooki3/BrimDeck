@@ -50,7 +50,7 @@ public partial class MainWindow
     {
         var now = DateTimeOffset.UtcNow;
         CheckSourceMenuPointer(WindowsHost.Cursor(), now: now);
-        UpdateSourceMenuTitles(Settings.Animations && SystemParameters.ClientAreaAnimation);
+        UpdateSourceMenuTitles(Soft.Enabled);
     }
     private void UpdateSourceMenuTitles(bool animations)
     {
@@ -67,7 +67,7 @@ public partial class MainWindow
         {
             if (!ReferenceEquals(MediaSourceButton.ContextMenu, menu)) { menu.IsOpen = false; return; }
             _hover.Stop(); _leave.Stop(); _sourceMenuOutsideAt = null;
-            UpdateSourceMenuTitles(Settings.Animations && SystemParameters.ClientAreaAnimation);
+            UpdateSourceMenuTitles(Soft.Enabled);
             ContentCanvas.SizeChanged += resized;
             menu.UpdateLayout(); _sourceMenuBounds = ScreenBounds(menu);
             _sourceMenuPress?.Dispose();
