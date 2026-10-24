@@ -22,6 +22,10 @@ public partial class MainWindow
     private int _noticeRows = NoticePageStep;
     // Notices not seen before the page opened; they keep their dot while it stays open.
     private HashSet<string> _freshNotices = [];
+    // The rows the page lists, with the revision each was built from, and what else the page was built from (see UpdateNoticeRows).
+    private StackPanel? _pageList;
+    private readonly List<(Notice Notice, int Revision, FrameworkElement Row)> _pageRows = [];
+    private string _pageKey = "";
 
     // The coordinator's name for this panel: the main panel's stays the same when its monitor changes.
     internal string NoticeLane => _lead is null ? "main" : "display:" + (Display?.Id ?? "");
@@ -167,9 +171,41 @@ public partial class MainWindow
         _noticesRenderQueued = true;
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
         {
+            // Marked viewed while the render is still queued: the change that raises is not drawn a second time (perf-8).
+            bool showing = _expanded && CurrentPage == DeckPage.Notices;
+            if (showing) _app.Notices.Hub.MarkAllViewed();
             _noticesRenderQueued = false;
-            if (_expanded && CurrentPage == DeckPage.Notices) { _app.Notices.Hub.MarkAllViewed(); RenderNotices(); }
+            if (showing && !UpdateNoticeRows()) RenderNotices();
         });
+    }
+
+    // What the page shows besides its rows; a change of it builds the whole page again.
+    private string NoticePageKey(NoticeCenter center) => string.Join('|', Status(center, center.Hub.Notices.Count), center.Paused, center.Epoch, _noticeRows,
+        _expandedNotice, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_freshNotices), Loc.Language);
+
+    // While the page lists the same notices in the same order, only the rows of notices that changed are built again: a
+    // task's progress no longer rebuilds the whole page on every step (perf-7). False when the page needs building whole.
+    private bool UpdateNoticeRows()
+    {
+        var center = _app.Notices;
+        var notices = center.Hub.Notices;
+        if (_pageList is not { } list || _pageKey != NoticePageKey(center) || Math.Min(notices.Count, _noticeRows) != _pageRows.Count) return false;
+        for (int i = 0; i < _pageRows.Count; i++)
+            if (!ReferenceEquals(notices[i], _pageRows[i].Notice)) return false;
+        var now = DateTimeOffset.UtcNow;
+        for (int i = 0; i < _pageRows.Count; i++)
+        {
+            var (notice, revision, old) = _pageRows[i];
+            if (notice.Revision == revision) continue;
+            int index = list.Children.IndexOf(old);
+            if (index < 0) return false;
+            _liveRows.RemoveAll(live => ReferenceEquals(live.Notice, notice));
+            var row = Row(notice, now);
+            list.Children[index] = row;
+            _pageRows[i] = (notice, notice.Revision, row);
+        }
+        WatchPageLive();
+        return true;
     }
 
     private void UpdateNoticeBadge()
@@ -194,6 +230,7 @@ public partial class MainWindow
         NoticesContent.Children.Clear();
         _waitingPlates.Clear();
         _liveRows.Clear();
+        _pageRows.Clear(); _pageList = null;
         NoticesContent.Margin = new Thickness(_header.Side, 0, _header.Side, 10);
         var center = _app.Notices;
         var notices = center.Hub.Notices;
@@ -210,7 +247,13 @@ public partial class MainWindow
         if (notices.Count == 0) { page.Children.Add(Empty(center)); WatchPageLive(); return; }
         var list = new StackPanel();
         var now = DateTimeOffset.UtcNow;
-        foreach (var notice in notices.Take(_noticeRows)) list.Children.Add(Row(notice, now));
+        foreach (var notice in notices.Take(_noticeRows))
+        {
+            var row = Row(notice, now);
+            list.Children.Add(row);
+            _pageRows.Add((notice, notice.Revision, row));
+        }
+        _pageList = list; _pageKey = NoticePageKey(center);
         if (notices.Count > _noticeRows)
         {
             var more = PageButton(Loc.T("显示更早的通知", "Show earlier notices"), () => { _noticeRows += NoticePageStep; RenderNotices(); });

@@ -17,7 +17,9 @@ internal sealed class NoticeCenter : IDisposable
     private readonly App _app;
     private readonly Dispatcher _dispatcher;
     private readonly PromptTimer _attentionTimer;
-    private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly DispatcherTimer _saveTimer = new() { Interval = SaveDelay };
+    // A change waits this long before it is saved; a task's progress or notices marked viewed wait longer (perf-7).
+    private static readonly TimeSpan SaveDelay = TimeSpan.FromSeconds(2), MinorSaveDelay = TimeSpan.FromSeconds(12);
     private readonly DispatcherTimer _maintenance = new() { Interval = TimeSpan.FromMinutes(10) };
     // While notices are held back, checks every 15 seconds whether presentation mode or the pause has ended (neither raises an event).
     private readonly DispatcherTimer _quietCheck = new() { Interval = TimeSpan.FromSeconds(15) };
@@ -33,7 +35,17 @@ internal sealed class NoticeCenter : IDisposable
     private volatile NoticeHistory? _history;
     // Whether notices are kept on disk, for a save finishing on a worker thread (see NoticeHistory.Save).
     private volatile bool _keepHistory;
-    private bool _historyLoaded, _saving, _savePending, _enabled, _disposed;
+    // _historyLoaded: the folder's file has been read into the list (or there was none); only then is the list written over
+    // it (core-M4). _folderTrusted: the folder may be read and written (NoticeStorage.Prepare).
+    private bool _historyLoaded, _loadingHistory, _folderTrusted = true, _saving, _savePending, _enabled, _disposed;
+    // The folder the notices moved away from; its file goes once the list has been written in the new one.
+    private NoticeHistory? _retired;
+    // Changes of the recent notices reach the views at most every ChangeSpacing, and an update that only moves what shows
+    // (a task's progress) reaches the shown notice at most as often: a burst of progress rebuilds nothing on every step (perf-7).
+    private static readonly TimeSpan ChangeSpacing = TimeSpan.FromMilliseconds(250);
+    private readonly PromptTimer _changeTimer, _refreshTimer;
+    private bool _changeWaiting;
+    private readonly HashSet<string> _refreshWaiting = new(StringComparer.Ordinal);
     private DateTimeOffset? _attentionAt;
     // Messages each link (the pipe, each distribution) may deliver per window; more are refused until the window moves on.
     private const int IntakeLimit = 200;
@@ -57,6 +69,8 @@ internal sealed class NoticeCenter : IDisposable
     public bool Enabled => _enabled;
     public bool Quiet { get; private set; }
     public bool FocusSupported => _quiet.FocusSupported;
+    // Counts the changes after which every view words its notices again, although no notice changed (the time zone changed).
+    public int Epoch { get; private set; }
     // Raised after the recent notices or a source's state changed; the panels' notices pages and the settings page follow it.
     public event Action? Changed;
     internal DeckSettings Settings => _app.Settings;
@@ -70,21 +84,24 @@ internal sealed class NoticeCenter : IDisposable
         _quiet.Changed += UpdateQuiet;
         _attentionTimer = new PromptTimer(_dispatcher, () => { _attentionTimer!.Stop(); _attentionAt = null; Apply(Attention.Tick(DateTimeOffset.UtcNow)); });
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); _ = SaveAsync(); };
-        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); AutoClear(); UpdateQuiet(); };
+        // A file that could not be reached at start-up is read once it can be (core-M4).
+        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); AutoClear(); UpdateQuiet(); if (HistoryState == NoticeHistoryState.Unavailable) LoadHistory(); };
         _quietCheck.Tick += (_, _) => UpdateQuiet();
         _resumeLimit.Tick += (_, _) => FinishResume(int.MaxValue);
         _timeDue = new PromptTimer(_dispatcher, FireDue);
         _liveTick = new PromptTimer(_dispatcher, LiveStep);
+        _changeTimer = new PromptTimer(_dispatcher, ChangeStep);
+        _refreshTimer = new PromptTimer(_dispatcher, RefreshStep);
         Microsoft.Win32.SystemEvents.TimeChanged += ClockMoved;
         Microsoft.Win32.SystemEvents.PowerModeChanged += PowerChanged;
         Attention.CanShow = CanShow;
         // A notice gone from the recent list (deleted, cleared, pruned by age or count) no longer waits to be shown.
-        Hub.Changed += () => { DropMissing(); ScheduleDue(); Changed?.Invoke(); };
+        Hub.Changed += HubChanged;
         Hub.Persist += QueueSave;
         // A reading still under way when notices or the source were switched off arrives late; it is dropped.
         // Notifications of Windows' Clock, Outlook, the calendars and Teams are sorted into time kinds here (NoticeTimeSources).
-        _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local)); });
-        _windows.Removed += key => _dispatcher.BeginInvoke(() => Hub.SourceRemoved(key));
+        _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && !_disposed && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local)); });
+        _windows.Removed += key => _dispatcher.BeginInvoke(() => { if (!_disposed) Hub.SourceRemoved(key); });
         _windows.StateChanged += () => _dispatcher.BeginInvoke(() => Changed?.Invoke());
         // Raised after the notices of a reading were handed over, so they are queued on the dispatcher before this.
         _windows.Synced += covers => _dispatcher.BeginInvoke(() => FinishResume(covers));
@@ -141,13 +158,55 @@ internal sealed class NoticeCenter : IDisposable
 
     public NoticeOutcome Receive(NoticeInput input)
     {
+        // Nothing is taken in once the last save on exit has been made (core-L3).
+        if (_disposed) return new(NoticeReceipt.Filtered, null, false, "shutting-down");
         var now = DateTimeOffset.UtcNow;
         var outcome = Hub.Receive(input, now);
         if (outcome.Notice is not { } notice) return outcome;
         if (outcome.Present) Present(notice, refresh: outcome.Receipt == NoticeReceipt.Updated);
         // A task's progress moves the notice that shows; nothing new appears.
-        else if (outcome.Receipt == NoticeReceipt.Updated) RefreshShown(notice);
+        else if (outcome.Receipt == NoticeReceipt.Updated) QueueRefresh(notice);
         return outcome;
+    }
+
+    // Windows notifications that arrived while the PC slept (WindowsNoticeSource.Missed, core-M5): recorded unviewed, not
+    // shown. To be wired with the event: _windows.Missed += input => _dispatcher.BeginInvoke(() => OnMissed(input));
+    private void OnMissed(NoticeInput input)
+    {
+        if (_enabled && !_disposed && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local) with { Missed = true });
+    }
+
+    // The first update shows at once; those that follow within ChangeSpacing show together at its end, the latest of each.
+    private void QueueRefresh(Notice notice)
+    {
+        if (_refreshTimer.IsEnabled) { _refreshWaiting.Add(notice.Id); return; }
+        RefreshShown(notice);
+        _refreshTimer.Interval = ChangeSpacing; _refreshTimer.Start();
+    }
+
+    private void RefreshStep()
+    {
+        if (_refreshWaiting.Count == 0) { _refreshTimer.Stop(); return; }
+        var waiting = _refreshWaiting.ToList();
+        _refreshWaiting.Clear();
+        foreach (var id in waiting) if (Hub.Find(id) is { } notice) RefreshShown(notice);
+    }
+
+    // Whatever the recent notices lost no longer waits to be shown at once; the views hear of the change at most every
+    // ChangeSpacing, the first change at once.
+    private void HubChanged()
+    {
+        DropMissing(); ScheduleDue();
+        if (_changeTimer.IsEnabled) { _changeWaiting = true; return; }
+        Changed?.Invoke();
+        _changeTimer.Interval = ChangeSpacing; _changeTimer.Start();
+    }
+
+    private void ChangeStep()
+    {
+        if (!_changeWaiting) { _changeTimer.Stop(); return; }
+        _changeWaiting = false;
+        Changed?.Invoke();
     }
 
     // The notice changed in place; where it shows, it shows the change.
@@ -162,7 +221,7 @@ internal sealed class NoticeCenter : IDisposable
     private AttentionItem Item(string lane, Notice notice, bool refresh = false) => new()
     {
         Lane = lane, Kind = AttentionKind.Notice, Key = notice.Id, Group = notice.AppKey, Priority = notice.Priority, Payload = notice, Refresh = refresh,
-        Urgent = NoticeClock.Alerting(notice.Timing),
+        Urgent = NoticeClock.Alerting(notice.Timing, DateTimeOffset.UtcNow),
         Duration = TimeSpan.FromSeconds(notice.Priority == NoticePriority.High ? Settings.NoticeHighDuration : Settings.NoticeDuration)
     };
 
@@ -188,6 +247,7 @@ internal sealed class NoticeCenter : IDisposable
         if (NoticeProtocol.Validate(message) is { } problem) return NoticeProtocol.Reply(NoticeResults.Rejected, problem, message.EventId);
         return await _dispatcher.InvokeAsync(() =>
         {
+            if (_disposed) return NoticeProtocol.Reply(NoticeResults.Rejected, "shutting-down", message.EventId);
             if (!_enabled) return NoticeProtocol.Reply(NoticeResults.Rejected, "notices-off", message.EventId);
             if (message.Type == NoticeTypes.Status) return NoticeProtocol.Reply(NoticeResults.Accepted, StatusLine(), message.EventId);
             if (message.Type != NoticeTypes.Notify) return NoticeProtocol.Reply(NoticeResults.Rejected, "unknown-type", message.EventId);
@@ -206,7 +266,14 @@ internal sealed class NoticeCenter : IDisposable
 
     private void FromAgent(string distro, NoticeMessage message)
     {
-        if (!_enabled || !Settings.NoticeWslDistros.Contains(distro, StringComparer.OrdinalIgnoreCase) || NoticeProtocol.Validate(message) is not null) return;
+        if (_disposed) return;
+        string? refusal = !_enabled ? "notices-off" : !Settings.NoticeWslDistros.Contains(distro, StringComparer.OrdinalIgnoreCase) ? "distro-off" : NoticeProtocol.Validate(message);
+        if (refusal is not null)
+        {
+            // brim-notify inside the distribution waits for a reply through the agent: it hears why at once (core-M2).
+            if (message.Type == NoticeTypes.Notify && message.Origin == "cli" && message.EventId is { } id) _wsl.Send(distro, NoticeProtocol.Reply(NoticeResults.Rejected, refusal, id));
+            return;
+        }
         bool server = _wsl.States.TryGetValue(distro, out var state) && state.State == WslAgentState.Server;
         switch (message.Type)
         {
@@ -361,7 +428,8 @@ internal sealed class NoticeCenter : IDisposable
         if (Settings.NoticeLastCleared is not { } last || last > now) { _app.Settings.NoticeLastCleared = now; _app.QueueSave(); return; }
         if (now - last < span) return;
         _app.Settings.NoticeLastCleared = now; _app.QueueSave();
-        Clear();
+        // A reminder still to come and a running stopwatch stay (core-L2); what goes no longer waits to show (HubChanged).
+        Hub.ClearDone(now);
     }
 
     // Deleting and clearing touch BrimDeck's own records only: no source is told, so no application stops reminding because
@@ -410,8 +478,16 @@ internal sealed class NoticeCenter : IDisposable
         ScheduleDue();
     }
 
-    // The clock was set or the PC woke: what is due is worked out again from the clock, not from the timer's wait.
-    private void ClockMoved(object? sender, EventArgs e) => _dispatcher.BeginInvoke(() => { _dueFor = null; _timeDue.Stop(); ScheduleDue(); });
+    // The clock was set or the PC woke: what is due is worked out again from the clock, not from the timer's wait. The time
+    // zone may have changed too, which .NET does not notice by itself: times are read and shown in the new one (core-M6).
+    private void ClockMoved(object? sender, EventArgs e) => _dispatcher.BeginInvoke(() =>
+    {
+        if (_disposed) return;
+        TimeZoneInfo.ClearCachedData();
+        _dueFor = null; _timeDue.Stop(); ScheduleDue();
+        Epoch++;
+        Changed?.Invoke();
+    });
     private void PowerChanged(object? sender, Microsoft.Win32.PowerModeChangedEventArgs e) { if (e.Mode == Microsoft.Win32.PowerModes.Resume) ClockMoved(sender, e); }
 
     // The shared second tick for live words. Views subscribe while they show such words and unsubscribe when they stop; the
@@ -532,87 +608,159 @@ internal sealed class NoticeCenter : IDisposable
     // The chosen folder, or the default one in BrimDeck's install folder (NoticeStorage).
     public static string HistoryFolder(DeckSettings settings) => settings.NoticeHistoryFolder.Length > 0 ? settings.NoticeHistoryFolder : NoticeStorage.DefaultFolder;
 
+    // Follows the settings: where the notices are kept and whether (see NoticeHistoryPlan for what that does with the file).
     private void UseHistoryFolder(DeckSettings settings)
     {
         string folder = HistoryFolder(settings);
-        _keepHistory = settings.NoticeHistory;
-        if (settings.NoticesEnabled && settings.NoticeHistory) NoticeStorage.Prepare(folder);
+        bool keep = settings.NoticeHistory, kept = _keepHistory, oldTrusted = _folderTrusted;
+        _keepHistory = keep;
         // Application icons are kept beside the saved notices only while notices are kept: memory only leaves nothing on disk.
-        Icons.Folder = settings.NoticeHistory ? folder : "";
-        if (_history?.DirectoryPath == folder)
+        Icons.Folder = keep ? folder : "";
+        var old = _history;
+        bool? loaded = _historyLoaded ? true : !_loadingHistory && HistoryState == NoticeHistoryState.Empty ? false : null;
+        var steps = NoticeHistoryPlan.For(old?.DirectoryPath, folder, kept, keep, loaded);
+        if (old is null || !NoticeHistoryPlan.SameFolder(old.DirectoryPath, folder))
         {
-            if (!settings.NoticeHistory) { _history.Delete(); NoticeIcons.DeleteStored(folder); }
-            return;
+            _history = new NoticeHistory(folder, new NoticeProtection());
+            _historyLoaded = false; HistoryState = NoticeHistoryState.Empty;
         }
-        // A new folder takes the notices from now on; the file in the old one is removed so no copy stays behind.
-        if (_history is { } old) { old.Delete(); NoticeIcons.DeleteStored(old.DirectoryPath); }
-        _history = new NoticeHistory(folder, new NoticeProtection());
-        if (_historyLoaded && settings.NoticeHistory) QueueSave();
+        // Checked (and the default folder created) before anything is read or written there (sec-M1).
+        _folderTrusted = !keep || NoticeStorage.Prepare(folder, create: settings.NoticesEnabled);
+        if (!_folderTrusted) HistoryState = NoticeHistoryState.Refused;
+        else if (HistoryState == NoticeHistoryState.Refused) HistoryState = NoticeHistoryState.Empty;
+        foreach (var step in steps)
+            switch (step)
+            {
+                // After a save, the old file goes once the new one is written (SaveAsync); a refused folder is left alone.
+                case NoticeHistoryStep.DeleteOld when steps.Contains(NoticeHistoryStep.Save): _retired = old; break;
+                case NoticeHistoryStep.DeleteOld when oldTrusted: DeleteFiles(old!); break;
+                case NoticeHistoryStep.MoveOld when oldTrusted && _folderTrusted: NoticeStorage.Move(old!.DirectoryPath, folder); break;
+                // After a Load, the save follows the reading (LoadHistoryAsync).
+                case NoticeHistoryStep.Save when !steps.Contains(NoticeHistoryStep.Load): QueueSave(); break;
+            }
+        // Not kept: no copy stays behind anywhere.
+        if (!keep && _retired is { } retired) { _retired = null; DeleteFiles(retired); }
     }
+
+    private static void DeleteFiles(NoticeHistory history) { history.Delete(); NoticeIcons.DeleteStored(history.DirectoryPath); }
 
     private void LoadHistory()
     {
-        if (_historyLoaded || _history is null) return;
-        _historyLoaded = true;
-        if (!Settings.NoticeHistory) { _history.Delete(); return; }
-        // The first time, notices an earlier version kept in the old default folder (%LOCALAPPDATA%) move to the default one.
-        if (Settings.NoticeHistoryFolder.Length == 0) NoticeStorage.MoveLegacy(_history.DirectoryPath);
-        HistoryState = _history.Load(out var notices, out var apps);
-        if (HistoryState == NoticeHistoryState.Loaded) Hub.Load(notices, apps, DateTimeOffset.UtcNow);
+        if (_historyLoaded || _loadingHistory || _history is not { } history) return;
+        if (!Settings.NoticeHistory) { history.Delete(); _historyLoaded = true; HistoryState = NoticeHistoryState.Empty; return; }
+        if (!_folderTrusted) { HistoryState = NoticeHistoryState.Refused; return; }
+        _loadingHistory = true;
+        _ = LoadHistoryAsync(history, Settings.NoticeHistoryFolder.Length == 0);
     }
+
+    // Read in the background (perf-9). Notices arriving meanwhile join the list, and nothing is written until the file has
+    // been read: a file that cannot be reached now is read again later instead of being written over (core-M4).
+    private async Task LoadHistoryAsync(NoticeHistory history, bool moveLegacy)
+    {
+        (NoticeHistoryState State, List<Notice> Notices, List<NoticeKnownApp> Apps) read;
+        try
+        {
+            read = await Task.Run(() =>
+            {
+                // The first time, notices an earlier version kept in the old default folder (%LOCALAPPDATA%) move to the default one.
+                if (moveLegacy) NoticeStorage.MoveLegacy(history.DirectoryPath);
+                var state = history.Load(out var notices, out var apps);
+                return (state, notices, apps);
+            });
+        }
+        finally { _loadingHistory = false; }
+        if (_disposed) return;
+        // The folder changed meanwhile: the new one is read instead.
+        if (_history != history) { if (_enabled) LoadHistory(); return; }
+        HistoryState = read.State;
+        if (read.State is NoticeHistoryState.Loaded or NoticeHistoryState.Empty)
+        {
+            _historyLoaded = true;
+            // What arrived while the file was read, or the list that moved here from another folder, is written now.
+            bool arrived = Hub.Notices.Count > 0;
+            if (read.State == NoticeHistoryState.Loaded) Hub.Load(read.Notices, read.Apps, DateTimeOffset.UtcNow);
+            if (arrived || _retired is not null) QueueSave();
+        }
+        Changed?.Invoke();
+    }
+
+    // Reads a file that could not be reached again now (the settings page), instead of at the next maintenance.
+    public void RetryHistory() { if (_enabled && HistoryState == NoticeHistoryState.Unavailable) LoadHistory(); }
 
     // Replaces an unreadable file with the current (empty or new) list.
     public void ResetHistory()
     {
+        if (!_folderTrusted) return;
         _history?.Delete();
         HistoryState = NoticeHistoryState.Empty;
+        _historyLoaded = true;
         QueueSave();
         Changed?.Invoke();
     }
 
-    private void QueueSave()
+    private bool CanSave => Settings.NoticeHistory && _history is not null && _historyLoaded && !_loadingHistory && _folderTrusted;
+
+    // A sooner save replaces a later one; a minor change never puts off one already due.
+    private void QueueSave(bool minor = false)
     {
-        if (!Settings.NoticeHistory || _history is null || HistoryState == NoticeHistoryState.Unreadable) return;
-        if (!_saveTimer.IsEnabled) _saveTimer.Start();
+        if (_disposed || !CanSave) return;
+        var wait = minor ? MinorSaveDelay : SaveDelay;
+        if (_saveTimer.IsEnabled && _saveTimer.Interval <= wait) return;
+        _saveTimer.Interval = wait;
+        _saveTimer.Start();
     }
 
     // The list is copied here, on the UI thread; encrypting and writing happen in the background, one save at a time.
     private async Task SaveAsync()
     {
-        if (_history is not { } history || !Settings.NoticeHistory) return;
+        if (_history is not { } history || !CanSave) return;
         if (_saving) { _savePending = true; return; }
         _saving = true;
         var notices = Hub.Notices.Select(n => n.Copy()).ToList();
         var apps = Hub.KnownApps.ToList();
         long order = history.NextOrder();
-        try { await Task.Run(() => history.Save(notices, apps, () => _keepHistory && _history == history, order)); }
+        bool written = false;
+        try { written = await Task.Run(() => history.Save(notices, apps, () => _keepHistory && _history == history, order)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { }
         finally { _saving = false; }
+        if (written) Retire(history);
         if (_savePending) { _savePending = false; QueueSave(); }
     }
 
-    // On exit: what is not saved yet is written now. A background save still under way may reach the file before or after
-    // this one; its list was copied earlier, so NoticeHistory.Save skips it if it comes last, and the newest list is the one
-    // left on disk.
+    // The list is written in its new folder: the file it moved away from goes.
+    private void Retire(NoticeHistory written)
+    {
+        if (_retired is not { } retired || _history != written) return;
+        _retired = null;
+        if (!NoticeHistoryPlan.SameFolder(retired.DirectoryPath, written.DirectoryPath)) DeleteFiles(retired);
+    }
+
+    // On exit: what is not saved yet is written now, and kept on the disk itself. A background save still under way may reach
+    // the file before or after this one; its list was copied earlier, so NoticeHistory.Save skips it if it comes last, and the
+    // newest list is the one left on disk.
     public void Flush()
     {
         if (!_saveTimer.IsEnabled && !_savePending && !_saving) return;
         _saveTimer.Stop(); _savePending = false;
-        if (_history is not { } history || !Settings.NoticeHistory || HistoryState == NoticeHistoryState.Unreadable) return;
-        try { history.Save(Hub.Notices, Hub.KnownApps); }
+        if (_history is not { } history || !CanSave) return;
+        try { if (history.Save(Hub.Notices, Hub.KnownApps, durable: true)) Retire(history); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { }
     }
 
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
+        // The sources stop first, so nothing arrives after the last save (core-L3).
+        _pipe?.Dispose(); _pipe = null;
+        _windows.Dispose(); _wsl.Dispose();
         // "Clear on exit": the list is emptied before the last save, so nothing of it is left on disk.
         if (_enabled && Settings.NoticeAutoClear == NoticeAutoClear.OnExit) Hub.Clear();
+        _disposed = true;
         Flush();
         _attentionTimer.Stop(); _saveTimer.Stop(); _maintenance.Stop(); _quietCheck.Stop(); _resumeLimit.Stop(); _timeDue.Stop(); _liveTick.Stop();
+        _changeTimer.Stop(); _refreshTimer.Stop();
         Microsoft.Win32.SystemEvents.TimeChanged -= ClockMoved;
         Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged;
-        _windows.Dispose(); _wsl.Dispose(); _pipe?.Dispose(); _quiet.Dispose();
+        _quiet.Dispose();
     }
 }
