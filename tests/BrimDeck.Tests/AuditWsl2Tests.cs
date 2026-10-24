@@ -12,6 +12,122 @@ internal static class AuditWsl2Tests
         CmdThroughCmd(check);
         ProgramSearch(check);
         await NotFoundIsReported(check);
+        AgentRequests(check);
+        await OversizedMessages(check);
+        await BoundedErrorLines(check);
+    }
+
+    // C-L5: BrimDeck's actions and dismissals name the session, and an agent acts only on its own run's.
+    private static void AgentRequests(Action<string, bool> check)
+    {
+        var action = NoticeProtocol.ToAgent(NoticeTypes.Action, "wsl:Ubuntu-24.04:server-1a2b3c:12", "default");
+        check("An action carries the notice's session and id", action is { Type: NoticeTypes.Action, Session: "server-1a2b3c", NativeId: "12", ActionKey: "default" });
+        check("A dismissal does too", NoticeProtocol.ToAgent(NoticeTypes.Dismissed, "wsl:Debian:monitor-ff:3") is { Session: "monitor-ff", NativeId: "3", ActionKey: null });
+        check("A key without a session sends none", NoticeProtocol.ToAgent(NoticeTypes.Dismissed, "wsl:Debian::3") is { Session: null, NativeId: "3" });
+        check("A key without a D-Bus id gives no request",
+            NoticeProtocol.ToAgent(NoticeTypes.Action, "wsl:Debian:server-a:abc") is null && NoticeProtocol.ToAgent(NoticeTypes.Action, "windows:App") is null
+            && NoticeProtocol.ToAgent(NoticeTypes.Action, "wsl:7") is null && NoticeProtocol.ToAgent(NoticeTypes.Action, "cli:x:y:1") is null);
+        var json = NoticeProtocol.Deserialize(NoticeProtocol.Serialize(action!));
+        check("The session travels on the wire", json is { Session: "server-1a2b3c", NativeId: "12" });
+        var server = new NotificationServer("1", session: "server-new");
+        uint id = (uint)server.Handle(Notify()).Bus[0].Body[0];
+        check("The current run's request is taken", server.Addresses(new NoticeMessage { Type = NoticeTypes.Action, Session = "server-new", NativeId = "1" }));
+        check("An earlier run's request for the same id is not", !server.Addresses(new NoticeMessage { Type = NoticeTypes.Action, Session = "server-old", NativeId = id.ToString() }));
+        check("A request from a BrimDeck that sends no session is taken as before", server.Addresses(new NoticeMessage { Type = NoticeTypes.Dismissed, NativeId = "1" }));
+    }
+
+    private static DBusMessage Notify(object[]? actions = null, Dictionary<object, object>? hints = null, string body = "Body", uint serial = 4) => new()
+    {
+        Type = DBusMessageType.MethodCall, Serial = serial, Sender = ":1.7", Destination = FreedesktopNotifications.Name, Path = FreedesktopNotifications.Path,
+        Interface = FreedesktopNotifications.Interface, Member = "Notify", Signature = FreedesktopNotifications.NotifySignature,
+        Body = ["app", 0u, "", "Title", body, (actions ?? []).ToList(), hints ?? new Dictionary<object, object>(), 5000]
+    };
+
+    private static object Image(int bytes) => new DBusVariant("(iiibiiay)", new object[] { 512, 512, 2048, true, 8, 4, new byte[bytes] });
+
+    // Reads one message the way the connection does when it is larger than MaxMessage; the stream holds a second message after it.
+    private static async Task<(byte[]? Slim, DBusMessage? Header, bool NextIntact)> ReadOversized(DBusMessage message, int limit)
+    {
+        var bytes = message.Encode();
+        var next = DBusMessage.Signal("/x", "x.y", "After", "s", "next").Encode();
+        using var stream = new MemoryStream([.. bytes, .. next]);
+        var start = new byte[16];
+        stream.ReadExactly(start);
+        var (slim, header) = await DBusOversized.ReadAsync(stream, start, DBusMessage.TotalLength(start), limit);
+        var rest = new byte[next.Length];
+        stream.ReadExactly(rest);
+        return (slim, header, DBusMessage.Decode(rest) is { Member: "After", Body: ["next"] } && stream.Position == stream.Length);
+    }
+
+    // C-L6: a notification too large because of its image keeps everything but the image; one too large without it is
+    // answered with an error at once.
+    private static async Task OversizedMessages(Action<string, bool> check)
+    {
+        var hints = new Dictionary<object, object> { ["image-data"] = Image(4 * 1024 * 1024 + 3), ["urgency"] = new DBusVariant("y", (byte)2), ["category"] = new DBusVariant("s", "im") };
+        var big = Notify(["default", "Open"], hints);
+        check("A notice with a 4 MB image is larger than a connection holds", big.Encode().Length > DBusConnection.MaxMessage);
+        var (slim, header, intact) = await ReadOversized(big, DBusConnection.MaxMessage);
+        check("It is read without the image", slim is not null && slim.Length < 64 * 1024 && header is { Member: "Notify", Serial: 4, Sender: ":1.7" } && intact);
+        var message = DBusMessage.Decode(slim!);
+        var kept = (Dictionary<object, object>)message.Body[6];
+        check("Every other value is kept, aligned as before",
+            message.Body is ["app", 0u, "", "Title", "Body", List<object> { Count: 2 }, _, 5000] && kept["urgency"] is DBusVariant { Value: (byte)2 } && kept["category"] is DBusVariant { Value: "im" });
+        check("The image keeps only its length's remainder modulo 8", kept["image-data"] is DBusVariant { Value: object[] { Length: 7 } fields } && fields[6] is byte[] { Length: 3 });
+        var notice = new NotificationServer("1").Handle(message);
+        check("The notice still reaches BrimDeck and the sender gets its id", notice.ToBrimDeck is [{ Title: "Title" }] && notice.Bus is [{ Type: DBusMessageType.MethodReturn, ReplySerial: 4 }]);
+
+        // Several large arrays nested in arrays and variants: each enclosing length is corrected.
+        var nested = new Dictionary<object, object>
+        {
+            ["a"] = new DBusVariant("aay", new List<object> { new byte[100_001], new byte[5], new byte[200_002] }),
+            ["b"] = new DBusVariant("(yay)", new object[] { (byte)1, new byte[70_000] }), ["c"] = new DBusVariant("x", 42L)
+        };
+        var (nestedSlim, _, nestedIntact) = await ReadOversized(Notify(hints: nested), 64 * 1024);
+        var nestedKept = nestedSlim is null ? null : (Dictionary<object, object>)DBusMessage.Decode(nestedSlim).Body[6];
+        var arrays = (nestedKept?["a"] as DBusVariant)?.Value as List<object>;
+        var pair = (nestedKept?["b"] as DBusVariant)?.Value as object[];
+        check("Nested large arrays are cut and their containers stay valid",
+            nestedIntact && arrays is { Count: 3 } && arrays.Cast<byte[]>().Select(bytes => bytes.Length).SequenceEqual([1, 5, 2])
+            && pair is { Length: 2 } && pair[0] is (byte)1 && pair[1] is byte[] { Length: 0 } && nestedKept!["c"] is DBusVariant { Value: 42L });
+
+        var huge = Notify(body: new string('x', 3 * 1024 * 1024), serial: 9);
+        var (none, hugeHeader, hugeIntact) = await ReadOversized(huge, DBusConnection.MaxMessage);
+        check("A message too large without its byte arrays comes back as its header", none is null && hugeHeader is { Serial: 9, Sender: ":1.7", Body: [] } && hugeIntact);
+        hugeHeader!.Oversized = true;
+        var refused = new NotificationServer("1").Handle(hugeHeader);
+        check("The service answers it with an error at once and passes nothing on",
+            refused.ToBrimDeck.Count == 0 && refused.Bus is [{ Type: DBusMessageType.Error, ErrorName: DBusConnection.LimitsExceeded, ReplySerial: 9, Destination: ":1.7" }]);
+        hugeHeader.Flags = DBusMessage.NoReplyExpected;
+        check("A call that wants no reply gets none", new NotificationServer("1").Handle(hugeHeader).Bus.Count == 0);
+        var monitor = new NotificationMonitor { Owner = ":1.3" };
+        check("A monitor ignores a header it could not read past", monitor.Observe(hugeHeader, DateTimeOffset.UnixEpoch).Count == 0 && monitor.NextDue is null);
+
+        var truncated = big.Encode()[..(DBusConnection.MaxMessage + 100)];
+        var cut = new MemoryStream(truncated);
+        var first = new byte[16];
+        cut.ReadExactly(first);
+        bool ended = false;
+        try { await DBusOversized.ReadAsync(cut, first, DBusMessage.TotalLength(first), DBusConnection.MaxMessage); }
+        catch (EndOfStreamException) { ended = true; }
+        check("A stream that ends inside the message ends the reading", ended);
+    }
+
+    // S8: a line without end is held to the bound; lines are passed on as they end.
+    private static async Task BoundedErrorLines(Action<string, bool> check)
+    {
+        var lines = new List<string>();
+        var text = "first\r\n\n  \nsecond 中文\n" + new string('x', 5_000_000);
+        await BoundedLines.ReadAsync(new MemoryStream(Encoding.UTF8.GetBytes(text)), 200, lines.Add);
+        check("Lines are passed on without blanks, and an endless one is cut to the bound",
+            lines.Count == 3 && lines[0] == "first" && lines[1] == "second 中文" && lines[2] == new string('x', 200));
+        var failing = new FailingStream();
+        await BoundedLines.ReadAsync(failing, 200, lines.Add);
+        check("A stream that fails ends the reading quietly", true);
+    }
+
+    private sealed class FailingStream : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => throw new IOException("gone");
     }
 
     private const string Prefix = "/e:on /d /v:off /s /c \"";

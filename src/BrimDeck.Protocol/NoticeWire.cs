@@ -137,6 +137,17 @@ public static class NoticeProtocol
     public static NoticeMessage Reply(string result, string? reason = null, string? id = null)
         => new() { Type = NoticeTypes.Reply, Result = result, Detail = reason, EventId = id };
 
+    // BrimDeck's request to a WSL agent about one of its desktop notices (type Action or Dismissed), addressed by both the
+    // session and the id of the notice's "wsl:<distribution>:<session>:<id>" key. The agent acts only on its current run's
+    // session, so an earlier run's notice never acts on the new run's notice with the same id (C-L5). Null when the key names
+    // no notice id.
+    public static NoticeMessage? ToAgent(string type, string instanceKey, string? actionKey = null)
+    {
+        var parts = instanceKey.Split(':');
+        if (parts is not ["wsl", _, .., var session, var id] || !uint.TryParse(id, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _)) return null;
+        return new() { Type = type, Session = session.Length > 0 ? session : null, NativeId = id, ActionKey = actionKey };
+    }
+
     // Checks a message received from outside BrimDeck and trims its texts to the limits. Returns null when it can be used,
     // or the reason it is refused.
     public static string? Validate(NoticeMessage message)

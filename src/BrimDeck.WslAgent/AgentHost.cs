@@ -78,9 +78,9 @@ internal sealed class AgentHost
             {
                 case NoticeTypes.Reply when message.EventId is { } id && _replies.TryRemove(id, out var waiter):
                     waiter.TrySetResult(message); break;
-                case NoticeTypes.Action when uint.TryParse(message.NativeId, NumberStyles.None, CultureInfo.InvariantCulture, out var actionId) && message.ActionKey is { } key:
+                case NoticeTypes.Action when ForThisRun(message) && uint.TryParse(message.NativeId, NumberStyles.None, CultureInfo.InvariantCulture, out var actionId) && message.ActionKey is { } key:
                     await EmitAsync(() => _server.ActionInvoked(actionId, key)); break;
-                case NoticeTypes.Dismissed when uint.TryParse(message.NativeId, NumberStyles.None, CultureInfo.InvariantCulture, out var dismissedId):
+                case NoticeTypes.Dismissed when ForThisRun(message) && uint.TryParse(message.NativeId, NumberStyles.None, CultureInfo.InvariantCulture, out var dismissedId):
                     await EmitAsync(() => _server.Dismissed(dismissedId)); break;
                 case NoticeTypes.Status:
                     string state, detail;
@@ -89,6 +89,8 @@ internal sealed class AgentHost
             }
         }
     }
+
+    private bool ForThisRun(NoticeMessage message) => _server.Addresses(message);
 
     private async Task EmitAsync(Func<IReadOnlyList<DBusMessage>> produce)
     {
@@ -267,7 +269,14 @@ internal sealed class AgentHost
 
     private async Task ListenAsync(string path)
     {
-        try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { }
+        // An agent still listening there (one stopping while BrimDeck already started this one) keeps its socket: deleting it
+        // would let that agent delete this one's in its turn as it ends (C-L12). This one tries again after its pause; a
+        // socket nobody listens on is left over and replaced.
+        if (File.Exists(path))
+        {
+            if (await AnswersAsync(path)) throw new IOException("another agent still listens on " + path);
+            try { File.Delete(path); } catch (IOException) { }
+        }
         using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         listener.Bind(new UnixDomainSocketEndPoint(path));
         try
@@ -283,6 +292,16 @@ internal sealed class AgentHost
             }
         }
         finally { try { File.Delete(path); } catch (IOException) { } }
+    }
+
+    private static async Task<bool> AnswersAsync(string path)
+    {
+        using var probe = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        try { await probe.ConnectAsync(new UnixDomainSocketEndPoint(path), timeout.Token); return true; }
+        // Refused: nobody listens. A connection that neither succeeds nor fails has a listener behind it, too busy to accept.
+        catch (SocketException) { return false; }
+        catch (OperationCanceledException) { return true; }
     }
 
     private async Task ServeClientAsync(Socket client)
