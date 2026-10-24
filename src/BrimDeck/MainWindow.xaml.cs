@@ -676,6 +676,9 @@ public partial class MainWindow : Window
     {
         // Dragging an edge may take the pointer outside; the panel stays open until the drag ends.
         if (!inside && Resizing) return;
+        // win2: a pointer reaching the island means someone is at the screen: the display is on (C-L13), and a notice is
+        // looked for briskly again (C-L8).
+        if (inside && !_pointerInside) { MotionEnvironment.InputSeen(); BrimDeck.Native.WindowsNoticeSource.Interacted(); }
         _pointerInside = inside; UpdateQuotaCarousel();
         if (inside) ReleaseHotkeyPin();
         if (inside)

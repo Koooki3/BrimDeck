@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using BrimDeck.Core;
 
 namespace BrimDeck;
@@ -100,6 +101,8 @@ internal static class InteractionFx
     {
         Surfaces.Add(surface);
         window.Closed += (_, _) => surface.Detach();
+        // C-L9: a window that stops being active takes no more keys, whether or not its focus moved.
+        window.Deactivated += (_, _) => surface.KeyboardLeft();
         surface.Detached += () => Surfaces.Remove(surface);
     }
 
@@ -156,6 +159,8 @@ internal sealed partial class FxSurface : FrameworkElement
     // Pressed by the keyboard (Space or Enter on a focused control) rather than by the mouse button; or by touch or a pen, which
     // the mouse button's own state does not show.
     private bool _keyPress, _stylusPress;
+    // A release seen only on the physical button waits for the queued input before it lets the press go (Frame).
+    private bool _liftCheck;
 
     public event Action? Detached;
 
@@ -171,6 +176,7 @@ internal sealed partial class FxSurface : FrameworkElement
         input.PreviewKeyDown += KeyWentDown;
         input.PreviewKeyUp += KeyWentUp;
         input.AddHandler(Keyboard.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler(Focused), true);
+        input.AddHandler(Keyboard.LostKeyboardFocusEvent, new KeyboardFocusChangedEventHandler(Unfocused), true);
     }
 
     protected override int VisualChildrenCount => 1;
@@ -188,6 +194,7 @@ internal sealed partial class FxSurface : FrameworkElement
         _input.PreviewKeyDown -= KeyWentDown;
         _input.PreviewKeyUp -= KeyWentUp;
         _input.RemoveHandler(Keyboard.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler(Focused));
+        _input.RemoveHandler(Keyboard.LostKeyboardFocusEvent, new KeyboardFocusChangedEventHandler(Unfocused));
         Reset();
         Detached?.Invoke();
     }
@@ -258,6 +265,11 @@ internal sealed partial class FxSurface : FrameworkElement
     {
         if (_keyPress && e.Key == Key.Space) LiftOff(true);
     }
+
+    // win2 C-L9: Space held while the focus leaves (Alt+Tab, a click on another window, Tab) never sees its key come up here;
+    // the button drops its own press then (Feedback follows it), and the layer backs out with it.
+    private void Unfocused(object sender, KeyboardFocusChangedEventArgs e) => KeyboardLeft();
+    internal void KeyboardLeft() { if (_keyPress) LiftOff(false); }
 
     private void Pressed(object sender, MouseButtonEventArgs e)
     {
@@ -442,8 +454,20 @@ internal sealed partial class FxSurface : FrameworkElement
         if (!Allowed) { Reset(); return; }
         if (!_interactive() && (_hover is not null || _press.Down)) Release();
         // ui-4: a control that does not capture the mouse (a tab, a list item) never hears the button come up off the window,
-        // which left the press held and the frames running; the button's own state lets it go.
-        if (_press.Down && !_keyPress && !_stylusPress && Preview is null && !LeftButtonDown()) LiftOff(false);
+        // which left the press held and the frames running; the button's own state lets it go. win2 C-L10: frames run ahead of
+        // input, so the button can read as up while its own release still waits in the queue; the press backs out only if it
+        // is still held once the queued input has gone through (below Input priority, the dispatcher waits for pending input).
+        // A control holding the mouse capture always hears its release, so it is left to Lifted and CaptureLost.
+        if (_press.Down && !_keyPress && !_stylusPress && Preview is null && !_liftCheck && _pressed is { } held && !held.Control.IsMouseCaptured && !LeftButtonDown())
+        {
+            _liftCheck = true;
+            int serial = held.Serial;
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+            {
+                _liftCheck = false;
+                if (_press.Down && !_keyPress && _pressed?.Serial == serial && !LeftButtonDown()) LiftOff(false);
+            });
+        }
         var dpi = Dpi;
         _hover?.Update(_scope, dpi);
         _leaving?.Update(_scope, dpi);

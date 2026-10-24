@@ -44,6 +44,7 @@ internal static class MotionEnvironment
         SystemParameters.StaticPropertyChanged -= SystemParameterChanged;
         if (_displayNotification != IntPtr.Zero) { UnregisterPowerSettingNotification(_displayNotification); _displayNotification = IntPtr.Zero; }
         _power?.Dispose(); _power = null;
+        _recheck?.Stop(); _recheck = null;
         _dispatcher = null; Changed = null;
     }
 
@@ -61,8 +62,17 @@ internal static class MotionEnvironment
                 SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect => SessionLocked() ?? false,
                 _ => null
             };
-            Set(locked, null);
+            // win2 C-L13: someone signing in or connecting has a screen in front of them, whether or not the display's "on"
+            // came through (a remote session reconnecting, some session switches skip it).
+            bool seen = reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.SessionLogon or SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect;
+            Set(locked, seen ? false : null);
         });
+    }
+
+    // The user pointed at or used one of BrimDeck's windows: the display is on, whatever the last message said (C-L13).
+    public static void InputSeen()
+    {
+        if (DisplayOff) Set(null, false);
     }
 
     private static void PowerModeChanged(object? sender, PowerModeChangedEventArgs e)
@@ -81,8 +91,31 @@ internal static class MotionEnvironment
     {
         bool changed = false;
         if (locked is { } l && l != Locked) { Locked = l; changed = true; }
-        if (displayOff is { } d && d != DisplayOff) { DisplayOff = d; changed = true; }
+        if (displayOff is { } d && d != DisplayOff) { DisplayOff = d; changed = true; WatchRecovery(); }
         if (changed) Changed?.Invoke();
+    }
+
+    // C-L13: while the display reads as off, its state is asked again once a minute (registering anew makes Windows send the
+    // current state at once), so an "on" that went missing does not stop everything until the next time the display sleeps.
+    private static readonly TimeSpan RecheckEvery = TimeSpan.FromSeconds(60);
+    private static DispatcherTimer? _recheck;
+    private static void WatchRecovery()
+    {
+        if (!DisplayOff || _power is null) { _recheck?.Stop(); return; }
+        if (_recheck is null)
+        {
+            _recheck = new DispatcherTimer(DispatcherPriority.Background, _dispatcher!) { Interval = RecheckEvery };
+            _recheck.Tick += (_, _) => { if (DisplayOff) AskDisplay(); else _recheck.Stop(); };
+        }
+        _recheck.Start();
+    }
+
+    private static void AskDisplay()
+    {
+        if (_power is null) return;
+        if (_displayNotification != IntPtr.Zero) UnregisterPowerSettingNotification(_displayNotification);
+        var setting = SessionDisplayStatus;
+        _displayNotification = RegisterPowerSettingNotification(_power.Handle, ref setting, 0);
     }
 
     // The display's state comes as WM_POWERBROADCAST to a window that asked for it: a hidden window of its own, which also
