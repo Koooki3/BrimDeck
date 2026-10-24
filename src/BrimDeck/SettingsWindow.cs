@@ -97,6 +97,7 @@ public sealed partial class SettingsWindow : Window
         SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         Deactivated += (_, _) => { EndAppDrag(false); QueuePreviewDismissal(); };
         PreviewMouseDown += (_, e) => DismissPreviewOutsideControl(e.OriginalSource);
+        DismissPreviewOnCaptionPress();
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape && _appDrag is not null) { EndAppDrag(false); e.Handled = true; } };
         ReleaseFocusOnEmptyClick(this, () => RootVisual);
         // Moving focus scrolls the control just into view; a little more keeps its focus outline visible at the edges.
@@ -1061,9 +1062,11 @@ public sealed partial class SettingsWindow : Window
         return row;
     }
 
-    private FrameworkElement Toggle(string title, bool value, Action<bool> changed, bool enabled = true, string? help = null)
+    // keepPreview marks the switch alone as a preview control, so a press on the rest of the row still ends the preview.
+    private FrameworkElement Toggle(string title, bool value, Action<bool> changed, bool enabled = true, string? help = null, bool keepPreview = false)
     {
         var toggle = new CheckBox { Content = TextLine(title, 13, TextPrimary, FontWeights.SemiBold), Style = (Style)FindResource("SettingsToggle"), IsChecked = value, IsEnabled = enabled, VerticalAlignment = VerticalAlignment.Center };
+        if (keepPreview) KeepPreview(toggle);
         AutomationProperties.SetName(toggle, title); toggle.Checked += (_, _) => changed(true); toggle.Unchecked += (_, _) => changed(false);
         if (help is not null)
         {
