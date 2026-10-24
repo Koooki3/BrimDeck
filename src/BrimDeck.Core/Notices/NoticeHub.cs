@@ -127,11 +127,16 @@ public sealed class NoticeHub
             existing.EventId = input.EventId ?? existing.EventId;
             // The notice now says what the latest message said, so it is as old as that message: an update shown as it arrives
             // must not read "38 min ago" from the first notice it replaced. It also keeps the list's order after a restart.
-            existing.CreatedAt = input.CreatedAt ?? now; existing.ReceivedAt = now;
+            // A task's progress alone does neither: two tasks updating in turn would swap places in the recent list several
+            // times a second (the retention counts from UpdatedAt).
+            if (significant) { existing.CreatedAt = input.CreatedAt ?? now; existing.ReceivedAt = now; }
             existing.UpdatedAt = now; existing.SourcePresent = true; existing.Revision++;
-            if (significant) existing.Viewed = false;
-            // An update moves the notice to the top, as a new one would arrive there.
-            _notices.Remove(existing); _notices.Insert(0, existing);
+            if (significant)
+            {
+                existing.Viewed = false;
+                // An update moves the notice to the top, as a new one would arrive there.
+                _notices.Remove(existing); _notices.Insert(0, existing);
+            }
             Recount(); Changed?.Invoke(); Persist?.Invoke(!significant);
             return new(NoticeReceipt.Updated, existing, significant && !quiet && !late, late ? "late" : null);
         }

@@ -96,10 +96,19 @@ public sealed class AttentionCoordinator
         var changes = new List<AttentionChange>();
         if (Suppressed) { if (item.Kind == AttentionKind.Notice && _suppressedKeys.Add(item.Key)) SuppressedCount++; return changes; }
         var lane = Get(item.Lane);
+        // A notice that starts ringing (a timer that came due while its own "started" notice still shows or waits) is shown
+        // anew, urgent and for its whole duration, instead of only changing what the island says for the time left.
+        if (item.Urgent)
+        {
+            if (lane.Current is { Urgent: false } quiet && quiet.Key == item.Key) { lane.Held = false; End(lane, now, changes, requeue: false); }
+            lane.Queue.RemoveAll(q => q.Key == item.Key && !q.Urgent);
+        }
         if (lane.Current is { } current && current.Key == item.Key)
         {
             current.Payload = item.Payload;
-            if (item.Refresh && !lane.Held && lane.Ends - now < MinimumRemaining) lane.Ends = now + MinimumRemaining;
+            // Progress keeps the island a little longer, at most twice the notice's duration like a merged burst: a long
+            // task does not keep the island (or the notices waiting behind it) for as long as it runs.
+            if (item.Refresh && !lane.Held && lane.Ends - now < MinimumRemaining && now - current.StartedAt < current.Duration * 2) lane.Ends = now + MinimumRemaining;
             changes.Add(new(item.Lane, null, null, current));
             return changes;
         }
@@ -107,7 +116,7 @@ public sealed class AttentionCoordinator
         if (item.Kind == AttentionKind.Notice && item.Group.Length > 0)
         {
             // A burst from one application becomes one notice that counts the others and shows the latest.
-            if (lane.Current is { Kind: AttentionKind.Notice } shown && shown.Group == item.Group && now - shown.LastMerge <= AggregationWindow)
+            if (!item.Urgent && lane.Current is { Kind: AttentionKind.Notice } shown && shown.Group == item.Group && now - shown.LastMerge <= AggregationWindow)
             {
                 Merge(shown, item, now);
                 // A source that keeps sending does not keep the island: a merged notice stays at most twice its duration.
@@ -115,7 +124,7 @@ public sealed class AttentionCoordinator
                 changes.Add(new(item.Lane, null, null, shown));
                 return changes;
             }
-            if (lane.Queue.FirstOrDefault(q => q.Kind == AttentionKind.Notice && q.Group == item.Group && now - q.LastMerge <= AggregationWindow) is { } queued)
+            if (!item.Urgent && lane.Queue.FirstOrDefault(q => q.Kind == AttentionKind.Notice && q.Group == item.Group && now - q.LastMerge <= AggregationWindow) is { } queued)
             { Merge(queued, item, now); return changes; }
         }
         item.SubmittedAt = now; item.LastMerge = now; item.Remaining = item.Duration;

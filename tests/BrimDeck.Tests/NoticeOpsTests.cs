@@ -9,6 +9,65 @@ internal static class NoticeOpsTests
     internal static void Run(Action<string, bool> check)
     {
         Probe(check);
+        Attention(check);
+        ProgressOrder(check);
+    }
+
+    private static AttentionItem Item(string key, string group = "g", bool refresh = false, bool urgent = false, double seconds = 6) => new()
+    {
+        Lane = "main", Kind = AttentionKind.Notice, Key = key, Group = group, Refresh = refresh, Urgent = urgent,
+        Priority = urgent ? NoticePriority.High : NoticePriority.Normal, Duration = TimeSpan.FromSeconds(seconds)
+    };
+
+    private static void Attention(Action<string, bool> check)
+    {
+        // Review 2: a task's progress keeps the island at most twice the notice's duration.
+        var coordinator = new AttentionCoordinator();
+        coordinator.Submit(Item("task"), T0);
+        var t = T0;
+        // As NoticeCenter.RefreshShown: progress is passed on only while the notice shows.
+        for (int i = 0; i < 100; i++) { t = t.AddSeconds(1); if (coordinator.Current("main") is not null) coordinator.Submit(Item("task", refresh: true), t); coordinator.Tick(t); }
+        check("Notices ops: progress does not keep the island for as long as the task runs", coordinator.Current("main") is null);
+        var held = new AttentionCoordinator();
+        held.Submit(Item("task"), T0);
+        held.Submit(Item("task", refresh: true), T0.AddSeconds(5));
+        held.Tick(T0.AddSeconds(6));
+        check("Notices ops: progress near the end still keeps it a little longer", held.Current("main")?.Key == "task");
+
+        // Review 3: a timer that comes due while its own "started" notice shows rings anew, urgent and for its whole duration.
+        var timer = new AttentionCoordinator();
+        timer.Submit(Item("timer", seconds: 6), T0);
+        var rang = timer.Submit(Item("timer", urgent: true, seconds: 8), T0.AddSeconds(5));
+        check("Notices ops: a timer due while its start notice shows starts again as urgent", timer.Current("main") is { Urgent: true } ringing
+            && rang.Any(c => c.Started is { Urgent: true }) && rang.Any(c => c.Ended is { Urgent: false }));
+        timer.Tick(T0.AddSeconds(12));
+        check("Notices ops: the ringing timer stays its whole duration", timer.Current("main")?.Key == "timer");
+        var queued = new AttentionCoordinator();
+        queued.Submit(Item("other", group: "o"), T0);
+        queued.Submit(Item("timer", seconds: 6), T0);
+        queued.Submit(Item("timer", urgent: true), T0.AddSeconds(1));
+        check("Notices ops: a waiting start notice gives way to its ringing", queued.Queued("main").All(q => q.Key != "timer" || q.Urgent));
+        var burst = new AttentionCoordinator();
+        burst.Submit(Item("a", group: "cli"), T0);
+        burst.Submit(Item("b", group: "cli", urgent: true), T0.AddMilliseconds(100));
+        check("Notices ops: an alarm is not merged into a burst of ordinary notices", burst.Current("main")?.Key == "b" && burst.Current("main")!.Count == 1);
+    }
+
+    private static void ProgressOrder(Action<string, bool> check)
+    {
+        // Review 4: progress alone does not move a notice to the top of the recent list.
+        var hub = new NoticeHub();
+        NoticeInput Task(string key, double progress) => new()
+        {
+            Origin = NoticeOrigin.Cli, AppKey = "cli:build", AppName = "build", InstanceKey = "cli:" + key, ReplaceKey = key, Title = key, Progress = progress
+        };
+        hub.Receive(Task("a", .1), T0);
+        hub.Receive(Task("b", .1), T0.AddSeconds(1));
+        var step = hub.Receive(Task("a", .5), T0.AddSeconds(2));
+        check("Notices ops: a progress step keeps the list's order", step.Receipt == NoticeReceipt.Updated && hub.Notices[0].Title == "b" && hub.Notices[1].Title == "a"
+            && hub.Notices[1].ReceivedAt == T0 && hub.Notices[1].UpdatedAt == T0.AddSeconds(2));
+        hub.Receive(Task("a", 1), T0.AddSeconds(3));
+        check("Notices ops: a finished task moves to the top", hub.Notices[0].Title == "a" && hub.Notices[0].ReceivedAt == T0.AddSeconds(3));
     }
 
     private static NoticeInput Toast(uint id) => new()
