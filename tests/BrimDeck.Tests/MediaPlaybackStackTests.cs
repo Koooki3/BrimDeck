@@ -102,5 +102,23 @@ internal static class MediaPlaybackStackTests
         real.Holds(playing, Clip("Other tab", S, 30), t0);
         check("A lasting switch to another tab is shown once the hold ends",
             real.Holds(playing, Clip("Other tab", S, 30), t0.AddSeconds(1)) && !real.Holds(playing, Clip("Other tab", S, 30), t0 + MediaSwapGuard.Hold) && real.RecheckAt is null);
+
+        // The music page keeps the progress bar's room while the next song's timeline is still to come.
+        var timeline = new MusicTimelineHold();
+        var next = Clip("Espresso", P, 0) with { PositionKnown = false };
+        timeline.Observe(playing, t0); timeline.Observe(next, t0.AddSeconds(0.1));
+        check("A song reported before its timeline keeps the bar's room", timeline.Holds(t0.AddSeconds(0.5)) && timeline.Until == t0.AddSeconds(0.1) + MusicTimelineHold.Hold);
+        check("The room is given up once the hold ends", !timeline.Holds(t0.AddSeconds(0.1) + MusicTimelineHold.Hold));
+        timeline.Observe(playing, t0); timeline.Observe(next with { TimelinePending = true }, t0.AddSeconds(0.1));
+        check("A timeline the player reports as pending is waited for longer", timeline.Holds(t0.AddSeconds(5)));
+        timeline.Observe(next, t0.AddSeconds(5));
+        check("A timeline no longer pending is waited for no longer than the short hold", timeline.Until == t0.AddSeconds(5) + MusicTimelineHold.Hold);
+        timeline.Observe(Clip("Espresso", P, 0.5), t0.AddSeconds(5.5));
+        check("The timeline's arrival ends the hold", !timeline.Holds(t0.AddSeconds(5.5)) && timeline.Until is null);
+        timeline.Observe(playing, t0); timeline.Observe(next with { Id = "system:other" }, t0.AddSeconds(0.1));
+        check("Another player without a timeline is laid out at once", !timeline.Holds(t0.AddSeconds(0.1)));
+        var never = new MusicTimelineHold();
+        never.Observe(next, t0); never.Observe(next with { Title = "Other" }, t0.AddSeconds(1));
+        check("A player that never had a timeline gets no room for one", !never.Holds(t0.AddSeconds(1)));
     }
 }
