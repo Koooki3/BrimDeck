@@ -41,9 +41,11 @@ public sealed class PanelPalette
     private IReadOnlyList<PanelThemeGradient>? _clockGradients;
 
     internal PanelPalette(string id, Dictionary<string, ThemeColor> colors, Dictionary<string, ThemeColor> apps, PanelThemeEffectValues effects,
-        IReadOnlyList<PanelThemeAdjustment> adjustments, PanelThemeClock? clock, IReadOnlyList<ThemeColor>? swatches)
+        IReadOnlyList<PanelThemeAdjustment> adjustments, PanelThemeClock? clock, IReadOnlyList<ThemeColor>? swatches,
+        IReadOnlyDictionary<string, ThemeColor> writtenColors, IReadOnlyDictionary<string, ThemeColor> writtenApps)
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
+        WrittenColors = writtenColors; WrittenApps = writtenApps;
         SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. effects.Glass?.Extremes ?? [], .. PanelThemes.TextureStops(effects, colors, Surface)];
         IsDark = SurfaceStops.Average(stop => stop.Luminance) < .18;
     }
@@ -52,6 +54,10 @@ public sealed class PanelPalette
 
     public IReadOnlyDictionary<string, ThemeColor> Colors => _colors;
     public IReadOnlyDictionary<string, ThemeColor> Apps => _apps;
+    // Every token and app color as the theme and its base themes write them, before any is made readable: what the theme
+    // editor in settings shows and starts from.
+    public IReadOnlyDictionary<string, ThemeColor> WrittenColors { get; }
+    public IReadOnlyDictionary<string, ThemeColor> WrittenApps { get; }
     public ThemeColor this[string key] => _colors[key];
     public ThemeColor Surface => _colors["surface"];
     // The surface and every gradient stop: text must read on each of them.

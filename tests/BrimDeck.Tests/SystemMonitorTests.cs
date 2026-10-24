@@ -274,6 +274,14 @@ static class SystemMonitorTests
         check("Pages: the music page alone", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Music);
         settings.MusicPage = false;
         check("Pages: with every page off the usage page says so", DeckPages.Resolve(settings, DeckPage.Music) == DeckPage.Usage && DeckPages.Visible(settings).Count == 0);
+        check("The wheel switches pages by default and its choice is saved with the settings",
+            settings.MouseWheel == MouseWheelAction.Pages && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheel":2}""")!.MouseWheel == MouseWheelAction.Volume);
+        var wheelOff = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":false}""")!; wheelOff.Normalize();
+        var wheelOn = System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheelPages":true}""")!; wheelOn.Normalize();
+        check("The wheel: an older file's switch is carried across and then left out of the file",
+            wheelOff.MouseWheel == MouseWheelAction.None && wheelOn.MouseWheel == MouseWheelAction.Pages
+            && !System.Text.Json.JsonSerializer.Serialize(wheelOff).Contains("MouseWheelPages"));
+        check("The wheel: enum values stay saved as before", (int)MouseWheelAction.None == 0 && (int)MouseWheelAction.Pages == 1 && (int)MouseWheelAction.Volume == 2);
         check("Pages: opening choices", DeckPages.Opening(DefaultDeckPage.Monitor) == DeckPage.Monitor && DeckPages.Opening(DefaultDeckPage.Last) is null
             && DeckPages.Opening(DefaultDeckPage.Usage) == DeckPage.Usage && DeckPages.Opening(DefaultDeckPage.Music) == DeckPage.Music);
         var sizes = new DeckSettings { Width = 500, Height = 150, MusicWidth = 700, MusicHeight = 180, MonitorWidth = 600, MonitorHeight = 300 };
@@ -390,14 +398,15 @@ static class SystemMonitorTests
         check("Monitor core colors run from performance to efficiency", sea.Core(0, 3) == sea.Performance && sea.Core(2, 3) == sea.Efficiency && sea.Core(0, 1) == sea.Performance && sea.Core(9, 2) == sea.Efficiency);
         check("Monitor palettes differ in light and dark", Enum.GetValues<MonitorPalette>().All(p => MonitorColors.For(p, true) != MonitorColors.For(p, false)));
         check("Monitor follows the panel theme by default", new DeckSettings().MonitorPalette == MonitorPalette.Theme && MonitorColors.For(MonitorPalette.Theme) == sea);
-        check("Monitor memory colors follow the level", sea.Memory(MemoryLevel.Critical) == sea.Critical && sea.Memory(MemoryLevel.Elevated) == sea.Warning && sea.Memory(MemoryLevel.Normal) == sea.Normal);
-        var themed = MonitorColors.FromTheme("#0A84FF", ["#5CE1E6", "#FF8FB1", "#E4FF6A", "#FF9F43"], "#E4FF6A", "#FFB000", "#FF4D4D");
-        check("Monitor theme scheme takes the accent, then cyan and pink", themed is { Performance: "#0A84FF", Efficiency: "#5CE1E6", Gpu: "#FF8FB1", Normal: "#E4FF6A" });
-        var cyberpunk = MonitorColors.FromTheme("#00F0FF", ["#00F0FF", "#FF2A6D", "#B6FF3B", "#FF9E3D"], "#B6FF3B", "#FFB000", "#FF4D4D");
+        check("Monitor level colors", sea.Level(MemoryLevel.Critical, sea.Memory) == sea.Critical && sea.Level(MemoryLevel.Elevated, sea.Memory) == sea.Warning && sea.Level(MemoryLevel.Normal, sea.Memory) == sea.Memory);
+        var themed = MonitorColors.FromTheme("#0A84FF", ["#5CE1E6", "#FF8FB1", "#E4FF6A", "#FF9F43"], "#FFB000", "#FF4D4D");
+        check("Monitor theme scheme takes the accent, then cyan and pink", themed is { Performance: "#0A84FF", Efficiency: "#5CE1E6", Memory: "#5CE1E6", Gpu: "#FF8FB1",
+            Download: "#0A84FF", Upload: "#5CE1E6", Warning: "#FFB000", Critical: "#FF4D4D" });
+        var cyberpunk = MonitorColors.FromTheme("#00F0FF", ["#00F0FF", "#FF2A6D", "#B6FF3B", "#FF9E3D"], "#FFB000", "#FF4D4D");
         check("Monitor theme scheme skips a cyan that is the accent", cyberpunk is { Performance: "#00F0FF", Efficiency: "#FF2A6D", Gpu: "#B6FF3B" });
-        var flat = MonitorColors.FromTheme("#808080", ["#808081", "#808082"], "#808080", "#808080", "#808080");
+        var flat = MonitorColors.FromTheme("#808080", ["#808081", "#808082"], "#808080", "#808080");
         check("Monitor theme scheme without distinct colors still gives colors", flat.Efficiency.Length == 7 && flat.Gpu.Length == 7);
         check("Color distance", ColorMath.Distance("#000000", "#000000") == 0 && Math.Abs(ColorMath.Distance("#000000", "#FFFFFF") - Math.Sqrt(3) * 255) < 1e-9);
-        check("Monitor palette names", Enum.GetValues<MonitorPalette>().Select(MonitorColors.Name).Distinct().Count() == 4);
+        check("Monitor palette names", Enum.GetValues<MonitorPalette>().Select(MonitorColors.Name).Distinct().Count() == 5);
     }
 }

@@ -269,58 +269,11 @@ internal sealed class MonitorStrip : FrameworkElement
     // the full quota rings beside it, and a letter stays legible at this size where a glyph does not.
     private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, MemoryLevel level, string letter, bool figured, double ppd)
     {
-        Dial(drawing, x, center, share, color, letter, ppd);
+        // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
+        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), share, color, letter, ppd);
         if (!figured) return;
         var text = MonitorDraw.Text(GaugeFigure(share), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + _dial + _inner, Math.Round(center + _font * .36));
-    }
-
-    // Three quarters of a circle, from lower left over the top to lower right, filled clockwise by the share. Its centre sits a
-    // little low, so the open circle looks centred in the row; the letter is centred on its own outline, not on the font's box.
-    private const double DialStart = Math.PI * 1.25, DialSweep = Math.PI * 1.5;
-    private void Dial(DrawingContext drawing, double x, double center, double? share, string color, string letter, double ppd)
-    {
-        // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
-        double size = _dial, ring = Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), radius = size / 2 - ring / 2;
-        var c = new Point(x + size / 2, center + .5 * _scale);
-        DialArc(drawing, c, radius, 1, ArcPen(PanelTheme.Hex("ringTrack"), ring));
-        if (share is { } value && value > .002) DialArc(drawing, c, radius, Math.Min(1, value), ArcPen(color, ring));
-        // Filled as its outline rather than drawn as text: WPF puts a glyph run's baseline on whole device pixels and hints the
-        // glyph to them, which at a fractional scale left the letter up to a pixel above the ring's centre (0.7 px at 150 %). The
-        // outline is rasterised exactly where it lies, as the ring is, so the two share their centre at any scale. Unhinted, it
-        // comes out lighter than the text did (about two thirds of its ink at 150 %); a stroke around it gives the weight back
-        // evenly on every side, so the centre stays. The text renderer darkens a letter by a fraction of a pixel that grows much
-        // more slowly than the letter, so the stroke follows the square root of its size in device pixels (about half a pixel at
-        // 150 %, and close to the text's weight up to 300 %); below 8 px it shrinks with the letter, which keeps the
-        // counters of a 100 % letter open. The outline and its stroke are made once per letter and scale.
-        if (Letter(letter, ppd) is not var (glyph, weight)) return;
-        var bounds = glyph.Bounds;
-        drawing.PushTransform(new TranslateTransform(c.X - bounds.X - bounds.Width / 2, c.Y - bounds.Y - bounds.Height / 2));
-        drawing.DrawGeometry(UI.Brush(UI.Primary), weight, glyph);
-        drawing.Pop();
-    }
-    private readonly Dictionary<string, (Geometry Glyph, Pen Weight)> _letters = [];
-    private double _lettersPpd;
-    private (Geometry Glyph, Pen Weight)? Letter(string letter, double ppd)
-    {
-        if (ppd != _lettersPpd) { _letters.Clear(); _lettersPpd = ppd; }
-        if (_letters.TryGetValue(letter, out var known)) return known;
-        var glyph = MonitorDraw.Text(letter, Math.Max(1, 7 * _scale), UI.Primary, ppd, strong: true).BuildGeometry(new Point());
-        if (glyph.Bounds.IsEmpty) return null;
-        glyph.Freeze();
-        double pixels = Math.Max(1, 7 * _scale) * ppd;
-        var weight = Frozen(new Pen(UI.Brush(UI.Primary), Math.Min(.06 * pixels, .17 * Math.Sqrt(pixels)) / ppd) { LineJoin = PenLineJoin.Round });
-        return _letters[letter] = (glyph, weight);
-    }
-
-    private static void DialArc(DrawingContext drawing, Point c, double radius, double fraction, Pen pen)
-    {
-        Point at(double angle) => new(c.X + radius * Math.Sin(angle), c.Y - radius * Math.Cos(angle));
-        double sweep = DialSweep * fraction;
-        var figure = new PathFigure { StartPoint = at(DialStart), IsClosed = false };
-        figure.Segments.Add(new ArcSegment(at(DialStart + sweep), new Size(radius, radius), 0, sweep > Math.PI, SweepDirection.Clockwise, true));
-        var geometry = new PathGeometry([figure]); geometry.Freeze();
-        drawing.DrawGeometry(null, pen, geometry);
     }
 
     // A figure keeps the text color while its reading is normal and takes the level's color at the warning and critical
@@ -330,12 +283,8 @@ internal sealed class MonitorStrip : FrameworkElement
     // An arrow and the rate in at most five characters: "84K", "1.2M", "99.9G". The arrow's ink starts at x.
     private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, double? rate, string color, MemoryLevel level, double ppd)
     {
-        double size = _arrow, scale = size / 16;
-        if (!_arrows.TryGetValue(color, out var pen))
-            _arrows[color] = pen = Frozen(new Pen(UI.Brush(color), _stroke / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round });
-        drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, x - ArrowInkLeft, center - size / 2));
-        drawing.DrawGeometry(null, pen, MonitorDraw.Glyph(glyph));
-        drawing.Pop();
+        double size = Math.Round(9 * _scale);
+        MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.4 * _scale), glyph, color);
         var text = MonitorDraw.Text(RateFigure(rate), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + Math.Ceiling(ArrowInk + _inner), Math.Round(center + _font * .36));
     }

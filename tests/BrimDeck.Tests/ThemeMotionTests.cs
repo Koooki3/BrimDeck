@@ -184,6 +184,6 @@ internal static class ThemeMotionTests
             builtIns.All(id => PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", Palette(id), id))).Motion == Palette(id).Motion
                 && PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", Palette(id)))).Motion == Palette(id).Motion));
         check("Filling the template leaves the clock's color and style to the clock",
-            PanelThemes.Parse(PanelThemes.FillTemplate("copy", Palette("dracula"))) is { Clock: { Color: "gradient", Style: "neon" }, Motion.Color: "accent" });
+            PanelThemes.Parse(PanelThemes.FillTemplate("copy", Palette("dracula"))) is { Clock: { Color: "default", Style: "minimal" }, Motion.Color: "accent" });
     }
 }

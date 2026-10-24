@@ -40,6 +40,7 @@ try
     DatePickerMotionTests.Run(Check);
     InteractionFxTests.Run(Check);
     MotionReviewTests.Run(Check);
+    PanelThemeEditorTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);

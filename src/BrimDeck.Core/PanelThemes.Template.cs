@@ -27,6 +27,9 @@ public static partial class PanelThemes
         do { path = Path.Combine(folder, n == 1 ? TemplateId + ".json" : $"{TemplateId}-{n}.json"); n++; }
         while (File.Exists(path) || Directory.Exists(Path.ChangeExtension(path, null)) || ids.Contains(Path.GetFileNameWithoutExtension(path)));
         File.WriteAllText(path, FillTemplate(Path.GetFileNameWithoutExtension(path), start, baseId));
+        // Themes are listed in the order they were added (InAddedOrder). Windows gives a file made under the name of one deleted
+        // moments before that file's creation time, so the time is set to now.
+        File.SetCreationTimeUtc(path, DateTime.UtcNow);
         return path;
     }
 

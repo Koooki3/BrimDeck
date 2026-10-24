@@ -35,6 +35,8 @@ public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
 public enum DeckPage { Usage, Music, Monitor, Notices }
 public enum DefaultDeckPage { Last, Usage, Music, Monitor, Notices }
+// What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
+public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
 // The monitor an arriving notice is shown on: the one with the foreground window, or always the main panel's.
 public enum NoticeScreen { Foreground, Main }
@@ -254,6 +256,12 @@ public sealed class DeckSettings
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;
+    // What the mouse wheel does while the panel is expanded; scrolling parts of a page keep their wheel.
+    public MouseWheelAction MouseWheel { get; set; } = MouseWheelAction.Pages;
+    // Read only to carry the switch of a file saved before MouseWheel existed; Normalize moves it across and the member
+    // then disappears from the saved file.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? MouseWheelPages { get; set; }
     public DeckPage LastPage { get; set; }
     public double Width { get; set; } = 520;
     public double Height { get; set; } = 200;
@@ -282,6 +290,12 @@ public sealed class DeckSettings
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
+    // The Custom scheme's colors; kept while another scheme is chosen.
+    public MonitorCustomColors MonitorCustomColors { get; set; } = new();
+    // The collapsed readings' colors at the warning and critical levels (ReadingLevels), "#RRGGBB", or null for the panel
+    // theme's warning and critical colors. The expanded page does not change color by level.
+    public string? CompactWarningColor { get; set; }
+    public string? CompactCriticalColor { get; set; }
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     public bool MonitorProcesses { get; set; } = true;
@@ -428,6 +442,7 @@ public sealed class DeckSettings
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
+        copy.MonitorCustomColors = (MonitorCustomColors ?? new()).Copy();
         copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
@@ -465,6 +480,10 @@ public sealed class DeckSettings
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
+        MonitorCustomColors ??= new();
+        MonitorCustomColors.Normalize();
+        CompactWarningColor = AppPresets.NormalizeColor(CompactWarningColor) is { Length: > 0 } warning ? warning : null;
+        CompactCriticalColor = AppPresets.NormalizeColor(CompactCriticalColor) is { Length: > 0 } critical ? critical : null;
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
@@ -473,6 +492,7 @@ public sealed class DeckSettings
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
         CompactReadings = Core.CompactMonitor.Normalize(CompactReadings);
+        Core.CompactMonitor.MoveColors(this);
         CompactMonitor = Core.CompactMonitor.Preset(CompactReadings) ?? CompactMonitorMode.Custom;
         CompactMonitorItems = Core.CompactMonitor.Shown(CompactReadings);
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
@@ -513,11 +533,15 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
+        // A file saved before MouseWheel had the page switch turned off as MouseWheelPages = false.
+        if (MouseWheelPages is false) MouseWheel = MouseWheelAction.None;
+        MouseWheelPages = null;
+        if (!Enum.IsDefined(MouseWheel)) MouseWheel = MouseWheelAction.Pages;
         // A file saved before app rules carried plain exceptions: each becomes a rule that keeps the panel's own style in
         // all three contexts, which is what an exception did.
-        if ((FullscreenExceptions ?? []).Count > 0)
+        if (FullscreenExceptions is { Count: > 0 } legacy)
         {
-            var carried = (FullscreenExceptions ?? []).Where(entry => entry is not null)
+            var carried = legacy.Where(entry => entry is not null)
                 .Select(entry => new FullscreenRule(ScreenPolicy.NormalizeName(entry.Name), ScreenPolicy.NormalizePath(entry.Path))
                     { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal });
             FullscreenRules = carried.Concat(FullscreenRules ?? []).ToList();
