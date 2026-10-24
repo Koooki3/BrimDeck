@@ -7,11 +7,11 @@
 
 # BrimDeck - A Dynamic Island for Windows
 
-BrimDeck is a Dynamic Island for Windows 10 and 11 that brings your AI coding tool quotas, usage and the music you are playing together at the top of the screen.<br>
+BrimDeck is a Dynamic Island for Windows 11 that brings your AI coding tool quotas, usage and the music you are playing together at the top of the screen.<br>
 It stays collapsed at the top of the screen and opens only when you need it.<br>
 A native Windows app built with C# and WPF, designed for performance and smoothness.
 
-[![Download](https://img.shields.io/badge/Download-Windows%2010%20%2F%2011%20x64-9CB9FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
+[![Download](https://img.shields.io/badge/Download-Windows%2011%20x64-9CB9FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
 [![Latest release](https://img.shields.io/github/v/release/MoFeng2223/BrimDeck?style=flat-square&label=Latest&color=98DBB0)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
 [![License](https://img.shields.io/badge/License-Apache%202.0-E5A385?style=flat-square)](LICENSE)
 ![Interface languages](https://img.shields.io/badge/Interface-English%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-B9A8FF?style=flat-square)
@@ -97,9 +97,7 @@ Works with players that use Windows media controls, with extra support for some 
 
 ## Install
 
-Requires Windows 10 version 2004 (build 19041) or later, or Windows 11 (x64).
-
-On Windows 10, the settings window uses square outer corners and its WPF theme instead of Windows 11 DWM styling. Music controls remain available; the level bars use the player's session peak meter when process audio capture is unavailable.
+Requires Windows 11 (x64).
 
 1. Download and run `BrimDeck-<version>-Setup.exe` from [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest).
 2. If Windows shows "Windows protected your PC", select "More info", then "Run anyway".
