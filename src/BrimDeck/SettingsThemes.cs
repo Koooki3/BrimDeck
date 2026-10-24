@@ -40,9 +40,6 @@ public sealed partial class SettingsWindow
         _themesFresh = false;
         var chosen = PanelThemes.NormalizeId(S.PanelTheme);
         var users = PanelTheme.UserThemes;
-        Note(Loc.T("每个主题会分别记住你在它下面修改的应用颜色、预警与告警颜色和时间样式，切换回来时恢复；第一次选择的主题使用它自己的配色。",
-            "Each theme remembers the app, warning and critical colors and the clock style you change while using it, and brings them back when you return to it. A theme chosen for the first time uses its own colors."),
-            12, TextSecondary, new Thickness(0, -6, 0, 24));
         ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
             .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
