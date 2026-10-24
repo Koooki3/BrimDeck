@@ -853,7 +853,7 @@ public partial class MainWindow
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         // The system readings ask for the width of everything chosen, on whole device pixels, and show what fits in the region they get.
-        var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings.MonitorPalette, Settings.CompactReadings), scale,
+        var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
             !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi) : null;
         // Readings that do not fit scroll in their region, as the rings and the lyric do, so the region keeps its width.
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0); CurrentCompactLayout = layout;

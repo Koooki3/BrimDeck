@@ -285,6 +285,12 @@ public sealed class DeckSettings
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
+    // The Custom scheme's colors; kept while another scheme is chosen.
+    public MonitorCustomColors MonitorCustomColors { get; set; } = new();
+    // The collapsed readings' colors at the warning and critical levels (ReadingLevels), "#RRGGBB", or null for the panel
+    // theme's warning and critical colors. The expanded page does not change color by level.
+    public string? CompactWarningColor { get; set; }
+    public string? CompactCriticalColor { get; set; }
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     public bool MonitorProcesses { get; set; } = true;
@@ -403,6 +409,7 @@ public sealed class DeckSettings
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
+        copy.MonitorCustomColors = (MonitorCustomColors ?? new()).Copy();
         copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
@@ -438,6 +445,10 @@ public sealed class DeckSettings
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
+        MonitorCustomColors ??= new();
+        MonitorCustomColors.Normalize();
+        CompactWarningColor = AppPresets.NormalizeColor(CompactWarningColor) is { Length: > 0 } warning ? warning : null;
+        CompactCriticalColor = AppPresets.NormalizeColor(CompactCriticalColor) is { Length: > 0 } critical ? critical : null;
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
@@ -446,6 +457,7 @@ public sealed class DeckSettings
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
         CompactReadings = Core.CompactMonitor.Normalize(CompactReadings);
+        Core.CompactMonitor.MoveColors(this);
         CompactMonitor = Core.CompactMonitor.Preset(CompactReadings) ?? CompactMonitorMode.Custom;
         CompactMonitorItems = Core.CompactMonitor.Shown(CompactReadings);
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
