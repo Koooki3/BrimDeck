@@ -112,7 +112,7 @@ internal sealed class GlassBackdrop : IDisposable
         var now = Wanted() ? Measure() : null;
         if (now != key) { Update(); return; }
         _pending = null;
-        if (!EnsureWindow()) return;
+        if (!EnsureWindow(key)) return;
         try
         {
             Place(key);
@@ -181,6 +181,8 @@ internal sealed class GlassBackdrop : IDisposable
     private void Fade(float to, int milliseconds)
     {
         if (_sprite is null || Composition.Compositor is not { } compositor) return;
+        // With animations off (BrimDeck's setting, Windows', high contrast) the blur comes and goes at once.
+        if (!Soft.Enabled) { _sprite.StopAnimation("Opacity"); _sprite.Opacity = to; return; }
         var animation = compositor.CreateScalarKeyFrameAnimation();
         // In: the soft landing the island's motion uses (Soft.Out); out: quick and even, it only steps aside.
         if (to > 0) animation.InsertKeyFrame(1, to, compositor.CreateCubicBezierEasingFunction(new Vector2(.22f, .8f), new Vector2(.28f, 1)));
@@ -190,7 +192,7 @@ internal sealed class GlassBackdrop : IDisposable
     }
 
     // The window, its composition target and the blurred sprite, made on first use.
-    private bool EnsureWindow()
+    private bool EnsureWindow(Key key)
     {
         if (_window is not null) return true;
         if (Composition.Compositor is not { } compositor) return false;
@@ -201,9 +203,12 @@ internal sealed class GlassBackdrop : IDisposable
                 WindowStyle = unchecked((int)0x80000000), // WS_POPUP
                 // A tool window that never takes focus or a taskbar button, with no redirection surface: composition draws it.
                 ExtendedWindowStyle = 0x80 | 0x08000000 | 0x00200000 | 0x08, // TOOLWINDOW | NOACTIVATE | NOREDIRECTIONBITMAP | TOPMOST
-                Width = 1, Height = 1, PositionX = -32000, PositionY = -32000
+                // Made where the island is, on its monitor: made elsewhere (another monitor at another scale) and moved over,
+                // it would be resized for the change of scale.
+                Width = Math.Max(1, key.Width), Height = Math.Max(1, key.Height), PositionX = key.X, PositionY = key.Y
             };
             _window = new HwndSource(parameters);
+            _window.AddHook(OwnMessage);
             int on = 1;
             DwmSetWindowAttribute(_window.Handle, UseHostBackdropBrush, ref on, sizeof(int));
             _target = Composition.Target(_window.Handle);
@@ -221,6 +226,17 @@ internal sealed class GlassBackdrop : IDisposable
             Composition.Fail(); Release();
             return false;
         }
+    }
+
+    // The window is placed in device pixels and never follows a change of scale: WPF would resize it for the new scale (seen with
+    // the blur ending short of a notice on a second monitor at 125 %). It is placed again for the island as it is now.
+    private IntPtr OwnMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int DpiChanged = 0x02E0;
+        if (message != DpiChanged) return IntPtr.Zero;
+        handled = true;
+        _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () => { if (_placed is { } placed && _window is not null && !_disposed) Place(placed); });
+        return IntPtr.Zero;
     }
 
     // The panel's window moved in the z-order (it is put back on top now and then): the blur goes back just under it.
