@@ -119,7 +119,15 @@ public partial class MainWindow : Window
         Island.SizeChanged += (_, _) => EndThemeFade();
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
-        _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
+        // An open panel closes as a closing, after the new context is laid out, so it gets the closing's timing and its
+        // coordinator and hotkey hear of it; clearing _expanded first made it a relayout in place.
+        _host.ContextChanged += context =>
+        {
+            _context = context;
+            bool close = !_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true;
+            ApplySettings(true);
+            if (close && _expanded) SetExpanded(false);
+        };
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false, keyboard: true)); };
         // The user went to another window while a hotkey had given the panel the keyboard (MainWindow.Hotkeys.cs).
         Deactivated += (_, _) => ReleaseKeyboard(giveBack: false);
@@ -393,8 +401,13 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("最近通知", "Recent notices"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
+    // Ending a preview that is not on does nothing. The settings window ends it as it closes, when the window behind may
+    // already be a full-screen app: laying the panel out at once here would jump it into that context's form, where the
+    // next poll (WindowsHost) moves it there with the usual animation.
     public void Preview(bool enabled, bool expanded = true)
-    { _preview = enabled; _previewExpanded = enabled && expanded; if (enabled) _pageSwitchHold.Stop(); ApplySettings(); SetExpanded(enabled && expanded, true); }
+    {
+        if (!enabled && !_preview) return;
+        _preview = enabled;_previewExpanded = enabled && expanded; if (enabled) _pageSwitchHold.Stop(); ApplySettings(); SetExpanded(enabled && expanded, true); }
     internal void ResumeAfterPreview()
     {
         if (!_preview) return;
