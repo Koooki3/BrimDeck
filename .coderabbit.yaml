@@ -1,5 +1,26 @@
 language: zh-CN
 reviews:
+  # Only publish review feedback; do not modify code or approve pull requests.
+  high_level_summary_in_walkthrough: true
+  auto_apply_labels: false
+  auto_assign_reviewers: false
+  auto_approvals:
+    enabled: false
+  post_merge_actions: []
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+    custom: []
   auto_review:
     enabled: true
     drafts: false
