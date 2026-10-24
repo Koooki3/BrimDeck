@@ -49,20 +49,38 @@ internal static class InteractionFx
         return surface;
     }
 
-    // Notices get the answers too, above their content in the window's own adorner layer, over the content presenter, which
-    // stays when the content is replaced.
+    // Notices and the date range picker's pop-up get the answers too, above their content in the window's own adorner layer,
+    // over the content presenter, which stays when the content is replaced. The picker's layer is clipped to its rounded face:
+    // its window keeps transparent room below it (ModelDateWindow), where nothing may show.
     private static void WindowLoaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not NoticeWindow window || !ReferenceEquals(e.OriginalSource, window) || (bool)window.GetValue(AttachedProperty)) return;
+        if (sender is not (NoticeWindow or ModelDateWindow) || sender is not Window window || !ReferenceEquals(e.OriginalSource, window) || (bool)window.GetValue(AttachedProperty)) return;
         var decorator = FindDecorator(window, 4);
         if (decorator?.Child is not UIElement adorned || decorator.AdornerLayer is not { } layer) return;
         window.SetValue(AttachedProperty, true);
-        var surface = new FxSurface(window, adorned, () => true);
-        layer.Add(new FxAdorner(adorned, surface));
+        // A pop-up that is leaving takes no input (ModelDetails.ShowModelPopup) and answers nothing more.
+        var surface = new FxSurface(window, adorned, () => window.IsHitTestVisible);
+        var adorner = new FxAdorner(adorned, surface);
+        if (window is ModelDateWindow { Picker: var picker }) ClipTo(adorner, picker, adorned);
+        layer.Add(adorner);
         window.SetValue(SurfaceProperty, surface);
         // Whatever it shows ends with the notice, never lingers into the next.
         window.IsVisibleChanged += (_, _) => surface.Reset();
         Track(window, surface);
+    }
+
+    // Keeps the layer inside a face that changes height (the picker's message opening).
+    private static void ClipTo(UIElement layer, Border face, UIElement adorned)
+    {
+        var clip = new RectangleGeometry { RadiusX = face.CornerRadius.TopLeft, RadiusY = face.CornerRadius.TopLeft };
+        void Fit()
+        {
+            if (PresentationSource.FromVisual(face) is null || !adorned.IsAncestorOf(face)) return;
+            clip.Rect = face.TransformToAncestor(adorned).TransformBounds(new Rect(face.RenderSize));
+        }
+        layer.Clip = clip;
+        Fit();
+        face.SizeChanged += (_, _) => Fit();
     }
 
     // A notice leaves or hands over to the panel: what it showed ends at once rather than playing on where its buttons were.

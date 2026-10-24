@@ -36,6 +36,8 @@ internal static class Program
         foreach (var dictionary in new[] { "ToolbarResources.xaml", "MusicResources.xaml", "ModelDetailsResources.xaml" })
             app.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/BrimDeck;component/" + dictionary, UriKind.Relative)));
 
+        // The date range picker's strips (DatePreview): --date <output folder>.
+        if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
         string? folder = null; double stripDpi = 1; HashSet<string>? only = null;
         for (int i = 0; i < args.Length; i++)
         {
