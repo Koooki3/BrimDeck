@@ -38,9 +38,13 @@ internal static class Program
 
         // The date range picker's strips (DatePreview): --date <output folder>.
         if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
-        // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...].
+        // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
         if (args.Length > 1 && args[0] == "--sheet")
-            return ThemeSheet.Run(args[1], args.Length > 3 && args[2] == "--themes" ? args[3].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null);
+        {
+            int at = Array.IndexOf(args, "--themes"), scale = Array.IndexOf(args, "--dpi");
+            return ThemeSheet.Run(args[1], at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
+                scale > 0 && scale + 1 < args.Length ? double.Parse(args[scale + 1], CultureInfo.InvariantCulture) : 1);
+        }
         string? folder = null; double stripDpi = 1; HashSet<string>? only = null;
         for (int i = 0; i < args.Length; i++)
         {
@@ -55,6 +59,7 @@ internal static class Program
             Console.WriteLine($"--- {dpi * 100:0}% ---");
             Checks();
             PixelChecks();
+            StairChecks();
         }
         _dpi = stripDpi;
         if (folder is not null)
@@ -294,6 +299,34 @@ internal static class Program
     // wide with their edges (and square or flat ends) on pixel boundaries; fills and edges of a mark lie on its snapped box;
     // the mark hugs the control's drawn shape within a device pixel. Only the round, soft things (glow dots, particles' halos
     // and diagonal star rays) are free of the grid.
+    // A pixel theme's stepped outline (IslandBorder.BuildStairs) for the island's shapes at this scale: every corner on a whole
+    // device pixel, every edge level or upright, nothing outside the smooth outline's bounds, corners that really step in,
+    // and left and right mirror images.
+    private static void StairChecks()
+    {
+        double step = Math.Max(1, Math.Round(2 * _dpi)) / _dpi;
+        var shapes = new (string Name, double W, double H, CornerRadius Corners, double Shoulder, double Inset)[]
+        {
+            ("capsule", 230, 32, new CornerRadius(16), 0, 0), ("notch", 260, 32, new CornerRadius(0, 0, 12, 12), 16, 0), ("panel", 580, 300, new CornerRadius(0, 0, 18, 18), 0, 0),
+            ("notice", 320, 104, new CornerRadius(22), 0, 0), ("shadow copy", 230, 32, new CornerRadius(16), 0, 1), ("notch copy", 260, 32, new CornerRadius(0, 0, 12, 12), 16, 1)
+        };
+        foreach (var (name, w, h, corners, shoulder, inset) in shapes)
+        {
+            var points = IslandBorder.BuildStairs(w, h, shoulder, corners, inset, step);
+            // Whole device pixels from the edge the steps are counted from (the inset copy's edges lie an inset inside).
+            bool Whole(double v) => Math.Abs(v * _dpi - Math.Round(v * _dpi)) < .01;
+            bool OnGrid(double v) => Whole(v) || Whole(v - inset) || Whole(w - inset - v) || Whole(h - inset - v);
+            bool axis = points.Select((p, i) => (p, q: points[(i + 1) % points.Count])).All(e => Math.Abs(e.p.X - e.q.X) < 1e-9 || Math.Abs(e.p.Y - e.q.Y) < 1e-9);
+            bool inside = points.All(p => p.X >= inset - 1e-6 && p.X <= w - inset + 1e-6 && p.Y >= -1e-6 && p.Y <= h - (shoulder > 0 ? inset : inset) + 1e-6);
+            double leftTop = points.Where(p => p.X <= inset + 1e-6).Select(p => p.Y).DefaultIfEmpty(0).Min();
+            bool steps = corners.TopLeft > 0 ? leftTop > 1 : corners.BottomLeft > 0 && points.Where(p => p.X <= inset + 1e-6 && shoulder <= 0).Select(p => p.Y).DefaultIfEmpty(0).Max() < h - inset - 1;
+            var xs = points.Select(p => Math.Round(p.X, 4)).Distinct().Order().ToList();
+            bool mirror = xs.Zip(xs.AsEnumerable().Reverse()).All(pair => Math.Abs(pair.First - inset + pair.Second - (w - inset)) < 1e-4);
+            Check($"Stepped {name} at {_dpi * 100:0}%: on device pixels, axis-aligned, within bounds, stepped corners, mirrored",
+                points.Count >= 8 && points.All(p => OnGrid(p.X) && OnGrid(p.Y)) && axis && inside && steps && mirror);
+        }
+    }
+
     private static void PixelChecks()
     {
         var problems = new List<string>();

@@ -14,18 +14,22 @@ using BrimDeck.Core;
 // drawn with the app's own island (IslandBorder dressed by PanelTheme), clock (ClockFace) and notice surface (NoticeSurface).
 // The desktop behind is half dark wallpaper, half a light document, so glass themes show over both. Drawn at 100 percent and
 // enlarged two times, pixel for pixel, so stepped corners and lines can be checked. Not a test: a picture to look at.
-//   dotnet run -c Release --project tests/BrimDeck.FxPreview -- --sheet <folder> [--themes id,id,...]
+//   dotnet run -c Release --project tests/BrimDeck.FxPreview -- --sheet <folder> [--themes id,id,...] [--dpi 1.5]
 internal static class ThemeSheet
 {
     private const double Width = 1280, Height = 520;
 
-    public static int Run(string folder, HashSet<string>? only)
+    private static double _dpi = 1;
+
+    public static int Run(string folder, HashSet<string>? only, double dpi = 1)
     {
+        _dpi = dpi;
+        string suffix = dpi == 1 ? "" : $"-{dpi * 100:0}";
         Directory.CreateDirectory(folder);
         foreach (var theme in PanelThemes.BuiltIns.Where(t => only is null || only.Contains(t.Id)))
         {
-            Draw(PanelThemes.Resolve(theme), Path.Combine(folder, theme.Id + "-sheet.png"), theme.DisplayName);
-            if (theme.File.Night is not null) Draw(PanelThemes.Resolve(theme, true), Path.Combine(folder, theme.Id + "-night-sheet.png"), theme.DisplayName + " · 夜间");
+            Draw(PanelThemes.Resolve(theme), Path.Combine(folder, theme.Id + suffix + "-sheet.png"), theme.DisplayName);
+            if (theme.File.Night is not null) Draw(PanelThemes.Resolve(theme, true), Path.Combine(folder, theme.Id + suffix + "-night-sheet.png"), theme.DisplayName + " · 夜间");
         }
         Console.WriteLine("Wrote theme sheets to " + Path.GetFullPath(folder));
         return 0;
@@ -56,22 +60,23 @@ internal static class ThemeSheet
         Place(root, Popup(palette), 40, 120);
         Place(root, Notice(palette), 920, 120);
 
+        // Laid out and drawn at the scale under test, as on a display at that scale; then enlarged two times, pixel for pixel.
+        root.UseLayoutRounding = true;
+        VisualTreeHelper.SetRootDpi(root, new DpiScale(_dpi, _dpi));
         root.Measure(new Size(Width, Height)); root.Arrange(new Rect(0, 0, Width, Height)); root.UpdateLayout();
-        var bitmap = new RenderTargetBitmap((int)Width, (int)Height, 96, 96, PixelFormats.Pbgra32);
+        int w = (int)Math.Ceiling(Width * _dpi), h = (int)Math.Ceiling(Height * _dpi);
+        var bitmap = new RenderTargetBitmap(w, h, 96 * _dpi, 96 * _dpi, PixelFormats.Pbgra32);
         bitmap.Render(root);
-        // Enlarged pixel for pixel.
-        var big = new TransformedBitmap(bitmap, new ScaleTransform(2, 2));
-        var nearest = new RenderTargetBitmap((int)Width * 2, (int)Height * 2, 96, 96, PixelFormats.Pbgra32);
+        var nearest = new RenderTargetBitmap(w * 2, h * 2, 96, 96, PixelFormats.Pbgra32);
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {
             RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.NearestNeighbor);
-            dc.DrawImage(bitmap, new Rect(0, 0, Width * 2, Height * 2));
+            dc.DrawImage(bitmap, new Rect(0, 0, w * 2, h * 2));
         }
         nearest.Render(visual);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(nearest));
         using var stream = File.Create(file); encoder.Save(stream);
-        _ = big;
     }
 
     private static void Place(Canvas canvas, UIElement element, double x, double y) { Canvas.SetLeft(element, x); Canvas.SetTop(element, y); canvas.Children.Add(element); }

@@ -166,9 +166,14 @@ public sealed class IslandBorder : Border
     {
         var smooth = BuildOutline(w, h, shoulderRadius, corners, insetBy);
         if (smooth.IsEmpty() || !(step > 0)) return [];
-        var matrix = smooth.Transform?.Value ?? Matrix.Identity;
+        // Blocks, not a fine staircase: a corner takes about four steps whatever its radius, each a whole number of pixels.
+        double curve = Math.Max(Math.Max(Math.Max(corners.TopLeft, corners.TopRight), Math.Max(corners.BottomLeft, corners.BottomRight)), shoulderRadius);
+        step *= Math.Max(1, Math.Round(curve / (4 * step)));
+        // The flattened copy keeps the inset as its own transform (or has it applied already, leaving none).
+        var flat = smooth.GetFlattenedPathGeometry(.02, ToleranceType.Absolute);
+        var matrix = flat.Transform?.Value ?? Matrix.Identity;
         var edges = new List<(Point A, Point B)>();
-        foreach (var figure in smooth.GetFlattenedPathGeometry(.02, ToleranceType.Absolute).Figures)
+        foreach (var figure in flat.Figures)
         {
             var points = new List<Point> { figure.StartPoint };
             foreach (var segment in figure.Segments)
@@ -196,6 +201,11 @@ public sealed class IslandBorder : Border
             tops[i] = lo <= top + 1e-6 ? top : Math.Min(bottom, top + step * Math.Ceiling((lo - top) / step - .5));
             bottoms[i] = hi >= bottom - 1e-6 ? bottom : Math.Max(top, bottom - step * Math.Ceiling((bottom - hi) / step - .5));
         }
+        // A notch's shoulders flare thinner than a block at the screen edge: columns left empty at either end are dropped, so
+        // the pixel notch meets the edge square.
+        int first = 0, last = tops.Length - 1;
+        while (first < last && bottoms[first] - tops[first] < 1e-6) first++;
+        while (last > first && bottoms[last] - tops[last] < 1e-6) last--;
         var outline = new List<Point>();
         void Add(Point p)
         {
@@ -205,8 +215,8 @@ public sealed class IslandBorder : Border
                 || Math.Abs(outline[^2].Y - outline[^1].Y) < 1e-9 && Math.Abs(outline[^1].Y - p.Y) < 1e-9)) outline[^1] = p;
             else outline.Add(p);
         }
-        for (int i = 0; i < tops.Length; i++) { Add(new Point(columns[i], tops[i])); Add(new Point(columns[i + 1], tops[i])); }
-        for (int i = bottoms.Length - 1; i >= 0; i--) { Add(new Point(columns[i + 1], bottoms[i])); Add(new Point(columns[i], bottoms[i])); }
+        for (int i = first; i <= last; i++) { Add(new Point(columns[i], tops[i])); Add(new Point(columns[i + 1], tops[i])); }
+        for (int i = last; i >= first; i--) { Add(new Point(columns[i + 1], bottoms[i])); Add(new Point(columns[i], bottoms[i])); }
         return outline;
     }
 
