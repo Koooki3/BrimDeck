@@ -654,7 +654,8 @@ internal sealed partial class NoticeWindow : Window
         button.MouseEnter += (_, _) => { if (!primary) face.Background = UI.Brush(_look.Hover); else face.Opacity = .88; };
         button.MouseLeave += (_, _) => { face.Background = UI.Brush(rest); face.Opacity = 1; };
         button.PreviewMouseLeftButtonDown += (_, _) => { if (!primary) face.Background = UI.Brush(_look.Pressed); };
-        button.GotKeyboardFocus += (_, _) => face.BorderThickness = new Thickness(1.5);
+        // Only for focus moved by the keyboard: a button takes focus when clicked too, and should not then wear a ring.
+        button.GotKeyboardFocus += (_, _) => { if (InputManager.Current.MostRecentInputDevice is KeyboardDevice) face.BorderThickness = new Thickness(1.5); };
         button.LostKeyboardFocus += (_, _) => face.BorderThickness = new Thickness(0);
         button.Click += (_, _) => click();
         AutomationProperties.SetName(button, text);
