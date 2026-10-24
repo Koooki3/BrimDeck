@@ -249,6 +249,8 @@ public sealed class DeckSettings
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;
+    // The mouse wheel walks the shown pages while the panel is expanded; scrolling parts of a page keep their wheel.
+    public bool MouseWheelPages { get; set; } = true;
     public DeckPage LastPage { get; set; }
     public double Width { get; set; } = 520;
     public double Height { get; set; } = 200;
