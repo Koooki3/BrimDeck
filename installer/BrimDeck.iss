@@ -71,7 +71,8 @@ DefaultDirName={autopf}\{#AppName}
 DisableDirPage=no
 DisableReadyPage=yes
 DisableProgramGroupPage=yes
-MinVersion=10.0.22000
+; Match the Windows API target in BrimDeck.csproj (Windows 10 version 2004).
+MinVersion=10.0.19041
 SetupArchitecture=x64
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
