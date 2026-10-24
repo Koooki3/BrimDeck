@@ -3,7 +3,7 @@ namespace BrimDeck.Core.Notices;
 // How a dynamic notice moves, on the panel's own clock (MainWindow.SetExpanded), so that the notice and the panel read as one
 // object. A move lasts the animation duration set for the panel. The notice grows out of the island as the panel opens: the
 // whole move on the opening spring, the island's flat indicator color gone within its first frames. It goes back as the panel
-// closes: its content leaves first, the surface settles with a slow start, the indicator's color returns only at the line's
+// closes: its content leaves first, the surface follows on the drawer's curve, the indicator's color returns only at the line's
 // size, and the island's own content lands last. The details open and close the same way. The content that leaves and the
 // content that arrives never show at once, so two figures are never faded over each other.
 // Tracks are fractions of a move (Start to End).

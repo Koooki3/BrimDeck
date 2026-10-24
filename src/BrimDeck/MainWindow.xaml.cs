@@ -570,7 +570,7 @@ public partial class MainWindow : Window
         HoverExtension.IsHitTestVisible = expanded;
         HoverExtension.Visibility = expanded ? Visibility.Visible : Visibility.Hidden;
         double boxTop = double.IsFinite(box.Top) ? box.Top : 0;
-        // Collapsing runs in three stages: the content leaves first, the surface settles with a slow start, the compact content lands last.
+        // Collapsing runs in three stages: the content leaves first, the surface follows on the drawer's curve, the compact content lands last.
         // Expanding must feel immediate: the surface grows from the first frame on the opening spring, the compact content vanishes
         // quickly, and the content fades in once the surface is about two thirds open.
         // Open already (a page switch, a new page size), the surface reshapes over the whole of the move, easing in and out, so
@@ -608,7 +608,7 @@ public partial class MainWindow : Window
         // Booting does not use that give: Bounce on Margin and Height would bob the whole capsule or line after the round
         // dot has already finished its jumps (the notch sits at the top edge, so the same overshoot is barely seen).
         bool bounce = !booting && expanded && !reshaping && !keyboard && duration > 0 && HasRoomToBounce(width, height, left, gap);
-        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting || redirect ? Soft.Out : Soft.Settle;
+        IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Drawer;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         // motion-review F13: what leaves eases out as what arrives does; InOut is for what changes in place.
