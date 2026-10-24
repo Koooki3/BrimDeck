@@ -57,6 +57,7 @@ public partial class MainWindow
         if (own == IntPtr.Zero) return;
         if (!_keyboardPanel && NoticeNative.Foreground() is var previous && previous != own) _keyboardReturn = previous;
         _keyboardPanel = true;
+        WindowsHost.KeyboardPanel = own;
         NoticeNative.SetActivatable(own, true);
         Activate();
         Dispatcher.BeginInvoke(() => { if (_keyboardPanel && _expanded) FocusPanelStart(); }, DispatcherPriority.Input);
@@ -80,6 +81,8 @@ public partial class MainWindow
         NoticeNative.SetActivatable(own, false);
         if (giveBack) NoticeNative.ReturnForeground(own, _keyboardReturn);
         _keyboardReturn = IntPtr.Zero;
+        // Only once the foreground has moved on: until then the panel being in front must not read as a change of context.
+        if (WindowsHost.KeyboardPanel == own) WindowsHost.KeyboardPanel = IntPtr.Zero;
     }
 
     internal void CollapseFromHotkey() => SetExpanded(false, keyboard: true);
