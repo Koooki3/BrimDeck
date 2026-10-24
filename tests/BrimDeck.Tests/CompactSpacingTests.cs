@@ -15,7 +15,68 @@ internal static class CompactSpacingTests
         Uniform(check);
         Surfaces(check);
         Motion(check);
+        Passing(check);
         Held(check);
+    }
+
+    // A drag that narrows (or widens) the row while parts leave (or arrive): parts are taken away by CompactMusicLayout at once
+    // and fade out over the next frames. At every frame no part lies over another, a part on its way in or out is drawn within its
+    // own room, nothing runs past the row, and what the row must show (cover, equalizer, clock, the title at its shortest) stays.
+    private static void Passing(Action<string, bool> check)
+    {
+        bool apart = true, inside = true, within = true, kept = true; string first = "";
+        void Fail(ref bool flag, string what) { if (flag && first.Length == 0) first = what; flag = false; }
+        // The capsule at the default height with two quota rings and every reading, as on screen.
+        double clock = 38, gap = 8, title = 400;
+        double[] readings = [.. Readings];
+        foreach (var dpi in Dpis) foreach (var step in new[] { 2d, 7, 23, 61 }) foreach (var fade in new[] { .05, .2, .5 })
+        foreach (var narrowing in new[] { true, false })
+        {
+            // Presence by part: 0 cover, 1 rings, 2 title, 3..8 readings in Order, 9 equalizer, 10 clock.
+            var presence = new double[11];
+            double required = CompactMusicLayout.Calculate(0, 1, true, 2, true, clock, readings, gap).Required;
+            double from = narrowing ? 800 : Math.Ceiling(required) + 1, to = narrowing ? Math.Ceiling(required) + 1 : 800;
+            bool started = false;
+            for (double w = from; narrowing ? w >= to : w <= to; w += narrowing ? -step : step)
+            {
+                double row = Math.Floor(w * dpi + 1e-6) / dpi;
+                var l = CompactMusicLayout.Calculate(row, 1, true, 2, true, clock, readings, gap);
+                var shown = CompactMonitor.First(CompactMonitorItems.All, l.MonitorItems);
+                // Readings offered in Priority order; placed in Order.
+                double Offered(CompactMonitorItems item) => readings[CompactMonitor.Priority.ToList().IndexOf(item)];
+                bool[] wanted = [l.CoverWidth > 0, l.RingWidth > 0, l.TextWidth > 0, .. CompactMonitor.Order.Select(item => (shown & item) != 0), l.EqualizerWidth > 0, l.ClockWidth > 0];
+                for (int i = 0; i < presence.Length; i++)
+                    presence[i] = !started ? (wanted[i] ? 1 : 0) : Math.Clamp(presence[i] + (wanted[i] ? fade : -fade), 0, 1);
+                started = true;
+                double[] widths = [20, Math.Max(l.RingWidth, 12), 0, .. CompactMonitor.Order.Select(Offered), 18, clock];
+                var parts = widths.Select((v, i) => new CompactSpacing.Part(v, presence[i])).ToArray();
+                var p = CompactSpacing.Arrange(parts, 2, title, row, gap, 1, dpi);
+                string at = $"dpi{dpi} step{step} fade{fade} {(narrowing ? "narrowing" : "widening")} w{w}";
+                double px = 1 / dpi + 1e-9, end = -1;
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    if (p.Presence[i] <= 0) continue;
+                    if (p.Left[i] < end - px) Fail(ref apart, at + $" part{i}");
+                    end = p.Left[i] + p.Room[i];
+                    // What is drawn: the title fills its room; every other part at its width times Zoom, in the middle of its room.
+                    if (i != 2 && widths[i] * CompactSpacing.Zoom(p.Presence[i]) > p.Room[i] + px) Fail(ref inside, at + $" part{i}");
+                    if (p.Presence[i] > presence[i] + 1e-9) Fail(ref inside, at + $" more present part{i}");
+                }
+                if (end > row + 1e-9 || p.Left.Any(v => v < -1e-9)) Fail(ref within, at);
+                if (presence[0] < 1 || presence[9] < 1 || presence[10] < 1 || p.Presence[0] < 1 || p.Presence[9] < 1 || p.Presence[10] < 1
+                    || Math.Abs(p.Room[0] - 20) > px || Math.Abs(p.Room[9] - 18) > px || Math.Abs(p.Room[10] - clock) > px
+                    || p.TitleRoom < Math.Min(CompactMusicLayout.MinimumText, l.TextWidth) - px)
+                    Fail(ref kept, at + $" title{p.TitleRoom}");
+            }
+        }
+        string Detail(bool ok) => ok ? "" : ": " + first;
+        check("Compact spacing: while parts come and go in a drag, no part lies over another" + Detail(apart), apart);
+        check("Compact spacing: a part on its way in or out is drawn within its own room" + Detail(inside), inside);
+        check("Compact spacing: parts on their way out never push the row past its width" + Detail(within), within);
+        check("Compact spacing: while parts come and go, the cover, equalizer, clock and the title at its shortest stay whole" + Detail(kept), kept);
+        // The drawing of a part on its way out before: .82 to 1 of its width, in a room of its width times its presence.
+        check("Compact spacing: a fading part is drawn no wider than its room", Enumerable.Range(0, 101).All(k => 44 * CompactSpacing.Zoom(k / 100.0) <= 44 * (k / 100.0) + 1e-9)
+            && 44 * (.82 + .18 * .5) > 44 * .5);
     }
 
     private static CompactSpacing.Part[] Parts(params double[] widths) => [.. widths.Select(w => new CompactSpacing.Part(w, 1))];

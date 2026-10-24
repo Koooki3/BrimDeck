@@ -13,7 +13,56 @@ internal static class CompactRowTests
         Examples(check);
         Properties(check);
         Surfaces(check);
+        Narrowing(check);
         Alert(check);
+    }
+
+    // The capsule (and the notch) dragged from wide down to the narrowest the grips allow (MainWindow.CompactWidthRange: the
+    // surface for Required, rounded up a DIP), with media playing, two quota rings and every reading: the equalizer, cover, clock
+    // and title stay at every width, every ring and reading leaves before any of them, and the narrowest surface still holds them.
+    private static void Narrowing(Action<string, bool> check)
+    {
+        var screen = new DipRect(0, 0, 2560, 1440); var area = new DipRect(0, 0, 2560, 1392);
+        bool required = true, ordered = true, floor = true; string first = "";
+        void Fail(ref bool flag, string what) { if (flag && first.Length == 0) first = what; flag = false; }
+        foreach (var style in new[] { CompactStyle.Capsule, CompactStyle.Notch })
+        foreach (var height in new[] { 24d, 32, 40, 48 })
+        foreach (var dpi in new[] { 1d, 1.25, 1.5, 2 })
+        {
+            double scale = height / CollapsedLimits.BaseHeight, face = Math.Ceiling(38 * scale - .001), inner = CompactMusicLayout.Whole(8 * scale);
+            double[] offered = [.. RowReadings.Select(r => Math.Ceiling(r * scale))];
+            double requiredWidth = Math.Ceiling(CompactMusicLayout.Calculate(0, scale, true, 2, true, face, offered, inner).Required) + 1;
+            double fit = CollapsedGeometry.SurfaceWidth(style, height, requiredWidth);
+            double narrowest = Math.Max(CollapsedGeometry.WidthRange(style, screen, area).Min, fit);
+            int optionalBefore = int.MaxValue;
+            var surfaces = new List<double>();
+            for (double s = 900; s > narrowest; s--) surfaces.Add(s);
+            surfaces.Add(narrowest);
+            foreach (var surface in surfaces)
+            {
+                var settings = new DeckSettings { NotchWidth = surface, NotchHeight = height, CapsuleWidth = surface, CapsuleHeight = height };
+                settings.Normalize();
+                var shape = CollapsedGeometry.Resolve(settings, style, screen, area, dpi, 0, requiredWidth);
+                double content = style == CompactStyle.Notch ? Math.Min(shape.ContentWidth, shape.Surface.Width - 2 * (shape.Shoulder + shape.BottomRadius)) : shape.ContentWidth;
+                content = Math.Floor(content * dpi + .001) / dpi;
+                var l = CompactMusicLayout.Calculate(content, scale, true, 2, true, face, offered, inner);
+                string at = $"{style} h{height} dpi{dpi} surface{surface:0.##}";
+                double minimum = CompactMusicLayout.Whole(CompactMusicLayout.MinimumText * scale);
+                if (l.EqualizerWidth == 0 || l.CoverWidth == 0 || l.ClockWidth == 0 || l.TextWidth < minimum - 1e-9) Fail(ref required, at);
+                // Rings and readings only leave as the row narrows, never come back, and never stay while a required part is gone.
+                int optional = l.VisibleRings + l.MonitorItems;
+                if (optional > optionalBefore || l.MonitorItems > 0 && l.VisibleRings < 2) Fail(ref ordered, at);
+                optionalBefore = optional;
+                if (Math.Abs(surface - narrowest) < 1e-9 && (narrowest == fit && optional != 0 || Math.Abs(shape.Surface.Width - narrowest) > 1e-9)) Fail(ref floor, at + " at the narrowest");
+            }
+        }
+        string Detail(bool ok) => ok ? "" : ": " + first;
+        check("Compact drag: down to the narrowest surface, the equalizer, cover, clock and the title at its shortest always show" + Detail(required), required);
+        check("Compact drag: quota rings and readings leave before any required part, readings before rings" + Detail(ordered), ordered);
+        check("Compact drag: the narrowest surface the grips allow holds the required parts, and no more where they set it" + Detail(floor), floor);
+        // The row as seen on screen: 300 DIPs of capsule with two quota rings and every reading still has its equalizer.
+        var seen = CompactMusicLayout.Calculate(300 - 32, 1, true, 2, true, 38, RowReadings, 8);
+        check("Compact drag: a 300 DIP capsule shows the equalizer beside the rings and the readings that fit", seen is { EqualizerWidth: 18, VisibleRings: 2 } && seen.MonitorItems < RowReadings.Length);
     }
 
     private static void Examples(Action<string, bool> check)
