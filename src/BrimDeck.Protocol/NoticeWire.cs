@@ -55,6 +55,8 @@ public sealed class NoticeMessage
     public string? Until { get; set; }
     public long? LeadMs { get; set; }
     public bool? Stop { get; set; }
+    // A desktop notification marked "transient": shown, but not saved with the recent notices (I1).
+    public bool? Transient { get; set; }
     public List<NoticeActionInfo>? Actions { get; set; }
     // Type "action": the chosen action's key.
     public string? ActionKey { get; set; }

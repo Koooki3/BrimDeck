@@ -91,6 +91,15 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
         return new(bus, forward);
     }
 
+    // The answer to a call to the agent's own bus name while it is not the notification service (it watches another, or has
+    // no name): an error at once, instead of leaving the caller to the bus's 25-second timeout (W10). Nothing for a call that
+    // expects no reply.
+    public static ServiceOutput NotServing(DBusMessage call)
+        => call.Type != DBusMessageType.MethodCall || (call.Flags & DBusMessage.NoReplyExpected) != 0 ? ServiceOutput.None
+            : new([call.ErrorFor(UnknownMethod, "BrimDeck's agent is not the notification service now.")], []);
+
+    public const string UnknownMethod = "org.freedesktop.DBus.Error.UnknownMethod";
+
     // Whether BrimDeck's action or dismissal is about this run's notices. One for another session is about an earlier run's
     // notice, whose id this run may have handed out again (C-L5); one without a session comes from a BrimDeck that does not
     // send it yet, and is taken as before.
@@ -107,13 +116,15 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
     // merely stopped showing is not dismissed: it stays open for the application.
     public IReadOnlyList<DBusMessage> Dismissed(uint id) => Forget(id) ? [Closed(id, FreedesktopNotifications.DismissedByUser)] : [];
 
-    // The notices whose expire_timeout ran out by now: closed for their applications as expired (W12). BrimDeck keeps them
-    // in its recent notices; a later dismissal there no longer reaches the application.
-    public IReadOnlyList<DBusMessage> Expire(DateTimeOffset now)
+    // The notices whose expire_timeout ran out by now: closed for their applications as expired (W12), and for BrimDeck as
+    // the CloseNotification branch closes them, so that it drops their buttons, which would no longer reach the application
+    // (review-batch1 item 2). BrimDeck keeps them in its recent notices, marked as closed at the source.
+    public ServiceOutput Expire(DateTimeOffset now)
     {
         var due = _expires.Where(pair => pair.Value <= now).Select(pair => pair.Key).ToList();
         foreach (var id in due) Forget(id);
-        return due.Select(id => Closed(id, FreedesktopNotifications.Expired)).ToList();
+        return new(due.Select(id => Closed(id, FreedesktopNotifications.Expired)).ToList(),
+            due.Select(id => new NoticeMessage { Type = NoticeTypes.Close, Origin = "dbus", Session = Session, NativeId = Id(id), Reason = (int)FreedesktopNotifications.Expired }).ToList());
     }
 
     private bool Forget(uint id) { _expires.Remove(id); return _open.Remove(id); }

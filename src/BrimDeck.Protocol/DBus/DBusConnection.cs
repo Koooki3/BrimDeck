@@ -9,6 +9,11 @@ public sealed class DBusException(string name, string message) : Exception(messa
     public string Name { get; } = name;
 }
 
+// What DBusConnection.SessionAddress reads: environment variables, whether a file is there, its owner's user id, the files
+// in a folder (full paths) and a small file's text. The agent passes the real ones; the tests pass their own.
+public sealed record BusLookup(Func<string, string?> Variable, Func<string, bool> Exists, Func<string, uint> OwnerOf,
+    Func<string, IEnumerable<string>> Files, Func<string, string?> Read, string MachineId);
+
 // A connection to a message bus over a Unix socket, authenticated as the calling user (SASL EXTERNAL). Method calls and
 // signals addressed to this connection, and everything a monitor connection receives, arrive through Received; replies to
 // CallAsync are matched by serial and returned instead.
@@ -42,15 +47,54 @@ public sealed class DBusConnection : IAsyncDisposable
 
     private DBusConnection(Socket socket) { _socket = socket; _stream = new NetworkStream(socket, ownsSocket: true); }
 
-    // The session bus address of this login, as libdbus finds it.
-    public static string? SessionAddress(uint uid)
+    // The session bus address of this login, as libdbus and GIO find it (W6), in this order: DBUS_SESSION_BUS_ADDRESS;
+    // $XDG_RUNTIME_DIR/bus and /run/user/<uid>/bus, each only when it is the user's own (WSLg may set XDG_RUNTIME_DIR to its
+    // own folder, which has no bus, while systemd's is in /run/user); and last the address an X11 autolaunched bus wrote to
+    // ~/.dbus/session-bus/<machine id>-<display> (a distribution without systemd). Null when none is there yet; finding none
+    // touches nothing but a few names, so it can be asked every few seconds.
+    public static string? SessionAddress(uint uid, BusLookup look)
     {
-        var address = Environment.GetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS");
-        if (!string.IsNullOrWhiteSpace(address)) return address;
-        var runtime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
-        if (string.IsNullOrWhiteSpace(runtime)) runtime = "/run/user/" + uid;
-        var path = Path.Combine(runtime, "bus");
-        return File.Exists(path) ? "unix:path=" + path : null;
+        var address = look.Variable("DBUS_SESSION_BUS_ADDRESS");
+        if (!string.IsNullOrWhiteSpace(address)) return address.Trim();
+        // An unknown user owns nothing (its id never matches a file's).
+        if (uid == uint.MaxValue) return null;
+        foreach (var folder in new[] { look.Variable("XDG_RUNTIME_DIR"), "/run/user/" + uid.ToString(System.Globalization.CultureInfo.InvariantCulture) })
+        {
+            if (string.IsNullOrWhiteSpace(folder) || !folder.StartsWith('/')) continue;
+            var path = folder.TrimEnd('/') + "/bus";
+            if (look.Exists(path) && look.OwnerOf(path) == uid) return "unix:path=" + path;
+        }
+        if (look.Variable("HOME") is not { Length: > 1 } home || !home.StartsWith('/') || DisplayNumber(look.Variable("DISPLAY")) is not { } display) return null;
+        var folderPath = home.TrimEnd('/') + "/.dbus/session-bus/";
+        var files = look.Files(folderPath).Select(file => file[(file.LastIndexOf('/') + 1)..]).Where(name => name.EndsWith("-" + display, StringComparison.Ordinal)).ToList();
+        // The file of this machine first, as libdbus names it; another machine id's (a copied home) only without one.
+        foreach (var name in files.OrderBy(name => name == look.MachineId + "-" + display ? 0 : 1))
+            if (AutolaunchAddress(look.Read(folderPath + name)) is { } found) return found;
+        return null;
+    }
+
+    // The display's number in DISPLAY (":0", ":0.0", "host:10.0"); null without one.
+    public static string? DisplayNumber(string? display)
+    {
+        if (string.IsNullOrWhiteSpace(display)) return null;
+        int colon = display.LastIndexOf(':');
+        if (colon < 0) return null;
+        var number = display[(colon + 1)..].Split('.')[0];
+        return number.Length > 0 && number.All(char.IsAsciiDigit) ? number : null;
+    }
+
+    // The DBUS_SESSION_BUS_ADDRESS line of an autolaunch file, its quotes taken off.
+    public static string? AutolaunchAddress(string? text)
+    {
+        foreach (var line in (text ?? "").Split('\n'))
+        {
+            const string Key = "DBUS_SESSION_BUS_ADDRESS=";
+            if (!line.StartsWith(Key, StringComparison.Ordinal)) continue;
+            var value = line[Key.Length..].Trim();
+            if (value.Length >= 2 && value[0] is '\'' or '"' && value[^1] == value[0]) value = value[1..^1];
+            return value.Length > 0 ? value : null;
+        }
+        return null;
     }
 
     // The socket endpoints in an address list such as "unix:path=/run/user/1000/bus;unix:abstract=/tmp/x,guid=...".

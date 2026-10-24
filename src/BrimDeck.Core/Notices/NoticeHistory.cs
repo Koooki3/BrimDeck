@@ -144,7 +144,8 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
     public bool Save(IEnumerable<Notice> notices, IEnumerable<NoticeKnownApp> apps, Func<bool>? wanted = null, long? order = null)
     {
         long own = order ?? NextOrder();
-        var contents = new Contents { Notices = notices.ToList(), Apps = apps.ToList() };
+        // A transient notice is never written (Notice.Transient).
+        var contents = new Contents { Notices = notices.Where(notice => !notice.Transient).ToList(), Apps = apps.ToList() };
         var json = JsonSerializer.SerializeToUtf8Bytes(contents, Options);
         var protectedData = protector.Protect(json);
         lock (_write)

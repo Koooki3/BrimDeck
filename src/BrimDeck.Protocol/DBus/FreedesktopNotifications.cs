@@ -11,8 +11,15 @@ public static partial class FreedesktopNotifications
     public const string NotifySignature = "susssasa{sv}i";
     // NotificationClosed reasons.
     public const uint Expired = 1, DismissedByUser = 2, ClosedByCall = 3, Undefined = 4;
-    // Only what the agent implements: plain body text and actions (shown as buttons in the notice's details).
-    public static readonly string[] Capabilities = ["body", "actions"];
+    // Only what the agent implements: body text, actions (shown as buttons in the notice's details), and body markup, which
+    // BrimDeck shows as plain text (PlainText). Saying "body-markup" makes clients that check escape a literal "<" or "&" in
+    // the body, which the decoding then turns back into what they meant (W11).
+    public static readonly string[] Capabilities = ["body", "body-markup", "actions"];
+    // Hints that name a notice a client sends again and again in its place: a volume or brightness OSD sends a new notice
+    // (replaces_id 0) at each step with the same tag, which then updates the one shown instead of adding another (I1).
+    public static readonly string[] StackHints = ["x-canonical-private-synchronous", "synchronous", "x-dunst-stack-tag"];
+    // The ReplaceId given for such a tag; within the application's own notices only (NoticeHub matches it by AppKey).
+    public const string StackPrefix = "stack:";
 
     public const string Introspection = """
         <!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
@@ -38,7 +45,8 @@ public static partial class FreedesktopNotifications
 
     // A Notify call's arguments as a notice. The id is the one the service gives (or gave, for a replacement); the sender is
     // the caller's unique bus name, which with the id identifies the notice for later updates. Texts are cut to the protocol's
-    // limits here, as BrimDeck would cut them: a long body must not make the notice too large for a frame (sec-L3).
+    // limits here, as BrimDeck would cut them: a long body must not make the notice too large for a frame (sec-L3). Only the
+    // body may carry markup; the summary is plain text by the specification and is kept as it is, "<" and "&" included (W11).
     public static NoticeMessage ToNotice(object[] body, uint id)
     {
         string appName = body[0] as string ?? "", icon = body[2] as string ?? "", summary = body[3] as string ?? "", text = body[4] as string ?? "";
@@ -48,7 +56,7 @@ public static partial class FreedesktopNotifications
         {
             Origin = "dbus", NativeId = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
             AppName = appName.Length > 0 ? NoticeProtocol.Clip(appName, NoticeProtocol.MaxField) : null,
-            Title = NoticeProtocol.Clip(PlainText(summary), NoticeProtocol.MaxTitle), Body = NoticeProtocol.Clip(PlainText(text), NoticeProtocol.MaxBody),
+            Title = NoticeProtocol.Clip(summary, NoticeProtocol.MaxTitle), Body = NoticeProtocol.Clip(PlainText(text), NoticeProtocol.MaxBody),
             Icon = NoticeProtocol.Clip(icon.Length > 0 ? icon : Hint<string>(hints, "image-path") ?? Hint<string>(hints, "image_path"), 1024),
             AppId = NoticeProtocol.Clip(Hint<string>(hints, "desktop-entry"), NoticeProtocol.MaxField),
             CreatedAt = DateTimeOffset.UtcNow,
@@ -63,6 +71,10 @@ public static partial class FreedesktopNotifications
                 pairs.Add(new() { Key = NoticeProtocol.Clip(key, 64)!, Label = NoticeProtocol.Clip(label.Length > 0 ? label : key, 64)! });
         if (pairs.Count > 0) message.Actions = pairs;
         if (Hint<int?>(hints, "value") is { } value && value is >= 0 and <= 100) message.Progress = value / 100d;
+        if (StackHints.Select(name => Hint<string>(hints, name)).FirstOrDefault(tag => !string.IsNullOrWhiteSpace(tag)) is { } stack)
+            message.ReplaceId = NoticeProtocol.Clip(StackPrefix + stack, NoticeProtocol.MaxField);
+        // Not to be kept once it went: BrimDeck shows it but does not save it with the recent notices (I1).
+        if (Hint<bool?>(hints, "transient") == true || Hint<int?>(hints, "transient") is { } flag && flag != 0) message.Transient = true;
         return message;
     }
 
@@ -88,7 +100,8 @@ public static partial class FreedesktopNotifications
         return "info";
     }
 
-    // Bodies may carry a small markup subset even to a service without "body-markup"; BrimDeck shows plain text.
+    // A body in the specification's small markup subset ("body-markup"), as plain text: tags go, line breaks stay, entities
+    // are decoded. A watched service may not say "body-markup"; its bodies are treated the same.
     public static string PlainText(string text)
     {
         if (text.IndexOf('<') < 0 && text.IndexOf('&') < 0) return text;

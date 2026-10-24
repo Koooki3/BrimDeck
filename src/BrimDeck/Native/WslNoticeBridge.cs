@@ -8,12 +8,14 @@ using BrimDeck.Protocol;
 
 namespace BrimDeck.Native;
 
-public enum WslAgentState { Off, NotRunning, NotPackaged, Installing, Starting, Server, Monitor, MonitorDenied, NoBus, Failed }
+// Idle: the agent ended because the user ran nothing in the distribution for a while (W2), so that WSL can stop it.
+public enum WslAgentState { Off, NotRunning, NotPackaged, Installing, Starting, Server, Monitor, MonitorDenied, NoBus, Failed, Idle }
 
 // The agents of the WSL distributions the user chose. A distribution is never started for notices: its agent starts once the
-// distribution runs (checked every RunningCheck while it does not) and stops with BrimDeck. Each agent is installed into
-// ~/.local/share/brimdeck of the distribution's default user the first time, and again when BrimDeck brings a new one.
-// Events are raised on worker threads.
+// distribution runs (checked every RunningCheck while it does not) and stops with BrimDeck, or ends by itself once the user
+// ran nothing there for WslLink.IdleLimit, since an agent that never ends keeps the distribution and WSL's virtual machine
+// running (W2); it starts again when the distribution next runs. Each agent is installed into ~/.local/share/brimdeck of the
+// distribution's default user the first time, and again when BrimDeck brings a new one. Events are raised on worker threads.
 internal sealed class WslNoticeBridge : IDisposable
 {
     public static readonly TimeSpan RunningCheck = TimeSpan.FromSeconds(30);
@@ -131,7 +133,8 @@ internal sealed class WslNoticeBridge : IDisposable
         bool waiting = false;
         foreach (var agent in idle)
         {
-            if (running.Contains(agent.Distribution)) _ = agent.StartAsync(_stop.Token);
+            // One that ended as idle waits for its distribution to stop and run again (see WslLink.StartAfterIdle).
+            if (running.Contains(agent.Distribution)) { if (agent.MayStart()) _ = agent.StartAsync(_stop.Token); }
             else { agent.MarkNotRunning(); waiting = true; }
         }
         if (_wsl1 != true || !waiting) { _idleChecks = 0; return RunningCheck; }
@@ -322,6 +325,8 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
     private readonly IntakeGate _intake = new(300, TimeSpan.FromSeconds(10));
     // The last failed install: the agent file's hash and the script's exit code (null: it did not finish).
     private (string Hash, int? Code)? _installFailure;
+    // When the agent last ended as idle (WslLink.IdleExitCode), until the distribution is seen stopped; null otherwise.
+    private DateTimeOffset? _idleSince;
 
     public string Distribution { get; } = distribution;
     public WslAgentState State { get; private set; } = WslAgentState.Off;
@@ -333,7 +338,19 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
 
     public bool NeedsStart { get { lock (_gate) return !_disposed && _process is null && State != WslAgentState.Installing && State != WslAgentState.Starting && DateTimeOffset.UtcNow >= _retryAt; } }
 
-    public void MarkNotRunning() { if (State is WslAgentState.Off or WslAgentState.NotRunning or WslAgentState.Failed) SetState(WslAgentState.NotRunning, ""); }
+    // The distribution is not running: an idle end is over, and the agent starts as soon as it runs again.
+    public void MarkNotRunning()
+    {
+        lock (_gate) _idleSince = null;
+        if (State is WslAgentState.Off or WslAgentState.NotRunning or WslAgentState.Failed or WslAgentState.Idle) SetState(WslAgentState.NotRunning, "");
+    }
+
+    // Whether to start the agent of a running distribution: always, unless it ended as idle and the distribution has kept
+    // running since, for less than WslLink.IdleRestart.
+    public bool MayStart()
+    {
+        lock (_gate) return _idleSince is not { } since || WslLink.StartAfterIdle(true, DateTimeOffset.UtcNow - since);
+    }
 
     public void Fail(string detail) => Retry(detail);
 
@@ -341,7 +358,7 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
     {
         if (!WslNoticeBridge.AgentPackaged) { SetState(WslAgentState.NotPackaged, ""); return; }
         bool installed;
-        lock (_gate) { if (_disposed || _process is not null) return; installed = _installed; }
+        lock (_gate) { if (_disposed || _process is not null) return; installed = _installed; _idleSince = null; }
         try
         {
             // The earlier agent may still own the notification service and the CLI socket; this one would only watch it
@@ -429,16 +446,25 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or ObjectDisposedException) { }
         catch (Exception ex) { NoticeCenter.Log(ex); }
+        // Its output ends as it exits; wsl.exe hands on the agent's exit code, which says whether it ended as idle (W2).
+        int? code = null;
+        try { if (process.WaitForExit(3000)) code = process.ExitCode; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        bool idle = reported && code == WslLink.IdleExitCode;
         lock (_gate)
         {
             if (_process == process) _process = null;
             // An agent that ended before it said anything did not start: the distribution may have been installed again or
             // the agent removed, so the next start checks the installation again (core-M3).
             if (!reported) _installed = false;
-            lock (_gate) _backoff.Ran(TimeSpan.FromMilliseconds(Environment.TickCount64 - started));
+            _backoff.Ran(TimeSpan.FromMilliseconds(Environment.TickCount64 - started));
+            if (idle) _idleSince = DateTimeOffset.UtcNow;
         }
         try { process.Dispose(); } catch (InvalidOperationException) { }
-        if (!_disposed) Retry(_lastError is { } error && !reported ? "exited: " + error : "exited");
+        if (_disposed) return;
+        // Not a failure: no pause and no failed state; MayStart holds the next start until the distribution ran again.
+        if (idle) SetState(WslAgentState.Idle, "");
+        else Retry(_lastError is { } error && !reported ? "exited: " + error : "exited");
     }
 
     public void Send(NoticeMessage message)

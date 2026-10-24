@@ -10,13 +10,20 @@ using BrimDeck.Protocol;
 
 namespace BrimDeck.WslAgent;
 
-// brimdeck-agent serve              started by BrimDeck through wsl.exe: receives this distribution's notices
-// brimdeck-agent [notify] ARGS...   brim-notify inside WSL (the brim-notify script runs this)
+// brimdeck-agent serve [--idle-minutes N]   started by BrimDeck through wsl.exe: receives this distribution's notices, and
+//                                           ends after N minutes (5 by default, 0 never) in which the user ran nothing there
+// brimdeck-agent [notify] ARGS...           brim-notify inside WSL (the brim-notify script runs this)
 internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        if (args is ["serve", ..]) return await AgentHost.RunAsync();
+        if (args is ["serve", .. var options])
+        {
+            var idle = WslLink.IdleLimit;
+            if (options is ["--idle-minutes", var minutes] && int.TryParse(minutes, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) && n <= 24 * 60)
+                idle = TimeSpan.FromMinutes(n);
+            return await AgentHost.RunAsync(idle);
+        }
         var command = NotifyCommandLine.Parse(args is ["notify", .. var rest] ? rest : args);
         return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
             Unreachable: "BrimDeck could not be reached (is it running, with this distribution switched on under dynamic notices?).",
@@ -199,5 +206,40 @@ internal static class Native
         foreach (var path in new[] { "/etc/machine-id", "/var/lib/dbus/machine-id" })
             try { if (File.Exists(path)) return File.ReadAllText(path).Trim(); } catch (IOException) { }
         return "";
+    }
+
+    // Where the session bus is looked for (DBusConnection.SessionAddress): this process's environment and files.
+    public static readonly BrimDeck.Protocol.DBus.BusLookup BusLookup = new(Environment.GetEnvironmentVariable, File.Exists, OwnerOf,
+        folder =>
+        {
+            try { return Directory.Exists(folder) ? Directory.GetFiles(folder) : []; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+        },
+        path =>
+        {
+            // An address file is a few lines; anything larger is not one.
+            try { var info = new FileInfo(path); return info.Exists && info.Length <= 4096 ? File.ReadAllText(path) : null; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+        },
+        MachineId());
+
+    // A symbolic link's target as written, or null for anything else (a missing file included).
+    public static string? LinkTarget(string path)
+    {
+        try { return new FileInfo(path).LinkTarget; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return null; }
+    }
+
+    // The processes in /proc, as far as they can be read; one that ends meanwhile is left out.
+    public static IEnumerable<LinuxProcess> Processes()
+    {
+        foreach (var folder in Directory.EnumerateDirectories("/proc"))
+        {
+            if (!int.TryParse(Path.GetFileName(folder), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var pid)) continue;
+            string status;
+            try { status = File.ReadAllText(folder + "/status"); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            if (WslIdle.Parse(pid, status) is { } process) yield return process;
+        }
     }
 }

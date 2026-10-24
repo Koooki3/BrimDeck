@@ -48,7 +48,10 @@ When you switch a distribution on under "WSL (off by default)", BrimDeck:
 
 - copies its notice agent to `~/.local/share/brimdeck/brimdeck-agent` of the distribution's default user, with `bridge.json` and a version stamp;
 - adds `~/.local/bin/brim-notify`. It is updated only while its content is exactly what BrimDeck wrote; any other file of that name, or a symbolic link, is left alone and shown as a conflict in the settings (then use `~/.local/share/brimdeck/brimdeck-agent notify`). Every file is written to a new temporary file and renamed into place, so nothing is written through a link;
-- starts the agent through `wsl.exe` only while the distribution **already runs**. A distribution is never started for notices, WSL's configuration is not changed and the system's `notify-send` is not replaced. WSL 1 and WSL 2 distributions both work.
+- starts the agent through `wsl.exe` only while the distribution **already runs**. A distribution is never started for notices, WSL's configuration is not changed and the system's `notify-send` is not replaced. WSL 1 and WSL 2 distributions both work;
+- the agent is itself a `wsl.exe` session, and while it runs WSL does not stop the distribution or its virtual machine. So the agent looks once a minute: once the user has had no process in the distribution for 5 minutes other than the agent, WSL's init and relay processes and the session plumbing (`systemd --user`, `(sd-pam)`, `dbus-daemon`/`dbus-broker`) — terminals and background jobs both count — it ends by itself, and WSL stops the distribution and frees its memory as usual. The settings show that the agent ended. It connects again when the distribution has stopped and runs again; if the distribution keeps running for another reason, BrimDeck starts the agent again at most once every 30 minutes, never in a loop.
+
+The agent looks for the session bus in this order: `DBUS_SESSION_BUS_ADDRESS`, `$XDG_RUNTIME_DIR/bus`, `/run/user/<uid>/bus` (both only when owned by the user), and `~/.dbus/session-bus/<machine-id>-<display>` (a bus X11 autolaunched where there is no systemd). While there is none it looks again every 3 seconds.
 
 The agent adapts to the session bus:
 
@@ -58,6 +61,8 @@ The agent adapts to the session bus:
 | Another service, watching allowed | The agent watches without replacing it; that service's buttons are not offered |
 | Another service, watching not allowed | Shown as a limitation; `brim-notify` still works |
 | No session bus | Shown as a limitation; `brim-notify` still works |
+
+As the notification service the agent says `body-markup`: markup in a body shows as plain text (tags removed, `&lt;` and the like decoded), while titles always show as sent. Notifications with an `x-canonical-private-synchronous`, `synchronous` or `x-dunst-stack-tag` hint (volume, brightness) update one notice per application and tag; those with the `transient` hint show as usual but are not kept with the saved notices. An icon that is a symbolic link within `/usr/share/icons` or `/usr/share/pixmaps`, leading only within them, shows as the file it leads to (Debian and Ubuntu install many theme icons that way); any other link is still not read.
 
 To remove it: switch the distribution off in settings, then delete `~/.local/share/brimdeck` and `~/.local/bin/brim-notify` in the distribution.
 

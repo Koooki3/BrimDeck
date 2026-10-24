@@ -135,10 +135,10 @@ internal static class NoticeWslOpsTests
         uint never = Id(server.Handle(Notify(0), t0));
         uint byServer = Id(server.Handle(Notify(-1), t0));
         check("Only a positive timeout expires", server.NextExpiry == t0.AddSeconds(5));
-        check("Nothing expires early", server.Expire(t0.AddSeconds(4.9)).Count == 0);
+        check("Nothing expires early", server.Expire(t0.AddSeconds(4.9)).Bus.Count == 0);
         var closed = server.Expire(t0.AddSeconds(5));
-        check("It closes as expired when due", closed is [{ Member: "NotificationClosed", Body: [uint id, FreedesktopNotifications.Expired] }] && id == timed);
-        check("Once", server.Expire(t0.AddSeconds(60)).Count == 0 && server.NextExpiry is null && server.Dismissed(timed).Count == 0);
+        check("It closes as expired when due", closed.Bus is [{ Member: "NotificationClosed", Body: [uint id, FreedesktopNotifications.Expired] }] && id == timed);
+        check("Once", server.Expire(t0.AddSeconds(60)).Bus.Count == 0 && server.NextExpiry is null && server.Dismissed(timed).Count == 0);
         check("The others stay open", server.Dismissed(never).Count == 1 && server.Dismissed(byServer).Count == 1);
 
         uint replaced = Id(server.Handle(Notify(3000), t0));
@@ -146,7 +146,7 @@ internal static class NoticeWslOpsTests
         check("A replacement without a timeout keeps it open", server.NextExpiry is null && server.Dismissed(replaced).Count == 1);
         uint closedEarly = Id(server.Handle(Notify(3000), t0));
         server.Handle(Close(closedEarly), t0);
-        check("A notice the application closed no longer expires", server.NextExpiry is null && server.Expire(t0.AddSeconds(10)).Count == 0);
+        check("A notice the application closed no longer expires", server.NextExpiry is null && server.Expire(t0.AddSeconds(10)).Bus.Count == 0);
     }
 
     // W14: the pause between starts grows and starts over only after an agent kept running a while.

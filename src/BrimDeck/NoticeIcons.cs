@@ -6,6 +6,7 @@ using System.Windows.Media.Imaging;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
+using BrimDeck.Protocol;
 
 namespace BrimDeck;
 
@@ -122,14 +123,9 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
     }
 
     // An absolute path as given; an icon name in the usual theme and pixmap folders, at sizes WPF can read (PNG, not SVG).
+    // The agent looks in the same places when it resolves an icon that is a link (LinuxIcons.Resolve).
     public static IEnumerable<string> WslCandidates(string icon)
-    {
-        if (!NoticeIntake.IsLinuxIcon(icon)) yield break;
-        if (icon.StartsWith('/')) { yield return icon; yield break; }
-        foreach (var size in new[] { "48x48", "64x64", "32x32", "128x128" })
-            yield return $"/usr/share/icons/hicolor/{size}/apps/{icon}.png";
-        yield return $"/usr/share/pixmaps/{icon}.png";
-    }
+        => NoticeIntake.IsLinuxIcon(icon) ? LinuxIcons.Candidates(icon) : [];
 
     // Whether a folder on the way to the file is a link or junction; a folder link may lead to a network share.
     private static bool ThroughLinks(string path)
