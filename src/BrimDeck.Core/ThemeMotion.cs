@@ -120,8 +120,6 @@ public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double Ho
 {
     public const string SystemAccent = "system";
     public static readonly ThemeMotion Default = new(AmbientMotion.None, HoverFx.Reveal, .12, PressFx.Shade, .18, 0, FocusFx.Ring, 1, "accent", "accent");
-    // The same value under the theme file's key, for the template writer and the tests that read it by that name.
-    public double Trail => ParticleStrength;
     public bool AnyInteraction => Hover != HoverFx.None && HoverStrength > 0 || Press != PressFx.None && PressStrength > 0 || ParticleStrength > 0 && Particles != ParticleFx.None || Focus != FocusFx.None;
 
     // "system" follows Windows: its accent color and the quiet Fluent answers (a light theme's lift and sink stay), with no

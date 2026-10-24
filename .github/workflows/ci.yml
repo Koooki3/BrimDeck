@@ -34,3 +34,8 @@ jobs:
         run: |
           dotnet run --project tests/BrimDeck.MediaTests -c Release --no-build
           if ($LASTEXITCODE -ne 0) { throw 'Media tests failed.' }
+      # Renders the interaction effects off screen at 100–175% and fails when an edge misses the device pixels.
+      - name: Interaction effect checks
+        run: |
+          dotnet run --project tests/BrimDeck.FxPreview -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Interaction effect checks failed.' }

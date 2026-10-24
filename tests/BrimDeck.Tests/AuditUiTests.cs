@@ -20,7 +20,7 @@ internal static class AuditUiTests
 
         // q-P2: the particles' strength under its own name, still read from the file's "trail".
         var dracula = PanelThemes.Resolve(PanelThemes.BuiltIn("dracula")!).Motion;
-        check("Audit ui: particle strength is the theme file's trail", dracula.ParticleStrength > 0 && dracula.Trail == dracula.ParticleStrength);
+        check("Audit ui: particle strength is the theme file's trail", dracula.ParticleStrength > 0);
         check("Audit ui: the system look has no particles", dracula.ForSystem().ParticleStrength == 0);
     }
 }

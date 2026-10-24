@@ -26,8 +26,8 @@ internal static class ThemeMotionTests
         check("One Dark Pro is the editor: a caret, a selection",
             Palette("one-dark-pro").Motion is { Hover: HoverFx.Caret, Press: PressFx.Select, Focus: FocusFx.Caret, Particles: ParticleFx.None });
         check("Dracula sparkles in purple and pink; Night Owl glows warm with fireflies",
-            Palette("dracula").Motion is { Hover: HoverFx.Sheen, Press: PressFx.Sparkle, Particles: ParticleFx.Star, Trail: > 0, Secondary: "liked" }
-            && Palette("night-owl").Motion is { Hover: HoverFx.Glow, Press: PressFx.Ember, Particles: ParticleFx.Firefly, Trail: > 0 });
+            Palette("dracula").Motion is { Hover: HoverFx.Sheen, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Secondary: "liked" }
+            && Palette("night-owl").Motion is { Hover: HoverFx.Glow, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 });
         check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 1
             && Palette("github-dark").Motion.Hover == Palette("github-light").Motion.Hover);
         check("Only the mechanical theme moves in steps", builtIns.All(id => (Palette(id).Motion.Steps > 0) == (id == PanelThemes.Demo)));
@@ -71,7 +71,7 @@ internal static class ThemeMotionTests
         check("Ambient values are clamped to their ranges", wild.Ambient == new AmbientMotion(MotionSafety.BreatheMin, MotionSafety.BreatheDepthMax, MotionSafety.DriftMin,
             MotionSafety.SweepMin, MotionSafety.SweepOpacityMax, MotionSafety.FlickerMin, MotionSafety.FlickerDepthMax));
         check("Interaction values are clamped and unknown styles keep the base's",
-            wild is { Hover: HoverFx.Reveal, HoverStrength: MotionSafety.HoverMax, Press: PressFx.Shade, PressStrength: 0, Trail: MotionSafety.TrailMax, Focus: FocusFx.Brackets, Pace: MotionSafety.PaceMax, Steps: MotionSafety.StepsMax });
+            wild is { Hover: HoverFx.Reveal, HoverStrength: MotionSafety.HoverMax, Press: PressFx.Shade, PressStrength: 0, ParticleStrength: MotionSafety.TrailMax, Focus: FocusFx.Brackets, Pace: MotionSafety.PaceMax, Steps: MotionSafety.StepsMax });
         check("One step is no steps; fractions round; nonsense keeps the base's",
             Custom("""{ "base": "cyberpunk-edgerunners", "motion": { "steps": 1 } }""").Motion.Steps == 0
             && Custom("""{ "motion": { "steps": 2.6 } }""").Motion.Steps == 3
