@@ -16,8 +16,8 @@ public readonly record struct DatePickerTiming(int Glide, int Band, int Leave, i
 {
     public static DatePickerTiming From(int animationDuration)
     {
-        double d = Math.Clamp(animationDuration, 100, 1000);
-        static int Ms(double value, double min, double max) => (int)Math.Round(Math.Clamp(value, min, max));
+        double d = AnimationLength.Clamp(animationDuration);
+        static int Ms(double value, double min, double max) => AnimationLength.Ms(value, min, max);
         return new(Ms(d * .875, 90, 875), Ms(d * 2 / 3, 70, 670), Ms(d * .4, 50, 400), Ms(d * 7 / 6, 120, 1000), Ms(d * 2 / 3, 70, 670),
             Ms(d * .45, 50, 450), Ms(d * 2 / 3, 70, 670));
     }

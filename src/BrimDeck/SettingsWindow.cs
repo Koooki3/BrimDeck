@@ -611,7 +611,7 @@ public sealed partial class SettingsWindow : Window
     private void Interaction()
     {
         SectionTitle(Loc.T("悬停与动画", "Hover and animation"));
-        var duration = SliderRow(Loc.T("展开与收起动画时长", "Animation duration"), S.AnimationDuration, 100, 1000, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value),
+        var duration = SliderRow(Loc.T("展开与收起动画时长", "Animation duration"), S.AnimationDuration, AnimationLength.Min, AnimationLength.Max, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value),
             Loc.T("设置每次展开或收起动画的持续时间。时间越短，动画越快。", "How long each expand or collapse animation lasts. The shorter the time, the faster the animation."));
         void EnableDuration(bool enabled)
         {

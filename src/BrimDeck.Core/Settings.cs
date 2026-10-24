@@ -239,7 +239,7 @@ public sealed class DeckSettings
     public PanelSize? QuickSize { get; set; }
     public int OpenDelay { get; set; } = 0;
     public int CloseDelay { get; set; } = 0;
-    public int AnimationDuration { get; set; } = 360;
+    public int AnimationDuration { get; set; } = AnimationLength.Default;
     public bool Animations { get; set; } = true;
     public WindowBehavior Maximized { get; set; } = WindowBehavior.Line;
     public WindowBehavior Borderless { get; set; } = WindowBehavior.Hide;
@@ -423,7 +423,7 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(LastPage)) LastPage = DeckPage.Usage;
         OpenDelay = Math.Clamp(OpenDelay, 0, 2000);
         CloseDelay = Math.Clamp(CloseDelay, 0, 2000);
-        AnimationDuration = Math.Clamp(AnimationDuration, 100, 1000);
+        AnimationDuration = AnimationLength.Clamp(AnimationDuration);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
         Language = Loc.Normalize(Language);

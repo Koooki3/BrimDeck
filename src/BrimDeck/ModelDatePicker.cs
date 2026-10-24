@@ -205,7 +205,7 @@ internal sealed class ModelDatePicker : Border
         Unloaded += (_, _) => Sleep();
     }
 
-    private DatePickerTiming Timing => DatePickerTiming.From(Preview?.AnimationDuration ?? (Application.Current as App)?.Settings.AnimationDuration ?? 360);
+    private DatePickerTiming Timing => DatePickerTiming.From(Preview?.AnimationDuration ?? (Application.Current as App)?.Settings.AnimationDuration ?? AnimationLength.Default);
     private bool Moves => Preview?.Moves?.Invoke() ?? Soft.Enabled;
     private double Clock() => Preview?.Clock() ?? Eased.Now;
     private string Hex(string token) => _palette[token].ToString();

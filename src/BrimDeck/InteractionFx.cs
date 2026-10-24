@@ -197,7 +197,7 @@ internal sealed partial class FxSurface : FrameworkElement
     private bool Allowed => !_detached && MotionGate.Interaction(Preview?.Conditions?.Invoke() ?? MotionEnvironment.Conditions(), _motion);
     private bool Active => Allowed && _interactive();
     private double Clock() => Preview?.Clock() ?? Eased.Now;
-    private int AnimationLength => Preview?.AnimationDuration ?? Settings?.AnimationDuration ?? 360;
+    private int AnimationDuration => Preview?.AnimationDuration ?? Settings?.AnimationDuration ?? AnimationLength.Default;
 
     // Whether this layer marks the control under the pointer now: a window that has its own hover look shows it only when not
     // (NoticeWindow.TextButton), so a control never wears two.
@@ -223,7 +223,7 @@ internal sealed partial class FxSurface : FrameworkElement
             Dress(palette, system);
         }
         // The animation length can change in settings without a new theme; the theme's pace with one. Worked out once.
-        _timing = MotionTiming.From(AnimationLength, _motion.Pace);
+        _timing = MotionTiming.From(AnimationDuration, _motion.Pace);
     }
 
     // ----- Pointer -----

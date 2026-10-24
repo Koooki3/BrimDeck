@@ -42,7 +42,7 @@ internal sealed partial class FxSurface
         _lastBurst = now;
         uint seed = (uint)mark.Serial * 2654435761u;
         double Next() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed & 0xFFFFFF) / (double)0x1000000; }
-        double scale = Math.Clamp(AnimationLength / 360d, .6, 1.6) * Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
+        double scale = Math.Clamp((double)AnimationDuration / AnimationLength.Default, .6, 1.6) * Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
         switch (_motion.Particles)
         {
             case ParticleFx.Star:

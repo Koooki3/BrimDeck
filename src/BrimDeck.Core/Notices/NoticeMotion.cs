@@ -50,5 +50,5 @@ public static class NoticeMotion
     public static double RevealLength => Landing.Length;
 
     // The length of a move in milliseconds: the panel's duration (kept to the settings' range), or 0 without animations.
-    public static int Length(int animationDuration, bool animate) => animate ? Math.Clamp(animationDuration, 100, 1000) : 0;
+    public static int Length(int animationDuration, bool animate) => animate ? AnimationLength.Clamp(animationDuration) : 0;
 }
