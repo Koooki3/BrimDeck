@@ -25,8 +25,8 @@ internal sealed class ModelDateWindow : Window
         _start = range.Start; _end = range.End; _month = new(_start.Year, _start.Month, 1);
         Title = Loc.T("按时间", "By date"); Width = 246; SizeToContent = SizeToContent.Height; WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize; AllowsTransparency = true; Background = Brushes.Transparent; ShowInTaskbar = false; Topmost = true;
-        FontFamily = UI.PanelFont;
-        Content = new Border { Child = _body, Background = UI.Brush(PanelTheme.Hex("popup")), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(8) };
+        FontFamily = UI.PanelFont; PanelTheme.Text(this);
+        Content = new Border { Child = _body, Background = UI.Brush(PanelTheme.Hex("popup")), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8) };
         Render();
     }
 
