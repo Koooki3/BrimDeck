@@ -135,7 +135,8 @@ internal sealed class MusicMarquee : FrameworkElement
     private double _fontSize = 11.5, _overflow, _fadeWidth = -1;
     private FormattedText? _formatted;
     private bool _scrolling, _running, _hovered, _hooked;
-    private TimeSpan _frame;
+    // Wakes the line shortly before a rest ends; during the rest itself no frame is drawn.
+    private PromptTimer? _rest;
     public MusicMarquee()
     {
         Loaded += (_, _) => UpdateAnimation();
@@ -248,29 +249,31 @@ internal sealed class MusicMarquee : FrameworkElement
         bool moving = _running || !IsLoaded && _scrolling && ScrollAllowed && !_hovered && _overflow > 0;
         TextOptions.SetTextHintingMode(Painter, moving ? TextHintingMode.Animated : TextHintingMode.Auto);
     }
-    // The line moves with the display's frames, timed by each frame's own time, as the resize spring is (MainWindow.Resize.cs):
+    // The line glides with the display's frames on the panel's clock (Motion), timed by each frame's own time (Motion.FrameTime):
     // a keyframe clock is ticked at WPF's default animation rate, which does not divide a 144 Hz refresh, so a slow glide stepped
-    // unevenly. Each frame only sets the transforms and fade stops, so nothing is measured or drawn again.
+    // unevenly. Each frame only sets the transforms and fade stops, so nothing is measured or drawn again. The rests at either
+    // end (MarqueeScroll.Hold) draw nothing, so they are waited out on a timer that wakes the line a few frames before the rest
+    // ends, instead of holding the display's clock for frames that change nothing.
+    private const double RestWake = .1;
     private void Hook()
     {
+        _rest?.Stop();
         if (_hooked) return;
-        _hooked = true; _frame = TimeSpan.Zero;
-        CompositionTarget.Rendering += Frame;
+        _hooked = true;
+        Motion.Start(this, Frame);
     }
-    private void Unhook()
+    private void Unhook() { _hooked = false; _rest?.Stop(); }
+    private bool Frame(double now)
     {
-        if (!_hooked) return;
-        _hooked = false;
-        CompositionTarget.Rendering -= Frame;
-    }
-    private void Frame(object? sender, EventArgs e)
-    {
-        if (e is not RenderingEventArgs args) return;
-        // WPF may raise Rendering more than once for one frame.
-        if (args.RenderingTime == _frame) return;
-        _frame = args.RenderingTime;
-        _scroll.Advance(_frame.TotalSeconds, _overflow, Speed);
+        if (!_hooked) return false;
+        _scroll.Advance(Motion.FrameTime, _overflow, Speed);
         Apply();
+        double rest = _scroll.RestLeft;
+        if (rest <= RestWake + .15) return true;
+        _hooked = false; _scroll.Wait();
+        _rest ??= new PromptTimer(Dispatcher, () => { _rest!.Stop(); if (_running) Hook(); });
+        _rest.Interval = TimeSpan.FromSeconds(rest - RestWake); _rest.Start();
+        return false;
     }
     // Places the text and the fades where the scroll stands; the frames of a rest set nothing.
     private void Apply()
@@ -342,10 +345,16 @@ internal sealed class QuotaCarousel : Grid
     private readonly bool _discrete;
     private bool _enabled, _paused, _begun;
     private TimeSpan _elapsed;
+    // With animations off the rings only jump between the two rests, which a timer waits for (Turn): a storyboard of discrete
+    // keyframes kept WPF's animation clock ticking at 60 frames a second for the whole cycle. _since is when the cycle last went
+    // on (Eased.Now), NaN while it is held; _elapsed is where it stood then.
+    private PromptTimer? _turn;
+    private double _since = double.NaN, _period, _end;
     public bool Rotates { get; }
     public double Travel { get; }
     // Position within the cycle; the window hands it to the next carousel so a rebuild continues where this one was.
-    public TimeSpan Elapsed => _begun ? _cycle!.GetCurrentTime(this) ?? _elapsed : _elapsed;
+    public TimeSpan Elapsed => _discrete ? TimeSpan.FromSeconds(DiscreteAt(Eased.Now))
+        : _begun ? _cycle!.GetCurrentTime(this) ?? _elapsed : _elapsed;
     public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
     {
         // The region is the layout's ring width in whole device pixels; rings sit in fixed slots from its left edge and its
@@ -389,42 +398,67 @@ internal sealed class QuotaCarousel : Grid
         // whole at the left edge, and the last is whole before the right fade. Since the fade is at most span - ring, this
         // never moves the last ring out of the region.
         Travel = Math.Ceiling((full + fade - span) / step - 1e-6) * step;
-        _discrete = !animate; _cycle = Cycle();
-        _elapsed = TimeSpan.FromTicks(elapsed.Ticks % _cycle.Duration.TimeSpan.Ticks);
+        _discrete = !animate;
+        _end = StartHold + Travel / Speed; _period = _end + EndHold;
+        if (!_discrete) { _cycle = Cycle(); _period = _cycle.Duration.TimeSpan.TotalSeconds; }
+        _elapsed = TimeSpan.FromSeconds(elapsed.TotalSeconds % _period);
         Loaded += (_, _) => Update();
         Unloaded += (_, _) => Update();
         IsVisibleChanged += (_, _) => Update();
     }
     private Storyboard Cycle()
     {
-        double move = Travel / Speed, end = StartHold + move, reset = end + EndHold;
+        double end = _end, reset = end + EndHold;
         static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
         var shift = new DoubleAnimationUsingKeyFrames();
         shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
         shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(StartHold)));
-        if (_discrete) shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(end)));
-        else shift.KeyFrames.Add(new SplineDoubleKeyFrame(-Travel, At(end), new KeySpline(.4, 0, .6, 1)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(reset + (_discrete ? 0 : Fade))));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(reset + (_discrete ? 0 : Fade))));
-        var cycle = new Storyboard { Duration = TimeSpan.FromSeconds(reset + (_discrete ? 0 : 2 * Fade)), RepeatBehavior = RepeatBehavior.Forever };
+        shift.KeyFrames.Add(new SplineDoubleKeyFrame(-Travel, At(end), new KeySpline(.4, 0, .6, 1)));
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(reset + Fade)));
+        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(reset + Fade)));
+        var cycle = new Storyboard { Duration = TimeSpan.FromSeconds(reset + 2 * Fade), RepeatBehavior = RepeatBehavior.Forever };
         Storyboard.SetTarget(shift, _strip); Storyboard.SetTargetProperty(shift, new PropertyPath("(UIElement.RenderTransform).(TranslateTransform.X)"));
         cycle.Children.Add(shift);
-        if (!_discrete)
-        {
-            // The return to the first ring is a short fade, so the reset never reads as a backwards scroll.
-            var fade = new DoubleAnimationUsingKeyFrames();
-            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(0)));
-            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(reset)));
-            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, At(reset + Fade)));
-            fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, At(reset + 2 * Fade)));
-            Storyboard.SetTarget(fade, _strip); Storyboard.SetTargetProperty(fade, new PropertyPath(OpacityProperty));
-            cycle.Children.Add(fade);
-        }
+        // The return to the first ring is a short fade, so the reset never reads as a backwards scroll.
+        var fade = new DoubleAnimationUsingKeyFrames();
+        fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(0)));
+        fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(reset)));
+        fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, At(reset + Fade)));
+        fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, At(reset + 2 * Fade)));
+        Storyboard.SetTarget(fade, _strip); Storyboard.SetTargetProperty(fade, new PropertyPath(OpacityProperty));
+        cycle.Children.Add(fade);
         return cycle;
     }
     public void SetRunning(bool enabled, bool paused) { _enabled = enabled; _paused = paused; Update(); }
+
+    // Where the discrete cycle stands at a time, in seconds from its start.
+    private double DiscreteAt(double now) => ((double.IsNaN(_since) ? _elapsed.TotalSeconds : _elapsed.TotalSeconds + now - _since) % _period + _period) % _period;
+    // The first rest until the glide's end, then the last until the cycle's end, as the keyframes had it.
+    private void Turn()
+    {
+        double now = Eased.Now, at = DiscreteAt(now);
+        ((TranslateTransform)_strip.RenderTransform).X = at < _end ? 0 : -Travel;
+        if (double.IsNaN(_since)) { _turn?.Stop(); return; }
+        _turn ??= new PromptTimer(Dispatcher, Turn);
+        // A hair past the turn; a timer that still lands short of it only waits out what is left.
+        _turn.Interval = TimeSpan.FromSeconds((at < _end ? _end - at : _period - at) + .005);
+        _turn.Start();
+    }
+
     private void Update()
     {
+        if (_discrete)
+        {
+            if (!Rotates) return;
+            bool run = IsLoaded && IsVisible && _enabled && !_paused;
+            double now = Eased.Now;
+            // Held, it still shows where the cycle stands (a carousel built in place of one that was past its glide).
+            if (run == !double.IsNaN(_since)) { if (!run) Turn(); return; }
+            if (run) _since = now;
+            else { _elapsed = TimeSpan.FromSeconds(DiscreteAt(now)); _since = double.NaN; }
+            Turn();
+            return;
+        }
         if (_cycle is null) return;
         if (!IsLoaded || !IsVisible)
         {

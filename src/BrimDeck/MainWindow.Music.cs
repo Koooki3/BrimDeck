@@ -396,7 +396,7 @@ public partial class MainWindow
         var c = layout.Metrics;
         // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
         ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(UsageHeader(_usageWidth, UsagePageHeight)) : PanelHeader.Music(c));
-        bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
+        bool animate = Soft.Enabled;
         string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
@@ -442,8 +442,8 @@ public partial class MainWindow
         body.Children.Add(upper);
         var art = MusicVisuals.Cover(_mediaCover, layout.Cover, layout.CoverRadius, outlined: true);
         art.RenderTransformOrigin = new Point(.5, .5); art.RenderTransform = _musicCoverScale;
-        MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleXProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
-        MusicControlButton.Animate(_musicCoverScale, ScaleTransform.ScaleYProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
+        Soft.Glide(_musicCoverScale, ScaleTransform.ScaleXProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
+        Soft.Glide(_musicCoverScale, ScaleTransform.ScaleYProperty, track.State == MediaState.Paused ? .94 : 1, animate, Soft.Move);
         AutomationProperties.SetName(art, Loc.T("专辑封面", "Album cover")); upper.Children.Add(art);
         AttachCoverFocus(art);
         if (newCover && animate) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; art.BeginAnimation(OpacityProperty, fade); }
@@ -832,16 +832,15 @@ public partial class MainWindow
         var key = (EffectiveStyle, scale, Settings.ShowsSummary(EffectiveStyle), Settings.ShowsMusic(EffectiveStyle), Settings.ShowsClock(EffectiveStyle), Settings.ShowsMonitor(EffectiveStyle),
             Settings.MusicText, Settings.CompactMonitor, Settings.CompactMonitorItems, Settings.ClockStyle, PanelTheme.Generation);
         var previous = _compactRow is { } last && Equals(last.Key, key) ? last : null;
-        bool motion = previous is not null && Motion.Enabled && Settings.Animations && SystemParameters.ClientAreaAnimation;
+        bool motion = previous is not null && Soft.Enabled;
         var grid = new CompactRow(key, layout.Gap, dpi, scale) { Width = rowWidth, Height = layout.RowHeight };
         if (media && layout.CoverWidth > 0)
         {
             var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
             grid.Show(CompactPart.Cover, cover, layout.CoverWidth, previous, motion);
         }
-        // The readings stay sampled while the row offers them, also while none fits: widened again, they come in with current
-        // figures rather than dashes.
-        _stripWanted = strip is not null;
+        // The readings are sampled only while one shows or is fading (UpdateMonitorDemand): with none fitting, the sampler rests.
+        // It lingers for a while first (SystemSampler), so a row narrowed and widened again finds current figures.
         if (strip is not null && (layout.MonitorItems > 0 || _stripPresence.Any(Eased.Now)))
         {
             strip.Admit(layout.MonitorItems);
@@ -868,7 +867,7 @@ public partial class MainWindow
             // Rotating rings show whole rings at rest; the carousel's right fade lies over the gap after them, where the next ring
             // waits (the region is one gap wider than the rings it shows).
             var rings = layout.ScrollRings ? layout with { RingWidth = layout.RingWidth + layout.RingGap } : layout;
-            _quotaCarousel = new QuotaCarousel(items, rings, _quotaElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation);
+            _quotaCarousel = new QuotaCarousel(items, rings, _quotaElapsed, Soft.Enabled);
             grid.Show(CompactPart.Rings, _quotaCarousel, layout.RingWidth, previous, motion);
         }
         if (layout.TextWidth > 0)
@@ -891,31 +890,32 @@ public partial class MainWindow
         bool musicVisible = MusicPresentationVisible;
         _app.PresentMedia(this, musicVisible);
         bool progressVisible = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && _mediaTrack is { HasTimeline: true, State: not MediaState.Stopped };
-        bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
+        bool animations = MusicMotion;
         // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours.
         _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
         UpdateLyricScrolling();
         UpdateQuotaCarousel();
-        bool needed = IsVisible && !IsSuppressed && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
+        bool needed = IsVisible && !IsSuppressed && !MotionEnvironment.DisplayOff && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
         _musicTick.Interval = TimeSpan.FromMilliseconds(animations && MusicAudioActive && musicVisible ? 33 : 250);
         if (needed) { if (!_musicTick.IsEnabled) { _lastMusicTick = DateTimeOffset.UtcNow; _musicTick.Start(); } }
         else _musicTick.Stop();
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }
-    private void UpdateLyricScrolling() => _lyricCurrent?.SetScrolling(Settings.Animations && SystemParameters.ClientAreaAnimation
-        && MusicAudioActive && IsVisible && !IsSuppressed && _expanded && IsMusicPage);
+    private void UpdateLyricScrolling() => _lyricCurrent?.SetScrolling(MusicMotion && MusicAudioActive && IsVisible && !IsSuppressed && _expanded && IsMusicPage);
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
     private void UpdateQuotaCarousel()
-        => _quotaCarousel?.SetRunning(IsVisible && !IsSuppressed && !_expanded && _alert is null, _pointerInside);
-    private bool MusicPresentationVisible => IsVisible && !IsSuppressed && _mediaTrack is { State: not MediaState.Stopped }
+        => _quotaCarousel?.SetRunning(IsVisible && !IsSuppressed && !MotionEnvironment.DisplayOff && !_expanded && _alert is null, _pointerInside);
+    // What moves with the music (the marquees and the bars) moves only while motion is allowed and the display is on: with the
+    // screen off and the session unlocked, nothing of it is seen.
+    private static bool MusicMotion => Soft.Enabled && !MotionEnvironment.DisplayOff;
+    private bool MusicPresentationVisible => IsVisible && !IsSuppressed && !MotionEnvironment.DisplayOff && _mediaTrack is { State: not MediaState.Stopped }
         && (_expanded ? IsMusicPage : Settings.ShowsMusic(EffectiveStyle) && _alert is null);
     private bool MusicAudioActive => _mediaTrack is { State: MediaState.Playing };
     private void TickMusic()
     {
         var now = DateTimeOffset.UtcNow; double seconds = Math.Min(.5, (now - _lastMusicTick).TotalSeconds); _lastMusicTick = now;
-        bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
-        bool playing = animations && MusicAudioActive;
+        bool playing = Soft.Enabled && MusicAudioActive;
         bool musicVisible = MusicPresentationVisible;
         _app.PresentMedia(this, musicVisible);
         float peak = musicVisible ? _media?.Peak() ?? 0 : 0;

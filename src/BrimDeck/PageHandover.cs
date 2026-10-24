@@ -75,13 +75,20 @@ internal sealed class PageHandover
     {
         double width = page.ActualWidth, height = page.ActualHeight;
         if (!page.IsVisible || width < 1 || height < 1 || PresentationSource.FromVisual(page) is null) return null;
-        var dpi = VisualTreeHelper.GetDpi(page);
+        return new Image { Source = Snapshot(page, width, height, VisualTreeHelper.GetDpi(page)), Width = width, Height = height, Stretch = Stretch.None,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
+    }
+
+    // A frozen picture of an element's own area at the given scale, drawn one to one (Exactly), so neither its offset in its
+    // parent nor a transform it is entering with is part of it.
+    public static BitmapSource Snapshot(Visual element, double width, double height, DpiScale dpi)
+    {
         var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
         var drawing = new DrawingVisual();
-        using (var context = drawing.RenderOpen()) context.DrawRectangle(Exactly(page, width, height), null, new Rect(0, 0, width, height));
+        using (var context = drawing.RenderOpen()) context.DrawRectangle(Exactly(element, width, height), null, new Rect(0, 0, width, height));
         picture.Render(drawing);
         picture.Freeze();
-        return new Image { Source = picture, Width = width, Height = height, Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
+        return picture;
     }
 
     // A brush that draws an element's own area one to one, for pictures of it. The view box is the element's area, not the
@@ -195,11 +202,5 @@ internal sealed class PageHandover
     // Moves an element that the rebuild keeps (a transport button) to its new place: it glides from where it is now, or is set
     // at once. The property keeps the new value; the glide only covers the way there.
     public static void Glide(UIElement element, DependencyProperty property, double to, bool animate, int milliseconds = Soft.Choose)
-    {
-        double from = (double)element.GetValue(property);
-        element.BeginAnimation(property, null);
-        element.SetValue(property, to);
-        if (!animate || !double.IsFinite(from) || Math.Abs(from - to) < .5) return;
-        element.BeginAnimation(property, Arrival(from, to, milliseconds));
-    }
+        => Soft.Glide(element, property, to, animate, milliseconds, tolerance: .5);
 }
