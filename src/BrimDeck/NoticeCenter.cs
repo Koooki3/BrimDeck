@@ -401,10 +401,8 @@ internal sealed class NoticeCenter : IDisposable
     private void ReportDismissed(Notice notice)
     {
         if ((notice.Capabilities & NoticeCapabilities.ReportDismissal) == 0 || notice.Distro is not { } distro) return;
-        if (NativeId(notice) is { } id) _wsl.Send(distro, new NoticeMessage { Type = NoticeTypes.Dismissed, NativeId = id });
+        if (NoticeProtocol.ToAgent(NoticeTypes.Dismissed, notice.InstanceKey) is { } message) _wsl.Send(distro, message);
     }
-
-    private static string? NativeId(Notice notice) => notice.InstanceKey.Split(':') is [.., var last] && uint.TryParse(last, out _) ? last : null;
 
     public bool CanOpen(Notice notice) => notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
         || notice.Actions.Any(action => action.Key == "default") && (notice.Capabilities & NoticeCapabilities.Actions) != 0;
@@ -421,8 +419,9 @@ internal sealed class NoticeCenter : IDisposable
     // Passes a chosen action back to the WSL application (only offered while the agent is its notification service).
     public bool Invoke(Notice notice, string key)
     {
-        if ((notice.Capabilities & NoticeCapabilities.Actions) == 0 || notice.Distro is not { } distro || NativeId(notice) is not { } id) return false;
-        _wsl.Send(distro, new NoticeMessage { Type = NoticeTypes.Action, NativeId = id, ActionKey = key });
+        if ((notice.Capabilities & NoticeCapabilities.Actions) == 0 || notice.Distro is not { } distro
+            || NoticeProtocol.ToAgent(NoticeTypes.Action, notice.InstanceKey, key) is not { } message) return false;
+        _wsl.Send(distro, message);
         Hub.SourceRemoved(notice.InstanceKey);
         Withdraw(notice.Id);
         return true;
