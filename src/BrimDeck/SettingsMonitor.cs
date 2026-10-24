@@ -38,11 +38,12 @@ public sealed partial class SettingsWindow
         Group(Row(Loc.T("配色", "Colors"), SegmentBorder(schemes)));
         CompactMonitorOptions();
         SectionTitle(Loc.T("展开时", "When expanded"));
-        Group(MusicChoice(Loc.T("主视图", "Large gauge"), S.MonitorMain, [(MonitorMain.Cpu, "CPU"), (MonitorMain.Gpu, "GPU")], v => Resize(s => s.MonitorMain = v, DeckPage.Monitor)),
+        // The choices that show themselves on the monitor page keep its preview open, so switching between them does not collapse it first.
+        Group(KeepPreview(MusicChoice(Loc.T("主视图", "Large gauge"), S.MonitorMain, [(MonitorMain.Cpu, "CPU"), (MonitorMain.Gpu, "GPU")], v => Resize(s => s.MonitorMain = v, DeckPage.Monitor))),
             MusicChoice(Loc.T("刷新间隔", "Update interval"), S.MonitorInterval, [(1, Loc.T("1 秒", "1 s")), (2, Loc.T("2 秒", "2 s"))], v => Change(s => s.MonitorInterval = v)),
-            MusicChoice(Loc.T("进程行", "Process rows"), S.MonitorProcessView,
+            KeepPreview(MusicChoice(Loc.T("进程行", "Process rows"), S.MonitorProcessView,
                 [(MonitorProcessView.Auto, Loc.T("自动", "Auto")), (MonitorProcessView.Compact, Loc.T("简略", "Compact")), (MonitorProcessView.Detailed, Loc.T("详细", "Detailed"))],
-                v => Resize(s => s.MonitorProcessView = v, DeckPage.Monitor)),
+                v => Resize(s => s.MonitorProcessView = v, DeckPage.Monitor))),
             KeepPreview(Toggle(Loc.T("显示进程列表", "Show the process list"), S.MonitorProcesses, v => Resize(s => s.MonitorProcesses = v, DeckPage.Monitor),
                 help:
                 Loc.T("按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行。面板足够大时显示。",
