@@ -244,9 +244,21 @@ internal sealed class MusicMarquee : FrameworkElement
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     { base.OnDpiChanged(oldDpi, newDpi); ResetText(); }
     private double EdgeStop => _fadeWidth > 0 ? Math.Min(.5, EdgeWidth / _fadeWidth) : 0;
+    // Scrolls the laps again from the start once a Limited line has rested (MarqueeScroll.Replay).
+    public void Replay() { if (_scroll.Replay()) { _applied = (double.NaN, 0, 0, 0); Apply(); UpdateAnimation(); } }
+    // Whether the line is on the display's clock (Motion): while it is, WPF draws a frame every refresh anyway. Gliding is raised
+    // when that changes, so the window can move the bars on those frames.
+    public bool IsGliding => _hooked;
+    public event Action<bool>? Gliding;
+    private void SetHooked(bool hooked)
+    {
+        if (_hooked == hooked) return;
+        _hooked = hooked; Gliding?.Invoke(hooked);
+    }
     private void UpdateAnimation()
     {
-        bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && _overflow > 0 && _formatted is not null;
+        // A Limited line that has scrolled its laps rests at its start with no clock and no timer (MarqueeScroll.Rested).
+        bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && !_scroll.Rested && _overflow > 0 && _formatted is not null;
         if (running != _running)
         {
             _running = running;
@@ -262,7 +274,7 @@ internal sealed class MusicMarquee : FrameworkElement
         // Scrolling text takes the animated quality, which follows fractional offsets smoothly; otherwise WPF chooses, so resting
         // text gets the static quality and the island's scaling still counts as motion. The mode is a composition flag and does not
         // draw the text again. A row built in place of a scrolling one takes it from its first frame, before it has loaded.
-        bool moving = _running || !IsLoaded && _scrolling && ScrollAllowed && !_hovered && _overflow > 0;
+        bool moving = _running || !IsLoaded && _scrolling && ScrollAllowed && !_hovered && !_scroll.Rested && _overflow > 0;
         TextOptions.SetTextHintingMode(Painter, moving ? TextHintingMode.Animated : TextHintingMode.Auto);
     }
     // The line glides with the display's frames on the panel's clock (Motion), timed by each frame's own time (Motion.FrameTime):
@@ -275,20 +287,23 @@ internal sealed class MusicMarquee : FrameworkElement
     {
         _rest?.Stop();
         if (_hooked) return;
-        _hooked = true;
         Motion.Start(this, Frame);
+        SetHooked(true);
     }
-    private void Unhook() { _hooked = false; _rest?.Stop(); }
+    private void Unhook() { _rest?.Stop(); SetHooked(false); }
     private bool Frame(double now)
     {
         if (!_hooked) return false;
         _scroll.Advance(Motion.FrameTime, _overflow, Speed);
         Apply();
+        // Its laps done, the line lets go of the clock for good (UpdateAnimation no longer runs it) until it is replayed or changes.
+        if (_scroll.Rested) { UpdateAnimation(); return false; }
         double rest = _scroll.RestLeft;
         if (rest <= RestWake + .15) return true;
-        _hooked = false; _scroll.Wait();
+        _scroll.Wait();
         _rest ??= new PromptTimer(Dispatcher, () => { _rest!.Stop(); if (_running) Hook(); });
         _rest.Interval = TimeSpan.FromSeconds(rest - RestWake); _rest.Start();
+        SetHooked(false);
         return false;
     }
     // Places the text and the fades where the scroll stands; the frames of a rest set nothing.

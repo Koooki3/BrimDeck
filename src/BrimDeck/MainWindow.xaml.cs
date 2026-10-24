@@ -801,7 +801,7 @@ public partial class MainWindow : Window
         // looked for briskly again (C-L8).
         if (inside && !_pointerInside) { MotionEnvironment.InputSeen(); BrimDeck.Native.WindowsNoticeSource.Interacted(); }
         _pointerInside = inside; UpdateQuotaCarousel();
-        if (inside) ReleaseHotkeyPin();
+        if (inside) { ReleaseHotkeyPin(); ReplayCompactTitle(); }
         if (inside)
         {
             _popupReturnArea = null;
