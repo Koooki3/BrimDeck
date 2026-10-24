@@ -153,6 +153,22 @@ public partial class MainWindow
         { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
     }
     private bool _capsulePending;
+    // The wheel walks the shown pages: down moves along the switch, up moves back. A wheel that a scrolling part of a
+    // page uses (the lyrics, the model details) never arrives, as those mark it handled on the way up; an open menu or
+    // the detail popup keeps the wheel to itself as well.
+    private void PanelWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (!Settings.MouseWheelPages || !_expanded || _preview || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
+        var shown = DeckPages.Visible(Settings);
+        if (shown.Count < 2) return;
+        int at = shown.ToList().IndexOf(CurrentPage);
+        if (at < 0) return;
+        int next = e.Delta > 0 ? at - 1 : at + 1;
+        if (next < 0 || next >= shown.Count) return;
+        SelectPage(shown[next]);
+        e.Handled = true;
+    }
+
     private void MusicPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Music);
     private void MonitorPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Monitor);
     // Where the usage page's application tabs start: after the page switch, which holds one 28 DIP button per shown page.
