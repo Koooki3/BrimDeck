@@ -12,9 +12,16 @@ public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
 public enum DisplayPlacement { Primary, Chosen }
 // A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named.
 public sealed record ChosenDisplay(string Id, string Name);
-// An app whose full-screen windows keep the panel in its normal style, such as a desktop beautification tool. Path is the
-// executable when it is known; an entry with only a name matches any process of that name.
-public sealed record FullscreenException(string Name = "", string Path = "");
+// One app's own answers to the three window rules, as "app rules": for each of the three contexts the app can be in, the
+// panel can follow the global rules (null) or choose one of the behaviors they offer. An app with all three set to Normal
+// is the full-screen exception as it began: its covering windows leave the panel alone. Path is the executable when it is
+// known; an entry with only a name matches any process of that name.
+public sealed record FullscreenRule(string Name = "", string Path = "")
+{
+    public WindowBehavior? Maximized { get; init; }
+    public WindowBehavior? Borderless { get; init; }
+    public WindowBehavior? Exclusive { get; init; }
+}
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop app or local web app) signed in with; DeepSeek uses a key entered by hand.
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
@@ -254,7 +261,11 @@ public sealed class DeckSettings
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
     // Applications whose windows are not counted as full screen, so that a desktop beautification tool does not hide the
     // panel. Empty by default: every app follows the three rules above.
-    public List<FullscreenException> FullscreenExceptions { get; set; } = [];
+    public List<FullscreenRule> FullscreenRules { get; set; } = [];
+    // Read only to carry the exceptions of a file saved before app rules existed; Normalize moves them across and the
+    // member then disappears from the saved file.
+    public sealed record LegacyFullscreenException(string Name = "", string Path = "");
+    public List<LegacyFullscreenException> FullscreenExceptions { get; set; } = [];
     public DisplayPlacement Display { get; set; }
     // Kept while Display is Primary, so that choosing displays again restores them.
     public List<ChosenDisplay> DisplayMonitors { get; set; } = [];
@@ -355,11 +366,28 @@ public sealed class DeckSettings
         if (entries.Count == 0) { if (enabled && Apps.Count < AppPresets.MaximumApps) Apps.Add(new AppEntry { QuotaSource = id, UsageSource = id }); }
         else foreach (var entry in entries) entry.Enabled = enabled;
     }
-    public WindowBehavior Behavior(ScreenContext context) => context switch
+    // The behavior a context calls for: the app's own rule first, where it chooses one for that context, and the global
+    // rules everywhere else. The app is the one the context was detected for; a null app, as on the desktop, has no rule.
+    public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null)
     {
-        ScreenContext.Maximized => Maximized, ScreenContext.Borderless => Borderless,
-        ScreenContext.Exclusive => Exclusive, _ => WindowBehavior.Normal
-    };
+        if (processName is not null || imagePath is not null)
+            foreach (var rule in FullscreenRules)
+                if (ScreenPolicy.Matches(rule, processName, imagePath))
+                {
+                    var own = context switch
+                    {
+                        ScreenContext.Maximized => rule.Maximized, ScreenContext.Borderless => rule.Borderless,
+                        ScreenContext.Exclusive => rule.Exclusive, _ => null
+                    };
+                    if (own is { } choice) return choice;
+                    break;
+                }
+        return context switch
+        {
+            ScreenContext.Maximized => Maximized, ScreenContext.Borderless => Borderless,
+            ScreenContext.Exclusive => Exclusive, _ => WindowBehavior.Normal
+        };
+    }
     public DeckSettings Copy()
     {
         var copy = (DeckSettings)MemberwiseClone();
@@ -369,7 +397,7 @@ public sealed class DeckSettings
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
-        copy.FullscreenExceptions = [.. FullscreenExceptions ?? []];
+        copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         return copy;
     }
     public void Normalize()
@@ -445,13 +473,25 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
+        // A file saved before app rules carried plain exceptions: each becomes a rule that keeps the panel's own style in
+        // all three contexts, which is what an exception did.
+        if ((FullscreenExceptions ?? []).Count > 0)
+        {
+            var carried = FullscreenExceptions.Where(entry => entry is not null)
+                .Select(entry => new FullscreenRule(ScreenPolicy.NormalizeName(entry.Name), ScreenPolicy.NormalizePath(entry.Path))
+                    { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal });
+            FullscreenRules = carried.Concat(FullscreenRules ?? []).ToList();
+            FullscreenExceptions = [];
+        }
         // A path-only entry takes its name from the executable, so it can also be matched when the path cannot be read.
-        FullscreenExceptions = (FullscreenExceptions ?? []).OfType<FullscreenException>()
-            .Select(e => new FullscreenException(ScreenPolicy.NormalizeName(e.Name), ScreenPolicy.NormalizePath(e.Path)))
-            .Select(e => e.Name.Length == 0 && e.Path.Length > 0 ? e with { Name = System.IO.Path.GetFileNameWithoutExtension(e.Path) } : e)
-            .Where(e => e.Name.Length > 0 || e.Path.Length > 0)
+        FullscreenRules = (FullscreenRules ?? []).OfType<FullscreenRule>()
+            .Select(r => new FullscreenRule(ScreenPolicy.NormalizeName(r.Name), ScreenPolicy.NormalizePath(r.Path))
+                { Maximized = Valid(r.Maximized), Borderless = Valid(r.Borderless), Exclusive = Valid(r.Exclusive) })
+            .Select(r => r.Name.Length == 0 && r.Path.Length > 0 ? r with { Name = System.IO.Path.GetFileNameWithoutExtension(r.Path) } : r)
+            .Where(r => r.Name.Length > 0 || r.Path.Length > 0)
             .DistinctBy(ScreenPolicy.Key, StringComparer.OrdinalIgnoreCase)
             .Take(AppPresets.MaximumFullscreenExceptions).ToList();
+        static WindowBehavior? Valid(WindowBehavior? choice) => choice is null || Enum.IsDefined(choice.Value) ? choice : null;
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;
