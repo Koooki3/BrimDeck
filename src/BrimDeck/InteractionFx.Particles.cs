@@ -138,7 +138,7 @@ internal sealed partial class FxSurface
                 }
                 case ParticleFx.Pixel:
                     y += 10 * age * age;
-                    if (alpha > .001) { dc.PushOpacity(Math.Min(1, alpha * 1.4)); dc.DrawRectangle(first ? _moteFirst : _moteSecond, null, new Rect(Math.Round(x - m.Size / 2), Math.Round(y - m.Size / 2), m.Size, m.Size)); dc.Pop(); }
+                    if (alpha > .001) { dc.PushOpacity(Math.Min(1, alpha * 1.4)); dc.DrawRectangle(first ? _moteFirst : _moteSecond, null, new Rect(Px(x - m.Size / 2), Px(y - m.Size / 2), Px(m.Size), Px(m.Size))); dc.Pop(); }
                     break;
                 case ParticleFx.Spark:
                 {

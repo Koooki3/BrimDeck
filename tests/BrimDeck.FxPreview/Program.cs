@@ -15,12 +15,17 @@ using Path = System.Windows.Shapes.Path;
 // <theme>-press.png and <theme>-cases.png (the panel opening under a hovered control, a theme switch mid-press, keyboard focus,
 // a disabled control, animations off). The snippet is hosted in an HwndSource that is never shown; BrimDeck is not started and
 // no settings or theme files are read. Not part of BrimDeck.sln; run it by hand:
-//   dotnet run -c Release --project tests/BrimDeck.FxPreview -- <output folder>
+//   dotnet run -c Release --project tests/BrimDeck.FxPreview -- <output folder> [--dpi 1.5] [--themes id,id,...]
+// The checks run at 100, 125, 150 and 175 percent display scaling (VisualTreeHelper.SetRootDpi on the snippet, so layout,
+// GetDpi and the layer's pixel snapping all see the scale). The strips are drawn at --dpi (100 percent when not given): at 100
+// percent at three times the size, otherwise pixel for pixel at that scale, each device pixel shown as a 2 x 2 block.
 internal static class Program
 {
     private const double Scale = 3;
+    private static readonly double[] Scales = [1, 1.25, 1.5, 1.75];
     private static int _failures;
     private static double _now;
+    private static double _dpi = 1;
 
     [STAThread]
     private static int Main(string[] args)
@@ -31,14 +36,29 @@ internal static class Program
         foreach (var dictionary in new[] { "ToolbarResources.xaml", "MusicResources.xaml", "ModelDetailsResources.xaml" })
             app.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/BrimDeck;component/" + dictionary, UriKind.Relative)));
 
-        Checks();
-        if (args.Length > 0)
+        string? folder = null; double stripDpi = 1; HashSet<string>? only = null;
+        for (int i = 0; i < args.Length; i++)
         {
-            Directory.CreateDirectory(args[0]);
-            foreach (var theme in PanelThemes.BuiltIns) Strips(PanelThemes.Resolve(theme), theme.Id, args[0]);
-            Strips(PanelThemes.Resolve(PanelThemes.BuiltIn("dark")!), "system-dark", args[0], system: true);
-            Strips(PanelThemes.Resolve(PanelThemes.BuiltIn("light")!), "system-light", args[0], system: true);
-            Console.WriteLine("Wrote previews to " + System.IO.Path.GetFullPath(args[0]));
+            if (args[i] == "--dpi" && i + 1 < args.Length) stripDpi = double.Parse(args[++i], CultureInfo.InvariantCulture);
+            else if (args[i] == "--themes" && i + 1 < args.Length) only = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
+            else folder = args[i];
+        }
+
+        foreach (var dpi in Scales)
+        {
+            _dpi = dpi;
+            Console.WriteLine($"--- {dpi * 100:0}% ---");
+            Checks();
+            PixelChecks();
+        }
+        _dpi = stripDpi;
+        if (folder is not null)
+        {
+            Directory.CreateDirectory(folder);
+            foreach (var theme in PanelThemes.BuiltIns.Where(t => only is null || only.Contains(t.Id))) Strips(PanelThemes.Resolve(theme), theme.Id, folder);
+            if (only is null || only.Contains("system-dark")) Strips(PanelThemes.Resolve(PanelThemes.BuiltIn("dark")!), "system-dark", folder, system: true);
+            if (only is null || only.Contains("system-light")) Strips(PanelThemes.Resolve(PanelThemes.BuiltIn("light")!), "system-light", folder, system: true);
+            Console.WriteLine($"Wrote previews at {stripDpi * 100:0}% to " + System.IO.Path.GetFullPath(folder));
         }
         Console.WriteLine(_failures == 0 ? "PASS: all interaction checks" : $"{_failures} interaction checks failed");
         return _failures == 0 ? 0 : 1;
@@ -153,7 +173,11 @@ internal static class Program
         };
         content.Children.Add(fx);
 
+        // As in BrimDeck's windows, layout is rounded to device pixels; the scale is the one under test, not the screen's.
+        island.UseLayoutRounding = true;
         var source = new HwndSource(new HwndSourceParameters("BrimDeck.FxPreview") { Width = 400, Height = 196, WindowStyle = unchecked((int)0x80000000) }) { RootVisual = island, SizeToContent = SizeToContent.Manual };
+        VisualTreeHelper.SetRootDpi(island, new DpiScale(_dpi, _dpi));
+        island.InvalidateMeasure();
         island.Measure(new Size(400, 196)); island.Arrange(new Rect(0, 0, 400, 196)); island.UpdateLayout();
         return new Scene
         {
@@ -203,6 +227,7 @@ internal static class Program
         var fx = scene.Fx;
         _now = 100;
         fx.Frame(_now);
+        Check($"The snippet and its layer see {_dpi * 100:0}% scaling", VisualTreeHelper.GetDpi(fx).DpiScaleX == _dpi && VisualTreeHelper.GetDpi(scene.Page2).DpiScaleY == _dpi);
         Rect Shape(FrameworkElement control) => FxMark.For(control) is { } mark ? Placed(mark) : Rect.Empty;
         Rect Placed(FxMark mark) { mark.Update(scene.Content, VisualTreeHelper.GetDpi(fx)); return mark.Box; }
         Rect Box(FrameworkElement control) => control.TransformToVisual(scene.Content).TransformBounds(new Rect(control.RenderSize));
@@ -213,7 +238,7 @@ internal static class Program
         var page = Shape(scene.Page2); var pageBox = Box(scene.Page2);
         Check("A page button is marked on its hover layer, which fills it", Math.Abs(page.Width - pageBox.Width) < 1 && Math.Abs(page.Height - pageBox.Height) < 1 && FxMark.For(scene.Page2)!.Source == FxShapeSource.HoverLayer);
         var play = FxMark.For(scene.Play)!; Placed(play);
-        Check("A round media button is marked on its circle", play.Ellipse && Math.Abs(play.Box.Width - play.Box.Height) < 1 && play.Box.Width <= 36.5);
+        Check($"A round media button is marked on its circle ({play.Box.Width:0.##} x {play.Box.Height:0.##})",play.Ellipse && Math.Abs(play.Box.Width - play.Box.Height) < 1 && play.Box.Width <= 36 + 1 / _dpi);
         var notice = FxMark.For(scene.Notice)!; Placed(notice);
         Check("A notice button is marked on its rounded face", notice.Source == FxShapeSource.Face && notice.LocalRadius == 8);
         var row = Shape(scene.Row1);
@@ -253,6 +278,167 @@ internal static class Program
     }
 
     private static Rect FxMarkOf(FxSurface fx, FrameworkElement control) => fx.HoverBox;
+
+    // ----- Device pixels -----
+
+    // Every theme, every kind of control, frame by frame through hover, a glide, a press held and completed, leaving and
+    // keyboard focus: what the layer draws must lie on device pixels at the scale under test. Lines are whole device pixels
+    // wide with their edges (and square or flat ends) on pixel boundaries; fills and edges of a mark lie on its snapped box;
+    // the mark hugs the control's drawn shape within a device pixel. Only the round, soft things (glow dots, particles' halos
+    // and diagonal star rays) are free of the grid.
+    private static void PixelChecks()
+    {
+        var problems = new List<string>();
+        int frames = 0, items = 0, problemCount = 0;
+        double worstHug = 0, worstEdge = 0;
+        bool glitch = false, scan = false;
+        foreach (var theme in PanelThemes.BuiltIns)
+        {
+            var palette = PanelThemes.Resolve(theme);
+            var scene = Build(palette);
+            var fx = scene.Fx;
+            var origin = scene.Content.TransformToAncestor(scene.Island).Transform(new Point());
+            bool released = false;
+            string phase = "";
+            Rect pressedBox = Rect.Empty;
+
+            void Sample(double seconds)
+            {
+                for (double t = 0; t < seconds; t += 1 / 60.0)
+                {
+                    _now += 1 / 60.0;
+                    fx.Frame(_now);
+                    frames++;
+                    if (VisualTreeHelper.GetChildrenCount(fx) == 0 || VisualTreeHelper.GetDrawing((Visual)VisualTreeHelper.GetChild(fx, 0)) is not { } drawing) continue;
+                    Walk(drawing, Matrix.Identity, theme.Id + " " + phase);
+                }
+            }
+
+            void Walk(Drawing drawing, Matrix matrix, string where)
+            {
+                switch (drawing)
+                {
+                    case DrawingGroup group:
+                        if (group.Transform is { } transform) matrix = transform.Value * matrix;
+                        foreach (var child in group.Children) Walk(child, matrix, where);
+                        break;
+                    case GeometryDrawing g:
+                        items++;
+                        Inspect(g, matrix, where);
+                        break;
+                }
+            }
+
+            void Inspect(GeometryDrawing g, Matrix matrix, string where)
+            {
+                var pen = g.Pen;
+                double t = pen?.Thickness ?? 0;
+                if (g.Brush is VisualBrush) glitch = true;
+                switch (g.Geometry)
+                {
+                    case EllipseGeometry e:
+                        // Glow dots and particles are soft and round on purpose.
+                        if (pen is null && (g.Brush is RadialGradientBrush || e.RadiusX < 3)) return;
+                        Width(pen, where + " ellipse");
+                        Edges(where + " ellipse", t / 2, e.Center.X - e.RadiusX, e.Center.X + e.RadiusX, e.Center.Y - e.RadiusY, e.Center.Y + e.RadiusY);
+                        break;
+                    case RectangleGeometry r:
+                        Width(pen, where + " rect");
+                        Edges(where + (g.Brush is VisualBrush ? " glitch slice" : " rect"), t / 2, r.Rect.Left, r.Rect.Right, r.Rect.Top, r.Rect.Bottom);
+                        break;
+                    case LineGeometry l when pen is not null:
+                    {
+                        bool horizontal = Math.Abs(l.StartPoint.Y - l.EndPoint.Y) < 1e-9, vertical = Math.Abs(l.StartPoint.X - l.EndPoint.X) < 1e-9;
+                        if (!horizontal && !vertical) return;
+                        Width(pen, where + " line");
+                        double cap = pen.StartLineCap == PenLineCap.Square ? t / 2 : 0;
+                        if (pen.StartLineCap == PenLineCap.Round) cap = double.NaN;
+                        double x1 = Math.Min(l.StartPoint.X, l.EndPoint.X), x2 = Math.Max(l.StartPoint.X, l.EndPoint.X);
+                        double y1 = Math.Min(l.StartPoint.Y, l.EndPoint.Y), y2 = Math.Max(l.StartPoint.Y, l.EndPoint.Y);
+                        if (horizontal)
+                        {
+                            Edge(where + " line", y1 - t / 2, vertical: true); Edge(where + " line", y1 + t / 2, vertical: true);
+                            if (!double.IsNaN(cap)) { Edge(where + " line end", x1 - cap); Edge(where + " line end", x2 + cap); }
+                            if (released && !pressedBox.IsEmpty && Math.Abs(x2 - x1 - pressedBox.Width) < .01) scan = true;
+                        }
+                        else
+                        {
+                            Edge(where + " line", x1 - t / 2); Edge(where + " line", x1 + t / 2);
+                            if (!double.IsNaN(cap)) { Edge(where + " line end", y1 - cap, vertical: true); Edge(where + " line end", y2 + cap, vertical: true); }
+                        }
+                        break;
+                    }
+                }
+
+                void Edges(string what, double half, double left, double right, double top, double bottom)
+                {
+                    Edge(what, left - half); Edge(what, right + half);
+                    Edge(what, top - half, vertical: true); Edge(what, bottom + half, vertical: true);
+                }
+
+                void Edge(string what, double at, bool vertical = false)
+                {
+                    var point = matrix.Transform(vertical ? new Point(0, at) : new Point(at, 0));
+                    double device = ((vertical ? point.Y : point.X) + (vertical ? origin.Y : origin.X)) * _dpi;
+                    double off = Math.Abs(device - Math.Round(device));
+                    worstEdge = Math.Max(worstEdge, off);
+                    if (off > .02) Problem($"{what}: edge at {device:0.###} px");
+                }
+            }
+
+            void Width(Pen? pen, string what)
+            {
+                if (pen is null) return;
+                double device = pen.Thickness * _dpi;
+                if (Math.Abs(device - Math.Round(device)) > .02 || device < .98) Problem($"{what}: stroke {device:0.###} px wide");
+            }
+
+            // One line per kind of problem (theme, phase, shape), with how often it came up and one example.
+            void Problem(string text)
+            {
+                problemCount++;
+                int cut = text.IndexOf(':');
+                string kind = cut > 0 ? text[..cut] : text;
+                problems.Add(kind + "|" + text);
+            }
+
+            foreach (var target in new[] { scene.Page2, scene.Sync, scene.Row1, scene.Play, scene.CardButton, scene.Notice })
+            {
+                fx.Reset(); released = false; pressedBox = Rect.Empty;
+                _now += 10;
+                phase = "hover " + target.GetType().Name;
+                Feedback(scene, target, true, false); fx.HoverOn(target); Sample(.6);
+                // The mark hugs the control's drawn shape, and its box is on device pixels.
+                if (FxMark.For(target) is { } mark && !fx.HoverBox.IsEmpty)
+                {
+                    var exact = mark.Anchor.TransformToVisual(scene.Content).TransformBounds(mark.Local);
+                    var box = fx.HoverBox;
+                    foreach (var (a, b) in new[] { (box.Left, exact.Left), (box.Right, exact.Right), (box.Top, exact.Top), (box.Bottom, exact.Bottom) })
+                        worstHug = Math.Max(worstHug, Math.Abs(a - b) * _dpi);
+                    foreach (var (v, x) in new[] { (box.Left + origin.X, true), (box.Right + origin.X, true), (box.Top + origin.Y, false), (box.Bottom + origin.Y, false) })
+                        if (Math.Abs(v * _dpi - Math.Round(v * _dpi)) > .02) Problem($"{theme.Id} mark box edge at {v * _dpi:0.###} px");
+                }
+                phase = "press " + target.GetType().Name;
+                Feedback(scene, target, true, true); fx.PressOn(target); pressedBox = fx.HoverBox; Sample(.4);
+                phase = "release " + target.GetType().Name;
+                Feedback(scene, target, true, false); fx.LiftOff(true); released = true; Sample(1.2); released = false;
+                phase = "leave " + target.GetType().Name;
+                fx.HoverOn(null); Sample(.6);
+                Feedback(scene, target, false, false);
+                phase = "focus " + target.GetType().Name;
+                fx.FocusOn(target); Sample(1.2);
+            }
+            fx.Reset(); _now += 10;
+            phase = "glide";
+            fx.HoverOn(scene.Page1); Sample(.5); fx.HoverOn(scene.Page2); Sample(.5); fx.HoverOn(scene.Page3); Sample(.5);
+            scene.Source.Dispose();
+        }
+        Check($"Marks hug the drawn shape within a device pixel (worst {worstHug:0.##} px)", worstHug <= 1.0001);
+        Check($"Everything drawn lies on device pixels with whole-pixel strokes ({frames} frames, {items} shapes, worst edge {worstEdge:0.###} px, {problemCount} off)", problemCount == 0);
+        foreach (var kind in problems.GroupBy(p => p[..p.IndexOf('|')]).Take(40))
+            Console.WriteLine($"      {kind.Count(),5} x {kind.First()[(kind.Key.Length + 1)..]}");
+        Check("The cyberpunk glitch slice and scan line were drawn (and checked)", glitch && scan);
+    }
 
     // ----- Strips -----
 
@@ -380,9 +566,12 @@ internal static class Program
 
     private static BitmapSource Render(Scene scene, Rect area)
     {
-        var bitmap = new RenderTargetBitmap((int)(400 * Scale), (int)(196 * Scale), 96 * Scale, 96 * Scale, PixelFormats.Pbgra32);
+        // At 100 percent three times the size; at another scale pixel for pixel, as the screen would show it.
+        double scale = _dpi == 1 ? Scale : _dpi;
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(400 * scale), (int)Math.Ceiling(196 * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
         bitmap.Render(scene.Island);
-        var crop = new CroppedBitmap(bitmap, new Int32Rect((int)(area.X * Scale), (int)(area.Y * Scale), (int)(area.Width * Scale), (int)(area.Height * Scale)));
+        int x = (int)Math.Round(area.X * scale), y = (int)Math.Round(area.Y * scale);
+        var crop = new CroppedBitmap(bitmap, new Int32Rect(x, y, Math.Min(bitmap.PixelWidth - x, (int)Math.Round(area.Width * scale)), Math.Min(bitmap.PixelHeight - y, (int)Math.Round(area.Height * scale))));
         crop.Freeze();
         return crop;
     }
@@ -394,10 +583,13 @@ internal static class Program
         foreach (var scenario in scenarios)
             for (int i = 0; i < scenario.Count; i += 5) rows.Add(scenario.Skip(i).Take(5).ToList());
         const double gap = 8, label = 18, top = 30;
-        double cellWidth = rows.SelectMany(r => r).Max(s => s.Image.PixelWidth), cellHeight = rows.Max(r => r.Max(s => s.Image.PixelHeight));
+        // Pixel-exact frames are magnified with every device pixel a sharp 2 x 2 block, so a blurred edge shows.
+        double zoom = _dpi == 1 ? 1 : 2;
+        double cellWidth = rows.SelectMany(r => r).Max(s => s.Image.PixelWidth) * zoom;
         int columns = rows.Max(r => r.Count);
-        double width = gap + columns * (cellWidth + gap), height = top + rows.Sum(r => r.Max(s => s.Image.PixelHeight) + label + gap) + gap;
+        double width = gap + columns * (cellWidth + gap), height = top + rows.Sum(r => r.Max(s => s.Image.PixelHeight) * zoom + label + gap) + gap;
         var visual = new DrawingVisual();
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.NearestNeighbor);
         var ink = new SolidColorBrush(palette.IsDark ? Color.FromRgb(0xE8, 0xE8, 0xEE) : Color.FromRgb(0x20, 0x20, 0x28));
         var typeface = new Typeface("Microsoft YaHei UI");
         using (var dc = visual.RenderOpen())
@@ -407,10 +599,10 @@ internal static class Program
             double y = top;
             foreach (var row in rows)
             {
-                double x = gap, rowHeight = row.Max(s => s.Image.PixelHeight);
+                double x = gap, rowHeight = row.Max(s => s.Image.PixelHeight) * zoom;
                 foreach (var shot in row)
                 {
-                    dc.DrawImage(shot.Image, new Rect(x, y, shot.Image.PixelWidth, shot.Image.PixelHeight));
+                    dc.DrawImage(shot.Image, new Rect(x, y, shot.Image.PixelWidth * zoom, shot.Image.PixelHeight * zoom));
                     dc.DrawText(new FormattedText(shot.Label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, typeface, 12, ink, 1), new Point(x + 2, y + rowHeight + 1));
                     x += cellWidth + gap;
                 }

@@ -72,12 +72,14 @@ public static class FxShapes
         => shape.Width >= MinSide && shape.Height >= MinSide && shape.Height <= MaxHeight
            && (surface.Width <= 0 || surface.Height <= 0 || shape.Width * shape.Height <= surface.Width * surface.Height * MaxShare);
 
-    // Edges on device pixels, so a 1 px line is one pixel and nothing shimmers at fractional scales.
+    // Edges on device pixels, so a 1 px line is one pixel and nothing shimmers at fractional scales. Halves always round the
+    // same way (up): rounding them to even would widen a shape that sits on half pixels (at 175 percent a 36 px circle at
+    // x.5 became 64 device pixels wide instead of 63).
     public static DipRect Snap(DipRect rect, double scaleX, double scaleY)
     {
         if (scaleX <= 0 || scaleY <= 0) return rect;
-        double left = Math.Round(rect.X * scaleX) / scaleX, top = Math.Round(rect.Y * scaleY) / scaleY;
-        double right = Math.Round(rect.Right * scaleX) / scaleX, bottom = Math.Round(rect.Bottom * scaleY) / scaleY;
+        double left = Pixel(rect.X * scaleX) / scaleX, top = Pixel(rect.Y * scaleY) / scaleY;
+        double right = Pixel(rect.Right * scaleX) / scaleX, bottom = Pixel(rect.Bottom * scaleY) / scaleY;
         return new(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
     }
 
@@ -86,8 +88,11 @@ public static class FxShapes
     {
         if (scale <= 0) return at;
         int pixels = Math.Max(1, (int)Math.Round(width * scale));
-        return pixels % 2 == 0 ? Math.Round(at * scale) / scale : (Math.Floor(at * scale) + .5) / scale;
+        return pixels % 2 == 0 ? Pixel(at * scale) / scale : (Math.Floor(at * scale) + .5) / scale;
     }
+
+    // The nearest device pixel boundary, halves up.
+    public static double Pixel(double devicePixels) => Math.Floor(devicePixels + .5);
 
     // Clipped to the viewports the control is shown through; empty when nothing of it shows.
     public static DipRect Clip(DipRect rect, DipRect viewport)
