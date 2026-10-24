@@ -67,6 +67,8 @@ public partial class MainWindow
         _dotSquash.BeginAnimation(ScaleTransform.ScaleXProperty, Part(p => p.ScaleX), HandoffBehavior.SnapshotAndReplace);
         _dotSquash.BeginAnimation(ScaleTransform.ScaleYProperty, Part(p => p.ScaleY), HandoffBehavior.SnapshotAndReplace);
         HoverZone.BeginAnimation(OpacityProperty, Part(p => p.Opacity), HandoffBehavior.SnapshotAndReplace);
+        // The pose moves no layout: the blur under glass is told to follow it.
+        _glass?.Follow(delay + length);
     }
 
     // Whether the island can pass a size of width x height at left and gap (window coordinates) by the opening spring's give

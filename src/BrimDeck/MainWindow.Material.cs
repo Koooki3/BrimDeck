@@ -19,8 +19,8 @@ public partial class MainWindow
         if (_glass is null)
         {
             _glass = new GlassBackdrop(this, Island);
-            // Over a held blur the tint thins as the blur fades in, and is whole again as it goes.
-            _glass.HeldChanged += (held, milliseconds) => Tracks.Animate(_surface, Brush.OpacityProperty, held ? PanelTheme.HeldOpacity(_expanded) : 1, milliseconds, new(0, 1), Soft.Out);
+            // Over a held blur the tint thins with it, frame by frame.
+            _glass.Held += held => _surface.Opacity = 1 + held * (PanelTheme.HeldOpacity(_surface.Color.A / 255d) - 1);
         }
         _glass.Update();
         bool glass = PanelTheme.GlassShown;

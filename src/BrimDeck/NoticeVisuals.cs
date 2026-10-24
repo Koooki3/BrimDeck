@@ -69,7 +69,7 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public static readonly DependencyProperty BottomRadiusProperty = Register(nameof(BottomRadius), 0d);
     public static readonly DependencyProperty ShoulderProperty = Register(nameof(Shoulder), 0d);
     public static readonly DependencyProperty IslandOpacityProperty = Register(nameof(IslandOpacity), 0d);
-    // The surface's opacity: below 1 while a held blur lies under glass (GlassBackdrop.HeldChanged).
+    // The surface's opacity: below 1 while a held blur lies under glass (GlassBackdrop.Held).
     public static readonly DependencyProperty FillOpacityProperty = DependencyProperty.Register(nameof(FillOpacity), typeof(double), typeof(NoticeSurface),
         new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty IslandColorProperty = DependencyProperty.Register(nameof(IslandColor), typeof(Color), typeof(NoticeSurface),

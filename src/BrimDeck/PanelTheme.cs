@@ -232,14 +232,15 @@ internal static class PanelTheme
         }
     }
     private const double Thicker = .35;
-    // Over a held blur (GlassBackdrop.HeldChanged) the tint thins to the theme's blur opacity: the opacity of the brush drawing
-    // SurfaceColor (or PanelSurfaceColor when open) that gives it. 1 for a theme without a held blur.
-    public static double HeldOpacity(bool open)
+    // Over a held blur (GlassBackdrop.Held) the tint thins to the theme's blur opacity: the opacity of the brush drawing glass
+    // of the given alpha (the tint, thickened toward PanelSurfaceColor as the panel opens) that gives the thinner tint thickened
+    // alike. 1 for a theme without a held blur.
+    public static double HeldOpacity(double alpha)
     {
-        if (!GlassShown || Current.Effects.Glass is not { Held: true } glass) return 1;
+        if (!GlassShown || Current.Effects.Glass is not { Held: true } glass || alpha <= 0) return 1;
         double whole = glass.Tint.A / 255d, thin = glass.BlurTint.A / 255d;
-        if (open) { whole += (1 - whole) * Thicker; thin += (1 - thin) * Thicker; }
-        return whole > 0 ? thin / whole : 1;
+        double thickened = whole < 1 ? Math.Clamp((alpha - whole) / (1 - whole), 0, 1) : 0;
+        return Math.Min(1, (thin + thickened * (1 - thin)) / alpha);
     }
     // What the panel's text asks for: ClearType over an opaque surface; over glass, where the layered window has no opaque
     // pixels under the text, ClearType would wash the text out, so WPF chooses (grayscale there).
