@@ -63,6 +63,7 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("展开时", "When expanded"));
         // The choices that show themselves on the monitor page keep its preview open, so switching between them does not collapse it first.
         Group(MusicChoice(Loc.T("主视图", "Large gauge"), S.MonitorMain, [(MonitorMain.Cpu, "CPU"), (MonitorMain.Gpu, "GPU")], v => Resize(s => s.MonitorMain = v, DeckPage.Monitor), keepPreview: true),
+            GpuChoiceRow(),
             MusicChoice(Loc.T("刷新间隔", "Update interval"), S.MonitorInterval, [(1, Loc.T("1 秒", "1 s")), (2, Loc.T("2 秒", "2 s"))], v => Change(s => s.MonitorInterval = v)),
             MusicChoice(Loc.T("进程行", "Process rows"), S.MonitorProcessView,
                 [(MonitorProcessView.Auto, Loc.T("自动", "Auto")), (MonitorProcessView.Compact, Loc.T("简略", "Compact")), (MonitorProcessView.Detailed, Loc.T("详细", "Detailed"))],
@@ -72,6 +73,39 @@ public sealed partial class SettingsWindow
                 Loc.T("按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行。面板足够大时显示。",
                     "Lists the apps using the most CPU or memory, with the processes of one program folded into one row. Shown when the panel is large enough."),
                 keepPreview: true));
+    }
+
+    // The graphics adapter the monitor shows, on the page and in the collapsed readings alike: 自动, or one of the adapters found,
+    // named with its kind. The adapters are the ones the monitor reads while it runs, else the ones DXGI lists. A chosen adapter
+    // that is not connected stays in the list, marked, so the choice can be seen and changed.
+    private Grid GpuChoiceRow()
+    {
+        var found = _app.Monitor?.Latest?.Gpus is { Count: > 0 } read ? read.Select(gpu => (gpu.Key, gpu.Name, gpu.Kind)).ToList()
+            : Native.GpuAdapters.Read().Adapters.Values.Where(adapter => !adapter.Software).OrderBy(adapter => GpuReadings.Rank(adapter.Kind))
+                .ThenBy(adapter => adapter.Name, StringComparer.Ordinal).Select(adapter => (adapter.Key, Name: (string?)adapter.Name, adapter.Kind)).ToList();
+        var options = new List<(string? Key, string? Name, string Label)> { (null, null, Loc.T("自动", "Auto")) };
+        options.AddRange(found.Select(gpu => ((string?)gpu.Key, gpu.Name, GpuChoice.Describe(gpu.Name, gpu.Kind))));
+        int selected = S.MonitorGpu is not { } saved ? 0 : options.FindIndex(option => option.Key == saved) is var byKey and > 0 ? byKey
+            : options.FindIndex(1, option => S.MonitorGpuName is { Length: > 0 } name && option.Name == name);
+        if (selected < 0)
+        {
+            options.Add((S.MonitorGpu, S.MonitorGpuName, Loc.T($"{S.MonitorGpuName ?? "GPU"}（未连接）", $"{S.MonitorGpuName ?? "GPU"} (not connected)")));
+            selected = options.Count - 1;
+        }
+        var choice = new ComboBox { Width = 292, Style = (Style)FindResource("SettingsCombo"), ItemsSource = options.Select(option => option.Label).ToList(), SelectedIndex = selected };
+        AutomationProperties.SetName(choice, Loc.T("显卡", "GPU")); PopupMotion.Attach(choice);
+        choice.SelectionChanged += (_, _) =>
+        {
+            if (choice.SelectedIndex < 0) return;
+            var (key, name, _) = options[choice.SelectedIndex];
+            if (key == S.MonitorGpu) return;
+            Change(s => { s.MonitorGpu = key; s.MonitorGpuName = name; });
+            // The open page and the collapsed readings show the new adapter at once.
+            _app.Monitor?.ShowGpuChoice();
+        };
+        return Row(Loc.T("显卡", "GPU"), choice, help: () => Loc.T(
+            "系统监控页和收起时的 GPU 读数显示这块显卡。自动：有独显时显示独显，否则显示占用最高的显卡，之后不随占用来回切换。有多块显卡时，以 GPU 为主视图时点击 GPU 读数可切换到下一块。",
+            "The GPU readings on the monitor page and in the collapsed row show this adapter. Auto shows the discrete GPU when there is one, else the busiest, and then stays on it whatever the load. With more than one GPU, click the GPU reading while the GPU is the large gauge to show the next one."));
     }
 
     // A color circle with its name beside it. refresh builds the circle again, so it shows the color the settings hold. The note

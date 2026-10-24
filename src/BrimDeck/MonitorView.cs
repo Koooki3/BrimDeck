@@ -39,7 +39,8 @@ internal static class MonitorThemeColors
 
 // The system monitor page, after ftop's panel: the main gauge large with its columns (the processor's cores, or the graphics
 // adapter's engines), the other gauge small beside it (a click on either swaps them), memory and network below, and the
-// busiest apps beside or under the readings. Every part draws itself; Update hands each its new reading.
+// busiest apps beside or under the readings. Every part draws itself; Update hands each its new reading. With more than one
+// graphics adapter the large GPU gauge names the shown adapter's kind and a click on it shows the next adapter.
 internal sealed class MonitorView : Grid
 {
     private readonly MonitorLayout _layout;
@@ -57,9 +58,11 @@ internal sealed class MonitorView : Grid
     private ProcessList? _processes;
     private int _cores = Environment.ProcessorCount;
     private bool _motion;
+    // The adapter a click on the large GPU gauge shows next; null with one adapter.
+    private GpuSample? _nextGpu;
 
     public MonitorView(MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
-        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold)
+        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged)
     {
         _layout = layout; _colors = colors; _main = main;
         bool cpuMain = main == MonitorMain.Cpu;
@@ -82,6 +85,7 @@ internal sealed class MonitorView : Grid
         small.VerticalAlignment = VerticalAlignment.Center;
         SetColumn(small, 1); head.Children.Add(big); head.Children.Add(small);
         small.Clicked += () => mainChanged(cpuMain ? MonitorMain.Gpu : MonitorMain.Cpu);
+        if (!cpuMain) _gpuGauge.Clicked += () => { if (_nextGpu is { } next) gpuChanged(next); };
         readings.Children.Add(head);
 
         var graphs = new Grid { Margin = new Thickness(0, layout.CompactMetrics ? 4 : 6, 0, layout.CompactMetrics ? 6 : 10) };
@@ -170,10 +174,16 @@ internal sealed class MonitorView : Grid
         {
             string memory = gpu.DedicatedBytes.TryGet(out var used)
                 ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Gigabytes(used) + (gpu.DedicatedTotal is { } total ? " / " + MonitorFormat.GigabytesCompact(total) : "") + " GB" : "";
-            string tip = (gpu.Name ?? "GPU") + " · " + MonitorFormat.Percent(gpu.Usage) + "%" + (memory.Length > 0 ? " · " + memory : "")
+            // With more than one adapter each is named with its kind, and the large gauge says which kind it shows.
+            bool several = snapshot.Gpus.Count > 1;
+            _nextGpu = several && !cpuMain ? GpuChoice.Next(snapshot.Gpus, gpu) : null;
+            string tip = (several ? GpuChoice.Describe(gpu.Name, gpu.Kind) : gpu.Name ?? "GPU") + " · " + MonitorFormat.Percent(gpu.Usage) + "%" + (memory.Length > 0 ? " · " + memory : "")
                 + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "");
+            string switchTo = _nextGpu is { } next ? Loc.T("点击切换到 ", "Click to show ") + GpuChoice.Describe(next.Name, next.Kind) : "";
+            if (!cpuMain) _gpuGauge.Button = switchTo.Length > 0 ? Loc.T("切换显卡", "Switch GPU") : null;
             // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure.
-            _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", "", tip, motion);
+            _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", several && !cpuMain ? GpuChoice.KindName(gpu.Kind) : "",
+                switchTo.Length > 0 ? tip + "\n" + switchTo : tip, motion);
             _gpuBlock?.Set(gpu.Usage, gpu.DedicatedFraction, tip, motion);
             _gpuGraph?.Set(gpu.Engines.Select(engine => new GraphColumn(engine.Usage, null, _colors.Gpu, 0,
                 GpuEngines.Label(engine.Kind) + " · " + MonitorFormat.Percent(engine.Usage) + "%", GpuEngines.Short(engine.Kind))).ToList(), motion);
@@ -181,6 +191,8 @@ internal sealed class MonitorView : Grid
         else
         {
             string reason = Loc.T("暂无读数：", "No reading: ") + snapshot.Gpu.Reason;
+            _nextGpu = null;
+            if (!cpuMain) _gpuGauge.Button = null;
             _gpuGauge.Set(null, "—", "", "", reason, motion);
             _gpuBlock?.Set(0, null, reason, motion);
             _gpuGraph?.Set([], motion);

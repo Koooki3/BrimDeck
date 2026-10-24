@@ -120,15 +120,20 @@ public static class ReadingLevels
 // One kind of engine of a graphics adapter (3D, Copy, VideoDecode, ...) with the shares of all processes summed, 0..1.
 public sealed record GpuEngine(string Kind, double Usage);
 
-// The busiest graphics adapter, read as Task Manager reads it: its busiest engine type, the processes' shares summed. Engines are
-// its kinds of engine in a fixed order (GpuEngines.Order); Name and DedicatedTotal come from the adapter's description and are
-// null where the system does not give them.
+// A graphics adapter, read as Task Manager reads it: its busiest engine type, the processes' shares summed. Engines are its kinds
+// of engine in a fixed order (GpuEngines.Order); Name and DedicatedTotal come from the adapter's description and are null where the
+// system does not give them. Luid names the adapter until the next restart, Key for good (GpuReadings.Keyed); History is its last
+// usage readings, oldest first, 0 to 1.
 public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
 {
     public IReadOnlyList<GpuEngine> Engines { get; init; } = [];
     public Reading<ulong> SharedBytes { get; init; } = Reading<ulong>.Unavailable("");
     public string? Name { get; init; }
     public ulong? DedicatedTotal { get; init; }
+    public ulong Luid { get; init; }
+    public string Key { get; init; } = "";
+    public GpuKind Kind { get; init; }
+    public IReadOnlyList<double> History { get; init; } = [];
     public double? DedicatedFraction => DedicatedBytes.TryGet(out var used) && DedicatedTotal is { } total && total > 0 ? Math.Clamp((double)used / total, 0, 1) : null;
 }
 
@@ -208,10 +213,12 @@ public sealed record ProcessList(IReadOnlyList<ProcessSample> Top, IReadOnlyList
 }
 
 // DownHistory and UpHistory are the last network readings, oldest first, bytes per second; empty until there are two.
-// CpuHistory and GpuHistory are the last processor and graphics usage readings in the same way, 0 to 1.
+// CpuHistory and GpuHistory are the last processor and graphics usage readings in the same way, 0 to 1. Gpus is every graphics
+// adapter read; Gpu is the one shown (GpuChoice), and GpuHistory its history.
 public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors, Reading<CpuSample> Cpu, Reading<MemorySample> Memory,
     Reading<NetworkSample> Network, Reading<GpuSample> Gpu, Reading<ProcessList> Processes)
 {
+    public IReadOnlyList<GpuSample> Gpus { get; init; } = [];
     public IReadOnlyList<double> DownHistory { get; init; } = [];
     public IReadOnlyList<double> UpHistory { get; init; } = [];
     public IReadOnlyList<double> CpuHistory { get; init; } = [];

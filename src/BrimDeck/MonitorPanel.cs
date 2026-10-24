@@ -87,7 +87,7 @@ public partial class MainWindow
         // The list being replaced may have been under the pointer; its leave event never comes.
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
         _monitorView = new MonitorView(CurrentMonitorLayout(), MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
-            Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; });
+            Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu);
         MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // A new main gauge, asked for on the page, arrives with a short fade instead of a cut.
@@ -120,6 +120,14 @@ public partial class MainWindow
         if (Settings.MonitorMain == main) return;
         Settings.MonitorMain = main; _app.QueueSave();
         RefreshMonitorPages();
+    }
+    // The adapter shown on the page is the one the monitor shows everywhere, the collapsed readings too, so a click on the page
+    // keeps it as the choice under the monitor's settings. Every page and strip shows it at once, without waiting for a reading.
+    private void SwitchMonitorGpu(GpuSample gpu)
+    {
+        if (Settings.MonitorGpu == gpu.Key) return;
+        Settings.MonitorGpu = gpu.Key; Settings.MonitorGpuName = gpu.Name; _app.QueueSave();
+        _app.Monitor?.ShowGpuChoice();
     }
     private void RefreshMonitorPages()
     {
