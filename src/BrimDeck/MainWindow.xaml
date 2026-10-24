@@ -12,7 +12,7 @@
           MouseEnter="Island_MouseEnter" MouseLeave="Island_MouseLeave">
       <!-- The shadow is drawn from a cached picture: WPF blurs an effect again whenever anything drawn over it changes (the
            ambient rim, the marquee, the equalizer), and the cache keeps the blurred result (dropped while the island changes
-           size, MainWindow.Motion.cs). The effect must stay on the
+           size or its color, MainWindow.Shadow.cs). The effect must stay on the
            child for the cache to hold it; the shadow fades on ShadowHost, outside the cache. ShadowBounds reaches past the blur by whole device pixels, so the picture lies on
            the pixel grid and looks exactly as the shadow drawn directly (MainWindow.FitShadowCache). -->
       <Grid x:Name="ShadowHost" HorizontalAlignment="Left" VerticalAlignment="Top" Opacity="0" IsHitTestVisible="False">

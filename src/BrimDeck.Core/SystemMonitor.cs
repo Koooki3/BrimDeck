@@ -34,8 +34,27 @@ public sealed record CoreSample(int Id, int Group, CoreTier Tier, int Number, do
 
 public sealed record CpuSample(IReadOnlyList<CoreSample> Cores, Reading<double> FrequencyMhz)
 {
-    public double Usage => Cores.Count == 0 ? 0 : Cores.Average(core => core.Usage);
-    public int GroupCount => Cores.Count == 0 ? 0 : Cores.Max(core => core.Group) + 1;
+    // By index, as Average and Max add up: both are read on every redraw of the collapsed readings, which allocate nothing.
+    public double Usage
+    {
+        get
+        {
+            if (Cores.Count == 0) return 0;
+            double sum = 0;
+            for (int i = 0; i < Cores.Count; i++) sum += Cores[i].Usage;
+            return sum / Cores.Count;
+        }
+    }
+    public int GroupCount
+    {
+        get
+        {
+            if (Cores.Count == 0) return 0;
+            int most = int.MinValue;
+            for (int i = 0; i < Cores.Count; i++) most = Math.Max(most, Cores[i].Group);
+            return most + 1;
+        }
+    }
     // The cores of each group, fastest group first.
     public IReadOnlyList<IReadOnlyList<CoreSample>> Groups =>
         Enumerable.Range(0, GroupCount).Select(group => (IReadOnlyList<CoreSample>)Cores.Where(core => core.Group == group).ToList()).Where(list => list.Count > 0).ToList();
@@ -79,7 +98,7 @@ public static class ReadingLevels
     // core's; the strip colors each column by its own core (OfShare).
     public static MemoryLevel Of(CompactMonitorItems item, MonitorSnapshot? snapshot) => item switch
     {
-        CompactMonitorItems.Columns => snapshot?.Cpu.OrDefault is { Cores.Count: > 0 } cores ? OfShare(cores.Cores.Max(core => core.Usage)) : MemoryLevel.Normal,
+        CompactMonitorItems.Columns => snapshot?.Cpu.OrDefault is { Cores.Count: > 0 } cores ? OfShare(Busiest(cores.Cores)) : MemoryLevel.Normal,
         CompactMonitorItems.Cpu => snapshot?.Cpu.OrDefault is { } cpu ? OfShare(cpu.Usage) : MemoryLevel.Normal,
         CompactMonitorItems.Memory => snapshot?.Memory.OrDefault?.Level ?? MemoryLevel.Normal,
         CompactMonitorItems.Gpu => snapshot?.Gpu.OrDefault is { } gpu ? OfShare(gpu.Usage) : MemoryLevel.Normal,
@@ -87,6 +106,15 @@ public static class ReadingLevels
         CompactMonitorItems.Upload => snapshot?.Network.OrDefault is { } up ? OfRate(up.UpBytesPerSecond) : MemoryLevel.Normal,
         _ => MemoryLevel.Normal
     };
+
+    // The busiest core's share, by index: asked on every redraw of the collapsed readings, which allocate nothing for it.
+    private static double Busiest(IReadOnlyList<CoreSample> cores)
+    {
+        // As Enumerable.Max: a share that is not a number is passed over.
+        double most = double.NaN;
+        for (int i = 0; i < cores.Count; i++) if (double.IsNaN(most) || cores[i].Usage > most) most = cores[i].Usage;
+        return most;
+    }
 }
 
 // One kind of engine of a graphics adapter (3D, Copy, VideoDecode, ...) with the shares of all processes summed, 0..1.

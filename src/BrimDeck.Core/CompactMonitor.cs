@@ -195,24 +195,36 @@ public static class CompactMonitor
         CompactMonitorItems shown, Func<CompactMonitorItems, double> width, double gap, Func<CompactMonitorItems, double> presence)
     {
         var items = new List<(CompactMonitorItems, double, double, double)>();
+        return (items, Arrange([.. order.Distinct()], shown, width, gap, presence, items));
+    }
+
+    // The same into a list the caller keeps (cleared first), returning Total: the strip arranges its readings on every redraw,
+    // and allocates nothing for it. The order must name each item once.
+    public static double Arrange(IReadOnlyList<CompactMonitorItems> order, CompactMonitorItems shown, Func<CompactMonitorItems, double> width, double gap,
+        Func<CompactMonitorItems, double> presence, List<(CompactMonitorItems Item, double X, double Width, double Presence)> items)
+    {
+        items.Clear();
         double x = 0, last = 0;
-        foreach (var item in order.Distinct())
+        for (int i = 0; i < order.Count; i++)
         {
+            var item = order[i];
             if ((shown & item) == 0 || !Order.Contains(item)) continue;
             double p = Math.Clamp(presence(item), 0, 1), w = Math.Max(0, width(item));
             if (p <= 0) continue;
             items.Add((item, x, w, p));
             x += (w + gap) * p; last = p;
         }
-        return (items, Math.Max(0, x - gap * last));
+        return Math.Max(0, x - gap * last);
     }
 
     // The width of the items side by side with this gap between them.
     public static double Width(CompactMonitorItems items, Func<CompactMonitorItems, double> width, double gap)
     {
         double total = 0; int count = 0;
-        foreach (var item in Order)
+        // By index: asked on every reading of a scrolling strip, and an interface's enumerator would be allocated each time.
+        for (int i = 0; i < Order.Count; i++)
         {
+            var item = Order[i];
             if ((items & item) == 0) continue;
             total += Math.Max(0, width(item)); count++;
         }
@@ -231,6 +243,10 @@ public static class CompactMonitor
         }
         return Width(shown, width, gap) <= available + 1e-9 ? shown : CompactMonitorItems.None;
     }
+
+    // Whether a region of the collapsed row this wide shows any of the readings. Readings wider than their region scroll in it,
+    // so any room shows some; a region squeezed to nothing shows none, and the sampler is not run for them.
+    public static bool HasRoom(double region) => double.IsFinite(region) && region > 0;
 }
 
 // The colors of the collapsed readings at each level (ReadingLevels), from the color scheme. The normal state has a color per

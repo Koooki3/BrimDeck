@@ -123,6 +123,7 @@ public partial class MainWindow : Window
         InitializeMonitor();
         InitializeResize();
         Island.Background = _surface;
+        InitializeShadow();
         InitializeMotion();
         PanelTheme.Changing += BeginThemeFade;
         Closed += (_, _) => PanelTheme.Changing -= BeginThemeFade;
@@ -405,10 +406,11 @@ public partial class MainWindow : Window
         _themeGeneration = PanelTheme.Generation; _themeDpi = dpi; _glassShown = PanelTheme.GlassShown;
         // The resize hints take the theme's colors when they are drawn.
         _grips?.InvalidateVisual();
-        if (sameTheme) { Island.Pattern = PanelTheme.Texture(dpiScale: dpi) ?? PanelTheme.Scanlines(dpiScale: dpi); return; }
+        if (sameTheme) { Island.Pattern = PanelTheme.Texture(dpiScale: dpi) ?? PanelTheme.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
         Foreground = UI.Brush(UI.Primary);
         PanelTheme.Dress(Island, dpiScale: dpi);
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
+        FitShadowCache(dpi);
         ApplyThemeMotion();
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
         SetImmediate(_surface, SolidColorBrush.ColorProperty, !_expanded && Collapsed.Style == CompactStyle.Line ? PanelTheme.ColorOf("indicator") : PanelTheme.SurfaceColor);
