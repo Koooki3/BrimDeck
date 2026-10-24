@@ -19,7 +19,7 @@ namespace BrimDeck;
 // One panel's dynamic notices. The window lies over the panel's collapsed island and is shown only while a notice is: the
 // notice grows out of the island's exact outline in the island's own theme material, shows the application's icon, title and
 // summary, opens into its details on hover or click, and shrinks back into the island at the end, moving as the island does,
-// on the panel's own clock and tracks (NoticeMotion: Soft.Bounce opening, Soft.Settle closing). Its window is sized once per
+// on the panel's own clock and tracks (NoticeMotion: Soft.Bounce opening, Soft.Drawer closing). Its window is sized once per
 // notice to hold the largest form, so nothing resizes the window while it moves; only the drawn surface is hit-tested, the rest
 // lets clicks through. It never takes focus unless the notices hotkey asks for the keyboard. Opened over, the panel takes the
 // notice's outline and grows on from it (HandOver).
@@ -190,7 +190,7 @@ internal sealed partial class NoticeWindow : Window
         // The island may have changed meanwhile (a window rule turned it into the indicator).
         _collapsed = NoticeGeometry.Collapsed(_deck.Collapsed);
         _surface.IslandColor = PanelTheme.ColorOf("indicator");
-        // As the panel closes: the content leaves first, the surface settles into the island with a slow start, and the
+        // As the panel closes: the content leaves first, the surface follows into the island on the drawer's curve, and the
         // indicator's color comes back only once the surface is nearly the line. The shadow or glow ends as the island's own
         // (none for the line), so nothing about it changes when the island takes over.
         // It goes back as the panel closes, in three quarters of the time (motion-review C1), or in the keyboard's shorter time
@@ -202,7 +202,7 @@ internal sealed partial class NoticeWindow : Window
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
         Animate(_glow, OpacityProperty, Indicator ? 0 : 1, duration, NoticeMotion.ReturnGlow, Soft.Out);
         if (Indicator) Animate(_surface, NoticeSurface.IslandOpacityProperty, 1, duration, NoticeMotion.ReturnTint, Soft.InOut);
-        SetFrame(_collapsed, duration, NoticeMotion.ReturnSurfaceFor(redirect), redirect ? Soft.Out : Soft.Settle, () => { if (generation == _generation && _item is null) Finish(reveal: true); });
+        SetFrame(_collapsed, duration, NoticeMotion.ReturnSurfaceFor(redirect), Soft.Drawer, () => { if (generation == _generation && _item is null) Finish(reveal: true); });
     }
 
     // The panel opens over the island: a notice still on its way out is removed at once, so the panel is never hidden.
@@ -854,7 +854,7 @@ internal sealed partial class NoticeWindow : Window
         // As the panel closes, in three quarters of the time (motion-review C1).
         double duration = NoticeMotion.ReturnLength(Duration(), keyboard: false);
         bool redirect = Turn(opening: false, _toastFrame, ref duration);
-        SetFrame(_toastFrame, duration, NoticeMotion.ReturnSurfaceFor(redirect), redirect ? Soft.Out : Soft.Settle);
+        SetFrame(_toastFrame, duration, NoticeMotion.ReturnSurfaceFor(redirect), Soft.Drawer);
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out, () => { if (!_showingDetail && _detail.Children.Count > 0) _detail.Visibility = Visibility.Hidden; });
         Animate(_toast, OpacityProperty, 1, duration, NoticeMotion.Landing, Soft.Out);
         _escape?.SetEnabled(false);
