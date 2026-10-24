@@ -1,0 +1,464 @@
+using System.Windows;
+using System.Windows.Media;
+using BrimDeck.Core;
+
+namespace BrimDeck;
+
+// How each theme draws its answers (ThemeMotion). Every mark lies on the
+// control's visible shape (FxMark.Box and Radius), on the layer above the content:
+//   reveal / shade (dark, system): a faint accent fill and an edge lit from the top; a press shades the shape and firms its edge.
+//   lift / sink (light): a soft shadow outside the shape and a light top edge; a press collapses the shadow and shades the shape.
+//   underline / indicator (GitHub): a subtle neutral fill and a 2 px bar along the bottom; a press turns the bar the highlight.
+//   caret / select (One Dark Pro): a line highlight and a caret bar at the left; a press sweeps a selection out behind the caret.
+//   brackets / lock (cyberpunk): HUD corner brackets that snap on in hard steps; a press clamps them onto the edge with a
+//     magenta ghost, a yellow corner and a glitch slice of the control itself, and a completed press ticks a scan line down it.
+//   sheen / sparkle (Dracula): a purple-to-pink tint and fine gradient edge; a press deepens it, then stars twinkle (particles).
+//   glow / ember (Night Owl): a warm glow inside the shape and a glint at its corner; a press swells it, then fireflies rise.
+// Brushes and pens are made when the theme dresses the layer and frozen; strengths are applied as opacity, so a frame only
+// draws.
+internal sealed partial class FxSurface
+{
+    private Brush _main = Brushes.Transparent, _second = Brushes.Transparent, _high = Brushes.Transparent, _light = Brushes.White;
+    private Brush _liftBrush = Brushes.Transparent, _revealEdgeBrush = Brushes.Transparent, _sheen = Brushes.Transparent, _glow = Brushes.Transparent, _ember = Brushes.Transparent, _glint = Brushes.Transparent;
+    private Pen _liftLine = new(), _mainLine = new(), _mainBold = new(), _secondLine = new(), _secondBold = new(), _highLine = new(), _highBold = new(), _revealEdge = new(), _sheenEdge = new(), _lightLine = new();
+    private double _line = 1, _bold = 1.5, _dressedDpi;
+    private bool _darkSurface;
+    // The glitch slice: the pressed control itself, a thin band of it drawn a few pixels aside for a moment.
+    private readonly VisualBrush _slice = new() { ViewboxUnits = BrushMappingMode.Absolute, ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
+    private Rect _sliceBand = Rect.Empty;
+    private PanelPalette? _dressedPalette;
+
+    private void Dress(PanelPalette palette, bool system)
+    {
+        _dressedPalette = palette;
+        var accent = _motion.Color == ThemeMotion.SystemAccent || _motion.Secondary == ThemeMotion.SystemAccent || _motion.Highlight == ThemeMotion.SystemAccent ? WindowsAccent() : null;
+        Color main = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, _motion.Color, accent));
+        Color second = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, _motion.Secondary, accent));
+        Color high = PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, _motion.Highlight, accent));
+        _darkSurface = palette.IsDark;
+        _main = Solid(main); _second = Solid(second); _high = Solid(high); _light = Solid(palette.IsDark ? Color.FromArgb(255, 255, 255, 255) : Colors.White);
+        _revealEdgeBrush = Vertical(main, 1, .3);
+        _sheen = Diagonal(main, second);
+        _liftBrush = Vertical(second, 0, 1);
+        _glow = Radial(second, new Point(.5, 1), .75, 1.25);
+        _ember = Radial(second, new Point(.5, .5), .65, .9);
+        _glint = Radial(second, new Point(.5, .5), .5, .5);
+        DressPens();
+        DressParticles(main, second, high);
+    }
+
+    // Lines on whole device pixels: a 1 px line is one pixel at any scale, and the brackets' 1.5 px is two at 100 percent.
+    private void DressPens()
+    {
+        double scale = Math.Max(1, Dpi.DpiScaleX);
+        _dressedDpi = Dpi.DpiScaleX;
+        _line = Math.Max(1, Math.Round(scale)) / scale;
+        _bold = Math.Max(2, Math.Round(1.5 * scale)) / scale;
+        _mainLine = Pen(_main, _line); _mainBold = Pen(_main, _bold, PenLineCap.Square);
+        _secondLine = Pen(_second, _line); _secondBold = Pen(_second, _bold, PenLineCap.Square);
+        _highLine = Pen(_high, _line); _highBold = Pen(_high, _bold, PenLineCap.Square);
+        _revealEdge = Pen(_revealEdgeBrush, _line);
+        _sheenEdge = Pen(_sheen, _line);
+        _lightLine = Pen(_light, _line);
+        // A shadow falls below: its edge fades out toward the top, so it never reads as an outline.
+        _liftLine = Pen(_liftBrush, _line);
+    }
+
+    // The Windows accent color, for the "system" theme; null where Windows does not say.
+    private static ThemeColor? WindowsAccent()
+    {
+        try
+        {
+            var c = new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent);
+            return new ThemeColor(c.A, c.R, c.G, c.B);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return null; }
+    }
+
+    private static Color Alpha(Color color, double alpha) => Color.FromArgb((byte)Math.Round(255 * Math.Clamp(alpha, 0, 1)), color.R, color.G, color.B);
+    private static Brush Solid(Color color) { var brush = new SolidColorBrush(color); brush.Freeze(); return brush; }
+    private static Pen Pen(Brush brush, double thickness, PenLineCap cap = PenLineCap.Flat)
+    {
+        var pen = new Pen(brush, thickness) { StartLineCap = cap, EndLineCap = cap, LineJoin = PenLineJoin.Miter };
+        pen.Freeze();
+        return pen;
+    }
+    private static Brush Vertical(Color color, double top, double bottom)
+    {
+        var brush = new LinearGradientBrush(Alpha(color, top), Alpha(color, bottom), 90);
+        brush.Freeze();
+        return brush;
+    }
+    private static Brush Diagonal(Color from, Color to)
+    {
+        var brush = new LinearGradientBrush(from, to, new Point(0, 0), new Point(1, 1));
+        brush.Freeze();
+        return brush;
+    }
+    private static Brush Radial(Color color, Point center, double radiusX, double radiusY)
+    {
+        var brush = new RadialGradientBrush(new GradientStopCollection { new GradientStop(color, 0), new GradientStop(Alpha(color, .45), .45), new GradientStop(Alpha(color, 0), 1) })
+        {
+            Center = center, GradientOrigin = center, RadiusX = radiusX, RadiusY = radiusY
+        };
+        brush.Freeze();
+        return brush;
+    }
+
+    // ----- Timelines -----
+
+    private int Steps => _motion.Steps;
+
+    private double HoverPresence(FxMark mark, double now)
+    {
+        if (!double.IsNaN(mark.LeftAt)) return LeavingPresence(mark, now);
+        if (double.IsNaN(mark.ShownAt)) return 0;
+        double t = MotionCurve.Linear(now - mark.ShownAt, _timing.HoverIn / 1000.0);
+        return mark.ShownFrom + (1 - mark.ShownFrom) * MotionCurve.Ease(t, Steps);
+    }
+
+    private double LeavingPresence(FxMark mark, double now)
+    {
+        // A mechanical theme drops its mark in half the time.
+        double length = _timing.HoverOut / 1000.0 * (Steps > 0 ? .5 : 1);
+        return mark.LeftFrom * (1 - MotionCurve.EaseOut(MotionCurve.Linear(now - mark.LeftAt, length), Steps));
+    }
+
+    // Where a mark is drawn: on its control, or on the way there from the previous control.
+    private Rect Drawn(FxMark mark, double now, out double radius)
+    {
+        radius = mark.Radius;
+        if (double.IsNaN(mark.GlideAt) || mark.GlideFrom.IsEmpty) return mark.Box;
+        double t = MotionCurve.Linear(now - mark.GlideAt, _timing.Glide / 1000.0);
+        if (t >= 1) { mark.GlideAt = double.NaN; return mark.Box; }
+        double e = Steps > 0 ? MotionCurve.Step(t, Steps) : Curves.Follow(t);
+        var from = mark.GlideFrom;
+        radius = mark.GlideFromRadius + (mark.Radius - mark.GlideFromRadius) * e;
+        return new Rect(from.X + (mark.Box.X - from.X) * e, from.Y + (mark.Box.Y - from.Y) * e,
+            Math.Max(0, from.Width + (mark.Box.Width - from.Width) * e), Math.Max(0, from.Height + (mark.Box.Height - from.Height) * e));
+    }
+
+    // ----- Drawing -----
+
+    private void Draw(DrawingContext dc, double now)
+    {
+        if (Math.Abs(Dpi.DpiScaleX - _dressedDpi) > .001) DressPens();
+        var press = _pressed is not null ? _press.At(now, _timing, Steps) : PressFrame.None;
+        if (_leaving is { Valid: true } leaving)
+        {
+            var box = Drawn(leaving, now, out double radius);
+            DrawMark(dc, leaving, box, radius, LeavingPresence(leaving, now), ReferenceEquals(leaving, _pressed) ? press : PressFrame.None);
+        }
+        if (_hover is { Valid: true } hover)
+        {
+            var box = Drawn(hover, now, out double radius);
+            DrawMark(dc, hover, box, radius, HoverPresence(hover, now), ReferenceEquals(hover, _pressed) ? press : PressFrame.None);
+        }
+        if (_pressed is { Valid: true } pressed && !ReferenceEquals(pressed, _hover) && !ReferenceEquals(pressed, _leaving))
+            DrawMark(dc, pressed, pressed.Box, pressed.Radius, 0, press);
+        if (_focus is { Valid: true } focus) DrawFocus(dc, focus, now);
+        DrawParticles(dc, now);
+    }
+
+    private void DrawMark(DrawingContext dc, FxMark mark, Rect r, double radius, double h, in PressFrame press)
+    {
+        if (r.IsEmpty || r.Width < 1 || r.Height < 1) return;
+        double k = press.Held, hs = _motion.HoverStrength, ps = _motion.PressStrength;
+        bool clip = !mark.Clip.IsEmpty;
+        if (clip) dc.PushClip(mark.ClipGeometry);
+        dc.PushOpacity(mark.Opacity);
+        bool ellipse = mark.Ellipse;
+        var hover = _motion.Hover; var style = _motion.Press;
+        if (h > 0 || k > 0 || press.Release >= 0)
+        {
+            switch (hover)
+            {
+                case HoverFx.Reveal:
+                    Fill(dc, _main, r, radius, ellipse, hs * .5 * h);
+                    Edge(dc, _revealEdge, r, radius, ellipse, Math.Min(1, hs * 3.2) * h);
+                    break;
+                case HoverFx.Lift:
+                {
+                    // The control rises from the surface: a shadow outside its shape, a light top edge; pressed, it is flat again.
+                    double lift = h * (style == PressFx.Sink ? 1 - k : 1);
+                    if (lift > .001)
+                    {
+                        for (int i = 1; i <= 3; i++)
+                        {
+                            var ring = r; ring.Inflate(i, i); ring.Offset(0, .4 + .5 * i * lift);
+                            Edge(dc, _liftLine, ring, radius + i, ellipse, hs * (i == 1 ? 1.6 : i == 2 ? .9 : .4) * lift);
+                        }
+                        if (!_darkSurface && !ellipse) Line(dc, _lightLine, r.Left + Math.Max(radius, 2), r.Top + _line / 2, r.Right - Math.Max(radius, 2), r.Top + _line / 2, .9 * lift);
+                    }
+                    break;
+                }
+                case HoverFx.Underline:
+                {
+                    Fill(dc, _second, r, radius, ellipse, hs * .3 * h);
+                    var bar = Bar(r, radius, ellipse, .45 + .55 * h);
+                    Box(dc, _second, bar, 1, Math.Min(1, hs * 3.6) * h);
+                    break;
+                }
+                case HoverFx.Caret:
+                {
+                    Fill(dc, _main, r, radius, ellipse, hs * .45 * h);
+                    // Caret pressed with a selection: it travels with the selection's end.
+                    double travel = style == PressFx.Select ? k : 0;
+                    Box(dc, _main, Caret(r, travel, ellipse), 0, Math.Max(h, k > 0 ? 1 : 0));
+                    break;
+                }
+                case HoverFx.Brackets:
+                    Fill(dc, _main, r, radius, ellipse, hs * .22 * h);
+                    break;
+                case HoverFx.Sheen:
+                    Fill(dc, _sheen, r, radius, ellipse, hs * .55 * h);
+                    Edge(dc, _sheenEdge, r, radius, ellipse, Math.Min(1, hs * 2.4) * h);
+                    break;
+                case HoverFx.Glow:
+                    Fill(dc, _glow, r, radius, ellipse, Math.Min(1, hs * 1.9) * h);
+                    Edge(dc, _mainLine, r, radius, ellipse, hs * 1.1 * h);
+                    // A single warm glint at the top corner, as a firefly settled there.
+                    double gx = ellipse ? r.Left + r.Width * .82 : r.Right - Math.Max(radius, 3) - 1.5, gy = ellipse ? r.Top + r.Height * .18 : r.Top + 3.5;
+                    Dot(dc, _glint, gx, gy, 3.8, h);
+                    break;
+            }
+            DrawPress(dc, mark, r, radius, ellipse, h, press, ps);
+        }
+        dc.Pop();
+        if (clip) dc.Pop();
+    }
+
+    private void DrawPress(DrawingContext dc, FxMark mark, Rect r, double radius, bool ellipse, double h, in PressFrame press, double ps)
+    {
+        double k = press.Held;
+        switch (_motion.Press)
+        {
+            case PressFx.Shade:
+                Fill(dc, _main, r, radius, ellipse, ps * .55 * k);
+                Edge(dc, _mainLine, r, radius, ellipse, Math.Min(1, ps * 2.2) * k);
+                break;
+            case PressFx.Sink:
+                // Pushed in: a light shade, and the top edge in shadow (inside the shape, fading down).
+                Fill(dc, _second, r, radius, ellipse, ps * .25 * k);
+                if (!ellipse)
+                {
+                    double inset = Math.Max(radius, 3);
+                    Line(dc, _secondLine, r.Left + inset, r.Top + _line / 2, r.Right - inset, r.Top + _line / 2, ps * .9 * k);
+                    Line(dc, _secondLine, r.Left + inset, r.Top + _line * 1.5, r.Right - inset, r.Top + _line * 1.5, ps * .35 * k);
+                }
+                break;
+            case PressFx.Indicator:
+                Fill(dc, _second, r, radius, ellipse, ps * .35 * k);
+                Box(dc, _high, Bar(r, radius, ellipse, 1), 1, k);
+                break;
+            case PressFx.Select:
+            {
+                // A selection sweeps out from the left edge, as text selected from the caret.
+                // A round button has no line to select across: it fills as a whole.
+                if (ellipse) Fill(dc, _high, r, radius, true, ps * .9 * k);
+                else if (k > .001) Box(dc, _high, new Rect(r.X, r.Y, r.Width * k, r.Height), Math.Min(radius, r.Width * k / 2), ps * .9);
+                if (_motion.Hover != HoverFx.Caret) Box(dc, _main, Caret(r, k, ellipse), 0, k > 0 ? 1 : 0);
+                break;
+            }
+            case PressFx.Lock:
+                break;
+            case PressFx.Sparkle:
+                Fill(dc, _sheen, r, radius, ellipse, ps * .6 * k);
+                Edge(dc, _sheenEdge, r, radius, ellipse, Math.Min(1, ps * 2.6) * k);
+                break;
+            case PressFx.Ember:
+                Fill(dc, _ember, r, radius, ellipse, Math.Min(1, ps * 1.5) * k);
+                break;
+        }
+        // The brackets belong to both the hover and the lock: one set, which snaps on with the hover, clamps with the press and
+        // kicks out as a completed press lets go.
+        if (_motion.Hover == HoverFx.Brackets || _motion.Press == PressFx.Lock) DrawBrackets(dc, mark, r, h, press);
+    }
+
+    private void DrawBrackets(DrawingContext dc, FxMark mark, Rect r, double h, in PressFrame press)
+    {
+        bool lockStyle = _motion.Press == PressFx.Lock;
+        double k = lockStyle ? press.Held : 0;
+        bool committed = lockStyle && _press.Committed && ReferenceEquals(mark, _pressed) && press.Release >= 0;
+        double kick = committed ? 3 * MotionCurve.Step(1 - press.Release, Math.Max(2, Steps)) * (press.Release < .5 ? 1 : 0) : 0;
+        double presence = _motion.Hover == HoverFx.Brackets ? Math.Max(h, k) : k;
+        if (presence <= .001 && kick <= 0) return;
+        double outset = 1 + 4 * (1 - h) * (1 - k) - 1.5 * k + kick;
+        double arm = Math.Clamp(Math.Min(r.Width, r.Height) * .3, 4, 9) + 2 * k;
+        if (k > .001)
+        {
+            // The chromatic ghost: the same brackets in the second color, a pixel or two aside.
+            Brackets(dc, _secondBold, r, outset, arm, -1.5 * k, 1 * k, .8 * k);
+        }
+        Brackets(dc, _mainBold, r, outset, arm, 0, 0, Math.Max(presence, kick > 0 ? 1 : 0));
+        if (k >= .5)
+        {
+            // Locked: the top left corner turns the highlight.
+            double left = Snap(r.Left - outset, _bold), top = Snap(r.Top - outset, _bold);
+            Line(dc, _highBold, left, top, left + arm, top, 1);
+            Line(dc, _highBold, left, top, left, top + arm, 1);
+        }
+        if (press.GlitchOn && ReferenceEquals(mark, _pressed) && !_sliceBand.IsEmpty) DrawGlitch(dc, r);
+        if (press.ScanAt >= 0 && ReferenceEquals(mark, _pressed))
+        {
+            double y = Snap(r.Top + 1 + (r.Height - 2) * press.ScanAt, _line);
+            Line(dc, _highLine, r.Left, y, r.Right, y, .95);
+            Line(dc, _mainLine, r.Left, Snap(y - 2, _line), r.Right, Snap(y - 2, _line), .35);
+        }
+    }
+
+    // Four L-shaped corners around the shape, `outset` outside it, each arm `arm` long.
+    private void Brackets(DrawingContext dc, Pen pen, Rect r, double outset, double arm, double dx, double dy, double alpha)
+    {
+        if (alpha <= .001) return;
+        double w = pen.Thickness;
+        double left = Snap(r.Left - outset + dx, w), right = Snap(r.Right + outset + dx, w), top = Snap(r.Top - outset + dy, w), bottom = Snap(r.Bottom + outset + dy, w);
+        arm = Math.Min(arm, Math.Min(right - left, bottom - top) / 2 - 1);
+        dc.PushOpacity(alpha);
+        dc.DrawLine(pen, new Point(left, top), new Point(left + arm, top)); dc.DrawLine(pen, new Point(left, top), new Point(left, top + arm));
+        dc.DrawLine(pen, new Point(right, top), new Point(right - arm, top)); dc.DrawLine(pen, new Point(right, top), new Point(right, top + arm));
+        dc.DrawLine(pen, new Point(left, bottom), new Point(left + arm, bottom)); dc.DrawLine(pen, new Point(left, bottom), new Point(left, bottom - arm));
+        dc.DrawLine(pen, new Point(right, bottom), new Point(right - arm, bottom)); dc.DrawLine(pen, new Point(right, bottom), new Point(right, bottom - arm));
+        dc.Pop();
+    }
+
+    // The glitch: a thin band of the control, drawn three pixels aside, edged in the two neon colors a pixel or two apart.
+    private void PrepareGlitch(FxMark mark)
+    {
+        var box = mark.Box;
+        if (box.IsEmpty || box.Height < 6) { _sliceBand = Rect.Empty; return; }
+        double band = Math.Clamp(Math.Round(box.Height * .22), 3, 6);
+        // A different place on each press, but the same for the same press: a preview is repeatable.
+        double place = .28 + .44 * ((mark.Serial * 0.6180339887) % 1);
+        _sliceBand = new Rect(0, Math.Round(box.Height * place - band / 2), box.Width, band);
+        // The band in the control's own coordinates, through the same transform the mark was placed with.
+        try
+        {
+            var toControl = TransformToVisual(mark.Control);
+            var band0 = toControl.TransformBounds(new Rect(box.X, box.Y + _sliceBand.Y, box.Width, band));
+            _slice.Visual = mark.Control;
+            _slice.Viewbox = band0;
+        }
+        catch (InvalidOperationException) { _sliceBand = Rect.Empty; }
+    }
+
+    private void DrawGlitch(DrawingContext dc, Rect r)
+    {
+        var band = new Rect(r.X + 3, r.Y + _sliceBand.Y, r.Width, _sliceBand.Height);
+        if (_slice.Viewport != band) _slice.Viewport = band;
+        dc.DrawRectangle(_slice, null, band);
+        Line(dc, _mainLine, r.X - 2, Snap(band.Top, _line), r.Right - 2, Snap(band.Top, _line), .9);
+        Line(dc, _secondLine, r.X + 4, Snap(band.Bottom, _line), r.Right + 4, Snap(band.Bottom, _line), .9);
+    }
+
+    // A short accent where keyboard focus lands: it rises quickly, then fades, over the control's own focus outline.
+    private void DrawFocus(DrawingContext dc, FxMark mark, double now)
+    {
+        double t = MotionCurve.Linear(now - _focusAt, _timing.Focus / 1000.0);
+        double a = t < .25 ? MotionCurve.Ease(t / .25, Steps) : 1 - MotionCurve.EaseOut((t - .25) / .75, Steps);
+        if (a <= .001) return;
+        var r = mark.Box; double radius = mark.Radius;
+        bool clip = !mark.Clip.IsEmpty;
+        if (clip) dc.PushClip(mark.ClipGeometry);
+        dc.PushOpacity(mark.Opacity);
+        switch (_motion.Focus)
+        {
+            case FocusFx.Ring:
+            {
+                var ring = r; ring.Inflate(2, 2);
+                Edge(dc, Pen2, ring, radius + 2, mark.Ellipse, .8 * a);
+                break;
+            }
+            case FocusFx.Glow:
+                for (int i = 1; i <= 3; i++)
+                {
+                    var ring = r; ring.Inflate(i, i);
+                    Edge(dc, _mainLine, ring, radius + i, mark.Ellipse, (i == 1 ? .5 : i == 2 ? .25 : .1) * a);
+                }
+                break;
+            case FocusFx.Brackets:
+                Brackets(dc, _mainBold, r, 3 - 2 * MotionCurve.Step(Math.Min(1, t / .3), Math.Max(2, Steps)), Math.Clamp(Math.Min(r.Width, r.Height) * .3, 4, 9), 0, 0, a);
+                break;
+            case FocusFx.Caret:
+                Box(dc, _main, Caret(r, 0, mark.Ellipse), 0, a);
+                break;
+        }
+        dc.Pop();
+        if (clip) dc.Pop();
+    }
+
+    private Pen? _pen2;
+    private Pen Pen2 => _pen2 is { } pen && ReferenceEquals(pen.Brush, _main) ? pen : _pen2 = Pen(_main, 2 * _line);
+
+    // ----- Primitives -----
+
+    private static void Fill(DrawingContext dc, Brush brush, Rect r, double radius, bool ellipse, double alpha)
+    {
+        if (alpha <= .001) return;
+        dc.PushOpacity(Math.Min(1, alpha));
+        if (ellipse) dc.DrawEllipse(brush, null, new Point(r.X + r.Width / 2, r.Y + r.Height / 2), r.Width / 2, r.Height / 2);
+        else dc.DrawRoundedRectangle(brush, null, r, radius, radius);
+        dc.Pop();
+    }
+
+    // An edge just inside the shape.
+    private static void Edge(DrawingContext dc, Pen pen, Rect r, double radius, bool ellipse, double alpha)
+    {
+        if (alpha <= .001) return;
+        double inset = pen.Thickness / 2;
+        if (r.Width <= pen.Thickness || r.Height <= pen.Thickness) return;
+        r.Inflate(-inset, -inset);
+        dc.PushOpacity(Math.Min(1, alpha));
+        if (ellipse) dc.DrawEllipse(null, pen, new Point(r.X + r.Width / 2, r.Y + r.Height / 2), r.Width / 2, r.Height / 2);
+        else dc.DrawRoundedRectangle(null, pen, r, Math.Max(0, radius - inset), Math.Max(0, radius - inset));
+        dc.Pop();
+    }
+
+    private static void Box(DrawingContext dc, Brush brush, Rect r, double radius, double alpha)
+    {
+        if (alpha <= .001 || r.Width <= 0 || r.Height <= 0) return;
+        dc.PushOpacity(Math.Min(1, alpha));
+        if (radius > 0) dc.DrawRoundedRectangle(brush, null, r, radius, radius); else dc.DrawRectangle(brush, null, r);
+        dc.Pop();
+    }
+
+    private static void Line(DrawingContext dc, Pen pen, double x1, double y1, double x2, double y2, double alpha)
+    {
+        if (alpha <= .001) return;
+        dc.PushOpacity(Math.Min(1, alpha));
+        dc.DrawLine(pen, new Point(x1, y1), new Point(x2, y2));
+        dc.Pop();
+    }
+
+    private static void Dot(DrawingContext dc, Brush brush, double x, double y, double radius, double alpha)
+    {
+        if (alpha <= .001) return;
+        dc.PushOpacity(Math.Min(1, alpha));
+        dc.DrawEllipse(brush, null, new Point(x, y), radius, radius);
+        dc.Pop();
+    }
+
+    // The bottom bar: 2 px along the inside of the bottom edge, clear of the corners; a round shape's sits just under it.
+    private Rect Bar(Rect r, double radius, bool ellipse, double share)
+    {
+        double height = 2 * _line;
+        double inset = Math.Max(radius, 3);
+        double full = ellipse ? r.Width * .5 : Math.Max(4, r.Width - 2 * inset);
+        double width = Math.Round(full * Math.Clamp(share, 0, 1));
+        double y = ellipse ? r.Bottom + 1 : r.Bottom - height;
+        return new Rect(Math.Round(r.X + (r.Width - width) / 2), y, width, height);
+    }
+
+    // The caret: 2 px wide at the left inside edge, two thirds of the height; `travel` moves it across to the right edge.
+    private Rect Caret(Rect r, double travel, bool ellipse = false)
+    {
+        // Inside a round button the caret stays within the circle, where its chord is tall enough.
+        double width = 2 * _line, height = Math.Max(8, Math.Round(r.Height * (ellipse ? .5 : .62)));
+        double margin = ellipse ? r.Width * .2 : 3;
+        double left = r.X + margin, right = r.Right - margin - width;
+        double x = Snap(left + (right - left) * Math.Clamp(travel, 0, 1), width);
+        return new Rect(x - width / 2, Math.Round(r.Y + (r.Height - height) / 2), width, height);
+    }
+
+    private double Snap(double at, double width) => FxShapes.SnapLine(at, width, Math.Max(.5, _dressedDpi));
+}

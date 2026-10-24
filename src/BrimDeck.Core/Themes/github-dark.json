@@ -65,6 +65,6 @@
     ]
   },
   "effects": { "shadowOpacity": 0.4 },
-  // Restrained and flat, as GitHub is: a thin outline that comes and goes quickly, a small dot under what the pointer is on, and small squares, as on a contribution graph, on a click.
-  "motion": { "hover": "edge", "hoverStrength": 0.22, "press": "pulse", "pressStrength": 0.12, "trail": 0.42, "particles": "pixel", "secondary": "#3FB950", "focus": "ring", "pace": 0.75 }
+  // Primer: flat and quick. A subtle fill and a neutral 2 px bar along the bottom; a press turns the bar coral, as a selected tab. No glow.
+  "motion": { "hover": "underline", "hoverStrength": 0.24, "press": "indicator", "pressStrength": 0.2, "trail": 0, "particles": "none", "focus": "ring", "pace": 0.75, "steps": 0, "color": "accent", "secondary": "#8B949E", "highlight": "#F78166" }
 }

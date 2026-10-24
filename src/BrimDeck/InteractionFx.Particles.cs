@@ -1,231 +1,171 @@
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Shapes;
 using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The few particles a press throws over the open panel, in the theme's style (ThemeMotion.Particles): soft dust, small squares as
-// on a contribution graph, short sparks, four-point stars that twinkle, fireflies that drift up and glow slowly, or neon motes in
-// two colors with a soft glow. They lie under the content, on the surface's material (InteractionFx.Island), so text and controls
-// stay above them as above the theme's own gradient and scan lines; each lives well under two seconds and fades, shrinks or turns
-// as its style does. A fixed set of shapes is reused; the frame callback runs only while any is alive, and nothing is allocated
-// per frame.
+// The few particles a completed press leaves (ThemeMotion.Particles), from the control's own edges, never from the pointer:
+// stars that twinkle once on its corners (Dracula), fireflies that rise slowly from its top edge and glow (Night Owl), and for
+// custom themes dust, pixels, sparks or neon motes. They lie on the layer above the content, small and faint, and live under
+// about a second and a half. Their paths are worked out from their age, not stepped frame by frame, so they look the same at
+// any frame rate and in a preview; a fixed set is reused and nothing is allocated per frame.
 internal sealed partial class FxSurface
 {
-    private const int MoteCount = 32;
-    private readonly Canvas _particleLayer = new() { IsHitTestVisible = false, ClipToBounds = true };
+    private const int MoteCount = 16;
     private readonly Mote[] _motes = new Mote[MoteCount];
-    private readonly Shape?[] _moteShapes = new Shape?[MoteCount];
-    private readonly MatrixTransform[] _moteTransforms = new MatrixTransform[MoteCount];
-    private readonly Random _random = new();
-    private ParticleFx _moteStyle = ParticleFx.None;
-    private Brush? _moteFirst, _moteSecond;
-    private bool _motesHooked;
-    private double _moteFrame;
     private int _nextMote;
-    // A four-point star in a unit square, its points pulled in by curves.
-    private static readonly Geometry StarShape = Frozen(Geometry.Parse("M 0.5,0 C 0.56,0.38 0.62,0.44 1,0.5 C 0.62,0.56 0.56,0.62 0.5,1 C 0.44,0.62 0.38,0.56 0,0.5 C 0.38,0.44 0.44,0.38 0.5,0 Z"));
+    private double _lastBurst = double.NegativeInfinity;
+    private Brush _moteFirst = Brushes.Transparent, _moteSecond = Brushes.Transparent, _moteFirstGlow = Brushes.Transparent, _moteSecondGlow = Brushes.Transparent;
+    private Pen _moteFirstPen = new(), _moteSecondPen = new();
 
     private struct Mote
     {
         public bool Alive, Second;
-        public double X, Y, Vx, Vy, Born, Life, Width, Height, Angle, Spin, Seed;
+        public double X, Y, Vx, Vy, Born, Life, Size, Angle, Seed;
     }
 
-    // Placed under the content by InteractionFx.Island.
-    public UIElement Backdrop => _particleLayer;
-
-    private static Geometry Frozen(Geometry geometry) { geometry.Freeze(); return geometry; }
-
-    // The theme's two colors, as the style draws them: glowing motes get a soft round light, the others a flat color.
-    private void DressParticles(Color first, Color second)
+    // The first color is the highlight, the second the theme's second tone.
+    private void DressParticles(Color main, Color second, Color high)
     {
         ClearParticles();
-        bool soft = _motion.Particles is ParticleFx.Dust or ParticleFx.Firefly or ParticleFx.Neon;
-        _moteFirst = soft ? Glow(first) : Solid(first);
-        _moteSecond = soft ? Glow(second) : Solid(second);
-        _moteStyle = ParticleFx.None;
+        _moteFirst = Solid(high); _moteSecond = Solid(second);
+        _moteFirstGlow = Radial(high, new Point(.5, .5), .5, .5); _moteSecondGlow = Radial(second, new Point(.5, .5), .5, .5);
+        _moteFirstPen = Pen(_moteFirst, 1.1, PenLineCap.Round); _moteSecondPen = Pen(_moteSecond, 1.1, PenLineCap.Round);
     }
 
-    private static Brush Glow(Color color)
+    // A few particles from the pressed control's shape, placed by the press's serial so the same press always looks the same.
+    private void Burst(FxMark mark, double now)
     {
-        var brush = new RadialGradientBrush(new GradientStopCollection
+        var r = mark.Box;
+        // Rapid clicks leave one set of particles a third of a second, not a cloud.
+        if (r.IsEmpty || now - _lastBurst < .33) return;
+        _lastBurst = now;
+        uint seed = (uint)mark.Serial * 2654435761u;
+        double Next() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed & 0xFFFFFF) / (double)0x1000000; }
+        double scale = Math.Clamp((AnimationDuration ?? Settings?.AnimationDuration ?? 360) / 360d, .6, 1.6) * Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
+        switch (_motion.Particles)
         {
-            new GradientStop(color, 0), new GradientStop(Alpha(color, .55), .4), new GradientStop(Alpha(color, 0), 1)
-        });
-        brush.Freeze();
-        return brush;
-    }
-
-    private void EnsureShapes()
-    {
-        if (_moteStyle == _motion.Particles) return;
-        _particleLayer.Children.Clear();
-        _moteStyle = _motion.Particles;
-        for (int i = 0; i < MoteCount; i++)
-        {
-            Shape shape = _moteStyle switch
-            {
-                ParticleFx.Dust or ParticleFx.Firefly or ParticleFx.Neon => new Ellipse(),
-                ParticleFx.Star => new Path { Data = StarShape, Stretch = Stretch.Fill },
-                ParticleFx.Pixel => new Rectangle { RadiusX = 1, RadiusY = 1 },
-                _ => new Rectangle { RadiusX = .8, RadiusY = .8 }
-            };
-            shape.IsHitTestVisible = false; shape.Visibility = Visibility.Collapsed;
-            shape.RenderTransform = _moteTransforms[i] ??= new MatrixTransform();
-            _particleLayer.Children.Add(shape);
-            _moteShapes[i] = shape;
-        }
-    }
-
-    // A press throws a small ring of the theme's particles outward from the pointer.
-    private void Burst(Point at)
-    {
-        EnsureShapes();
-        const int count = 7;
-        double start = _random.NextDouble() * Math.PI * 2;
-        for (int i = 0; i < count; i++)
-        {
-            double angle = start + i * Math.PI * 2 / count + Random(-.2, .2), speed = Random(45, 80);
-            var direction = new Vector(Math.Cos(angle), Math.Sin(angle));
-            Spawn(at, -direction);
-            ref var m = ref _motes[(_nextMote + MoteCount - 1) % MoteCount];
-            m.Vx = direction.X * speed; m.Vy = direction.Y * speed - (_moteStyle == ParticleFx.Firefly ? 15 : 0);
-            if (_moteStyle == ParticleFx.Spark) m.Angle = angle * 180 / Math.PI;
-        }
-        HookMotes();
-    }
-
-    private void HookMotes()
-    {
-        if (_motesHooked) return;
-        _motesHooked = true; _moteFrame = Eased.Now;
-        CompositionTarget.Rendering += MoteFrame;
-    }
-
-    private double Random(double from, double to) => from + (to - from) * _random.NextDouble();
-
-    private void Spawn(Point at, Vector direction)
-    {
-        int index = _nextMote;
-        _nextMote = (index + 1) % MoteCount;
-        var m = new Mote { Alive = true, X = at.X, Y = at.Y, Born = Eased.Now, Seed = _random.NextDouble() };
-        switch (_moteStyle)
-        {
-            case ParticleFx.Pixel:
-                m.Life = .9; m.Width = m.Height = Math.Round(Random(3.5, 5));
-                m.Vx = Random(-6, 6); m.Vy = Random(2, 9); m.Second = _random.NextDouble() < .65;
-                break;
-            case ParticleFx.Spark:
-            {
-                m.Life = .45; m.Width = Random(4.5, 7.5); m.Height = 2;
-                double angle = Math.Atan2(-direction.Y, -direction.X) + Random(-.35, .35), speed = Random(50, 85);
-                m.Vx = Math.Cos(angle) * speed; m.Vy = Math.Sin(angle) * speed; m.Angle = angle * 180 / Math.PI;
-                m.Second = _random.NextDouble() < .35;
-                break;
-            }
             case ParticleFx.Star:
-                m.Life = .95; m.Width = m.Height = Random(5, 10);
-                m.Vx = Random(-10, 10); m.Vy = Random(-10, 10); m.Spin = Random(-120, 120); m.Second = _random.NextDouble() < .45;
+                // On three of the corners, just outside the shape; they swell, turn a little and shrink in place.
+                Spawn(r.Right - 1, r.Top - 1, 4, -6, .8, 7 + 2 * Next(), false);
+                Spawn(r.Left + 1, r.Bottom + 1, -4, 6, .8, 5 + 2 * Next(), true);
+                Spawn(r.Left + r.Width * (.3 + .2 * Next()), r.Top - 2, 0, -8, .8, 4.5 + 1.5 * Next(), false);
                 break;
             case ParticleFx.Firefly:
-                m.Life = 1.5; m.Width = m.Height = Random(6, 10);
-                m.Vx = Random(-8, 8); m.Vy = -Random(14, 28); m.Second = _random.NextDouble() < .75;
+                // From the top edge, rising slowly and swaying.
+                for (int i = 0; i < 3; i++)
+                    Spawn(r.Left + r.Width * (.22 + .28 * i + .08 * (Next() - .5)), r.Top + 2, 5 * (Next() - .5), -(16 + 10 * Next()), 1.25, 3.4 + 1.4 * Next(), i != 1);
+                break;
+            case ParticleFx.Dust:
+                for (int i = 0; i < 4; i++)
+                {
+                    double angle = (i + .5) * Math.PI / 2 + .3 * (Next() - .5);
+                    Spawn(r.X + r.Width / 2 + Math.Cos(angle) * r.Width / 2, r.Y + r.Height / 2 + Math.Sin(angle) * r.Height / 2, Math.Cos(angle) * 12, Math.Sin(angle) * 12, .65, 2 + Next(), i % 2 == 1);
+                }
+                break;
+            case ParticleFx.Pixel:
+                for (int i = 0; i < 3; i++) Spawn(r.Left + r.Width * (.25 + .25 * i), r.Bottom - 1, 3 * (Next() - .5), 8 + 6 * Next(), .7, 3, i == 1);
+                break;
+            case ParticleFx.Spark:
+                Spawn(r.Left - 1, r.Y + r.Height * (.35 + .3 * Next()), -40, 0, .35, 6, false);
+                Spawn(r.Right + 1, r.Y + r.Height * (.35 + .3 * Next()), 40, 0, .35, 6, true);
                 break;
             case ParticleFx.Neon:
-                // Round neon motes that follow the pointer's path, alternating the theme's two colors.
-                m.Life = .65; m.Width = m.Height = Random(5, 9);
-                m.Vx = -direction.X * 18 + Random(-8, 8); m.Vy = -direction.Y * 18 + Random(-8, 8); m.Second = index % 2 == 1;
-                break;
-            default:
-                m.Life = .7; m.Width = m.Height = Random(3, 6);
-                m.Vx = -direction.X * 14 + Random(-16, 16); m.Vy = -direction.Y * 14 + Random(-16, 16); m.Second = _random.NextDouble() < .4;
+                Spawn(r.Left, r.Top, -10, -10, .5, 4, false); Spawn(r.Right, r.Top, 10, -10, .5, 4, true);
+                Spawn(r.Left, r.Bottom, -10, 10, .5, 4, true); Spawn(r.Right, r.Bottom, 10, 10, .5, 4, false);
                 break;
         }
-        // The animation length chosen in settings and the theme's pace stretch or shorten every life alike.
-        m.Life *= Math.Clamp((Settings?.AnimationDuration ?? 360) / 360d, .6, 1.6) * Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
-        _motes[index] = m;
-        if (_moteShapes[index] is { } shape)
+
+        void Spawn(double x, double y, double vx, double vy, double life, double size, bool second)
         {
-            shape.Width = m.Width; shape.Height = m.Height;
-            shape.Fill = m.Second ? _moteSecond : _moteFirst;
-            shape.Opacity = 0;
-            shape.Visibility = Visibility.Visible;
+            ref var m = ref _motes[_nextMote];
+            _nextMote = (_nextMote + 1) % MoteCount;
+            m = new Mote { Alive = true, X = x, Y = y, Vx = vx, Vy = vy, Born = now, Life = life * scale, Size = size, Second = second, Seed = Next(), Angle = 40 * (Next() - .5) };
         }
     }
 
-    private void MoteFrame(object? sender, EventArgs e)
+    // Whether any particle is still alive.
+    private bool StepParticles(double now)
     {
-        double now = Eased.Now, dt = Math.Clamp(now - _moteFrame, 0, .05);
-        _moteFrame = now;
-        double strength = _motion.Trail;
-        int alive = 0;
+        bool any = false;
         for (int i = 0; i < MoteCount; i++)
         {
             ref var m = ref _motes[i];
-            if (!m.Alive || _moteShapes[i] is not { } shape) continue;
-            double age = now - m.Born, t = age / m.Life;
-            if (t >= 1) { m.Alive = false; shape.Visibility = Visibility.Collapsed; continue; }
-            alive++;
-            double drag = Math.Exp(-dt * (_moteStyle == ParticleFx.Spark ? 5 : 2.2));
-            m.Vx *= drag; m.Vy *= drag;
-            if (_moteStyle == ParticleFx.Pixel) m.Vy += 18 * dt;
-            m.X += m.Vx * dt; m.Y += m.Vy * dt;
-            // Rises within its first eighth, then fades out softly; never a blink.
-            double rise = Math.Min(1, t / .12), alpha = strength * rise * Math.Pow(1 - t, 1.6);
-            double sx = 1, sy = 1, x = m.X, y = m.Y, angle = m.Angle;
-            switch (_moteStyle)
-            {
-                case ParticleFx.Dust:
-                    sx = sy = 1 - .45 * t;
-                    break;
-                case ParticleFx.Pixel:
-                    alpha = strength * rise * (t < .7 ? 1 : (1 - t) / .3);
-                    break;
-                case ParticleFx.Spark:
-                    sx = 1 - .6 * t;
-                    break;
-                case ParticleFx.Star:
-                    sx = sy = .5 + .6 * Math.Sin(Math.PI * Math.Min(1, t * 1.1));
-                    angle += m.Spin * age;
-                    break;
-                case ParticleFx.Firefly:
-                    // A slow glow (under one cycle a second, a third of the light) and a gentle sway as it rises.
-                    alpha *= .65 + .35 * Math.Sin(2 * Math.PI * .9 * age + m.Seed * 6.28);
-                    x += Math.Sin(age * 2.4 + m.Seed * 6) * 3;
-                    break;
-                case ParticleFx.Neon:
-                    sx = sy = 1 - .55 * t;
-                    break;
-            }
-            shape.Opacity = alpha;
-            var matrix = Matrix.Identity;
-            matrix.Translate(-m.Width / 2, -m.Height / 2);
-            matrix.Scale(sx, sy);
-            if (angle != 0) matrix.Rotate(angle);
-            matrix.Translate(x, y);
-            _moteTransforms[i].Matrix = matrix;
+            if (!m.Alive) continue;
+            if (now - m.Born >= m.Life || now < m.Born) m.Alive = false; else any = true;
         }
-        if (alive == 0) UnhookMotes();
+        return any;
     }
 
-    private void UnhookMotes()
+    private void DrawParticles(DrawingContext dc, double now)
     {
-        if (!_motesHooked) return;
-        _motesHooked = false;
-        CompositionTarget.Rendering -= MoteFrame;
+        double strength = _motion.Trail;
+        for (int i = 0; i < MoteCount; i++)
+        {
+            ref var m = ref _motes[i];
+            if (!m.Alive) continue;
+            double age = now - m.Born, t = Math.Clamp(age / m.Life, 0, 1);
+            // Slowed by the air: the distance covered levels off.
+            double travel = (1 - Math.Exp(-2.4 * age)) / 2.4;
+            double x = m.X + m.Vx * travel, y = m.Y + m.Vy * travel;
+            // Rises within its first eighth, then fades softly; never a blink.
+            double alpha = strength * Math.Min(1, t / .12) * Math.Pow(1 - t, 1.4);
+            var first = !m.Second;
+            switch (_motion.Particles)
+            {
+                case ParticleFx.Star:
+                {
+                    // One swell and shrink over its life, turning a little: a single twinkle, not a blink.
+                    double size = m.Size * Math.Sin(Math.PI * t) * .5;
+                    double angle = (m.Angle + 30 * t) * Math.PI / 180, cos = Math.Cos(angle) * size, sin = Math.Sin(angle) * size;
+                    double a = strength * Math.Sin(Math.PI * t) * 1.6;
+                    if (a <= .001 || size <= .2) break;
+                    dc.PushOpacity(Math.Min(1, a));
+                    var pen = first ? _moteFirstPen : _moteSecondPen;
+                    dc.DrawLine(pen, new Point(x - cos, y - sin), new Point(x + cos, y + sin));
+                    dc.DrawLine(pen, new Point(x + sin * .7, y - cos * .7), new Point(x - sin * .7, y + cos * .7));
+                    dc.DrawEllipse(first ? _moteFirstGlow : _moteSecondGlow, null, new Point(x, y), size * .7, size * .7);
+                    dc.Pop();
+                    break;
+                }
+                case ParticleFx.Firefly:
+                {
+                    // A slow glow (one swell over its life) and a gentle sway as it rises.
+                    x += Math.Sin(age * 3.1 + m.Seed * 6.28) * 2.2;
+                    double a = strength * Math.Min(1, t / .2) * (.55 + .45 * Math.Sin(Math.PI * t)) * (1 - t * t) * 1.4;
+                    Glow(dc, first, x, y, m.Size, a);
+                    break;
+                }
+                case ParticleFx.Pixel:
+                    y += 10 * age * age;
+                    if (alpha > .001) { dc.PushOpacity(Math.Min(1, alpha * 1.4)); dc.DrawRectangle(first ? _moteFirst : _moteSecond, null, new Rect(Math.Round(x - m.Size / 2), Math.Round(y - m.Size / 2), m.Size, m.Size)); dc.Pop(); }
+                    break;
+                case ParticleFx.Spark:
+                {
+                    double length = m.Size * (1 - .6 * t), dir = Math.Sign(m.Vx);
+                    if (alpha > .001) { dc.PushOpacity(Math.Min(1, alpha * 1.4)); dc.DrawLine(first ? _moteFirstPen : _moteSecondPen, new Point(x, y), new Point(x - dir * length, y)); dc.Pop(); }
+                    break;
+                }
+                default:
+                    Glow(dc, first, x, y, m.Size * (1 - .4 * t), alpha * 1.3);
+                    break;
+            }
+        }
+    }
+
+    private void Glow(DrawingContext dc, bool first, double x, double y, double size, double alpha)
+    {
+        if (alpha <= .001) return;
+        dc.PushOpacity(Math.Min(1, alpha));
+        dc.DrawEllipse(first ? _moteFirstGlow : _moteSecondGlow, null, new Point(x, y), size, size);
+        dc.DrawEllipse(first ? _moteFirst : _moteSecond, null, new Point(x, y), size * .28, size * .28);
+        dc.Pop();
     }
 
     // Every particle gone at once (a theme change, the window closing).
     private void ClearParticles()
     {
-        UnhookMotes();
-        for (int i = 0; i < MoteCount; i++)
-        {
-            _motes[i].Alive = false;
-            if (_moteShapes[i] is { } shape) shape.Visibility = Visibility.Collapsed;
-        }
+        for (int i = 0; i < MoteCount; i++) _motes[i].Alive = false;
+        _nextMote = 0; _lastBurst = double.NegativeInfinity;
     }
 }

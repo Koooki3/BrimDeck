@@ -68,9 +68,9 @@
   // The color picker's original twelve presets; other themes offer their own colors instead.
   "swatches": ["#E5A385", "#F0B37E", "#E5C890", "#98DBB0", "#7FD1C4", "#9CB9FF", "#B9A8FF", "#E7A0D0", "#E78284", "#D4D5DF", "#8E8E93", "#F5F5F7"],
   "effects": { "rimWidth": 1, "shadowBlur": 14, "shadowDepth": 4, "shadowOpacity": 0.28, "scanlines": 0 },
-  // No ambient light; a soft light under the pointer and one pulse in the accent where it presses.
+  // No ambient light. Fluent: a faint accent fill with an edge lit from the top; a press shades the shape and firms its edge. No particles.
   "motion": {
     "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 0, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
-    "hover": "spot", "hoverStrength": 0.1, "press": "pulse", "pressStrength": 0.16, "trail": 0.3, "particles": "dust", "focus": "glow", "pace": 1, "color": "accent", "secondary": "accent"
+    "hover": "reveal", "hoverStrength": 0.12, "press": "shade", "pressStrength": 0.18, "trail": 0, "particles": "none", "focus": "ring", "pace": 1, "steps": 0, "color": "accent", "secondary": "accent", "highlight": "accent"
   }
 }

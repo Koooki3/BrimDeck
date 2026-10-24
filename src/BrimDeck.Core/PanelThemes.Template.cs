@@ -86,11 +86,11 @@ public static partial class PanelThemes
         var a = motion.Ambient;
         static string Number(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
         foreach (var (key, value) in new[] { ("breathe", a.Breathe), ("breatheDepth", a.BreatheDepth), ("drift", a.Drift), ("sweep", a.Sweep), ("sweepOpacity", a.SweepOpacity),
-            ("flicker", a.Flicker), ("flickerDepth", a.FlickerDepth), ("hoverStrength", motion.HoverStrength), ("pressStrength", motion.PressStrength), ("trail", motion.Trail), ("pace", motion.Pace) })
+            ("flicker", a.Flicker), ("flickerDepth", a.FlickerDepth), ("hoverStrength", motion.HoverStrength), ("pressStrength", motion.PressStrength), ("trail", motion.Trail), ("pace", motion.Pace), ("steps", (double)motion.Steps) })
             tail = Regex.Replace(tail, $"\"{key}\": [0-9.]+", $"\"{key}\": {Number(value)}");
         foreach (var (key, value) in new[] { ("hover", motion.Hover.ToString()), ("press", motion.Press.ToString()), ("focus", motion.Focus.ToString()), ("particles", motion.Particles.ToString()) })
             tail = Regex.Replace(tail, $"\"{key}\": \"\\w+\"", $"\"{key}\": \"{value.ToLowerInvariant()}\"");
-        foreach (var (key, value) in new[] { ("color", motion.Color), ("secondary", motion.Secondary) })
+        foreach (var (key, value) in new[] { ("color", motion.Color), ("secondary", motion.Secondary), ("highlight", motion.Highlight) })
             tail = Regex.Replace(tail, $"\"{key}\": \"[^\"]*\"", $"\"{key}\": {Quote(value).Replace("$", "$$", StringComparison.Ordinal)}");
         return head + tail;
     }
