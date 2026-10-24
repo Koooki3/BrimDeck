@@ -372,11 +372,11 @@ public partial class MainWindow
         grid.Children.Add(plate);
         var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
         Grid.SetColumn(texts, 1); grid.Children.Add(texts);
-        texts.Children.Add(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold));
+        texts.Children.Add(NoticeWindow.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold)));
         if (NoticeTimeLine(notice, now) is { } timeLine) texts.Children.Add(timeLine);
         if (notice.Body.Length > 0)
         {
-            var body = UI.Line(open ? notice.Body : NoticeText.Summary(notice.Body), 11.5, UI.Secondary);
+            var body = NoticeWindow.Directed(UI.Line(open ? notice.Body : NoticeText.Summary(notice.Body), 11.5, UI.Secondary));
             body.FontFamily = UI.PanelFont;
             if (open) { body.TextWrapping = TextWrapping.Wrap; body.TextTrimming = TextTrimming.None; }
             texts.Children.Add(body);

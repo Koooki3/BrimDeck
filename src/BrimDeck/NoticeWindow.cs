@@ -466,9 +466,9 @@ internal sealed partial class NoticeWindow : Window
         if (_announced is null || _toastShape is null || !_toastShape.Equals(ToastShape(notice, summary.Length > 0))) { _accent = previous; return false; }
         string name = SpokenName(notice, title, summary);
         _toastWordsChanged = AutomationProperties.GetName(_announced) != name;
-        _announced.Text = title;
+        _announced.Text = title; Directed(_announced);
         AutomationProperties.SetName(_announced, name);
-        if (_summaryLine is not null) _summaryLine.Text = summary;
+        if (_summaryLine is not null) { _summaryLine.Text = summary; Directed(_summaryLine); }
         _liveLine = live ? _summaryLine : null;
         if (_countText is not null && _item is { } item)
         {
@@ -551,11 +551,18 @@ internal sealed partial class NoticeWindow : Window
         return new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(AccentHex), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0), IsHitTestVisible = false };
     }
 
-    private static TextBlock Line(string text, double size, string color, FontWeight weight) => new()
+    private static TextBlock Line(string text, double size, string color, FontWeight weight) => Directed(new()
     {
         Text = text, FontFamily = UI.PanelFont, FontSize = size, FontWeight = weight, Foreground = UI.Brush(color),
         TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap
-    };
+    });
+
+    // A text in a right-to-left language reads and aligns from the right (NoticeText.RightToLeft).
+    internal static TextBlock Directed(TextBlock block)
+    {
+        block.FlowDirection = NoticeText.RightToLeft(block.Text) ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+        return block;
+    }
 
     // The application's icon on a small plate in the theme's fill, which keeps white and transparent icons readable.
     private FrameworkElement Plate(Notice? notice, double size)
@@ -741,7 +748,7 @@ internal sealed partial class NoticeWindow : Window
 
     private static TextBlock Wrapped(string text, double size, string color, FontWeight weight, Thickness margin, int maxLines = 0)
     {
-        var block = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = size, FontWeight = weight, Foreground = UI.Brush(color), TextWrapping = TextWrapping.Wrap, Margin = margin, LineHeight = Math.Round(size * 1.4) };
+        var block = Directed(new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = size, FontWeight = weight, Foreground = UI.Brush(color), TextWrapping = TextWrapping.Wrap, Margin = margin, LineHeight = Math.Round(size * 1.4) });
         if (maxLines > 0) { block.MaxHeight = block.LineHeight * maxLines; block.TextTrimming = TextTrimming.CharacterEllipsis; }
         return block;
     }

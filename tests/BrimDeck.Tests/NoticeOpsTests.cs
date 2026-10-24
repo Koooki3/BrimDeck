@@ -9,6 +9,10 @@ internal static class NoticeOpsTests
     internal static void Run(Action<string, bool> check)
     {
         Probe(check);
+        check("Notices ops: Arabic and Hebrew texts read right to left", NoticeText.RightToLeft("مرحبا بالعالم") && NoticeText.RightToLeft("שלום עולם")
+            && NoticeText.RightToLeft("123 - مرحبا"));
+        check("Notices ops: Latin, Chinese and texts without letters read left to right", !NoticeText.RightToLeft("Hello مرحبا") && !NoticeText.RightToLeft("你好 שלום")
+            && !NoticeText.RightToLeft("12345 !?") && !NoticeText.RightToLeft(""));
         Attention(check);
         ProgressOrder(check);
     }
