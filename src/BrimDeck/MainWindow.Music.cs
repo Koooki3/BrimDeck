@@ -845,6 +845,9 @@ public partial class MainWindow
             }
         }
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
+        // Hidden, the bar keeps its last length: setting it four times a second laid the island out again for nothing. It takes
+        // its length on the first update after it shows again.
+        if (MusicIndicator.Visibility != Visibility.Visible) return;
         // The progress runs along the indicator's own length, whatever length is set.
         double length = double.IsFinite(Collapsed.Surface.Width) ? Math.Max(0, Collapsed.Surface.Width) : 0;
         double progress = track.HasTimeline && track.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / track.Duration.TotalSeconds, 0, 1) : 0;
