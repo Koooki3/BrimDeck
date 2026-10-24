@@ -236,9 +236,11 @@ internal static class PanelThemeTests
         }
         check("A theme made from another starts out identical: colors, effects, apps, clock and swatches", reproduced);
         var nightOwl = BuiltIn("night-owl");
+        // No built-in theme suggests a gradient clock, so a theme of its own carries one.
+        var glow = PanelThemes.Build("glow", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "neon", Color = "gradient", Gradient = ["#C792EA", "#82AAFF", "#7FDBCA"] } });
         check("A theme made from another keeps its clock gradient, and the template's placeholder otherwise",
-            PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", nightOwl, "night-owl"))).Clock is { Style: "serif", Color: "gradient" } owlClock
-            && owlClock.Gradient!.SequenceEqual(nightOwl.Clock!.Gradient!) && PanelThemes.Parse(PanelThemes.FillTemplate("copy", nightOwl)).Clock!.Custom == "#B9A8FF");
+            PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", glow, "night-owl"))).Clock is { Style: "neon", Color: "gradient" } copiedClock
+            && copiedClock.Gradient!.SequenceEqual(glow.Clock!.Gradient!) && PanelThemes.Parse(PanelThemes.FillTemplate("copy", nightOwl)).Clock!.Custom == "#B9A8FF");
 
         // Clock, swatches and what choosing a theme changes.
         bool clockColors = true, pickers = true;
@@ -256,10 +258,12 @@ internal static class PanelThemeTests
         check("The dark theme keeps the original picker colors and clock presets",
             dark.Swatches.Select(color => color.ToString()).SequenceEqual(AppPresets.Palette) && dark.ClockPreset(ClockColor.Amber).ToString() == ClockColors.Preset(ClockColor.Amber)
             && dark.ClockGradients.Select(g => g.Stops).Zip(ClockColors.Gradients).All(pair => pair.First.SequenceEqual(pair.Second.Stops)));
-        var draculaClock = new DeckSettings();
-        PanelThemes.ApplyClock(BuiltIn("dracula"), draculaClock);
-        check("A theme's clock is applied to the settings", draculaClock.ClockStyle == ClockStyle.Neon && draculaClock.ClockColor == ClockColor.Gradient
-            && draculaClock.ClockGradient.SequenceEqual(["#FF79C6", "#BD93F9", "#8BE9FD"]));
+        var glowClock = new DeckSettings();
+        PanelThemes.ApplyClock(glow, glowClock);
+        check("A theme's clock is applied to the settings", glowClock.ClockStyle == ClockStyle.Neon && glowClock.ClockColor == ClockColor.Gradient
+            && glowClock.ClockGradient.SequenceEqual(["#C792EA", "#82AAFF", "#7FDBCA"]));
+        check("The built-in themes suggest a clock in one color, not a gradient",
+            PanelThemes.BuiltIns.All(theme => PanelThemes.Resolve(theme).Clock?.Color != "gradient"));
         var demoClock = new DeckSettings { ClockGradient = ["#111111", "#222222", "#333333"] };
         PanelThemes.ApplyClock(demo, demoClock);
         check("The demo uses the seven-segment clock in the theme's color and leaves the gradient alone", demoClock.ClockStyle == ClockStyle.Segment
@@ -268,16 +272,16 @@ internal static class PanelThemeTests
         PanelThemes.ApplyClock(PanelThemes.Build("p", template), placeholder);
         check("The clock's custom color and gradient count only when the clock uses them", placeholder.ClockCustomColor == "#123456"
             && placeholder.ClockGradient.SequenceEqual(["#111111", "#222222", "#333333"]) && placeholder.ClockColor == ClockColor.White);
-        check("A theme without its own clock inherits its base's", sparsePalette.Clock?.Style == "neon");
-        var partial = PanelThemes.Build("partial", new PanelThemeFile { Base = "dracula", Clock = new PanelThemeClock { Style = "segment" } });
-        check("A clock that names only a style keeps its base's color", partial.Clock is { Style: "segment", Color: "gradient" } && partial.Clock.Gradient!.Count == 3);
+        check("A theme without its own clock inherits its base's", sparsePalette.Clock?.Style == "minimal");
+        var partial = PanelThemes.Build("partial", new PanelThemeFile { Base = "one-dark-pro", Clock = new PanelThemeClock { Style = "segment" } });
+        check("A clock that names only a style keeps its base's color", partial.Clock is { Style: "segment", Color: "custom", Custom: "#61AFEF" });
         var wide = new DeckSettings();
         PanelThemes.ApplyClock(PanelThemes.Build("w", new PanelThemeFile { Clock = new PanelThemeClock { Color = "custom", Custom = "#FF61AFEF" } }), wide);
         check("An 8-digit clock color is applied as its opaque color", wide.ClockColor == ClockColor.Custom && wide.ClockCustomColor == "#61AFEF");
         var matched = new DeckSettings(); matched.Apps[0].ThemeColor = "#123456"; matched.Apps[0].WarningColor = "#654321"; matched.Apps[1].CriticalColor = "#ABCDEF";
-        PanelThemes.ApplyMatching(nightOwl, matched);
+        PanelThemes.ApplyMatching(BuiltIn("cyberpunk-edgerunners"), matched);
         check("Choosing a theme makes the app colors follow it and switches the clock", matched.Apps.All(app => app.ThemeColor == "" && app.WarningColor == "" && app.CriticalColor == "")
-            && matched.ClockStyle == ClockStyle.Serif);
+            && matched.ClockStyle == ClockStyle.Segment);
         var dracula = BuiltIn("dracula"); var githubDark = BuiltIn("github-dark");
         var carried = new DeckSettings { ClockGradient = [.. dracula.ClockGradients[2].Stops] };
         PanelThemes.ApplyMatching(githubDark, carried, dracula);

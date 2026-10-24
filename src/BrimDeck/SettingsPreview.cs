@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Threading;
 
 namespace BrimDeck;
@@ -17,6 +18,18 @@ public sealed partial class SettingsWindow
     {
         if (_page is 1 or 2 or ThemePage or MonitorSettingsPage && (source is not DependencyObject control || !(bool)control.GetValue(PreviewControlProperty)))
             QueuePreviewDismissal();
+    }
+
+    // The top of the window is its caption (SettingsChrome), where a press is a non-client message and raises no mouse event,
+    // so the press there is caught from the window's messages instead. The caption buttons are hit-testable and take the path above.
+    private void DismissPreviewOnCaptionPress()
+    {
+        SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook((IntPtr _, int message, IntPtr _, IntPtr _, ref bool _) =>
+        {
+            const int LeftDown = 0x00A1, RightDown = 0x00A4, MiddleDown = 0x00A7;
+            if (message is LeftDown or RightDown or MiddleDown) DismissPreviewOutsideControl(null);
+            return IntPtr.Zero;
+        });
     }
 
     private void QueuePreviewDismissal()

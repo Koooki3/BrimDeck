@@ -40,9 +40,6 @@ public sealed partial class SettingsWindow
         _themesFresh = false;
         var chosen = PanelThemes.NormalizeId(S.PanelTheme);
         var users = PanelTheme.UserThemes;
-        Note(Loc.T("每个主题会分别记住你在它下面修改的应用颜色、预警与告警颜色和时间样式，切换回来时恢复；第一次选择的主题使用它自己的配色。",
-            "Each theme remembers the app, warning and critical colors and the clock style you change while using it, and brings them back when you return to it. A theme chosen for the first time uses its own colors."),
-            12, TextSecondary, new Thickness(0, -6, 0, 24));
         ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
             .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
@@ -77,6 +74,8 @@ public sealed partial class SettingsWindow
         foreach (var (id, name, theme) in themes)
         {
             bool own = theme.Path is not null;
+            // The chosen theme of the user's with unsaved changes offers to save them over it in place of its card.
+            if (own && id == chosen && !PanelTheme.KeptLastGood && PanelTheme.DraftOf(id) is not null) { grid.Children.Add(OverwriteCard(theme)); continue; }
             var card = KeepPreview(new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = ThemePreview(id, theme),
                 Margin = new Thickness(6, 3, 6, 6), Tag = own ? "" : name, GroupName = "PanelTheme", IsChecked = id == chosen });
             AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + name);
@@ -154,12 +153,12 @@ public sealed partial class SettingsWindow
             var open = ActionButton(Path.GetFileName(path) + " ↗", () => OpenThemeFile(path)); open.Style = (Style)FindResource("SettingsLink"); open.ToolTip = path;
             rows.Add(Row(Loc.T("文件", "File"), open));
         }
-        var adjustments = PanelThemes.Resolve(theme).Adjustments;
-        if (adjustments.Count > 0)
-            rows.Add(Row(Loc.T("可读性调整", "Readability"), Wrapped(string.Join("\n", adjustments.Select(adjustment => adjustment.Describe())), false),
-                help: () => Loc.T("为保证文字与信息清晰可读，低于对比度下限的颜色会沿原色相自动调亮或调暗到刚好达标，不影响主题文件本身。",
-                    "To keep text and figures readable, a color below its contrast minimum is lightened or darkened along its own hue just enough to pass. The theme file is not changed.")));
+        // The colors moved to stay readable, counted here and listed once opened; with unsaved changes, those of the theme as
+        // it would be saved.
+        rows.AddRange(ReadabilityRows(PanelTheme.PaletteOf(theme).Adjustments));
         Group([.. rows]);
+        // A theme shown in place of a missing or broken one is not the one chosen, so it is not offered for editing.
+        if (!missing && !kept) ThemeEditor(theme);
     }
 
     private TextBlock Wrapped(string text, bool error)
@@ -196,16 +195,27 @@ public sealed partial class SettingsWindow
         head.Children.Add(reload);
         Target.Children.Add(head);
         Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, 12) });
-        var own = users.Where(t => t.Usable).ToList();
+        // In the order they were added, so a new theme takes the place of the card that made it, at the end.
+        var own = PanelThemes.InAddedOrder(users.Where(t => t.Usable)).ToList();
         ThemeCards([.. own.Select(t => (t.Id, t.DisplayName, t))], chosen, CustomTile());
         var broken = users.Where(t => !t.Usable).ToList();
         if (broken.Count > 0)
             Group([.. broken.Select(t => (FrameworkElement)Row(t.Path is { } file ? PanelThemes.DisplayFileName(file) : t.Id, Wrapped(Loc.T("无法使用：", "Cannot be used: ") + t.Error, true)))]);
     }
 
-    // The new-theme card: a theme card's frame with a plus in place of the preview. The new theme starts as a copy of the current one.
+    // The new-theme card: a theme card's frame with a plus in place of the preview. The new theme starts as a copy of the current
+    // one and is chosen at once. While the current theme has unsaved changes, the card saves the theme as changed as a new theme
+    // instead (SaveCard).
     private FrameworkElement CustomTile()
     {
+        if (!PanelTheme.KeptLastGood && PanelTheme.DraftOf(PanelTheme.ShownTheme.Id) is not null)
+        {
+            var save = SaveCard(Loc.T("保存当前主题", "Save current theme"), null, SaveThemeDraftAsNew);
+            save.ToolTip = Loc.T("把当前主题连同尚未保存的修改保存为一个新的自定义主题，并切换到它。",
+                "Saves the current theme with its unsaved changes as a new custom theme and switches to it.");
+            AutomationProperties.SetName(save, Loc.T("保存当前主题为新主题", "Save current theme as a new theme"));
+            return save;
+        }
         var create = ActionButton(Loc.T("以当前主题新建", "New from current theme"), () =>
         {
             try
@@ -214,18 +224,13 @@ public sealed partial class SettingsWindow
                 var current = PanelTheme.ShownTheme;
                 var path = PanelThemes.CreateFromTemplate(PanelTheme.Folder, PanelTheme.Current, current.BuiltIn ? current.Id : null);
                 PanelTheme.Reload();
-                // The folder as just read, including this new file, so the watcher's report of the write reloads nothing.
-                _themeStamp = ThemeFolderStamp();
-                var id = PanelTheme.UserThemes.FirstOrDefault(t => t.Usable && string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase))?.Id;
                 // The new theme copies the current one, so it starts with what was changed under the current one.
-                if (id is not null) Change(s => { var kept = ThemeChoices.From(s); ChooseTheme(s, id); kept.ApplyTo(s); });
-                OpenThemeFile(path);
+                ChooseOwnTheme(path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { SaveStatus(Loc.T("无法创建主题文件：", "Could not create the theme file: ") + ex.Message, true); }
             _themesFresh = true; ShowPage(ThemePage);
         });
-        create.ToolTip = Loc.T("把当前主题的全部颜色写入一个带注释的模板文件并打开它；改好后保存，本页会自动重新加载。",
-            "Writes every color of the current theme into a commented template file and opens it; save your changes and this page reloads them.");
+        create.ToolTip = Loc.T("把当前主题的全部颜色写入一个新的自定义主题，并切换到它。", "Writes every color of the current theme into a new custom theme and switches to it.");
         create.Style = (Style)FindResource("SettingsAddCard"); create.Content = null;
         create.Tag = Loc.T("以当前主题新建", "New from current theme"); create.Margin = new Thickness(6, 3, 6, 6);
         AutomationProperties.SetName(create, Loc.T("以当前主题新建主题", "New theme from current theme"));
@@ -308,6 +313,7 @@ public sealed partial class SettingsWindow
         var target = string.Equals(Path.GetFileName(path), "theme.json", StringComparison.OrdinalIgnoreCase) ? Path.GetDirectoryName(path)! : path;
         if (!Native.RecycleBin.Send(target)) { SaveStatus(Loc.T("无法删除主题文件：", "Could not delete the theme file: ") + target, true); return; }
         string id = theme.Id;
+        PanelTheme.Discard(id);
         Change(s =>
         {
             if (PanelThemes.NormalizeId(s.PanelTheme) == id) ChooseTheme(s, PanelThemes.Dark);

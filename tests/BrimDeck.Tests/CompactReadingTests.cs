@@ -48,8 +48,8 @@ internal static class CompactReadingTests
         check("Compact readings: unknown and repeated readings are dropped, missing ones join hidden",
             Same(odd.CompactReadings, Download, Cpu, Columns, Memory, Gpu, Upload) && odd.CompactReadings[0].Visible && !odd.CompactReadings[1].Visible
             && odd.CompactReadings.Skip(2).All(r => !r.Visible) && odd.CompactMonitorItems == Download && odd.CompactMonitor == CompactMonitorMode.Custom);
-        check("Compact readings: colors are normalized or follow the palette", odd.CompactReadings[0].Color == "#12AB3C" || odd.CompactReadings[0].Color == "#12ab3c");
-        check("Compact readings: an invalid color follows the palette", odd.CompactReadings[1].Color is null);
+        check("Compact readings: an older own color moves into the custom scheme, normalized", odd.MonitorPalette == MonitorPalette.Custom
+            && odd.MonitorCustomColors is { Base: MonitorPalette.Theme, Download: "#12AB3C", Cpu: null } && odd.CompactReadings.All(r => !r.HasOwnColors));
         var none = Read("""{"AppVersion":"0.1.0","CompactReadings":[{"Item":2,"Visible":false}]}""");
         check("Compact readings: with every reading off the strip shows CPU", none.CompactMonitorItems == Cpu && CompactMonitor.Visible(none.CompactReadings) == CompactMonitorItems.None);
         var broken = Read("""{"AppVersion":"0.1.0","CompactReadings":null}""");
@@ -119,13 +119,6 @@ internal static class CompactReadingTests
         check("Compact readings: rings alone sit closer only without figures",
             CompactMonitor.RingsOnly(CompactMonitor.Rings, CompactMonitorItems.None) && !CompactMonitor.RingsOnly(CompactMonitor.Rings, Cpu) && !CompactMonitor.RingsOnly(All, CompactMonitorItems.None));
 
-        var palette = MonitorColors.For(MonitorPalette.Sea);
-        var colors = new StripColors(palette, [new() { Item = Memory, Color = "#123456" }, new() { Item = Cpu, Color = "#654321" }]);
-        check("Compact readings: an own color replaces only the normal state", colors.Memory(MemoryLevel.Normal) == "#123456"
-            && colors.Memory(MemoryLevel.Elevated) == palette.Warning && colors.Memory(MemoryLevel.Critical) == palette.Critical);
-        check("Compact readings: without an own color a reading follows the palette", colors.Normal(Gpu) == palette.Gpu && colors.Normal(Cpu) == "#654321"
-            && new StripColors(palette).Normal(Memory) == palette.Efficiency && colors.Core(1, 2) == palette.Core(1, 2));
-
         // Upload, GPU, download, columns and memory leave in turn; widths 50, 42, 50, 20, 42 and CPU 42, gaps 10.
         static CompactMonitorItems Expected(double space) => space switch
         {
@@ -134,47 +127,45 @@ internal static class CompactReadingTests
         };
     }
 
-    // Every reading has a color per level (ReadingLevels): its own where set, else the color scheme's; the core columns have
-    // two normal colors, one per kind of core.
+    // Every reading takes its colors from the color scheme (ReadingLevels): in the normal state its own, the core columns one per
+    // kind of core; at the warning and critical levels the scheme's. The custom scheme changes some colors of the one it starts from.
     private static void LevelColors(Action<string, bool> check)
     {
         const MemoryLevel Normal = MemoryLevel.Normal, Elevated = MemoryLevel.Elevated, Critical = MemoryLevel.Critical;
         var palette = MonitorColors.For(MonitorPalette.Sea);
-        var own = new StripColors(palette, [new() { Item = Memory, Color = "#123456", WarningColor = "#ABCDEF", CriticalColor = "#FEDCBA" },
-            new() { Item = Cpu, Color = "#654321", WarningColor = "#111111" }, new() { Item = Download, CriticalColor = "#222222" }]);
-        check("Level colors: a reading takes its own color at each level", own.Memory(Normal) == "#123456" && own.Memory(Elevated) == "#ABCDEF" && own.Memory(Critical) == "#FEDCBA");
-        check("Level colors: every reading has levels, an unset one follows the palette", own.At(Cpu, Elevated) == "#111111" && own.At(Cpu, Critical) == palette.Critical
-            && own.At(Download, Critical) == "#222222" && own.At(Download, Elevated) == palette.Warning && own.At(Gpu, Elevated) == palette.Warning && own.At(Upload, Normal) == palette.Efficiency);
-        var none = new StripColors(palette);
-        check("Level colors: without own colors every reading follows the palette at each level", CompactMonitor.Order.All(item => none.At(item, Elevated) == palette.Warning
-            && none.At(item, Critical) == palette.Critical && none.At(item, Normal) == none.Default(item)) && none.Memory(Normal) == palette.Efficiency);
-
-        // Each scheme's three main colors stand for CPU, memory and GPU; the core columns and the rates take the first two.
         var schemes = Enum.GetValues<MonitorPalette>().SelectMany(scheme => new[] { MonitorColors.For(scheme, true), MonitorColors.For(scheme, false) })
-            .Append(MonitorColors.FromTheme("#112233", ["#445566", "#778899", "#AABBCC"], "#00FF00", "#FFFF00", "#FF0000")).ToList();
-        check("Level colors: the defaults per scheme and item", schemes.All(scheme =>
+            .Append(MonitorColors.FromTheme("#112233", ["#445566", "#778899", "#AABBCC"], "#FFFF00", "#FF0000")).ToList();
+        check("Level colors: every reading takes its scheme color at each level", schemes.All(scheme =>
         {
-            var defaults = new StripColors(scheme);
-            return defaults.Default(Cpu) == scheme.Performance && defaults.Default(Memory) == scheme.Efficiency && defaults.Default(Gpu) == scheme.Gpu
-                && defaults.Default(Columns) == scheme.Performance && defaults.Default(Columns, 1) == scheme.Efficiency
-                && defaults.Default(Download) == scheme.Performance && defaults.Default(Upload) == scheme.Efficiency
-                && CompactMonitor.Order.All(item => defaults.DefaultAt(item, Elevated) == scheme.Warning && defaults.DefaultAt(item, Critical) == scheme.Critical);
+            var strip = new StripColors(scheme);
+            return strip.Normal(Cpu) == scheme.Performance && strip.Normal(Memory) == scheme.Memory && strip.Normal(Gpu) == scheme.Gpu
+                && strip.Normal(Columns) == scheme.Performance && strip.Normal(Columns, 1) == scheme.Efficiency
+                && strip.Normal(Download) == scheme.Download && strip.Normal(Upload) == scheme.Upload
+                && CompactMonitor.Order.All(item => strip.At(item, Normal) == strip.Normal(item) && strip.At(item, Elevated) == scheme.Warning && strip.At(item, Critical) == scheme.Critical);
         }));
-        check("Level colors: own colors are drawn as the caller draws them",
-            new StripColors(palette, [new() { Item = Memory, CriticalColor = "#FEDCBA" }], _ => "#000000").Memory(Critical) == "#000000");
-        var warm = new StripColors(MonitorColors.For(MonitorPalette.Warm));
-        check("Level colors: the defaults come from the color scheme", warm.Default(Cpu) == MonitorColors.For(MonitorPalette.Warm).Performance && warm.Default(Cpu) != none.Default(Cpu)
-            && warm.Default(Columns, 1) == MonitorColors.For(MonitorPalette.Warm).Efficiency && new StripColors(MonitorColors.For(MonitorPalette.Sea, false)).At(Memory, Elevated) == MonitorColors.For(MonitorPalette.Sea, false).Warning);
-
-        var cores = new StripColors(palette, [new() { Item = Columns, Color = "#FF0000", ExtraColors = ["#0000FF"] }]);
-        check("Level colors: the core columns run from their first color to their second", cores.Core(0, 3) == ColorMath.Mix("#FF0000", "#0000FF", 0)
-            && cores.Core(2, 3) == ColorMath.Mix("#FF0000", "#0000FF", 1) && cores.Normal(Columns, 1) == "#0000FF" && cores.Core(0, 1) == ColorMath.Mix("#FF0000", "#0000FF", 0));
-        check("Level colors: a busy core takes the level's color", cores.Core(1, 3, Elevated) == palette.Warning && cores.Core(0, 3, Critical) == palette.Critical);
-        check("Level colors: with only the first core color the others run part of the way to the palette's",
-            new StripColors(palette, [new() { Item = Columns, Color = "#FF0000" }]).Core(1, 2) == ColorMath.Mix("#FF0000", palette.Efficiency, .45));
-        check("Level colors: without own core colors the palette's run", none.Core(1, 3) == palette.Core(1, 3) && none.Default(Columns, 1) == palette.Efficiency
-            && none.Default(Columns) == palette.Performance && none.DefaultAt(Columns, Elevated, 1) == palette.Warning);
+        check("Level colors: the fixed schemes give memory and upload the efficiency color, download the performance color",
+            schemes.All(scheme => scheme.Memory == scheme.Efficiency && scheme.Upload == scheme.Efficiency && scheme.Download == scheme.Performance));
+        check("Level colors: each color of a scheme by its role", Enum.GetValues<MonitorRole>().All(role =>
+            palette.With(role, "#010203")[role] == "#010203" && Enum.GetValues<MonitorRole>().Where(other => other != role).All(other => palette.With(role, "#010203")[other] == palette[other])));
+        var none = new StripColors(palette);
+        check("Level colors: the core columns run from the CPU color to the efficiency color", none.Core(0, 3) == palette.Performance && none.Core(2, 3) == palette.Efficiency
+            && none.Core(1, 3) == palette.Core(1, 3));
+        check("Level colors: a busy core takes the level's color", none.Core(1, 3, Elevated) == palette.Warning && none.Core(0, 3, Critical) == palette.Critical);
         check("Level colors: only the core columns have two channels", CompactMonitor.Channels(Columns) == 2 && CompactMonitor.Order.Where(item => item != Columns).All(item => CompactMonitor.Channels(item) == 1));
+
+        var warm = MonitorColors.For(MonitorPalette.Warm);
+        var custom = new MonitorCustomColors { Base = MonitorPalette.Warm, Memory = "#123456", Upload = "#ABCDEF" };
+        var over = custom.Over(warm);
+        check("Custom colors: the changed colors over the base's", over.Memory == "#123456" && over.Upload == "#ABCDEF" && over.Performance == warm.Performance
+            && over.Gpu == warm.Gpu && over.Warning == warm.Warning && custom.Changed && !new MonitorCustomColors().Changed);
+        check("Custom colors: drawn as the caller draws them", custom.Over(warm, _ => "#000000") is { Memory: "#000000", Upload: "#000000" } drawn && drawn.Gpu == warm.Gpu);
+        var strip = new StripColors(over with { Warning = "#111111" });
+        check("Custom colors: the collapsed readings take them, and the level colors apart from them", strip.Memory(Normal) == "#123456" && strip.Normal(Upload) == "#ABCDEF"
+            && strip.Memory(Elevated) == "#111111" && strip.At(Cpu, Elevated) == "#111111" && strip.Normal(Gpu) == warm.Gpu);
+        var odd = new MonitorCustomColors { Base = MonitorPalette.Custom, Cpu = "12ab3c", Gpu = "red" }; odd.Normalize();
+        var unknown = new MonitorCustomColors { Base = (MonitorPalette)42 }; unknown.Normalize();
+        check("Custom colors: normalized, an invalid one follows the base, the base is never Custom",
+            odd is { Base: MonitorPalette.Theme, Cpu: "#12AB3C", Gpu: null } && unknown.Base == MonitorPalette.Theme);
 
         check("Level thresholds: shares", ReadingLevels.OfShare(.79) == Normal && ReadingLevels.OfShare(.8) == Elevated && ReadingLevels.OfShare(.919) == Elevated
             && ReadingLevels.OfShare(.92) == Critical && ReadingLevels.OfShare(1) == Critical);
@@ -189,36 +180,30 @@ internal static class CompactReadingTests
             && ReadingLevels.Of(Memory, snapshot) == Elevated && ReadingLevels.Of(Gpu, snapshot) == Normal && ReadingLevels.Of(Download, snapshot) == Critical
             && ReadingLevels.Of(Upload, snapshot) == Normal && ReadingLevels.Of(Cpu, null) == Normal && ReadingLevels.Of(Memory, MonitorSnapshot.Empty(2, "test")) == Normal);
 
-        var reading = new CompactReading { Item = Columns };
-        reading.SetColor(Elevated, "#111111"); reading.SetColor(Critical, "#222222"); reading.SetColor(Normal, "#333333"); reading.SetColor(Normal, "#444444", 1);
-        check("Level colors: each level and channel sets its own color", reading.WarningColor == "#111111" && reading.CriticalColor == "#222222" && reading.Color == "#333333"
-            && reading.ExtraColors is ["#444444"] && reading.ColorAt(Normal, 1) == "#444444" && reading.ColorAt(Elevated, 1) == "#111111");
-        reading.SetColor(Normal, null, 1);
-        check("Level colors: clearing the last further channel leaves none", reading.ExtraColors is null && reading.Color == "#333333");
-
-        var read = Read("""{"AppVersion":"0.1.0","CompactReadings":[{"Item":4,"Color":"#7fd1c4","WarningColor":"#aabbcc","CriticalColor":"nope"},{"Item":2,"WarningColor":"#112233","CriticalColor":"#445566","ExtraColors":["#000000"]},{"Item":1,"ExtraColors":["#0000ff","#00ff00"]}]}""");
-        var memory = read.CompactReadings.First(r => r.Item == Memory); var cpu = read.CompactReadings.First(r => r.Item == Cpu); var columns = read.CompactReadings.First(r => r.Item == Columns);
-        check("Level colors: normalized, an invalid one follows the palette, every reading keeps its level colors",
-            memory.Color == "#7FD1C4" && memory.WarningColor == "#AABBCC" && memory.CriticalColor is null && cpu.WarningColor == "#112233" && cpu.CriticalColor == "#445566");
-        check("Level colors: only the channels a reading has are kept", cpu.ExtraColors is null && columns.ExtraColors is ["#0000FF"]);
-        var older = Read("""{"AppVersion":"0.1.0","CompactReadings":[{"Item":4,"Color":"#7FD1C4"}]}""").CompactReadings.First(r => r.Item == Memory);
-        check("Level colors: a file without them follows the palette", older.Color == "#7FD1C4" && older.WarningColor is null && older.CriticalColor is null && older.ExtraColors is null);
-
-        var settings = new DeckSettings { CompactReadings = CompactMonitor.Normalize([new() { Item = Memory, WarningColor = "#ABCDEF", CriticalColor = "#FEDCBA" },
-            new() { Item = Columns, Color = "#123456", ExtraColors = ["#654321"], Visible = false }, new() { Item = Upload, ShowValue = false, WarningColor = "#999999" }]) };
-        settings.Normalize();
-        CompactMonitor.Apply(settings.CompactReadings, CompactMonitorMode.Brief); CompactMonitor.Apply(settings.CompactReadings, CompactMonitorMode.Full);
-        var copy = settings.Copy(); copy.CompactReadings.First(r => r.Item == Columns).ExtraColors![0] = "#000000"; copy.CompactReadings.First(r => r.Item == Memory).WarningColor = "#000000";
-        var kept = settings.CompactReadings.First(r => r.Item == Memory); var keptColumns = settings.CompactReadings.First(r => r.Item == Columns);
-        var saved = SettingsMigrations.Read(JsonSerializer.Serialize(settings)).CompactReadings;
-        check("Level colors: kept by presets, deep copies and saving", kept.WarningColor == "#ABCDEF" && kept.CriticalColor == "#FEDCBA" && keptColumns.ExtraColors is ["#654321"]
-            && saved.First(r => r.Item == Memory).CriticalColor == "#FEDCBA" && saved.First(r => r.Item == Columns).ExtraColors is ["#654321"] && saved.First(r => r.Item == Upload).WarningColor == "#999999");
-
-        settings.CompactReadings.First(r => r.Item == Gpu).Visible = false;
-        var before = settings.CompactReadings.Select(r => (r.Item, r.Visible, r.ShowValue)).ToArray();
-        CompactMonitor.ResetColors(settings.CompactReadings);
-        check("Level colors: resetting clears every color and keeps the rest", settings.CompactReadings.All(r => r.Color is null && r.ExtraColors is null && r.WarningColor is null && r.CriticalColor is null)
-            && settings.CompactReadings.Select(r => (r.Item, r.Visible, r.ShowValue)).SequenceEqual(before));
+        // Files saved before the custom scheme: the readings' own colors become the custom scheme over the scheme in use. The
+        // CPU color falls back to the core columns' first; the level colors are the first a reading sets, in the table's order.
+        var read = Read("""{"AppVersion":"0.1.0","MonitorPalette":2,"CompactReadings":[{"Item":4,"Color":"#7fd1c4","WarningColor":"#aabbcc","CriticalColor":"nope"},{"Item":2,"WarningColor":"#112233","CriticalColor":"#445566","ExtraColors":["#000000"]},{"Item":1,"Color":"#ff0000","ExtraColors":["#0000ff","#00ff00"],"Visible":false},{"Item":16,"Color":"#010101"}]}""");
+        check("Older colors: the readings' own colors become the custom scheme", read.MonitorPalette == MonitorPalette.Custom
+            && read.MonitorCustomColors is { Base: MonitorPalette.Warm, Memory: "#7FD1C4", Cpu: "#FF0000", Efficiency: "#0000FF", Download: "#010101", Gpu: null, Upload: null });
+        check("Older colors: the level colors become the collapsed readings' own", read is { CompactWarningColor: "#AABBCC", CompactCriticalColor: "#445566" });
+        var levelsOnly = Read("""{"AppVersion":"0.1.0","MonitorPalette":1,"CompactReadings":[{"Item":2,"WarningColor":"#112233"}]}""");
+        check("Older colors: level colors alone keep the scheme", levelsOnly is { MonitorPalette: MonitorPalette.Graphite, CompactWarningColor: "#112233", CompactCriticalColor: null }
+            && !levelsOnly.MonitorCustomColors.Changed);
+        var levels = Read("""{"AppVersion":"0.1.0","CompactWarningColor":"abcdef","CompactCriticalColor":"nope"}""");
+        check("Level colors: normalized, an invalid one follows the panel theme", levels is { CompactWarningColor: "#ABCDEF", CompactCriticalColor: null }
+            && SettingsMigrations.Read(JsonSerializer.Serialize(levels)).CompactWarningColor == "#ABCDEF");
+        check("Older colors: they leave the readings, which keep the rest", read.CompactReadings.All(r => !r.HasOwnColors)
+            && !read.CompactReadings.First(r => r.Item == Columns).Visible && Same(read.CompactReadings, Memory, Cpu, Columns, Download, Gpu, Upload));
+        var plain = Read("""{"AppVersion":"0.1.0","MonitorPalette":1,"CompactReadings":[{"Item":4}]}""");
+        check("Older colors: without own colors the scheme stays", plain.MonitorPalette == MonitorPalette.Graphite && !plain.MonitorCustomColors.Changed);
+        var readings = JsonSerializer.Serialize(read.CompactReadings);
+        check("Older colors: not written", !readings.Contains("Color"));
+        var again = SettingsMigrations.Read(JsonSerializer.Serialize(read));
+        check("Custom colors: survive saving and reading", again.MonitorPalette == MonitorPalette.Custom && again.MonitorCustomColors.Key == read.MonitorCustomColors.Key);
+        var copy = read.Copy(); copy.MonitorCustomColors.Memory = "#000000";
+        check("Custom colors: Copy is deep", read.MonitorCustomColors.Memory == "#7FD1C4");
+        var missing = Read("""{"AppVersion":"0.1.0","MonitorCustomColors":null}""");
+        check("Custom colors: a missing one reads as unchanged", missing.MonitorCustomColors is { Base: MonitorPalette.Theme, Changed: false });
     }
 
     // WPF throws when a panel's child is replaced through its indexer ("指定的索引已经在使用"), which once left the collapsed
@@ -254,14 +239,14 @@ internal static class CompactReadingTests
     private static void Copies(Action<string, bool> check)
     {
         var settings = new DeckSettings();
-        settings.CompactReadings = CompactMonitor.Normalize([new() { Item = Gpu, ShowValue = false, Color = "#ABCDEF" }, new() { Item = Upload }, new() { Item = Cpu }]);
+        settings.CompactReadings = CompactMonitor.Normalize([new() { Item = Gpu, ShowValue = false }, new() { Item = Upload }, new() { Item = Cpu }]);
         settings.Normalize();
         var copy = settings.Copy();
-        copy.CompactReadings[0].Color = "#000000"; copy.CompactReadings.Reverse();
-        check("Compact readings: Copy is deep", settings.CompactReadings[0].Item == Gpu && settings.CompactReadings[0].Color == "#ABCDEF");
+        copy.CompactReadings[0].ShowValue = true; copy.CompactReadings.Reverse();
+        check("Compact readings: Copy is deep", settings.CompactReadings[0].Item == Gpu && !settings.CompactReadings[0].ShowValue);
         var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
         check("Compact readings: the table survives saving and reading",
-            read.CompactReadings.Select(r => (r.Item, r.Visible, r.ShowValue, r.Color)).SequenceEqual(settings.CompactReadings.Select(r => (r.Item, r.Visible, r.ShowValue, r.Color)))
+            read.CompactReadings.Select(r => (r.Item, r.Visible, r.ShowValue)).SequenceEqual(settings.CompactReadings.Select(r => (r.Item, r.Visible, r.ShowValue)))
             && read.CompactMonitor == CompactMonitorMode.Custom && read.CompactMonitorItems == (Gpu | Upload | Cpu));
         var untouched = new DeckSettings { CompactMonitor = CompactMonitorMode.Brief }.Copy();
         check("Compact readings: Copy keeps a table not yet built", CompactMonitor.Preset(untouched.CompactReadings) == CompactMonitorMode.Brief);

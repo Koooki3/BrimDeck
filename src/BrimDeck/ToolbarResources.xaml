@@ -115,25 +115,27 @@
           <ContentPresenter Grid.Column="2" ContentSource="Header" VerticalAlignment="Center" HorizontalAlignment="Stretch"/>
         </Grid>
       </Border>
-      <!-- Later triggers win: check, then the outline pin on hover, then the filled pin when pinned.
-           Tag is "pinned" for the pinned row and "single" when there is nothing to choose between. -->
+      <!-- Later triggers win. At rest every row shows only its check. On hover the check column becomes the pin:
+           outline for an unpinned row, filled for the pinned one. Tag is "pinned" for the pinned row and "single"
+           when there is nothing to choose between; a single row keeps its check on hover. -->
       <ControlTemplate.Triggers>
         <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource PanelHover}"/></Trigger>
         <Trigger Property="IsChecked" Value="True"><Setter TargetName="Checkmark" Property="Visibility" Value="Visible"/></Trigger>
-        <MultiTrigger>
-          <MultiTrigger.Conditions><Condition Property="IsHighlighted" Value="True"/><Condition Property="IsChecked" Value="False"/></MultiTrigger.Conditions>
-          <Setter TargetName="PinOutline" Property="Visibility" Value="Visible"/>
-        </MultiTrigger>
-        <Trigger SourceName="PinButton" Property="IsMouseOver" Value="True">
+        <Trigger Property="IsHighlighted" Value="True">
           <Setter TargetName="Checkmark" Property="Visibility" Value="Hidden"/><Setter TargetName="PinOutline" Property="Visibility" Value="Visible"/>
         </Trigger>
         <Trigger Property="Tag" Value="single">
           <Setter TargetName="PinButton" Property="IsHitTestVisible" Value="False"/><Setter TargetName="PinOutline" Property="Visibility" Value="Hidden"/>
         </Trigger>
-        <Trigger Property="Tag" Value="pinned">
-          <Setter TargetName="Checkmark" Property="Visibility" Value="Hidden"/><Setter TargetName="PinOutline" Property="Visibility" Value="Hidden"/>
-          <Setter TargetName="PinFilled" Property="Visibility" Value="Visible"/><Setter TargetName="PinButton" Property="AutomationProperties.Name" Value="{DynamicResource UnpinSourceName}"/>
-        </Trigger>
+        <MultiTrigger>
+          <MultiTrigger.Conditions><Condition Property="Tag" Value="single"/><Condition Property="IsChecked" Value="True"/></MultiTrigger.Conditions>
+          <Setter TargetName="Checkmark" Property="Visibility" Value="Visible"/>
+        </MultiTrigger>
+        <Trigger Property="Tag" Value="pinned"><Setter TargetName="PinButton" Property="AutomationProperties.Name" Value="{DynamicResource UnpinSourceName}"/></Trigger>
+        <MultiTrigger>
+          <MultiTrigger.Conditions><Condition Property="Tag" Value="pinned"/><Condition Property="IsHighlighted" Value="True"/></MultiTrigger.Conditions>
+          <Setter TargetName="PinOutline" Property="Visibility" Value="Hidden"/><Setter TargetName="PinFilled" Property="Visibility" Value="Visible"/>
+        </MultiTrigger>
         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value=".4"/></Trigger>
         <!-- An action row below the sources keeps the check column empty so its text lines up with theirs. -->
         <Trigger Property="Tag" Value="action"><Setter TargetName="PinButton" Property="Visibility" Value="Hidden"/></Trigger>

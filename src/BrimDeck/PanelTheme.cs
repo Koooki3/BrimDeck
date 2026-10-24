@@ -23,6 +23,11 @@ internal static class PanelTheme
     private static string _signature = "";
     private static bool _loaded;
     private static string? _chosen;
+    // Changes made on the theme page and not yet saved, by theme id. They take effect only once saved: until then neither the
+    // panel nor the theme cards show them, and they last as long as BrimDeck runs. Each draft's palette, which the theme page
+    // shows, is kept until the draft or the theme's file changes.
+    private static readonly Dictionary<string, PanelThemeDraft> _drafts = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, (PanelThemeFile File, int Version, PanelPalette Palette)> _draftPalettes = new(StringComparer.Ordinal);
     // Every token's text form and the default app colors as drawn, made once per theme: they are read hundreds of times per render.
     private static Dictionary<string, string> _hex = Hexes(Current);
     private static readonly Dictionary<ProviderId, string> _appColors = [];
@@ -84,6 +89,29 @@ internal static class PanelTheme
             string.Join(",", palette.Swatches));
     }
     private static Dictionary<string, string> Hexes(PanelPalette palette) => palette.Colors.ToDictionary(pair => pair.Key, pair => pair.Value.ToString());
+
+    // A theme as the theme page edits it: its file with the unsaved changes made to it, if any.
+    public static PanelPalette PaletteOf(PanelThemeInfo theme)
+    {
+        if (DraftOf(theme.Id) is not { } draft) return PanelThemes.Resolve(theme);
+        if (_draftPalettes.TryGetValue(theme.Id, out var kept) && ReferenceEquals(kept.File, theme.File) && kept.Version == draft.Version) return kept.Palette;
+        var palette = PanelThemes.Build(theme.Id, PanelThemes.ApplyDraft(theme.File, draft));
+        _draftPalettes[theme.Id] = (theme.File, draft.Version, palette);
+        return palette;
+    }
+    public static PanelThemeDraft? DraftOf(string id) => _drafts.TryGetValue(id, out var draft) && !draft.IsEmpty ? draft : null;
+    // Changes the theme's draft, starting one if there is none; a draft left without changes is let go.
+    public static void Edit(PanelThemeInfo theme, Action<PanelThemeDraft> edit)
+    {
+        if (!_drafts.TryGetValue(theme.Id, out var draft)) _drafts[theme.Id] = draft = new PanelThemeDraft(theme.Id);
+        edit(draft);
+        if (draft.IsEmpty) Discard(theme.Id);
+    }
+    // Drops the theme's unsaved changes: they were saved, given up, or the theme was deleted.
+    public static void Discard(string id)
+    {
+        _drafts.Remove(id); _draftPalettes.Remove(id);
+    }
 
     public static string Hex(string key) => _hex[key];
     public static Color ColorOf(string key) => ToColor(Current[key]);

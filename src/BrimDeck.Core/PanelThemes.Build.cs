@@ -34,6 +34,8 @@ public static partial class PanelThemes
         }
         // The dark theme sets every token, so a missing one only happens if the embedded file is broken.
         foreach (var token in Tokens) if (!colors.ContainsKey(token.Key)) colors[token.Key] = token.Key == "surface" ? ThemeColor.Black : ThemeColor.White;
+        var writtenColors = new Dictionary<string, ThemeColor>(colors, StringComparer.Ordinal);
+        var writtenApps = new Dictionary<string, ThemeColor>(apps, StringComparer.Ordinal);
         // The surface is drawn opaque, as a translucent one would let the desktop through behind the text. A tooltip is a window of
         // its own and the seek bubble floats over lyrics and times, so both are drawn as they look over the surface.
         var surface = colors["surface"] = colors["surface"].Over(ThemeColor.Black);
@@ -77,7 +79,7 @@ public static partial class PanelThemes
         // A theme's own picker colors are offered as the panel draws them, like the ones derived from its palette.
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
             .OfType<ThemeColor>().Take(12).ToList();
-        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches);
+        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps);
     }
 
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.
@@ -126,8 +128,39 @@ public static partial class PanelThemes
     {
         var surfaceGradient = Stops(effects.SurfaceGradient);
         var rimGradient = Stops(effects.RimGradient);
+        double Value(string key) { var (min, max, fallback) = EffectRange(key); return Fit(Effect(effects, key), min, max, fallback); }
         return new(surfaceGradient.Count >= 2 ? surfaceGradient : [], rimGradient.Count >= 2 ? rimGradient : [],
-            Fit(effects.RimWidth, 0, 3, 1), Fit(effects.ShadowBlur, 0, 40, 14), Fit(effects.ShadowDepth, 0, 12, 4), Fit(effects.ShadowOpacity, 0, 1, .28), Fit(effects.Scanlines, 0, .12, 0));
+            Value("rimWidth"), Value("shadowBlur"), Value("shadowDepth"), Value("shadowOpacity"), Value("scanlines"));
+    }
+
+    // The numeric effects by their names in the file, with their ranges and the values used when no theme sets them.
+    public static readonly IReadOnlyList<string> EffectKeys = ["rimWidth", "shadowBlur", "shadowDepth", "shadowOpacity", "scanlines"];
+    public static (double Min, double Max, double Fallback) EffectRange(string key) => key switch
+    {
+        "rimWidth" => (0, 3, 1), "shadowBlur" => (0, 40, 14), "shadowDepth" => (0, 12, 4), "shadowOpacity" => (0, 1, .28), "scanlines" => (0, .12, 0),
+        _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
+    };
+    public static double? Effect(PanelThemeEffects? effects, string key) => key switch
+    {
+        "rimWidth" => effects?.RimWidth, "shadowBlur" => effects?.ShadowBlur, "shadowDepth" => effects?.ShadowDepth,
+        "shadowOpacity" => effects?.ShadowOpacity, "scanlines" => effects?.Scanlines, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
+    };
+    public static double Effect(PanelThemeEffectValues values, string key) => key switch
+    {
+        "rimWidth" => values.RimWidth, "shadowBlur" => values.ShadowBlur, "shadowDepth" => values.ShadowDepth,
+        "shadowOpacity" => values.ShadowOpacity, "scanlines" => values.Scanlines, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
+    };
+    private static void SetEffect(PanelThemeEffects effects, string key, double value)
+    {
+        switch (key)
+        {
+            case "rimWidth": effects.RimWidth = value; break;
+            case "shadowBlur": effects.ShadowBlur = value; break;
+            case "shadowDepth": effects.ShadowDepth = value; break;
+            case "shadowOpacity": effects.ShadowOpacity = value; break;
+            case "scanlines": effects.Scanlines = value; break;
+            default: throw new ArgumentException("Unknown effect: " + key, nameof(key));
+        }
     }
     private static List<ThemeColor> Stops(List<string>? values) => values is null ? [] : values.Select(value => ThemeColor.TryParse(value, out var c) ? c : (ThemeColor?)null).OfType<ThemeColor>().Take(8).ToList();
     private static double Fit(double? value, double min, double max, double fallback) => value is { } v && double.IsFinite(v) ? Math.Clamp(v, min, max) : fallback;
