@@ -172,21 +172,54 @@ public static class NoticeProtocol
         return null;
     }
 
-    // Removes control characters other than line breaks and tabs, and the bidirectional overrides and isolates, which could
-    // make a text read differently from what it is; cuts at the limit without splitting a surrogate pair.
+    // Removes control characters other than line breaks and tabs, and the invisible characters Clean drops (the bidi overrides
+    // and isolates among them), which could make a text read differently from what it is; line and paragraph separators
+    // become a line break. Cuts at the limit without splitting a surrogate pair.
     public static string? Clip(string? text, int limit)
     {
         if (text is null) return null;
         var builder = new StringBuilder(Math.Min(text.Length, limit));
-        foreach (char c in text)
+        for (int i = 0; i < text.Length && builder.Length < limit; i++)
         {
-            if (builder.Length >= limit) break;
-            if (c is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069' or '\u200E' or '\u200F' or '\u061C') continue;
-            if (char.IsControl(c) && c is not ('\n' or '\t')) { if (c == '\r') continue; builder.Append(' '); continue; }
-            builder.Append(c);
+            char c = text[i];
+            bool pair = char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]);
+            if (Unwanted(text, i, out bool breaks)) { if (breaks) builder.Append('\n'); }
+            else if (char.IsControl(c) && c is not ('\n' or '\t')) { if (c != '\r') builder.Append(' '); }
+            else { builder.Append(c); if (pair) builder.Append(text[i + 1]); }
+            if (pair) i++;
         }
+        if (builder.Length > limit) builder.Length = limit;
         if (builder.Length > 0 && char.IsHighSurrogate(builder[^1])) builder.Length--;
         return builder.ToString();
+    }
+
+    // Text as a sender wrote it, without the invisible characters that let it pass for something else (sec-L4): format
+    // characters (zero-width spaces, bidi marks, word joiners, the BOM, Unicode tags) are dropped, the zero-width joiner of
+    // emoji sequences excepted; line and paragraph separators, which WPF breaks lines on, become a line break, or a space
+    // in a single line. BrimDeck.Core's NoticeText.Clean is this.
+    public static string Clean(string text, bool singleLine = false)
+    {
+        int i = 0;
+        for (; i < text.Length; i++)
+            if (Unwanted(text, i, out _)) break;
+        if (i == text.Length) return text;
+        var builder = new StringBuilder(text.Length);
+        builder.Append(text, 0, i);
+        for (; i < text.Length; i++)
+        {
+            bool pair = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]);
+            if (Unwanted(text, i, out bool breaks)) { if (breaks) builder.Append(singleLine ? ' ' : '\n'); }
+            else { builder.Append(text[i]); if (pair) builder.Append(text[i + 1]); }
+            if (pair) i++;
+        }
+        return builder.ToString();
+    }
+
+    private static bool Unwanted(string text, int index, out bool breaks)
+    {
+        var category = char.GetUnicodeCategory(text, index);
+        breaks = category is System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator;
+        return breaks || category == System.Globalization.UnicodeCategory.Format && text[index] != '\u200D';
     }
 }
 
