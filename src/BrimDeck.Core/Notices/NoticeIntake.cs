@@ -69,7 +69,8 @@ public static class NoticeIntake
         Actions = (capabilities & NoticeCapabilities.Actions) != 0 && message.Actions is { } actions ? actions.Select(a => new NoticeAction(a.Key, Name(a.Label, a.Key))).ToList() : [],
         ExitCode = message.ExitCode, DurationMs = message.DurationMs, Command = Blank(message.Command),
         Timing = NoticeTimeIntake.Resolve(message, now ?? DateTimeOffset.UtcNow, zone ?? TimeZoneInfo.Local),
-        StopTiming = message.Stop == true
+        StopTiming = message.Stop == true,
+        Transient = message.Transient == true
     };
 
     // Icons are local only: a Windows file path for the Windows link, a Linux path or icon name inside the distribution for
