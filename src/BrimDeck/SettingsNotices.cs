@@ -49,7 +49,8 @@ public sealed partial class SettingsWindow
         var line = TextLine("", 11.5, TextSecondary);
         line.TextWrapping = TextWrapping.Wrap; line.TextTrimming = TextTrimming.None; line.Margin = new Thickness(0, 2, 0, 0);
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
-        void Update() { var (text, problem) = read(); line.Text = text; line.Foreground = UI.Brush(problem ? _palette.Dark ? "#F0A6AA" : "#B12E3A" : TextSecondary); }
+        // An empty line takes no room, so a line whose state may come later (the local channel failing) can always be on the page.
+        void Update() { var (text, problem) = read(); line.Text = text; line.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed; line.Foreground = UI.Brush(problem ? _palette.Dark ? "#F0A6AA" : "#B12E3A" : TextSecondary); }
         Update();
         _noticeStatusLines.Add(Update);
         return line;
@@ -118,7 +119,7 @@ public sealed partial class SettingsWindow
             () => Loc.T("Windows 上使用 BrimDeck 安装目录中的 BrimDeck.Notify.exe；WSL 中开启发行版后使用 brim-notify。run 会运行命令并在结束后提示结果；同一 --replace 键会更新同一条提示。",
                 "On Windows use BrimDeck.Notify.exe in BrimDeck's folder; in WSL use brim-notify once the distribution is on. run runs a command and shows its result when it ends; the same --replace key updates the same notice.")));
         var pipe = StatusLine(() => center.PipeError is { } error ? (Loc.T("本地通道不可用：", "The local channel is unavailable: ") + error, true) : ("", false));
-        if (pipe.Text.Length > 0) Target.Children.Add(pipe);
+        Target.Children.Add(pipe);
         NoticeTimeSection(center);
     }
 
@@ -144,6 +145,7 @@ public sealed partial class SettingsWindow
             {
                 NoticeTimeRole.Clock => Loc.T("闹钟、计时器结束（时钟内正在运行的计时 Windows 不对外提供）", "Alarms and finished timers (Windows does not share the Clock's running timers)"),
                 NoticeTimeRole.Calendar => Loc.T("日程提醒", "Event reminders"),
+                NoticeTimeRole.Reminders => Loc.T("任务提醒，到点时像闹钟一样弹出", "Task reminders, shown like an alarm when due"),
                 NoticeTimeRole.Meetings => Loc.T("会议提醒和开始；其他消息照常", "Meeting reminders and starts; other messages as usual"),
                 _ => Loc.T("新邮件、日程提醒", "New mail, event reminders")
             }, 11.5, TextSecondary);
@@ -171,7 +173,7 @@ public sealed partial class SettingsWindow
             WslAgentState.Monitor => (Loc.T("正在接收：旁路观察已有的通知服务（不提供其按钮）。", "Receiving: watching the existing notification service (its buttons are not offered)."), false),
             WslAgentState.MonitorDenied => (Loc.T("已有通知服务，且总线不允许监视；brim-notify 仍可用。", "Another notification service runs and the bus does not allow watching it; brim-notify still works."), true),
             WslAgentState.NoBus => (Loc.T("没有可用的会话总线；brim-notify 仍可用。", "No session bus is available; brim-notify still works."), true),
-            WslAgentState.Failed => (Loc.T("连接失败，稍后重试", "Connection failed; trying again later") + (state.Detail.Length > 0 ? "（" + state.Detail + "）" : ""), true),
+            WslAgentState.Failed => (Loc.T("连接失败，稍后重试", "Connection failed; trying again later") + (state.Detail.Length > 0 ? Loc.T("（", " (") + state.Detail + Loc.T("）", ")") : ""), true),
             _ => (Loc.T("未开启", "Off"), false)
         };
         if (!state.Conflict) return (text, warning);
@@ -205,7 +207,10 @@ public sealed partial class SettingsWindow
     private void NoticeBehavior(NoticeCenter center)
     {
         SectionTitle(Loc.T("提醒方式", "Behavior"));
-        var pause = ActionButton(center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停 1 小时", "Pause for 1 hour"), () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); ShowPage(NoticesSettingsPage); });
+        static string PauseLabel(NoticeCenter center) => center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停 1 小时", "Pause for 1 hour");
+        var pause = ActionButton(PauseLabel(center), () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); ShowPage(NoticesSettingsPage); });
+        // A pause that runs out while the page is open turns the button back as the status line changes.
+        _noticeStatusLines.Add(() => pause.Content = PauseLabel(center));
         var pauseStatus = StatusLine(() => center.Paused && S.NoticesPausedUntil is { } until
             ? (Loc.T($"已暂停至 {until.ToLocalTime():HH:mm}，期间的通知只进入最近通知。", $"Paused until {until.ToLocalTime():HH:mm}; notices meanwhile only go to the recent notices."), false)
             : center.Quiet ? (Loc.T("Windows 正处于专注、演示或锁定状态，提示暂时不显示。", "Windows is in focus, presentation or locked state; notices are held back for now."), false) : ("", false));

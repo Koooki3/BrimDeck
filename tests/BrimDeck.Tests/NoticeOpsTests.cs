@@ -42,6 +42,16 @@ internal static class NoticeOpsTests
             && rang.Any(c => c.Started is { Urgent: true }) && rang.Any(c => c.Ended is { Urgent: false }));
         timer.Tick(T0.AddSeconds(12));
         check("Notices ops: the ringing timer stays its whole duration", timer.Current("main")?.Key == "timer");
+        var hovered = new AttentionCoordinator();
+        hovered.Submit(Item("timer"), T0);
+        hovered.Hold("main", true, T0.AddSeconds(1));
+        hovered.Submit(Item("timer", urgent: true), T0.AddSeconds(2));
+        check("Notices ops: a card the user holds changes in place when its timer rings", hovered.Current("main") is { Key: "timer", Urgent: false });
+        var spent = new AttentionCoordinator();
+        for (int i = 0; i < AttentionCoordinator.UrgentLimit; i++) { spent.Submit(Item("a" + i, urgent: true), T0.AddSeconds(i * 10)); spent.Dismiss("main", T0.AddSeconds(i * 10 + 1)); }
+        spent.Submit(Item("timer"), T0.AddSeconds(40));
+        spent.Submit(Item("timer", urgent: true), T0.AddSeconds(41));
+        check("Notices ops: a timer past its urgent limit keeps its card instead of leaving the island empty", spent.Current("main")?.Key == "timer");
         var queued = new AttentionCoordinator();
         queued.Submit(Item("other", group: "o"), T0);
         queued.Submit(Item("timer", seconds: 6), T0);
@@ -115,7 +125,8 @@ internal static class NoticeOpsTests
         check("Notices ops: a reading may start when none is out", WindowsNoticePace.MayRead([], T0));
         check("Notices ops: a reading waits for one still out", !WindowsNoticePace.MayRead([T0.AddMinutes(-1)], T0));
         check("Notices ops: a reading hung for minutes no longer blocks (L4)", WindowsNoticePace.MayRead([T0 - WindowsNoticePace.StuckAfter], T0));
-        check("Notices ops: hung readings never pile up", !WindowsNoticePace.MayRead([T0.AddHours(-2), T0.AddHours(-1)], T0)
-            && !WindowsNoticePace.MayRead([T0.AddHours(-2), T0.AddMinutes(-1)], T0.AddMinutes(1)));
+        check("Notices ops: hung readings never pile up", !WindowsNoticePace.MayRead([T0.AddMinutes(-25), T0.AddMinutes(-10)], T0)
+            &&!WindowsNoticePace.MayRead([T0.AddMinutes(-20), T0.AddMinutes(-1)], T0.AddMinutes(1)));
+        check("Notices ops: readings hung for half an hour no longer count", WindowsNoticePace.MayRead([T0.AddHours(-2), T0.AddHours(-1)], T0));
     }
 }

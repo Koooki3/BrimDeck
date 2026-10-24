@@ -617,7 +617,7 @@ internal sealed partial class NoticeWindow : Window
         {
             key.Append('\u0001').Append(notice.Id).Append('\u0001').Append(notice.AppName).Append('\u0001').Append(notice.Title).Append('\u0001').Append(notice.Body)
                 .Append('\u0001').Append(notice.Category).Append('\u0001').Append(notice.Origin).Append('\u0001').Append(notice.Distro).Append('\u0001').Append(notice.IconRef)
-                .Append('\u0001').Append(notice.ReceivedAt.UtcTicks).Append('\u0001').Append(notice.SourcePresent).Append('\u0001').Append(notice.Capabilities)
+                .Append('\u0001').Append(NoticeText.Relative(notice.ReceivedAt, DateTimeOffset.UtcNow)).Append('\u0001').Append(notice.SourcePresent).Append('\u0001').Append(notice.Capabilities)
                 .Append('\u0001').Append(notice.Progress is not null).Append('\u0001').Append(notice.Call).Append('\u0001').Append(notice.TimeKind)
                 .Append('\u0001').Append(NoticeClock.IsLive(notice.Timing, DateTimeOffset.UtcNow)).Append('\u0001').Append(Center.CanOpen(notice));
             foreach (var action in notice.Actions) key.Append('\u0001').Append(action.Key).Append('\u0002').Append(action.Label);

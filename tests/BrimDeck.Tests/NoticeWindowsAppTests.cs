@@ -39,7 +39,7 @@ internal static class NoticeWindowsAppTests
             && Who("Microsoft.Office.OUTLOOK.EXE.15", null, "t").AppName == "Outlook");
         check("A known id still takes the name Windows gives", Who("BiliBiliPC", "哔哩哔哩 PC", "t").AppName == "哔哩哔哩 PC");
         check("A Squirrel-installed program is named by its program", Who("com.squirrel.Discord.Discord", null, "t").AppName == "Discord"
-            && Who("com.squirrel.slack.slack", null, "t").AppName == "slack" && Who("com.squirrel.", null, "t").AppName == "com.squirrel."
+            && Who("com.squirrel.slack.slack", null, "t").AppName == "Slack" && Who("com.squirrel.", null, "t").AppName == "com.squirrel."
             && Who("com.squirrel.x.a b", null, "t").AppName == "com.squirrel.x.a b");
         var hostile = Who("Evil", "Bad‮name\u0007" + new string('x', 400), "t");
         check("A name from the sender is clipped and loses direction overrides and control characters",
@@ -108,6 +108,11 @@ internal static class NoticeWindowsAppTests
         check("A phone call relayed by Phone Link is a call", Who("Microsoft.YourPhone_8wekyb3d8bbwe!App", "手机连接", "来电", "138 0000 0000").Call);
         check("A missed call or a chat about calls is no ringing call", !Who("QQ", "QQ", "Alice", "未接来电").Call && !Who("QQ", "QQ", "Alice", "我们晚点打电话").Call
             && !Who("MSTeams_8wekyb3d8bbwe!MSTeams", "Microsoft Teams", "Bob", "Missed call").Call && !Who("QQ", "QQ", "Alice", "recalling yours").Call);
+        check("Chat about power or later calls is no call", !Who("QQ", "QQ", "家人群", "来电了").Call && !Who("QQ", "QQ", "Alice", "来电话了吗").Call
+            && !Who("QQ", "QQ", "来电显示怎么设置", "x").Call && !Who("MSTeams_8wekyb3d8bbwe!MSTeams", "Microsoft Teams", "Bob", "I'll be calling you later").Call
+            && !Who("MSTeams_8wekyb3d8bbwe!MSTeams", "Microsoft Teams", "Bob", "Missed incoming call").Call);
+        check("A call said only further down the body is no call", !Who("QQ", "QQ", "Alice", "看看这个\n邀请你进行语音通话").Call);
+        check("A caller line after 来电 is a call", Who("Microsoft.YourPhone_8wekyb3d8bbwe!App", "手机连接", "来电：妈妈", "").Call && Who("QQ", "QQ", "Alice", "语音来电").Call);
         check("Only chat and phone apps have calls", !Who("Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows", "Outlook", "Incoming call", "x").Call
             && !Who("Chrome", "Google Chrome", "Incoming call", "x").Call && !Who("Claude_pzs8sxrjxfjjc!Claude", "Claude", "Task", "is calling you").Call);
 

@@ -252,8 +252,8 @@ internal sealed class WindowsNoticeSource : IDisposable
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(token);
         lock (_gate)
         {
-            _reading.RemoveAll(r => r.Task.IsCompleted);
             var now = DateTimeOffset.UtcNow;
+            _reading.RemoveAll(r => r.Task.IsCompleted || now - r.Started >= WindowsNoticePace.ForgetAfter);
             if (!WindowsNoticePace.MayRead(_reading.Select(r => r.Started), now)) throw new TimeoutException("An earlier reading of the notification list has not finished.");
             limit.CancelAfter(ReadLimit);
             read = listener.GetNotificationsAsync(NotificationKinds.Toast).AsTask(limit.Token);

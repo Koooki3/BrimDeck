@@ -423,15 +423,6 @@ public partial class MainWindow
             if (e.OriginalSource is DependencyObject source && FindButton(source)) return;
             _expandedNotice = open ? null : notice.Id; RenderNotices(); e.Handled = true;
         };
-        // From the keyboard too (review 7c): Enter or Space opens or closes the row, which keeps the focus after the page is
-        // built again, so its buttons are the next Tab stops.
-        row.Focusable = true;
-        row.KeyDown += (_, e) =>
-        {
-            if (e.Key is not (Key.Enter or Key.Space) || e.OriginalSource != row) return;
-            _expandedNotice = open ? null : notice.Id; RenderNotices(); e.Handled = true;
-            Dispatcher.BeginInvoke(() => _pageRows.FirstOrDefault(r => r.Notice.Id == notice.Id).Row?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
-        };
         AutomationProperties.SetName(row, notice.AppName + ", " + notice.Title + ", " + NoticeText.Relative(notice.ReceivedAt, now));
         return row;
     }
@@ -445,7 +436,7 @@ public partial class MainWindow
     {
         var center = _app.Notices;
         return string.Join('\u0001', notice.Title, notice.Body, notice.AppName, notice.Origin, notice.Distro, notice.IconRef, notice.SourcePresent, notice.Category,
-            notice.TimeKind, NoticeClock.IsLive(notice.Timing, now), notice.ReceivedAt.UtcTicks, notice.Capabilities, center.CanOpen(notice), _expandedNotice == notice.Id,
+            notice.TimeKind, NoticeClock.IsLive(notice.Timing, now), NoticeText.Relative(notice.ReceivedAt, now), notice.Capabilities, center.CanOpen(notice), _expandedNotice == notice.Id,
             _freshNotices.Contains(notice.Id), string.Join('\u0002', notice.Actions.Select(a => a.Key + "=" + a.Label)), string.Join('\u0002', center.TimeActions(notice).Select(a => a.Key)));
     }
 

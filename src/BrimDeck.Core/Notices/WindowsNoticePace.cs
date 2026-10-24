@@ -31,10 +31,12 @@ public static class WindowsNoticePace
     // the oldest still out has hung for StuckAfter, one more may start, up to MostOutstanding hung readings in all.
     public static readonly TimeSpan StuckAfter = TimeSpan.FromMinutes(5);
     public const int MostOutstanding = 2;
+    // A reading still out after this is no longer counted: two hung readings would otherwise block the source for good again.
+    public static readonly TimeSpan ForgetAfter = TimeSpan.FromMinutes(30);
 
     public static bool MayRead(IEnumerable<DateTimeOffset> outstanding, DateTimeOffset now)
     {
-        var started = outstanding.ToList();
+        var started = outstanding.Where(at => now - at < ForgetAfter).ToList();
         return started.Count == 0 || started.Count < MostOutstanding && started.All(at => now - at >= StuckAfter);
     }
 

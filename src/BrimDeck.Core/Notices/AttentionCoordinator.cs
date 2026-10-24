@@ -100,7 +100,8 @@ public sealed class AttentionCoordinator
         // anew, urgent and for its whole duration, instead of only changing what the island says for the time left.
         if (item.Urgent)
         {
-            if (lane.Current is { Urgent: false } quiet && quiet.Key == item.Key) { lane.Held = false; End(lane, now, changes, requeue: false); }
+            // Only when it can start now and the user is not working with the card: else it changes in place, as before.
+            if (lane.Current is { Urgent: false } quiet && quiet.Key == item.Key && !lane.Held && CanStart(item, now)) End(lane, now, changes, requeue: false);
             lane.Queue.RemoveAll(q => q.Key == item.Key && !q.Urgent);
         }
         if (lane.Current is { } current && current.Key == item.Key)
