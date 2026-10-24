@@ -169,7 +169,11 @@ public sealed partial class SettingsWindow
         var (text, warning) = state.State switch
         {
             WslAgentState.NotRunning => (Loc.T("发行版未运行；它运行后自动接入。", "The distribution is not running; it connects once it runs."), false),
-            WslAgentState.NotPackaged => (Loc.T("此版本没有附带 WSL 代理。", "This build does not include the WSL agent."), true),
+            WslAgentState.NotPackaged => (state.Detail.Length > 0
+                ? Loc.T($"此版本没有附带适用于该发行版（{state.Detail}）的 WSL 代理。", $"This build does not include the WSL agent for this distribution ({state.Detail}).")
+                : Loc.T("此版本没有附带 WSL 代理。", "This build does not include the WSL agent."), true),
+            WslAgentState.Unsupported => (Loc.T($"该发行版的处理器架构或 C 库（{state.Detail}）没有可用的 WSL 代理；brim-notify 在 Windows 上仍可用。",
+                $"No WSL agent runs on this distribution's processor or C library ({state.Detail}); brim-notify still works on Windows."), true),
             WslAgentState.Installing => (Loc.T("正在安装代理…", "Installing the agent…"), false),
             WslAgentState.Starting => (Loc.T("正在启动…", "Starting…"), false),
             WslAgentState.Server => (Loc.T("正在接收：BrimDeck 是该会话的通知服务。", "Receiving: BrimDeck is this session's notification service."), false),

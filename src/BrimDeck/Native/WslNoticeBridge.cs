@@ -9,7 +9,8 @@ using BrimDeck.Protocol;
 namespace BrimDeck.Native;
 
 // Idle: the agent ended because the user ran nothing in the distribution for a while (W2), so that WSL can stop it.
-public enum WslAgentState { Off, NotRunning, NotPackaged, Installing, Starting, Server, Monitor, MonitorDenied, NoBus, Failed, Idle }
+// Unsupported: no build of the agent runs on the distribution's processor or C library (W15); the detail names them.
+public enum WslAgentState { Off, NotRunning, NotPackaged, Installing, Starting, Server, Monitor, MonitorDenied, NoBus, Failed, Idle, Unsupported }
 
 // The agents of the WSL distributions the user chose. A distribution is never started for notices: its agent starts once the
 // distribution runs (checked every RunningCheck while it does not) and stops with BrimDeck, or ends by itself once the user
@@ -380,7 +381,7 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
                 // A distribution no build runs on, or whose build this copy does not include, will not change by itself: it is
                 // asked again only after RepeatedInstallFailure (or when the user switches it off and on), never in a loop (W15).
                 var (rid, machine, libc) = WslPlatform.Select(check.Length > 2 ? check[2] : null);
-                if (rid is null) { Unavailable(WslAgentState.Failed, Unsupported(machine, libc)); return; }
+                if (rid is null) { Unavailable(WslAgentState.Unsupported, Unsupported(machine, libc)); return; }
                 if (WslNoticeBridge.AgentPath(rid) is not { } path) { Unavailable(WslAgentState.NotPackaged, rid); return; }
                 var (stamp, hash) = WslNoticeBridge.AgentStamp(path);
                 if (hash is null) { Retry("install"); return; }
@@ -528,8 +529,7 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
     // No agent build runs on the distribution: another processor (armv7l, riscv64...), or neither glibc's nor musl's loader.
     internal static string Unsupported(string machine, string libc)
     {
-        string what = (machine.Length > 0 ? machine : "?") + (libc.Length > 0 ? ", " + libc : "");
-        return Loc.T("无法安装：该发行版的处理器架构或 C 库不受支持（" + what + "）", "cannot install: the distribution's processor or C library is not supported (" + what + ")");
+        return (machine.Length > 0 ? machine : "?") + (libc.Length > 0 ? ", " + libc : "");
     }
 
     // The distribution cannot get an agent from this copy of BrimDeck (W15): said once, and asked again only after
