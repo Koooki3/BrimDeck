@@ -109,7 +109,15 @@ public partial class MainWindow : Window
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
-        _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
+        // An open panel closes as a closing, after the new context is laid out, so the notices' coordinator and the hotkey hear
+        // of it (DeckExpanded, HotkeyPanelCollapsed); clearing _expanded first made it a relayout in place.
+        _host.ContextChanged += context =>
+        {
+            _context = context;
+            bool close = !_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true;
+            ApplySettings(true);
+            if (close && _expanded) SetExpanded(false);
+        };
         // The app under the same context changed. Only the app rules' answer can differ, so only a changed answer is
         // re-applied: collapsed, the shape crosses to it with the same animation a context change uses; expanded, it is
         // applied at once, so switching windows does not replay the expand animation. An unchanged answer re-applies
