@@ -43,11 +43,12 @@ internal sealed class WslNoticeBridge : IDisposable
     public event Action<string, NoticeMessage>? Received;
     public event Action? StateChanged;
 
-    public static string AgentPath => Path.Combine(AppContext.BaseDirectory, "wsl", "brimdeck-agent");
+    // The agent build for a distribution's runtime identifier (see WslPlatform), or null when this copy does not include it.
+    public static string? AgentPath(string rid) => WslPlatform.Find(AppContext.BaseDirectory, rid, File.Exists);
     // By its full path: a bare name is also looked for in BrimDeck's folder and the current directory before System32.
     public static string WslExe => Path.Combine(Environment.SystemDirectory, "wsl.exe");
     public static string HelperPath => Path.Combine(AppContext.BaseDirectory, "BrimDeck.Notify.exe");
-    public static bool AgentPackaged => File.Exists(AgentPath);
+    public static bool AgentPackaged => WslPlatform.AnyPackaged(AppContext.BaseDirectory, File.Exists);
 
     public IReadOnlyDictionary<string, (WslAgentState State, string Detail, bool Conflict)> States
     {
@@ -214,14 +215,14 @@ internal sealed class WslNoticeBridge : IDisposable
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException or OperationCanceledException) { return (null, ""); }
     }
 
-    // The version stamp of the packaged agent, BrimDeck's version and the start of the file's hash, so a rebuilt agent is
-    // installed again even without a version change; and the whole hash, which the install script checks its copy against.
-    // Hash is null when the file cannot be read.
-    public static (string Stamp, string? Hash) AgentStamp()
+    // The version stamp of a packaged agent (path), BrimDeck's version and the start of the file's hash, so a rebuilt agent is
+    // installed again even without a version change, and another build (W15) has another stamp; and the whole hash, which the
+    // install script checks its copy against. Hash is null when the file cannot be read.
+    public static (string Stamp, string? Hash) AgentStamp(string path)
     {
         try
         {
-            using var file = File.OpenRead(AgentPath);
+            using var file = File.OpenRead(path);
             var hash = Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
             return (ApplicationVersion.Current + "-" + hash[..12], hash);
         }
@@ -301,7 +302,8 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
         printf '%s' "$3" | put "$dir/agent.version" 644
         """.ReplaceLineEndings("\n");
     // The installed stamp on the first line; then whether brim-notify is BrimDeck's current one ("ok"), an earlier one of
-    // BrimDeck's ("stale"), absent ("missing") or the user's own ("conflict").
+    // BrimDeck's ("stale"), absent ("missing") or the user's own ("conflict"); then the machine and its program loaders, from
+    // which WslPlatform.Select picks the agent build (W15).
     private static readonly string CheckScript = $$"""
         cat "$HOME/.local/share/brimdeck/agent.version" 2>/dev/null; echo
         b="$HOME/.local/bin/brim-notify"
@@ -310,6 +312,7 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
         elif printf '%s\n' {{WrapperLines}} | cmp -s - "$b"; then echo ok
         elif printf '%s\n' {{EarlierWrapperLines}} | cmp -s - "$b"; then echo stale
         else echo conflict; fi
+        {{WslPlatform.Probe}}
         """.ReplaceLineEndings("\n");
     private readonly object _gate = new();
     private readonly SemaphoreSlim _writeLock = new(1, 1);
@@ -371,13 +374,20 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
             if (!installed)
             {
                 SetState(WslAgentState.Installing, "");
-                var (stamp, hash) = WslNoticeBridge.AgentStamp();
+                // Without the check's answer the build to install is unknown: tried again after the usual pause.
+                if (await WslNoticeBridge.RunWslAsync(["-d", Distribution, "--exec", "/bin/sh", "-c", CheckScript], token) is not { } output) { Retry(InstallFailure(null)); return; }
+                var check = output.Split('\n', StringSplitOptions.TrimEntries);
+                // A distribution no build runs on, or whose build this copy does not include, will not change by itself: it is
+                // asked again only after RepeatedInstallFailure (or when the user switches it off and on), never in a loop (W15).
+                var (rid, machine, libc) = WslPlatform.Select(check.Length > 2 ? check[2] : null);
+                if (rid is null) { Unavailable(WslAgentState.Failed, Unsupported(machine, libc)); return; }
+                if (WslNoticeBridge.AgentPath(rid) is not { } path) { Unavailable(WslAgentState.NotPackaged, rid); return; }
+                var (stamp, hash) = WslNoticeBridge.AgentStamp(path);
                 if (hash is null) { Retry("install"); return; }
-                var check = (await WslNoticeBridge.RunWslAsync(["-d", Distribution, "--exec", "/bin/sh", "-c", CheckScript], token) ?? "").Split('\n', StringSplitOptions.TrimEntries);
                 string wrapper = check.Length > 1 ? check[1] : "";
                 if (check[0] != stamp || wrapper is "missing" or "stale")
                 {
-                    var (code, result) = await WslNoticeBridge.RunWslWithCodeAsync(["-d", Distribution, "--exec", "/bin/sh", "-c", InstallScript, "sh", WslNoticeBridge.AgentPath, WslNoticeBridge.HelperPath, stamp, hash], token, timeout: TimeSpan.FromSeconds(60));
+                    var (code, result) = await WslNoticeBridge.RunWslWithCodeAsync(["-d", Distribution, "--exec", "/bin/sh", "-c", InstallScript, "sh", path, WslNoticeBridge.HelperPath, stamp, hash], token, timeout: TimeSpan.FromSeconds(60));
                     if (code != 0) { InstallFailed(hash, code); return; }
                     wrapper = result.Contains("conflict", StringComparison.Ordinal) ? "conflict" : "ok";
                 }
@@ -514,6 +524,21 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
         null => Loc.T("安装超时或无法运行 wsl.exe", "install timed out, or wsl.exe could not run"),
         _ => "install (" + code + ")"
     };
+
+    // No agent build runs on the distribution: another processor (armv7l, riscv64...), or neither glibc's nor musl's loader.
+    internal static string Unsupported(string machine, string libc)
+    {
+        string what = (machine.Length > 0 ? machine : "?") + (libc.Length > 0 ? ", " + libc : "");
+        return Loc.T("无法安装：该发行版的处理器架构或 C 库不受支持（" + what + "）", "cannot install: the distribution's processor or C library is not supported (" + what + ")");
+    }
+
+    // The distribution cannot get an agent from this copy of BrimDeck (W15): said once, and asked again only after
+    // RepeatedInstallFailure, since neither the distribution nor BrimDeck's folder changes by itself.
+    private void Unavailable(WslAgentState state, string detail)
+    {
+        lock (_gate) _retryAt = DateTimeOffset.UtcNow + RepeatedInstallFailure;
+        SetState(state, detail);
+    }
 
     private void SetState(WslAgentState state, string detail)
     {

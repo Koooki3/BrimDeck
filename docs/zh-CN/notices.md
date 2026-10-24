@@ -47,7 +47,7 @@ Windows 通知里的应用标识有时看不出是哪个应用，BrimDeck 会这
 
 在“WSL（默认关闭）”下打开某个发行版后，BrimDeck 会：
 
-- 把通知代理复制到该发行版默认用户的 `~/.local/share/brimdeck/brimdeck-agent`，并写入 `bridge.json` 与版本记录；
+- 把通知代理复制到该发行版默认用户的 `~/.local/share/brimdeck/brimdeck-agent`，并写入 `bridge.json` 与版本记录。代理分别为 x64 与 ARM64 构建，各有 glibc 版（Ubuntu、Debian、Fedora 等大多数发行版）和 musl 版（Alpine）；BrimDeck 按发行版的 `uname -m` 和程序加载器选择。都不能运行的发行版（32 位 ARM、RISC-V，或 C 库不在标准位置）会在设置中显示为不受支持，30 分钟内不再重试；
 - 添加 `~/.local/bin/brim-notify`。只有内容与 BrimDeck 写入的完全一致时才会更新它；同名的其他文件或符号链接一律保持不动，并在设置中提示冲突（此时可直接用 `~/.local/share/brimdeck/brimdeck-agent notify`）。所有文件都先写到新建的临时文件再改名替换，不会顺着符号链接写到别处；
 - 只在发行版**已运行**时通过 `wsl.exe` 启动代理，绝不为了接收通知而启动发行版，也不修改 WSL 配置或替换系统的 `notify-send`。WSL 1 与 WSL 2 发行版都支持；
 - 代理本身是一个 `wsl.exe` 会话，它运行时 WSL 不会自动停止发行版和虚拟机。因此代理每分钟检查一次：发行版中该用户除代理自身、WSL 的 init/中继进程和会话组件（`systemd --user`、`(sd-pam)`、`dbus-daemon`/`dbus-broker`）以外已没有任何进程（终端、后台任务都算在内），并且持续 5 分钟，代理就自行退出，让 WSL 照常停止发行版、释放内存。设置中显示为“代理已退出”。之后发行版停止、再次运行时，代理自动重新接入；如果发行版因为其他原因一直没有停止，BrimDeck 最多每 30 分钟再启动一次代理，不会反复重启。
