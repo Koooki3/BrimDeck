@@ -151,22 +151,62 @@ internal static class Native
         return Unknown;
     }
     public const uint Unknown = uint.MaxValue;
-    // The owner of a file, from stat(1)'s output; uint.MaxValue when it cannot be told. stat is named by its full path:
-    // Process.Start looks for a bare name in the current directory before PATH.
+
+    // statx(2) of the C library, or 0 without it (glibc before 2.28, musl before 1.2.5). "libc.so.6" is glibc's; musl
+    // answers to any libc.* name with itself. Asked only when needed: brim-notify --version never loads it.
+    private static nint _statx = -1;
+    private static nint StatxFunction()
+    {
+        if (_statx == -1)
+            _statx = System.Runtime.InteropServices.NativeLibrary.TryLoad("libc.so.6", out var library)
+                && System.Runtime.InteropServices.NativeLibrary.TryGetExport(library, "statx", out var function) ? function : 0;
+        return _statx;
+    }
+
+    // The owner of a file, not following a link (as stat(1) without -L); uint.MaxValue when it cannot be told. Through
+    // statx, without a child process at each brim-notify (W16); stat(1) only where statx is missing or fails.
     public static uint OwnerOf(string path)
     {
-        if (new[] { "/usr/bin/stat", "/bin/stat" }.FirstOrDefault(File.Exists) is not { } stat) return uint.MaxValue;
+        if (path.Contains('\0')) return Unknown;
+        return OwnerByStatx(path) ?? OwnerByStatCommand(path);
+    }
+
+    private static unsafe uint? OwnerByStatx(string path)
+    {
+        const int AtFdCwd = -100, AtSymlinkNoFollow = 0x100;
+        const uint StatxUid = 0x8;
+        nint function = StatxFunction();
+        if (function == 0) return null;
+        byte[] name = System.Text.Encoding.UTF8.GetBytes(path + "\0");
+        // struct statx is 256 bytes with the same layout on every architecture: stx_mask at 0, stx_uid at 20.
+        byte* result = stackalloc byte[256];
+        int code;
+        fixed (byte* file = name)
+            code = ((delegate* unmanaged<int, byte*, int, uint, byte*, int>)function)(AtFdCwd, file, AtSymlinkNoFollow, StatxUid, result);
+        if (code != 0 || (*(uint*)result & StatxUid) == 0) return null;
+        return *(uint*)(result + 20);
+    }
+
+    // stat(1) by its full path: Process.Start looks for a bare name in the current directory before PATH. Its output is a
+    // few bytes, so it is read after the wait, which then also bounds a stat that hangs (on a network file system, say).
+    private static uint OwnerByStatCommand(string path)
+    {
+        if (new[] { "/usr/bin/stat", "/bin/stat" }.FirstOrDefault(File.Exists) is not { } stat) return Unknown;
         try
         {
             var start = new System.Diagnostics.ProcessStartInfo(stat) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
             start.ArgumentList.Add("-c"); start.ArgumentList.Add("%u"); start.ArgumentList.Add("--"); start.ArgumentList.Add(path);
             using var process = System.Diagnostics.Process.Start(start);
-            if (process is null) return uint.MaxValue;
+            if (process is null) return Unknown;
+            if (!process.WaitForExit(3000))
+            {
+                try { process.Kill(); } catch (InvalidOperationException) { }
+                return Unknown;
+            }
             var text = process.StandardOutput.ReadToEnd();
-            process.WaitForExit(3000);
-            return process.ExitCode == 0 && uint.TryParse(text.Trim(), out var uid) ? uid : uint.MaxValue;
+            return process.ExitCode == 0 && uint.TryParse(text.Trim(), out var uid) ? uid : Unknown;
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return uint.MaxValue; }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return Unknown; }
     }
 
     // A program as the shell finds it: a name with a slash from the current directory, otherwise the first executable file

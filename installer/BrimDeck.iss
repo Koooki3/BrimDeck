@@ -126,6 +126,13 @@ en.FolderNotSecured=Setup could not give the install folder rights of its own: %
 [Dirs]
 Name: "{app}"; AfterInstall: SecureAppDir
 
+; Earlier versions had the WSL agent as one linux-x64 file in {app}\wsl; it now lies in {app}\wsl\<rid> for each processor and C
+; library (linux-x64, linux-arm64, linux-musl-x64, linux-musl-arm64), so that ARM64 Windows, whose distributions are
+; aarch64, and musl distributions such as Alpine get one too. The old file goes even if the earlier version's uninstall
+; left it behind; BrimDeck itself only falls back to it while {app}\wsl\linux-x64 is missing.
+[InstallDelete]
+Type: files; Name: "{app}\wsl\brimdeck-agent"
+
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
