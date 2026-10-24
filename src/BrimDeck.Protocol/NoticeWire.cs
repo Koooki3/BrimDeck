@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -193,15 +194,20 @@ public static class NoticeProtocol
         return builder.ToString();
     }
 
-    // Text as a sender wrote it, without the invisible characters that let it pass for something else (sec-L4): format
-    // characters (zero-width spaces, bidi marks, word joiners, the BOM, Unicode tags) are dropped, the zero-width joiner of
-    // emoji sequences excepted; line and paragraph separators, which WPF breaks lines on, become a line break, or a space
-    // in a single line. BrimDeck.Core's NoticeText.Clean is this.
+    // Text as a sender wrote it, without the invisible characters that let it pass for something else (sec-L4, S3): format
+    // characters (zero-width spaces, bidi embeddings, overrides and isolates, word joiners, the BOM, stray Unicode tags) and
+    // the Hangul fillers that show as nothing are dropped, and a letter keeps at most MaxMarks combining marks, so stacked
+    // marks cannot spill over other lines. Kept, because writing needs them (C-L11): the zero-width joiner of emoji
+    // sequences, the zero-width non-joiner (Persian, Indic scripts), the left-to-right, right-to-left and Arabic letter marks
+    // that set punctuation in right-to-left text, and the tags of a subdivision flag (England, Scotland). Line and paragraph
+    // separators, which WPF breaks lines on, become a line break; in a single line they, line breaks and every other
+    // control character become a space (a carriage return goes). BrimDeck.Core's NoticeText.Clean is this.
     public static string Clean(string text, bool singleLine = false)
     {
+        bool Drop(int index) => Unwanted(text, index, out _) || singleLine && char.IsControl(text[index]);
         int i = 0;
         for (; i < text.Length; i++)
-            if (Unwanted(text, i, out _)) break;
+            if (Drop(i)) break;
         if (i == text.Length) return text;
         var builder = new StringBuilder(text.Length);
         builder.Append(text, 0, i);
@@ -209,17 +215,53 @@ public static class NoticeProtocol
         {
             bool pair = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]);
             if (Unwanted(text, i, out bool breaks)) { if (breaks) builder.Append(singleLine ? ' ' : '\n'); }
+            else if (singleLine && char.IsControl(text[i])) { if (text[i] != '\r') builder.Append(' '); }
             else { builder.Append(text[i]); if (pair) builder.Append(text[i + 1]); }
             if (pair) i++;
         }
         return builder.ToString();
     }
 
+    // Combining marks one letter keeps; enough for Vietnamese, Indic and Thai stacks and an emoji keycap.
+    public const int MaxMarks = 4;
+
     private static bool Unwanted(string text, int index, out bool breaks)
     {
         var category = char.GetUnicodeCategory(text, index);
-        breaks = category is System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator;
-        return breaks || category == System.Globalization.UnicodeCategory.Format && text[index] != '\u200D';
+        breaks = category is UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
+        if (breaks) return true;
+        char c = text[index];
+        if (c is '\u115F' or '\u1160' or '\u3164' or '\uFFA0') return true;
+        if (category is UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark) return MarksBefore(text, index) >= MaxMarks;
+        if (category != UnicodeCategory.Format || c is '\u200C' or '\u200D' or '\u200E' or '\u200F' or '\u061C') return false;
+        return !(Tag(text, index) && AfterFlag(text, index));
+    }
+
+    // A Unicode tag character (U+E0020 to U+E007F); they take a surrogate pair.
+    private static bool Tag(string text, int index)
+        => char.IsHighSurrogate(text[index]) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1])
+            && char.ConvertToUtf32(text[index], text[index + 1]) is >= 0xE0020 and <= 0xE007F;
+
+    // Whether the tag at index follows a black flag (U+1F3F4) through other tags only, as in a subdivision flag; the cancel
+    // tag (U+E007F) ends the flag, so a tag after it is stray.
+    private static bool AfterFlag(string text, int index)
+    {
+        int j = index;
+        while (j >= 2 && Tag(text, j - 2) && !(text[j - 2] == '\uDB40' && text[j - 1] == '\uDC7F')) j -= 2;
+        return j >= 2 && text[j - 2] == '\uD83C' && text[j - 1] == '\uDFF4';
+    }
+
+    // How many combining marks directly precede the code point at index (up to MaxMarks).
+    private static int MarksBefore(string text, int index)
+    {
+        int count = 0, j = index;
+        while (count < MaxMarks && j > 0)
+        {
+            int start = j >= 2 && char.IsLowSurrogate(text[j - 1]) && char.IsHighSurrogate(text[j - 2]) ? j - 2 : j - 1;
+            if (char.GetUnicodeCategory(text, start) is not (UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark)) break;
+            count++; j = start;
+        }
+        return count;
     }
 }
 

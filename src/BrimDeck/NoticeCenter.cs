@@ -35,11 +35,16 @@ internal sealed class NoticeCenter : IDisposable
     private volatile NoticeHistory? _history;
     // Whether notices are kept on disk, for a save finishing on a worker thread (see NoticeHistory.Save).
     private volatile bool _keepHistory;
-    // _historyLoaded: the folder's file has been read into the list (or there was none); only then is the list written over
-    // it (core-M4). _folderTrusted: the folder may be read and written (NoticeStorage.Prepare).
-    private bool _historyLoaded, _loadingHistory, _folderTrusted = true, _saving, _savePending, _enabled, _disposed;
+    // _historyLoaded (HistoryLoaded): the folder's file has been read into the list (or there was none); only then is the list
+    // written over it (core-M4).
+    private bool _historyLoaded, _loadingHistory, _saving, _savePending, _enabled, _disposed;
+    // What NoticeStorage.Prepare made of the folder; null until it has been checked, which happens in the background with the
+    // first reading after the folder changed, not on every settings change (C-M2).
+    private NoticeStorage.FolderTrust? _folderTrust;
     // The folder the notices moved away from; its file goes once the list has been written in the new one.
     private NoticeHistory? _retired;
+    // A folder whose file, never read, moves into the new folder once that one has been checked (NoticeHistoryStep.MoveOld).
+    private string? _moveFrom;
     // Changes of the recent notices reach the views at most every ChangeSpacing, and an update that only moves what shows
     // (a task's progress) reaches the shown notice at most as often: a burst of progress rebuilds nothing on every step (perf-7).
     private static readonly TimeSpan ChangeSpacing = TimeSpan.FromMilliseconds(250);
@@ -85,7 +90,7 @@ internal sealed class NoticeCenter : IDisposable
         _attentionTimer = new PromptTimer(_dispatcher, () => { _attentionTimer!.Stop(); _attentionAt = null; Apply(Attention.Tick(DateTimeOffset.UtcNow)); });
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); _ = SaveAsync(); };
         // A file that could not be reached at start-up is read once it can be (core-M4).
-        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); AutoClear(); UpdateQuiet(); if (HistoryState == NoticeHistoryState.Unavailable) LoadHistory(); };
+        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); AutoClear(); UpdateQuiet(); if (HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Denied) LoadHistory(); };
         _quietCheck.Tick += (_, _) => UpdateQuiet();
         _resumeLimit.Tick += (_, _) => FinishResume(int.MaxValue);
         _timeDue = new PromptTimer(_dispatcher, FireDue);
@@ -98,6 +103,9 @@ internal sealed class NoticeCenter : IDisposable
         // A notice gone from the recent list (deleted, cleared, pruned by age or count) no longer waits to be shown.
         Hub.Changed += HubChanged;
         Hub.Persist += QueueSave;
+        // Until the saved file is read, what is deleted or cleared must not come back with it (C-L2).
+        Hub.TrackRemovals = true;
+        Hub.PendingDropped += count => Log($"Dropped {count} reminders or stopwatches beyond {NoticeHub.MaxPending} (C-M3).");
         // A reading still under way when notices or the source were switched off arrives late; it is dropped.
         // Notifications of Windows' Clock, Outlook, the calendars and Teams are sorted into time kinds here (NoticeTimeSources).
         _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && !_disposed && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local)); });
@@ -592,14 +600,19 @@ internal sealed class NoticeCenter : IDisposable
 
     // Failures go to notices.log in the data folder: the exception's type, code and stack, never a message, a title or a body.
     // The log keeps about the last 256 KB.
-    public static void Log(Exception error)
+    public static void Log(Exception error) => Write($"{error.GetType().FullName} 0x{error.HResult:X8}\n{error.StackTrace}\n\n");
+
+    // A line of BrimDeck's own words (never a sender's text).
+    private static void Log(string line) => Write(line + "\n");
+
+    private static void Write(string entry)
     {
         try
         {
             var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "notices.log");
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             if (File.Exists(path) && new FileInfo(path).Length > 256 * 1024) File.Move(path, path + ".old", true);
-            File.AppendAllText(path, $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}] {ApplicationVersion.Current} {error.GetType().FullName} 0x{error.HResult:X8}\n{error.StackTrace}\n\n");
+            File.AppendAllText(path, $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}] {ApplicationVersion.Current} {entry}");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
@@ -613,7 +626,10 @@ internal sealed class NoticeCenter : IDisposable
     private void UseHistoryFolder(DeckSettings settings)
     {
         string folder = HistoryFolder(settings);
-        bool keep = settings.NoticeHistory, kept = _keepHistory, oldTrusted = _folderTrusted;
+        bool keep = settings.NoticeHistory, kept = _keepHistory;
+        // A folder not checked yet (notices were not kept) is left as it was before: only BrimDeck's own file names go, and
+        // never through a link (NoticeHistory.Delete). A refused one is left alone.
+        bool oldTrusted = _folderTrust is null or NoticeStorage.FolderTrust.Trusted;
         _keepHistory = keep;
         // Application icons are kept beside the saved notices only while notices are kept: memory only leaves nothing on disk.
         Icons.Folder = keep ? folder : "";
@@ -623,19 +639,20 @@ internal sealed class NoticeCenter : IDisposable
         if (old is null || !NoticeHistoryPlan.SameFolder(old.DirectoryPath, folder))
         {
             _history = new NoticeHistory(folder, new NoticeProtection());
-            _historyLoaded = false; HistoryState = NoticeHistoryState.Empty;
+            SetLoaded(false); HistoryState = NoticeHistoryState.Empty;
+            _folderTrust = null; _moveFrom = null;
         }
-        // Checked (and the default folder created) before anything is read or written there (sec-M1).
-        _folderTrusted = !keep || NoticeStorage.Prepare(folder, create: settings.NoticesEnabled);
-        if (!_folderTrusted) HistoryState = NoticeHistoryState.Refused;
-        else if (HistoryState == NoticeHistoryState.Refused) HistoryState = NoticeHistoryState.Empty;
+        // Switched on again: the folder is checked and its file read (the file was removed while off, so the list in memory
+        // is written there next) before anything is saved, as at start-up.
+        else if (keep && !kept && _folderTrust is null) SetLoaded(false);
         foreach (var step in steps)
             switch (step)
             {
                 // After a save, the old file goes once the new one is written (SaveAsync); a refused folder is left alone.
                 case NoticeHistoryStep.DeleteOld when steps.Contains(NoticeHistoryStep.Save): _retired = old; break;
                 case NoticeHistoryStep.DeleteOld when oldTrusted: DeleteFiles(old!); break;
-                case NoticeHistoryStep.MoveOld when oldTrusted && _folderTrusted: NoticeStorage.Move(old!.DirectoryPath, folder); break;
+                // Moved in the background, once the new folder has been checked (LoadHistoryAsync).
+                case NoticeHistoryStep.MoveOld when oldTrusted: _moveFrom = old!.DirectoryPath; break;
                 // After a Load, the save follows the reading (LoadHistoryAsync).
                 case NoticeHistoryStep.Save when !steps.Contains(NoticeHistoryStep.Load): QueueSave(); break;
             }
@@ -645,61 +662,90 @@ internal sealed class NoticeCenter : IDisposable
 
     private static void DeleteFiles(NoticeHistory history) { history.Delete(); NoticeIcons.DeleteStored(history.DirectoryPath); }
 
+    // Whether the folder's file has been read; until then the hub remembers what was deleted or cleared (C-L2).
+    private void SetLoaded(bool loaded) { _historyLoaded = loaded; Hub.TrackRemovals = !loaded; }
+
     private void LoadHistory()
     {
         if (_historyLoaded || _loadingHistory || _history is not { } history) return;
-        if (!Settings.NoticeHistory) { history.Delete(); _historyLoaded = true; HistoryState = NoticeHistoryState.Empty; return; }
-        if (!_folderTrusted) { HistoryState = NoticeHistoryState.Refused; return; }
+        if (!Settings.NoticeHistory) { history.Delete(); SetLoaded(true); HistoryState = NoticeHistoryState.Empty; return; }
+        // A refused folder stays refused until another is chosen (or the user closes it to other accounts).
+        if (_folderTrust is { } trust && trust is not (NoticeStorage.FolderTrust.Trusted or NoticeStorage.FolderTrust.Unreachable)) { HistoryState = NoticeHistoryState.Refused; return; }
         _loadingHistory = true;
-        _ = LoadHistoryAsync(history, Settings.NoticeHistoryFolder.Length == 0);
+        var moveFrom = _moveFrom;
+        _ = LoadHistoryAsync(history, Settings.NoticeHistoryFolder.Length == 0, moveFrom, check: _folderTrust != NoticeStorage.FolderTrust.Trusted);
     }
 
     // Read in the background (perf-9). Notices arriving meanwhile join the list, and nothing is written until the file has
-    // been read: a file that cannot be reached now is read again later instead of being written over (core-M4).
-    private async Task LoadHistoryAsync(NoticeHistory history, bool moveLegacy)
+    // been read: a file that cannot be reached now is read again later instead of being written over (core-M4). The folder
+    // is checked (and the default one created) here too, once per folder, before anything is moved into, read from or
+    // written to it (sec-M1, C-M2): a network folder that does not answer holds up the reading, not the UI.
+    private async Task LoadHistoryAsync(NoticeHistory history, bool moveLegacy, string? moveFrom, bool check)
     {
-        (NoticeHistoryState State, List<Notice> Notices, List<NoticeKnownApp> Apps) read;
+        (NoticeStorage.FolderTrust Trust, NoticeHistoryState State, List<Notice> Notices, List<NoticeKnownApp> Apps) read;
         try
         {
             read = await Task.Run(() =>
             {
+                var trust = check ? NoticeStorage.Prepare(history.DirectoryPath) : NoticeStorage.FolderTrust.Trusted;
+                if (trust != NoticeStorage.FolderTrust.Trusted) return (trust, NoticeHistoryState.Refused, new List<Notice>(), new List<NoticeKnownApp>());
+                // A file never read moves along with the folder (life-L1).
+                if (moveFrom is not null) NoticeStorage.Move(moveFrom, history.DirectoryPath);
                 // The first time, notices an earlier version kept in the old default folder (%LOCALAPPDATA%) move to the default one.
                 if (moveLegacy) NoticeStorage.MoveLegacy(history.DirectoryPath);
                 var state = history.Load(out var notices, out var apps);
-                return (state, notices, apps);
+                return (trust, state, notices, apps);
             });
         }
         finally { _loadingHistory = false; }
         if (_disposed) return;
         // The folder changed meanwhile: the new one is read instead.
         if (_history != history) { if (_enabled) LoadHistory(); return; }
-        HistoryState = read.State;
+        // A folder that could not be checked now is checked again with the next reading.
+        _folderTrust = read.Trust == NoticeStorage.FolderTrust.Unreachable ? null : read.Trust;
+        if (read.Trust == NoticeStorage.FolderTrust.Trusted && _moveFrom == moveFrom) _moveFrom = null;
+        HistoryState = read.Trust == NoticeStorage.FolderTrust.Unreachable ? NoticeHistoryState.Unavailable : read.State;
         if (read.State is NoticeHistoryState.Loaded or NoticeHistoryState.Empty)
         {
-            _historyLoaded = true;
             // What arrived while the file was read, or the list that moved here from another folder, is written now.
             bool arrived = Hub.Notices.Count > 0;
             if (read.State == NoticeHistoryState.Loaded) Hub.Load(read.Notices, read.Apps, DateTimeOffset.UtcNow);
+            SetLoaded(true);
             if (arrived || _retired is not null) QueueSave();
         }
         Changed?.Invoke();
     }
 
     // Reads a file that could not be reached again now (the settings page), instead of at the next maintenance.
-    public void RetryHistory() { if (_enabled && HistoryState == NoticeHistoryState.Unavailable) LoadHistory(); }
+    public void RetryHistory() { if (_enabled && HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Denied) LoadHistory(); }
 
-    // Replaces an unreadable file with the current (empty or new) list.
+    // What made BrimDeck refuse the folder, or null while it is used (or not checked yet).
+    public NoticeStorage.FolderTrust? HistoryRefusal => _folderTrust is { } trust && trust != NoticeStorage.FolderTrust.Trusted ? trust : null;
+
+    // Closes a folder of the user's own that other accounts may write in (the settings page) and reads it again.
+    public async Task CloseHistoryFolderAsync()
+    {
+        if (_history is not { } history || _folderTrust != NoticeStorage.FolderTrust.Shared) return;
+        await Task.Run(() => NoticeStorage.Close(history.DirectoryPath));
+        if (_disposed || _history != history) return;
+        _folderTrust = null; HistoryState = NoticeHistoryState.Empty;
+        if (_enabled) LoadHistory();
+        Changed?.Invoke();
+    }
+
+    // Replaces a file that could not be read (damaged, not readable by this account, or a link in a folder BrimDeck uses)
+    // with the current (empty or new) list.
     public void ResetHistory()
     {
-        if (!_folderTrusted) return;
+        if (_folderTrust != NoticeStorage.FolderTrust.Trusted || _loadingHistory) return;
         _history?.Delete();
         HistoryState = NoticeHistoryState.Empty;
-        _historyLoaded = true;
+        SetLoaded(true);
         QueueSave();
         Changed?.Invoke();
     }
 
-    private bool CanSave => Settings.NoticeHistory && _history is not null && _historyLoaded && !_loadingHistory && _folderTrusted;
+    private bool CanSave => Settings.NoticeHistory && _history is not null && _historyLoaded && !_loadingHistory && _folderTrust == NoticeStorage.FolderTrust.Trusted;
 
     // A sooner save replaces a later one; a minor change never puts off one already due.
     private void QueueSave(bool minor = false)
@@ -744,7 +790,7 @@ internal sealed class NoticeCenter : IDisposable
         if (!_saveTimer.IsEnabled && !_savePending && !_saving) return;
         _saveTimer.Stop(); _savePending = false;
         if (_history is not { } history || !CanSave) return;
-        try { if (history.Save(Hub.Notices, Hub.KnownApps, durable: true)) Retire(history); }
+        try { if (history.Save(Hub.Notices, Hub.KnownApps)) Retire(history); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { }
     }
 
@@ -755,7 +801,13 @@ internal sealed class NoticeCenter : IDisposable
         _pipe?.Dispose(); _pipe = null;
         _windows.Dispose(); _wsl.Dispose();
         // "Clear on exit": the list is emptied before the last save, so nothing of it is left on disk.
-        if (_enabled && Settings.NoticeAutoClear == NoticeAutoClear.OnExit) Hub.Clear();
+        if (_enabled && Settings.NoticeAutoClear == NoticeAutoClear.OnExit)
+        {
+            Hub.Clear();
+            // A file never read (unreachable, still reading) cannot be written over with the empty list; it goes instead, so it
+            // does not come back at the next start (C-L2).
+            if (!_historyLoaded && Settings.NoticeHistory && _folderTrust == NoticeStorage.FolderTrust.Trusted && _history is { } unread) unread.Delete();
+        }
         _disposed = true;
         Flush();
         _attentionTimer.Stop(); _saveTimer.Stop(); _maintenance.Stop(); _quietCheck.Stop(); _resumeLimit.Stop(); _timeDue.Stop(); _liveTick.Stop();
