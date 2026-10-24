@@ -111,6 +111,8 @@ public partial class MainWindow : Window
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
         _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
+        // The app under the same context changed: the app rules may answer differently, but the panel keeps its shape.
+        _host.AppChanged += () => { if (_host.Current != ScreenContext.Desktop) { _context = _host.Current; ApplySettings(false); } };
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false)); };
         Loaded += async (_, _) =>
         {
