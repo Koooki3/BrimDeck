@@ -58,6 +58,10 @@ public partial class MainWindow
     private Button? _musicFullControl;
     private TextBlock? _musicSmtcHint;
     private readonly Dictionary<MediaCommand, (MusicControlButton Button, string Icon)> _musicControlButtons = new();
+    // The transport button the pointer last clicked, and when (Environment.TickCount64): only its own new glyph grows into
+    // place; one changed by a media key, the keyboard or the player switches at once (motion-review F10).
+    private (MediaCommand Id, long At)? _musicPointerClick;
+    private const int MusicClickAnswer = 2000;
     private MusicEqualizer? _musicEqualizer, _compactEqualizer;
     private readonly double[] _flowLevels = new double[5];
     private MusicMarquee? _compactMarquee;
@@ -134,7 +138,8 @@ public partial class MainWindow
     private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Notices => NoticesContent, _ => UsageContent };
     private void ShowPage(DeckPage page, bool animatePage)
     {
-        _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = ""; _handover.Drop();
+        // A switch the hand-over animates lets the page still leaving from the last one finish (PageHandover.Begin).
+        _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = ""; if (!animatePage) _handover.Drop();
         ApplySettings(animatePage);
     }
     // Places the chosen page's fill under its button. While the open panel shows it, it glides there as the monitor page's sort pill
@@ -150,7 +155,14 @@ public partial class MainWindow
         double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = button.ActualHeight;
         bool glide = _expanded && !_preview && PageSwitch.IsVisible && Soft.Enabled && PageCapsule.Width > 0 && Math.Abs(PageCapsuleShift.X - x) > .5;
         PageCapsule.Height = height;
-        PageHandover.Glide(PageCapsule, WidthProperty, width, glide, Soft.Choose);
+        // motion-review F8: the width is set at once and the change is drawn by stretching the capsule from its left edge, so
+        // the glide lays nothing out again.
+        double was = PageCapsule.Width;
+        PageCapsule.Width = width;
+        PageCapsuleStretch.BeginAnimation(ScaleTransform.ScaleXProperty, null); PageCapsuleStretch.ScaleX = 1;
+        if (glide && double.IsFinite(was) && was > 0 && Math.Abs(was - width) > .5)
+            PageCapsuleStretch.BeginAnimation(ScaleTransform.ScaleXProperty, new System.Windows.Media.Animation.DoubleAnimation(was / width, 1, TimeSpan.FromMilliseconds(Soft.Choose))
+            { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
         double from = PageCapsuleShift.X;
         PageCapsuleShift.BeginAnimation(TranslateTransform.XProperty, null);
         PageCapsuleShift.X = x;
@@ -516,7 +528,7 @@ public partial class MainWindow
             _musicDuration = UI.Fixed("", c.Time, c.TimeLine, UI.Secondary); _musicDuration.HorizontalAlignment = HorizontalAlignment.Right; times.Children.Add(_musicDuration);
             foreach (var time in new[] { _musicElapsed, _musicDuration }) Typography.SetNumeralAlignment(time, FontNumeralAlignment.Tabular);
             body.Children.Add(times);
-            _musicSeek = new MusicSeekSlider { Style = (Style)FindResource("MusicSeek"), RestHeight = c.Bar, HoverHeight = c.BarHover, BarHeight = c.Bar,
+            _musicSeek = new MusicSeekSlider { Style = (Style)FindResource("MusicSeek"), RestHeight = c.Bar, HoverHeight = c.BarHover, BarHeight = c.BarHover,
                 Accent = ((SolidColorBrush)_musicAccent).Color, DurationSeconds = track.Duration.TotalSeconds, Height = c.SeekRow, AnimationsEnabled = animate, IsEnabled = track.CanSeek,
                 VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, layout.ProgressY, 0, 0) };
             AutomationProperties.SetName(_musicSeek, Loc.T("播放进度", "Playback position"));
@@ -555,7 +567,11 @@ public partial class MainWindow
             if (!_musicControlButtons.TryGetValue(id, out var slot))
             {
                 var created = new MusicControlButton { Style = (Style)FindResource("MusicControl") };
-                created.Click += async (_, _) => { if (created.Tag is Func<Task> execute) await execute(); };
+                created.Click += async (_, _) =>
+                {
+                    if (InputManager.Current.MostRecentInputDevice is MouseDevice or StylusDevice) _musicPointerClick = (id, Environment.TickCount64);
+                    if (created.Tag is Func<Task> execute) await execute();
+                };
                 slot = (created, ""); controls.Children.Add(created);
             }
             var button = slot.Button;
@@ -570,13 +586,16 @@ public partial class MainWindow
                     singleLabel.HorizontalAlignment = HorizontalAlignment.Center;
                     container.Children.Add(singleLabel); icon = container;
                 }
-                // A changed glyph (play and pause, the playback mode, the heart) grows into place instead of switching.
-                if (glide && button.IsVisible && slot.Icon.Length > 0 && icon is FrameworkElement grown)
+                // A glyph changed by a click on it (play and pause, the playback mode, the heart) grows into place from nearly its
+                // size instead of switching (motion-review F10).
+                bool clicked = _musicPointerClick is { } click && click.Id == id && Environment.TickCount64 - click.At < MusicClickAnswer;
+                if (clicked) _musicPointerClick = null;
+                if (glide && clicked && button.IsVisible && slot.Icon.Length > 0 && icon is FrameworkElement grown)
                 {
-                    var scale = new ScaleTransform(.6, .6);
+                    var scale = new ScaleTransform(.9, .9);
                     grown.RenderTransformOrigin = new Point(.5, .5); grown.RenderTransform = scale;
-                    var grow = Soft.Fade(.6, 1, Soft.Choose, Soft.Follow); grow.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
-                    var fade = Soft.Fade(0, 1, Soft.Choose, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+                    var grow = Soft.Fade(.9, 1, 200); grow.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
+                    var fade = Soft.Fade(0, 1, 200); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop;
                     scale.ScaleX = scale.ScaleY = 1;
                     scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow); scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
                     grown.BeginAnimation(OpacityProperty, fade);
@@ -921,7 +940,8 @@ public partial class MainWindow
     private void TickMusic()
     {
         var now = DateTimeOffset.UtcNow; double seconds = Math.Min(.5, (now - _lastMusicTick).TotalSeconds); _lastMusicTick = now;
-        bool playing = Soft.Enabled && MusicAudioActive;
+        // motion-review F18: the bars rest whenever the music's motion does (animations off, the display off).
+        bool playing = MusicMotion && MusicAudioActive;
         bool musicVisible = MusicPresentationVisible;
         _app.PresentMedia(this, musicVisible);
         float peak = musicVisible ? _media?.Peak() ?? 0 : 0;
