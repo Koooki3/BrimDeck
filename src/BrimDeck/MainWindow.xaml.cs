@@ -128,6 +128,20 @@ public partial class MainWindow : Window
             ApplySettings(true);
             if (close && _expanded) SetExpanded(false);
         };
+        // The app under the same context changed. Only the app rules' answer can differ, so only a changed answer is
+        // re-applied: collapsed, the shape crosses to it with the same animation a context change uses; expanded, it is
+        // applied at once, so switching windows does not replay the expand animation. An unchanged answer re-applies
+        // nothing — most switches are between apps with the same rules.
+        _host.AppChanged += previous =>
+        {
+            var context = _host.Current;
+            if (context == ScreenContext.Desktop) return;
+            var before = Settings.Behavior(context, previous.Name, previous.Path);
+            var after = Settings.Behavior(context, _host.App.Name, _host.App.Path);
+            if (before == after) return;
+            _context = context;
+            ApplySettings(!_expanded);
+        };
         SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escapeDismissal = new EscapeDismissal(this, () => SetExpanded(false, keyboard: true)); };
         // The user went to another window while a hotkey had given the panel the keyboard (MainWindow.Hotkeys.cs).
         Deactivated += (_, _) => ReleaseKeyboard(giveBack: false);
