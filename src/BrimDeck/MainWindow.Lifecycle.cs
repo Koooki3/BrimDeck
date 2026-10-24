@@ -109,7 +109,7 @@ public partial class MainWindow
         var shape = Collapsed = ShapeFor(EffectiveStyle);
         PlaceDot(shape);
         _bootDot = true;
-        SetImmediate(IslandShadow, OpacityProperty, 0d);
+        SetImmediate(ShadowHost, OpacityProperty, 0d);
         if (Compact.Visibility == Visibility.Visible)
         {
             SetImmediate(Compact, OpacityProperty, 0d);
@@ -157,7 +157,7 @@ public partial class MainWindow
         SetImmediate(Island, IslandBorder.ShoulderRadiusProperty, 0d);
         SetImmediate(Compact, OpacityProperty, 0d);
         SetImmediate(MusicIndicator, OpacityProperty, 0d);
-        SetImmediate(IslandShadow, OpacityProperty, 0d);
+        SetImmediate(ShadowHost, OpacityProperty, 0d);
         return true;
     }
 
@@ -202,7 +202,7 @@ public partial class MainWindow
         Animate(MusicIndicator, OpacityProperty, 0, shrink, compact, Soft.InOut);
         Animate(CompactScale, ScaleTransform.ScaleXProperty, .85, shrink, compact, Soft.InOut);
         Animate(CompactScale, ScaleTransform.ScaleYProperty, .85, shrink, compact, Soft.InOut);
-        Animate(IslandShadow, OpacityProperty, 0, shrink, shadow, Soft.Out);
+        Animate(ShadowHost, OpacityProperty, 0, shrink, shadow, Soft.Out);
         Animate(Island, IslandBorder.MaterialOpacityProperty, 1, shrink, tone, Soft.Out);
         _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = PanelTheme.ColorOf("surface"), EasingFunction = Soft.InOut }, shrink, tone), HandoffBehavior.SnapshotAndReplace);
         Animate(Island, IslandBorder.ShoulderRadiusProperty, 0, shrink, corners, Soft.InOut);
