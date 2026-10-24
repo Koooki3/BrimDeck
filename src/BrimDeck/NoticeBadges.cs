@@ -88,7 +88,7 @@ internal static class NoticeBadges
     {
         if (NoticeGlyphs.App(notice.AppKey, notice.AppName, notice.Origin) is not { } glyph) return null;
         var color = Wpf(Colors.OnPlate(Theme(appColor)));
-        var element = Glyph(glyph, Math.Round(plateSize * .6), color);
+        var element = Glyph(glyph, Math.Round(plateSize * .66), color);
         element.HorizontalAlignment = HorizontalAlignment.Center; element.VerticalAlignment = VerticalAlignment.Center;
         return element;
     }
@@ -102,7 +102,7 @@ internal static class NoticeBadges
         if (notice.Category == NoticeCategory.Task && kind is null) return null;
         if (NoticeGlyphs.Status(notice.Category, kind) is not { } glyph) return null;
         var colors = Colors;
-        double size = Math.Max(10, Math.Round(plateSize * .42));
+        double size = Math.Max(12, Math.Round(plateSize * .4));
         var badge = new NoticeGlyphElement
         {
             Glyph = glyph, Badge = true, Ink = Wpf(colors.BadgeInk), Disc = Wpf(colors.Tone(NoticeGlyphs.Tone(glyph))), Ring = Wpf(colors.Surface),
@@ -126,7 +126,7 @@ internal static class NoticeBadges
     {
         if (NoticeGlyphs.Source(notice.Origin, notice.AppKey) is not { } glyph || glyph == shown) return null;
         var colors = Colors;
-        double size = Math.Max(10, Math.Round(plateSize * .42));
+        double size = Math.Max(12, Math.Round(plateSize * .4));
         var badge = new NoticeGlyphElement
         {
             Glyph = glyph, Badge = true, Ink = Wpf(colors.Secondary), Disc = Wpf(colors.Plate), Ring = Wpf(colors.Surface), Width = size, Height = size, IsHitTestVisible = false,
