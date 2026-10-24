@@ -839,6 +839,9 @@ public partial class MainWindow
             var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
             grid.Show(CompactPart.Cover, cover, layout.CoverWidth, previous, motion);
         }
+        // The readings stay sampled while the row offers them, also while none fits: widened again, they come in with current
+        // figures rather than dashes.
+        _stripWanted = strip is not null;
         if (strip is not null && (layout.MonitorItems > 0 || _stripPresence.Any(Eased.Now)))
         {
             strip.Admit(layout.MonitorItems);

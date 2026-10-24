@@ -14,7 +14,7 @@ public partial class MainWindow
     private MonitorStrip? _compactStrip;
     // Which readings the collapsed row shows and how far each has come in or gone out, kept while the row is built again.
     private readonly StripPresence _stripPresence = new();
-    private bool _monitorShowing, _stripShowing, _monitorFade;
+    private bool _monitorShowing, _stripShowing, _monitorFade, _stripWanted;
 
     private void InitializeMonitor()
     {
@@ -27,7 +27,7 @@ public partial class MainWindow
     private void UpdateMonitorDemand()
     {
         bool page = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
-        bool strip = !_expanded && _compactStrip is not null && IsVisible && !IsSuppressed && _alert is null && EffectiveStyle != CompactStyle.Line;
+        bool strip = !_expanded && (_compactStrip is not null || _stripWanted) && IsVisible && !IsSuppressed && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!page)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
