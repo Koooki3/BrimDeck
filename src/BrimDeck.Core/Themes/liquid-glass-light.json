@@ -1,16 +1,16 @@
 {
   // Liquid glass, light: the island is a pane of frosted glass over the desktop rather than a painted surface.
-  //   Material: a milky white tint over a blur of what lies behind the island (Windows draws the blur), strong enough that dark
-  //   text keeps 7:1 even where the desktop behind is black. Without the blur (transparency effects off, battery saver, high
-  //   contrast) the surface is the pale frosted color below.
+  //   Material: a milky white tint over the desktop, dense enough that dark text keeps 7:1 even where the desktop behind is
+  //   black. It does not blur what lies behind (see docs/zh-CN/themes.md, "玻璃"). With transparency effects off or in high
+  //   contrast the surface is the pale frosted color below.
   //   Light: a specular rim, bright at the top left and the bottom right, and light gathered along the inner edge as a thick
   //   lens gathers it. The glint travels slowly around the rim; a hovered control catches light like a glass bead.
   "formatVersion": 1,
   "id": "liquid-glass-light",
   "name": "液态玻璃（浅色）",
   "nameEn": "Liquid Glass (light)",
-  "description": "磨砂玻璃材质：透出并模糊岛下方的桌面，镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的磨砂底色。",
-  "descriptionEn": "Frosted glass that blurs the desktop behind the island, with a specular glint gliding along its rim; opaque frost when Windows turns transparency off.",
+  "description": "乳白色的清透玻璃：岛下方的桌面淡淡透出，镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的磨砂底色。",
+  "descriptionEn": "Milky clear glass through which the desktop shows faintly, with a specular glint gliding along its rim; opaque frost when Windows turns transparency off.",
   "author": "BrimDeck",
   "license": "Apache-2.0",
   "base": "light",
