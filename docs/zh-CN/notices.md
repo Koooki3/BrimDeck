@@ -70,9 +70,9 @@ brim-notify "部署中" -r deploy --progress 40      同一 -r 键更新同一�
 brim-notify status                              检查 BrimDeck 是否在接收
 ```
 
-选项：`-b/--body`、`-s/--source`（来源名称）、`-c/--category`（message、task、success、warning、error、info）、`-p/--priority`（low、normal、high，仅作提示，只有你为该应用设置的“优先”才会真正提高优先级）、`-i/--icon`（本机图标文件）、`--id`（重试时去重）。Windows 上的程序名为 `BrimDeck.Notify.exe`，位于安装目录。
+选项：`-b/--body`、`-s/--source`（来源名称）、`-c/--category`（message、task、success、warning、error、info）、`-p/--priority`（low、normal、high，仅作提示，只有你为该应用设置的“优先”才会真正提高优先级）、`-i/--icon`（本机图标文件，相对路径从当前目录算起；WSL 中不带 `/` 且当前目录没有同名文件时按图标名查找）、`--id`（重试时去重）。Windows 上的程序名为 `BrimDeck.Notify.exe`，位于安装目录。
 
-退出码：0 已送达（或被你的规则静音），1 用法错误，2 被拒绝，3 BrimDeck 未运行或灵动提示已关闭；`run` 返回所运行程序自己的退出码。
+退出码：0 已送达（或被你的规则静音），1 用法错误（包括按 BrimDeck 的长度上限截短后仍超过 64 KB 的消息），2 被拒绝（包括 `stop` 找不到这个键的计时器、秒表或日程），3 BrimDeck 未运行、灵动提示已关闭，或没有及时回复（此时提示仍可能显示）；`run` 返回所运行程序自己的退出码。标题和正文在发送前就按 BrimDeck 的上限截短。
 
 ## 时间类通知
 

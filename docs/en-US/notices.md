@@ -70,9 +70,9 @@ brim-notify "Deploying" -r deploy --progress 40       the same -r key updates th
 brim-notify status                                  check that BrimDeck receives notices
 ```
 
-Options: `-b/--body`, `-s/--source` (the source's name), `-c/--category` (message, task, success, warning, error, info), `-p/--priority` (low, normal, high — a hint; only "High" chosen by you for the application raises it), `-i/--icon` (a local icon file), `--id` (shown once however often it is retried). On Windows the program is `BrimDeck.Notify.exe` in BrimDeck's folder.
+Options: `-b/--body`, `-s/--source` (the source's name), `-c/--category` (message, task, success, warning, error, info), `-p/--priority` (low, normal, high — a hint; only "High" chosen by you for the application raises it), `-i/--icon` (a local icon file; a relative path is from the current folder, and in WSL a name without `/` that is no file in the current folder is looked up as an icon name), `--id` (shown once however often it is retried). On Windows the program is `BrimDeck.Notify.exe` in BrimDeck's folder.
 
-Exit codes: 0 delivered (or kept quiet by your rules), 1 usage error, 2 refused, 3 BrimDeck is not running or dynamic notices are off; `run` returns the program's own exit code.
+Exit codes: 0 delivered (or kept quiet by your rules), 1 usage error (a message over 64 KB even with its texts cut to BrimDeck's limits included), 2 refused (a `stop` that finds no timer, stopwatch or event with that key included), 3 BrimDeck is not running, dynamic notices are off, or it did not answer in time (the notice may still show); `run` returns the program's own exit code. Titles and bodies are cut to BrimDeck's limits before they are sent.
 
 ## Time notices
 
