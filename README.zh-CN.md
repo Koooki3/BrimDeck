@@ -7,11 +7,11 @@
 
 # BrimDeck - Windows 灵动岛
 
-BrimDeck 是 Windows 11 上的灵动岛，在屏幕顶部集中显示 AI 编程工具的额度与用量，以及正在播放的音乐。<br>
+BrimDeck 是 Windows 10 和 11 上的灵动岛，在屏幕顶部集中显示 AI 编程工具的额度与用量，以及正在播放的音乐。<br>
 平时收起在屏幕顶部，只在需要时展开。<br>
 Windows 原生应用，使用 C# 与 WPF 开发，注重性能与流畅度。
 
-[![下载](https://img.shields.io/badge/下载-Windows%2011%20x64-9CB9FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
+[![下载](https://img.shields.io/badge/下载-Windows%2010%20%2F%2011%20x64-9CB9FF?style=flat-square)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
 [![最新版本](https://img.shields.io/github/v/release/MoFeng2223/BrimDeck?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=98DBB0)](https://github.com/MoFeng2223/BrimDeck/releases/latest)
 [![许可证](https://img.shields.io/badge/许可证-Apache%202.0-E5A385?style=flat-square)](LICENSE)
 ![界面语言](https://img.shields.io/badge/界面-简体中文%20%7C%20English-B9A8FF?style=flat-square)
@@ -97,7 +97,9 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 ## 安装
 
-需要 Windows 11（x64）。
+需要 Windows 10 2004（内部版本 19041）及以上，或 Windows 11（x64）。
+
+在 Windows 10 上，设置窗口使用直角外框和 WPF 主题，不启用 Windows 11 专用的 DWM 窗口效果。音乐控制仍然可用；无法按进程采集音频时，律动条使用播放器音频会话的峰值表。
 
 1. 从 [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest) 下载并运行 `BrimDeck-<版本>-Setup.exe`。
 2. 如出现“Windows 已保护你的电脑”提示，点击“更多信息”→“仍要运行”。
