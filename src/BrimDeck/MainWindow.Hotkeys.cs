@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using BrimDeck.Core.Notices;
 
 namespace BrimDeck;
 
@@ -21,7 +22,9 @@ public partial class MainWindow
     internal bool IsOpenForHotkey => _expanded && !_preview;
     internal bool IsHotkeyPinned => _hotkeyPinned;
 
-    internal void OpenFromHotkey()
+    // byKey: the hotkey itself; false when a click asked for the same opening ("View all" on a notice), which then moves as a
+    // pointer's opening does (motion-review C4).
+    internal void OpenFromHotkey(bool byKey = true)
     {
         if (_expanded) return;
         // A collapsed preview of the settings ends as hovering would end it; a preview of the open panel is left alone.
@@ -32,11 +35,11 @@ public partial class MainWindow
         if (_app.UserHidden && !_hotkeyOpened) { _hotkeyOpened = true; ApplySettings(); }
         _hover.Stop(); _leave.Stop();
         _hotkeyPinned = true;
-        SetExpanded(true);
+        SetExpanded(true, keyboard: byKey);
         if (!_expanded) { _hotkeyPinned = false; if (_hotkeyOpened) { _hotkeyOpened = false; ApplySettings(); } }
     }
 
-    internal void CollapseFromHotkey() => SetExpanded(false);
+    internal void CollapseFromHotkey() => SetExpanded(false, keyboard: true);
 
     // For TrackPointer while open: the pointer inside ends the pin. True while the pin holds the panel open.
     internal bool HotkeyPinned(bool inside)
@@ -55,8 +58,9 @@ public partial class MainWindow
         if (!_hotkeyOpened) return;
         _hotkeyOpened = false;
         if (!_app.UserHidden) return;
-        // Hide again once the closing animation has played. Never from inside SetExpanded: ApplySettings calls it.
-        int duration = Soft.Enabled ? Settings.AnimationDuration : 0;
+        // Hide again once the closing animation has played (at most the pointer's closing; the keyboard's is shorter). Never
+        // from inside SetExpanded: ApplySettings calls it.
+        int duration = Soft.Enabled ? NoticeMotion.PanelLength(Settings.AnimationDuration, closing: true, keyboard: false) : 0;
         _hotkeyRehide ??= new DispatcherTimer(DispatcherPriority.Normal, Dispatcher);
         _hotkeyRehide.Stop();
         _hotkeyRehide.Interval = TimeSpan.FromMilliseconds(Math.Max(1, duration));

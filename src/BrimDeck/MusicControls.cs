@@ -15,25 +15,30 @@ public sealed class MusicControlButton : Button
         get => _animationsEnabled;
         set { if (_animationsEnabled == value) return; _animationsEnabled = value; UpdateState(); }
     }
+    // Over the button by touch or a pen, which only stands in for a pointer while it presses: no hover is shown for it
+    // (motion-review F4).
+    private bool _touched;
     protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
         if (e.Property == IsMouseOverProperty || e.Property == IsPressedProperty || e.Property == IsEnabledProperty) UpdateState();
+    }
+    protected override void OnMouseEnter(MouseEventArgs e) { _touched = e.StylusDevice is not null; base.OnMouseEnter(e); UpdateState(); }
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        if (_touched && e.StylusDevice is null) { _touched = false; UpdateState(); }
     }
     public override void OnApplyTemplate() { base.OnApplyTemplate(); UpdateState(); }
     private void UpdateState()
     {
         if (Template?.FindName("Hover", this) is Ellipse hover)
         {
-            double opacity = !IsEnabled ? 0 : IsPressed ? .16 : (bool)GetValue(IsMouseOverProperty) ? .10 : 0;
-            Soft.Glide(hover, OpacityProperty, opacity, AnimationsEnabled);
+            double opacity = !IsEnabled ? 0 : IsPressed ? .16 : (bool)GetValue(IsMouseOverProperty) && !_touched ? .10 : 0;
+            Soft.Glide(hover, OpacityProperty, opacity, AnimationsEnabled, IsPressed ? Soft.PressFill : Soft.Hover);
         }
-        if (Template?.FindName("ControlScale", this) is ScaleTransform scale)
-        {
-            double value = IsEnabled && IsPressed ? .94 : 1;
-            Soft.Glide(scale, ScaleTransform.ScaleXProperty, value, false);
-            Soft.Glide(scale, ScaleTransform.ScaleYProperty, value, false);
-        }
+        // The press shrinks the button as it does the cover (motion-review F11).
+        if (Template?.FindName("ControlScale", this) is ScaleTransform scale) Soft.Pressed(scale, IsEnabled && IsPressed, AnimationsEnabled);
     }
 }
 
@@ -63,16 +68,23 @@ public sealed class MusicSeekSlider : Slider
     public override void OnApplyTemplate()
     {
         base.OnApplyTemplate(); Foreground = _fill;
+        foreach (var part in new[] { GetTemplateChild("Rail"), GetTemplateChild("PART_Track") }.OfType<UIElement>())
+        { part.RenderTransformOrigin = new Point(.5, .5); part.RenderTransform = _barScale; }
         // A layout rebuild must start in its final color, not animate from the
         // new brush's transparent white. Animate only subsequent interaction.
         UpdateState(animate: false);
     }
     private static void StateChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) => ((MusicSeekSlider)d).UpdateState();
+    // motion-review F8: the bar is laid out once at its hover height and only scaled down to rest, so hovering it changes no
+    // layout. The rail and the track (the played part) share the scale.
+    private readonly ScaleTransform _barScale = new(1, 1);
+    private bool _touched;
+    protected override void OnMouseEnter(MouseEventArgs e) { _touched = e.StylusDevice is not null; base.OnMouseEnter(e); UpdateState(); }
     private void UpdateState(bool animate = true)
     {
         animate &= AnimationsEnabled && IsLoaded;
-        bool active = IsEnabled && ((bool)GetValue(IsMouseOverProperty) || Seeking);
-        Soft.Glide(this, BarHeightProperty, active ? HoverHeight : RestHeight, animate);
+        bool active = IsEnabled && ((bool)GetValue(IsMouseOverProperty) && !_touched || Seeking);
+        Soft.Glide(_barScale, ScaleTransform.ScaleYProperty, active || HoverHeight <= 0 ? 1 : RestHeight / HoverHeight, animate);
         // On a dark surface the hover color is lighter, on a light one darker, so hovering only ever adds contrast.
         bool dark = PanelTheme.Current.IsDark;
         byte Shift(byte value) => (byte)Math.Round(dark ? value + (255 - value) * .12 : value * .88);
@@ -85,6 +97,7 @@ public sealed class MusicSeekSlider : Slider
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        if (_touched && e.StylusDevice is null) { _touched = false; UpdateState(); }
         if (Seeking && IsMouseCaptured && Mouse.LeftButton == MouseButtonState.Pressed)
             Value = Math.Clamp(e.GetPosition(this).X / Math.Max(1, ActualWidth), 0, 1);
         UpdateBubble();

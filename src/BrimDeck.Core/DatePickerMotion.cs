@@ -22,6 +22,9 @@ public readonly record struct DatePickerTiming(int Glide, int Band, int Leave, i
             Ms(d * .45, 50, 450), Ms(d * 2 / 3, 70, 670));
     }
 
+    // What the picker uses (motion-review C5): the timings at the default length, whatever the panel's animation length.
+    public static readonly DatePickerTiming Fixed = From(AnimationLength.Default);
+
     // The new month starts to arrive once the old one has nearly gone (DatePickerMotion.HandOver).
     public int ArriveDelay => (int)Math.Round(Leave * DatePickerMotion.HandOver);
     public int MonthLength => ArriveDelay + Arrive;

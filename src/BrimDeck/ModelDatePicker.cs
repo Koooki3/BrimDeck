@@ -26,7 +26,7 @@ internal sealed class ModelDatePicker : Border
     private bool _editingEnd;
     private readonly PanelPalette _palette;
 
-    // For previews (tests/BrimDeck.FxPreview): a clock, whether anything moves, and the animation length, instead of the app's.
+    // For previews (tests/BrimDeck.FxPreview): a clock and whether anything moves, instead of the app's.
     internal PreviewHooks? Preview { get; set; }
 
     internal event Action<UsageDateRange>? Applied;
@@ -205,7 +205,8 @@ internal sealed class ModelDatePicker : Border
         Unloaded += (_, _) => Sleep();
     }
 
-    private DatePickerTiming Timing => DatePickerTiming.From(Preview?.AnimationDuration ?? (Application.Current as App)?.Settings.AnimationDuration ?? AnimationLength.Default);
+    // Its own pace, whatever the panel's animation length (motion-review C5).
+    private static DatePickerTiming Timing => DatePickerTiming.Fixed;
     private bool Moves => Preview?.Moves?.Invoke() ?? Soft.Enabled;
     private double Clock() => Preview?.Clock() ?? Eased.Now;
     private string Hex(string token) => _palette[token].ToString();
@@ -465,6 +466,8 @@ internal sealed class ModelDatePicker : Border
             moving |= marker.Column.Moving(now) || marker.Row.Moving(now) || marker.Presence.Moving(now);
         }
         double open = _messageOpen.At(now);
+        // The slot's height is animated on purpose (motion-review F8 leaves it): the message pushes the rows below it down and
+        // the face grows with it; a scale or a clip would leave them where they are and the message over them.
         _messageSlot.Height = _messageHeight * open;
         _message.Opacity = open; _messageShift.Y = -MessageRise * (1 - open);
         moving |= _messageOpen.Moving(now);

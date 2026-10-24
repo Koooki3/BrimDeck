@@ -82,7 +82,8 @@ public sealed partial class SettingsWindow
         var host = new Grid(); host.Children.Add(highlight); host.Children.Add(content);
         void Slide(double from, double to)
         {
-            if (!SystemParameters.ClientAreaAnimation || Math.Abs(from - to) < 0.5) { move.BeginAnimation(TranslateTransform.XProperty, null); move.X = to; return; }
+            // The app's one rule for motion (motion-review F6), not Windows' setting alone.
+            if (!Soft.Enabled || Math.Abs(from - to) < 0.5) { move.BeginAnimation(TranslateTransform.XProperty, null); move.X = to; return; }
             var slide = new System.Windows.Media.Animation.DoubleAnimation(from, to, TimeSpan.FromMilliseconds(200))
             { EasingFunction = Soft.Out };
             // Hand the final position back to the property so later layout passes can move the highlight again.

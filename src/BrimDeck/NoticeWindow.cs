@@ -55,6 +55,10 @@ internal sealed partial class NoticeWindow : Window
     private ColumnDefinition? _progressDone, _progressLeft;
     private FrameworkElement? _progressTrack;
     private bool _dressed;
+    // The surface's last opening (Arrive, GrowIntoDetail), so that a move back can tell it turns one around while it is still
+    // under way (motion-review F1, F2); and whether the next move was asked for by the keyboard (C4).
+    private readonly MoveTurn _turn = new();
+    private bool _keyMove;
 
     public NoticeWindow(MainWindow deck, App app)
     {
@@ -73,11 +77,11 @@ internal sealed partial class NoticeWindow : Window
         _detail.HorizontalAlignment = HorizontalAlignment.Center; _detail.VerticalAlignment = VerticalAlignment.Top;
         _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && _surface.IsMouseOver && !_showingDetail) OpenDetail(); }) { Interval = TimeSpan.FromMilliseconds(HoverOpenMs) };
         _leaveClose = new(Dispatcher, () => { _leaveClose!.Stop(); if (!_surface.IsMouseOver && !_keyboard) LeaveDetail(); });
-        _surface.MouseEnter += (_, _) => PointerEntered();
+        _surface.MouseEnter += (_, e) => PointerEntered(e.StylusDevice is not null);
         _surface.MouseLeave += (_, _) => PointerLeft();
         _surface.MouseLeftButtonUp += (_, e) => { if (e.OriginalSource is DependencyObject source && FindAncestor<Button>(source) is not null) return; Clicked(); e.Handled = true; };
         _surface.MouseRightButtonUp += (_, e) => e.Handled = true;
-        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escape = new EscapeDismissal(this, () => Dismiss(true)); };
+        SourceInitialized += (_, _) => { WindowsHost.ConfigureOverlay(this); _escape = new EscapeDismissal(this, () => { _keyMove = true; Dismiss(true); }); };
         PreviewKeyDown += KeyPressed;
         Deactivated += (_, _) => { if (_keyboard) EndKeyboard(); };
         _app.Notices.Icons.Loaded += IconLoaded;
@@ -100,7 +104,7 @@ internal sealed partial class NoticeWindow : Window
         bool continuing = IsVisible;
         _item = item; _leaving = false; _openFailed = false;
         int generation = ++_generation;
-        _showingDetail = false; _keyboard = false; _detailFor = null;
+        _showingDetail = false; _keyboard = false; _detailFor = null; _keyMove = false;
         // Everything the move needs is built before it starts: the window's size and place, the theme and the toast.
         Layout();
         Dress();
@@ -140,9 +144,10 @@ internal sealed partial class NoticeWindow : Window
         // The notice now stands exactly where the island is; the island underneath is hidden while it does.
         if (!continuing) _deck.SetIslandCovered(true);
         double duration = Duration();
+        _turn.Started(Environment.TickCount64, duration, opening: true, _toastFrame.Rect.Width, _toastFrame.Rect.Height);
         SetFrame(_toastFrame, duration, NoticeMotion.Surface, Soft.Bounce);
         Animate(_surface, NoticeSurface.IslandOpacityProperty, 0, duration, NoticeMotion.ArriveTint, Soft.Out);
-        Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.InOut, () => { if (!_showingDetail && _detailFor is null) _detail.Visibility = Visibility.Collapsed; });
+        Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out, () => { if (!_showingDetail && _detailFor is null) _detail.Visibility = Visibility.Collapsed; });
         Animate(_toast, OpacityProperty, 1, duration, continuing ? NoticeMotion.FollowContent : NoticeMotion.ArriveContent, Soft.Out);
         GlowIn(duration);
     }
@@ -188,12 +193,16 @@ internal sealed partial class NoticeWindow : Window
         // As the panel closes: the content leaves first, the surface settles into the island with a slow start, and the
         // indicator's color comes back only once the surface is nearly the line. The shadow or glow ends as the island's own
         // (none for the line), so nothing about it changes when the island takes over.
-        double duration = Duration();
-        Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.InOut);
-        Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.InOut);
-        Animate(_glow, OpacityProperty, Indicator ? 0 : 1, duration, NoticeMotion.ReturnGlow, Soft.InOut);
+        // It goes back as the panel closes, in three quarters of the time (motion-review C1), or in the keyboard's shorter time
+        // for Escape (C4); content that leaves eases out (F13).
+        double duration = NoticeMotion.ReturnLength(Duration(), _keyMove);
+        _keyMove = false;
+        bool redirect = Turn(opening: false, _collapsed, ref duration);
+        Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
+        Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
+        Animate(_glow, OpacityProperty, Indicator ? 0 : 1, duration, NoticeMotion.ReturnGlow, Soft.Out);
         if (Indicator) Animate(_surface, NoticeSurface.IslandOpacityProperty, 1, duration, NoticeMotion.ReturnTint, Soft.InOut);
-        SetFrame(_collapsed, duration, NoticeMotion.ReturnSurface, Soft.Settle, () => { if (generation == _generation && _item is null) Finish(reveal: true); });
+        SetFrame(_collapsed, duration, NoticeMotion.ReturnSurfaceFor(redirect), redirect ? Soft.Out : Soft.Settle, () => { if (generation == _generation && _item is null) Finish(reveal: true); });
     }
 
     // The panel opens over the island: a notice still on its way out is removed at once, so the panel is never hidden.
@@ -345,6 +354,17 @@ internal sealed partial class NoticeWindow : Window
     // A move takes as long as the panel's opening or closing (NoticeMotion.Length); a change in place as long as the monitor's
     // glide between choices (Soft.Choose). Without animations (BrimDeck's setting or Windows' own), nothing moves.
     private double Duration() => NoticeMotion.Length(Settings.AnimationDuration, Soft.Enabled);
+
+    // motion-review F1, F2: a move that turns around one the other way still under way (true) takes the share of the move it
+    // has to undo, and starts its surface at once; either way it is the last move from now on.
+    private bool Turn(bool opening, NoticeFrame to, ref double duration)
+    {
+        long now = Environment.TickCount64;
+        bool turns = duration > 0 && _turn.Turns(now, opening);
+        if (turns) duration *= _turn.Share(now, opening, _surface.Width, _surface.Height, to.Rect.Width, to.Rect.Height);
+        _turn.Started(now, duration, opening, to.Rect.Width, to.Rect.Height);
+        return turns;
+    }
     private static double InPlace => Soft.Enabled ? Soft.Choose : 0;
 
     // The theme as it is now, for the surface and the shadow or glow behind it. Before the window is first shown it has no scale
@@ -378,9 +398,10 @@ internal sealed partial class NoticeWindow : Window
     {
         if (_look.Glow && duration > 0)
         {
-            // A theme that glows lights up once as the notice arrives, then keeps its usual glow.
+            // A theme that glows lights up once as the notice arrives, then keeps its usual glow. It lights up from where it is:
+            // a notice that follows another does not put its glow out first (motion-review F3).
             var pulse = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(duration * 2.4) };
-            pulse.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(0)));
+            pulse.KeyFrames.Add(new EasingDoubleKeyFrame(_glow.Opacity, KeyTime.FromPercent(0)));
             pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromPercent(.35), Soft.Out));
             pulse.KeyFrames.Add(new EasingDoubleKeyFrame(.7, KeyTime.FromPercent(1), Soft.InOut));
             _glow.BeginAnimation(OpacityProperty, pulse, HandoffBehavior.SnapshotAndReplace);
@@ -798,7 +819,8 @@ internal sealed partial class NoticeWindow : Window
         return button;
     }
 
-    private void OpenDetail()
+    // byKey: the notices hotkey asked for it (motion-review C4).
+    private void OpenDetail(bool byKey = false)
     {
         if (_item is null || _showingDetail) return;
         _showingDetail = true;
@@ -811,16 +833,19 @@ internal sealed partial class NoticeWindow : Window
         bool built = PrepareDetail();
         _detail.Visibility = Visibility.Visible;
         int generation = _generation;
-        if (!built || Duration() <= 0) GrowIntoDetail();
-        else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => { if (generation == _generation && _showingDetail && _item is not null) GrowIntoDetail(); });
+        if (!built || Duration() <= 0) GrowIntoDetail(byKey);
+        else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => { if (generation == _generation && _showingDetail && _item is not null) GrowIntoDetail(byKey); });
     }
 
-    // The notice opens into its details as the panel opens: on the opening spring, its text gone before the details arrive.
-    private void GrowIntoDetail()
+    // The notice opens into its details as the panel opens: on the opening spring, its text gone before the details arrive. For
+    // the keyboard it opens in its shorter time, without the spring's give (motion-review C4).
+    private void GrowIntoDetail(bool byKey = false)
     {
-        double duration = Duration();
-        SetFrame(_detailFrame, duration, NoticeMotion.Surface, Soft.Bounce);
-        Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.OpenOut, Soft.InOut, () => { if (_showingDetail) _toast.Visibility = Visibility.Hidden; });
+        double duration = Duration() * (byKey ? NoticeMotion.KeyFactor : 1);
+        // Opened again while it still goes back from its details, it only has that way to come (motion-review F2).
+        Turn(opening: true, _detailFrame, ref duration);
+        SetFrame(_detailFrame, duration, NoticeMotion.Surface, byKey ? Soft.Out : Soft.Bounce);
+        Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.OpenOut, Soft.Out, () => { if (_showingDetail) _toast.Visibility = Visibility.Hidden; });
         Animate(_detail, OpacityProperty, 1, duration, NoticeMotion.OpenIn, Soft.Out);
     }
 
@@ -833,9 +858,11 @@ internal sealed partial class NoticeWindow : Window
         _toast.Visibility = Visibility.Visible;
         var toast = Frame(NoticeForm.Toast, ToastSize());
         if (toast != _toastFrame) { _toastFrame = toast; BuildToast(); }
-        double duration = Duration();
-        SetFrame(_toastFrame, duration, NoticeMotion.ReturnSurface, Soft.Settle);
-        Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.InOut, () => { if (!_showingDetail && _detail.Children.Count > 0) _detail.Visibility = Visibility.Hidden; });
+        // As the panel closes, in three quarters of the time (motion-review C1).
+        double duration = NoticeMotion.ReturnLength(Duration(), keyboard: false);
+        bool redirect = Turn(opening: false, _toastFrame, ref duration);
+        SetFrame(_toastFrame, duration, NoticeMotion.ReturnSurfaceFor(redirect), redirect ? Soft.Out : Soft.Settle);
+        Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out, () => { if (!_showingDetail && _detail.Children.Count > 0) _detail.Visibility = Visibility.Hidden; });
         Animate(_toast, OpacityProperty, 1, duration, NoticeMotion.Landing, Soft.Out);
         _escape?.SetEnabled(false);
         if (!_surface.IsMouseOver) Center.Hold(_deck, false);
@@ -852,8 +879,9 @@ internal sealed partial class NoticeWindow : Window
     private void ViewAll()
     {
         var deck = _deck;
+        bool byKey = InputManager.Current.MostRecentInputDevice is KeyboardDevice;
         Dismiss(false);
-        deck.OpenNoticesPage();
+        deck.OpenNoticesPage(byKey);
     }
 
     private void Dismiss(bool byUser)
@@ -864,7 +892,8 @@ internal sealed partial class NoticeWindow : Window
 
     // ----- Pointer and keyboard -----
 
-    private void PointerEntered()
+    // touch: by touch or a pen, which does not hover: the details then open on a tap only (motion-review F4).
+    private void PointerEntered(bool touch = false)
     {
         _leaveClose.Stop();
         if (_item is null || _leaving) return;
@@ -872,7 +901,7 @@ internal sealed partial class NoticeWindow : Window
         if (_arrivedUnderPointer) return;
         Center.Hold(_deck, true);
         _escape?.SetEnabled(true);
-        if (!_showingDetail && Settings.NoticeHoverDetails)
+        if (!_showingDetail && Settings.NoticeHoverDetails && !touch)
         {
             _hoverOpen.Start();
             // The details are built and laid out while the pointer rests, after anything more urgent, so the card only has to
@@ -909,7 +938,7 @@ internal sealed partial class NoticeWindow : Window
     {
         if (_item is null) return;
         _keyboard = true;
-        if (!_showingDetail) OpenDetail();
+        if (!_showingDetail) OpenDetail(byKey: true);
         Center.Hold(_deck, true);
         _escape?.SetEnabled(false);
         var own = new WindowInteropHelper(this).Handle;
@@ -932,7 +961,7 @@ internal sealed partial class NoticeWindow : Window
 
     private void KeyPressed(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape) { Dismiss(true); e.Handled = true; }
+        if (e.Key == Key.Escape) { _keyMove = true; Dismiss(true); e.Handled = true; }
     }
 
     private static Button? FirstButton(DependencyObject root)

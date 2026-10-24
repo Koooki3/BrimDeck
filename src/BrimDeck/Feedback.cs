@@ -20,8 +20,19 @@ internal static class Feedback
     public static void SetFade(DependencyObject element, bool value) => element.SetValue(FadeProperty, value);
 
     private static readonly MouseButtonEventHandler ButtonHandler = (sender, _) => Update(sender);
-    private static readonly MouseEventHandler PointerHandler = (sender, _) => Update(sender);
-    private static readonly MouseEventHandler MoveHandler = (sender, _) => { if (sender is UIElement { IsMouseCaptured: true }) Update(sender); };
+    // motion-review F4: touch and a pen stand in for the pointer only while they press, so they leave no hover behind.
+    private static readonly DependencyProperty TouchedProperty = DependencyProperty.RegisterAttached("Touched", typeof(bool), typeof(Feedback));
+    private static readonly MouseEventHandler PointerHandler = (sender, e) =>
+    {
+        if (e.RoutedEvent == UIElement.MouseEnterEvent && sender is DependencyObject button) button.SetValue(TouchedProperty, e.StylusDevice is not null);
+        Update(sender);
+    };
+    private static readonly MouseEventHandler MoveHandler = (sender, e) =>
+    {
+        bool touchEnded = e.StylusDevice is null && sender is DependencyObject button && (bool)button.GetValue(TouchedProperty);
+        if (touchEnded) ((DependencyObject)sender).SetValue(TouchedProperty, false);
+        if (touchEnded || sender is UIElement { IsMouseCaptured: true }) Update(sender);
+    };
     private static readonly DependencyPropertyChangedEventHandler EnabledHandler = (sender, _) => Update(sender);
     private static readonly KeyEventHandler KeyHandler = (sender, _) => Update(sender);
     private static readonly KeyboardFocusChangedEventHandler FocusHandler = (sender, _) => Update(sender);
@@ -45,16 +56,17 @@ internal static class Feedback
     {
         if (sender is not ButtonBase { Template: { } template } button) return;
         bool enabled = button.IsEnabled, animate = Soft.Enabled && button.IsVisible;
-        bool over = enabled && button.IsMouseOver, pressed = enabled && button.IsPressed;
-        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate);
-        Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate);
-        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate);
+        bool over = enabled && button.IsMouseOver && !(bool)button.GetValue(TouchedProperty), pressed = enabled && button.IsPressed;
+        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate, Soft.Hover);
+        // motion-review F12: a press shows at once and lets go as hover does.
+        Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate, pressed ? Soft.PressFill : Soft.Quick);
+        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate, pressed ? Soft.PressFill : Soft.Hover);
     }
     private const double GlyphRest = .78, GlyphPressed = .6;
 
-    private static void Show(UIElement? layer, double target, bool animate)
+    private static void Show(UIElement? layer, double target, bool animate, int milliseconds)
     {
         if (layer is null || Math.Abs(layer.Opacity - target) < .01 && !layer.HasAnimatedProperties) return;
-        Soft.Glide(layer, UIElement.OpacityProperty, target, animate);
+        Soft.Glide(layer, UIElement.OpacityProperty, target, animate, milliseconds);
     }
 }
