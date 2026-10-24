@@ -44,19 +44,7 @@ internal static class Program
         NoticeProtocol.Stamp(message, DateTimeOffset.UtcNow);
         await using var pipe = await ConnectAsync();
         if (pipe is null) return null;
-        return await ExchangeAsync(pipe, message);
-    }
-
-    // One message to BrimDeck and its reply, or null when the pipe failed or BrimDeck did not answer in time.
-    private static async Task<NoticeMessage?> ExchangeAsync(NamedPipeClientStream pipe, NoticeMessage message)
-    {
-        using var limit = new CancellationTokenSource(ReplyWait);
-        try
-        {
-            await NoticeFrames.WriteAsync(pipe, message, limit.Token);
-            return await NoticeFrames.ReadMessageAsync(pipe, limit.Token);
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or OperationCanceledException) { return null; }
+        return (await NoticeFrames.ExchangeAsync(pipe, message, ReplyWait)).Reply;
     }
 
     // "run"'s program, found and started as WindowsPrograms describes (sec-L1). A program that is not found exits with cmd's
@@ -119,14 +107,16 @@ internal static class Program
                 catch (InvalidDataException) { return NotifyCli.Refused; }
                 if (message is null) return 0;
                 NoticeMessage? reply = null;
-                for (int attempt = 0; attempt < 2 && reply is null; attempt++)
+                bool written = false;
+                // A second connection only for a message that never reached BrimDeck: one it received may still show (W3).
+                for (int attempt = 0; attempt < 2 && reply is null && !written; attempt++)
                 {
                     pipe ??= await ConnectAsync();
                     if (pipe is null) break;
-                    reply = await ExchangeAsync(pipe, message);
+                    (reply, written) = await NoticeFrames.ExchangeAsync(pipe, message, ReplyWait);
                     if (reply is null) { await pipe.DisposeAsync(); pipe = null; }
                 }
-                await NoticeFrames.WriteAsync(output, reply ?? NoticeProtocol.Reply(NoticeResults.Rejected, "unreachable"));
+                await NoticeFrames.WriteAsync(output, reply ?? NoticeProtocol.Reply(NoticeResults.Rejected, written ? "no-reply" : "unreachable", message.EventId));
             }
         }
         finally { if (pipe is not null) await pipe.DisposeAsync(); }

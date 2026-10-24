@@ -36,8 +36,10 @@ Windows 通知里的应用标识有时看不出是哪个应用，BrimDeck 会这
 - **Edge 安装的网页应用**（如 WhatsApp 网页版、Facebook）：按网站命名，例如“WhatsApp”，不显示为 Microsoft Edge；不同网站是不同的应用，可以分别设置规则。正文末尾重复的网址会去掉。
 - **Chrome 等浏览器里网站的推送**：浏览器会在最后一行附上网站地址。BrimDeck 去掉这一行，并按网站区分来源，例如“Gmail · Google Chrome”，这样可以只静音某个网站。只有两行文字的通知保持原样。
 - **没有开始菜单快捷方式的桌面程序**：使用它注册的名称和图标（注册表 `HKCU\Software\Classes\AppUserModelId`，图标只取本机文件）。
+- **Windows 没给名称的常见程序**：哔哩哔哩、钉钉、Gemini、经典版 Outlook 等按 BrimDeck 内置的名称显示；Squirrel 安装的 Electron 程序（如 Discord、Slack）显示为程序名。
 - **老式托盘程序的气泡提醒**：Windows 没有给出名称时显示为“托盘程序”，不再显示一串数字；只有程序路径的桌面程序显示为程序名。
-- **默认分类**：Windows 通知不带分类。Claude、Codex 桌面版的通知标为“任务”；Windows 系统提醒、NVIDIA App、Adobe Creative Cloud、Clash Party、截图工具等标为“提示”；聊天、邮件和浏览器保持“消息”。
+- **默认分类**：Windows 通知不带分类。Claude、Codex（ChatGPT）、Gemini 桌面版和 Cursor 的通知标为“任务”；Windows 系统提醒、Windows 安全中心、NVIDIA App、Adobe Creative Cloud、Clash Party/Clash Verge、截图工具、联想和英特尔的工具等标为“提示”；聊天、邮件和浏览器保持“消息”。
+- **来电**：聊天应用（QQ、微信、Teams、WhatsApp、Discord 等）和手机连接的通知如果是语音/视频通话邀请（“邀请你进行语音通话”“Incoming call”“is calling you”等），显示来电标记，并像闹钟一样立即弹出（该应用设为低优先级时除外）；“未接来电”不算。
 - **被替换的通知**：应用用同一条通知更新内容时（比如 QQ 把新消息合并成一条），Windows 会删掉旧通知、加入新通知。如果两者来自同一应用、标题相同，并且在同一次读取中出现，BrimDeck 会更新原来那条提示，不会留下两条。
 
 ### WSL
@@ -68,9 +70,9 @@ brim-notify "部署中" -r deploy --progress 40      同一 -r 键更新同一�
 brim-notify status                              检查 BrimDeck 是否在接收
 ```
 
-选项：`-b/--body`、`-s/--source`（来源名称）、`-c/--category`（message、task、success、warning、error、info）、`-p/--priority`（low、normal、high，仅作提示，只有你为该应用设置的“优先”才会真正提高优先级）、`-i/--icon`（本机图标文件）、`--id`（重试时去重）。Windows 上的程序名为 `BrimDeck.Notify.exe`，位于安装目录。
+选项：`-b/--body`、`-s/--source`（来源名称）、`-c/--category`（message、task、success、warning、error、info）、`-p/--priority`（low、normal、high，仅作提示，只有你为该应用设置的“优先”才会真正提高优先级）、`-i/--icon`（本机图标文件，相对路径从当前目录算起；WSL 中不带 `/` 且当前目录没有同名文件时按图标名查找）、`--id`（重试时去重）。Windows 上的程序名为 `BrimDeck.Notify.exe`，位于安装目录。
 
-退出码：0 已送达（或被你的规则静音），1 用法错误，2 被拒绝，3 BrimDeck 未运行或灵动提示已关闭；`run` 返回所运行程序自己的退出码。
+退出码：0 已送达（或被你的规则静音），1 用法错误（包括按 BrimDeck 的长度上限截短后仍超过 64 KB 的消息），2 被拒绝（包括 `stop` 找不到这个键的计时器、秒表或日程），3 BrimDeck 未运行、灵动提示已关闭，或没有及时回复（此时提示仍可能显示）；`run` 返回所运行程序自己的退出码。标题和正文在发送前就按 BrimDeck 的上限截短。
 
 ## 时间类通知
 
@@ -81,8 +83,9 @@ brim-notify status                              检查 BrimDeck 是否在接收
 | 闹钟 | Windows 时钟的闹钟、计时器结束、专注时段结束的系统通知 | 高优先级；可“打开应用”回到时钟 |
 | 计时进行中（秒表） | `brim-notify stopwatch` | 实时显示“已计时 12:03”，可停止 |
 | 倒计时 | `brim-notify timer` | 实时显示“还剩 24:59”和进度环；到点时再次弹出（高优先级），可取消或“5 分钟后再提醒” |
-| 邮件 | Outlook（新版和经典版）、邮件和日历、Thunderbird、Foxmail 等的新邮件通知；WSL 中带 `email` 类别的桌面通知 | 普通通知 |
-| 日程 | Microsoft 365 日历、邮件和日历的日程提醒；Outlook 中像提醒的通知（“15 分钟后”“现在”或以“下午3:00 - 下午3:30”开头的一行）；Teams 的会议提醒和“会议已开始”；`brim-notify event` | 高优先级，显示“14 分钟后开始”“进行中”；`brim-notify event` 由 BrimDeck 自己在开始前提醒 |
+| 闹钟 | Microsoft To Do 的任务提醒 | 同上 |
+| 邮件 | Outlook（新版和经典版）、邮件和日历、Thunderbird、Foxmail 等的新邮件通知；浏览器里网页邮箱（Gmail、Outlook 网页版、QQ 邮箱、网易邮箱等）的通知；WSL 中带 `email` 类别的桌面通知 | 普通通知 |
+| 日程 | Microsoft 365 日历、邮件和日历的日程提醒；Outlook 中像提醒的通知（“15 分钟后”“现在”或以“下午3:00 - 下午3:30”开头的一行）；Teams 的会议提醒和“会议已开始”；Google 日历网页版的提醒，网页邮箱中像提醒的通知；`brim-notify event` | 高优先级，显示“14 分钟后开始”“进行中”；`brim-notify event` 由 BrimDeck 自己在开始前提醒 |
 
 - 识别依据是应用的 ID（AUMID）和通知文字，只在本机内存中判断，不保存原始通知，不读取邮箱或日历。识别属于启发式：Outlook、Teams 的提醒格式随版本和语言变化，未识别时按普通通知显示。
 - 设置 › 灵动提示 › 时间类通知 列出本机装有哪些相关应用（只检查是否安装，不读取应用数据）。这些应用的提醒来自 Windows 通知，需要开启“Windows 应用通知”。

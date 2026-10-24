@@ -114,7 +114,19 @@ internal static class NoticeNative
         SetWindowLongPtr(window, -20, new IntPtr(activatable ? style & ~NoActivate : style | NoActivate));
     }
 
+    public static IntPtr Foreground() => GetForegroundWindow();
+
+    // Gives the keyboard back to the window that had it before the notices hotkey, if this process still has the foreground
+    // (Windows lets the foreground process pass it on) and that window still exists.
+    public static void ReturnForeground(IntPtr own, IntPtr previous)
+    {
+        if (previous == IntPtr.Zero || previous == own || !IsWindow(previous) || GetForegroundWindow() != own) return;
+        SetForegroundWindow(previous);
+    }
+
     [DllImport("user32")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32")] private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32")] private static extern bool IsWindow(IntPtr window);
     [DllImport("user32")] private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
     [DllImport("user32")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);

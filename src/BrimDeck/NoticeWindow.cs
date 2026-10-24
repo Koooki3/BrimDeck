@@ -47,6 +47,13 @@ internal sealed partial class NoticeWindow : Window
     private int _generation;
     // The item the details were last built for; opening them for the same item only moves the surface.
     private AttentionItem? _detailFor;
+    // What the details were built from apart from a task's progress (DetailKey), and the progress track's two columns, so that
+    // progress alone changes in place: rebuilding the card under the pointer lost clicks, focus and the body's scroll.
+    private string? _detailKey;
+    // The window that had the keyboard before the notices hotkey (EnterKeyboard), to give it back.
+    private IntPtr _previousForeground;
+    private ColumnDefinition? _progressDone, _progressLeft;
+    private FrameworkElement? _progressTrack;
     private bool _dressed;
 
     public NoticeWindow(MainWindow deck, App app)
@@ -157,8 +164,8 @@ internal sealed partial class NoticeWindow : Window
         // again only when what it is made of changes. Screen readers hear it again only when its words change.
         bool spoken = moved || !RefreshToast();
         if (spoken) BuildToast();
-        // A change in place glides as the monitor's selections do.
-        if (_showingDetail) ShowDetailFrame(InPlace, Soft.Follow);
+        // A change in place glides as the monitor's selections do. Progress alone changes the open details in place.
+        if (_showingDetail && !UpdateDetailInPlace()) ShowDetailFrame(InPlace, Soft.Follow);
         else if (moved) SetFrame(_toastFrame, InPlace, NoticeMotion.Surface, Soft.Follow);
         if (spoken || _toastWordsChanged) Announce();
         WatchLive();
@@ -403,11 +410,14 @@ internal sealed partial class NoticeWindow : Window
         if (Indicator) height -= 4;
         var (padding, plate) = ToastMetrics(height);
         double text = Math.Max(Measure(title, 12.5, FontWeights.SemiBold), summary.Length > 0 ? Measure(summary, 11.5, FontWeights.Normal) : 0);
-        // In 16 DIP steps, so that titles of nearly the same length give the same width.
-        return new Size(Math.Ceiling((padding * 2 + plate + 10 + text + TrailingWidth()) / 16) * 16, height);
+        // In 16 DIP steps, so that titles of nearly the same length give the same width. The text column has 10 DIP before it
+        // and 6 after it (BuildToast).
+        return new Size(Math.Ceiling((padding * 2 + plate + 16 + text + TrailingWidth()) / 16) * 16, height);
     }
 
-    private double TrailingWidth() => _item is { Count: > 1 } ? 30 : Notice?.Progress is not null || HasCountdownRing(Notice) ? 26 : 12;
+    // The count chip is as wide as its number with its padding (at least 22); the progress ring and the dot take fixed room.
+    private double TrailingWidth() => _item is { Count: > 1 } item ? Math.Max(22, Measure(item.Count > 99 ? "99+" : item.Count.ToString(Loc.Culture), 11, FontWeights.SemiBold) + 12)
+        : Notice?.Progress is not null || HasCountdownRing(Notice) ? 26 : 12;
 
     // Live says the summary is the live words about the notice's time (NoticeWindow.Time.cs), worked out once here: read twice,
     // a second could pass between the two and the countdown would stop (ui-7).
@@ -423,10 +433,11 @@ internal sealed partial class NoticeWindow : Window
         return (title, summary, live is not null);
     }
 
-    private static double Measure(string text, double size, FontWeight weight)
+    // Measured at the window's own scale: the window draws text in display mode, whose glyph widths round to device pixels.
+    private double Measure(string text, double size, FontWeight weight)
     {
         if (text.Length == 0) return 0;
-        var formatted = new FormattedText(text, Loc.Culture, FlowDirection.LeftToRight, new Typeface(UI.PanelFont, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.White, 1.25);
+        var formatted = new FormattedText(text, Loc.Culture, FlowDirection.LeftToRight, new Typeface(UI.PanelFont, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip);
         return Math.Ceiling(formatted.WidthIncludingTrailingWhitespace);
     }
 
@@ -596,9 +607,46 @@ internal sealed partial class NoticeWindow : Window
     private double DetailPadding() => _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(18, _deck.Collapsed.Shoulder + 14) : 18;
     private const double DetailTop = 14, DetailBottom = 16;
 
+    // Everything the details show except a task's progress and the live time words (which follow their own tick).
+    private string DetailKey()
+    {
+        var notice = Notice;
+        var key = new System.Text.StringBuilder();
+        key.Append(_item?.Key).Append('\u0001').Append(_item?.Kind).Append('\u0001').Append(_item?.Payload is int count ? count : -1).Append('\u0001').Append(_openFailed).Append('\u0001').Append(Loc.Language);
+        if (notice is not null)
+        {
+            key.Append('\u0001').Append(notice.Id).Append('\u0001').Append(notice.AppName).Append('\u0001').Append(notice.Title).Append('\u0001').Append(notice.Body)
+                .Append('\u0001').Append(notice.Category).Append('\u0001').Append(notice.Origin).Append('\u0001').Append(notice.Distro).Append('\u0001').Append(notice.IconRef)
+                .Append('\u0001').Append(notice.ReceivedAt.UtcTicks).Append('\u0001').Append(notice.SourcePresent).Append('\u0001').Append(notice.Capabilities)
+                .Append('\u0001').Append(notice.Progress is not null).Append('\u0001').Append(notice.Call).Append('\u0001').Append(notice.TimeKind)
+                .Append('\u0001').Append(NoticeClock.IsLive(notice.Timing, DateTimeOffset.UtcNow)).Append('\u0001').Append(Center.CanOpen(notice));
+            foreach (var action in notice.Actions) key.Append('\u0001').Append(action.Key).Append('\u0002').Append(action.Label);
+            foreach (var action in Center.TimeActions(notice)) key.Append('\u0001').Append(action.Key);
+        }
+        return key.ToString();
+    }
+
+    // The open details for the same item, changed only in a task's progress: the track follows, nothing is built again and
+    // the frame does not move. False when the details must be built again.
+    private bool UpdateDetailInPlace()
+    {
+        if (_detail.Children.Count == 0 || _detailKey is null || _detailKey != DetailKey()) return false;
+        if (Notice?.Progress is { } progress && _progressDone is not null && _progressLeft is not null && _progressTrack is not null)
+        {
+            double done = Math.Clamp(progress, 0, 1);
+            _progressDone.Width = new GridLength(done, GridUnitType.Star);
+            _progressLeft.Width = new GridLength(1 - done, GridUnitType.Star);
+            AutomationProperties.SetName(_progressTrack, Loc.T($"进度 {progress:P0}", $"Progress {progress:P0}"));
+        }
+        _detailFor = _item;
+        return true;
+    }
+
     private void BuildDetail()
     {
         _detail.Children.Clear();
+        _progressDone = _progressLeft = null; _progressTrack = null;
+        _detailKey = DetailKey();
         double padding = DetailPadding();
         _detail.Margin = new Thickness(padding, DetailTop, padding, DetailBottom);
         var notice = Notice;
@@ -631,15 +679,19 @@ internal sealed partial class NoticeWindow : Window
             if (notice.Body.Length > 0)
             {
                 var body = Wrapped(notice.Body, 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0));
-                stack.Children.Add(new ScrollViewer { Content = body, MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 4, 0, 0), Focusable = false });
+                stack.Children.Add(new ScrollViewer { Content = body, MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 4, 0, 0),
+                    // Reachable with Tab in keyboard mode, so a long body scrolls with the arrows and page keys (review 7b).
+                    Focusable = true, IsTabStop = true });
             }
             if (notice.Progress is { } progress)
             {
                 // The fill is a share of the track itself; the card's width, padding included, overshot it.
                 double done = Math.Clamp(progress, 0, 1);
                 var track = new Grid { Height = 4, Margin = new Thickness(0, 10, 0, 0) };
-                track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 4 });
-                track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) });
+                _progressDone = new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 4 };
+                _progressLeft = new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) };
+                track.ColumnDefinitions.Add(_progressDone); track.ColumnDefinitions.Add(_progressLeft);
+                _progressTrack = track;
                 var rail = new Border { Background = UI.Brush(PanelTheme.Hex("track")), CornerRadius = new CornerRadius(2) };
                 Grid.SetColumnSpan(rail, 2);
                 track.Children.Add(rail);
@@ -694,6 +746,12 @@ internal sealed partial class NoticeWindow : Window
         return block;
     }
 
+    private void AnnounceNow(object? sender, EventArgs e)
+    {
+        _announceLater?.Stop();
+        if (_item is not null && !_leaving) Announce();
+    }
+
     private Button GlyphButton(string glyph, string name, Action click)
     {
         var button = TextButton("", click, primary: false, flat: true);
@@ -713,9 +771,18 @@ internal sealed partial class NoticeWindow : Window
         var button = new Button { Content = face, Margin = new Thickness(8, 0, 0, 0), MinHeight = 32, Cursor = Cursors.Hand, FocusVisualStyle = null,
             Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
         // One hover look at a time: the theme's mark (InteractionFx) when it answers, else this one (q-P5).
-        button.MouseEnter += (_, _) => { if (InteractionFx.AnswersHover(this)) return; if (!primary) face.Background = UI.Brush(_look.Hover); else face.Opacity = .88; };
-        button.MouseLeave += (_, _) => { face.Background = UI.Brush(rest); face.Opacity = 1; };
-        button.PreviewMouseLeftButtonDown += (_, _) => { if (!primary) face.Background = UI.Brush(_look.Pressed); };
+        // High contrast lights hover and press in the highlight color, so the label takes the highlight's text color (review 5);
+        // the glyph button's label is set after this, hence looked up when lit.
+        Brush? unlit = null;
+        void Lit(bool lit)
+        {
+            if (primary || !_look.HighContrast || face.Child is not TextBlock label) return;
+            if (lit) { unlit ??= label.Foreground; label.Foreground = UI.Brush(_look.OnAccent); }
+            else if (unlit is not null) label.Foreground = unlit;
+        }
+        button.MouseEnter += (_, _) => { if (InteractionFx.AnswersHover(this)) return; if (!primary) { face.Background = UI.Brush(_look.Hover); Lit(true); } else face.Opacity = .88; };
+        button.MouseLeave += (_, _) => { face.Background = UI.Brush(rest); face.Opacity = 1; Lit(false); };
+        button.PreviewMouseLeftButtonDown += (_, _) => { if (!primary) { face.Background = UI.Brush(_look.Pressed); Lit(true); } };
         // Only for focus moved by the keyboard: a button takes focus when clicked too, and should not then wear a ring.
         button.GotKeyboardFocus += (_, _) => { if (InputManager.Current.MostRecentInputDevice is KeyboardDevice) face.BorderThickness = new Thickness(1.5); };
         button.LostKeyboardFocus += (_, _) => face.BorderThickness = new Thickness(0);
@@ -838,7 +905,9 @@ internal sealed partial class NoticeWindow : Window
         if (!_showingDetail) OpenDetail();
         Center.Hold(_deck, true);
         _escape?.SetEnabled(false);
-        NoticeNative.SetActivatable(new WindowInteropHelper(this).Handle, true);
+        var own = new WindowInteropHelper(this).Handle;
+        if (NoticeNative.Foreground() is var previous && previous != own) _previousForeground = previous;
+        NoticeNative.SetActivatable(own, true);
         Activate();
         Dispatcher.BeginInvoke(() => (_actions?.Children.OfType<Button>().LastOrDefault() ?? FirstButton(_detail))?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
@@ -846,7 +915,11 @@ internal sealed partial class NoticeWindow : Window
     private void EndKeyboard()
     {
         _keyboard = false;
-        NoticeNative.SetActivatable(new WindowInteropHelper(this).Handle, false);
+        var own = new WindowInteropHelper(this).Handle;
+        NoticeNative.SetActivatable(own, false);
+        // At once, not after the notice's way out: keys typed meanwhile go to where the user was (review 7a).
+        NoticeNative.ReturnForeground(own, _previousForeground);
+        _previousForeground = IntPtr.Zero;
         if (_item is not null && !_surface.IsMouseOver) { LeaveDetail(); Center.Hold(_deck, false); }
     }
 
@@ -874,9 +947,24 @@ internal sealed partial class NoticeWindow : Window
     }
 
     // Screen readers hear the new notice once, politely, without the window taking focus.
+    // A burst would queue dozens of announcements that go on long after the notice left (review 9): at most one a second,
+    // and the latest words once the burst pauses.
+    private static readonly TimeSpan AnnounceSpacing = TimeSpan.FromSeconds(1);
+    private DateTime _announcedAt;
+    private System.Windows.Threading.DispatcherTimer? _announceLater;
+
     private void Announce()
     {
         if (_announced is null || !AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged)) return;
+        var wait = _announcedAt + AnnounceSpacing - DateTime.UtcNow;
+        if (wait > TimeSpan.Zero)
+        {
+            _announceLater ??= new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background, Dispatcher);
+            _announceLater.Tick -= AnnounceNow; _announceLater.Tick += AnnounceNow;
+            if (!_announceLater.IsEnabled) { _announceLater.Interval = wait; _announceLater.Start(); }
+            return;
+        }
+        _announcedAt = DateTime.UtcNow;
         (UIElementAutomationPeer.FromElement(_announced) ?? UIElementAutomationPeer.CreatePeerForElement(_announced))?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }
 }

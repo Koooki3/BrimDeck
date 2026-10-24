@@ -68,6 +68,10 @@ internal sealed partial class NoticeWindow
         var words = LiveWords(notice);
         if (words is not null)
         {
+            // Words that grew (a stopwatch passing an hour, an event that started) may no longer fit: the toast widens, as
+            // an update would make it (review 11). Shorter words leave it as it is.
+            if (_liveLine is not null && words.Length > _liveLine.Text.Length && !_showingDetail && _item is { } item && ToastSize().Width > _toastFrame.Rect.Width)
+            { Update(item); return; }
             if (_liveLine is not null) _liveLine.Text = words;
             if (_liveDetail is not null) _liveDetail.Text = words;
         }

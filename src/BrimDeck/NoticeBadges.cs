@@ -98,6 +98,7 @@ internal static class NoticeBadges
     {
         // A time notice (alarm, stopwatch, countdown, mail, event) shows its kind; the glyph names match NoticeTimeKind's.
         if (kind is null && notice.TimeKind != NoticeTimeKind.None) kind = notice.TimeKind.ToString();
+        if (kind is null && notice.Call) kind = "call";
         if (notice.Category == NoticeCategory.Task && kind is null) return null;
         if (NoticeGlyphs.Status(notice.Category, kind) is not { } glyph) return null;
         var colors = Colors;

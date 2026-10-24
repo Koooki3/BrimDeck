@@ -43,6 +43,13 @@ public static class NoticeGeometry
         width = Math.Min(width, Math.Max(0, monitorWidth - 2 * ScreenMargin));
         double centre = surface.X + surface.Width / 2;
         double left = Math.Clamp(centre - width / 2, Math.Min(ScreenMargin, monitorWidth / 2), Math.Max(ScreenMargin, monitorWidth - ScreenMargin - width));
+        // An island about as wide as the screen already reaches into the margins: a toast covers it exactly instead of
+        // narrowing it (sync L7), so no end of the island shows beside the toast or shrinks back when it leaves.
+        if (form == NoticeForm.Toast && shape.Style != CompactStyle.Line && surface.Width > width)
+        {
+            width = Math.Min(surface.Width, monitorWidth);
+            left = Math.Clamp(surface.X, 0, Math.Max(0, monitorWidth - width));
+        }
         double top;
         if (notch) top = 0;
         else

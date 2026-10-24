@@ -5,13 +5,13 @@ namespace BrimDeck.Core.Notices;
 // site's push notice in Chrome carries the site only as its last line (the attribution), a desktop program registered for
 // notifications without a Start menu shortcut has its name only in the registry, and Windows names the tray balloons of older
 // programs by a number. Everything read here comes from the sender, so names are clipped and never used as paths or commands.
-public static class WindowsNoticeApps
+public static partial class WindowsNoticeApps
 {
     // What Windows tells about one notification. DisplayName is AppInfo.DisplayInfo's; RegisteredName the DisplayName under
     // HKCU\Software\Classes\AppUserModelId\<id>. Texts are the notification's text elements in order, empty ones left out.
     public sealed record Reading(string AppId, string? DisplayName, string? RegisteredName, IReadOnlyList<string> Texts);
 
-    public sealed record Identity(string AppKey, string AppName, string Title, string Body, NoticeCategory Category);
+    public sealed record Identity(string AppKey, string AppName, string Title, string Body, NoticeCategory Category, bool Call = false);
 
     // Chromium browsers whose notifications end with the site's host as an attribution line: by application id, or the
     // start of a packaged browser's id.
@@ -28,7 +28,30 @@ public static class WindowsNoticeApps
         ("outlook.live.com", "Outlook", null), ("outlook.office.com", "Outlook", null), ("outlook.office365.com", "Outlook", null),
         ("teams.microsoft.com", "Teams", null), ("teams.live.com", "Teams", null), ("youtube.com", "YouTube", null), ("x.com", "X", null), ("twitter.com", "X", null),
         ("github.com", "GitHub", null), ("gitlab.com", "GitLab", null), ("notion.so", "Notion", null), ("chatgpt.com", "ChatGPT", null), ("claude.ai", "Claude", null),
-        ("feishu.cn", "飞书", "Feishu"), ("larksuite.com", "Lark", null), ("dingtalk.com", "钉钉", "DingTalk"), ("bilibili.com", "哔哩哔哩", "Bilibili")
+        ("feishu.cn", "飞书", "Feishu"), ("larksuite.com", "Lark", null), ("dingtalk.com", "钉钉", "DingTalk"), ("bilibili.com", "哔哩哔哩", "Bilibili"),
+        ("wx.qq.com", "微信", "WeChat"), ("web.wechat.com", "微信", "WeChat"), ("mail.qq.com", "QQ 邮箱", "QQ Mail"), ("exmail.qq.com", "腾讯企业邮", "Tencent Exmail"),
+        ("docs.qq.com", "腾讯文档", "Tencent Docs"), ("mail.163.com", "网易邮箱", "NetEase Mail"), ("mail.126.com", "网易邮箱", "NetEase Mail"),
+        ("outlook.cloud.microsoft", "Outlook", null), ("meet.google.com", "Google Meet", null), ("zoom.us", "Zoom", null), ("web.skype.com", "Skype", null),
+        ("chat.deepseek.com", "DeepSeek", null), ("kimi.com", "Kimi", null), ("kimi.moonshot.cn", "Kimi", null), ("doubao.com", "豆包", "Doubao"),
+        ("yuque.com", "语雀", "Yuque"), ("kdocs.cn", "金山文档", "Kdocs"), ("weibo.com", "微博", "Weibo"), ("zhihu.com", "知乎", "Zhihu"),
+        ("douyin.com", "抖音", "Douyin"), ("reddit.com", "Reddit", null), ("linear.app", "Linear", null), ("figma.com", "Figma", null)
+    ];
+
+    // Sites whose notices are mail, and sites whose notices are calendar reminders (NoticeTimeSources.Classify).
+    private static readonly string[] MailSites = ["mail.google.com", "outlook.live.com", "outlook.office.com", "outlook.office365.com", "outlook.cloud.microsoft",
+        "mail.qq.com", "exmail.qq.com", "mail.163.com", "mail.126.com", "mail.yahoo.com", "mail.proton.me", "icloud.com"];
+    private static readonly string[] CalendarSites = ["calendar.google.com"];
+
+    // Names for application ids Windows often gives no display name for: desktop programs whose notifications are not tied to
+    // a Start menu shortcut Windows can read. Only used when neither Windows nor the registry names the application.
+    private static readonly (string Id, string Name, string? English)[] KnownApps =
+    [
+        ("BiliBiliPC", "哔哩哔哩", "Bilibili"), ("ali.dingtalk.release", "钉钉", "DingTalk"), ("Weixin", "微信", "WeChat"), ("WeChat", "微信", "WeChat"),
+        ("com.google.gemini.windows", "Gemini", null), ("Microsoft.VisualStudioCode", "Visual Studio Code", null), ("Anysphere.Cursor", "Cursor", null),
+        ("QuarkCloudDrive", "夸克网盘", "Quark Drive"), ("md.obsidian", "Obsidian", null), ("party.mihomo.app", "Clash Party", null),
+        ("io.github.clash-verge-rev.clash-verge-rev", "Clash Verge", null), ("com.nvidia.nvapp", "NVIDIA App", null), ("Adobe.CreativeCloud", "Adobe Creative Cloud", null),
+        ("Microsoft.Office.OUTLOOK.EXE.15", "Outlook", null), ("Microsoft.Office.OUTLOOK.EXE.16", "Outlook", null), ("Microsoft.Office.lync.exe.15", "Skype for Business", null),
+        ("Microsoft.Office.lync.exe.16", "Skype for Business", null), ("Lenovo.PcManager.MainWnd", "联想电脑管家", "Lenovo PC Manager"), ("Kingsoft.Office.WPSUFD", "WPS", null)
     ];
 
     // The status a notice from these applications gets: Windows notifications carry no category of their own. Matched by
@@ -36,11 +59,14 @@ public static class WindowsNoticeApps
     private static readonly (string Prefix, NoticeCategory Category)[] Categories =
     [
         // Coding agents: their notifications say that a task finished or waits for the user.
-        ("Claude_", NoticeCategory.Task), ("OpenAI.Codex_", NoticeCategory.Task),
+        ("Claude_", NoticeCategory.Task), ("OpenAI.Codex_", NoticeCategory.Task), ("OpenAI.ChatGPT", NoticeCategory.Task),
+        ("com.google.gemini.windows", NoticeCategory.Task), ("Anysphere.Cursor", NoticeCategory.Task),
         // System and utility notices: devices, settings, security summaries, driver and app updates, proxy state, screenshots.
         ("Windows.SystemToast.", NoticeCategory.Info), ("Windows.Defender.", NoticeCategory.Info), ("Windows.ActionCenter.", NoticeCategory.Info),
         ("windows.immersivecontrolpanel_", NoticeCategory.Info), ("Microsoft.WindowsStore_", NoticeCategory.Info), ("com.nvidia.", NoticeCategory.Info),
-        ("Adobe.CreativeCloud", NoticeCategory.Info), ("party.mihomo.app", NoticeCategory.Info), ("Microsoft.ScreenSketch_", NoticeCategory.Info)
+        ("Adobe.CreativeCloud", NoticeCategory.Info), ("party.mihomo.app", NoticeCategory.Info), ("Microsoft.ScreenSketch_", NoticeCategory.Info),
+        ("Microsoft.SecHealthUI_", NoticeCategory.Info), ("io.github.clash-verge-rev.", NoticeCategory.Info), ("Microsoft.YourPhone_8wekyb3d8bbwe!YourPhoneSetup", NoticeCategory.Info),
+        ("Lenovo.", NoticeCategory.Info), ("AppUp.IntelGraphicsExperience_", NoticeCategory.Info), ("Microsoft.XboxGamingOverlay_", NoticeCategory.Info)
     ];
 
     public const string TrayPrefix = "NotifyIconGeneratedAumid_";
@@ -67,7 +93,8 @@ public static class WindowsNoticeApps
         }
         string title = texts.Count > 0 ? texts[0] : "";
         string body = string.Join("\n", texts.Skip(1));
-        return new Identity(appKey, Clip(name, maxName), title, body, Category(appId));
+        name = Clip(name, maxName);
+        return new Identity(appKey, name, title, body, Category(appId), ReadsAsCall(appKey, name, title, body));
     }
 
     // The application's name: Windows' display name, else the registered one, else something better than the raw id.
@@ -77,6 +104,12 @@ public static class WindowsNoticeApps
         if (Usable(reading.DisplayName, appId) is { } display) return display;
         if (Usable(reading.RegisteredName, appId) is { } registered) return registered;
         if (appId.StartsWith(TrayPrefix, StringComparison.OrdinalIgnoreCase)) return Loc.T("托盘程序", "Tray app");
+        foreach (var (id, known, english) in KnownApps)
+            if (string.Equals(appId, id, StringComparison.OrdinalIgnoreCase)) return english is null ? known : Loc.T(known, english);
+        // Squirrel installs Electron apps (Discord, Slack, GitHub Desktop, the classic Teams) as "com.squirrel.<package>.<exe>".
+        if (appId.StartsWith("com.squirrel.", StringComparison.OrdinalIgnoreCase) && appId.LastIndexOf('.') is int dot && dot < appId.Length - 1
+            && appId[(dot + 1)..] is { } exe && exe.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-'))
+            return exe;
         // A desktop program without a registered id is named by its path, "{known folder GUID}\folder\app.exe".
         int slash = appId.LastIndexOf('\\');
         if (slash >= 0 && slash < appId.Length - 1 && appId.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return appId[(slash + 1)..^4];
@@ -128,6 +161,30 @@ public static class WindowsNoticeApps
             if (host == known || host.EndsWith("." + known, StringComparison.Ordinal)) return english is null ? name : Loc.T(name, english);
         return host.StartsWith("www.", StringComparison.Ordinal) ? host[4..] : host;
     }
+
+    // The site a Windows notice is from: a browser's site notice ("windows:Chrome|mail.google.com") or a web app; else null.
+    public static string? SiteOf(string appKey, string appId)
+    {
+        int bar = appKey.LastIndexOf('|');
+        if (bar > 0 && appKey.StartsWith("windows:", StringComparison.Ordinal) && Host(appKey[(bar + 1)..]) is { } site) return site;
+        return WebAppSite(appId);
+    }
+
+    public static bool IsMailSite(string host) => Matches(host, MailSites);
+    public static bool IsCalendarSite(string host) => Matches(host, CalendarSites);
+    private static bool Matches(string host, string[] sites) => sites.Any(known => host == known || host.EndsWith("." + known, StringComparison.Ordinal));
+
+    // An incoming call, by the words chat applications use for one ("邀请你语音通话", "Incoming video call", "is calling you").
+    // Only applications that read as chat or phone apps are looked at: a mail or news app mentioning a call is not one.
+    public static bool ReadsAsCall(string appKey, string appName, string title, string body)
+    {
+        if (NoticeGlyphs.App(appKey, appName) is not (NoticeGlyph.Chat or NoticeGlyph.Phone)) return false;
+        return CallWords().IsMatch(title) || CallWords().IsMatch(body.Length > 200 ? body[..200] : body);
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?:邀请你(?:进行)?(?:语音|视频)通话|(?:语音|视频)通话邀请|发起了?(?:语音|视频)通话|正在呼叫你|向你发起(?:语音|视频)?通话|^来电$|^(?:语音|视频)?来电|\bincoming (?:voice |video |audio )?call\b|\bis calling you\b|\bcalling you\b)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Multiline)]
+    private static partial System.Text.RegularExpressions.Regex CallWords();
 
     public static NoticeCategory Category(string appId)
     {

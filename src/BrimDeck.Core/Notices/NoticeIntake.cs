@@ -40,6 +40,18 @@ public static class NoticeIntake
         return Build(message, NoticeOrigin.Cli, NoticeKeys.Cli(distro, cliName), cliName, distro, CliInstance(distro, cliName, message), NoticeCapabilities.None, now, zone);
     }
 
+    // The WSL link's own count of notices, on the bridge's reading thread before anything reaches the UI thread, as the pipe
+    // counts its messages (W5): a program in the distribution calling Notify in a loop must not fill the UI thread's queue.
+    // Whether the message goes on; refusal is the reply for a brim-notify waiting through the agent, null when nobody waits.
+    // Only notices count: status reports and closes are few and bounded by the agent.
+    public static bool AdmitFromAgent(IntakeGate gate, NoticeMessage message, long nowMilliseconds, out NoticeMessage? refusal)
+    {
+        refusal = null;
+        if (message.Type != NoticeTypes.Notify || gate.Admit(nowMilliseconds)) return true;
+        if (message.Origin == "cli" && message.EventId is { } id) refusal = NoticeProtocol.Reply(NoticeResults.Rejected, "rate-limited", id);
+        return false;
+    }
+
     // A command-line notice's instance at its source: the sender's event id within its own name (core-M1), so the same
     // --id from another -s is another notice; a blank id is no id, and the notice is its own.
     private static string CliInstance(string? distro, string name, NoticeMessage message)

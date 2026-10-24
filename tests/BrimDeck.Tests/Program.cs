@@ -17,6 +17,7 @@ try
     await NoticeProtocolTests.Run(Check);
     AuditWslTests.Run(Check);
     await AuditWsl2Tests.Run(Check);
+    await NoticeWslOpsTests.Run(Check);
     NoticeCoreTests.Run(root, Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeTimeTests.Run(Check);
@@ -29,6 +30,7 @@ try
     AuditUiTests.Run(Check);
     AuditFollowupTests.Run(Check);
     AuditWin2Tests.Run(Check);
+    NoticeOpsTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     NoticeGlyphTests.Run(Check);
     ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");

@@ -20,9 +20,15 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
     public string Session { get; } = session;
     // Ids handed out and still open, so that CloseNotification and BrimDeck's dismissals only signal real notices.
     private readonly HashSet<uint> _open = [];
+    // When the open notices whose application asked for an expire_timeout expire; only ids still in _open (W12).
+    private readonly Dictionary<uint, DateTimeOffset> _expires = [];
     public const int MaxOpen = 4096;
 
-    public ServiceOutput Handle(DBusMessage call)
+    // When the next notice expires; null while none asked to, so nothing needs to wake.
+    public DateTimeOffset? NextExpiry => _expires.Count == 0 ? null : _expires.Values.Min();
+
+    // now: when the call arrived, from which an expire_timeout counts; the present by default.
+    public ServiceOutput Handle(DBusMessage call, DateTimeOffset? now = null)
     {
         if (call.Type != DBusMessageType.MethodCall) return ServiceOutput.None;
         bool wantsReply = (call.Flags & DBusMessage.NoReplyExpected) == 0;
@@ -46,6 +52,11 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
                     uint id = replaces != 0 && _open.Contains(replaces) ? replaces : NextId();
                     var message = FreedesktopNotifications.ToNotice(call.Body, id);
                     message.Session = Session;
+                    // A positive expire_timeout closes the notice for the application when it runs out, as the
+                    // specification asks: "notify-send --wait -t 5000" waits for that. -1 (the server decides) and 0
+                    // (never) keep it open until the user acts on it; a replacement's own timeout counts from now.
+                    if (call.Body[7] is int timeout && timeout > 0) _expires[id] = (now ?? DateTimeOffset.UtcNow).AddMilliseconds(timeout);
+                    else _expires.Remove(id);
                     forward.Add(message);
                     reply = call.ReturnFor("u", id);
                     break;
@@ -53,7 +64,7 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
                 case (FreedesktopNotifications.Interface or null, "CloseNotification") when call.Signature == "u":
                 {
                     uint id = (uint)call.Body[0];
-                    if (_open.Remove(id))
+                    if (Forget(id))
                     {
                         bus.Add(Closed(id, FreedesktopNotifications.ClosedByCall));
                         forward.Add(new NoticeMessage { Type = NoticeTypes.Close, Origin = "dbus", Session = Session, NativeId = Id(id), Reason = (int)FreedesktopNotifications.ClosedByCall });
@@ -88,20 +99,31 @@ public sealed class NotificationServer(string version, Func<string>? machineId =
     // The user chose an action in BrimDeck: the application learns which, and the notice closes as dismissed.
     public IReadOnlyList<DBusMessage> ActionInvoked(uint id, string key)
     {
-        if (!_open.Remove(id)) return [];
+        if (!Forget(id)) return [];
         return [DBusMessage.Signal(FreedesktopNotifications.Path, FreedesktopNotifications.Interface, "ActionInvoked", "us", id, key), Closed(id, FreedesktopNotifications.DismissedByUser)];
     }
 
     // The user dismissed the notice in BrimDeck (its close button, or cleared it from the recent notices). A notice BrimDeck
     // merely stopped showing is not dismissed: it stays open for the application.
-    public IReadOnlyList<DBusMessage> Dismissed(uint id) => _open.Remove(id) ? [Closed(id, FreedesktopNotifications.DismissedByUser)] : [];
+    public IReadOnlyList<DBusMessage> Dismissed(uint id) => Forget(id) ? [Closed(id, FreedesktopNotifications.DismissedByUser)] : [];
+
+    // The notices whose expire_timeout ran out by now: closed for their applications as expired (W12). BrimDeck keeps them
+    // in its recent notices; a later dismissal there no longer reaches the application.
+    public IReadOnlyList<DBusMessage> Expire(DateTimeOffset now)
+    {
+        var due = _expires.Where(pair => pair.Value <= now).Select(pair => pair.Key).ToList();
+        foreach (var id in due) Forget(id);
+        return due.Select(id => Closed(id, FreedesktopNotifications.Expired)).ToList();
+    }
+
+    private bool Forget(uint id) { _expires.Remove(id); return _open.Remove(id); }
 
     private uint NextId()
     {
         do { _next = _next == uint.MaxValue ? 1 : _next + 1; } while (_open.Contains(_next));
         _open.Add(_next);
         // Applications that never close their notices must not grow the set without bound; the oldest ids are forgotten.
-        if (_open.Count > MaxOpen) _open.Remove(_open.Min());
+        if (_open.Count > MaxOpen) Forget(_open.Min());
         return _next;
     }
 

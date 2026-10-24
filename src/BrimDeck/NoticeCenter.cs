@@ -238,7 +238,8 @@ internal sealed class NoticeCenter : IDisposable
     private AttentionItem Item(string lane, Notice notice, bool refresh = false) => new()
     {
         Lane = lane, Kind = AttentionKind.Notice, Key = notice.Id, Group = notice.AppKey, Priority = notice.Priority, Payload = notice, Refresh = refresh,
-        Urgent = NoticeClock.Alerting(notice.Timing, DateTimeOffset.UtcNow),
+        // A ringing call is as urgent as an alarm; the user can still make its application low priority (NoticeHub).
+        Urgent = NoticeClock.Alerting(notice.Timing, DateTimeOffset.UtcNow) || notice.Call && notice.Priority != NoticePriority.Low,
         Duration = TimeSpan.FromSeconds(notice.Priority == NoticePriority.High ? Settings.NoticeHighDuration : Settings.NoticeDuration)
     };
 
@@ -353,7 +354,7 @@ internal sealed class NoticeCenter : IDisposable
 
     // A quota alert from a panel. It shows when nothing more important does; while the panel is open it waits.
     public void SubmitQuota(MainWindow deck, object alert, string key)
-        => Apply(Attention.Submit(new AttentionItem { Lane = deck.NoticeLane, Kind = AttentionKind.Quota, Key = key, Payload = alert, Duration = TimeSpan.FromSeconds(5) }, DateTimeOffset.UtcNow));
+        => Apply(Attention.Submit(new AttentionItem { Lane = deck.NoticeLane, Kind = AttentionKind.Quota, Key = key, Payload = alert, Duration = MainWindow.AlertShown }, DateTimeOffset.UtcNow));
     // A track change shows only if nothing else does right now. True when it shows.
     public bool TryTrack(MainWindow deck, TimeSpan duration)
     {

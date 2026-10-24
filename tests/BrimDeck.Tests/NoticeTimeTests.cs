@@ -264,6 +264,15 @@ internal static class NoticeTimeTests
         check("Calendar companions' notifications are all events", Kind(Toast(calendar, "牙医", "明天")) is { Kind: NoticeTimeKind.Event, StartsAt: null });
         check("Other mail programs are known by name", Kind(Toast("E7CF176E110C211B", "Ann", "Hello", name: "Mozilla Thunderbird")) is { Kind: NoticeTimeKind.Mail }
             && NoticeTimeSources.Classify(Toast("Some.App", "Ann", "15 分钟后"), China).Timing is null);
+        check("Microsoft To Do's reminders ring like alarms", Kind(Toast("Microsoft.Todos_8wekyb3d8bbwe!App", "交房租", "今天")) is { Kind: NoticeTimeKind.Alarm } todo && todo.EndsAt == TimeNow);
+        var gmail = Toast("Chrome", "张三", "周报") with { AppKey = "windows:Chrome|mail.google.com" };
+        var gmailReminder = Toast("Chrome", "周会", "15 分钟后") with { AppKey = "windows:Chrome|mail.google.com" };
+        var googleCalendar = Toast("Chrome", "牙医", "下午3:00 - 下午4:00", created: created) with { AppKey = "windows:Chrome|calendar.google.com" };
+        const string qqMailApp = "Microsoft.MicrosoftEdge.Stable_8wekyb3d8bbwe!https://mail.qq.com/";
+        check("Web mail in the browser is mail, and its reminders are events", Kind(gmail) is { Kind: NoticeTimeKind.Mail }
+            && Kind(gmailReminder) is { Kind: NoticeTimeKind.Event } reminder && reminder.StartsAt == TimeNow.AddMinutes(15) && Kind(Toast(qqMailApp, "李四", "合同")) is { Kind: NoticeTimeKind.Mail });
+        check("A web calendar's notices are events", Kind(googleCalendar) is { Kind: NoticeTimeKind.Event } web && web.StartsAt == new DateTimeOffset(2026, 10, 24, 7, 0, 0, TimeSpan.Zero));
+        check("Other sites stay as they are", NoticeTimeSources.Classify(Toast("Chrome", "x", "15 分钟后") with { AppKey = "windows:Chrome|github.com" }, China).Timing is null);
         var wsl = Toast(outlook, "x", "y") with { Origin = NoticeOrigin.Wsl };
         var labelled = Toast(outlook, "x", "15 分钟后") with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Mail } };
         check("Only Windows notifications not sorted yet are sorted", NoticeTimeSources.Classify(wsl, China).Timing is null && NoticeTimeSources.Classify(labelled, China).Timing!.Kind == NoticeTimeKind.Mail);
