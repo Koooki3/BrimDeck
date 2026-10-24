@@ -21,6 +21,7 @@ internal static class NoticeCoreTests
         SettingsValues(root, check);
         AuditCoreTests.Run(root, check);
         AuditCore2Tests.Run(root, check);
+        AuditR3Tests.Run(root, check);
     }
 
     private static NoticeInput Input(string instance, string app = "windows:Chat", string title = "Hi", string body = "Body", string? replace = null,

@@ -89,9 +89,13 @@ public static class WindowsPrograms
     // cmd's own commands, which are no files to find.
     private static readonly HashSet<string> Builtins = new(StringComparer.OrdinalIgnoreCase)
     {
-        "assoc", "call", "cd", "chdir", "cls", "copy", "date", "del", "dir", "echo", "erase", "ftype", "md", "mkdir", "mklink",
-        "move", "path", "rd", "ren", "rename", "rmdir", "set", "start", "time", "title", "type", "ver", "vol"
+        "assoc", "cd", "chdir", "cls", "copy", "date", "del", "dir", "echo", "erase", "ftype", "md", "mkdir", "mklink",
+        "move", "path", "rd", "ren", "rename", "rmdir", "set", "time", "title", "type", "ver", "vol"
     };
+
+    // cmd's own commands that read their arguments as a command line once more (call, and start's new cmd), expanding %NAME%
+    // again after CmdArguments kept it from the first reading (N2). They are refused; "cmd /c" says so openly when meant.
+    public static bool Reparses(string name) => name.Equals("call", StringComparison.OrdinalIgnoreCase) || name.Equals("start", StringComparison.OrdinalIgnoreCase);
 
     // The full path of the program, or null. pathExt is %PATHEXT%; exists says whether a file is there. skip is BrimDeck's
     // own folder, never searched even when it is in PATH: it holds no program of the user's, and others may be able to write

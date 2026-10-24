@@ -13,7 +13,8 @@ public sealed class NoticeHub
 {
     public const int DefaultMaxCount = 500;
     // Reminders still to come and running stopwatches stay past MaxCount, but not without end: a script that starts timers
-    // in a loop would otherwise grow the list (and the file) for ever. Beyond this the oldest created go (C-M3).
+    // in a loop would otherwise grow the list (and the file) for ever. Beyond this the application holding the most loses
+    // the one received longest ago (C-M3, M1).
     public const int MaxPending = 200;
     private static readonly TimeSpan EventMemory = TimeSpan.FromMinutes(10);
     // Senders choose application names freely; at most this many are remembered, the least recently seen go first.
@@ -72,7 +73,13 @@ public sealed class NoticeHub
     // keys with what the distribution's agent delivered (S3).
     private static bool SameLink(Notice notice, NoticeInput input) => NoticeIntake.ViaPipe(notice.InstanceKey) == NoticeIntake.ViaPipe(input.InstanceKey);
 
-    private Notice? Replacing(NoticeInput input, string key) => _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key && SameLink(n, input));
+    // The notice -r or stop names: one from the same link first. The distribution's agent also reaches what came over the pipe
+    // under its name, which is where WSL's brim-notify turns while the agent is down (M2); never the other way round, since a
+    // pipe sender cannot be told from any Windows process naming the distribution (S3).
+    private Notice? Replacing(NoticeInput input, string key)
+        => _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key && SameLink(n, input))
+            ?? (input.Distro is null || NoticeIntake.ViaPipe(input.InstanceKey) ? null
+                : _notices.FirstOrDefault(n => n.AppKey == input.AppKey && n.ReplaceKey == key && NoticeIntake.ViaPipe(n.InstanceKey)));
 
     public static NoticePriority EffectivePriority(NoticeAppRule? rule, NoticePriority hint)
     {
@@ -136,7 +143,7 @@ public sealed class NoticeHub
             Progress = input.Progress, Actions = [.. input.Actions], Capabilities = input.Capabilities, Timing = input.Timing?.Copy()
         };
         _notices.Insert(0, notice); _byId[notice.Id] = notice;
-        Prune(now, notify: false);
+        Prune(now, notify: false, keep: notice);
         Recount(); Changed?.Invoke(); Persist?.Invoke(false);
         return new(NoticeReceipt.Accepted, notice, !quiet && !late, late ? "late" : null);
     }
@@ -278,8 +285,9 @@ public sealed class NoticeHub
     private static bool Pending(Notice notice, DateTimeOffset now)
         => NoticeClock.NextDue(notice.Timing) is not null || notice.Timing is { Kind: NoticeTimeKind.Stopwatch } && NoticeClock.IsLive(notice.Timing, now);
 
-    // Drops notices older than the retention and beyond the count limit. Returns whether anything was dropped.
-    public bool Prune(DateTimeOffset now, bool notify = true)
+    // Drops notices older than the retention and beyond the count limit. Returns whether anything was dropped. keep, the
+    // notice just received, stays whatever the limits: its sender is told it was accepted (M1).
+    public bool Prune(DateTimeOffset now, bool notify = true, Notice? keep = null)
     {
         int before = _notices.Count;
         var limit = now - Retention;
@@ -288,12 +296,12 @@ public sealed class NoticeHub
         // of the others go (core-L2).
         _notices.RemoveAll(n => LastChange(n) < limit && !Pending(n, now));
         for (int i = _notices.Count - 1; i >= 0 && _notices.Count > MaxCount; i--)
-            if (!Pending(_notices[i], now)) _notices.RemoveAt(i);
+            if (!Pending(_notices[i], now) && _notices[i] != keep) _notices.RemoveAt(i);
         // The pending ones have their own limit (C-M3).
         var pending = _notices.Where(n => Pending(n, now)).ToList();
         if (pending.Count > MaxPending)
         {
-            var dropped = pending.OrderByDescending(n => n.CreatedAt).Skip(MaxPending).ToHashSet();
+            var dropped = Excess(pending, pending.Count - MaxPending, keep);
             _notices.RemoveAll(dropped.Contains);
             PendingDropped?.Invoke(dropped.Count);
         }
@@ -302,6 +310,27 @@ public sealed class NoticeHub
         if (changed) Reindex();
         if (changed && notify) { Recount(); Changed?.Invoke(); Persist?.Invoke(false); }
         return changed;
+    }
+
+    // The pending notices to drop (M1): one at a time from the application holding the most, the one BrimDeck received longest
+    // ago first (BrimDeck's own time: a sender chooses its CreatedAt). A script starting timers in a loop so loses its own, not
+    // the reminders other applications set long ago. keep is never among them.
+    private static HashSet<Notice> Excess(List<Notice> pending, int count, Notice? keep)
+    {
+        var sources = pending.GroupBy(n => n.AppKey, StringComparer.Ordinal)
+            .Select(g => (Held: g.Count(), Oldest: new Queue<Notice>(g.Where(n => n != keep).OrderBy(n => n.ReceivedAt)))).ToList();
+        var dropped = new HashSet<Notice>();
+        while (dropped.Count < count)
+        {
+            int most = -1;
+            for (int i = 0; i < sources.Count; i++)
+                if (sources[i].Oldest.Count > 0 && (most < 0 || sources[i].Held > sources[most].Held
+                    || sources[i].Held == sources[most].Held && sources[i].Oldest.Peek().ReceivedAt < sources[most].Oldest.Peek().ReceivedAt)) most = i;
+            if (most < 0) break;
+            dropped.Add(sources[most].Oldest.Dequeue());
+            sources[most] = (sources[most].Held - 1, sources[most].Oldest);
+        }
+        return dropped;
     }
 
     private static DateTimeOffset LastChange(Notice notice) => notice.ReceivedAt > notice.UpdatedAt ? notice.ReceivedAt : notice.UpdatedAt;

@@ -130,7 +130,8 @@ internal static class AuditCore2Tests
         var agentStop = NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", ReplaceId = "t1", Stop = true }, "Ubuntu", false, T0);
         check("S3: a pipe sender naming a distribution keeps its rules but marks its keys", piped.AppKey == "cli:Ubuntu:b" && NoticeIntake.ViaPipe(piped.InstanceKey)
             && !NoticeIntake.ViaPipe(agentStop.InstanceKey));
-        check("S3: the agent's stop does not reach a timer the pipe started", hub.Receive(agentStop, T0.AddSeconds(1)).Reason == "no-timer");
+        // r3 M2: the other way round now: WSL's brim-notify started it over the pipe while the agent was down.
+        check("S3: the agent's stop reaches a timer the pipe started under its distribution (r3 M2)", hub.Receive(agentStop, T0.AddSeconds(1)).Receipt == NoticeReceipt.Updated && piped.Timing!.Stopped);
         var real = hub.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", ReplaceId = "t2", Kind = "stopwatch" }, "Ubuntu", false, T0) with
         { Timing = new NoticeTiming { Kind = NoticeTimeKind.Stopwatch, StartsAt = T0, Native = true } }, T0.AddSeconds(2)).Notice!;
         var spoof = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", ReplaceId = "t2", Title = "伪造" }, T0), T0.AddSeconds(3));

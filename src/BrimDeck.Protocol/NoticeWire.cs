@@ -191,13 +191,15 @@ public static class NoticeProtocol
     {
         if (text is null) return null;
         var builder = new StringBuilder(Math.Min(text.Length, limit));
+        // Combining marks the output ends with (L1): what was dropped between them does not start the count again.
+        int marks = 0;
         for (int i = 0; i < text.Length && builder.Length < limit; i++)
         {
             char c = text[i];
             bool pair = char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]);
-            if (Unwanted(text, i, out bool breaks)) { if (breaks) builder.Append('\n'); }
-            else if (char.IsControl(c) && c is not ('\n' or '\t')) { if (c != '\r') builder.Append(' '); }
-            else { builder.Append(c); if (pair) builder.Append(text[i + 1]); }
+            if (Unwanted(text, i, marks, out bool breaks)) { if (breaks) { builder.Append('\n'); marks = 0; } }
+            else if (char.IsControl(c) && c is not ('\n' or '\t')) { if (c != '\r') { builder.Append(' '); marks = 0; } }
+            else { builder.Append(c); if (pair) builder.Append(text[i + 1]); marks = Mark(text, i) ? marks + 1 : 0; }
             if (pair) i++;
         }
         if (builder.Length > limit) builder.Length = limit;
@@ -215,19 +217,24 @@ public static class NoticeProtocol
     // control character become a space (a carriage return goes). BrimDeck.Core's NoticeText.Clean is this.
     public static string Clean(string text, bool singleLine = false)
     {
-        bool Drop(int index) => Unwanted(text, index, out _) || singleLine && char.IsControl(text[index]);
-        int i = 0;
+        bool Pair(int index) => char.IsHighSurrogate(text[index]) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]);
+        // Combining marks the output ends with (L1): what was dropped between them does not start the count again.
+        int i = 0, marks = 0;
         for (; i < text.Length; i++)
-            if (Drop(i)) break;
+        {
+            if (Unwanted(text, i, marks, out _) || singleLine && char.IsControl(text[i])) break;
+            marks = Mark(text, i) ? marks + 1 : 0;
+            if (Pair(i)) i++;
+        }
         if (i == text.Length) return text;
         var builder = new StringBuilder(text.Length);
         builder.Append(text, 0, i);
         for (; i < text.Length; i++)
         {
-            bool pair = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]);
-            if (Unwanted(text, i, out bool breaks)) { if (breaks) builder.Append(singleLine ? ' ' : '\n'); }
-            else if (singleLine && char.IsControl(text[i])) { if (text[i] != '\r') builder.Append(' '); }
-            else { builder.Append(text[i]); if (pair) builder.Append(text[i + 1]); }
+            bool pair = Pair(i);
+            if (Unwanted(text, i, marks, out bool breaks)) { if (breaks) { builder.Append(singleLine ? ' ' : '\n'); marks = 0; } }
+            else if (singleLine && char.IsControl(text[i])) { if (text[i] != '\r') { builder.Append(' '); marks = 0; } }
+            else { builder.Append(text[i]); if (pair) builder.Append(text[i + 1]); marks = Mark(text, i) ? marks + 1 : 0; }
             if (pair) i++;
         }
         return builder.ToString();
@@ -236,14 +243,15 @@ public static class NoticeProtocol
     // Combining marks one letter keeps; enough for Vietnamese, Indic and Thai stacks and an emoji keycap.
     public const int MaxMarks = 4;
 
-    private static bool Unwanted(string text, int index, out bool breaks)
+    // marks: how many combining marks the output kept so far ends with.
+    private static bool Unwanted(string text, int index, int marks, out bool breaks)
     {
         var category = char.GetUnicodeCategory(text, index);
         breaks = category is UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
         if (breaks) return true;
         char c = text[index];
         if (c is '\u115F' or '\u1160' or '\u3164' or '\uFFA0') return true;
-        if (category is UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark) return MarksBefore(text, index) >= MaxMarks;
+        if (category is UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark) return marks >= MaxMarks;
         if (category != UnicodeCategory.Format || c is '\u200C' or '\u200D' or '\u200E' or '\u200F' or '\u061C') return false;
         return !(Tag(text, index) && AfterFlag(text, index));
     }
@@ -254,26 +262,19 @@ public static class NoticeProtocol
             && char.ConvertToUtf32(text[index], text[index + 1]) is >= 0xE0020 and <= 0xE007F;
 
     // Whether the tag at index follows a black flag (U+1F3F4) through other tags only, as in a subdivision flag; the cancel
-    // tag (U+E007F) ends the flag, so a tag after it is stray.
+    // tag (U+E007F) ends the flag, so a tag after it is stray. A flag's tags are a region's code, a few letters: those beyond
+    // MaxFlagTags are stray too, which keeps the look back short (L1) and hides no text behind a flag.
     private static bool AfterFlag(string text, int index)
     {
-        int j = index;
-        while (j >= 2 && Tag(text, j - 2) && !(text[j - 2] == '\uDB40' && text[j - 1] == '\uDC7F')) j -= 2;
+        int j = index, tags = 0;
+        while (tags < MaxFlagTags - 1 && j >= 2 && Tag(text, j - 2) && !(text[j - 2] == '\uDB40' && text[j - 1] == '\uDC7F')) { j -= 2; tags++; }
         return j >= 2 && text[j - 2] == '\uD83C' && text[j - 1] == '\uDFF4';
     }
 
-    // How many combining marks directly precede the code point at index (up to MaxMarks).
-    private static int MarksBefore(string text, int index)
-    {
-        int count = 0, j = index;
-        while (count < MaxMarks && j > 0)
-        {
-            int start = j >= 2 && char.IsLowSurrogate(text[j - 1]) && char.IsHighSurrogate(text[j - 2]) ? j - 2 : j - 1;
-            if (char.GetUnicodeCategory(text, start) is not (UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark)) break;
-            count++; j = start;
-        }
-        return count;
-    }
+    // Tags one flag keeps at most: a subdivision's code ("gbsct") with the cancel tag takes six.
+    public const int MaxFlagTags = 8;
+
+    private static bool Mark(string text, int index) => char.GetUnicodeCategory(text, index) is UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark;
 }
 
 // Frames on a stream: a 4-byte little-endian length, then that many bytes of UTF-8 JSON.

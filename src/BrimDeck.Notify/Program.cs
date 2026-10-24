@@ -66,6 +66,11 @@ internal static class Program
         string name = program[0];
         string? path = Environment.GetEnvironmentVariable("PATH"), pathExt = Environment.GetEnvironmentVariable("PATHEXT");
         var file = WindowsPrograms.Find(name, path, pathExt, File.Exists, skip: AppContext.BaseDirectory);
+        if (file is null && WindowsPrograms.Reparses(name))
+        {
+            Console.Error.WriteLine("brim-notify: " + name + " reads its arguments a second time, expanding %NAME% in them; refused. Run the program itself, or through cmd /c.");
+            return (null, NotifyCli.Usage, false);
+        }
         bool builtin = file is null && WindowsPrograms.IsBuiltin(name);
         if (file is null && !builtin)
         {
