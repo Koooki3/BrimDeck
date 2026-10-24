@@ -190,7 +190,9 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
             var existing = new FileInfo(path);
             if (existing.Exists && (existing.Attributes & FileAttributes.ReparsePoint) == 0 && existing.Length == bytes.Length)
             {
-                existing.LastWriteTimeUtc = DateTime.UtcNow;
+                // win2 P5: marked at most once a day; a day's precision is plenty to tell the least recently used.
+                var now = DateTime.UtcNow;
+                if (NoticeIconStore.NeedsMark(existing.LastWriteTimeUtc, now)) existing.LastWriteTimeUtc = now;
                 return;
             }
             temporary = Path.Combine(folder, ".icon." + Guid.NewGuid().ToString("N") + ".tmp");

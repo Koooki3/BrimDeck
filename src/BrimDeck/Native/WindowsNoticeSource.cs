@@ -25,7 +25,8 @@ public enum NoticeSourceState
 // is looked up (about 2.5 ms of CPU, a fifth of reading the whole list), and the whole list is read every FullInterval and
 // whenever the probe finds a new notice. The probe needs the newest id Windows has given out: notifications removed before
 // BrimDeck started can leave that ahead of the newest one still listed, so until a full reading has seen a notice arrive, the
-// list is read every WindowsNoticeList.UnknownWait instead, less often while nothing arrives. Access is checked before every
+// list is read every 3 s instead, and less often (WindowsNoticeList.UnknownWait) only once nothing has happened for a few
+// minutes (WindowsNoticePace). A step that fails waits longer after each failure in a row. Access is checked before every
 // full reading, the only one that can conclude that a notice was removed. The first reading after starting or being granted
 // access is a baseline: notices already there are not shown again. The first after waking hands over what arrived meanwhile
 // as Missed (WindowsNoticeList). Events are raised on a worker thread.
@@ -51,11 +52,19 @@ internal sealed class WindowsNoticeSource : IDisposable
         public DateTimeOffset LastFull = DateTimeOffset.MinValue;
         // Wakes this loop only: a loop still ending cannot take the wake meant for the next one.
         public readonly SemaphoreSlim Wake = new(0, 1);
-        // The last failure, so that one repeating every step goes to notices.log once.
+        // The last failure, so that one repeating every step goes to notices.log once, and how many steps in a row failed.
         public string? Failure;
+        public int Failures;
     }
     private Run? _run;
     private bool _dirty, _quiet;
+    // When something last happened that makes a notice likely soon (WindowsNoticePace.Unconfirmed). The pointer on an island
+    // counts for every source (Interacted), hence static.
+    private DateTimeOffset _lastActivity = DateTimeOffset.UtcNow;
+    private static long s_lastInteraction;
+    // win2 P2: a reading Windows has not finished, even one given up on. A new one waits for it, so readings that never
+    // return cannot pile up (UserNotificationListener.Current is one object for every run).
+    private Task? _reading;
 
     public NoticeSourceState State { get; private set; } = NoticeSourceState.Off;
     public string Detail { get; private set; } = "";
@@ -87,7 +96,7 @@ internal sealed class WindowsNoticeSource : IDisposable
     {
         if (_run is not null) return;
         var run = new Run();
-        lock (_gate) { _run = run; _list.Reset(); }
+        lock (_gate) { _run = run; _list.Reset(); _lastActivity = DateTimeOffset.UtcNow; }
         SystemEvents.PowerModeChanged += PowerModeChanged;
         _ = Task.Run(() => LoopAsync(run));
     }
@@ -104,9 +113,12 @@ internal sealed class WindowsNoticeSource : IDisposable
     // Locked or paused: arriving notices are not shown, so the list is read rarely; it is read in full when that ends.
     public void SetQuiet(bool quiet)
     {
-        lock (_gate) { if (_quiet == quiet) return; _quiet = quiet; if (!quiet) _dirty = true; }
+        lock (_gate) { if (_quiet == quiet) return; _quiet = quiet; if (!quiet) { _dirty = true; _lastActivity = DateTimeOffset.UtcNow; } }
         Wake();
     }
+
+    // The pointer came onto an island (MainWindow): someone is at the screen, so the brisk reading starts over (C-L8).
+    public static void Interacted() => Interlocked.Exchange(ref s_lastInteraction, DateTimeOffset.UtcNow.UtcTicks);
 
     // Reads the list again soon, for example after access was granted. Returns the request's number: a Synced with this number
     // or more comes from a reading that started after it.
@@ -115,7 +127,7 @@ internal sealed class WindowsNoticeSource : IDisposable
     private int Refresh(WindowsNoticeBaseline baseline)
     {
         int number;
-        lock (_gate) { _dirty = true; _list.ExpectBaseline(baseline); number = ++_refreshes; }
+        lock (_gate) { _dirty = true; _list.ExpectBaseline(baseline); number = ++_refreshes; _lastActivity = DateTimeOffset.UtcNow; }
         Wake();
         return number;
     }
@@ -146,7 +158,7 @@ internal sealed class WindowsNoticeSource : IDisposable
         {
             while (!token.IsCancellationRequested)
             {
-                try { await StepAsync(run); run.Failure = null; }
+                try { await StepAsync(run); run.Failure = null; run.Failures = 0; }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
                 // Any failure, a reading that timed out included, is reported and the next step starts over with a new
                 // listener and a full reading, instead of the loop ending while the settings still say it receives (life-L5).
@@ -156,10 +168,11 @@ internal sealed class WindowsNoticeSource : IDisposable
                     Detach(run);
                     if (ex is not (COMException or InvalidOperationException or UnauthorizedAccessException or TimeoutException) && run.Failure != ex.Message)
                         NoticeCenter.Log(ex);
-                    run.Failure = ex.Message;
+                    run.Failure = ex.Message; run.Failures++;
                     SetState(NoticeSourceState.Failed, ex.Message, run);
                 }
-                try { await run.Wake.WaitAsync(ProbeInterval, token); }
+                // A Refresh (access granted, waking, unlocking) still tries again at once.
+                try { await run.Wake.WaitAsync(run.Failures > 0 ? WindowsNoticePace.Retry(run.Failures) : ProbeInterval, token); }
                 catch (OperationCanceledException) { return; }
             }
         }
@@ -181,12 +194,15 @@ internal sealed class WindowsNoticeSource : IDisposable
         uint newest;
         TimeSpan unknownWait;
         bool confirmed;
+        DateTimeOffset active;
         lock (_gate)
         {
             full = _dirty || _list.Baseline != WindowsNoticeBaseline.None; quiet = _quiet;
             newest = _list.Newest; confirmed = _list.Confirmed; unknownWait = _list.UnknownWait;
+            var touched = new DateTimeOffset(Interlocked.Read(ref s_lastInteraction), TimeSpan.Zero);
+            active = touched > _lastActivity ? touched : _lastActivity;
         }
-        var interval = quiet ? QuietInterval : run.Events ? EventSafetyInterval : !confirmed ? unknownWait : FullInterval;
+        var interval = quiet ? QuietInterval : run.Events ? EventSafetyInterval : !confirmed ? WindowsNoticePace.Unconfirmed(now, active, unknownWait) : FullInterval;
         if (!full && now - run.LastFull >= interval) full = true;
         // The next id is taken by the next notice for this user, so finding it means something arrived. Without access the
         // lookup finds nothing, and the next full reading reports the change of access.
@@ -217,8 +233,26 @@ internal sealed class WindowsNoticeSource : IDisposable
         int covers;
         lock (_gate) { _dirty = false; covers = _refreshes; }
         run.LastFull = now;
-        var list = await run.Listener.GetNotificationsAsync(NotificationKinds.Toast).AsTask(token).WaitAsync(ReadLimit, token);
-        Sync(list, run, covers);
+        Sync(await ReadAsync(run.Listener, token), run, covers);
+    }
+
+    // The whole list, given up after ReadLimit. win2 P2: the WinRT call itself is cancelled then (before, only the wait for it
+    // ended and the call stayed outstanding), and while one that ignored its cancellation is still out, no other is started.
+    private async Task<IReadOnlyList<UserNotification>> ReadAsync(UserNotificationListener listener, CancellationToken token)
+    {
+        Task<IReadOnlyList<UserNotification>> read;
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(token);
+        lock (_gate)
+        {
+            if (_reading is { IsCompleted: false }) throw new TimeoutException("An earlier reading of the notification list has not finished.");
+            limit.CancelAfter(ReadLimit);
+            read = listener.GetNotificationsAsync(NotificationKinds.Toast).AsTask(limit.Token);
+            _reading = read;
+        }
+        // A reading given up on may still fail later; that is seen here rather than as an unobserved task exception.
+        _ = read.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+        try { return await read.WaitAsync(ReadLimit + TimeSpan.FromSeconds(1), token); }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { throw new TimeoutException("Windows did not return the notification list in time."); }
     }
 
     private void Sync(IReadOnlyList<UserNotification> list, Run run, int covers)
@@ -237,6 +271,7 @@ internal sealed class WindowsNoticeSource : IDisposable
             // Stopped (and perhaps started again) while reading: this reading belongs to no run any more.
             if (_run != run) return;
             changes = _list.Compare(listed, id => Read(byId[id], id));
+            if (changes.Arrived.Count + changes.Missed.Count > 0) _lastActivity = DateTimeOffset.UtcNow;
         }
         foreach (var input in changes.Arrived) Received?.Invoke(input);
         foreach (var input in changes.Missed) Missed?.Invoke(input);

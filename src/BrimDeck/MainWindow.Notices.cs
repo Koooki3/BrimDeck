@@ -104,6 +104,10 @@ public partial class MainWindow
 
     private AttentionItem? _noticeAfterBoot;
     private System.Windows.Threading.DispatcherTimer? _bootNotice;
+    // win2 P4: when the held notice started waiting. A boot that never ends (its clock replaced, frames stopped on a locked
+    // session) holds it no longer than BootNoticeLimit; the notice then shows over whatever the island is.
+    private long _bootNoticeSince;
+    private const int BootNoticeLimit = 10_000;
 
     // Shows the item once the boot has played; ended or updated meanwhile (AttentionEnded, AttentionUpdated), the latest wins.
     private void ShowAfterBoot(AttentionItem item)
@@ -111,10 +115,16 @@ public partial class MainWindow
         _noticeAfterBoot = item;
         if (_bootNotice is null)
         {
-            _bootNotice = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Normal, Dispatcher) { Interval = TimeSpan.FromMilliseconds(100) };
+            _bootNotice = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Normal, Dispatcher);
             _bootNotice.Tick += (_, _) =>
             {
-                if (BootHoldsPointer && _noticeAfterBoot is not null) return;
+                long now = Environment.TickCount64;
+                if (BootHoldsPointer && _noticeAfterBoot is not null && now - _bootNoticeSince < BootNoticeLimit)
+                {
+                    // Once the boot has started its end is known: the next look is then, not every 100 ms.
+                    _bootNotice.Interval = BootNoticeWait(now);
+                    return;
+                }
                 _bootNotice.Stop();
                 if (_noticeAfterBoot is not { } waiting) return;
                 _noticeAfterBoot = null;
@@ -122,7 +132,16 @@ public partial class MainWindow
                 (_noticeWindow ??= new NoticeWindow(this, _app)).Present(waiting);
             };
         }
+        if (!_bootNotice.IsEnabled) _bootNoticeSince = Environment.TickCount64;
+        _bootNotice.Interval = BootNoticeWait(Environment.TickCount64);
         _bootNotice.Start();
+    }
+
+    // Until the boot's end, or a short look while it still waits for an idle dispatcher (Boot), never past the limit.
+    private TimeSpan BootNoticeWait(long now)
+    {
+        long wait = _bootWaiting || _bootEnds <= now ? 100 : _bootEnds - now + 1;
+        return TimeSpan.FromMilliseconds(Math.Clamp(wait, 1, Math.Max(1, _bootNoticeSince + BootNoticeLimit - now)));
     }
 
     // While a notice covers the island, the island itself is not drawn (see NoticeWindow.Present and Finish). A notice that has
