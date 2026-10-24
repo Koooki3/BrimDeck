@@ -41,6 +41,7 @@ Windows 通知里的应用标识有时看不出是哪个应用，BrimDeck 会这
 - **默认分类**：Windows 通知不带分类。Claude、Codex（ChatGPT）、Gemini 桌面版和 Cursor 的通知标为“任务”；Windows 系统提醒、Windows 安全中心、NVIDIA App、Adobe Creative Cloud、Clash Party/Clash Verge、截图工具、联想和英特尔的工具等标为“提示”；聊天、邮件和浏览器保持“消息”。
 - **来电**：聊天应用（QQ、微信、Teams、WhatsApp、Discord 等）和手机连接的通知如果是语音/视频通话邀请（“邀请你进行语音通话”“Incoming call”“is calling you”等），显示来电标记，并像闹钟一样立即弹出（该应用设为低优先级时除外）；“未接来电”不算。
 - **被替换的通知**：应用用同一条通知更新内容时（比如 QQ 把新消息合并成一条），Windows 会删掉旧通知、加入新通知。如果两者来自同一应用、标题相同，并且在同一次读取中出现，BrimDeck 会更新原来那条提示，不会留下两条。
+- **emoji 的显示**：WPF 不支持彩色字体，emoji 显示为单色；由多个 emoji 组合成的序列（如家庭、彩虹旗）可能显示为方框，国旗显示为两个字母。这是平台限制，文字本身不受影响。
 
 ### WSL
 

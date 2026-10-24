@@ -41,6 +41,7 @@ The application id in a Windows notification does not always say which applicati
 - **Default categories**: Windows notifications carry no category. Notices from the Claude, Codex (ChatGPT) and Gemini desktop apps and Cursor are marked "Task"; Windows system notices, Windows Security, NVIDIA App, Adobe Creative Cloud, Clash Party/Clash Verge, Snipping Tool, Lenovo and Intel utilities and similar are marked "Info"; chat, mail and browsers stay "Message".
 - **Calls**: a notice from a chat application (QQ, WeChat, Teams, WhatsApp, Discord and others) or Phone Link that is a voice or video call ("Incoming call", "is calling you", "邀请你进行语音通话"…) gets the call mark and shows at once like an alarm (unless the application is set to low priority); a missed call does not count.
 - **Replaced notifications**: when an application updates its notification (QQ gathering new messages into one, for example), Windows removes the old one and adds a new one. If both come from the same application with the same title in the same reading, BrimDeck updates the existing notice instead of keeping two.
+- **Emoji**: WPF draws no color fonts, so emoji are monochrome; sequences joined from several emoji (a family, the rainbow flag) may show as a box, and flags as two letters. This is a platform limit; the text itself is unaffected.
 
 ### WSL
 
