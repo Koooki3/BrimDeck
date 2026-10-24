@@ -354,7 +354,7 @@ internal sealed class NoticeCenter : IDisposable
 
     // A quota alert from a panel. It shows when nothing more important does; while the panel is open it waits.
     public void SubmitQuota(MainWindow deck, object alert, string key)
-        => Apply(Attention.Submit(new AttentionItem { Lane = deck.NoticeLane, Kind = AttentionKind.Quota, Key = key, Payload = alert, Duration = TimeSpan.FromSeconds(5) }, DateTimeOffset.UtcNow));
+        => Apply(Attention.Submit(new AttentionItem { Lane = deck.NoticeLane, Kind = AttentionKind.Quota, Key = key, Payload = alert, Duration = MainWindow.AlertShown }, DateTimeOffset.UtcNow));
     // A track change shows only if nothing else does right now. True when it shows.
     public bool TryTrack(MainWindow deck, TimeSpan duration)
     {

@@ -331,6 +331,10 @@ internal static class NoticeCoreTests
         settings.NotchWidth = 600;
         var wide = CollapsedGeometry.Resolve(settings, CompactStyle.Notch, monitor, work);
         check("A notch wider than the toast range keeps its width", NoticeGeometry.Frame(wide, monitor, work, NoticeForm.Toast, 300, 50).Rect.Width == wide.Surface.Width);
+        var full = CollapsedGeometry.Resolve(new DeckSettings { NotchWidth = 5000 }, CompactStyle.Notch, monitor, work);
+        var fullToast = NoticeGeometry.Frame(full, monitor, work, NoticeForm.Toast, 300, 50).Rect;
+        check("A toast over an island as wide as the screen covers it exactly (sync L7)", full.Surface.Width > monitor.Width - 2 * NoticeGeometry.ScreenMargin
+            && fullToast.X == full.Surface.X && fullToast.Width == full.Surface.Width);
         settings.NotchOffsetX = 4000;
         var edge = CollapsedGeometry.Resolve(settings, CompactStyle.Notch, monitor, work);
         var edgeToast = NoticeGeometry.Frame(edge, monitor, work, NoticeForm.Detail, 460, 300);
