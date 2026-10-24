@@ -101,6 +101,7 @@ internal sealed class NoticeCenter : IDisposable
         // A reading still under way when notices or the source were switched off arrives late; it is dropped.
         // Notifications of Windows' Clock, Outlook, the calendars and Teams are sorted into time kinds here (NoticeTimeSources).
         _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && !_disposed && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local)); });
+        _windows.Missed += input => _dispatcher.BeginInvoke(() => OnMissed(input));
         _windows.Removed += key => _dispatcher.BeginInvoke(() => { if (!_disposed) Hub.SourceRemoved(key); });
         _windows.StateChanged += () => _dispatcher.BeginInvoke(() => Changed?.Invoke());
         // Raised after the notices of a reading were handed over, so they are queued on the dispatcher before this.
@@ -170,7 +171,7 @@ internal sealed class NoticeCenter : IDisposable
     }
 
     // Windows notifications that arrived while the PC slept (WindowsNoticeSource.Missed, core-M5): recorded unviewed, not
-    // shown. To be wired with the event: _windows.Missed += input => _dispatcher.BeginInvoke(() => OnMissed(input));
+    // shown.
     private void OnMissed(NoticeInput input)
     {
         if (_enabled && !_disposed && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local) with { Missed = true });
