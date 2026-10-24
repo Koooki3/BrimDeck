@@ -44,7 +44,7 @@ internal static class NoticeStorage
         {
             var info = new DirectoryInfo(folder);
             if (!info.Exists) return FolderTrust.Trusted;
-            if ((info.Attributes & FileAttributes.ReparsePoint) != 0) return FolderTrust.Linked;
+            if (NoticeHistory.Linked(folder)) return FolderTrust.Linked;
             if (OnNetwork(folder)) return FolderTrust.Trusted;
             var security = info.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
             if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner) return unknown ? FolderTrust.Trusted : FolderTrust.Foreign;
@@ -83,7 +83,7 @@ internal static class NoticeStorage
     {
         foreach (FileSystemAccessRule rule in security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
         {
-            if (rule.AccessControlType != AccessControlType.Allow || (rule.FileSystemRights & WriteRights) == 0) continue;
+            if (rule.AccessControlType != AccessControlType.Allow || ((FileSystemRights)NoticeHistory.SpecificRights((int)rule.FileSystemRights) & WriteRights) == 0) continue;
             if (rule.IdentityReference is not SecurityIdentifier sid || sid == user) continue;
             if (sid.IsWellKnown(WellKnownSidType.LocalSystemSid) || sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)
                 || sid.IsWellKnown(WellKnownSidType.CreatorOwnerSid) || sid.Value == "S-1-3-4" || sid.Value.StartsWith(TrustedInstaller, StringComparison.Ordinal)) continue;
@@ -127,8 +127,41 @@ internal static class NoticeStorage
         return Check(folder, unknown: true) == FolderTrust.Trusted;
     }
 
-    public static string Describe(FolderTrust trust) => trust switch
+    // Whether Close can take effect and changes nothing but BrimDeck's own (M3): the folder is the user's own (or BrimDeck runs
+    // elevated and the administrators own it), and it holds only what BrimDeck keeps there, since the new rights pass down to
+    // everything inside that inherits its rights. A folder with more than that is better replaced by another one. Reads the
+    // disk: in the background.
+    public static bool Closable(string folder)
     {
+        try
+        {
+            var info = new DirectoryInfo(folder);
+            if (!info.Exists || OnNetwork(folder)) return false;
+            var user = WindowsIdentity.GetCurrent().User;
+            if (info.GetAccessControl(AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner) return false;
+            if (owner != user && !(owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid) && new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))) return false;
+            int seen = 0;
+            foreach (var entry in info.EnumerateFileSystemInfos())
+            {
+                if (++seen > 1000) return false;
+                if (entry is DirectoryInfo icons)
+                {
+                    if (icons.Name != "icons" || (icons.Attributes & FileAttributes.ReparsePoint) != 0) return false;
+                    foreach (var inner in icons.EnumerateFileSystemInfos())
+                        if (++seen > 1000 || inner is DirectoryInfo || !NoticeHistory.OwnName(inner.Name, inIcons: true)) return false;
+                }
+                else if (!NoticeHistory.OwnName(entry.Name, inIcons: false)) return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or PlatformNotSupportedException
+                                   or NotSupportedException or InvalidOperationException or ArgumentException) { return false; }
+    }
+
+    public static string Describe(FolderTrust trust, bool closable = true) => trust switch
+    {
+        FolderTrust.Shared when !closable => Loc.T("其他账户也可以改动该文件夹中的文件，BrimDeck 不会在其中读写。请选择其他文件夹。",
+            "Other accounts can change the files in this folder, so BrimDeck neither reads nor writes there. Choose another folder."),
         FolderTrust.Linked => Loc.T("该文件夹是链接，BrimDeck 不会在其中读写。请选择自己的文件夹。",
             "This folder is a link, so BrimDeck neither reads nor writes there. Choose a folder of your own."),
         FolderTrust.Foreign => Loc.T("该文件夹属于其他账户，BrimDeck 不会在其中读写。请选择自己的文件夹。",
@@ -139,7 +172,8 @@ internal static class NoticeStorage
     };
 
     // A folder BrimDeck creates outside the user's profile (an install folder on another drive usually lets every signed-in
-    // user change what is in it) is opened to the current user and the system only, without inheriting the parent's rights.
+    // user change what is in it) is opened to the current user, the system and the administrators only (as the installer's
+    // SecureAppDir leaves them in: M3), without inheriting the parent's rights.
     // The file inside is encrypted for this user anyway; this keeps other accounts from reading, replacing or deleting it.
     public static void MakePrivate(string folder)
     {
@@ -152,6 +186,7 @@ internal static class NoticeStorage
             const InheritanceFlags All = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
             security.AddAccessRule(new FileSystemAccessRule(user, FileSystemRights.FullControl, All, PropagationFlags.None, AccessControlType.Allow));
             security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), FileSystemRights.FullControl, All, PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), FileSystemRights.FullControl, All, PropagationFlags.None, AccessControlType.Allow));
             new DirectoryInfo(folder).SetAccessControl(security);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PrivilegeNotHeldException or InvalidOperationException) { }

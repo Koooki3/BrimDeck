@@ -52,6 +52,12 @@ internal sealed class NoticeCenter : IDisposable
     private bool _changeWaiting;
     private readonly HashSet<string> _refreshWaiting = new(StringComparer.Ordinal);
     private DateTimeOffset? _attentionAt;
+    // Reminders dropped beyond NoticeHub.MaxPending and not logged yet, and when the log last heard of some (L3).
+    private int _droppedPending;
+    private DateTimeOffset _droppedLogged;
+    // Old files removed in the background (L6), one after another; a reading waits for them, so it never reads a file that
+    // is about to go.
+    private Task _deleting = Task.CompletedTask;
     // Messages each link (the pipe, each distribution) may deliver per window; more are refused until the window moves on.
     private const int IntakeLimit = 200;
     private static readonly TimeSpan IntakeWindow = TimeSpan.FromSeconds(10);
@@ -90,7 +96,7 @@ internal sealed class NoticeCenter : IDisposable
         _attentionTimer = new PromptTimer(_dispatcher, () => { _attentionTimer!.Stop(); _attentionAt = null; Apply(Attention.Tick(DateTimeOffset.UtcNow)); });
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); _ = SaveAsync(); };
         // A file that could not be reached at start-up is read once it can be (core-M4).
-        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); AutoClear(); UpdateQuiet(); if (HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Denied) LoadHistory(); };
+        _maintenance.Tick += (_, _) => { Hub.Prune(DateTimeOffset.UtcNow); if (_droppedPending > 0) LogDropped(); AutoClear(); UpdateQuiet(); if (HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Denied) LoadHistory(); };
         _quietCheck.Tick += (_, _) => UpdateQuiet();
         _resumeLimit.Tick += (_, _) => FinishResume(int.MaxValue);
         _timeDue = new PromptTimer(_dispatcher, FireDue);
@@ -105,7 +111,9 @@ internal sealed class NoticeCenter : IDisposable
         Hub.Persist += QueueSave;
         // Until the saved file is read, what is deleted or cleared must not come back with it (C-L2).
         Hub.TrackRemovals = true;
-        Hub.PendingDropped += count => Log($"Dropped {count} reminders or stopwatches beyond {NoticeHub.MaxPending} (C-M3).");
+        // Counted here and written at most once a minute, in the background (L3): a script looping past the limit drops one with
+        // every message.
+        Hub.PendingDropped += count => { _droppedPending += count; if (DateTimeOffset.UtcNow - _droppedLogged >= TimeSpan.FromMinutes(1)) LogDropped(); };
         // A reading still under way when notices or the source were switched off arrives late; it is dropped.
         // Notifications of Windows' Clock, Outlook, the calendars and Teams are sorted into time kinds here (NoticeTimeSources).
         _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && !_disposed && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local)); });
@@ -604,6 +612,13 @@ internal sealed class NoticeCenter : IDisposable
     // A line of BrimDeck's own words (never a sender's text).
     private static void Log(string line) => Write(line + "\n");
 
+    private void LogDropped()
+    {
+        int count = _droppedPending;
+        _droppedPending = 0; _droppedLogged = DateTimeOffset.UtcNow;
+        _ = Task.Run(() => Log($"Dropped {count} reminders or stopwatches beyond {NoticeHub.MaxPending} (C-M3)."));
+    }
+
     private static void Write(string entry)
     {
         try
@@ -630,8 +645,6 @@ internal sealed class NoticeCenter : IDisposable
         // never through a link (NoticeHistory.Delete). A refused one is left alone.
         bool oldTrusted = _folderTrust is null or NoticeStorage.FolderTrust.Trusted;
         _keepHistory = keep;
-        // Application icons are kept beside the saved notices only while notices are kept: memory only leaves nothing on disk.
-        Icons.Folder = keep ? folder : "";
         var old = _history;
         bool? loaded = _historyLoaded ? true : !_loadingHistory && HistoryState == NoticeHistoryState.Empty ? false : null;
         var steps = NoticeHistoryPlan.For(old?.DirectoryPath, folder, kept, keep, loaded);
@@ -644,6 +657,7 @@ internal sealed class NoticeCenter : IDisposable
         // Switched on again: the folder is checked and its file read (the file was removed while off, so the list in memory
         // is written there next) before anything is saved, as at start-up.
         else if (keep && !kept && _folderTrust is null) SetLoaded(false);
+        UseIconFolder();
         foreach (var step in steps)
             switch (step)
             {
@@ -659,7 +673,21 @@ internal sealed class NoticeCenter : IDisposable
         if (!keep && _retired is { } retired) { _retired = null; DeleteFiles(retired); }
     }
 
-    private static void DeleteFiles(NoticeHistory history) { history.Delete(); NoticeIcons.DeleteStored(history.DirectoryPath); }
+    // Application icons are kept beside the saved notices only while notices are kept (memory only leaves nothing on disk),
+    // and only once the folder was checked and found Trusted (N1): a refused folder is neither written to nor read from, and
+    // one not created yet is created by Prepare, private, never by an icon's write with the parent's rights.
+    private void UseIconFolder()
+        => Icons.Folder = _keepHistory && _folderTrust == NoticeStorage.FolderTrust.Trusted && _history is { } history ? history.DirectoryPath : "";
+
+    private void DeleteFiles(NoticeHistory history) => Remove(() => { history.Delete(); NoticeIcons.DeleteStored(history.DirectoryPath); });
+
+    // Disk work that removes old files, off the UI thread (L6): a folder on a network share that does not answer must not
+    // freeze it. In order, after what was queued before; on exit it is done at once, before the process ends.
+    private void Remove(Action work)
+    {
+        if (_disposed) { work(); return; }
+        _deleting = _deleting.ContinueWith(_ => { try { work(); } catch (Exception ex) { Log(ex); } }, TaskScheduler.Default);
+    }
 
     // Whether the folder's file has been read; until then the hub remembers what was deleted or cleared (C-L2).
     private void SetLoaded(bool loaded) { _historyLoaded = loaded; Hub.TrackRemovals = !loaded; }
@@ -667,7 +695,7 @@ internal sealed class NoticeCenter : IDisposable
     private void LoadHistory()
     {
         if (_historyLoaded || _loadingHistory || _history is not { } history) return;
-        if (!Settings.NoticeHistory) { history.Delete(); SetLoaded(true); HistoryState = NoticeHistoryState.Empty; return; }
+        if (!Settings.NoticeHistory) { Remove(history.Delete); SetLoaded(true); HistoryState = NoticeHistoryState.Empty; return; }
         // A refused folder stays refused until another is chosen (or the user closes it to other accounts).
         if (_folderTrust is { } trust && trust is not (NoticeStorage.FolderTrust.Trusted or NoticeStorage.FolderTrust.Unreachable)) { HistoryState = NoticeHistoryState.Refused; return; }
         _loadingHistory = true;
@@ -682,11 +710,15 @@ internal sealed class NoticeCenter : IDisposable
     private async Task LoadHistoryAsync(NoticeHistory history, bool moveLegacy, string? moveFrom, bool check)
     {
         (NoticeStorage.FolderTrust Trust, NoticeHistoryState State, List<Notice> Notices, List<NoticeKnownApp> Apps) read;
+        bool closable = false;
         try
         {
+            // Old files still being removed go first (Remove): the folder may be the one they are removed from.
+            await _deleting;
             read = await Task.Run(() =>
             {
                 var trust = check ? NoticeStorage.Prepare(history.DirectoryPath) : NoticeStorage.FolderTrust.Trusted;
+                closable = trust == NoticeStorage.FolderTrust.Shared && NoticeStorage.Closable(history.DirectoryPath);
                 if (trust != NoticeStorage.FolderTrust.Trusted) return (trust, NoticeHistoryState.Refused, new List<Notice>(), new List<NoticeKnownApp>());
                 // A file never read moves along with the folder (life-L1).
                 if (moveFrom is not null) NoticeStorage.Move(moveFrom, history.DirectoryPath);
@@ -702,6 +734,8 @@ internal sealed class NoticeCenter : IDisposable
         if (_history != history) { if (_enabled) LoadHistory(); return; }
         // A folder that could not be checked now is checked again with the next reading.
         _folderTrust = read.Trust == NoticeStorage.FolderTrust.Unreachable ? null : read.Trust;
+        HistoryClosable = closable;
+        UseIconFolder();
         if (read.Trust == NoticeStorage.FolderTrust.Trusted && _moveFrom == moveFrom) _moveFrom = null;
         HistoryState = read.Trust == NoticeStorage.FolderTrust.Unreachable ? NoticeHistoryState.Unavailable : read.State;
         if (read.State is NoticeHistoryState.Loaded or NoticeHistoryState.Empty)
@@ -721,13 +755,17 @@ internal sealed class NoticeCenter : IDisposable
     // What made BrimDeck refuse the folder, or null while it is used (or not checked yet).
     public NoticeStorage.FolderTrust? HistoryRefusal => _folderTrust is { } trust && trust != NoticeStorage.FolderTrust.Trusted ? trust : null;
 
+    // Whether a Shared folder can be made the user's own from the settings page (NoticeStorage.Closable, M3).
+    public bool HistoryClosable { get; private set; }
+
     // Closes a folder of the user's own that other accounts may write in (the settings page) and reads it again.
     public async Task CloseHistoryFolderAsync()
     {
-        if (_history is not { } history || _folderTrust != NoticeStorage.FolderTrust.Shared) return;
+        if (_history is not { } history || _folderTrust != NoticeStorage.FolderTrust.Shared || !HistoryClosable) return;
         await Task.Run(() => NoticeStorage.Close(history.DirectoryPath));
         if (_disposed || _history != history) return;
         _folderTrust = null; HistoryState = NoticeHistoryState.Empty;
+        UseIconFolder();
         if (_enabled) LoadHistory();
         Changed?.Invoke();
     }
@@ -766,7 +804,7 @@ internal sealed class NoticeCenter : IDisposable
         var apps = Hub.KnownApps.ToList();
         long order = history.NextOrder();
         bool written = false;
-        try { written = await Task.Run(() => history.Save(notices, apps, () => _keepHistory && _history == history, order)); }
+        try { await _deleting; written = await Task.Run(() => history.Save(notices, apps, () => _keepHistory && _history == history, order)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) { }
         finally { _saving = false; }
         if (written) Retire(history);

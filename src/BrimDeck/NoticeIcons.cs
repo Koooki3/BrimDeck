@@ -168,7 +168,7 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         try
         {
             // Not through a link: it would lead to a folder BrimDeck did not fill.
-            if (!Directory.Exists(icons) || (File.GetAttributes(icons) & FileAttributes.ReparsePoint) != 0) return;
+            if (!Directory.Exists(icons) || NoticeHistory.Linked(icons)) return;
             foreach (var file in Directory.EnumerateFiles(icons, "*.png"))
                 if (Path.GetFileNameWithoutExtension(file) is { Length: 24 } name && name.All(Uri.IsHexDigit)) File.Delete(file);
             if (!Directory.EnumerateFileSystemEntries(icons).Any()) Directory.Delete(icons);
@@ -185,8 +185,11 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         try
         {
             var folder = Path.GetDirectoryName(path)!;
+            // The notices folder itself is created by NoticeStorage.Prepare, private to the user; never here with whatever
+            // rights its parent hands down (N1). Only the icons folder inside it is.
+            if (!Directory.Exists(Path.GetDirectoryName(folder))) return;
             Directory.CreateDirectory(folder);
-            if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0) return;
+            if (NoticeHistory.Linked(folder)) return;
             var existing = new FileInfo(path);
             if (existing.Exists && (existing.Attributes & FileAttributes.ReparsePoint) == 0 && existing.Length == bytes.Length)
             {

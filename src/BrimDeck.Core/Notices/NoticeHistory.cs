@@ -58,7 +58,7 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
             {
                 return Reachable(DirectoryPath) ? NoticeHistoryState.Empty : NoticeHistoryState.Unavailable;
             }
-            if ((attributes & FileAttributes.ReparsePoint) != 0) return NoticeHistoryState.Refused;
+            if ((attributes & FileAttributes.ReparsePoint) != 0 && Linked(FilePath)) return NoticeHistoryState.Refused;
             byte[] data;
             using (var stream = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
@@ -89,13 +89,38 @@ public sealed class NoticeHistory(string directory, INoticeProtector protector)
         }
     }
 
-    // Whether the path is a link (symbolic link, junction, any reparse point): one attribute read. A path that cannot be read
-    // is no link; what follows fails on it by itself.
+    // Whether the path is a link (symbolic link, junction or mount point): one attribute read, and only for a reparse point a
+    // look at what it is. Other reparse points (OneDrive's files on demand, deduplicated files) are the file or folder itself
+    // and lead nowhere else (L7); LinkTarget names a target for the two kinds that do. A path that cannot be read is no link;
+    // what follows fails on it by itself. A reparse point that cannot be looked at counts as a link.
     public static bool Linked(string path)
     {
-        try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(path); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
+        if ((attributes & FileAttributes.ReparsePoint) == 0) return false;
+        try { return ((attributes & FileAttributes.Directory) != 0 ? (FileSystemInfo)new DirectoryInfo(path) : new FileInfo(path)).LinkTarget is not null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return true; }
     }
+
+    // An access mask with its generic rights (as an inherit-only entry may hold them) turned into the file rights they stand
+    // for, so that a GENERIC_WRITE or GENERIC_ALL granted to others is seen as the write it is (L2).
+    public static int SpecificRights(int mask)
+    {
+        const int GenericAll = 0x10000000, GenericWrite = 0x40000000, FileAll = 0x001F01FF, FileWrite = 0x00120116;
+        if ((mask & GenericAll) != 0) mask |= FileAll;
+        if ((mask & GenericWrite) != 0) mask |= FileWrite;
+        return mask;
+    }
+
+    // Whether a name in a notices folder is one BrimDeck keeps there: the file and its temporary files, or in icons\ the stored
+    // icons and their temporary files (M3).
+    public static bool OwnName(string name, bool inIcons)
+        => inIcons
+            ? name.Length == 28 && name.EndsWith(".png", StringComparison.Ordinal) && name[..24].All(Uri.IsHexDigit)
+                || name.StartsWith(".icon.", StringComparison.Ordinal) && name.EndsWith(".tmp", StringComparison.Ordinal)
+            : name is "notices.dat" or "notices.dat.tmp"
+                || name.StartsWith(".notices.", StringComparison.Ordinal) && name.EndsWith(".tmp", StringComparison.Ordinal);
 
     // Whether the folder could hold the file now: its drive or network share is there. A folder that does not exist on a
     // drive that does is simply new (the first save creates it); one whose drive or share is missing is unmounted or offline,

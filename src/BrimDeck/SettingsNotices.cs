@@ -311,7 +311,7 @@ public sealed partial class SettingsWindow
         };
         Button Rebuild() => ActionButton(Loc.T("清空并重建", "Clear and start again"), () => { center.ResetHistory(); ShowPage(NoticesSettingsPage); });
         // The folder's own refusal (a link, another account's, open to others) says which; otherwise the file's state does.
-        string Reason() => center.HistoryState == NoticeHistoryState.Refused && center.HistoryRefusal is { } refusal ? NoticeStorage.Describe(refusal) : NoticeHistory.Describe(center.HistoryState);
+        string Reason() => center.HistoryState == NoticeHistoryState.Refused && center.HistoryRefusal is { } refusal ? NoticeStorage.Describe(refusal, center.HistoryClosable) : NoticeHistory.Describe(center.HistoryState);
         if (center.HistoryState == NoticeHistoryState.Unreadable
             // A notices file that is a link, in a folder BrimDeck may use: clearing removes the link itself.
             || center.HistoryState == NoticeHistoryState.Refused && center.HistoryRefusal is null)
@@ -329,8 +329,9 @@ public sealed partial class SettingsWindow
             if (center.HistoryState == NoticeHistoryState.Refused)
             {
                 title = Loc.T("无法使用该文件夹", "Folder not used");
-                // A folder of the user's own that others may write in can be closed to them, as BrimDeck's own folder is.
-                if (center.HistoryRefusal == NoticeStorage.FolderTrust.Shared)
+                // A folder of the user's own that others may write in can be closed to them, as BrimDeck's own folder is; only
+                // one this can take effect on and that holds nothing but BrimDeck's files (M3).
+                if (center.HistoryRefusal == NoticeStorage.FolderTrust.Shared && center.HistoryClosable)
                     Add(ActionButton(Loc.T("仅限本人访问", "Make it mine only"), async () => { await center.CloseHistoryFolderAsync(); ShowPage(NoticesSettingsPage); }));
                 Add(ActionButton(Loc.T("默认位置", "Default"), () => { Change(s => s.NoticeHistoryFolder = ""); ShowPage(NoticesSettingsPage); }));
             }
