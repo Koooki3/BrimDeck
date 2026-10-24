@@ -28,7 +28,8 @@ public partial class MainWindow
     // The coordinator's name for this panel: the main panel's stays the same when its monitor changes.
     internal string NoticeLane => _lead is null ? "main" : "display:" + (Display?.Id ?? "");
     internal long NoticeMonitor => MonitorHandle.ToInt64();
-    internal bool CanShowNotices => IsVisible && !IsSuppressed && !_preview;
+    // ui-2: nothing starts while the panel powers off; it draws back into the dot in sight (PowerOff ends a shown notice).
+    internal bool CanShowNotices => IsVisible && !IsSuppressed && !_preview && !_poweringOff;
     private bool NoticeCovering => _noticeWindow?.Covering == true;
 
     private void SubscribeNotices()
@@ -45,6 +46,7 @@ public partial class MainWindow
         _noticesSubscribed = false;
         if (_app.Notices is not null) { _liveRows.Clear(); WatchPageLive(); }
         _noticeWindow?.Close(); _noticeWindow = null;
+        _bootNotice?.Stop(); _noticeAfterBoot = null;
         _app.Notices?.DeckRetired(this);
     }
 
@@ -56,6 +58,9 @@ public partial class MainWindow
         {
             case AttentionKind.Notice or AttentionKind.Summary:
                 if (!CanShowNotices) { _app.Notices.Dismiss(this, reportToSource: false); return; }
+                // ui-2: one that arrives while the panel boots (the summary of what came in while BrimDeck was quiet) waits for
+                // the boot to play; covering the island then would hide the boot, and the island would show in the wrong shape.
+                if (BootHoldsPointer) { ShowAfterBoot(item); return; }
                 (_noticeWindow ??= new NoticeWindow(this, _app)).Present(item);
                 break;
             case AttentionKind.Quota when item.Payload is CompactAlertInfo alert:
@@ -72,6 +77,7 @@ public partial class MainWindow
         switch (item.Kind)
         {
             case AttentionKind.Notice or AttentionKind.Summary:
+                if (_noticeAfterBoot?.Key == item.Key) _noticeAfterBoot = null;
                 _noticeWindow?.End(item);
                 // Ended because the panel opened: no exit motion over the opening panel.
                 if (_expanded) _noticeWindow?.Abort();
@@ -86,20 +92,49 @@ public partial class MainWindow
 
     internal void AttentionUpdated(AttentionItem item)
     {
-        if (item.IsNotice) _noticeWindow?.Update(item);
+        if (item.IsNotice && _noticeAfterBoot?.Key == item.Key) _noticeAfterBoot = item;
+        else if (item.IsNotice) _noticeWindow?.Update(item);
         // The same quota rose again while its alert shows: the alert shows the new level.
         else if (item.Kind == AttentionKind.Quota && item.Payload is CompactAlertInfo alert && _alert is not null) { _alert = alert; RenderCompact(); }
+    }
+
+    private AttentionItem? _noticeAfterBoot;
+    private System.Windows.Threading.DispatcherTimer? _bootNotice;
+
+    // Shows the item once the boot has played; ended or updated meanwhile (AttentionEnded, AttentionUpdated), the latest wins.
+    private void ShowAfterBoot(AttentionItem item)
+    {
+        _noticeAfterBoot = item;
+        if (_bootNotice is null)
+        {
+            _bootNotice = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Normal, Dispatcher) { Interval = TimeSpan.FromMilliseconds(100) };
+            _bootNotice.Tick += (_, _) =>
+            {
+                if (BootHoldsPointer && _noticeAfterBoot is not null) return;
+                _bootNotice.Stop();
+                if (_noticeAfterBoot is not { } waiting) return;
+                _noticeAfterBoot = null;
+                if (!CanShowNotices || _expanded) { _app.Notices.Dismiss(this, reportToSource: false); return; }
+                (_noticeWindow ??= new NoticeWindow(this, _app)).Present(waiting);
+            };
+        }
+        _bootNotice.Start();
     }
 
     // While a notice covers the island, the island itself is not drawn (see NoticeWindow.Present and Finish). A notice that has
     // gone back into the island (reveal) leaves it without content; the island's own content then lands as it does when the
     // panel closes (SetExpanded's compact track), instead of appearing all at once.
+    // ui-2: being covered is its own state, shown through HoverZone's Visibility; the boot and the power-off own its Opacity.
+    // The island shows only when both allow it, and neither undoes the other.
+    private bool _islandCovered;
     internal void SetIslandCovered(bool covered, bool reveal = false)
     {
         // A notice that ended before it had covered the island (within its first frame) leaves the island's content as it was.
-        bool wasCovered = HoverZone.Opacity == 0;
-        HoverZone.Opacity = covered ? 0 : 1;
-        if (covered || !reveal || !wasCovered || _expanded || _poweringOff || Compact.Visibility != Visibility.Visible || Collapsed.Style == CompactStyle.Line) return;
+        bool wasCovered = _islandCovered;
+        _islandCovered = covered;
+        HoverZone.Visibility = covered ? Visibility.Hidden : Visibility.Visible;
+        // A boot under way lands the content itself.
+        if (covered || !reveal || !wasCovered || _expanded || _poweringOff || BootHoldsPointer || Compact.Visibility != Visibility.Visible || Collapsed.Style == CompactStyle.Line) return;
         int duration = (int)(NoticeMotion.Length(Settings.AnimationDuration, Soft.Enabled) * NoticeMotion.RevealLength);
         if (duration <= 0) return;
         var land = new Track(0, 1);
@@ -169,8 +204,10 @@ public partial class MainWindow
         _noticesRenderQueued = true;
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
         {
+            // perf-8: marking the list seen raises Changed again; it is marked while still queued, so the page is drawn once.
+            if (_expanded && CurrentPage == DeckPage.Notices) _app.Notices.Hub.MarkAllViewed();
             _noticesRenderQueued = false;
-            if (_expanded && CurrentPage == DeckPage.Notices) { _app.Notices.Hub.MarkAllViewed(); RenderNotices(); }
+            if (_expanded && CurrentPage == DeckPage.Notices) RenderNotices();
         });
     }
 

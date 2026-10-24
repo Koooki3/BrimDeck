@@ -42,7 +42,7 @@ internal static class Program
         return failures == 0 ? 0 : 1;
     }
 
-    private static Color C(ThemeColor color) => NoticeBadges.Wpf(color);
+    private static Color C(ThemeColor color) => PanelTheme.ToColor(color);
 
     private static FrameworkElement Sheet(PanelPalette palette, NoticeGlyphColors? system)
     {
