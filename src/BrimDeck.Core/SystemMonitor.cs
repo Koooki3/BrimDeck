@@ -49,14 +49,45 @@ public enum MemoryLevel { Normal, Elevated, Critical }
 // it as available. The page draws it after the memory in use, lighter.
 public sealed record MemorySample(ulong Total, ulong Used, ulong CommitUsed, ulong CommitLimit, ulong Cached = 0)
 {
+    // The levels' thresholds: the share of physical memory in use, or the commit charge against its limit.
+    // Memory in use is read as every share is (ReadingLevels).
+    public const double ElevatedUsed = ReadingLevels.ElevatedShare, ElevatedCommit = .8, CriticalUsed = ReadingLevels.CriticalShare, CriticalCommit = .9;
     public double CachedFraction => Total > 0 ? Math.Clamp((double)Math.Min(Cached, Total - Math.Min(Used, Total)) / Total, 0, 1) : 0;
     public double UsedFraction => Total > 0 ? Math.Clamp((double)Used / Total, 0, 1) : 0;
     public double CommitFraction => CommitLimit > 0 ? Math.Clamp((double)CommitUsed / CommitLimit, 0, 1) : 0;
-    public MemoryLevel Level => UsedFraction >= .92 || CommitFraction >= .9 ? MemoryLevel.Critical
-        : UsedFraction >= .8 || CommitFraction >= .8 ? MemoryLevel.Elevated : MemoryLevel.Normal;
+    public MemoryLevel Level => UsedFraction >= CriticalUsed || CommitFraction >= CriticalCommit ? MemoryLevel.Critical
+        : UsedFraction >= ElevatedUsed || CommitFraction >= ElevatedCommit ? MemoryLevel.Elevated : MemoryLevel.Normal;
 }
 
 public sealed record NetworkSample(double DownBytesPerSecond, double UpBytesPerSecond);
+
+// The level of each reading of the collapsed strip, by one rule per kind of reading: a share (CPU, GPU, each core column,
+// memory in use) against ElevatedShare and CriticalShare, memory also by its commit charge (MemorySample.Level), and a rate
+// against fixed rates. A rate has no share: Windows reports an adapter's link speed, but that is the nominal speed of the
+// link (a Wi-Fi rate, or 1 Gb/s on a line that delivers far less), so a share of it would hardly ever rise.
+public static class ReadingLevels
+{
+    public const double ElevatedShare = .8, CriticalShare = .92;
+    // Bytes per second in decimal units, as the rates are shown (MonitorFormat.Rate): 10 MB/s and 50 MB/s.
+    public const double ElevatedRate = 10_000_000, CriticalRate = 50_000_000;
+
+    public static MemoryLevel OfShare(double share) => share >= CriticalShare ? MemoryLevel.Critical : share >= ElevatedShare ? MemoryLevel.Elevated : MemoryLevel.Normal;
+    public static MemoryLevel OfRate(double bytesPerSecond) =>
+        bytesPerSecond >= CriticalRate ? MemoryLevel.Critical : bytesPerSecond >= ElevatedRate ? MemoryLevel.Elevated : MemoryLevel.Normal;
+
+    // A reading's level as the strip shows it, Normal while it is unavailable. The core columns as a whole take the busiest
+    // core's; the strip colors each column by its own core (OfShare).
+    public static MemoryLevel Of(CompactMonitorItems item, MonitorSnapshot? snapshot) => item switch
+    {
+        CompactMonitorItems.Columns => snapshot?.Cpu.OrDefault is { Cores.Count: > 0 } cores ? OfShare(cores.Cores.Max(core => core.Usage)) : MemoryLevel.Normal,
+        CompactMonitorItems.Cpu => snapshot?.Cpu.OrDefault is { } cpu ? OfShare(cpu.Usage) : MemoryLevel.Normal,
+        CompactMonitorItems.Memory => snapshot?.Memory.OrDefault?.Level ?? MemoryLevel.Normal,
+        CompactMonitorItems.Gpu => snapshot?.Gpu.OrDefault is { } gpu ? OfShare(gpu.Usage) : MemoryLevel.Normal,
+        CompactMonitorItems.Download => snapshot?.Network.OrDefault is { } down ? OfRate(down.DownBytesPerSecond) : MemoryLevel.Normal,
+        CompactMonitorItems.Upload => snapshot?.Network.OrDefault is { } up ? OfRate(up.UpBytesPerSecond) : MemoryLevel.Normal,
+        _ => MemoryLevel.Normal
+    };
+}
 
 // One kind of engine of a graphics adapter (3D, Copy, VideoDecode, ...) with the shares of all processes summed, 0..1.
 public sealed record GpuEngine(string Kind, double Usage);

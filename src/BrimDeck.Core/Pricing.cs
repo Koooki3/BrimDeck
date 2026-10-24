@@ -25,9 +25,14 @@ public sealed class Pricing : IDisposable
     private readonly bool _ownsHttp;
     private readonly string _cacheFile;
     private readonly string _manualFile;
+    private readonly string _officialFile;
     private readonly object _sync = new();
     private readonly Dictionary<string, ModelPrice> _remote = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, ModelPrice> _manual = new(StringComparer.OrdinalIgnoreCase);
+    // Kimi Code models priced at Moonshot AI's own endpoint, by catalog ID (see Moonshot below).
+    private readonly Dictionary<string, ModelPrice> _official = new(StringComparer.OrdinalIgnoreCase);
+    // Catalog entries for those models that still carry the catalog's own price, which Kimi Code records do not use.
+    private HashSet<ModelPrice> _unofficial = new(ReferenceEqualityComparer.Instance);
     private readonly Func<DateTimeOffset> _now;
     private readonly SemaphoreSlim _gate = new(1);
     private DateTimeOffset? _lastAttempt;
@@ -53,6 +58,7 @@ public sealed class Pricing : IDisposable
     {
         _cacheFile = Path.Combine(directory, "model-prices.json");
         _manualFile = Path.Combine(directory, "manual-model-prices.json");
+        _officialFile = Path.Combine(directory, OfficialFile);
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(15) };
         _ownsHttp = http is null; _now = now ?? (() => DateTimeOffset.UtcNow);
         try
@@ -85,6 +91,21 @@ public sealed class Pricing : IDisposable
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidDataException)
         { ManualLoadWarning = Loc.T("无法读取手动模型价格，原文件已保留。", "The prices added by hand could not be read; the original file is kept. "); }
+        try
+        {
+            if (File.Exists(_officialFile))
+            {
+                using var saved = JsonDocument.Parse(File.ReadAllText(_officialFile));
+                var models = saved.RootElement.Get("models").Deserialize<List<ModelPrice>>() ?? [];
+                lock (_sync)
+                {
+                    foreach (var model in models.Where(m => ValidModel(m) && OfficialIds.Contains(Normalize(m.Model)))) _official[Normalize(model.Model)] = model;
+                    RebuildLookup();
+                }
+            }
+        }
+        // Without saved prices, those models stay unpriced until the next update.
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or NotSupportedException) { }
     }
 
     // The first call in each process fetches online even when a disk cache exists.
@@ -121,8 +142,85 @@ public sealed class Pricing : IDisposable
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
             catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or IOException or InvalidDataException)
             { LastError = ModelCount > 0 ? Loc.T("更新失败，使用缓存价格", "Update failed; cached prices are used") : Loc.T("价格暂不可用", "Prices are not available yet"); }
+            await RefreshOfficialAsync(cancellation).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
+    }
+
+    // Kimi Code bills its models at Moonshot AI's list prices, but a catalog entry carries the price of whichever provider is
+    // cheapest (for Kimi K3, a quantized third-party host). So Kimi K3 and K3.1 Pro take the prices of the Moonshot AI endpoint
+    // from https://openrouter.ai/api/v1/models/{id}/endpoints, which also lists K3.1 Pro Highspeed as a Moonshot AI endpoint
+    // of K3.1 Pro tagged "highspeed". These prices replace the catalog entry, are added when the catalog has no entry, and are
+    // kept on disk. A failed or empty answer keeps the prices saved before; without any, Kimi Code records of these models stay
+    // unpriced rather than taking the catalog price. Prices added by hand still win.
+    public const string OfficialFile = "moonshot-prices.json";
+    public const string OfficialProvider = "Moonshot AI";
+    public static readonly IReadOnlyList<string> OfficialModels = ["moonshotai/kimi-k3", "moonshotai/kimi-k3.1-pro"];
+    private static readonly HashSet<string> OfficialIds = OfficialModels.SelectMany(m => new[] { m, m + "-highspeed" }).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    public static string EndpointsSource(string model) => $"https://openrouter.ai/api/v1/models/{model}/endpoints";
+
+    private async Task RefreshOfficialAsync(CancellationToken cancellation)
+    {
+        var found = new List<ModelPrice>();
+        foreach (var model in OfficialModels)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, EndpointsSource(model));
+                request.Headers.UserAgent.ParseAdd("BrimDeck/0.1.0");
+                using var response = await _http.SendAsync(request, cancellation).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false));
+                found.AddRange(ParseOfficial(doc.RootElement, model));
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
+            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or IOException) { }
+        }
+        if (found.Count == 0) return;
+        string payload;
+        lock (_sync)
+        {
+            // A model whose answer named no Moonshot AI endpoint keeps its earlier price.
+            foreach (var group in found.GroupBy(m => OfficialBase(m.Model)))
+            {
+                foreach (var key in _official.Keys.Where(k => OfficialBase(k) == group.Key).ToList()) _official.Remove(key);
+                foreach (var model in group) _official[Normalize(model.Model)] = model;
+            }
+            RebuildLookup();
+            payload = JsonSerializer.Serialize(new { updatedAt = _now(), models = _official.Values.ToArray() });
+        }
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_officialFile)!);
+            var temporary = _officialFile + ".tmp";
+            await File.WriteAllTextAsync(temporary, payload, cancellation).ConfigureAwait(false);
+            File.Move(temporary, _officialFile, true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+    private static string OfficialBase(string model)
+    {
+        var key = Normalize(model);
+        return key.EndsWith("-highspeed", StringComparison.Ordinal) ? key[..^"-highspeed".Length] : key;
+    }
+
+    // The Moonshot AI endpoints of one model: the one tagged "highspeed" prices "<model>-highspeed"; one whose tag names only a
+    // quantization ("moonshotai/mxfp4") prices the model itself. Other tags (a batch tier, say) are left out. The first wins.
+    public static IReadOnlyList<ModelPrice> ParseOfficial(JsonElement root, string model)
+    {
+        var prices = new Dictionary<string, ModelPrice>(StringComparer.OrdinalIgnoreCase);
+        foreach (var endpoint in root.Get("data").Get("endpoints").Items())
+        {
+            if (!string.Equals(endpoint.Get("provider_name").Text().Trim(), OfficialProvider, StringComparison.OrdinalIgnoreCase)) continue;
+            var tag = endpoint.Get("tag").Text().ToLowerInvariant();
+            var words = tag[(tag.IndexOf('/') + 1)..].Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (!tag.Contains('/')) words = [];
+            string? id = words.Contains("highspeed") ? model + "-highspeed"
+                : words.All(word => Regex.IsMatch(word, @"^(mx)?(fp|int|bf)\d+$|^unknown$")) ? model : null;
+            if (id is null || prices.ContainsKey(id) || ReadModel(id, endpoint.Get("pricing")) is not { } price) continue;
+            prices[id] = price;
+        }
+        return prices.Values.ToArray();
     }
 
     public static IReadOnlyList<ModelPrice> Parse(JsonElement catalog)
@@ -131,21 +229,25 @@ public sealed class Pricing : IDisposable
         foreach (var item in catalog.Get("data").Items())
         {
             var id = item.Get("id").Text();
-            var pricing = item.Get("pricing");
-            if (string.IsNullOrWhiteSpace(id) || !id.Contains('/') || ReadPrice(pricing, "prompt") is not { } input || ReadPrice(pricing, "completion") is not { } output) continue;
-            var prices = new TokenPrices(input, output, ReadPrice(pricing, "input_cache_read"), ReadPrice(pricing, "input_cache_write"), ReadPrice(pricing, "input_cache_write_1h"));
-            var tiers = new List<PriceTier>();
-            foreach (var tier in pricing.Get("overrides").Items())
-            {
-                if (tier.Get("min_prompt_tokens").Number() is not { } threshold || threshold < 0 || threshold > 1e15) continue;
-                tiers.Add(new((long)threshold, new(ReadPrice(tier, "prompt") ?? input, ReadPrice(tier, "completion") ?? output,
-                    ReadPrice(tier, "input_cache_read") ?? prices.CacheRead, ReadPrice(tier, "input_cache_write") ?? prices.CacheWrite,
-                    ReadPrice(tier, "input_cache_write_1h") ?? prices.CacheWriteHour)));
-            }
-            models.Add(new(id, prices, tiers.OrderBy(x => x.MinimumPromptTokens).ToArray()));
+            if (string.IsNullOrWhiteSpace(id) || !id.Contains('/') || ReadModel(id, item.Get("pricing")) is not { } model) continue;
+            models.Add(model);
         }
         if (models.Count == 0) throw new InvalidDataException("No usable model prices.");
         return models;
+    }
+    private static ModelPrice? ReadModel(string id, JsonElement pricing)
+    {
+        if (ReadPrice(pricing, "prompt") is not { } input || ReadPrice(pricing, "completion") is not { } output) return null;
+        var prices = new TokenPrices(input, output, ReadPrice(pricing, "input_cache_read"), ReadPrice(pricing, "input_cache_write"), ReadPrice(pricing, "input_cache_write_1h"));
+        var tiers = new List<PriceTier>();
+        foreach (var tier in pricing.Get("overrides").Items())
+        {
+            if (tier.Get("min_prompt_tokens").Number() is not { } threshold || threshold < 0 || threshold > 1e15) continue;
+            tiers.Add(new((long)threshold, new(ReadPrice(tier, "prompt") ?? input, ReadPrice(tier, "completion") ?? output,
+                ReadPrice(tier, "input_cache_read") ?? prices.CacheRead, ReadPrice(tier, "input_cache_write") ?? prices.CacheWrite,
+                ReadPrice(tier, "input_cache_write_1h") ?? prices.CacheWriteHour)));
+        }
+        return new(id, prices, tiers.OrderBy(x => x.MinimumPromptTokens).ToArray());
     }
     private static decimal? ReadPrice(JsonElement pricing, string name)
     {
@@ -190,6 +292,10 @@ public sealed class Pricing : IDisposable
             foreach (var word in segments[(shape.Version + 1)..]) if (word.Length > 0 && !char.IsDigit(word[0])) words.Add(word);
         }
         // The table is replaced before the cache, so a concurrent Find never stores an old answer in the new cache.
+        var unofficial = new HashSet<ModelPrice>(ReferenceEqualityComparer.Instance);
+        foreach (var model in models)
+            if (OfficialIds.Contains(Normalize(model.Model)) && _remote.TryGetValue(Normalize(model.Model), out var remote) && ReferenceEquals(remote, model)) unofficial.Add(model);
+        _unofficial = unofficial;
         _lookup = lookup; _tiers = tiers; _found = new(StringComparer.Ordinal); ModelCount = models.Length;
         Changed?.Invoke();
     }
@@ -202,6 +308,8 @@ public sealed class Pricing : IDisposable
             // A manually added bare model ID also protects the same model when it later arrives online.
             if (!_manual.ContainsKey(model.Key) && !_manual.ContainsKey(bare)) merged[model.Key] = model.Value;
         }
+        foreach (var model in _official)
+            if (!_manual.ContainsKey(model.Key) && !_manual.ContainsKey(Normalize(model.Value.Model[(model.Value.Model.IndexOf('/') + 1)..]))) merged[model.Key] = model.Value;
         foreach (var model in _manual) merged[model.Key] = model.Value;
         return merged;
     }
@@ -259,6 +367,11 @@ public sealed class Pricing : IDisposable
         var model = Find(entry.Model);
         if (model is null && entry.Key.StartsWith("ag:", StringComparison.Ordinal))
             model = FindAntigravityBase(entry.Model);
+        else if (entry.Key.StartsWith("kimi:", StringComparison.Ordinal))
+        {
+            if (model is null && KimiUsage.PriceModel(entry.Model) is { } priced) model = Find(priced);
+            if (model is not null && _unofficial.Contains(model)) model = null;
+        }
         return model;
     }
     // Blank cache prices in a manual entry: a cache read costs nothing, a cache write costs the input price, and a

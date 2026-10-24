@@ -83,7 +83,8 @@ public partial class App : Application
         Prices = new Pricing(folder);
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
-        Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName));
+        Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
+            kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();

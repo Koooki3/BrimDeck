@@ -17,7 +17,8 @@ public interface IDesktopSources
 }
 
 // quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null) : IDisposable
+// kimiQuotaCache does the same for Kimi Code (KimiQuotaCache).
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null, string? kimiQuotaCache = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -42,6 +43,14 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private bool _includeWsl;
     private readonly AntigravityUsage _antigravity = new();
     private readonly DshSessions _dsh = new();
+    private readonly KimiSessions _kimi = new();
+    // The Kimi Code membership level, read from /me at most every few hours, for the hash of the token it was read with.
+    private (string Account, string Plan, DateTimeOffset Time)? _kimiPlan;
+    // The last Kimi Code quota read online and the hash of its account; kimiQuotaCache keeps it across restarts.
+    private KimiQuotaReading? _kimiRetained;
+    private string _kimiAccount = "", _kimiSaved = "";
+    private bool _kimiCacheRead;
+    private DateTimeOffset _kimiSavedTime;
     private readonly SemaphoreSlim _gate = new(1);
     private ClaudeQuotaSnapshot? _grokBotRetained;
     // The last Claude quota read online; until this run reads its own, the previous run's (ClaudeQuotaCache), which is read on
@@ -213,6 +222,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (id == ProviderId.ZCode) ZCodeUsage.Read(snapshot, desktop, _locations.ZCodeHome, start, now);
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
         if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
+        if (id == ProviderId.Kimi) _kimi.Read(snapshot, _locations.KimiHome, start, now);
         try
         {
             switch (id)
@@ -253,6 +263,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.GrokBot:
                     await ReadGrokBotAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.Kimi:
+                    await ReadKimiAsync(snapshot, now, ct);
                     break;
             }
         }
@@ -857,6 +870,155 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (doc.RootElement.Get("code").Number() == 40003) { Expired(); return; }
         snapshot.Metrics = DshUsage.Summary(doc.RootElement) ?? throw new InvalidDataException();
         Connected(snapshot, Loc.T("DeepSeek Harness · DeepSeek 账户", "DeepSeek Harness · DeepSeek account"), now);
+    }
+
+    // Kimi Code's own sign-in reads the plan quota. The token is used as it is: an expired one is not sent and never renewed,
+    // since renewing would replace the sign-in Kimi Code holds. Kimi Code renews it only while in use, so most refreshes find
+    // it expired; the last reading (KimiQuotaCache) then stands in, marked as old, until Kimi Code is used again. A rejected
+    // token is treated the same way, since Kimi Code renews it on its next use.
+    private async Task ReadKimiAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var service = KimiUsage.Service(_locations.KimiHome, _locations.KimiEnvironment);
+        var source = KimiAccount(service.Global);
+        var credential = KimiUsage.ReadCredential(_locations.KimiHome, service.CredentialName);
+        if (credential is null)
+        {
+            ForgetKimi();
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected"); snapshot.Status = Loc.T("请先登录 Kimi Code", "Sign in to Kimi Code first");
+            return;
+        }
+        snapshot.Scope = "account";
+        var baseUrl = service.BaseUrl;
+        // The hash covers the service address, so a reading kept for one region is never shown for the other.
+        var accountHash = KimiQuotaCache.AccountHash(baseUrl, credential.Account);
+        if (credential.Expired(now)) { ShowKimiRetained(snapshot, accountHash, source, null, now); return; }
+        var planKey = accountHash.Length > 0 ? accountHash
+            : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(baseUrl + "\n" + credential.AccessToken)));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        var cached = _kimiPlan is { } plan && plan.Account == planKey && now - plan.Time < TimeSpan.FromHours(6) ? plan.Plan : null;
+        var planTask = cached is null ? ReadKimiPlanAsync(baseUrl, credential.AccessToken, deadline.Token) : Task.FromResult<string?>(cached);
+        // Leaving early stops the membership request still under way.
+        using var stop = new CancelOnExit(deadline);
+        List<UsageMetric> metrics;
+        try
+        {
+            using var request = Bearer(HttpMethod.Get, baseUrl + "/usages", credential.AccessToken);
+            using var response = await _http.SendAsync(request, deadline.Token);
+            if (response.StatusCode == HttpStatusCode.PaymentRequired) { NoKimiPlan(snapshot); return; }
+            response.EnsureSuccessStatusCode();
+            using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: deadline.Token);
+            metrics = KimiUsage.Usages(doc.RootElement, service.Global ? "USD" : "CNY");
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or OperationCanceledException or InvalidDataException or JsonException or IOException or FormatException)
+        {
+            if (ShowKimiRetained(snapshot, accountHash, source, ex, now)) return;
+            if (ex is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized }) return;
+            if (ex is HttpRequestException { StatusCode: HttpStatusCode.NotFound })
+            {
+                snapshot.StatusLabel = Loc.T("暂不可用", "Unavailable");
+                snapshot.Status = Loc.T("未找到 Kimi Code 用量接口，请检查 Kimi Code 的服务地址", "The Kimi Code usage API was not found. Check the service address Kimi Code uses.");
+                return;
+            }
+            throw;
+        }
+        if (metrics.Count == 0) { NoKimiPlan(snapshot); return; }
+        var name = await planTask;
+        if (name is not null && cached is null) _kimiPlan = (planKey, name, now);
+        snapshot.Metrics = metrics;
+        snapshot.Plan = name ?? "";
+        if (snapshot.Plan.Length > 0) snapshot.PlanSource = source;
+        Connected(snapshot, source, now);
+        KeepKimi(new(now, snapshot.Plan, metrics), accountHash);
+    }
+
+    // As with ZCode's two regions, the account names its service: kimi.com in mainland China, kimi.ai elsewhere.
+    private static string KimiAccount(bool global) => KimiUsage.Source("Kimi Code", global);
+
+    // An account without a Kimi Code plan has no quota to keep.
+    private void NoKimiPlan(ProviderSnapshot snapshot)
+    {
+        ForgetKimi();
+        snapshot.StatusLabel = Loc.T("未订阅", "No plan");
+        snapshot.Status = Loc.T("未订阅 Kimi Code 套餐", "No Kimi Code plan");
+    }
+
+    // The last reading, for the account signed in now: read from the file once that account is known. A reading of another
+    // known account is set aside.
+    private KimiQuotaReading? KimiRetained(string accountHash, DateTimeOffset now)
+    {
+        if (accountHash.Length > 0 && _kimiAccount.Length > 0 && accountHash != _kimiAccount) { _kimiRetained = null; _kimiCacheRead = false; }
+        if (_kimiRetained is null && !_kimiCacheRead && kimiQuotaCache is not null && accountHash.Length > 0)
+        {
+            _kimiCacheRead = true;
+            _kimiRetained = KimiQuotaCache.Load(kimiQuotaCache, now, accountHash);
+            _kimiAccount = accountHash;
+        }
+        return _kimiRetained is null ? null : KimiQuotaCache.Usable(_kimiRetained, now);
+    }
+
+    // The file is written when the reading changed, and otherwise once it is RewriteAfter old. A reading whose account is not
+    // known is kept for this run only.
+    private void KeepKimi(KimiQuotaReading reading, string accountHash)
+    {
+        _kimiRetained = reading; _kimiAccount = accountHash; _kimiCacheRead = true;
+        if (kimiQuotaCache is null || accountHash.Length == 0) return;
+        var key = KimiQuotaCache.Serialize(reading with { Time = default }, accountHash);
+        if (key == _kimiSaved && reading.Time - _kimiSavedTime < KimiQuotaCache.RewriteAfter) return;
+        _kimiSaved = key; _kimiSavedTime = reading.Time;
+        KimiQuotaCache.Save(kimiQuotaCache, reading, accountHash);
+    }
+
+    private void ForgetKimi()
+    {
+        _kimiRetained = null; _kimiAccount = ""; _kimiSaved = "";
+        if (kimiQuotaCache is null) return;
+        _kimiCacheRead = true;
+        KimiQuotaCache.Delete(kimiQuotaCache);
+    }
+
+    // Shows the last reading in place of one that could not be taken: failure is null when the token had expired and no request
+    // was sent. Without a reading, an expired or rejected sign-in waits for Kimi Code to renew it; other failures return false.
+    private bool ShowKimiRetained(ProviderSnapshot snapshot, string accountHash, string source, Exception? failure, DateTimeOffset now)
+    {
+        bool renew = failure is null or HttpRequestException { StatusCode: HttpStatusCode.Unauthorized };
+        if (KimiRetained(accountHash, now) is not { } kept)
+        {
+            if (!renew) return false;
+            snapshot.StatusLabel = Loc.T("等待更新", "Waiting for update");
+            snapshot.Status = Loc.T("使用 Kimi Code 后自动更新", "Updates automatically after Kimi Code is used");
+            return true;
+        }
+        snapshot.IsStale = true;
+        snapshot.Metrics = kept.Metrics.ToList();
+        if (kept.Plan.Length > 0) { snapshot.Plan = kept.Plan; snapshot.PlanSource = source; }
+        snapshot.LiveQuota = true; snapshot.QuotaTime = kept.Time; snapshot.Source = source;
+        var time = kept.Time.LocalDateTime.ToString(kept.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+        var shown = Loc.T($"显示 {time} 读取的额度", $"showing the allowance read at {time}");
+        (snapshot.StatusLabel, snapshot.Status) = failure switch
+        {
+            _ when renew => (Loc.T("等待更新", "Waiting for update"), Loc.T($"使用 Kimi Code 后自动更新；{shown}", $"Updates automatically after Kimi Code is used; {shown}")),
+            HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } => (Loc.T("稍后重试", "Retrying later"), Loc.T($"请求频繁，{shown}，稍后自动重试", $"Too many requests; {shown}. Retrying automatically later.")),
+            OperationCanceledException => (Loc.T("稍后重试", "Retrying later"), Loc.T($"读取超时，{shown}，稍后自动重试", $"Reading timed out; {shown}. Retrying automatically later.")),
+            InvalidDataException or JsonException or FormatException => (Loc.T("稍后重试", "Retrying later"), Loc.T($"数据格式发生变化，{shown}", $"The data format has changed; {shown}.")),
+            IOException => (Loc.T("稍后重试", "Retrying later"), Loc.T($"暂时无法读取数据，{shown}，稍后自动重试", $"The data cannot be read right now; {shown}. Retrying automatically later.")),
+            _ => (Loc.T("稍后重试", "Retrying later"), Loc.T($"账户接口暂时不可用，{shown}，稍后自动重试", $"The account API is temporarily unavailable; {shown}. Retrying automatically later."))
+        };
+        return true;
+    }
+
+    private sealed class CancelOnExit(CancellationTokenSource source) : IDisposable { public void Dispose() => source.Cancel(); }
+
+    // The membership level only labels the column, so a failed read leaves the label out instead of failing the quota.
+    private async Task<string?> ReadKimiPlanAsync(string baseUrl, string token, CancellationToken ct)
+    {
+        try
+        {
+            using var request = Bearer(HttpMethod.Get, baseUrl + "/me", token);
+            using var doc = await SendAsync(_http, request, ct);
+            return KimiUsage.Plan(doc.RootElement) is { Length: > 0 } plan ? plan : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or IOException) { return null; }
     }
 
     private static HttpRequestMessage Bearer(HttpMethod method, string uri, string token)

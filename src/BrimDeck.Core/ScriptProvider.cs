@@ -33,6 +33,7 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
     }
     public async Task<ProviderResult> RunAsync()
     {
+        if (entry.QuotaSource == ProviderId.KimiApi) return await RunKimiAsync();
         using var engine = new Engine(options =>
         {
             options.ExperimentalFeatures = ExperimentalFeature.TaskInterop;
@@ -151,6 +152,43 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
         { return Error(ex is InvalidDataException ? ex.Message : ex is HttpRequestException ? Loc.T("无法连接到站点。", "Cannot connect to the site.")
             : Loc.T("无法读取接口，请检查地址、网络和凭据。", "The API cannot be read. Check the address, the network and the credentials.")); }
     }
+    // A Kimi Code API key (sk-kimi-…) reads the same GET {base}/usages and {base}/me as the Kimi Code sign-in, and the replies
+    // are read by KimiUsage as for that source. kimi.com is asked first; a key it rejects is tried on kimi.ai. The region
+    // shown follows /me, otherwise the service that answered; extra usage without a currency takes the region's.
+    private async Task<ProviderResult> RunKimiAsync()
+    {
+        string t(string zh, string en) => Loc.T(zh, en);
+        async Task<(int Status, string Body)> Get(string url)
+        {
+            var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + secret, ["Accept"] = "application/json" };
+            using var reply = JsonDocument.Parse(await SendAsync("GET", JsonSerializer.Serialize(new { url, options = new { headers } })));
+            if (reply.RootElement.Get("error").Text() is { Length: > 0 } error) throw new InvalidDataException(error);
+            return ((int)(reply.RootElement.Get("status").Number() ?? 0), reply.RootElement.Get("body").Text());
+        }
+        static JsonElement Json(string body) { try { using var doc = JsonDocument.Parse(body); return doc.RootElement.Clone(); } catch (JsonException) { return default; } }
+        var baseUrl = KimiUsage.DefaultBaseUrl;
+        var usages = await Get(baseUrl + "/usages");
+        if (usages.Status == 401)
+        {
+            baseUrl = KimiUsage.GlobalBaseUrl;
+            usages = await Get(baseUrl + "/usages");
+            // Only the second answer describes the key; the first is just the other region's.
+            if (usages.Status != 401) _statuses.Clear();
+        }
+        if (usages.Status == 401) throw new InvalidDataException(t("Kimi Code 拒绝了这个 API 密钥，请确认它是在 Kimi Code 控制台创建的密钥（sk-kimi-…），且未被删除。",
+            "Kimi Code rejected this API key. Check that it was created in the Kimi Code console (sk-kimi-…) and has not been deleted."));
+        if (usages.Status != 200) throw new HttpRequestException("HTTP " + usages.Status);
+        var root = Json(usages.Body);
+        if (root.ValueKind != JsonValueKind.Object) throw new InvalidDataException(t("Kimi Code 返回的额度无法识别。", "The quota Kimi Code returned is not recognized."));
+        // The membership only adds the plan name and region; the quota still shows without it.
+        JsonElement me = default;
+        try { if (await Get(baseUrl + "/me") is { Status: 200 } reply) me = Json(reply.Body); }
+        catch (InvalidDataException) { }
+        bool global = KimiUsage.GlobalRegion(me) ?? baseUrl == KimiUsage.GlobalBaseUrl;
+        var metrics = KimiUsage.Usages(root, global ? "USD" : "CNY");
+        if (metrics.Count == 0) throw new InvalidDataException(t("这个密钥所属的账户没有 Kimi Code 会员套餐额度。", "The account of this key has no Kimi Code plan quota."));
+        return new(metrics, KimiUsage.Plan(me), "plan", [], []) { Source = KimiUsage.Source(ProviderCatalog.Name(ProviderId.KimiApi), global) };
+    }
     private static string Error(string error) => JsonSerializer.Serialize(new { error });
     // pick: { path: "data", fields: ["a", "b"] } keeps only those fields of each object in the array at path; anything else becomes null.
     private static string Pick(byte[] body, JsonElement pick)
@@ -255,6 +293,7 @@ public sealed class ConfiguredProviders : IDisposable
                     var result = await Task.Run(session.RunAsync, deadline.Token);
                     snapshot.Metrics = result.Metrics; snapshot.Plan = result.Plan; snapshot.Scope = result.Scope;
                     snapshot.Details = result.Details; snapshot.QuotaTime = now; snapshot.LiveQuota = true;
+                    if (result.Source.Length > 0) snapshot.Source = result.Source;
                     // Warnings follow the state after the separator the settings test reads back (SettingsProviders).
                     snapshot.StatusLabel = Loc.T("已连接", "Connected");
                     snapshot.Status = result.Warnings.Count == 0 ? snapshot.StatusLabel : snapshot.StatusLabel + Loc.T("；", "; ") + string.Join(Loc.T("；", "; "), result.Warnings);

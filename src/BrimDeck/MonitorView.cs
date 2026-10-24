@@ -24,9 +24,9 @@ internal static class MonitorThemeColors
     // Opaque "#RRGGBB" as drawn on the theme, which ColorMath needs for the core groups' shades and for telling colors apart.
     private static string Drawn(string color) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color)));
 
-    // The collapsed readings' colors: the palette's, and each reading's own color as drawn on the theme, as the app colors are.
-    public static StripColors Strip(MonitorPalette palette, IEnumerable<CompactReading> readings) =>
-        new(For(palette), readings.Where(reading => reading.Color is { Length: > 0 }).ToDictionary(reading => reading.Item, reading => Drawn(reading.Color!)));
+    // The collapsed readings' colors: the palette's, and each reading's own colors (normal, warning, critical) as drawn on the
+    // theme, as the app colors are.
+    public static StripColors Strip(MonitorPalette palette, IEnumerable<CompactReading> readings) => new(For(palette), readings, Drawn);
 }
 
 // The system monitor page, after ftop's panel: the main gauge large with its columns (the processor's cores, or the graphics
