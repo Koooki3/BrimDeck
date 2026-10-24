@@ -96,9 +96,9 @@ internal sealed class AmbientGlow : IMotionClient
         return Interval(frame.Sweep);
     }
 
-    // Over a live blur (GlassBackdrop) every frame of the open panel's large layered window costs several times what it does over
-    // clear glass (measured: 22 % of a core against 7 %), so there the light rests while the panel is open and moves on the
-    // small collapsed island only.
+    // Over a live blur (GlassBackdrop) each frame of the open panel's large layered window costs more, and the drifting light
+    // alone kept the open panel at 7.5 % of a core against 2.7 % with it at rest (measured). There the light rests while the
+    // panel is open and moves on the small collapsed island only.
     private bool HeldForBlur => _open() && GlassBackdrop.Available;
 
     // Slow light needs few frames: fewer still on the small collapsed island, a few more while a scan line moves.
