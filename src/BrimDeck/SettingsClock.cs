@@ -145,11 +145,12 @@ public sealed partial class SettingsWindow
     {
         var popup = new Popup { PlacementTarget = target, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
         popup.Opened += (_, _) => target.IsHitTestVisible = false;
+        PopupMotion.Attach(popup);
         popup.Closed += (_, _) => target.IsHitTestVisible = true;
         target.Click += (_, _) =>
         {
             var color = current();
-            popup.Child = ColorPicker(color, string.Equals(color, fallback, StringComparison.OrdinalIgnoreCase), value => { popup.IsOpen = false; apply(value.Length > 0 ? value : fallback); });
+            popup.Child = ColorPicker(color, string.Equals(color, fallback, StringComparison.OrdinalIgnoreCase), value => { popup.IsOpen = false; PopupMotion.AfterClose(() => apply(value.Length > 0 ? value : fallback)); });
             popup.IsOpen = true;
         };
     }
