@@ -133,6 +133,13 @@ public sealed partial class SettingsWindow
         rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
+        if (theme.File.Night is not null) rows.Add(DaylightRow(theme.File));
+        // Glass needs Windows' transparency effects; without them it is drawn opaque, and the page says why.
+        if (PanelThemes.Resolve(theme).IsGlass && (!MotionEnvironment.Transparency || SystemParameters.HighContrast))
+            rows.Add(Row(Loc.T("提示", "Note"), Wrapped(SystemParameters.HighContrast
+                ? Loc.T("高对比度下玻璃改为不透明底色显示。", "In high contrast the glass is drawn opaque.")
+                : Loc.T("Windows 的透明效果已关闭，玻璃改为不透明底色显示；在“个性化 › 颜色”中打开透明效果即可恢复。",
+                    "Windows' transparency effects are off, so the glass is drawn opaque. Turn them on in Personalization › Colors to bring it back."), false)));
         // A file that carries the chosen id (or is named after it) but cannot be used is there, with its error listed below.
         bool broken = missing && users.Any(t => !t.Usable && (PanelThemes.NormalizeId(t.File.Id) == chosen || t.Path is { } file && PanelThemes.NormalizeId(PanelThemes.FileName(file)) == chosen));
         if (missing)
@@ -160,6 +167,35 @@ public sealed partial class SettingsWindow
                 help: () => Loc.T("为保证文字与信息清晰可读，低于对比度下限的颜色会沿原色相自动调亮或调暗到刚好达标，不影响主题文件本身。",
                     "To keep text and figures readable, a color below its contrast minimum is lightened or darkened along its own hue just enough to pass. The theme file is not changed.")));
         Group([.. rows]);
+    }
+
+    // A theme with a night look: when its day begins and ends, in half hours. The theme's own hours are saved as no setting,
+    // so a later change to the theme's hours still reaches those who never moved them.
+    private FrameworkElement DaylightRow(PanelThemeFile file)
+    {
+        var (day, night) = PanelThemes.DaylightHours(file, S.ThemeDaylight);
+        var times = Enumerable.Range(0, 48).Select(i => TimeSpan.FromMinutes(30 * i)).ToList();
+        ComboBox Pick(TimeSpan value, string name)
+        {
+            var box = new ComboBox { Width = 84, Style = (Style)FindResource("SettingsCombo"), ItemsSource = times.Select(PanelThemes.FormatTimeOfDay).ToList(),
+                SelectedIndex = times.FindIndex(time => time >= value) is var at and >= 0 ? at : 0 };
+            AutomationProperties.SetName(box, name); PopupMotion.Attach(box);
+            return box;
+        }
+        var from = Pick(day, Loc.T("白天开始", "Day begins"));
+        var to = Pick(night, Loc.T("夜晚开始", "Night begins"));
+        void Save()
+        {
+            var (d, n) = (times[Math.Max(0, from.SelectedIndex)], times[Math.Max(0, to.SelectedIndex)]);
+            if (d == n) return;
+            Change(s => s.ThemeDaylight = (d, n) == PanelThemes.DaylightHours(file) ? "" : PanelThemes.FormatDaylight(d, n));
+        }
+        from.SelectionChanged += (_, _) => Save(); to.SelectionChanged += (_, _) => Save();
+        var pair = new StackPanel { Orientation = Orientation.Horizontal };
+        pair.Children.Add(from); pair.Children.Add(TextLine("–", 12, TextSecondary)); pair.Children.Add(to);
+        ((TextBlock)pair.Children[1]).Margin = new Thickness(8, 0, 8, 0); ((TextBlock)pair.Children[1]).VerticalAlignment = VerticalAlignment.Center;
+        return Row(Loc.T("白天时段", "Daytime"), pair, help: () => Loc.T("在这段时间内使用白天外观，其余时间使用夜间外观；到点时自动渐变切换。",
+            "The day look is shown between these times and the night look the rest of the day; it changes over by itself, with a slow fade."));
     }
 
     private TextBlock Wrapped(string text, bool error)

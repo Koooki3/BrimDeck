@@ -52,7 +52,11 @@ public static partial class PanelThemes
         var effects = start.Effects;
         text = Regex.Replace(text, @"""surfaceGradient"": \[\]", "\"surfaceGradient\": " + ColorList(effects.SurfaceGradient));
         text = Regex.Replace(text, @"""rimGradient"": \[\]", "\"rimGradient\": " + ColorList(effects.RimGradient));
-        foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines) })
+        // Glass is written out in place of the template's commented example.
+        if (effects.Glass is { } glass)
+            text = Regex.Replace(text, @"// , ""glass"": \{[^}]*\}", $"\"glass\": {{ \"tint\": \"{glass.Tint}\", \"edge\": {glass.Edge.ToString("0.###", CultureInfo.InvariantCulture)}, \"highlight\": \"{glass.Highlight}\" }}")
+                .Replace("\"texture\": 0 ", "\"texture\": 0,", StringComparison.Ordinal);
+        foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines), ("pixel", effects.Pixel), ("texture", effects.Texture) })
             text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {value.ToString("0.###", CultureInfo.InvariantCulture)}");
         return FillMotion(text, start.Motion);
     }

@@ -9,11 +9,26 @@ internal static class ThemeMotionTests
         static PanelPalette Palette(string id) => PanelThemes.Resolve(PanelThemes.BuiltIn(id)!);
         static PanelPalette Custom(string json) => PanelThemes.Build("custom", PanelThemes.Parse(json));
 
-        // Every built-in theme has its own answers to the pointer; only the cyberpunk demo has ambient light.
-        string[] builtIns = ["dark", "light", "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", PanelThemes.Demo];
+        // Every built-in theme has its own answers to the pointer; ambient light is for the cyberpunk demo, the glass themes'
+        // drifting glint and the island's swell.
+        string[] builtIns = ["dark", "light", PanelThemes.GlassLight, PanelThemes.GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl",
+            PanelThemes.IslandHoliday, PanelThemes.PixelBlocks, PanelThemes.Demo];
+        string[] ambient = [PanelThemes.Demo, PanelThemes.GlassLight, PanelThemes.GlassDark, PanelThemes.IslandHoliday];
         check("Every built-in theme is listed for motion", PanelThemes.BuiltIns.Select(theme => theme.Id).Order().SequenceEqual(builtIns.Order()));
         check("Every built-in theme answers the pointer", builtIns.All(id => Palette(id).Motion.AnyInteraction));
-        check("Only the cyberpunk theme has ambient light", builtIns.All(id => Palette(id).Motion.Ambient.Any == (id == PanelThemes.Demo)));
+        check("Only the cyberpunk, glass and island themes have ambient light", builtIns.All(id => Palette(id).Motion.Ambient.Any == ambient.Contains(id)));
+        check("Glass: only a slow drifting glint, no breathing, sweep or flicker; a lens on hover, no particles",
+            new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion is { Hover: HoverFx.Lens, Particles: ParticleFx.None, Steps: 0 } m
+                && m.Ambient is { Drift: >= 20, Breathe: 0, Sweep: 0, Flicker: 0 })
+            && new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion.Press == PressFx.Jelly));
+        var islandDay = Palette(PanelThemes.IslandHoliday).Motion;
+        var islandNight = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!, true).Motion;
+        check("Island holiday: a swell and waves; sun glints by day, glowing plankton by night",
+            islandDay is { Hover: HoverFx.Wave, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Steps: 0 } && islandDay.Ambient is { Breathe: > 0, Drift: > 0, Sweep: > 0 }
+            && islandNight is { Hover: HoverFx.Wave, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 } && islandNight.Ambient.Breathe > islandDay.Ambient.Breathe
+            && islandNight.Pace == islandDay.Pace);
+        check("Pixel blocks: slots and bevels in four hard steps, square particles, no ambient light",
+            Palette(PanelThemes.PixelBlocks).Motion is { Hover: HoverFx.Slot, Press: PressFx.Bevel, Particles: ParticleFx.Pixel, ParticleStrength: > 0, Steps: 4 } pixel && !pixel.Ambient.Any);
         var cyber = Palette(PanelThemes.Demo).Motion;
         check("Cyberpunk: breathing, drifting, sweeping, a rare flicker; hard HUD answers in steps",
             cyber.Ambient is { Breathe: 6.5, BreatheDepth: .22, Drift: 11, Sweep: 16, SweepOpacity: .07, Flicker: 41, FlickerDepth: .1 }
@@ -28,9 +43,10 @@ internal static class ThemeMotionTests
         check("Dracula sparkles in purple and pink; Night Owl glows warm with fireflies",
             Palette("dracula").Motion is { Hover: HoverFx.Sheen, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Secondary: "liked" }
             && Palette("night-owl").Motion is { Hover: HoverFx.Glow, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 });
-        check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 1
+        // The GitHub pair and the glass pair are one material each in two tones, and share their answers.
+        check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 2
             && Palette("github-dark").Motion.Hover == Palette("github-light").Motion.Hover);
-        check("Only the mechanical theme moves in steps", builtIns.All(id => (Palette(id).Motion.Steps > 0) == (id == PanelThemes.Demo)));
+        check("Only the mechanical and pixel themes move in steps", builtIns.All(id => (Palette(id).Motion.Steps > 0) == (id is PanelThemes.Demo or PanelThemes.PixelBlocks)));
         check("Particle styles inherit and unknown ones keep the base's",
             Custom("""{ "base": "dracula", "motion": { "particles": "firefly" } }""").Motion.Particles == ParticleFx.Firefly
             && Custom("""{ "base": "dracula", "motion": { "particles": "confetti" } }""").Motion.Particles == ParticleFx.Star);

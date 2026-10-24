@@ -182,7 +182,7 @@ public partial class MainWindow
         SetImmediate(Island, Border.CornerRadiusProperty, new CornerRadius(from.TopRadius, from.TopRadius, from.BottomRadius, from.BottomRadius));
         SetImmediate(Island, IslandBorder.ShoulderRadiusProperty, from.Shoulder);
         SetImmediate(Island, IslandBorder.MaterialOpacityProperty, 1d);
-        SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf("surface"));
+        SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.SurfaceColor);
         SetImmediate(Compact, OpacityProperty, 0d);
         ResetDotPose();
     }

@@ -61,7 +61,7 @@ internal sealed class AmbientGlow : IMotionClient
     // Starts or stops the light for the current conditions.
     public void Update()
     {
-        bool run = _rim is not null && MotionGate.Ambient(_conditions(), _motion);
+        bool run = _rim is not null && MotionGate.Ambient(_conditions(), _motion) && !HeldForBlur;
         if (run == _running) return;
         if (run) { _running = true; _origin = Eased.Now; MotionTicker.Add(this, Interval(-1)); }
         else Stop();
@@ -80,7 +80,7 @@ internal sealed class AmbientGlow : IMotionClient
     public int Tick(double now)
     {
         if (!_running) return 0;
-        if (_rim is null || !MotionGate.Ambient(_conditions(), _motion)) { Stop(); return 0; }
+        if (_rim is null || !MotionGate.Ambient(_conditions(), _motion) || HeldForBlur) { Stop(); return 0; }
         var frame = _motion.Ambient.At(now - _origin);
         // Changes below what eight bits of opacity can show are left for a later frame. The drift always moves on by more than
         // its threshold between ticks (cyberpunk: .006 of a width per collapsed tick against .0015), so a slower tick would
@@ -95,6 +95,11 @@ internal sealed class AmbientGlow : IMotionClient
         else if (_sweepShown >= 0) { _sweepShown = -1; _sweepOpacityShown = 0; _sweep.Opacity = 0; }
         return Interval(frame.Sweep);
     }
+
+    // Over a live blur (GlassBackdrop) each frame of the open panel's large layered window costs more, and the drifting light
+    // alone kept the open panel at 7.5 % of a core against 2.7 % with it at rest (measured). There the light rests while the
+    // panel is open and moves on the small collapsed island only.
+    private bool HeldForBlur => _open() && GlassBackdrop.Available;
 
     // Slow light needs few frames: fewer still on the small collapsed island, a few more while a scan line moves.
     private int Interval(double sweep) => sweep >= 0 ? SweepMs : _open() ? OpenMs : CollapsedMs;

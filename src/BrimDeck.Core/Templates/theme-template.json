@@ -14,7 +14,8 @@
   "author": "",
   "license": "",
   "homepage": "",
-  "base": "dark",                   // Any built-in theme: dark, light, one-dark-pro, github-dark, github-light, dracula, night-owl, cyberpunk-edgerunners
+  "base": "dark",                   // Any built-in theme: dark, light, liquid-glass-light, liquid-glass-dark, one-dark-pro, github-dark,
+                                    // github-light, dracula, night-owl, island-holiday, pixel-blocks, cyberpunk-edgerunners
 
   "colors": {
     "surface": "#000000",           // The notch, capsule and panel. Always drawn opaque.
@@ -65,7 +66,7 @@
   },
 
   // The clock that suits the theme. Choosing the theme in settings switches the clock to it; the clock can still be changed after.
-  // style: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed
+  // style: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel
   // color: default (the "clock" color above), amber, cyan, pink, lime, custom, gradient, cover (the playing song's cover)
   // custom is used when color is "custom"; gradient, exactly three colors, when color is "gradient".
   // palette: the colors of the amber, cyan, pink and lime swatches in this theme. At least 4.5:1 against the surface.
@@ -93,7 +94,15 @@
     "shadowBlur": 14,               // 0 to 40
     "shadowDepth": 4,               // 0 to 12; 0 spreads the shadow evenly around the surface
     "shadowOpacity": 0.28,          // 0 to 1
-    "scanlines": 0                  // 0 to 0.12: horizontal lines in the primary text color at this opacity
+    "scanlines": 0,                 // 0 to 0.12: horizontal lines in the primary text color at this opacity
+    "pixel": 0,                     // 0, or 1 to 4: pixel art. Corners become steps of this many DIP, text is drawn unsmoothed,
+                                    // and with a rimGradient the rim is a bevel: its first color lights the edges facing up and
+                                    // left, its last shades the others
+    "texture": 0                    // 0 to 0.12, with pixel art: squares a little lighter or darker than the surface, a block's grain
+    // Glass: remove the "//" to make the surface a tint over the desktop instead of a solid color. Text is held to its minimums
+    // over the tint on both a black and a white desktop, so a light tint needs to be fairly dense (about 75 %). "surface" above
+    // is drawn instead where Windows' transparency effects are off. edge: 0 to 1, the light along the inner edge.
+    // , "glass": { "tint": "#C2F7F9FC", "edge": 0.6, "highlight": "#FFFFFF" }
   },
 
   // How the theme moves. Everything here follows Settings › Animations and Windows' "Animation effects": with either off, or in
