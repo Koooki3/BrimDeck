@@ -153,8 +153,9 @@ internal sealed partial class FxSurface : FrameworkElement
     private DependencyObject? _lastSource;
     private FrameworkElement? _lastTarget;
 
-    // Pressed by the keyboard (Space or Enter on a focused control) rather than by the mouse button.
-    private bool _keyPress;
+    // Pressed by the keyboard (Space or Enter on a focused control) rather than by the mouse button; or by touch or a pen, which
+    // the mouse button's own state does not show.
+    private bool _keyPress, _stylusPress;
 
     public event Action? Detached;
 
@@ -263,7 +264,9 @@ internal sealed partial class FxSurface : FrameworkElement
         if (_detached) return;
         EnsureDressed();
         if (!Active) return;
-        if (TargetOf(e.OriginalSource as DependencyObject) is { } target) PressOn(target);
+        if (TargetOf(e.OriginalSource as DependencyObject) is not { } target) return;
+        _stylusPress = e.StylusDevice is not null;
+        PressOn(target);
     }
 
     private void Lifted(object sender, MouseButtonEventArgs e)
@@ -440,7 +443,7 @@ internal sealed partial class FxSurface : FrameworkElement
         if (!_interactive() && (_hover is not null || _press.Down)) Release();
         // ui-4: a control that does not capture the mouse (a tab, a list item) never hears the button come up off the window,
         // which left the press held and the frames running; the button's own state lets it go.
-        if (_press.Down && !_keyPress && Preview is null && !LeftButtonDown()) LiftOff(false);
+        if (_press.Down && !_keyPress && !_stylusPress && Preview is null && !LeftButtonDown()) LiftOff(false);
         var dpi = Dpi;
         _hover?.Update(_scope, dpi);
         _leaving?.Update(_scope, dpi);
