@@ -68,38 +68,74 @@ internal static class MonitorDraw
         // more slowly than the letter, so the stroke follows the square root of its size in device pixels (about half a pixel at
         // 150 %, and close to the text's weight up to 300 %); below 8 px it shrinks with the letter, which keeps the
         // counters of a 100 % letter open.
-        var glyph = text.BuildGeometry(new Point());
-        var bounds = glyph.Bounds;
+        // The outline, its bounds and its stroke are made once per letter, size, scale and text color (the page and the collapsed
+        // row redraw their dials on every reading and every frame of a move).
+        var key = (letter, letterSize, ppd, UI.Primary);
+        if (!Letters.TryGetValue(key, out var made))
+        {
+            var outline = text.BuildGeometry(new Point()); outline.Freeze();
+            double pixels = letterSize * ppd;
+            var stroke = new Pen(UI.Brush(UI.Primary), Math.Min(.06 * pixels, .17 * Math.Sqrt(pixels)) / ppd) { LineJoin = PenLineJoin.Round };
+            stroke.Freeze();
+            if (Letters.Count > 64) Letters.Clear();
+            Letters[key] = made = (outline, outline.Bounds, stroke);
+        }
+        var (glyph, bounds, weight) = made;
         if (bounds.IsEmpty) return;
-        double pixels = letterSize * ppd;
-        var weight = new Pen(UI.Brush(UI.Primary), Math.Min(.06 * pixels, .17 * Math.Sqrt(pixels)) / ppd) { LineJoin = PenLineJoin.Round };
-        weight.Freeze();
-        drawing.PushTransform(new TranslateTransform(c.X - bounds.X - bounds.Width / 2, c.Y - bounds.Y - bounds.Height / 2));
+        drawing.PushTransform(Placed(new Matrix(1, 0, 0, 1, c.X - bounds.X - bounds.Width / 2, c.Y - bounds.Y - bounds.Height / 2)));
         drawing.DrawGeometry(UI.Brush(UI.Primary), weight, glyph);
         drawing.Pop();
     }
 
     private static void DialArc(DrawingContext drawing, Point c, double radius, double thickness, double fraction, string color)
     {
-        Point at(double angle) => new(c.X + radius * Math.Sin(angle), c.Y - radius * Math.Cos(angle));
-        double sweep = DialSweep * fraction;
-        var figure = new PathFigure { StartPoint = at(DialStart), IsClosed = false };
-        figure.Segments.Add(new ArcSegment(at(DialStart + sweep), new Size(radius, radius), 0, sweep > Math.PI, SweepDirection.Clockwise, true));
-        var geometry = new PathGeometry([figure]); geometry.Freeze();
-        var pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-        pen.Freeze();
-        drawing.DrawGeometry(null, pen, geometry);
+        // The whole track is the same on every reading while the dial holds its place; only the share's arc is made anew.
+        bool track = fraction >= 1;
+        if (!track || !Tracks.TryGetValue((c, radius, thickness), out var geometry))
+        {
+            Point at(double angle) => new(c.X + radius * Math.Sin(angle), c.Y - radius * Math.Cos(angle));
+            double sweep = DialSweep * fraction;
+            var figure = new PathFigure { StartPoint = at(DialStart), IsClosed = false };
+            figure.Segments.Add(new ArcSegment(at(DialStart + sweep), new Size(radius, radius), 0, sweep > Math.PI, SweepDirection.Clockwise, true));
+            geometry = new PathGeometry([figure]); geometry.Freeze();
+            if (track) { if (Tracks.Count > 32) Tracks.Clear(); Tracks[(c, radius, thickness)] = geometry; }
+        }
+        drawing.DrawGeometry(null, Stroke(ArcPens, color, thickness, PenLineJoin.Miter), geometry);
     }
 
     // A rate's arrow in the color, stroked, in a square of the size with its top left corner at the point.
     public static void Arrow(DrawingContext drawing, Point at, double size, double thickness, MonitorGlyph glyph, string color)
     {
         double scale = size / 16;
-        var pen = new Pen(UI.Brush(color), thickness / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
-        pen.Freeze();
-        drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, at.X, at.Y));
-        drawing.DrawGeometry(null, pen, Glyphs[glyph]);
+        drawing.PushTransform(Placed(new Matrix(scale, 0, 0, scale, at.X, at.Y)));
+        drawing.DrawGeometry(null, Stroke(ArrowPens, color, thickness / scale, PenLineJoin.Round), Glyphs[glyph]);
         drawing.Pop();
+    }
+
+    // What the dials and the arrows draw with, kept across redraws: the page and the collapsed row keep their sizes, colors and
+    // places from one reading to the next, and each redraw made them again (the letters' outlines and strokes, the tracks, the
+    // pens and the transforms that place them). Keys hold everything the drawing depends on; each table is emptied when it
+    // grows past a handful of entries, as when a dial moves across the row.
+    private static readonly Dictionary<(string Letter, double Size, double Ppd, string Color), (Geometry Glyph, Rect Bounds, Pen Weight)> Letters = [];
+    private static readonly Dictionary<(Point Center, double Radius, double Thickness), Geometry> Tracks = [];
+    private static readonly Dictionary<(string Color, double Thickness), Pen> ArcPens = [], ArrowPens = [];
+    private static readonly Dictionary<Matrix, Transform> Places = [];
+
+    private static Pen Stroke(Dictionary<(string Color, double Thickness), Pen> pens, string color, double thickness, PenLineJoin join)
+    {
+        if (pens.TryGetValue((color, thickness), out var pen)) return pen;
+        pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = join };
+        pen.Freeze();
+        if (pens.Count > 64) pens.Clear();
+        return pens[(color, thickness)] = pen;
+    }
+
+    private static Transform Placed(Matrix place)
+    {
+        if (Places.TryGetValue(place, out var known)) return known;
+        var transform = new MatrixTransform(place); transform.Freeze();
+        if (Places.Count > 64) Places.Clear();
+        return Places[place] = transform;
     }
 
     // A color made fainter, for the second segment of a bar and the fill under a sparkline.

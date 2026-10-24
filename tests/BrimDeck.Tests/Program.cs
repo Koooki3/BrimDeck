@@ -29,6 +29,7 @@ try
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
     CurvesTests.Run(Check);
+    IdleCostTests.Run(Check);
     DotMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     NeteaseLogTests.Run(Check);

@@ -118,6 +118,7 @@ public partial class MainWindow : Window
         InitializeMusic();
         InitializeMonitor();
         InitializeResize();
+        InitializeShadow();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
@@ -372,10 +373,11 @@ public partial class MainWindow : Window
         _themeGeneration = PanelTheme.Generation; _themeDpi = dpi;
         // The resize hints take the theme's colors when they are drawn.
         _grips?.InvalidateVisual();
-        if (sameTheme) { Island.Pattern = PanelTheme.Scanlines(dpiScale: dpi); return; }
+        if (sameTheme) { Island.Pattern = PanelTheme.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
         Foreground = UI.Brush(UI.Primary);
         PanelTheme.Dress(Island, dpiScale: dpi);
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
+        FitShadowCache(dpi);
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
         SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf(!_expanded && Collapsed.Style == CompactStyle.Line ? "indicator" : "surface"));
         _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent);
@@ -612,7 +614,7 @@ public partial class MainWindow : Window
         Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
-        Animate(IslandShadow, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
+        Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
         var tone = PanelTheme.ColorOf(indicator ? "indicator" : "surface");
