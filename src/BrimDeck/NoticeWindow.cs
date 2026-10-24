@@ -395,7 +395,7 @@ internal sealed partial class NoticeWindow : Window
 
     private (double Padding, double Plate) ToastMetrics(double height)
     {
-        double plate = Math.Clamp(Math.Round(height - 20), 22, 30);
+        double plate = Math.Clamp(Math.Round(height - 16), 24, 34);
         double padding = _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(16, _deck.Collapsed.Shoulder + 14) : Math.Max(8, (height - plate) / 2);
         return (padding, plate);
     }
@@ -497,7 +497,7 @@ internal sealed partial class NoticeWindow : Window
         BitmapSource? image = _item?.Kind == AttentionKind.Summary ? null : Center.Icons.Get(notice?.IconRef, out _);
         if (image is not null)
         {
-            var picture = new Image { Source = image, Width = size * .72, Height = size * .72, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var picture = new Image { Source = image, Width = size * .84, Height = size * .84, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             RenderOptions.SetBitmapScalingMode(picture, BitmapScalingMode.HighQuality);
             plate.Children.Add(picture);
         }
@@ -552,7 +552,7 @@ internal sealed partial class NoticeWindow : Window
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(Plate(notice, 32));
+        header.Children.Add(Plate(notice, 40));
         var who = new StackPanel { Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         who.Children.Add(Line(notice?.AppName ?? "BrimDeck", 12.5, _look.Primary, FontWeights.SemiBold));
         string meta = notice is null ? Loc.T("最近通知", "Recent notices")

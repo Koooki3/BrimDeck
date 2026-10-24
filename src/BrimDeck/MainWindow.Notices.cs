@@ -258,7 +258,7 @@ public partial class MainWindow
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.Child = grid;
-        var plate = NoticePlate(notice, 28);
+        var plate = NoticePlate(notice, 34);
         plate.VerticalAlignment = VerticalAlignment.Top; plate.Margin = new Thickness(0, 1, 10, 0);
         grid.Children.Add(plate);
         var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
@@ -359,7 +359,7 @@ public partial class MainWindow
         plate.Children.Clear();
         plate.Children.Add(new Border { CornerRadius = new CornerRadius(size * .28), Background = UI.Brush(UI.Fill) });
         var image = _app.Notices.Icons.Get(notice.IconRef, out _);
-        if (image is not null) plate.Children.Add(new Image { Source = image, Width = size * .72, Height = size * .72, Stretch = Stretch.Uniform });
+        if (image is not null) plate.Children.Add(new Image { Source = image, Width = size * .84, Height = size * .84, Stretch = Stretch.Uniform });
         else if (NoticeBadges.AppGlyph(notice, size, _app.Notices.Icons.AccentFor(notice, Settings.NoticeRule(notice.AppKey))) is { } glyph) plate.Children.Add(glyph);
         else
         {
