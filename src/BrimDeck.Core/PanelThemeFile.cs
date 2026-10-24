@@ -25,6 +25,17 @@ public sealed class PanelThemeFile
     // The twelve preset colors of the color picker in settings. Unlike everything else these are not inherited: a theme without
     // its own list offers its own app, warning, critical and clock colors (see PanelPalette.Swatches).
     public List<string>? Swatches { get; set; }
+    // A theme with a day and a night look: Night is laid over the theme from Daylight's evening to its morning. Only its colors,
+    // apps, effects, motion and clock are read; it has no base or name of its own.
+    public PanelThemeFile? Night { get; set; }
+    public PanelThemeDaylight? Daylight { get; set; }
+}
+
+// When the day look of a theme with a night look begins and ends, as "HH:mm" local time. The settings can move both.
+public sealed class PanelThemeDaylight
+{
+    public string Day { get; set; } = "";
+    public string Night { get; set; } = "";
 }
 
 public sealed class PanelThemeClock
@@ -62,4 +73,19 @@ public sealed class PanelThemeEffects
     public double? ShadowOpacity { get; set; }
     // Horizontal scan lines over the surface, as an opacity of the primary text color.
     public double? Scanlines { get; set; }
+    // Glass: the surface is a tint over a blur of what lies behind the island, where Windows can draw one.
+    public PanelThemeGlass? Glass { get; set; }
+    // Pixel art: corners become steps of this many DIP (1 to 4), the rim a bevel and the text unsmoothed. 0 turns it off.
+    public double? Pixel { get; set; }
+}
+
+// The glass material (see PanelThemes.Glass). Tint is the color laid over the blurred backdrop; text is held to its minimums
+// over the tint on a black and on a white backdrop alike, so the glass reads over any desktop. Edge (0 to 1) is the light the
+// glass gathers along its inner edge, as a thick lens does; Highlight the color of that light and of the rim's specular glint.
+// Where Windows draws no blur (transparency effects off, high contrast, battery saver) the surface color is drawn instead.
+public sealed class PanelThemeGlass
+{
+    public string? Tint { get; set; }
+    public double? Edge { get; set; }
+    public string? Highlight { get; set; }
 }

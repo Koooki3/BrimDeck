@@ -16,7 +16,13 @@ internal static class PanelTheme
     // The theme on screen. While the chosen theme file has an error, this is still its last good version (see Use).
     public static PanelThemeInfo ShownTheme { get; private set; } = PanelThemes.BuiltIn(PanelThemes.Dark)!;
     public static bool KeptLastGood { get; private set; }
+    // Whether the theme on screen shows its night look (PanelThemeFile.Night).
+    public static bool Night { get; private set; }
+    // When the theme on screen changes between its day and night looks next, or null for a theme without a night look.
+    public static DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
     public static int Generation { get; private set; }
+    // Raised just before another palette becomes current; true when a theme trades its day and night looks.
+    public static event Action<bool>? Changing;
     // The themes found in the folder at the last reload.
     public static IReadOnlyList<PanelThemeInfo> UserThemes { get; private set; } = [];
 
@@ -49,7 +55,8 @@ internal static class PanelTheme
     public static bool Use(DeckSettings settings, bool reload = false, bool systemChanged = false)
     {
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
-        if (!reload && !systemChanged && _loaded && chosen == _chosen) return false;
+        // New hours for the day and night looks count as a change too.
+        if (!reload && !systemChanged && _loaded && chosen == _chosen && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night) return false;
         if (reload || !_loaded) Reload();
         _chosen = chosen;
         var theme = Find(chosen);
@@ -59,12 +66,16 @@ internal static class PanelTheme
             && UserThemes.Any(t => !t.Usable && string.Equals(t.Path, ShownTheme.Path, StringComparison.OrdinalIgnoreCase));
         KeptLastGood = keepLastGood;
         if (keepLastGood) return false;
+        // A theme with a night look shows it by the local clock (PanelThemes.IsNight).
+        bool night = PanelThemes.IsNight(theme.File, DateTime.Now, settings.ThemeDaylight);
         // The same theme as now (the common case for "system") needs no new palette.
-        if (!reload && ReferenceEquals(theme, ShownTheme) && _signature.Length > 0) return false;
-        ShownTheme = theme;
-        var palette = PanelThemes.Resolve(theme);
+        if (!reload && ReferenceEquals(theme, ShownTheme) && night == Night && _signature.Length > 0) return false;
+        ShownTheme = theme; Night = night;
+        var palette = PanelThemes.Resolve(theme, night);
         var signature = Signature(theme, palette);
         if (signature == _signature) return false;
+        // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade).
+        Changing?.Invoke(Current.Id == palette.Id && Current.IsNight != palette.IsNight);
         _signature = signature; Current = palette; Generation++;
         _hex = Hexes(palette); _appColors.Clear(); _warningColor = _criticalColor = null;
         _readable.Clear(); _readableColors.Clear();
@@ -72,12 +83,21 @@ internal static class PanelTheme
         return true;
     }
 
+    // For the previews (tests/BrimDeck.FxPreview): makes a palette current without settings or files, as Use would.
+    internal static void Show(PanelPalette palette)
+    {
+        Current = palette; Generation++; _signature = "";
+        _hex = Hexes(palette); _appColors.Clear(); _warningColor = _criticalColor = null;
+        _readable.Clear(); _readableColors.Clear();
+        Publish(Application.Current?.Resources);
+    }
+
     // Everything a palette draws, by value: a file theme is built anew for every reading, so an edit shows as a new signature.
     private static string Signature(PanelThemeInfo theme, PanelPalette palette)
     {
         var e = palette.Effects;
         var clock = palette.Clock;
-        return string.Join("|", theme.Id, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
+        return string.Join("|", theme.Id, palette.IsNight, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
             string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}"),
             $"{clock?.Style}/{clock?.Color}/{clock?.Custom}/{string.Join(",", clock?.Gradient ?? [])}",
             string.Join(",", ClockColors.Swatches.Select(palette.ClockPreset)), string.Join(";", palette.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops))),
@@ -147,6 +167,40 @@ internal static class PanelTheme
         palette ??= Current;
         island.Gradient = SurfaceGradient(palette); island.Pattern = Scanlines(palette, dpiScale);
         island.RimBrush = RimBrush(palette); island.RimWidth = palette.Effects.RimWidth;
+        island.Pixel = palette.Effects.Pixel; island.BevelBrush = BevelBrush(palette);
+        island.EdgeBrush = GlassShownFor(palette) ? EdgeBrush(palette) : null;
+    }
+
+    // Glass shows as glass only where Windows' transparency effects are on and high contrast is off; otherwise its surface
+    // color is drawn, opaque, like any other theme's.
+    public static bool GlassShown => GlassShownFor(Current);
+    private static bool GlassShownFor(PanelPalette palette) => palette.IsGlass && MotionEnvironment.Transparency && !SystemParameters.HighContrast;
+    // The island's base color: the glass tint over the desktop, or the surface. The indicator line keeps its own color.
+    public static Color SurfaceColor => GlassShown ? ToColor(Current.Effects.Glass!.Tint) : ColorOf("surface");
+
+    // A pixel theme's bevel: the rim's last gradient color shades the edges that face down and right (IslandBorder.Pixel).
+    public static Brush? BevelBrush(PanelPalette? palette = null)
+    {
+        var effects = (palette ?? Current).Effects;
+        if (effects.Pixel <= 0 || effects.RimGradient.Count < 2) return null;
+        var brush = new SolidColorBrush(ToColor(effects.RimGradient[^1]));
+        brush.Freeze();
+        return brush;
+    }
+
+    // The light a glass surface gathers along its edge: brightest along the top, where light falls on it, gone through the
+    // middle and back faintly along the bottom, in the glass's highlight color.
+    public static Brush? EdgeBrush(PanelPalette? palette = null)
+    {
+        if ((palette ?? Current).Effects.Glass is not { Edge: > 0 } glass) return null;
+        var light = ToColor(glass.Highlight);
+        Color At(double alpha) => Color.FromArgb((byte)Math.Round(255 * Math.Clamp(alpha * glass.Edge, 0, 1)), light.R, light.G, light.B);
+        var brush = new LinearGradientBrush(new GradientStopCollection
+        {
+            new(At(.9), 0), new(At(.35), .22), new(At(0), .5), new(At(.12), .8), new(At(.4), 1)
+        }, new Point(0, 0), new Point(0, 1));
+        brush.Freeze();
+        return brush;
     }
     // The shadow under the collapsed surface, or the glow of a theme that gives it no depth.
     public static void Dress(DropShadowEffect shadow, PanelPalette? palette = null)
@@ -188,7 +242,9 @@ internal static class PanelTheme
     {
         palette ??= Current;
         var effects = palette.Effects;
-        Brush brush = effects.RimGradient.Count >= 2 ? Spread(effects.RimGradient, new Point(1, 0)) : new SolidColorBrush(ToColor(palette["rim"]));
+        // A pixel theme's bevel lights its upper and left edges in the gradient's first color and shades the others in the last.
+        Brush brush = effects.Pixel > 0 && effects.RimGradient.Count >= 2 ? new SolidColorBrush(ToColor(effects.RimGradient[0]))
+            : effects.RimGradient.Count >= 2 ? Spread(effects.RimGradient, new Point(1, 0)) : new SolidColorBrush(ToColor(palette["rim"]));
         brush.Freeze();
         return brush;
     }

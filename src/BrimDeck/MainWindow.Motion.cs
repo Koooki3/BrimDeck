@@ -39,7 +39,12 @@ public partial class MainWindow
     }
 
     // Windows changed something motion depends on (lock, display, battery saver, animation effects, high contrast).
-    private void EnvironmentChanged() { UpdateAmbient(); UpdateMusicTimer(); UpdateMonitorDemand(); }
+    // Transparency effects or high contrast turning glass on or off dresses the surface again.
+    private void EnvironmentChanged()
+    {
+        if (_glassShown != PanelTheme.GlassShown && _themeGeneration >= 0) ApplySettings();
+        UpdateAmbient(); UpdateMusicTimer(); UpdateMonitorDemand();
+    }
 
     // The shadow's cached picture (ShadowHost) is drawn at the display's scale, and reaches past the blur by whole device
     // pixels: a picture whose edge fell between pixels was resampled when drawn, and differed from the shadow drawn directly

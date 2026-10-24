@@ -11,14 +11,17 @@ namespace BrimDeck.Core;
 // The mark on a hovered control. reveal: a faint fill and a 1 px edge lit from the top (Fluent); lift: a soft shadow outside
 // the shape and a light top edge (a light theme's raised card); underline: a subtle fill and a 2 px bar along the bottom
 // (Primer); caret: an editor's line highlight and a caret bar at the left; brackets: four HUD corner brackets that snap on in
-// steps; sheen: a two-color tint and a fine gradient edge; glow: a warm inner glow and a glint at a corner.
-public enum HoverFx { None, Reveal, Lift, Underline, Caret, Brackets, Sheen, Glow }
+// steps; sheen: a two-color tint and a fine gradient edge; glow: a warm inner glow and a glint at a corner; lens: light caught
+// at the top of a glass bead and a bright rim (liquid glass); wave: a faint tint and a gentle wave rolling in along the bottom
+// (island holiday); slot: a square, solid-edged highlight, as an inventory slot under the pointer (pixel blocks).
+public enum HoverFx { None, Reveal, Lift, Underline, Caret, Brackets, Sheen, Glow, Lens, Wave, Slot }
 // The press. shade: the shape darkens or brightens a little and its edge firms; sink: the shadow collapses and the shape is
 // shaded as if pushed in; indicator: the bottom bar turns the highlight color; select: a selection sweeps across from the
 // caret; lock: the brackets clamp onto the shape with a chromatic ghost and a short glitch slice, and a scan line passes on
 // release; sparkle: the tint deepens and a few stars twinkle on the corners on release; ember: a warm glow swells from the
-// middle and fireflies rise from the top on release.
-public enum PressFx { None, Shade, Sink, Indicator, Select, Lock, Sparkle, Ember }
+// middle and fireflies rise from the top on release; bevel: the block's bevel turns over, shaded on top and lit below, as a
+// pixel-art button pressed in.
+public enum PressFx { None, Shade, Sink, Indicator, Select, Lock, Sparkle, Ember, Bevel }
 // A short accent where keyboard focus lands, over the focus outline the control keeps: a ring, a soft glow, brackets or a caret.
 public enum FocusFx { None, Ring, Glow, Brackets, Caret }
 // What a completed press leaves for a moment, from the control's own edges (never where the pointer is): dust (soft motes),
@@ -359,10 +362,10 @@ public readonly record struct PressFrame(double Held, double Release, double Flo
 public sealed class PanelThemeMotion
 {
     public PanelThemeAmbient? Ambient { get; set; }
-    // none, reveal, lift, underline, caret, brackets, sheen, glow (HoverFx); earlier names: spot, edge, neon
+    // none, reveal, lift, underline, caret, brackets, sheen, glow, lens, wave, slot (HoverFx); earlier names: spot, edge, neon
     public string? Hover { get; set; }
     public double? HoverStrength { get; set; }
-    // none, shade, sink, indicator, select, lock, sparkle, ember (PressFx); earlier names: pulse, ripple, ring
+    // none, shade, sink, indicator, select, lock, sparkle, ember, bevel (PressFx); earlier names: pulse, ripple, ring
     public string? Press { get; set; }
     public double? PressStrength { get; set; }
     // 0 to 0.6: how strongly the particles a completed press leaves show (0: none)

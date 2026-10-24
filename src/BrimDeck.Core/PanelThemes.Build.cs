@@ -7,23 +7,30 @@ namespace BrimDeck.Core;
 public static partial class PanelThemes
 {
     // Built-in palettes never change. A user file is resolved once per reading: an edited file is read again into a new entry.
-    private static readonly Dictionary<string, PanelPalette> ResolvedBuiltIns = new(StringComparer.Ordinal);
-    private static readonly ConditionalWeakTable<PanelThemeInfo, PanelPalette> ResolvedFiles = new();
-    public static PanelPalette Resolve(PanelThemeInfo theme)
+    // A theme with a night look resolves to two palettes, kept side by side.
+    private static readonly Dictionary<(string, bool), PanelPalette> ResolvedBuiltIns = [];
+    private static readonly ConditionalWeakTable<PanelThemeInfo, PanelPalette> ResolvedFiles = new(), ResolvedNights = new();
+    public static PanelPalette Resolve(PanelThemeInfo theme) => Resolve(theme, false);
+    public static PanelPalette Resolve(PanelThemeInfo theme, bool night)
     {
-        if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue(theme.Id, out var cached) : ResolvedFiles.TryGetValue(theme, out cached)) return cached;
-        var palette = Build(theme.Id, theme.File);
-        if (theme.BuiltIn) ResolvedBuiltIns[theme.Id] = palette; else ResolvedFiles.AddOrUpdate(theme, palette);
+        night &= theme.File.Night is not null;
+        var files = night ? ResolvedNights : ResolvedFiles;
+        if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue((theme.Id, night), out var cached) : files.TryGetValue(theme, out cached)) return cached;
+        var palette = Build(theme.Id, theme.File, night);
+        if (theme.BuiltIn) ResolvedBuiltIns[(theme.Id, night)] = palette; else files.AddOrUpdate(theme, palette);
         return palette;
     }
 
-    public static PanelPalette Build(string id, PanelThemeFile file)
+    // night lays the file's night look over it, when it has one.
+    public static PanelPalette Build(string id, PanelThemeFile file, bool night = false)
     {
         var colors = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var apps = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var effects = new PanelThemeEffects();
         PanelThemeClock? clock = null;
         var chain = BaseChain(file);
+        night &= file.Night is not null;
+        if (night) chain.Add(file.Night!);
         foreach (var layer in chain)
         {
             foreach (var (key, value) in layer.Colors ?? [])
@@ -41,7 +48,8 @@ public static partial class PanelThemes
         colors["tooltip"] = colors["tooltip"].Over(surface);
         colors["bubble"] = colors["bubble"].Over(surface);
         var values = EffectValues(effects);
-        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface))];
+        // Glass is read over the darkest and the lightest backdrop it can stand on; its surface color is what shows without it.
+        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? []];
 
         var adjustments = new List<PanelThemeAdjustment>();
         var popup = colors["popup"].Over(surface);
@@ -79,7 +87,7 @@ public static partial class PanelThemes
         // A theme's own picker colors are offered as the panel draws them, like the ones derived from its palette.
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
             .OfType<ThemeColor>().Take(12).ToList();
-        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches) { Motion = MotionValues(chain) };
+        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches) { Motion = MotionValues(chain), IsNight = night };
     }
 
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.
@@ -121,6 +129,14 @@ public static partial class PanelThemes
         merged.ShadowDepth = layer.ShadowDepth ?? merged.ShadowDepth;
         merged.ShadowOpacity = layer.ShadowOpacity ?? merged.ShadowOpacity;
         merged.Scanlines = layer.Scanlines ?? merged.Scanlines;
+        merged.Pixel = layer.Pixel ?? merged.Pixel;
+        if (layer.Glass is { } glass)
+        {
+            merged.Glass ??= new PanelThemeGlass();
+            merged.Glass.Tint = glass.Tint ?? merged.Glass.Tint;
+            merged.Glass.Edge = glass.Edge ?? merged.Glass.Edge;
+            merged.Glass.Highlight = glass.Highlight ?? merged.Glass.Highlight;
+        }
     }
 
     // The effects in their ranges; a gradient needs two stops and keeps at most eight.
@@ -128,8 +144,14 @@ public static partial class PanelThemes
     {
         var surfaceGradient = Stops(effects.SurfaceGradient);
         var rimGradient = Stops(effects.RimGradient);
+        // Glass needs a tint that lets some of the backdrop through, and is there: an opaque or an empty one is no glass. The pixel size is whole DIP.
+        PanelGlass? glass = effects.Glass is { Tint: { } tintText } glassFile && ThemeColor.TryParse(tintText, out var tint) && tint.A is > 0 and < 255
+            ? new PanelGlass(tint, Fit(glassFile.Edge, 0, 1, .5), glassFile.Highlight is { } light && ThemeColor.TryParse(light, out var highlight) ? highlight : ThemeColor.White)
+            : null;
+        double pixel = Math.Round(Fit(effects.Pixel, 0, 4, 0));
         return new(surfaceGradient.Count >= 2 ? surfaceGradient : [], rimGradient.Count >= 2 ? rimGradient : [],
-            Fit(effects.RimWidth, 0, 3, 1), Fit(effects.ShadowBlur, 0, 40, 14), Fit(effects.ShadowDepth, 0, 12, 4), Fit(effects.ShadowOpacity, 0, 1, .28), Fit(effects.Scanlines, 0, .12, 0));
+            Fit(effects.RimWidth, 0, 3, 1), Fit(effects.ShadowBlur, 0, 40, 14), Fit(effects.ShadowDepth, 0, 12, 4), Fit(effects.ShadowOpacity, 0, 1, .28), Fit(effects.Scanlines, 0, .12, 0),
+            glass, pixel);
     }
     private static List<ThemeColor> Stops(List<string>? values) => values is null ? [] : values.Select(value => ThemeColor.TryParse(value, out var c) ? c : (ThemeColor?)null).OfType<ThemeColor>().Take(8).ToList();
     private static double Fit(double? value, double min, double max, double fallback) => value is { } v && double.IsFinite(v) ? Math.Clamp(v, min, max) : fallback;

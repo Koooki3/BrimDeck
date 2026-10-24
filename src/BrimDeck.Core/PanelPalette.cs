@@ -21,7 +21,15 @@ public sealed record PanelThemeAdjustment(string Key, string Before, string Afte
 }
 
 public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGradient, IReadOnlyList<ThemeColor> RimGradient, double RimWidth,
-    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines);
+    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, PanelGlass? Glass = null, double Pixel = 0);
+
+// The glass a theme's surface is made of (PanelThemeGlass, fitted): the tint over the backdrop, the strength of the light along
+// its inner edge and the color of that light.
+public sealed record PanelGlass(ThemeColor Tint, double Edge, ThemeColor Highlight)
+{
+    // The tint over the darkest and the lightest backdrop: text must read on both.
+    public IReadOnlyList<ThemeColor> Extremes => [Tint.Over(ThemeColor.Black), Tint.Over(ThemeColor.White)];
+}
 
 // A theme ready to draw: every token has a color, every effect a value, and the contrast rules hold (see PanelThemes.Build).
 public sealed class PanelPalette
@@ -36,7 +44,7 @@ public sealed class PanelPalette
         IReadOnlyList<PanelThemeAdjustment> adjustments, PanelThemeClock? clock, IReadOnlyList<ThemeColor>? swatches)
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
-        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface))];
+        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. effects.Glass?.Extremes ?? []];
         IsDark = SurfaceStops.Average(stop => stop.Luminance) < .18;
     }
 
@@ -53,7 +61,11 @@ public sealed class PanelPalette
     public PanelThemeEffectValues Effects { get; }
     // How the theme moves: ambient light and the answers to the pointer, held to MotionSafety's limits.
     public ThemeMotion Motion { get; init; } = ThemeMotion.Default;
-    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0;
+    // A glass surface shows the desktop through it, so like a gradient it has no single color to fade text into.
+    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Glass is not null;
+    public bool IsGlass => Effects.Glass is not null;
+    // Whether this is a theme's night look (PanelThemes.Resolve).
+    public bool IsNight { get; init; }
     public IReadOnlyList<PanelThemeAdjustment> Adjustments { get; }
 
     // The theme's default color for an application column. The dark theme names every source, and every theme builds on it.

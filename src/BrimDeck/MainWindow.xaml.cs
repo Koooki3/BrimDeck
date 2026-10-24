@@ -53,6 +53,8 @@ public partial class MainWindow : Window
     // The panel theme generation this window's surface and cached content were built for; see ApplyTheme.
     private int _themeGeneration = -1;
     private double _themeDpi;
+    // Whether the theme's glass was shown when the surface was last dressed (PanelTheme.GlassShown).
+    private bool _glassShown;
     private VirtualDesktopPresence? _virtualDesktops;
     private EscapeDismissal? _escapeDismissal;
     private bool _expanded, _refreshing, _preview, _refreshRequested, _pointerInside;
@@ -110,6 +112,11 @@ public partial class MainWindow : Window
         InitializeResize();
         Island.Background = _surface;
         InitializeMotion();
+        PanelTheme.Changing += BeginThemeFade;
+        Closed += (_, _) => PanelTheme.Changing -= BeginThemeFade;
+        // The picture of a theme being left lies on the island's present shape only.
+        IsVisibleChanged += (_, _) => { if (!IsVisible) EndThemeFade(); };
+        Island.SizeChanged += (_, _) => EndThemeFade();
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
@@ -353,10 +360,10 @@ public partial class MainWindow : Window
     private void ApplyTheme()
     {
         double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
-        if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi) return;
+        if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi && _glassShown == PanelTheme.GlassShown) return;
         // A new scale alone only redraws the scan lines, which are laid out in device pixels.
-        bool sameTheme = _themeGeneration == PanelTheme.Generation;
-        _themeGeneration = PanelTheme.Generation; _themeDpi = dpi;
+        bool sameTheme = _themeGeneration == PanelTheme.Generation && _glassShown == PanelTheme.GlassShown;
+        _themeGeneration = PanelTheme.Generation; _themeDpi = dpi; _glassShown = PanelTheme.GlassShown;
         // The resize hints take the theme's colors when they are drawn.
         _grips?.InvalidateVisual();
         if (sameTheme) { Island.Pattern = PanelTheme.Scanlines(dpiScale: dpi); return; }
@@ -365,7 +372,8 @@ public partial class MainWindow : Window
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
         ApplyThemeMotion();
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
-        SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf(!_expanded && Collapsed.Style == CompactStyle.Line ? "indicator" : "surface"));
+        SetImmediate(_surface, SolidColorBrush.ColorProperty, !_expanded && Collapsed.Style == CompactStyle.Line ? PanelTheme.ColorOf("indicator") : PanelTheme.SurfaceColor);
+        ApplyMaterial();
         _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent);
         _musicRenderKey = ""; _compactRendered = null; _alertRendered = null;
         if (_detailPopup is { } popup) Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_detailPopup, popup)) popup.Close(); });
@@ -639,7 +647,7 @@ public partial class MainWindow : Window
         Animate(IslandShadow, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
-        var tone = PanelTheme.ColorOf(indicator ? "indicator" : "surface");
+        var tone = indicator ? PanelTheme.ColorOf("indicator") : PanelTheme.SurfaceColor;
         // Opening from the indicator, the surface takes its own color while it is still the thin line: the opening spring is
         // half way open within a few frames, and a tint still under way showed for those frames as a large block in the
         // indicator's color.

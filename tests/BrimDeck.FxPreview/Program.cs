@@ -38,6 +38,9 @@ internal static class Program
 
         // The date range picker's strips (DatePreview): --date <output folder>.
         if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
+        // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...].
+        if (args.Length > 1 && args[0] == "--sheet")
+            return ThemeSheet.Run(args[1], args.Length > 3 && args[2] == "--themes" ? args[3].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null);
         string? folder = null; double stripDpi = 1; HashSet<string>? only = null;
         for (int i = 0; i < args.Length; i++)
         {

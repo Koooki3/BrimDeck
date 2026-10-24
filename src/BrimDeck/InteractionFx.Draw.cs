@@ -14,6 +14,10 @@ namespace BrimDeck;
 //     magenta ghost, a yellow corner and a glitch slice of the control itself, and a completed press ticks a scan line down it.
 //   sheen / sparkle (Dracula): a purple-to-pink tint and fine gradient edge; a press deepens it, then stars twinkle (particles).
 //   glow / ember (Night Owl): a warm glow inside the shape and a glint at its corner; a press swells it, then fireflies rise.
+//   lens (liquid glass): light gathered at the top of the shape as on a glass bead, and a rim bright at the top.
+//   wave (island holiday): a faint tint and a gentle wave that rolls in along the bottom and settles.
+//   slot / bevel (pixel blocks): a square highlight with a solid inner edge, as an inventory slot; a press turns the block's
+//     bevel over, shaded at the top left and lit at the bottom right, as a pixel-art button pushed in.
 // Brushes and pens are made when the theme dresses the layer and frozen; strengths are applied as opacity, so a frame only
 // draws.
 internal sealed partial class FxSurface
@@ -21,6 +25,8 @@ internal sealed partial class FxSurface
     private Brush _main = Brushes.Transparent, _second = Brushes.Transparent, _high = Brushes.Transparent;
     private Brush _liftBrush = Brushes.Transparent, _revealEdgeBrush = Brushes.Transparent, _sheen = Brushes.Transparent, _glow = Brushes.Transparent, _ember = Brushes.Transparent, _glint = Brushes.Transparent;
     private Pen _liftLine = new(), _mainLine = new(), _mainBold = new(), _secondLine = new(), _secondBold = new(), _highLine = new(), _highBold = new(), _revealEdge = new(), _sheenEdge = new(), _lightLine = new();
+    private Brush _lens = Brushes.Transparent, _lensEdgeBrush = Brushes.Transparent, _shadeBrush = Brushes.Transparent;
+    private Pen _lensEdge = new(), _shadeBold = new();
     private double _line = 1, _bold = 1.5, _dressedDpi;
     private bool _darkSurface;
     // The glitch slice: the pressed control itself, a thin band of it drawn a few pixels aside for a moment.
@@ -41,6 +47,11 @@ internal sealed partial class FxSurface
         _glow = Radial(second, new Point(.5, 1), .75, 1.25);
         _ember = Radial(second, new Point(.5, .5), .65, .9);
         _glint = Radial(second, new Point(.5, .5), .5, .5);
+        // A glass bead: light pooled at the top centre, the rim brightest at the top and faint at the bottom.
+        _lens = Radial(main, new Point(.5, 0), .75, 1.1);
+        _lensEdgeBrush = Vertical(main, 1, .15);
+        // The shaded side of a pixel bevel.
+        _shadeBrush = Solid(Alpha(Colors.Black, _darkSurface ? .85 : .55));
         DressPens();
         DressParticles(main, second, high);
     }
@@ -56,6 +67,8 @@ internal sealed partial class FxSurface
         _secondLine = Pen(_second, _line); _secondBold = Pen(_second, _bold, PenLineCap.Square);
         _highLine = Pen(_high, _line); _highBold = Pen(_high, _bold, PenLineCap.Square);
         _revealEdge = Pen(_revealEdgeBrush, _line);
+        _lensEdge = Pen(_lensEdgeBrush, _line);
+        _shadeBold = Pen(_shadeBrush, _bold, PenLineCap.Square);
         _sheenEdge = Pen(_sheen, _line);
         // The light top edge of a raised card (lift), on light themes only.
         _lightLine = Pen(Brushes.White, _line);
@@ -223,6 +236,22 @@ internal sealed partial class FxSurface
                     double gx = ellipse ? r.Left + r.Width * .82 : r.Right - Math.Max(radius, 3) - 1.5, gy = ellipse ? r.Top + r.Height * .18 : r.Top + 3.5;
                     Dot(dc, _glint, gx, gy, 3.8, h);
                     break;
+                case HoverFx.Lens:
+                    Fill(dc, _lens, r, radius, ellipse, Math.Min(1, hs * 1.8) * h);
+                    Edge(dc, _lensEdge, r, radius, ellipse, Math.Min(1, hs * 4) * h);
+                    break;
+                case HoverFx.Wave:
+                    Fill(dc, _main, r, radius, ellipse, hs * .35 * h);
+                    DrawWave(dc, r, radius, ellipse, h, Math.Min(1, hs * 4.5) * h);
+                    break;
+                case HoverFx.Slot:
+                {
+                    // Square whatever the control's corners: a slot is a block.
+                    Box(dc, _main, r, 0, hs * .6 * h);
+                    var inner = r; inner.Inflate(-_bold / 2, -_bold / 2);
+                    if (inner.Width > 0 && inner.Height > 0) { dc.PushOpacity(Math.Min(1, hs * 3.5) * h); dc.DrawRectangle(null, _mainBold, inner); dc.Pop(); }
+                    break;
+                }
             }
             DrawPress(dc, mark, r, radius, ellipse, h, press, ps);
         }
@@ -271,6 +300,16 @@ internal sealed partial class FxSurface
             case PressFx.Ember:
                 Fill(dc, _ember, r, radius, ellipse, Math.Min(1, ps * 1.5) * k);
                 break;
+            case PressFx.Bevel:
+                if (k > .001)
+                {
+                    // Pushed in: darker, shaded along the top and left inside edges, lit along the bottom and right ones.
+                    Box(dc, _shadeBrush, r, 0, ps * .6 * k);
+                    double t = _bold / 2, left = r.Left + t, top = r.Top + t, right = r.Right - t, bottom = r.Bottom - t;
+                    Line(dc, _shadeBold, left, top, right, top, k); Line(dc, _shadeBold, left, top, left, bottom, k);
+                    Line(dc, _mainBold, left, bottom, right, bottom, Math.Min(1, ps * 2.4) * k); Line(dc, _mainBold, right, top, right, bottom, Math.Min(1, ps * 2.4) * k);
+                }
+                break;
         }
         // The brackets belong to both the hover and the lock: one set, which snaps on with the hover, clamps with the press and
         // kicks out as a completed press lets go.
@@ -307,6 +346,26 @@ internal sealed partial class FxSurface
             Line(dc, _highLine, r.Left, y, r.Right, y, .95);
             Line(dc, _mainLine, r.Left, Snap(y - 2, _line), r.Right, Snap(y - 2, _line), .35);
         }
+    }
+
+    // A gentle wave along the inside of the bottom edge, clear of the corners: it rolls in from the left as the hover arrives
+    // (its phase runs out with the presence) and then lies still. A round shape's wave sits across its lower third.
+    private void DrawWave(DrawingContext dc, Rect r, double radius, bool ellipse, double presence, double alpha)
+    {
+        if (alpha <= .001 || r.Width < 12 || r.Height < 8) return;
+        double inset = ellipse ? r.Width * .22 : Math.Max(radius, 4), left = r.Left + inset, right = r.Right - inset;
+        double y = ellipse ? r.Top + r.Height * .68 : r.Bottom - Math.Max(3, Math.Min(5, r.Height * .2));
+        double wavelength = Math.Clamp((right - left) / 3, 6, 14), amplitude = Math.Min(1.4, r.Height * .06), phase = (1 - presence) * Math.PI * 2;
+        var wave = new StreamGeometry();
+        using (var path = wave.Open())
+        {
+            path.BeginFigure(new Point(left, y + amplitude * Math.Sin(phase)), false, false);
+            for (double x = left + 1; x <= right; x += 1) path.LineTo(new Point(x, y + amplitude * Math.Sin(phase + (x - left) / wavelength * Math.PI * 2)), true, true);
+        }
+        wave.Freeze();
+        dc.PushOpacity(alpha);
+        dc.DrawGeometry(null, _mainLine, wave);
+        dc.Pop();
     }
 
     // Four L-shaped corners around the shape, `outset` outside it, each arm `arm` long.

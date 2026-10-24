@@ -1,0 +1,85 @@
+{
+  // Liquid glass, dark: smoked glass over the desktop, the night counterpart of liquid-glass-light.
+  //   Material: a graphite tint over a blur of what lies behind the island, dense enough that white text keeps 7:1 even where
+  //   the desktop behind is white. Without the blur the surface is the deep graphite below.
+  //   Light: a cool specular rim that is brightest at the top left, light gathered along the inner edge, and a glint that
+  //   travels slowly around the rim. Hovered controls catch light like a glass bead, presses shade, keyboard focus glows.
+  "formatVersion": 1,
+  "id": "liquid-glass-dark",
+  "name": "液态玻璃（深色）",
+  "nameEn": "Liquid Glass (dark)",
+  "description": "烟熏玻璃材质：透出并模糊岛下方的桌面，冷色镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的石墨底色。",
+  "descriptionEn": "Smoked glass that blurs the desktop behind the island, with a cool glint gliding along its rim; opaque graphite when Windows turns transparency off.",
+  "author": "BrimDeck",
+  "license": "Apache-2.0",
+  "base": "dark",
+  "colors": {
+    "surface": "#1A1C21",
+    "textPrimary": "#F6F7F9",
+    "textSecondary": "#E8EDEFF5",
+    "textTertiary": "#8FEDEFF5",
+    "accent": "#7DC1FF",
+    "onAccent": "#03111F",
+    "danger": "#FFA9AF",
+    "liked": "#FF7D8B",
+    "clock": "#F6F7F9",
+    "equalizer": "#B3EDEFF5",
+    "hairline": "#1CFFFFFF",
+    "track": "#24FFFFFF",
+    "ringTrack": "#2EFFFFFF",
+    "fill": "#0FFFFFFF",
+    "fillSelected": "#1AFFFFFF",
+    "hover": "#14FFFFFF",
+    "pressed": "#2BFFFFFF",
+    "outline": "#2EFFFFFF",
+    "popup": "#24272D",
+    "popupBorder": "#38FFFFFF",
+    "input": "#16181C",
+    "rangeFill": "#407DC1FF",
+    "coverPlaceholder": "#14FFFFFF",
+    "coverOutline": "#1FFFFFFF",
+    "scrollThumb": "#5A5F6B",
+    "rim": "#66FFFFFF",
+    "shadow": "#000000",
+    "indicator": "#8E9099",
+    "indicatorProgress": "#2E3036",
+    "switchFill": "#12FFFFFF",
+    "seekRail": "#33FFFFFF",
+    "rowDivider": "#12FFFFFF",
+    "rowHover": "#0FFFFFFF",
+    "menuDetail": "#B3EDEFF5",
+    "tooltip": "#26292F",
+    "tooltipBorder": "#3DFFFFFF",
+    "bubble": "#2C2F36",
+    "bubbleBorder": "#24FFFFFF"
+  },
+  "apps": {
+    "claude": "#EDAE90", "codex": "#9DDFB4", "antigravity": "#A3BEFF", "cursor": "#D6D8E0", "zcode": "#A5B4EC",
+    "dsh": "#9AB3F2", "grokBot": "#D6D8E0", "kimi": "#7AD3EE", "manual": "#D4A9F2", "other": "#D6D8E0", "warning": "#EDCF94", "critical": "#F2969A"
+  },
+  "clock": {
+    "style": "minimal", "color": "default",
+    "palette": { "amber": "#FFB86B", "cyan": "#7DE6EA", "pink": "#FFA3C2", "lime": "#E2FF8A" },
+    "gradients": [
+      { "name": "日落", "nameEn": "Sunset", "stops": ["#FFC29E", "#FFA1C7", "#C6B2FF"] },
+      { "name": "海洋", "nameEn": "Ocean", "stops": ["#8FF5FF", "#88C2FF", "#B6B7FF"] },
+      { "name": "极光", "nameEn": "Aurora", "stops": ["#9DFFBE", "#7DE6EA", "#C6B2FF"] },
+      { "name": "火焰", "nameEn": "Ember", "stops": ["#FFE590", "#FFB86B", "#FFA6A6"] },
+      { "name": "霓虹", "nameEn": "Neon", "stops": ["#FF99F5", "#CFB0FF", "#7DE6EA"] }
+    ]
+  },
+  "effects": {
+    // A cool specular rim: brightest at the top left, a faint line along the long edges, a second catch at the bottom right.
+    "rimGradient": ["#C7FFFFFF", "#4DFFFFFF", "#24FFFFFF", "#2EFFFFFF", "#8CFFFFFF"],
+    "rimWidth": 1.25,
+    "shadowBlur": 24,
+    "shadowDepth": 6,
+    "shadowOpacity": 0.42,
+    "glass": { "tint": "#C8121419", "edge": 0.45, "highlight": "#E8F2FF" }
+  },
+  "motion": {
+    "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 26, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
+    "hover": "lens", "hoverStrength": 0.16, "press": "shade", "pressStrength": 0.2, "trail": 0, "particles": "none", "focus": "glow", "pace": 1.1, "steps": 0,
+    "color": "accent", "secondary": "textPrimary", "highlight": "accent"
+  }
+}

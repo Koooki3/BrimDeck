@@ -1,0 +1,89 @@
+{
+  // Pixel blocks: an unofficial pixel-art theme inspired by block-building sandbox games such as Minecraft. It uses no
+  // artwork, fonts, textures or logos from any game: everything is drawn from colors and squares.
+  //   Material: a deep slate block with stepped corners (2 DIP steps), a bevel rim lit at the top left and shaded at the bottom
+  //   right, and a hard shadow with no blur. Text is drawn unsmoothed, as on a pixel screen.
+  //   Colors: the bright chat-style palette, white text, a yellow block clock, a green experience bar for the indicator;
+  //   menus and tooltips in a deep violet with a violet frame.
+  //   Motion: everything moves in four hard steps; hover lights the slot, a press pushes the block in and leaves square pixels.
+  "formatVersion": 1,
+  "id": "pixel-blocks",
+  "name": "像素方块",
+  "nameEn": "Pixel Blocks",
+  "description": "非官方像素风，灵感来自《我的世界》等方块沙盒游戏：阶梯圆角、斜面描边、硬阴影、像素时钟与方块粒子，动效逐格跳动。",
+  "descriptionEn": "An unofficial pixel-art look inspired by block sandbox games like Minecraft: stepped corners, bevel rim, hard shadow, a block clock and square particles, all moving in steps.",
+  "author": "BrimDeck",
+  "license": "Apache-2.0",
+  "base": "dark",
+  "colors": {
+    "surface": "#1C1C21",
+    "textPrimary": "#FFFFFF",
+    "textSecondary": "#C8C8C8",
+    "textTertiary": "#8C8C8C",
+    "accent": "#55FF55",
+    "onAccent": "#0A240A",
+    "danger": "#FF6B6B",
+    "liked": "#FF55FF",
+    "clock": "#FFFF55",
+    "equalizer": "#55FFFF",
+    "hairline": "#2EFFFFFF",
+    "track": "#33FFFFFF",
+    "ringTrack": "#3DFFFFFF",
+    "fill": "#14FFFFFF",
+    "fillSelected": "#2BFFFFFF",
+    "hover": "#26FFFFFF",
+    "pressed": "#40FFFFFF",
+    "outline": "#4DFFFFFF",
+    "popup": "#160A1E",
+    "popupBorder": "#6A3BC8",
+    "input": "#0E0E12",
+    "rangeFill": "#4D55FF55",
+    "coverPlaceholder": "#1AFFFFFF",
+    "coverOutline": "#40FFFFFF",
+    "scrollThumb": "#6E6E78",
+    "rim": "#5C5C66",
+    "shadow": "#000000",
+    "indicator": "#3B7A1E",
+    "indicatorProgress": "#8CFF3C",
+    "switchFill": "#1AFFFFFF",
+    "seekRail": "#40FFFFFF",
+    "rowDivider": "#26FFFFFF",
+    "rowHover": "#1AFFFFFF",
+    "menuDetail": "#C8C8C8",
+    "tooltip": "#160A1E",
+    "tooltipBorder": "#6A3BC8",
+    "bubble": "#160A1E",
+    "bubbleBorder": "#6A3BC8"
+  },
+  "apps": {
+    "claude": "#FFAA00", "codex": "#55FF55", "antigravity": "#55FFFF", "cursor": "#C8C8C8", "zcode": "#8888FF",
+    "dsh": "#66A3FF", "grokBot": "#C8C8C8", "kimi": "#22CCCC", "manual": "#FF77FF", "other": "#C8C8C8", "warning": "#FFFF55", "critical": "#FF5555"
+  },
+  "clock": {
+    "style": "pixel", "color": "default",
+    "palette": { "amber": "#FFAA00", "cyan": "#55FFFF", "pink": "#FF77FF", "lime": "#55FF55" },
+    "gradients": [
+      { "name": "日落", "nameEn": "Sunset", "stops": ["#FFFF55", "#FFAA00", "#FF5555"] },
+      { "name": "海洋", "nameEn": "Ocean", "stops": ["#55FFFF", "#66A3FF", "#B388FF"] },
+      { "name": "极光", "nameEn": "Aurora", "stops": ["#55FF55", "#55FFFF", "#66A3FF"] },
+      { "name": "火焰", "nameEn": "Ember", "stops": ["#FFAA00", "#FF7744", "#FF5555"] },
+      { "name": "霓虹", "nameEn": "Neon", "stops": ["#FF77FF", "#B388FF", "#55FFFF"] }
+    ]
+  },
+  "effects": {
+    // A bevel: the first color lights the top and left edges, the last shades the bottom and right ones.
+    "rimGradient": ["#6A6A75", "#08080A"],
+    "rimWidth": 2,
+    "shadowBlur": 0,
+    "shadowDepth": 3,
+    "shadowOpacity": 0.6,
+    "pixel": 2
+  },
+  // No ambient light: a block does not glow. Hover lights the slot in white, a press turns its bevel over and leaves square pixels in the
+  // clock's yellow, keyboard focus is a square ring; all of it in four hard steps.
+  "motion": {
+    "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 0, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
+    "hover": "slot", "hoverStrength": 0.2, "press": "bevel", "pressStrength": 0.26, "trail": 0.45, "particles": "pixel", "focus": "ring", "pace": 0.9, "steps": 4,
+    "color": "textPrimary", "secondary": "accent", "highlight": "clock"
+  }
+}

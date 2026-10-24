@@ -32,6 +32,7 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 public static partial class PanelThemes
 {
     public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
+    public const string GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", IslandHoliday = "island-holiday", PixelBlocks = "pixel-blocks";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2;
 
     public static readonly IReadOnlyList<PanelThemeToken> Tokens =
@@ -97,9 +98,10 @@ public static partial class PanelThemes
         var file = JsonSerializer.Deserialize<PanelThemeFile>(json, Json) ?? throw new JsonException("The theme file is empty.");
         // Properties are checked for null by the serializer; values inside the colors, apps and gradient collections are not.
         static bool HasNull(IEnumerable<string?>? values) => values?.Any(value => value is null) == true;
-        if (HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
+        static bool AnyNull(PanelThemeFile file) => HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
             || HasNull(file.Effects?.SurfaceGradient) || HasNull(file.Effects?.RimGradient)
-            || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true)
+            || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true;
+        if (AnyNull(file) || file.Night is { } night && AnyNull(night))
             throw new JsonException(Loc.T("颜色值不能为 null", "A color cannot be null"));
         return file;
     }
@@ -108,7 +110,8 @@ public static partial class PanelThemes
     // name, which a test keeps equal to the id inside the file.
     private const string ThemeResources = ".Themes.";
     // Dark and light first, then the ported editor themes, then the custom demo.
-    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", Demo];
+    // The base glass themes come right after dark and light: like them they are materials rather than palettes.
+    private static readonly string[] BuiltInOrder = [Dark, Light, GlassLight, GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, PixelBlocks, Demo];
     private static (string Id, string Resource)[]? _builtInIndex;
     private static (string Id, string Resource)[] BuiltInIndex => _builtInIndex ??= [.. typeof(PanelThemes).Assembly.GetManifestResourceNames()
         .Where(name => name.Contains(ThemeResources, StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))
@@ -123,7 +126,7 @@ public static partial class PanelThemes
         {
             if (key != id) continue;
             // The demo theme sits with the extensions, so the custom section holds only the user's own themes.
-            var kind = id is Dark or Light ? PanelThemeKind.Basic : PanelThemeKind.Extension;
+            var kind = id is Dark or Light or GlassLight or GlassDark ? PanelThemeKind.Basic : PanelThemeKind.Extension;
             return ParsedBuiltIns[id] = new PanelThemeInfo(id, kind, Parse(Resource(resource)), null, null);
         }
         return null;
