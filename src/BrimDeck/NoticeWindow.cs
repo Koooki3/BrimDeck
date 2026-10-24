@@ -395,8 +395,10 @@ internal sealed partial class NoticeWindow : Window
 
     private (double Padding, double Plate) ToastMetrics(double height)
     {
-        double plate = Math.Clamp(Math.Round(height - 16), 24, 34);
-        double padding = _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(16, _deck.Collapsed.Shoulder + 14) : Math.Max(8, (height - plate) / 2);
+        double plate = Math.Clamp(Math.Round(height - 18), 24, 32);
+        // The badges overhang the plate's lower corners a little; on a round-ended toast the plate keeps far enough from the end
+        // that they stay inside its curve.
+        double padding = _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(16, _deck.Collapsed.Shoulder + 14) : Math.Max(16, (height - plate) / 2 + 6);
         return (padding, plate);
     }
 
