@@ -714,11 +714,14 @@ public sealed partial class SettingsWindow : Window
         }
     }
 
+    // The color columns fit their headings and help marks: "Warning" and "Critical" need more room than "预警" and "告警".
+    // The collapsed readings' table (SettingsMonitor) uses the same width for its color columns.
+    private static GridLength SwatchColumn => new(Loc.IsEnglish ? 60 : 50);
+
     private static Grid AppColumns()
     {
         var grid = new Grid { Background = Brushes.Transparent };
-        // The three color columns fit their headings and help marks: "Warning" and "Critical" need more room than "预警" and "告警".
-        var swatch = new GridLength(Loc.IsEnglish ? 60 : 50);
+        var swatch = SwatchColumn;
         foreach (var width in new[] { new GridLength(40), new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star),
             new GridLength(1.12, GridUnitType.Star), swatch, swatch, swatch, new GridLength(50), new GridLength(26) })
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });

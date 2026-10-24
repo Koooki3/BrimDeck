@@ -133,22 +133,26 @@ internal sealed class MonitorStrip : FrameworkElement
                 drawing.PushTransform(new TranslateTransform(offset, 0));
             }
             double left = Math.Round(x);
+            // Each reading in the color of its level (ReadingLevels); the core columns take theirs core by core.
+            var level = ReadingLevels.Of(item, s);
+            string color = _colors.At(item, level);
             switch (item)
             {
                 case CompactMonitorItems.Columns: Columns(drawing, left, width, center, s?.Cpu.OrDefault); break;
-                case CompactMonitorItems.Cpu: Gauge(drawing, left, center, s?.Cpu.OrDefault?.Usage, _colors.Normal(item), "C", (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Cpu: Gauge(drawing, left, center, s?.Cpu.OrDefault?.Usage, color, level, "C", (_values & item) != 0, ppd); break;
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
-                    Gauge(drawing, left, center, memory?.UsedFraction, memory is null ? UI.Tertiary : _colors.Memory(memory.Level), "M", (_values & item) != 0, ppd); break;
-                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, _colors.Normal(item), "G", (_values & item) != 0, ppd); break;
-                case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, _colors.Normal(item), ppd); break;
-                case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, _colors.Normal(item), ppd); break;
+                    Gauge(drawing, left, center, memory?.UsedFraction, memory is null ? UI.Tertiary : color, level, "M", (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, color, level, "G", (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
+                case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
         }
     }
 
-    // The cores as thin columns, fastest kind first, in their colors; their tops show the load at a glance.
+    // The cores as thin columns, fastest kind first, in their colors; their tops show the load at a glance, and a busy core
+    // takes the warning or critical color by its own load.
     private void Columns(DrawingContext drawing, double x, double width, double center, CpuSample? cpu)
     {
         double height = Math.Round(14 * _scale), top = Math.Round(center - height / 2);
@@ -160,17 +164,17 @@ internal sealed class MonitorStrip : FrameworkElement
             var core = cpu.Cores[i];
             double cx = x + i * (column + gap), fill = Math.Max(1.5, core.Usage * height);
             drawing.DrawRectangle(UI.Brush(UI.Fill), null, new Rect(cx, top, column, height));
-            drawing.DrawRectangle(UI.Brush(_colors.Core(core.Group, groups)), null, new Rect(cx, top + height - fill, column, fill));
+            drawing.DrawRectangle(UI.Brush(_colors.Core(core.Group, groups, ReadingLevels.OfShare(core.Usage))), null, new Rect(cx, top + height - fill, column, fill));
         }
     }
 
     // A dial open at the bottom with the reading's letter inside, and the figure after it when it shows one: the gap tells it from
     // the full quota rings beside it, and a letter stays legible at this size where a glyph does not.
-    private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, string letter, bool figured, double ppd)
+    private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, MemoryLevel level, string letter, bool figured, double ppd)
     {
         Dial(drawing, x, center, share, color, letter, ppd);
         if (!figured) return;
-        var text = MonitorDraw.Text(GaugeFigure(share), _font, UI.Primary, ppd);
+        var text = MonitorDraw.Text(GaugeFigure(share), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + _dial + Math.Round(4 * _scale), Math.Round(center + _font * .36));
     }
 
@@ -216,8 +220,12 @@ internal sealed class MonitorStrip : FrameworkElement
         drawing.DrawGeometry(null, pen, geometry);
     }
 
+    // A figure keeps the text color while its reading is normal and takes the level's color at the warning and critical
+    // levels, as the quota bars' numbers do.
+    private static string FigureColor(MemoryLevel level, string color) => level == MemoryLevel.Normal ? UI.Primary : color;
+
     // An arrow and the rate in at most four characters and a letter: "84K", "1.2M".
-    private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, double? rate, string color, double ppd)
+    private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, double? rate, string color, MemoryLevel level, double ppd)
     {
         double size = Math.Round(9 * _scale), scale = size / 16;
         var pen = new Pen(UI.Brush(color), Math.Max(1, 1.4 * _scale) / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
@@ -225,7 +233,7 @@ internal sealed class MonitorStrip : FrameworkElement
         drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, x, center - size / 2));
         drawing.DrawGeometry(null, pen, MonitorDraw.Glyph(glyph));
         drawing.Pop();
-        var text = MonitorDraw.Text(RateFigure(rate), _font, UI.Primary, ppd);
+        var text = MonitorDraw.Text(RateFigure(rate), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 }
