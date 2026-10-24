@@ -16,13 +16,23 @@ public enum WslAgentState { Off, NotRunning, NotPackaged, Installing, Starting, 
 internal sealed class WslNoticeBridge : IDisposable
 {
     public static readonly TimeSpan RunningCheck = TimeSpan.FromSeconds(30);
+    // Asking about a WSL 1 distribution starts wsl.exe; once it was found not running a few times, it is asked less often
+    // (perf-12). A change of the chosen distributions asks at once again.
+    public static readonly TimeSpan IdleWsl1Check = TimeSpan.FromMinutes(2);
+    private const int QuickWsl1Checks = 3;
+    // All agents stopped together get this long, in total, to end on their own before they are ended (life-L3).
+    public static readonly TimeSpan StopWait = TimeSpan.FromMilliseconds(1500);
     private readonly Dictionary<string, WslNoticeAgent> _agents = new(StringComparer.OrdinalIgnoreCase);
+    // Only cancelled, never disposed: the loop and starting agents may still read its token after Dispose (life-L6).
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _wake = new(0, 1);
-    private Task _loop = Task.CompletedTask;
+    // Whether the loop runs, kept under the lock of _agents: the loop clears it in the same lock in which it finds no agent,
+    // so Apply never sees a loop that is about to end as one still running (life-L4).
+    private bool _looping;
     // Whether a chosen distribution runs under WSL 1; null until asked after the choice changed (a stale answer only costs
     // one more question).
     private bool? _wsl1;
+    private int _idleChecks;
 
     public event Action<string, NoticeMessage>? Received;
     public event Action? StateChanged;
@@ -41,10 +51,11 @@ internal sealed class WslNoticeBridge : IDisposable
     // Applies the chosen distributions: agents of distributions no longer chosen stop; new ones start when their distribution runs.
     public void Apply(IReadOnlyCollection<string> distributions)
     {
+        var stopped = new List<WslNoticeAgent>();
         lock (_agents)
         {
             foreach (var name in _agents.Keys.Where(name => !distributions.Contains(name, StringComparer.OrdinalIgnoreCase)).ToList())
-            { _agents[name].Dispose(); _agents.Remove(name); }
+            { stopped.Add(_agents[name]); _agents.Remove(name); }
             foreach (var name in distributions.Where(name => !_agents.ContainsKey(name)))
             {
                 var agent = new WslNoticeAgent(name);
@@ -53,7 +64,14 @@ internal sealed class WslNoticeBridge : IDisposable
                 _agents[name] = agent;
             }
             _wsl1 = null;
-            if (_agents.Count > 0 && _loop.IsCompleted) _loop = Task.Run(LoopAsync);
+            _idleChecks = 0;
+            if (_agents.Count > 0 && !_looping) { _looping = true; _ = Task.Run(LoopAsync); }
+        }
+        // Outside the lock and off the calling (UI) thread: the agents end together, within StopWait in total (life-L3).
+        if (stopped.Count > 0)
+        {
+            var processes = stopped.Select(agent => agent.BeginStop()).OfType<Process>().ToList();
+            if (processes.Count > 0) _ = Task.Run(() => WslNoticeAgent.FinishStop(processes, StopWait));
         }
         Wake();
         StateChanged?.Invoke();
@@ -70,27 +88,45 @@ internal sealed class WslNoticeBridge : IDisposable
 
     private async Task LoopAsync()
     {
-        while (!_stop.IsCancellationRequested)
+        while (true)
         {
             List<WslNoticeAgent> idle;
-            lock (_agents) { if (_agents.Count == 0) return; idle = _agents.Values.Where(agent => agent.NeedsStart).ToList(); }
-            if (idle.Count > 0)
+            lock (_agents)
             {
-                // Asked once per set of chosen distributions: WSL 1 ones run without the virtual machine RunningDistributionsAsync looks for.
-                if (_wsl1 is null)
-                {
-                    var versions = await VersionsAsync(_stop.Token);
-                    _wsl1 = idle.Any(agent => versions.TryGetValue(agent.Distribution, out int version) && version == 1);
-                }
-                var running = await RunningDistributionsAsync(_stop.Token, anyWsl1: _wsl1 == true);
-                foreach (var agent in idle)
-                {
-                    if (running.Contains(agent.Distribution)) _ = agent.StartAsync(_stop.Token);
-                    else agent.MarkNotRunning();
-                }
+                if (_agents.Count == 0 || _stop.IsCancellationRequested) { _looping = false; return; }
+                idle = _agents.Values.Where(agent => agent.NeedsStart).ToList();
             }
-            try { await _wake.WaitAsync(RunningCheck, _stop.Token); } catch (OperationCanceledException) { return; }
+            var wait = RunningCheck;
+            try { if (idle.Count > 0) wait = await StartRunningAsync(idle); }
+            catch (Exception) when (_stop.IsCancellationRequested) { }
+            // Whatever else goes wrong, the loop goes on and asks again at the next check; the agents say it failed (life-L5).
+            catch (Exception ex)
+            {
+                NoticeCenter.Log(ex);
+                foreach (var agent in idle) agent.Fail(ex.GetType().Name);
+            }
+            try { await _wake.WaitAsync(wait, _stop.Token); } catch (OperationCanceledException) { }
         }
+    }
+
+    // Starts the agents of the idle distributions that run; returns how long to wait before asking again.
+    private async Task<TimeSpan> StartRunningAsync(List<WslNoticeAgent> idle)
+    {
+        // Asked once per set of chosen distributions: WSL 1 ones run without the virtual machine RunningDistributionsAsync looks for.
+        if (_wsl1 is null)
+        {
+            var versions = await VersionsAsync(_stop.Token);
+            _wsl1 = idle.Any(agent => versions.TryGetValue(agent.Distribution, out int version) && version == 1);
+        }
+        var running = await RunningDistributionsAsync(_stop.Token, anyWsl1: _wsl1 == true);
+        bool waiting = false;
+        foreach (var agent in idle)
+        {
+            if (running.Contains(agent.Distribution)) _ = agent.StartAsync(_stop.Token);
+            else { agent.MarkNotRunning(); waiting = true; }
+        }
+        if (_wsl1 != true || !waiting) { _idleChecks = 0; return RunningCheck; }
+        return ++_idleChecks > QuickWsl1Checks ? IdleWsl1Check : RunningCheck;
     }
 
     // The distributions running now. WSL 2 runs them all in one virtual machine process; without it no WSL 2 distribution runs,
@@ -99,19 +135,29 @@ internal sealed class WslNoticeBridge : IDisposable
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (!anyWsl1 && !VirtualMachineRuns()) return names;
-        var output = await RunWslAsync(["--list", "--running", "--quiet"], token, Encoding.Unicode);
-        if (output is null) return names;
-        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            if (line.Trim('\0').Trim() is { Length: > 0 } name) names.Add(name);
+        return ParseRunning(await RunWslAsync(["--list", "--running", "--quiet"], token, Encoding.Unicode));
+    }
+
+    // "wsl --list --running --quiet": one name per line.
+    internal static HashSet<string> ParseRunning(string? output)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in (output ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (line.Trim('\0', '﻿').Trim() is { Length: > 0 } name) names.Add(name);
         return names;
     }
 
-    // Whether WSL 2's virtual machine process runs. Every Process object found is released, not only the first.
+    // Whether WSL 2's virtual machine process runs: one look at the process list (perf-12), every Process object released.
     private static bool VirtualMachineRuns()
     {
-        var found = Process.GetProcessesByName("vmmemWSL").Concat(Process.GetProcessesByName("vmmem")).ToList();
-        foreach (var process in found) process.Dispose();
-        return found.Count > 0;
+        bool found = false;
+        foreach (var process in Process.GetProcesses())
+        {
+            try { found |= process.ProcessName.Equals("vmmemWSL", StringComparison.OrdinalIgnoreCase) || process.ProcessName.Equals("vmmem", StringComparison.OrdinalIgnoreCase); }
+            catch (InvalidOperationException) { }
+            process.Dispose();
+        }
+        return found;
     }
 
     // Each installed distribution's WSL version, from "wsl --list --verbose" (which starts no distribution): lines such as
@@ -139,37 +185,43 @@ internal sealed class WslNoticeBridge : IDisposable
             using var limit = CancellationTokenSource.CreateLinkedTokenSource(token);
             limit.CancelAfter(timeout ?? TimeSpan.FromSeconds(20));
             var read = process.StandardOutput.ReadToEndAsync(limit.Token);
-            _ = process.StandardError.ReadToEndAsync(limit.Token);
+            // Drained and dropped: nothing reads it, and a task left reading it would fail once the process is released.
+            process.BeginErrorReadLine();
             try { await process.WaitForExitAsync(limit.Token); }
             catch (OperationCanceledException) { try { process.Kill(true); } catch (InvalidOperationException) { } return null; }
             var text = await read;
             return process.ExitCode == 0 ? text : null;
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { return null; }
+        // The time limit may also end the reading just after the process exited (life-L5).
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException or OperationCanceledException) { return null; }
     }
 
-    // The version stamp of the packaged agent: BrimDeck's version and the start of the file's hash, so a rebuilt agent is
-    // installed again even without a version change.
-    public static string AgentStamp()
+    // The version stamp of the packaged agent, BrimDeck's version and the start of the file's hash, so a rebuilt agent is
+    // installed again even without a version change; and the whole hash, which the install script checks its copy against.
+    // Hash is null when the file cannot be read.
+    public static (string Stamp, string? Hash) AgentStamp()
     {
         try
         {
             using var file = File.OpenRead(AgentPath);
-            return ApplicationVersion.Current + "-" + Convert.ToHexString(SHA256.HashData(file))[..12].ToLowerInvariant();
+            var hash = Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
+            return (ApplicationVersion.Current + "-" + hash[..12], hash);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return ApplicationVersion.Current; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return (ApplicationVersion.Current, null); }
     }
 
     public void Dispose()
     {
         _stop.Cancel();
-        lock (_agents) { foreach (var agent in _agents.Values) agent.Dispose(); _agents.Clear(); }
-        _stop.Dispose();
+        List<Process> processes;
+        lock (_agents) { processes = _agents.Values.Select(agent => agent.BeginStop()).OfType<Process>().ToList(); _agents.Clear(); }
+        // On exit the agents still end together, within StopWait in total rather than each in turn.
+        WslNoticeAgent.FinishStop(processes, StopWait);
     }
 }
 
 // One distribution's agent: installs it when needed and runs it through wsl.exe as the distribution's default user.
-internal sealed class WslNoticeAgent(string distribution) : IDisposable
+internal sealed class WslNoticeAgent(string distribution)
 {
     // brim-notify in ~/.local/bin. BrimDeck treats the file as its own only while it is exactly this text: a file of that name
     // with anything else in it, or a link, belongs to the user and is left alone (reported as a conflict).
@@ -179,7 +231,9 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
     // Copies the agent from Windows (path as $1, converted by wslpath), records how brim-notify reaches Windows without the
     // agent ($2), adds brim-notify (see WrapperLines) and writes the stamp ($3) last. BrimDeck's folder must be the user's own
     // and not a link; every file is written to a new temporary file (mktemp creates it, so nothing is followed) and renamed
-    // into place, which replaces a link instead of writing through it. Prints "conflict" when brim-notify was left alone.
+    // into place, which replaces a link instead of writing through it. The agent's copy must have the SHA-256 BrimDeck read
+    // ($4): a file replaced on Windows after BrimDeck read it is not installed (sec-M2). Prints "conflict" when brim-notify
+    // was left alone.
     // sh needs plain line feeds; a raw string takes the source file's line endings, which Git on Windows checks out as CRLF.
     private static readonly string InstallScript = $$"""
         set -eu
@@ -192,7 +246,12 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
         trap 'rm -f "$dir"/.new.?????? "$bin"/.brim-notify.??????' EXIT
         put() { t=$(mktemp "$dir/.new.XXXXXX"); cat > "$t"; chmod "$2" "$t"; mv -f "$t" "$1"; }
         src=$(wslpath -u "$1")
-        put "$dir/brimdeck-agent" 755 < "$src"
+        t=$(mktemp "$dir/.new.XXXXXX")
+        cat < "$src" > "$t"
+        sum=$(sha256sum "$t")
+        if [ "${sum%% *}" != "$4" ]; then echo "refused: the agent changed while it was copied" >&2; exit 4; fi
+        chmod 755 "$t"
+        mv -f "$t" "$dir/brimdeck-agent"
         helper=$(wslpath -u "$2" 2>/dev/null || true)
         printf '{"helper":"%s","version":"%s"}\n' "$helper" "$3" | put "$dir/bridge.json" 644
         mkdir -p "$bin"
@@ -224,6 +283,8 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private Process? _process;
     private bool _installed, _disposed;
+    // The agent's last line on standard error, for the failure's detail; nothing more of it is kept (sec-L3).
+    private volatile string? _lastError;
     private DateTimeOffset _retryAt = DateTimeOffset.MinValue;
     private TimeSpan _backoff = TimeSpan.FromSeconds(5);
 
@@ -236,30 +297,33 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
     public event Action? StateChanged;
 
     public bool NeedsStart { get { lock (_gate) return !_disposed && _process is null && State != WslAgentState.Installing && State != WslAgentState.Starting && DateTimeOffset.UtcNow >= _retryAt; } }
-    public bool IsServer => State == WslAgentState.Server;
 
     public void MarkNotRunning() { if (State is WslAgentState.Off or WslAgentState.NotRunning or WslAgentState.Failed) SetState(WslAgentState.NotRunning, ""); }
+
+    public void Fail(string detail) => Retry(detail);
 
     public async Task StartAsync(CancellationToken token)
     {
         if (!WslNoticeBridge.AgentPackaged) { SetState(WslAgentState.NotPackaged, ""); return; }
-        lock (_gate) { if (_disposed || _process is not null) return; }
+        bool installed;
+        lock (_gate) { if (_disposed || _process is not null) return; installed = _installed; }
         try
         {
-            if (!_installed)
+            if (!installed)
             {
                 SetState(WslAgentState.Installing, "");
-                string stamp = WslNoticeBridge.AgentStamp();
+                var (stamp, hash) = WslNoticeBridge.AgentStamp();
+                if (hash is null) { Retry("install"); return; }
                 var check = (await WslNoticeBridge.RunWslAsync(["-d", Distribution, "--exec", "/bin/sh", "-c", CheckScript], token) ?? "").Split('\n', StringSplitOptions.TrimEntries);
                 string wrapper = check.Length > 1 ? check[1] : "";
                 if (check[0] != stamp || wrapper is "missing" or "stale")
                 {
-                    var result = await WslNoticeBridge.RunWslAsync(["-d", Distribution, "--exec", "/bin/sh", "-c", InstallScript, "sh", WslNoticeBridge.AgentPath, WslNoticeBridge.HelperPath, stamp], token, timeout: TimeSpan.FromSeconds(60));
+                    var result = await WslNoticeBridge.RunWslAsync(["-d", Distribution, "--exec", "/bin/sh", "-c", InstallScript, "sh", WslNoticeBridge.AgentPath, WslNoticeBridge.HelperPath, stamp, hash], token, timeout: TimeSpan.FromSeconds(60));
                     if (result is null) { Retry("install"); return; }
                     wrapper = result.Contains("conflict", StringComparison.Ordinal) ? "conflict" : "ok";
                 }
                 Conflict = wrapper == "conflict";
-                _installed = true;
+                lock (_gate) _installed = true;
             }
             SetState(WslAgentState.Starting, "");
             var start = new ProcessStartInfo(WslNoticeBridge.WslExe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -271,23 +335,37 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
                 if (_disposed) { try { process.Kill(); } catch (InvalidOperationException) { } process.Dispose(); return; }
                 _process = process;
             }
-            _ = process.StandardError.ReadToEndAsync(token);
+            _lastError = null;
+            process.ErrorDataReceived += (_, line) => { if (!string.IsNullOrWhiteSpace(line.Data)) _lastError = NoticeProtocol.Clip(line.Data, 200); };
+            process.BeginErrorReadLine();
             _ = ReadAsync(process);
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException) { Retry(ex.Message); }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        // Whatever went wrong, the agent is tried again after the pause (life-L5).
+        catch (Exception ex)
+        {
+            if (ex is not (System.ComponentModel.Win32Exception or IOException or InvalidOperationException)) NoticeCenter.Log(ex);
+            Retry(ex.Message);
+        }
     }
 
     private async Task ReadAsync(Process process)
     {
         var stream = process.StandardOutput.BaseStream;
+        bool reported = false;
         try
         {
             while (await NoticeFrames.ReadMessageAsync(stream) is { } message)
             {
-                if (NoticeProtocol.Validate(message) is not null) continue;
+                if (NoticeProtocol.Validate(message) is { } problem)
+                {
+                    // brim-notify waits for an answer: it hears why at once instead of "no-reply" after its wait (core-M2).
+                    if (message.Type == NoticeTypes.Notify && message.Origin == "cli" && message.EventId is { } id) Send(NoticeProtocol.Reply(NoticeResults.Rejected, problem, id));
+                    continue;
+                }
                 if (message.Type == NoticeTypes.Status)
                 {
+                    reported = true;
                     SetState(message.State switch
                     {
                         AgentStates.Server => WslAgentState.Server, AgentStates.Monitor => WslAgentState.Monitor,
@@ -300,9 +378,16 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
             }
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or ObjectDisposedException) { }
-        lock (_gate) { if (_process == process) _process = null; }
+        catch (Exception ex) { NoticeCenter.Log(ex); }
+        lock (_gate)
+        {
+            if (_process == process) _process = null;
+            // An agent that ended before it said anything did not start: the distribution may have been installed again or
+            // the agent removed, so the next start checks the installation again (core-M3).
+            if (!reported) _installed = false;
+        }
         try { process.Dispose(); } catch (InvalidOperationException) { }
-        if (!_disposed) Retry("exited");
+        if (!_disposed) Retry(_lastError is { } error && !reported ? "exited: " + error : "exited");
     }
 
     public void Send(NoticeMessage message)
@@ -313,8 +398,10 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
         _ = Task.Run(async () =>
         {
             await _writeLock.WaitAsync();
-            try { await NoticeFrames.WriteAsync(process.StandardInput.BaseStream, message); }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException) { }
+            // An agent that stopped reading must not hold every later reply back (life-L15).
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try { await NoticeFrames.WriteAsync(process.StandardInput.BaseStream, message, limit.Token); }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException or InvalidDataException or OperationCanceledException) { }
             finally { _writeLock.Release(); }
         });
     }
@@ -339,14 +426,26 @@ internal sealed class WslNoticeAgent(string distribution) : IDisposable
         StateChanged?.Invoke();
     }
 
-    public void Dispose()
+    // Stops the agent for good and asks it to end: closing its standard input makes it give up the notification service name
+    // and exit. Returns its process for FinishStop, or null when none runs.
+    public Process? BeginStop()
     {
         Process? process;
         lock (_gate) { _disposed = true; process = _process; _process = null; }
-        if (process is null) return;
-        // Closing standard input asks the agent to end; it gives up the notification service name as it exits.
+        if (process is null) return null;
         try { process.StandardInput.Close(); } catch (Exception ex) when (ex is IOException or InvalidOperationException) { }
-        try { if (!process.WaitForExit(1500)) process.Kill(true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-        process.Dispose();
+        return process;
+    }
+
+    // Waits for the stopped agents together, budget in total; those still running then are ended.
+    public static void FinishStop(IReadOnlyList<Process> processes, TimeSpan budget)
+    {
+        long deadline = Environment.TickCount64 + (long)budget.TotalMilliseconds;
+        foreach (var process in processes)
+        {
+            try { if (!process.WaitForExit((int)Math.Max(0, deadline - Environment.TickCount64))) process.Kill(true); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            process.Dispose();
+        }
     }
 }
