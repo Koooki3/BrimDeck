@@ -1,13 +1,16 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace BrimDeck.Protocol;
 
 // What one brim-notify differs in: how a message reaches BrimDeck, how "run" starts a program, and what it says when BrimDeck
-// cannot be reached. Start returns the started process, or null with the exit code to return (it printed why).
+// cannot be reached. Start returns the started process, or null with the exit code to return (it printed why); Report then
+// says whether that code still counts as the program's result, sent to BrimDeck as a finished run (a program not found on
+// Windows, as cmd reported it before).
 public sealed record NotifySender(
     string Version,
     Func<NoticeMessage, Task<NoticeMessage?>> Send,
-    Func<IReadOnlyList<string>, (Process? Process, int Failure)> Start,
+    Func<IReadOnlyList<string>, (Process? Process, int Failure, bool Report)> Start,
     string Unreachable,
     string NotReceiving);
 
@@ -55,27 +58,34 @@ public static class NotifyCli
     private static async Task<int> RunProgramAsync(NotifyCommand command, NotifySender sender)
     {
         var watch = Stopwatch.StartNew();
-        var (process, failure) = sender.Start(command.Program!);
-        if (process is null) return failure;
+        var (process, failure, report) = sender.Start(command.Program!);
+        if (process is null) return report ? await ReportRunAsync(command, sender, failure, watch.Elapsed) : failure;
         using (process)
         {
             // Ctrl+C reaches the program too; brim-notify waits for it to finish and still reports the result.
             Console.CancelKeyPress += (_, e) => e.Cancel = true;
             await process.WaitForExitAsync();
-            int code = process.ExitCode;
-            if (await sender.Send(NotifyCommandLine.RunResult(command.Message!, code, watch.Elapsed)) is null)
-                Console.Error.WriteLine("brim-notify: the program finished, but BrimDeck could not be reached.");
-            return code;
+            return await ReportRunAsync(command, sender, process.ExitCode, watch.Elapsed);
         }
+    }
+
+    private static async Task<int> ReportRunAsync(NotifyCommand command, NotifySender sender, int code, TimeSpan elapsed)
+    {
+        if (await sender.Send(NotifyCommandLine.RunResult(command.Message!, code, elapsed)) is null)
+            Console.Error.WriteLine("brim-notify: the program finished, but BrimDeck could not be reached.");
+        return code;
     }
 }
 
-// How the Windows brim-notify finds and starts "run"'s program (sec-L1). A bare name is looked for in PATH only, the way a
+/// How the Windows brim-notify finds and starts "run"'s program (sec-L1). A bare name is looked for in PATH only, the way a
 // shell would with the current folder left out: CreateProcess alone would first look in BrimDeck's folder and the current one.
-// Programs other than .exe and .com (batch files, scripts) and cmd's own commands run through cmd, which parses its command
-// line by rules of its own, so an argument it could misread is refused instead of passed on.
+// Programs other than .exe and .com (batch files, scripts opened by their file type) and cmd's own commands run through
+// cmd, with a command line built so that cmd hands every argument over as it was given (C-M1).
 public static class WindowsPrograms
 {
+    // What a program that is not found exits with, as cmd says it: brim-notify used to leave that to cmd, and scripts check it.
+    public const int NotFound = 9009;
+
     // cmd's own commands, which are no files to find.
     private static readonly HashSet<string> Builtins = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -83,26 +93,37 @@ public static class WindowsPrograms
         "move", "path", "rd", "ren", "rename", "rmdir", "set", "start", "time", "title", "type", "ver", "vol"
     };
 
-    // The full path of the program, or null. pathExt is %PATHEXT%; exists says whether a file is there.
-    public static string? Find(string name, string? path, string? pathExt, Func<string, bool> exists)
+    // The full path of the program, or null. pathExt is %PATHEXT%; exists says whether a file is there. skip is BrimDeck's
+    // own folder, never searched even when it is in PATH: it holds no program of the user's, and others may be able to write
+    // to it (S5).
+    public static string? Find(string name, string? path, string? pathExt, Func<string, bool> exists, string? skip = null)
     {
         if (name.Length == 0 || name.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || name.Contains('*') || name.Contains('?')) return null;
         var extensions = (string.IsNullOrWhiteSpace(pathExt) ? ".COM;.EXE;.BAT;.CMD" : pathExt).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         // Given with a folder (.\build.bat, C:\tools\x): that file, as written.
         if (name.Contains('\\') || name.Contains('/') || name.Contains(':'))
             return Candidates(Path.GetFullPath(name), extensions).FirstOrDefault(exists);
+        string? skipped = skip is null ? null : Folder(skip);
         foreach (var folder in (path ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var folderPath = folder.Trim('"');
             if (!Path.IsPathFullyQualified(folderPath)) continue;
+            if (skipped is not null && string.Equals(Folder(folderPath), skipped, StringComparison.OrdinalIgnoreCase)) continue;
             if (Candidates(Path.Combine(folderPath, name), extensions).FirstOrDefault(exists) is { } found) return found;
         }
         return null;
     }
 
-    // The name as given when it already has one of the extensions, otherwise with each in turn.
+    private static string Folder(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
+    // The name as given when it already has one of the extensions; otherwise with each in turn, and a name with an extension
+    // of its own (script.py) first as it is, which cmd then opens by its file type.
     private static IEnumerable<string> Candidates(string file, string[] extensions)
-        => extensions.Any(extension => file.EndsWith(extension, StringComparison.OrdinalIgnoreCase)) ? [file] : extensions.Select(extension => file + extension);
+    {
+        if (extensions.Any(extension => file.EndsWith(extension, StringComparison.OrdinalIgnoreCase))) return [file];
+        var appended = extensions.Select(extension => file + extension);
+        return Path.HasExtension(file) ? appended.Prepend(file) : appended;
+    }
 
     public static bool IsBuiltin(string name) => Builtins.Contains(name);
 
@@ -110,18 +131,65 @@ public static class WindowsPrograms
     public static bool RunsDirectly(string file)
         => file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".com", StringComparison.OrdinalIgnoreCase);
 
-    // The arguments for cmd.exe that run the program with its arguments, or null when one of them cannot be passed through
-    // cmd safely. Each part is quoted, which keeps & | < > ( ) ^ literal; cmd still expands % inside quotes (and ! with
-    // delayed expansion, switched off here), and a quote inside a part would end the quoting, so those are refused. A
-    // builtin's name stays unquoted, since cmd does not know "echo" with quotes.
+    // The arguments for cmd.exe that run the program with its arguments, escaped the way Rust's standard library escapes
+    // them for batch files (its fix of CVE-2024-24576): an argument is quoted only when it needs to be, so "release" reaches
+    // %1 as release; a quote inside is doubled; % becomes %%cd:~,% (an empty substring of %cd% after it), which keeps cmd from
+    // expanding %NAME% even inside quotes; /v:off leaves ! alone. Null only when a part holds a line break or NUL, which would
+    // end cmd's command line early, or the program's path cannot be quoted. A builtin's name stays bare, since cmd does not
+    // know "echo" with quotes.
     public static string? CmdArguments(string program, IEnumerable<string> arguments, bool builtin)
     {
-        var parts = new List<string?> { builtin ? program : Quote(program) };
-        foreach (var argument in arguments) parts.Add(Quote(argument));
-        if (parts.Contains(null)) return null;
+        // /e:on: the %cd:~,% substring needs cmd's extensions, which the registry could have switched off.
+        var line = new StringBuilder("/e:on /d /v:off /s /c \"");
+        if (builtin) line.Append(program);
+        else
+        {
+            // A file name cannot hold a quote, and a trailing \ would escape the closing one.
+            if (program.Length == 0 || program.Contains('"') || program.EndsWith('\\') || Unsafe(program)) return null;
+            line.Append('"');
+            AppendEscaped(line, program);
+            line.Append('"');
+        }
+        foreach (var argument in arguments)
+        {
+            if (Unsafe(argument)) return null;
+            line.Append(' ');
+            AppendArgument(line, argument);
+        }
         // /s: cmd takes everything between the first and the last quote as the command, as it is.
-        return "/d /v:off /s /c \"" + string.Join(' ', parts) + "\"";
+        return line.Append('"').ToString();
     }
 
-    private static string? Quote(string text) => text.IndexOfAny(['"', '%', '!', '\r', '\n', '\0']) >= 0 ? null : "\"" + text + "\"";
+    private static bool Unsafe(string text) => text.IndexOfAny(['\r', '\n', '\0']) >= 0;
+
+    private static void AppendArgument(StringBuilder line, string argument)
+    {
+        // An empty argument would vanish unquoted; one ending in \ is quoted for scripts that pass "%~1" on to a program,
+        // whose parser would otherwise read that \ as escaping the closing quote.
+        bool quote = argument.Length == 0 || argument.EndsWith('\\');
+        // Every ASCII symbol is taken as one cmd may treat specially, except these known to be plain; control characters too.
+        foreach (char c in argument)
+            if (c < 128 && !(char.IsAsciiLetterOrDigit(c) || "#$*+-./:?@\\_".Contains(c)) || char.IsControl(c)) { quote = true; break; }
+        if (!quote) { line.Append(argument); return; }
+        line.Append('"');
+        int backslashes = AppendEscaped(line, argument);
+        // Backslashes before the closing quote are doubled, so that they stay backslashes.
+        line.Append('\\', backslashes).Append('"');
+    }
+
+    // The text with each quote doubled (the backslashes before it doubled too) and each % made one cmd does not expand;
+    // returns how many backslashes it ends with.
+    private static int AppendEscaped(StringBuilder line, string text)
+    {
+        int backslashes = 0;
+        foreach (char c in text)
+        {
+            if (c == '\\') { backslashes++; line.Append(c); continue; }
+            if (c == '"') line.Append('\\', backslashes).Append('"');
+            else if (c == '%') line.Append("%%cd:~,");
+            backslashes = 0;
+            line.Append(c);
+        }
+        return backslashes;
+    }
 }

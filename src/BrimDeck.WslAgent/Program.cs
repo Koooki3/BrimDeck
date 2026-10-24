@@ -26,13 +26,13 @@ internal static class Program
     internal static string Version => typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0";
 
     // "run"'s program as the shell finds it; 127 when it is not found or cannot start, as in the shell.
-    private static (Process? Process, int Failure) Start(IReadOnlyList<string> program)
+    private static (Process? Process, int Failure, bool Report) Start(IReadOnlyList<string> program)
     {
-        if (Native.FindProgram(program[0]) is not { } path) { Console.Error.WriteLine("brim-notify: " + program[0] + ": command not found"); return (null, 127); }
+        if (Native.FindProgram(program[0]) is not { } path) { Console.Error.WriteLine("brim-notify: " + program[0] + ": command not found"); return (null, 127, false); }
         var start = new ProcessStartInfo(path) { UseShellExecute = false };
         foreach (var argument in program.Skip(1)) start.ArgumentList.Add(argument);
-        try { return (Process.Start(start), 127); }
-        catch (Win32Exception ex) { Console.Error.WriteLine("brim-notify: could not start " + program[0] + ": " + ex.Message); return (null, 127); }
+        try { return (Process.Start(start), 127, false); }
+        catch (Win32Exception ex) { Console.Error.WriteLine("brim-notify: could not start " + program[0] + ": " + ex.Message); return (null, 127, false); }
     }
 
     // Through the running agent's socket; without it, through BrimDeck.Notify.exe on Windows (WSL interop), whose path BrimDeck
