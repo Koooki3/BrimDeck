@@ -249,7 +249,7 @@ internal static class PanelTheme
         var effects = palette.Effects;
         if (effects.Texture <= 0 || effects.Pixel <= 0) return null;
         if (!(dpiScale > 0) || !double.IsFinite(dpiScale)) dpiScale = 1;
-        double cell = Math.Max(1, Math.Round(effects.Pixel * dpiScale)) / dpiScale, size = 8 * cell;
+        double cell = Math.Max(1, Math.Round(effects.Pixel * dpiScale, MidpointRounding.AwayFromZero)) / dpiScale, size = 8 * cell;
         var light = ToColor(palette["textPrimary"]);
         var tile = new DrawingGroup();
         tile.Children.Add(new GeometryDrawing(Brushes.Transparent, null, new RectangleGeometry(new Rect(0, 0, size, size))));

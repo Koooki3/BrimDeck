@@ -304,7 +304,7 @@ internal static class Program
     // and left and right mirror images.
     private static void StairChecks()
     {
-        double step = Math.Max(1, Math.Round(2 * _dpi)) / _dpi;
+        double step = Math.Max(1, Math.Round(2 * _dpi, MidpointRounding.AwayFromZero)) / _dpi;
         var shapes = new (string Name, double W, double H, CornerRadius Corners, double Shoulder, double Inset)[]
         {
             ("capsule", 230, 32, new CornerRadius(16), 0, 0), ("notch", 260, 32, new CornerRadius(0, 0, 12, 12), 16, 0), ("panel", 580, 300, new CornerRadius(0, 0, 18, 18), 0, 0),

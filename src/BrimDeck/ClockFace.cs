@@ -242,10 +242,11 @@ internal sealed class ClockFace : FrameworkElement
     // pixel grid by its row (the collapsed row snaps it), and a block is the device pixels its square covers.
     private double Blocks(DrawingContext? dc, string clock, double x)
     {
-        const double block = 2, gap = 2;
-        double top = Math.Round((FaceHeight - 7 * block) / 2), start = x;
-        double dpi = dc is null ? 1 : VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        double Snap(double value) => Math.Round(value * _scale * dpi) / (_scale * dpi);
+        // Every block the same whole number of device pixels (at 125 % a 2 DIP block would alternate between 2 and 3 pixels).
+        double device = _scale * VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        double block = Math.Max(1, Math.Round(2 * device, MidpointRounding.AwayFromZero)) / device, gap = block;
+        double top = Math.Round((FaceHeight - 7 * block) / 2 * device) / device, start = x;
+        double Snap(double value) => Math.Round(value * device) / device;
         for (int i = 0; i < clock.Length; i++)
         {
             var rows = DotFont[clock[i]];

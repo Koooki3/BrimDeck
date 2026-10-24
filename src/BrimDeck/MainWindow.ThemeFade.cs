@@ -5,49 +5,84 @@ using System.Windows.Media.Imaging;
 
 namespace BrimDeck;
 
-// A change of theme while the island is on screen dissolves from the old look into the new one instead of snapping: a picture
-// of the island as it was lies over it and fades out while the new colors are already drawn underneath. A theme's day and night
-// looks trade places slowly (DaylightFadeMs), as dusk does; any other change takes about a hover's time. Nothing moves with
-// animations off; the picture is taken once, so the fade costs one bitmap and an opacity animation.
+// A change of theme while the island is on screen dissolves from the old look into the new one instead of snapping. Two
+// pictures of the island as it was lie over it while the new colors are already drawn underneath:
+//   the material alone (surface, gradient, rim), under the content, fading over MaterialFade: slowly for a theme's day and night
+//   looks (DaylightFadeMs), as dusk does, and in about a hover's time for any other change;
+//   the whole island, content too, over everything, fading over ThemeFadeMs whatever the change. Readings and titles go on
+//   changing under it, and two different figures must never stand over each other for long (the monitor's rule), so the old
+//   content leaves quickly even while the old surface lingers.
+// Nothing moves with animations off; each picture is taken once, so the fade costs two bitmaps and two opacity animations.
 public partial class MainWindow
 {
     private const int DaylightFadeMs = 1600, ThemeFadeMs = 320;
-    private Image? _themeFade;
+    private Image? _themeFade, _materialFade;
 
-    // PanelTheme.Changing: the old look is still on screen. The new one is drawn on the frames that follow.
+    // PanelTheme.Changing: the old look is still on screen, and PanelTheme.Current is still the old palette. The new one is
+    // drawn on the frames that follow.
     private void BeginThemeFade(bool daylight)
     {
         EndThemeFade();
         if (!IsVisible || !Soft.Enabled || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;
-        var dpi = VisualTreeHelper.GetDpi(Island);
+        if (Island.Child is not Panel content) return;
         double width = Island.ActualWidth, height = Island.ActualHeight;
-        var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
-        // Drawn through a brush so the island's own place in the window does not offset the picture.
-        var copy = new DrawingVisual();
-        using (var dc = copy.RenderOpen()) dc.DrawRectangle(new VisualBrush(Island) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top }, null, new Rect(0, 0, width, height));
-        picture.Render(copy);
-        picture.Freeze();
-        var at = Island.TranslatePoint(new Point(), HoverZone);
-        _themeFade = new Image
+        // The material: a copy of the island's own shape, dressed as it is now, without its content.
+        var material = new IslandBorder
         {
-            Source = picture, Width = width, Height = height, Stretch = Stretch.Fill, IsHitTestVisible = false,
-            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(at.X, at.Y, 0, 0)
+            Width = width, Height = height, CornerRadius = Island.CornerRadius, ShoulderRadius = Island.ShoulderRadius, MaterialOpacity = Island.MaterialOpacity,
+            Background = new SolidColorBrush(_surface.Color), Pixel = Island.Pixel
         };
-        RenderOptions.SetBitmapScalingMode(_themeFade, BitmapScalingMode.NearestNeighbor);
+        PanelTheme.Dress(material, dpiScale: VisualTreeHelper.GetDpi(Island).DpiScaleX);
+        _materialFade = Fade(Picture(material, width, height), daylight ? DaylightFadeMs : ThemeFadeMs);
+        // Under the content and the ambient light's scan line, above the island's own drawing.
+        content.Children.Insert(0, _materialFade);
+        // The whole island, drawn through a brush so its place in the window does not offset the picture.
+        _themeFade = Fade(Picture(new System.Windows.Shapes.Rectangle { Width = width, Height = height, Fill = new VisualBrush(Island) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top } },
+            width, height), ThemeFadeMs);
+        var at = Island.TranslatePoint(new Point(), HoverZone);
+        _themeFade.Margin = new Thickness(at.X, at.Y, 0, 0);
         Panel.SetZIndex(_themeFade, int.MaxValue);
         HoverZone.Children.Add(_themeFade);
-        var fade = Soft.Fade(1, 0, daylight ? DaylightFadeMs : ThemeFadeMs, Soft.InOut);
-        var image = _themeFade;
-        fade.Completed += (_, _) => { if (ReferenceEquals(_themeFade, image)) EndThemeFade(); };
-        image.BeginAnimation(OpacityProperty, fade);
     }
 
-    // Also when the island changes shape or hides: the picture would no longer lie on it.
+    private BitmapSource Picture(FrameworkElement element, double width, double height)
+    {
+        var dpi = VisualTreeHelper.GetDpi(Island);
+        // The copy is laid out at the island's scale, so a pixel theme's steps match the island's.
+        VisualTreeHelper.SetRootDpi(element, dpi);
+        element.Measure(new Size(width, height)); element.Arrange(new Rect(0, 0, width, height));
+        var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        picture.Render(element);
+        picture.Freeze();
+        return picture;
+    }
+
+    private Image Fade(BitmapSource picture, int milliseconds)
+    {
+        var image = new Image
+        {
+            Source = picture, Width = picture.Width, Height = picture.Height, Stretch = Stretch.Fill, IsHitTestVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top
+        };
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
+        var fade = Soft.Fade(1, 0, milliseconds, Soft.InOut);
+        fade.Completed += (_, _) => Remove(image);
+        image.BeginAnimation(OpacityProperty, fade);
+        return image;
+    }
+
+    // Also when the island changes shape or hides: the pictures would no longer lie on it.
     private void EndThemeFade()
     {
-        if (_themeFade is not { } image) return;
-        _themeFade = null;
+        if (_themeFade is { } top) Remove(top);
+        if (_materialFade is { } under) Remove(under);
+    }
+
+    private void Remove(Image image)
+    {
+        if (ReferenceEquals(image, _themeFade)) _themeFade = null;
+        if (ReferenceEquals(image, _materialFade)) _materialFade = null;
         image.BeginAnimation(OpacityProperty, null);
-        HoverZone.Children.Remove(image);
+        (image.Parent as Panel)?.Children.Remove(image);
     }
 }

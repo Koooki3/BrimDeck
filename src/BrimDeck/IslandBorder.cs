@@ -141,7 +141,7 @@ public sealed class IslandBorder : Border
         var stairs = BuildStairs(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset, step);
         // The bevel is a whole number of device pixels thick, never thinner than one.
         double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        _bevel = RimWidth > 0 ? Bevel(stairs, Math.Max(1, Math.Round(RimWidth * dpi)) / dpi) : null;
+        _bevel = RimWidth > 0 ? Bevel(stairs, Math.Max(1, Math.Round(RimWidth * dpi, MidpointRounding.AwayFromZero)) / dpi) : null;
         return _outline = Polygon(stairs);
     }
 
@@ -150,7 +150,7 @@ public sealed class IslandBorder : Border
     {
         if (!(pixel > 0) || !double.IsFinite(pixel)) return 0;
         double dpi = VisualTreeHelper.GetDpi(visual).PixelsPerDip;
-        return Math.Max(1, Math.Round(pixel * dpi)) / dpi;
+        return Math.Max(1, Math.Round(pixel * dpi, MidpointRounding.AwayFromZero)) / dpi;
     }
 
     // The outline as the island draws it: stepped for a pixel theme (BuildStairs), smooth otherwise. Notices draw the same.
