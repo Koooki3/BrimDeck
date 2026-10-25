@@ -119,12 +119,15 @@ internal sealed class GlassBackdrop : IDisposable
     // Hover and press, eased toward the pointer's state; the time they were last eased.
     private double _hover, _press;
     private long _easedAt;
-    // While the island holds still, the desktop under it is looked at this often for a change (a video, a window moving).
+    // While the island holds still, the desktop under it is looked at for a change (a video, a window moving): every PollMs
+    // while the pointer is over the island or the desktop changed in the last IdleAfterMs, else every IdlePollMs; SettleMs
+    // after a comparison went out, to read its answer.
     private DispatcherTimer? _poll;
     private LiquidFrame _liquidFrame;
     private LiquidGlass.RECT _liquidRegion;
     private int _pad;
-    private const int PollMs = 33;
+    private long _changedAt;
+    private const int PollMs = 33, IdlePollMs = 100, SettleMs = 8, IdleAfterMs = 2000;
     private const double HoverInMs = 120, HoverOutMs = 260, PressDownMs = 60, PressUpMs = 220;
 
     // Windows can draw the blur now: the glass theme is shown (transparency effects on, no high contrast), battery saver is off,
@@ -381,20 +384,23 @@ internal sealed class GlassBackdrop : IDisposable
         _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () => Follow(0));
     }
 
-    // The island holds still: the desktop under it may still change. Looked at every PollMs; a change redraws the glass.
+    // The island holds still: the desktop under it may still change. Looked at as often as PollInterval says; a change redraws
+    // the glass. Our own windows' redraws (the ambient rim light) are reported as changes too, but only cost a comparison.
     private void Poll(bool on)
     {
         if (!on || !LiquidShown) { _poll?.Stop(); return; }
         if (_poll is null)
         {
-            _poll = new DispatcherTimer(DispatcherPriority.Render, _owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(PollMs) };
+            _poll = new DispatcherTimer(DispatcherPriority.Render, _owner.Dispatcher);
             _poll.Tick += (_, _) =>
             {
                 if (_following || _disposed || _source is null || _renderer is null || !LiquidShown) { _poll!.Stop(); return; }
                 try
                 {
                     if (!_source.Update(_liquidRegion, out bool changed) || _source.Texture is not { } background) { _poll!.Stop(); Follow(0); return; }
-                    if (changed) _renderer.Render(background, _pad, _liquidFrame);
+                    if (changed) { _renderer.Render(background, _pad, _liquidFrame); _changedAt = Environment.TickCount64; }
+                    var interval = PollInterval();
+                    if (_poll!.Interval != interval) _poll.Interval = interval;
                 }
                 catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or SharpGen.Runtime.SharpGenException)
                 {
@@ -402,8 +408,18 @@ internal sealed class GlassBackdrop : IDisposable
                 }
             };
         }
+        // The island just stopped moving: looked at often for a while, as after a change.
+        _changedAt = Environment.TickCount64;
+        _poll.Interval = PollInterval();
         _poll.Start();
     }
+
+    // A comparison out is read soon; the desktop is looked at often while the pointer is over the island or it changed lately
+    // (a video), and less often once it has been still for a while, so a change still shows within about IdlePollMs.
+    private TimeSpan PollInterval() => TimeSpan.FromMilliseconds(
+        _source is { Comparing: true } ? SettleMs
+        : _pointer is not null || Environment.TickCount64 - _changedAt < IdleAfterMs ? PollMs
+        : IdlePollMs);
 
     private void ReleaseLiquid()
     {
