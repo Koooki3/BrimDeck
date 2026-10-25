@@ -367,6 +367,8 @@ internal sealed class NoticeCenter : IDisposable
     // The pointer is over the shown item, its details are open, or the keyboard works it: its time stands still.
     public void Hold(MainWindow deck, bool held) => Apply(Attention.Hold(deck.NoticeLane, held, DateTimeOffset.UtcNow));
     public void DeckExpanded(MainWindow deck, bool expanded) => Apply(Attention.SetBusy(deck.NoticeLane, expanded, DateTimeOffset.UtcNow));
+    // The pointer left the open panel, or came back to it (AttentionCoordinator.SetLeaving).
+    public void DeckLeaving(MainWindow deck, bool leaving) => Attention.SetLeaving(deck.NoticeLane, leaving);
     public void DeckRetired(MainWindow deck) { Attention.RemoveLane(deck.NoticeLane); Schedule(); }
     // A panel stopped being able to show anything (hidden by the user or a full-screen rule): what it shows ends, and its
     // waiting notices are not shown later (they stay in the recent list; CanShow refuses them while the panel is hidden).

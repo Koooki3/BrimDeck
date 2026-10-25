@@ -69,7 +69,8 @@ public sealed class AttentionCoordinator
     {
         public AttentionItem? Current;
         public DateTimeOffset Ends;
-        public bool Held, Busy;
+        // Leaving: the panel is still open but on its way to closing (the pointer has left it, the closing has begun).
+        public bool Held, Busy, Leaving;
         public readonly List<AttentionItem> Queue = [];
     }
 
@@ -131,8 +132,10 @@ public sealed class AttentionCoordinator
         item.SubmittedAt = now; item.LastMerge = now; item.Remaining = item.Duration;
         if (lane.Busy)
         {
-            // The open panel shows notices on its own page; a quota alert waits for the panel to close.
-            if (item.Kind == AttentionKind.Quota) Enqueue(lane, item);
+            // The open panel shows notices on its own page; a quota alert waits for the panel to close. So does a notice that
+            // arrives once the pointer has left the panel: no one is looking at the page any more, and it shows from the
+            // island once the panel has closed.
+            if (item.Kind == AttentionKind.Quota || lane.Leaving && item.IsNotice) Enqueue(lane, item);
             return changes;
         }
         if (lane.Current is null)
@@ -204,7 +207,7 @@ public sealed class AttentionCoordinator
         var changes = new List<AttentionChange>();
         var lane = Get(laneName);
         if (lane.Busy == busy) return changes;
-        lane.Busy = busy;
+        lane.Busy = busy; lane.Leaving = false;
         if (busy)
         {
             lane.Held = false;
@@ -213,6 +216,16 @@ public sealed class AttentionCoordinator
         }
         else StartNext(lane, now, changes);
         return changes;
+    }
+
+    // The open panel is about to close (the pointer left it) or no longer is (the pointer came back). Notices that arrive
+    // meanwhile wait for the panel to close (Submit); coming back, the user sees them on the page, so they wait no longer.
+    public void SetLeaving(string laneName, bool leaving)
+    {
+        var lane = Get(laneName);
+        if (!lane.Busy || lane.Leaving == leaving) return;
+        lane.Leaving = leaving;
+        if (!leaving) lane.Queue.RemoveAll(item => item.IsNotice);
     }
 
     // Ends the current item at the user's request (close button, Escape). It is not shown again.

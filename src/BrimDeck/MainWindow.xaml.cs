@@ -569,7 +569,9 @@ public partial class MainWindow : Window
         if (expanded) _noticeWindow?.Abort();
         bool wasExpanded = _expanded;
         _expanded = expanded;
-        // The coordinator hears of it after this call: it may start a waiting alert, which lays the island out again.
+        // The coordinator hears of it after this call: it may start a waiting alert, which lays the island out again. A notice
+        // that arrives before it does already waits for the closing (DeckLeaving).
+        if (wasExpanded && !expanded && !_preview) _app.Notices?.DeckLeaving(this, true);
         if (wasExpanded != expanded && !_preview) Dispatcher.BeginInvoke(() => _app.Notices?.DeckExpanded(this, _expanded));
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
@@ -810,7 +812,9 @@ public partial class MainWindow : Window
         if (inside)
         {
             _popupReturnArea = null;
-            _leave.Stop(); if (_expanded || IsSuppressed) return;
+            _leave.Stop();
+            if (_expanded && !_preview) _app.Notices?.DeckLeaving(this, false);
+            if (_expanded || IsSuppressed) return;
             _hover.Stop(); _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
@@ -818,6 +822,8 @@ public partial class MainWindow : Window
             _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
             int delay = Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
             _leftAt = Environment.TickCount64;
+            // Notices arriving from now on show from the island once the panel has closed, not only on its page.
+            _app.Notices?.DeckLeaving(this, true);
             _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(delay); _leave.Start();
         }
     }
