@@ -566,11 +566,13 @@ public partial class MainWindow : Window
             : new CornerRadius(shape.TopRadius, shape.TopRadius, shape.BottomRadius, shape.BottomRadius);
         double gap = expanded ? panelTop : shape.Surface.Y;
         // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor. A
-        // panel opened by hovering a surface wider than itself centres on where the pointer was instead, as far as the surface's
-        // ends allow, and keeps that centre while open (page switches, resizing) without following the pointer.
+        // panel opened by hovering a surface wider than every shown page centres on where the pointer was instead, as far as the
+        // surface's ends allow, and keeps that centre while open (page switches, resizing) without following the pointer. The
+        // choice is the same for every page: decided per page, a capsule that the music widens past the narrow pages but not the
+        // wide ones put some pages at the pointer and others at the middle, so switching pages moved the panel sideways.
         if (!expanded) _openCentre = null;
         double panelCentre = shape.Surface.X + shape.Surface.Width / 2;
-        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > _pageWidth)
+        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > Math.Max(_pageWidth, DeckPages.Largest(Settings).Width))
             panelCentre = Math.Clamp(pointer, shape.Surface.X + _pageWidth / 2, shape.Surface.Right - _pageWidth / 2);
         double panelLeft = Math.Clamp(panelCentre - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
         double left = (expanded ? panelLeft : shape.Surface.X) - _windowOffset;
