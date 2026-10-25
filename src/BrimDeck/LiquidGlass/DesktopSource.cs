@@ -19,8 +19,11 @@ namespace BrimDeck.LiquidGlass;
 // dirty and moved rectangles) are copied into a copy of the output kept here, so the region can move or resize without waiting
 // for the next change; the region texture is then filled from that copy (a plain copy, or a small shader where the region
 // reaches past the output's edge or the desktop is float). Windows still reports our own windows' redraws as changes over the
-// region, though their pixels are not in the frame: the region is compared with what it was (an occlusion query counting the
-// pixels that differ), so the island's own motion, and the refraction drawn from this, never count as a change of the desktop.
+// region, though their pixels are not in the frame: the region is compared with what the glass last showed (an occlusion query
+// counting the pixels that differ), so the island's own motion, and the refraction drawn from this, never count as a change of
+// the desktop. Those rectangles cannot simply be skipped: our windows span the region, mostly transparent, so a change under
+// them (a video behind the island) is reported in the same place. The query is never waited for: its answer is read on a later
+// Update (Comparing says one is out), and until then the region counts as unchanged.
 //
 // Update returns false, and the caller shows the plain blur instead, while there is nothing to show: protected content masked out
 // on the output, access lost (a UAC prompt or the lock screen on the secure desktop, a mode change, a full-screen exclusive
@@ -34,8 +37,8 @@ internal sealed class DesktopSource : IDisposable
     private const int RetryMilliseconds = 500, FirstFrameMilliseconds = 20;
     // Dirty and moved rectangles copied one by one before the whole output is copied instead.
     private const int MaxRects = 48;
-    // How long Update waits for the comparison's result before taking a reported change as a change.
-    private const double CompareMilliseconds = 4;
+    // How long a comparison may stay unanswered before the reported change is taken as a change.
+    private const long CompareMilliseconds = 250;
 
     private ID3D11Device? _device;
     private ID3D11DeviceContext? _context;
@@ -53,8 +56,14 @@ internal sealed class DesktopSource : IDisposable
     private bool _changedAll;
     private readonly RawRect[] _rects = new RawRect[MaxRects];
     private readonly OutduplMoveRect[] _moves = new OutduplMoveRect[MaxRects];
-    // The region texture, the region it was last filled for, and what it held before the last fill (for the comparison).
+    // The region texture, the region it was last filled for, and what the glass last showed of it (the comparison's baseline;
+    // not valid after a move, when it is taken from the region texture before the next fill).
     private ID3D11Texture2D? _texture, _before, _scratch;
+    private bool _beforeValid;
+    // A comparison out on the GPU (and since when), and one owed because the region was filled again meanwhile; whether the
+    // region holds a fill not yet shown, and whether the last comparison answered found a change (the desktop is changing).
+    private bool _comparing, _compareOwed, _unshown, _hot;
+    private long _comparingSince;
     private ID3D11ShaderResourceView? _textureView, _beforeView;
     private ID3D11RenderTargetView? _textureTarget, _scratchTarget;
     private RECT? _filled;
@@ -92,6 +101,9 @@ internal sealed class DesktopSource : IDisposable
     // The desktop under the region of the last successful Update: BGRA8, the region's size.
     public ID3D11Texture2D? Texture => _texture;
 
+    // Whether a comparison is out: the next Update, soon, tells whether the region changed.
+    public bool Comparing => _comparing || _compareOwed;
+
     // Raised when Device was replaced (adapter or monitor change, device lost): the renderer must rebuild its resources.
     public event Action? DeviceChanged;
 
@@ -113,8 +125,11 @@ internal sealed class DesktopSource : IDisposable
     // Copies the desktop under the region (device pixels, screen coordinates, already padded by the caller for refraction
     // reach) into Texture, a BGRA8 texture of exactly the region's size, re-created when the size changes. A region over two
     // monitors takes the one under its centre; the part beyond that output's edge repeats the edge. False when nothing could be
-    // captured; Changed is true when the pixels differ from the last call's. Leaves the immediate context's pipeline state cleared
-    // (where it draws, it sets what it needs and clears it after).
+    // captured. Changed is true when the region moved or resized, or when a comparison answered since the last call found the
+    // pixels differ from what the glass last showed (the caller then draws them, and they become the baseline); a change found
+    // by a comparison shows on a later call than the one that filled it (Comparing), and while the desktop keeps changing (a
+    // video) each fill shows at once, as its comparison only decides when that stops. Leaves the immediate context's pipeline
+    // state cleared (where it draws, it sets what it needs and clears it after).
     public bool Update(RECT region, out bool changed)
     {
         changed = false;
@@ -135,16 +150,22 @@ internal sealed class DesktopSource : IDisposable
             bool resized = EnsureTexture(region.Width, region.Height);
             bool moved = resized || _filled != region;
             var local = region.Offset(-output.Bounds.Left, -output.Bounds.Top);
-            if (!moved && !Touches(local)) { _changes.Clear(); _changedAll = false; return true; }
+            bool touched = moved || Touches(local);
             _changes.Clear(); _changedAll = false;
 
-            var context = _context!;
-            if (!moved) context.CopyResource(_before, _texture);
-            if (!partial && !linear)
-                context.CopySubresourceRegion(_texture, 0, 0, 0, 0, _desktop, 0, new Box(local.Left, local.Top, 0, local.Right, local.Bottom, 1));
-            else Fill(local, output, linear);
-            _filled = region;
-            changed = moved || Differs(region.Width, region.Height);
+            if (touched)
+            {
+                var context = _context!;
+                // Moved, the caller draws it anyway: a comparison still out is of another region, and the baseline is taken
+                // from what is drawn now when the region is next filled.
+                if (moved) { _beforeValid = false; _comparing = false; _compareOwed = false; _unshown = false; }
+                else if (!_beforeValid) { context.CopyResource(_before, _texture); _beforeValid = true; }
+                if (!partial && !linear)
+                    context.CopySubresourceRegion(_texture, 0, 0, 0, 0, _desktop, 0, new Box(local.Left, local.Top, 0, local.Right, local.Bottom, 1));
+                else Fill(local, output, linear);
+                _filled = region;
+            }
+            changed = moved || Differs(touched && !moved);
             return true;
         }
         catch (SharpGen.Runtime.SharpGenException ex)
@@ -342,24 +363,50 @@ internal sealed class DesktopSource : IDisposable
         Draw(_textureTarget!, local.Width, local.Height, _fillShader!, _desktopView!, null);
     }
 
-    // Whether the region now differs from before the fill, by the occlusion query over the differ shader. Where the shaders
-    // are missing, or the GPU does not answer in time, a reported change is taken as a change.
-    private bool Differs(int width, int height)
+    // Whether the region is to be shown again (it then becomes the baseline). Each fill (filled: this call's) is compared with
+    // the baseline by the occlusion query over the differ shader, sent now and read on a later call, never waited for; one fill
+    // meanwhile is compared once that answer is in. A comparison that finds a change shows what is not shown yet, and while
+    // the last answer found one each fill shows at once (the GPU runs the comparison before the baseline is replaced), so a
+    // video keeps its pace; the first answer that finds nothing ends that. Where the shaders are missing, every fill shows;
+    // a comparison unanswered for CompareMilliseconds counts as a change.
+    private bool Differs(bool filled)
     {
-        if (!EnsureShaders()) return true;
+        if (!EnsureShaders()) return filled;
         var context = _context!;
-        context.Begin(_differQuery!);
-        Draw(_scratchTarget!, width, height, _differShader!, _textureView!, _beforeView);
-        context.End(_differQuery!);
-        context.Flush();
-        long start = System.Diagnostics.Stopwatch.GetTimestamp();
-        while (true)
+        bool show = false;
+        if (_comparing)
         {
             var result = context.GetData(_differQuery!, _queryResult, sizeof(ulong), AsyncGetDataFlags.DoNotFlush);
-            if (result.Code == 0) return Marshal.ReadInt64(_queryResult) != 0;
-            if (result.Failure || System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds > CompareMilliseconds) return true;
-            Thread.SpinWait(64);
+            bool answered = result.Code == 0, late = Environment.TickCount64 - _comparingSince > CompareMilliseconds;
+            if (answered || result.Failure || late)
+            {
+                _comparing = false;
+                _hot = !answered || result.Failure || Marshal.ReadInt64(_queryResult) != 0;
+                show = _hot && _unshown;
+            }
         }
+        if (filled)
+        {
+            _unshown = true; _compareOwed = true;
+            show |= _hot;
+        }
+        if (_compareOwed && !_comparing)
+        {
+            _compareOwed = false;
+            context.Begin(_differQuery!);
+            Draw(_scratchTarget!, _textureSize.Width, _textureSize.Height, _differShader!, _textureView!, _beforeView);
+            context.End(_differQuery!);
+            // Sent to the GPU now, so the answer is there by the next Update.
+            context.Flush();
+            _comparing = true;
+            _comparingSince = Environment.TickCount64;
+        }
+        if (show)
+        {
+            context.CopyResource(_before, _texture);
+            _unshown = false;
+        }
+        return show;
     }
 
     private readonly IntPtr _queryResult = Marshal.AllocHGlobal(sizeof(ulong));
@@ -480,6 +527,7 @@ internal sealed class DesktopSource : IDisposable
         _textureTarget?.Dispose(); _textureView?.Dispose(); _texture?.Dispose();
         _scratchTarget = null; _scratch = null; _beforeView = null; _before = null; _textureTarget = null; _textureView = null; _texture = null;
         _filled = null;
+        _beforeValid = false; _comparing = false; _compareOwed = false; _unshown = false; _hot = false;
     }
 
     private void ReleaseDevice()
