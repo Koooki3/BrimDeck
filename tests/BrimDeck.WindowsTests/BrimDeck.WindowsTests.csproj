@@ -15,5 +15,7 @@
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeProtection.cs" Link="NoticeProtection.cs" />
     <Compile Include="..\..\src\BrimDeck\MainWindow.Shadow.cs" Link="MainWindow.Shadow.cs" />
+    <!-- The island itself: the shadow observes its properties, and the settled clip is checked on its drawing. -->
+    <Compile Include="..\..\src\BrimDeck\IslandBorder.cs" Link="IslandBorder.cs" />
   </ItemGroup>
 </Project>
