@@ -142,8 +142,8 @@ internal readonly record struct LiquidFrame(
 // the caller asks (the background, the pointer, the shape or an animation changed); a frame copies the background into a
 // texture of its own with mips (the frost reads them), updates one constant buffer and draws one triangle. Nothing is
 // allocated per frame, and the whole pipeline state is set on every frame (the capture side clears the context's state). The
-// background is read only through that copy, so its texture needs no view of ours. All calls on one thread, with the device's immediate context not used elsewhere at the same time (the
-// constructor turns on the device's multithread protection, so the capture side may use it from another thread).
+// background is read only through that copy, so its texture needs no view of ours. All calls on one thread, the capture side's
+// (DesktopSource, on the UI thread): the device is used from no other, so it needs no multithread protection.
 internal sealed class LiquidRenderer : IDisposable
 {
     private const Format Pixels = Format.B8G8R8A8_UNorm;
@@ -170,7 +170,6 @@ internal sealed class LiquidRenderer : IDisposable
     {
         _device = device;
         _context = device.ImmediateContext;
-        using (var multithread = device.QueryInterfaceOrNull<ID3D11Multithread>()) multithread?.SetMultithreadProtected(true);
         var source = Source();
         using (var code = Compile(source, "VS", "vs_5_0")) _vertex = device.CreateVertexShader(code.AsSpan());
         using (var code = Compile(source, "PS", "ps_5_0")) _pixel = device.CreatePixelShader(code.AsSpan());

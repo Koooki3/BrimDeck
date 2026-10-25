@@ -73,6 +73,8 @@ internal sealed class GlassBackdrop : IDisposable
     private bool _brushHolds;
 
     // How much of the held blur lies under the island's material now (0 to 1): the tint thins to PanelTheme.HeldOpacity by as much.
+    // While the surface is aside (SurfaceAside), how much of the island is liquid glass (its material), which the surface leaves
+    // to the glass (SurfaceOpacity).
     public event Action<double>? Held;
 
     // The island as drawn, in device pixels from the panel window's corner: its bounds, corners and shoulder at that size, its
@@ -94,10 +96,13 @@ internal sealed class GlassBackdrop : IDisposable
     // glass lights its rim from it and presses with it. The light eases toward it on the frames that follow.
     private Point? _pointer;
     private bool _pointerDown;
+    // When the pointer last moved over the island: resting there, it changes nothing, and the poll slows down (LiquidIdle).
+    private long _pointerMovedAt;
     public void Pointer(Point? at, bool down)
     {
         if (_pointer == at && _pointerDown == down) return;
         _pointer = at; _pointerDown = down;
+        _pointerMovedAt = Environment.TickCount64;
         Follow(0);
     }
 
@@ -105,17 +110,43 @@ internal sealed class GlassBackdrop : IDisposable
     // Under the island, glass themes can show true refraction instead of the blur: the desktop under the island, captured
     // without BrimDeck's own windows (DesktopSource), drawn through a slab of thick glass (LiquidRenderer) whose rim lights
     // from the pointer. It takes the blur's place on the same window and follows the same delayed shape; anything it cannot do
-    // (no capture, protected content, a lost device) shows the blur instead. BRIMDECK_LIQUID=0 turns it off, for comparing.
+    // (no capture, protected content, a lost device) shows the blur instead, and liquid glass is tried again every second while
+    // the blur stands in (Recover). BRIMDECK_LIQUID=0 turns it off, for comparing.
     // The island's surface tint (its alpha now, thickened as the panel opens), set by the island to turn liquid glass on.
     public Func<double>? LiquidTint { get; set; }
-    // Whether liquid glass is what is shown now: the island's own tint then steps aside, as the glass draws it.
+    // Whether liquid glass is what is shown now.
     public bool LiquidShown { get; private set; }
+    // Whether the island's own surface steps aside (SurfaceOpacity): liquid glass draws its own tint, and the island's, nearly
+    // opaque, would cover it. It steps aside with the frame liquid glass is first shown on, and comes back only with a frame
+    // that shows the blur in its place, or once glass is not shown at all: a frame showing nothing (the island hidden, faded
+    // out, collapsed to nothing) keeps it as it was, so the surface never flashes in between.
+    public bool SurfaceAside { get; private set; }
+
+    // What Held reports for a frame: aside, the island's material (all of it glass at 1; 0 while it is the indicator's color),
+    // whatever the motion; else the share of the held blur under it, none while the island moves fast or the blur is not held.
+    public static double HeldShare(bool aside, bool holds, double material, double moving) => aside ? material : holds ? material * (1 - moving) : 0;
+
+    // The island's surface opacity over the glass, from what Held reported: aside, none where the island is liquid glass (its
+    // own color, the indicator's, coming back as the glass goes); else thinned over a held blur by as much of it as lies
+    // under the island toward the theme's blur opacity for a tint of this alpha.
+    public static double SurfaceOpacity(bool aside, double held, double alpha) => aside ? 1 - held : 1 + held * (PanelTheme.HeldOpacity(alpha) - 1);
+
     private static readonly bool LiquidOff = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID") == "0";
-    private DesktopSource? _source;
-    private LiquidRenderer? _renderer;
+    private LiquidHost? _host;
     private SpriteVisual? _liquid;
     private CompositionRoundedRectangleGeometry? _liquidClip;
-    private bool _liquidFailed;
+    // A failure (no capture, the renderer refused): tried again after _retryAt, sooner after one failure than after many. A
+    // window Windows will not leave out of the capture (DesktopSource.Exclude) turns liquid glass off for the run.
+    private bool _liquidFailed, _excludeRefused;
+    private int _failures;
+    private long _retryAt;
+    private const int RetryMs = 1000, RetryMaxMs = 60_000;
+    // While liquid glass is wanted but the blur is shown instead (a failure, the lock screen, a UAC prompt, protected content):
+    // looked at again every RetryMs (Recover).
+    private DispatcherTimer? _retry;
+    private LiquidGlass.RECT _tryRegion;
+    // Counted for the debug log: tries again, failures.
+    private long _retries, _failed;
     // Hover and press, eased toward the pointer's state; the time they were last eased.
     private double _hover, _press;
     private long _easedAt;
@@ -151,8 +182,8 @@ internal sealed class GlassBackdrop : IDisposable
     private LiquidFrame _liquidFrame;
     private LiquidGlass.RECT _liquidRegion;
     private int _pad;
-    // How often, and what a tick does: LiquidIdle.
-    private readonly LiquidIdle _idle = new();
+    // The poll's tick, made once (the timer keeps it).
+    private EventHandler? _tick;
     // Frames followed and times following started, for the debug log.
     private long _steps, _followStarts;
     private const double HoverInMs = 120, HoverOutMs = 260, PressDownMs = 60, PressUpMs = 220;
@@ -295,8 +326,8 @@ internal sealed class GlassBackdrop : IDisposable
             _moving += (fast * fast * (3 - 2 * fast) - _moving) * Ease;
             if (_moving < .002) _moving = 0;
         }
-        Report(_brushHolds ? frame.Material * (1 - _moving) : 0);
-        if (opacity < .002) { Conceal(); return; }
+        // Reported once this frame has decided between liquid glass and the blur (SurfaceAside), at the end.
+        if (opacity < .002) { Conceal(); Report(frame.Material); return; }
         var handle = _window!.Handle;
         var owner = OwnerHandle;
         GetWindowRect(owner, out var rect);
@@ -330,7 +361,7 @@ internal sealed class GlassBackdrop : IDisposable
         left += shoulder + inset; right -= shoulder + inset; bottom -= inset;
         double clipTop = squareTop ? top - radius - 2 : top + inset;
         double corner = Math.Max(0, radius - inset);
-        if (right - left < 1 || bottom - Math.Max(top, clipTop) < 1) { Conceal(); return; }
+        if (right - left < 1 || bottom - Math.Max(top, clipTop) < 1) { Conceal(); Report(frame.Material); return; }
         _clip!.Offset = new Vector2((float)left, (float)clipTop);
         _clip.Size = new Vector2((float)(right - left), (float)(bottom - clipTop));
         _clip.CornerRadius = new Vector2((float)corner);
@@ -338,6 +369,8 @@ internal sealed class GlassBackdrop : IDisposable
         double outerLeft = left - shoulder - inset, outerRight = right + shoulder + inset, outerBottom = bottom + inset;
         bool liquid = Liquid(shown, outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
         _sprite!.Opacity = liquid ? 0 : (float)opacity;
+        SurfaceAside = liquid;
+        Report(frame.Material);
         if (liquid) { left = outerLeft; right = outerRight; bottom = outerBottom; corner = radius; }
         // The window region: the clip's rectangle, rounded alike, so the window takes no clicks and shows nothing outside it.
         // A square top reaches above the window, as the clip does, so the region's rounded top corners fall outside it.
@@ -354,35 +387,28 @@ internal sealed class GlassBackdrop : IDisposable
     // Liquid glass for this frame, at the delayed shape, clipped to the recent shapes (window pixels); false shows the blur.
     private bool Liquid(Frame shown, double left, double top, double right, double bottom, double radius, double opacity)
     {
-        if (LiquidTint is not { } tint || LiquidOff || _liquidFailed || Composition.Compositor is not { } compositor || _root is null
+        if (LiquidTint is not { } tint || LiquidOff || _liquidFailed || _excludeRefused || Composition.Compositor is null || _root is null
             || PanelTheme.Current.Effects.Glass is not { } glass || _windowRect is not { } window)
             return ShowLiquid(false);
         try
         {
-            if (_source is null)
+            if (_host is null)
             {
-                _source = DesktopSource.TryCreate();
-                if (_source is null) { _liquidFailed = true; return ShowLiquid(false); }
-                _source.DeviceChanged += Rebuild;
-                DesktopSource.Exclude(OwnerHandle);
-                if (_window is not null) DesktopSource.Exclude(_window.Handle);
-            }
-            if (_renderer is null)
-            {
-                _renderer = new LiquidRenderer(_source.Device); _idle.Forget();
-                _liquid ??= compositor.CreateSpriteVisual();
-                _liquidClip ??= compositor.CreateRoundedRectangleGeometry();
-                _liquid.Clip ??= compositor.CreateGeometricClip(_liquidClip);
-                var previous = _liquid.Brush;
-                _liquid.Brush = _renderer.CreateBrush(compositor);
-                previous?.Dispose();
-                if (_liquid.Parent is null) _root.Children.InsertAtTop(_liquid);
+                var source = DesktopSource.Open(OwnerHandle, _window?.Handle ?? IntPtr.Zero, out bool refused);
+                if (source is null)
+                {
+                    if (refused) _excludeRefused = true; else Failed();
+                    return ShowLiquid(false);
+                }
+                _host = new LiquidHost(source);
+                _host.Rebuilt += Rebuilt;
             }
             double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
             int x = (int)Math.Round(shown.Left), y = (int)Math.Round(shown.Top);
             int width = Math.Max(1, (int)Math.Round(shown.Right - shown.Left)), height = Math.Max(1, (int)Math.Round(shown.Bottom - shown.Top));
             _pad = (int)Math.Ceiling(48 * scale);
             var region = new LiquidGlass.RECT(window.X + x - _pad, window.Y + y - _pad, window.X + x + width + _pad, window.Y + y + height + _pad);
+            _tryRegion = region;
             // The glass's own preset: clear glass held to the theme's band only where the background lies outside it (the
             // band is the one the theme's text was fitted to, never wider). The island's tint thickening as the panel opens
             // says how open it is, which takes a little more frost; the tint itself is not drawn over the glass.
@@ -406,9 +432,7 @@ internal sealed class GlassBackdrop : IDisposable
             // Drawn again only when the glass changed (its shape, place, look, the pointer's light) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),
             // the desktop is looked at no oftener than the idle poll's PollMs.
-            var renderer = _renderer;
-            int pad = _pad;
-            if (!_idle.Frame(_source, region, next, background => renderer.Render(background, pad, next), Environment.TickCount64)) return ShowLiquid(false);
+            if (!_host.Frame(region, _pad, next, Environment.TickCount64)) return ShowLiquid(false);
             _liquidFrame = next; _liquidRegion = region;
             ReportBackdrop();
             _liquid!.Offset = new Vector3(x, y, 0);
@@ -421,25 +445,46 @@ internal sealed class GlassBackdrop : IDisposable
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotSupportedException or SharpGen.Runtime.SharpGenException or DllNotFoundException)
         {
-            _liquidFailed = true; ReleaseLiquid();
+            ReleaseLiquid(); Failed();
             return ShowLiquid(false);
         }
+    }
+
+    // A failure: liquid glass is tried again after RetryMs, twice as long after each failure in a row, up to RetryMaxMs.
+    private void Failed()
+    {
+        _liquidFailed = true; _failed++;
+        _retryAt = Environment.TickCount64 + Math.Min(RetryMaxMs, RetryMs << Math.Min(_failures++, 6));
+    }
+
+    // The renderer made (again, on a new device): the glass shows its swap chain.
+    private void Rebuilt(LiquidRenderer renderer)
+    {
+        if (Composition.Compositor is not { } compositor || _root is null) return;
+        _liquid ??= compositor.CreateSpriteVisual();
+        _liquidClip ??= compositor.CreateRoundedRectangleGeometry();
+        _liquid.Clip ??= compositor.CreateGeometricClip(_liquidClip);
+        var previous = _liquid.Brush;
+        _liquid.Brush = renderer.CreateBrush(compositor);
+        previous?.Dispose();
+        if (_liquid.Parent is null) _root.Children.InsertAtTop(_liquid);
     }
 
     // A step of automatic liquid glass's look: the latest measure of what lies behind, once its answer is in, or the last one.
     private void ReportBackdrop()
     {
-        if (_renderer is null) return;
+        if (_host?.Renderer is not { } renderer) return;
         long now = Environment.TickCount64;
         bool auto = AutoLook?.Invoke() == true;
         bool current = PanelTheme.Current.IsDark;
         bool turn = false, instant = false;
-        if (auto) turn = _look.Step(_renderer, now, current, out instant);
-        else { _look.Forget(); _renderer.TryBackdrop(out _); }
+        if (auto) turn = _look.Step(renderer, now, current, out instant);
+        else { _look.Forget(); renderer.TryBackdrop(out _); }
         if (LiquidDebug && (turn || now - _debugAt >= DebugEveryMs))
         {
             _debugAt = now;
-            DebugLine(FormattableString.Invariant($"{DateTime.Now:HH:mm:ss.fff} poll ticks {_idle.Ticks} renders {_idle.Renders} following {_following} starts {_followStarts} frames {_steps} drawn {_idle.FrameRenders} auto {auto} luma {_look.Luma:0.000} measures {_look.Measures} shown {(current ? "dark" : "light")} decided {(_look.Dark is { } d ? d ? "dark" : "light" : "-")}{(turn ? instant ? " -> turn now" : " -> turn" : "")}"));
+            var idle = _host.Idle;
+            DebugLine(FormattableString.Invariant($"{DateTime.Now:HH:mm:ss.fff} poll ticks {idle.Ticks} renders {idle.Renders} following {_following} starts {_followStarts} frames {_steps} drawn {idle.FrameRenders} rebuilds {_host.Rebuilds} failures {_failed} retries {_retries} auto {auto} luma {_look.Luma:0.000} measures {_look.Measures} shown {(current ? "dark" : "light")} decided {(_look.Dark is { } d ? d ? "dark" : "light" : "-")}{(turn ? instant ? " -> turn now" : " -> turn" : "")}"));
         }
         if (turn) Look?.Invoke(!current, instant);
     }
@@ -458,66 +503,100 @@ internal sealed class GlassBackdrop : IDisposable
 
     private bool ShowLiquid(bool shown)
     {
-        if (!shown && _liquid is not null) _liquid.Opacity = 0;
+        bool was = LiquidShown;
         LiquidShown = shown;
+        if (shown) { _failures = 0; _retry?.Stop(); }
+        else
+        {
+            if (_liquid is not null) _liquid.Opacity = 0;
+            // What the swap chain holds is not shown now, and may be stale when it is again: drawn anew then.
+            if (was) _host?.Idle.Forget();
+            if (LiquidWanted) Recover();
+        }
         return shown;
     }
 
-    // A new device (another adapter, a lost one): the renderer is made again on the next frame.
-    private void Rebuild()
+    // Liquid glass would be shown but the blur is, in its place (a failure, no capture for now).
+    private bool LiquidWanted => LiquidTint is not null && !LiquidOff && !_excludeRefused && !_disposed && _shown && !LiquidShown
+        && PanelTheme.Current.Effects.Glass is not null && Available;
+
+    // Tries liquid glass again every RetryMs while it is wanted: after a failure once its wait is over, else once the capture
+    // answers again (the lock screen or a UAC prompt gone, protected content closed); following the island then shows it.
+    private void Recover()
     {
-        _idle.Forget();
-        _renderer?.Dispose(); _renderer = null;
-        _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () => Follow(0));
+        if (_retry is null)
+        {
+            _retry = new DispatcherTimer(DispatcherPriority.Background, _owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(RetryMs) };
+            _retry.Tick += (_, _) =>
+            {
+                if (!LiquidWanted) { _retry!.Stop(); return; }
+                try
+                {
+                    if (_liquidFailed) { if (Environment.TickCount64 < _retryAt) return; _liquidFailed = false; }
+                    else if (_host is not null && !_tryRegion.IsEmpty && !_host.Source.Update(_tryRegion, out _)) return;
+                }
+                catch (Exception ex) when (ex is COMException or InvalidOperationException or SharpGen.Runtime.SharpGenException) { return; }
+                _retries++;
+                Follow(0);
+            };
+        }
+        if (!_retry.IsEnabled) _retry.Start();
     }
 
     // The island holds still: the desktop under it may still change. Looked at as often as PollInterval says; a change redraws
     // the glass. Our own windows' redraws (the ambient rim light) are reported as changes too, but only cost a comparison.
     private void Poll(bool on)
     {
-        if (!on || !LiquidShown) { _poll?.Stop(); return; }
+        if (!on || !LiquidShown || _host is null) { _poll?.Stop(); return; }
         if (_poll is null)
         {
             _poll = new DispatcherTimer(DispatcherPriority.Render, _owner.Dispatcher);
-            _poll.Tick += (_, _) =>
+            _tick = (_, _) =>
             {
-                if (_following || _disposed || _source is null || _renderer is null || !LiquidShown) { _poll!.Stop(); return; }
+                if (_following || _disposed || _host is null || !LiquidShown) { _poll!.Stop(); return; }
                 try
                 {
-                    if (!_idle.Tick(_source, _liquidRegion, background => _renderer.Render(background, _pad, _liquidFrame), Environment.TickCount64)) { _poll!.Stop(); Follow(0); return; }
+                    if (!_host.Tick(_liquidRegion, _pad, _liquidFrame, Environment.TickCount64)) { _poll!.Stop(); Follow(0); return; }
                     ReportBackdrop();
                     var interval = PollInterval();
                     if (_poll!.Interval != interval) _poll.Interval = interval;
                 }
-                catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or SharpGen.Runtime.SharpGenException)
+                catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotSupportedException or SharpGen.Runtime.SharpGenException)
                 {
-                    _poll!.Stop(); _liquidFailed = true; ReleaseLiquid(); Follow(0);
+                    _poll!.Stop(); ReleaseLiquid(); Failed(); Follow(0);
                 }
             };
+            _poll.Tick += _tick;
         }
-        _idle.Start(Environment.TickCount64);
+        _host.Idle.Start(Environment.TickCount64);
         _poll.Interval = PollInterval();
         _poll.Start();
     }
 
-    private TimeSpan PollInterval() => TimeSpan.FromMilliseconds(_idle.Interval(_pointer is not null, _renderer is { Measuring: true }, Environment.TickCount64));
+    private TimeSpan PollInterval()
+    {
+        long now = Environment.TickCount64;
+        bool pointer = LiquidIdle.PointerActive(_pointer is not null, _pointerMovedAt, now);
+        return TimeSpan.FromMilliseconds(_host?.Idle.Interval(pointer, _host.Renderer is { Measuring: true }, now) ?? LiquidIdle.IdlePollMs);
+    }
 
     private void ReleaseLiquid()
     {
-        _idle.Forget();
         _poll?.Stop();
         LiquidShown = false;
-        _renderer?.Dispose(); _renderer = null;
-        if (_source is not null) { _source.DeviceChanged -= Rebuild; _source.Dispose(); _source = null; }
+        if (_host is not null) { _host.Rebuilt -= Rebuilt; _host.Dispose(); _host = null; }
         if (_liquid is not null) { _liquid.Brush?.Dispose(); _liquid.Clip?.Dispose(); _liquid.Dispose(); _liquid = null; }
         _liquidClip?.Dispose(); _liquidClip = null;
     }
 
-    // On every frame followed: the island's tint may be changing too (thickening as the panel opens).
-    private void Report(double held, bool always = true)
+    // On every frame followed: the island's tint may be changing too (thickening as the panel opens). Always when the surface
+    // stepped aside or came back since the last report.
+    private bool _reportedAside;
+    private void Report(double material, bool always = true)
     {
-        if (!always && Math.Abs(held - _reported) < .001) return;
-        _reported = held;
+        double held = HeldShare(SurfaceAside, _brushHolds, material, _moving);
+        if (!always && Math.Abs(held - _reported) < .001 && _reportedAside == SurfaceAside) return;
+        _reported = held; _reportedAside = SurfaceAside;
         Held?.Invoke(held);
     }
 
@@ -549,16 +628,19 @@ internal sealed class GlassBackdrop : IDisposable
     // No blur now, the window kept for the next time.
     private void Conceal()
     {
+        bool shown = _shown;
+        _shown = false;
         ShowLiquid(false); Poll(false);
         if (_sprite is not null) _sprite.Opacity = 0;
-        if (_shown && _window is not null) ShowWindowNative(_window.Handle, Hidden);
-        _shown = false;
+        if (shown && _window is not null) ShowWindowNative(_window.Handle, Hidden);
     }
 
-    // No blur and nothing remembered: the next frame starts afresh.
+    // No blur and nothing remembered: the next frame starts afresh. The island's surface comes back only where glass is not
+    // shown at all now (another theme, transparency effects off): an island merely hidden keeps it aside (SurfaceAside).
     private void Hide()
     {
-        Report(0, always: false);
+        if (!Available) SurfaceAside = false;
+        if (!SurfaceAside) Report(0, always: false);
         Conceal();
         _recent.Clear(); _last = null; _moving = 0; _arriving = 0;
     }
@@ -636,6 +718,8 @@ internal sealed class GlassBackdrop : IDisposable
     private void Release()
     {
         ReleaseLiquid();
+        _retry?.Stop();
+        SurfaceAside = false;
         // The composition objects are let go with the window: a panel made again (a monitor added, settings applied) starts afresh.
         if (_sprite is not null) { GlassEffect.Release(_sprite.Brush); _sprite.Clip?.Dispose(); _sprite.Dispose(); }
         _clip?.Dispose(); _root?.Dispose();

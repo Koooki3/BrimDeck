@@ -54,7 +54,77 @@ internal static class LiquidPreview
         Time(device, renderer);
         failures += Composition(device, renderer);
         failures += SwitchContrast(device, renderer);
+        failures += SurfaceOver(device, renderer);
         return failures == 0 ? 0 : 1;
+    }
+
+    // The island's own surface over liquid glass, composed as it is shown: the glass (the renderer's output over the desktop),
+    // and over it the island as WPF draws it, an IslandBorder filled with the glass theme's surface color at the opacity
+    // MainWindow's Held handler gives it (GlassBackdrop.HeldShare and SurfaceOpacity, the surface aside while liquid glass is
+    // shown). For an island all of glass, in every state of the motion (moving 1 while it opens, a page resizes or the glass
+    // arrives; 0 at rest; between) and whether or not the theme's blur is held, the glass must show through unchanged, in both
+    // glass themes; for the island turned to the indicator's color (material 0) the surface must be whole again. The rule as it
+    // was (1 - the held blur's share over liquid glass) is composed too, and must hide the glass, so the check can fail.
+    private static int SurfaceOver(ID3D11Device device, LiquidRenderer renderer)
+    {
+        int failures = 0;
+        var desktop = Desktop(1, out int dw, out int dh);
+        var shape = Shapes[0];
+        var at = Place(shape, 1);
+        try
+        {
+            foreach (var id in new[] { PanelThemes.GlassLight, PanelThemes.GlassDark })
+            {
+                PanelTheme.Show(PanelThemes.Resolve(PanelThemes.BuiltIn(id)!));
+                var tint = PanelTheme.ToColor(PanelTheme.Current.Effects.Glass!.Tint);
+                var glass = Render(device, renderer, desktop, dw, dh, at, Frame(shape, id == PanelThemes.GlassDark, 1, at, null, 0), 48);
+                var bare = Compose(desktop, dw, at, glass, shape, tint, 0);
+                double alpha = tint.A / 255d;
+                int worst = 0;
+                foreach (bool holds in new[] { true, false })
+                    foreach (double moving in new[] { 0, .5, 1 })
+                        worst = Math.Max(worst, MaxDifference(bare, Compose(desktop, dw, at, glass, shape, tint, GlassBackdrop.SurfaceOpacity(true, GlassBackdrop.HeldShare(true, holds, 1, moving), alpha))));
+                // The rule as it was, opening (moving 1): 1 - the held blur's share, which is then 0.
+                int old = MaxDifference(bare, Compose(desktop, dw, at, glass, shape, tint, 1 - GlassBackdrop.HeldShare(false, true, 1, 1)));
+                double indicator = GlassBackdrop.SurfaceOpacity(true, GlassBackdrop.HeldShare(true, true, 0, 0), alpha);
+                bool ok = worst <= 1 && old > 40 && indicator == 1;
+                if (!ok) failures++;
+                Console.WriteLine(FormattableString.Invariant($"{(ok ? "PASS" : "FAIL")}: {id}: liquid glass shows through the island's surface while opening, resizing and at rest (largest change {worst}; the old rule changed it by {old}); turned to the indicator's color the surface is whole ({indicator:0.##})"));
+            }
+        }
+        finally { PanelTheme.Show(PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.Dark)!)); }
+        return failures;
+    }
+
+    // The desktop under the island, the glass over it (premultiplied), and the island's surface over that at an opacity:
+    // rendered by WPF, BGRA rows of the island's size.
+    private static byte[] Compose(byte[] desktop, int dw, (int X, int Y, int Width, int Height) at, byte[] glass, Shape shape, Color tint, double opacity)
+    {
+        int w = at.Width, h = at.Height;
+        var under = new byte[w * h * 4];
+        for (int y = 0; y < h; y++) Buffer.BlockCopy(desktop, ((at.Y + y) * dw + at.X) * 4, under, y * w * 4, w * 4);
+        var grid = new System.Windows.Controls.Grid { Width = w, Height = h };
+        grid.Children.Add(new System.Windows.Controls.Image { Source = BitmapSource.Create(w, h, 96, 96, PixelFormats.Pbgra32, null, under, w * 4), Stretch = Stretch.None });
+        grid.Children.Add(new System.Windows.Controls.Image { Source = BitmapSource.Create(w, h, 96, 96, PixelFormats.Pbgra32, null, glass, w * 4), Stretch = Stretch.None });
+        grid.Children.Add(new IslandBorder
+        {
+            Background = new SolidColorBrush(tint) { Opacity = opacity },
+            CornerRadius = new CornerRadius(shape.Top, shape.Top, shape.Bottom, shape.Bottom), ShoulderRadius = shape.Shoulder
+        });
+        grid.Measure(new Size(w, h));
+        grid.Arrange(new Rect(0, 0, w, h));
+        var bitmap = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(grid);
+        var pixels = new byte[w * h * 4];
+        bitmap.CopyPixels(pixels, w * 4, 0);
+        return pixels;
+    }
+
+    private static int MaxDifference(byte[] a, byte[] b)
+    {
+        int max = 0;
+        for (int i = 0; i < a.Length; i++) max = Math.Max(max, Math.Abs(a[i] - b[i]));
+        return max;
     }
 
     // Automatic liquid glass's turn, as GlassBackdrop and App run it: the glass eases from the old look to the new over 320 ms

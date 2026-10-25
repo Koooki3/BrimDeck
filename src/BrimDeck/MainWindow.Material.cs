@@ -22,13 +22,16 @@ public partial class MainWindow
         if (_glass is null)
         {
             _glass = new GlassBackdrop(this, Island);
-            // Over a held blur the tint thins with it, frame by frame.
-            // Liquid glass draws the tint itself, so the surface steps aside under it as the blur's tint thins.
+            // Over a held blur the tint thins with it, frame by frame. Liquid glass draws its own tint: the island's surface
+            // steps aside under it altogether (GlassBackdrop.SurfaceAside), whatever the blur's tint would be.
             _glass.Held += held =>
             {
-                _surface.Opacity = _glass.LiquidShown ? 1 - held : 1 + held * (PanelTheme.HeldOpacity(_surface.Color.A / 255d) - 1);
-                LiquidEdge(_glass.LiquidShown);
+                _surface.Opacity = GlassBackdrop.SurfaceOpacity(_glass.SurfaceAside, held, _surface.Color.A / 255d);
+                LiquidEdge(_glass.SurfaceAside);
             };
+            // The panel opening takes the island out of a press at once: a squash or spring left on the open panel would hold
+            // it off the screen's top edge.
+            Island.SizeChanged += (_, _) => { if (_expanded) ResetJelly(); };
             _glass.LiquidTint = () => _surface.Color.A / 255d;
             // Automatic liquid glass takes its look from what lies behind the island (App.BackdropMeasured).
             _glass.AutoLook = () => _app.AutoLookFrom(this);
@@ -54,18 +57,33 @@ public partial class MainWindow
         else { Island.LayoutUpdated -= CutShadow; ShadowHost.Clip = null; _shadowCutKey = null; }
     }
 
-    // The press of liquid-glass-web's glass (xiaofangstudio, MIT): pressed, it squashes at once to scale(1 + k, 1 - .45 k) about
-    // its middle; released, it springs back over JellyBackMs as 1 - e^(-5t) cos 9t (SpringEase). k is the source's .1 for a
-    // glass as wide as its buttons (JellyWidth), less on a wider island. Only the collapsed island (a press in the open panel
+    // The press of liquid-glass-web's glass (xiaofangstudio, MIT): pressed, it squashes to scale(1 + k, 1 - .45 k) about its
+    // middle, going down as every press in BrimDeck does (Soft.Pressed: Soft.Press on the monitor's curve); released, it springs
+    // back over JellyBackMs on the source's 1 - e^(-5t) cos 9t (SpringEase, which lands exactly on 1). k is the source's .1 for
+    // a glass as wide as its buttons (JellyWidth), less on a wider island. Only the collapsed island (a press in the open panel
     // is a press of one of its controls), only over liquid glass, and not with animations off. The glass follows the island's
-    // shape through its transform (GlassBackdrop.Measure), as it follows the boot's dot.
+    // shape through its transform (GlassBackdrop.Measure), as it follows the boot's dot. Each animation only covers the way and
+    // ends without holding the scale (Soft.Glide's pattern), so the scale left behind is exactly the one set: 1 once let go.
     private ScaleTransform? _jelly;
     private bool _jellyDown;
     private const double JellyK = .1, JellyWidth = 140, JellyBackMs = 500;
+    private static readonly SpringEase JellySpring = Frozen(new SpringEase());
+    private static SpringEase Frozen(SpringEase ease) { ease.Freeze(); return ease; }
+
+    // Out of any press at once, no spring: the panel opening.
+    private void ResetJelly()
+    {
+        _jellyDown = false;
+        if (_jelly is null || _jelly.ScaleX == 1 && _jelly.ScaleY == 1 && !_jelly.HasAnimatedProperties) return;
+        SetImmediate(_jelly, ScaleTransform.ScaleXProperty, 1d);
+        SetImmediate(_jelly, ScaleTransform.ScaleYProperty, 1d);
+    }
+
     private void Jelly(bool down)
     {
         if (down == _jellyDown) return;
         if (down && (_expanded || _glass?.LiquidShown != true || !Soft.Enabled)) return;
+        if (!down && _expanded) { ResetJelly(); return; }
         _jellyDown = down;
         if (_jelly is null)
         {
@@ -84,15 +102,24 @@ public partial class MainWindow
         if (down)
         {
             double k = JellyK * Math.Min(1, JellyWidth / Math.Max(1, Island.ActualWidth));
-            SetImmediate(_jelly, ScaleTransform.ScaleXProperty, 1 + k);
-            SetImmediate(_jelly, ScaleTransform.ScaleYProperty, 1 - .45 * k);
-            _glass?.Follow(0);
+            Soft.Glide(_jelly, ScaleTransform.ScaleXProperty, 1 + k, true, Soft.Press);
+            Soft.Glide(_jelly, ScaleTransform.ScaleYProperty, 1 - .45 * k, true, Soft.Press);
+            _glass?.Follow(Soft.Press + 50);
             return;
         }
-        var spring = new SpringEase();
-        foreach (var property in new[] { ScaleTransform.ScaleXProperty, ScaleTransform.ScaleYProperty })
-            _jelly.BeginAnimation(property, new DoubleAnimation((double)_jelly.GetValue(property), 1, TimeSpan.FromMilliseconds(JellyBackMs)) { EasingFunction = spring }, HandoffBehavior.SnapshotAndReplace);
+        Back(_jelly, ScaleTransform.ScaleXProperty);
+        Back(_jelly, ScaleTransform.ScaleYProperty);
         _glass?.Follow(JellyBackMs + 50);
+
+        // From where the press has it now (perhaps still going down) back to 1, the value set before the spring starts.
+        static void Back(ScaleTransform jelly, DependencyProperty property)
+        {
+            double from = (double)jelly.GetValue(property);
+            jelly.BeginAnimation(property, null);
+            jelly.SetValue(property, 1d);
+            if (from != 1)
+                jelly.BeginAnimation(property, new DoubleAnimation(from, 1, TimeSpan.FromMilliseconds(JellyBackMs)) { EasingFunction = JellySpring, FillBehavior = FillBehavior.Stop });
+        }
     }
 
     // Automatic liquid glass turning: the glass eases toward the new look ahead of the theme (GlassBackdrop.Lead).

@@ -18,7 +18,10 @@ namespace BrimDeck.LiquidGlass;
 // Desktop Duplication hands out frames of a whole output, only when something on it changed. Each new frame's changed parts (its
 // dirty and moved rectangles) are copied into a copy of the output kept here, so the region can move or resize without waiting
 // for the next change; the region texture is then filled from that copy (a plain copy, or a small shader where the region
-// reaches past the output's edge or the desktop is float). Windows still reports our own windows' redraws as changes over the
+// reaches past the output's edge, the desktop is float, or the texture is larger than the region). The region texture grows in
+// steps of 64 pixels and never shrinks (an opening panel would otherwise make three textures anew on every frame): the region
+// lies at its top-left (Size), and the shader repeats the region's last column and row across the rest, so whatever reads past
+// the region (the renderer's mips, its reach) sees the region's edge, as a texture of exactly its size clamped would show. Windows still reports our own windows' redraws as changes over the
 // region, though their pixels are not in the frame: the region is compared with what the glass last showed (an occlusion query
 // counting the pixels that differ), so the island's own motion, and the refraction drawn from this, never count as a change of
 // the desktop. Those rectangles cannot simply be skipped: our windows span the region, mostly transparent, so a change under
@@ -29,7 +32,11 @@ namespace BrimDeck.LiquidGlass;
 // on the output, access lost (a UAC prompt or the lock screen on the secure desktop, a mode change, a full-screen exclusive
 // game) until duplication can start again, an output turned to portrait, or a device lost until a new one is made.
 //
-// Not thread-safe: Update and everything drawn with Device's immediate context belong to one thread (the renderer's).
+// The first frame of a new duplication may hold no image yet (nothing presented since it started: seen all black): the copy of
+// the output is taken from the first frame that was presented, whole, and the region only after that.
+//
+// Not thread-safe: Update and everything drawn with Device's immediate context belong to one thread (BrimDeck's UI thread, where
+// GlassBackdrop draws; no other thread uses the device, so it needs no multithread protection).
 internal sealed class DesktopSource : IDisposable
 {
     // How long after a failure to start duplicating, or a lost access, before trying again; how long Update may wait for the
@@ -39,6 +46,8 @@ internal sealed class DesktopSource : IDisposable
     private const int MaxRects = 48;
     // How long a comparison may stay unanswered before the reported change is taken as a change.
     private const long CompareMilliseconds = 250;
+    // The region texture's size grows in steps of this many pixels.
+    private const int Bucket = 64;
 
     private ID3D11Device? _device;
     private ID3D11DeviceContext? _context;
@@ -67,7 +76,11 @@ internal sealed class DesktopSource : IDisposable
     private ID3D11ShaderResourceView? _textureView, _beforeView;
     private ID3D11RenderTargetView? _textureTarget, _scratchTarget;
     private RECT? _filled;
-    private (int Width, int Height) _textureSize;
+    // The region texture's size, and the region's size in it (at its top-left).
+    private (int Width, int Height) _textureSize, _size;
+    // Whether the duplication's first frame was waited for; whether a device was made during this Update (DeviceChanged is
+    // raised as Update returns, never inside it).
+    private bool _waitedFirst, _deviceMade;
     // The shaders, made per device; null where the compiler is missing.
     private ID3D11VertexShader? _vertexShader;
     private ID3D11PixelShader? _fillShader, _differShader;
@@ -95,35 +108,102 @@ internal sealed class DesktopSource : IDisposable
         catch (Exception ex) when (ex is NotSupportedException or SharpGen.Runtime.SharpGenException or COMException) { return null; }
     }
 
+    // The capture for an island's window and its glass window (GlassBackdrop), both left out of it, with every other window of
+    // ours that can lie over the island (ExcludeOurs). Null where there is no capture, or (refused) where Windows will not leave
+    // the island's windows out: the glass would then refract the island itself, and the blur stands in for the rest of the run.
+    public static DesktopSource? Open(IntPtr island, IntPtr glass, out bool refused)
+    {
+        refused = false;
+        var source = TryCreate();
+        if (source is null) return null;
+        if (!Exclude(island) || glass != IntPtr.Zero && !Exclude(glass))
+        {
+            source.Dispose();
+            refused = true;
+            return null;
+        }
+        ExcludeOurs();
+        return source;
+    }
+
     // Device on the adapter that drives the monitor containing the region's centre (device pixels). Recreated when that changes.
     public ID3D11Device Device => _device ?? throw new ObjectDisposedException(nameof(DesktopSource));
 
-    // The desktop under the region of the last successful Update: BGRA8, the region's size.
+    // The desktop under the region of the last successful Update: BGRA8, at least the region's size (in steps of 64 pixels), the
+    // region at its top-left (Size) and its last column and row repeated over the rest; exactly the region's size where the
+    // shaders are missing. Kept while the region shrinks or moves, made anew only when it grows past it.
     public ID3D11Texture2D? Texture => _texture;
+
+    // The region's size in Texture (device pixels), as the last successful Update captured it.
+    public (int Width, int Height) Size => _size;
+
+    // Counts the devices made: changes when Device was replaced. What was made on the old device (a renderer) must be made again
+    // before it draws anything Update captured on the new one.
+    public int Generation { get; private set; }
 
     // Whether a comparison is out: the next Update, soon, tells whether the region changed.
     public bool Comparing => _comparing || _compareOwed;
 
-    // Raised when Device was replaced (adapter or monitor change, device lost): the renderer must rebuild its resources.
+    // Raised as Update returns when Device was replaced during it (adapter or monitor change, device lost): the renderer must be
+    // made again. Never raised inside Update, where a caller's frame still holds the old renderer; the caller checks Generation
+    // before drawing what Update captured.
     public event Action? DeviceChanged;
 
-    // Hides a window of ours from the capture (the island window, notices, the blur window): from Desktop Duplication only, so
-    // screenshots and recordings still show it.
-    public static void Exclude(IntPtr hwnd)
+    // Hides a window of ours from the capture (the island window, notices, the blur window, menus and tooltips): from Desktop
+    // Duplication only, so screenshots and recordings still show it. False where Windows refused it or does not keep it (the
+    // attribute read back is off): the window would then be in the capture, refracted under itself, and the caller shows the
+    // blur instead.
+    public static bool Exclude(IntPtr hwnd)
     {
-        if (hwnd == IntPtr.Zero) return;
-        var on = Marshal.AllocHGlobal(sizeof(int));
+        if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) return false;
+        var value = Marshal.AllocHGlobal(sizeof(int));
         try
         {
-            Marshal.WriteInt32(on, 1);
-            var data = new CompositionAttribute { Attribute = ExcludedFromDda, Data = on, Size = sizeof(int) };
-            SetWindowCompositionAttribute(hwnd, ref data);
+            Marshal.WriteInt32(value, 1);
+            var data = new CompositionAttribute { Attribute = ExcludedFromDda, Data = value, Size = sizeof(int) };
+            if (SetWindowCompositionAttribute(hwnd, ref data) == 0) return false;
+            // Read back where Windows answers for the attribute; a value it did not write (-1) says nothing either way.
+            Marshal.WriteInt32(value, -1);
+            data = new CompositionAttribute { Attribute = ExcludedFromDda, Data = value, Size = sizeof(int) };
+            return GetWindowCompositionAttribute(hwnd, ref data) == 0 || Marshal.ReadInt32(value) != 0;
         }
-        finally { Marshal.FreeHGlobal(on); }
+        finally { Marshal.FreeHGlobal(value); }
+    }
+
+    // Every window of this process that can lie over an island is left out of the capture, now and whenever one is shown from
+    // here on: the island, notices, the glass windows, pop-ups (menus, tooltips, drop-down lists, PopupMotion's pictures), that
+    // is every topmost, tool or never-activated window. Ordinary windows (settings, dialogs) stay in it, so a recording by
+    // Desktop Duplication still shows them. The hook runs on the calling (UI) thread's message loop; installed once.
+    public static void ExcludeOurs()
+    {
+        if (_showHook != IntPtr.Zero) return;
+        EnumWindows(OurWindow, IntPtr.Zero);
+        _showHook = SetWinEventHook(ObjectShow, ObjectShow, IntPtr.Zero, Shown, (uint)Environment.ProcessId, 0, 0);
+    }
+
+    // Kept for the life of the process: Windows calls them back.
+    private static IntPtr _showHook;
+    private static readonly EnumWindowsProc OurWindow = static (hwnd, _) =>
+    {
+        GetWindowThreadProcessId(hwnd, out uint process);
+        if (process == (uint)Environment.ProcessId && Overlay(hwnd)) Exclude(hwnd);
+        return true;
+    };
+    private static readonly WinEventProc Shown = static (_, _, hwnd, objectId, child, _, _) =>
+    {
+        if (objectId == 0 && child == 0 && Overlay(hwnd)) Exclude(hwnd);
+    };
+
+    // A top-level window that can sit over the island: topmost, a tool window, or one that never activates.
+    internal static bool Overlay(IntPtr hwnd)
+    {
+        if (GetAncestor(hwnd, 2) != hwnd) return false; // GA_ROOT
+        long style = GetWindowLongPtr(hwnd, -20).ToInt64(); // GWL_EXSTYLE
+        return (style & (0x8 | 0x80 | 0x08000000)) != 0; // TOPMOST | TOOLWINDOW | NOACTIVATE
     }
 
     // Copies the desktop under the region (device pixels, screen coordinates, already padded by the caller for refraction
-    // reach) into Texture, a BGRA8 texture of exactly the region's size, re-created when the size changes. A region over two
+    // reach) into Texture, at its top-left (Size), the texture made anew only when the region grows past it. A region over two
     // monitors takes the one under its centre; the part beyond that output's edge repeats the edge. False when nothing could be
     // captured. Changed is true when the region moved or resized, or when a comparison answered since the last call found the
     // pixels differ from what the glass last showed (the caller then draws them, and they become the baseline); a change found
@@ -134,6 +214,16 @@ internal sealed class DesktopSource : IDisposable
     {
         changed = false;
         if (_disposed || region.IsEmpty) return false;
+        try { return Capture(region, out changed); }
+        finally
+        {
+            if (_deviceMade) { _deviceMade = false; DeviceChanged?.Invoke(); }
+        }
+    }
+
+    private bool Capture(RECT region, out bool changed)
+    {
+        changed = false;
         try
         {
             if ((_device is null || _device.DeviceRemovedReason.Failure) && !Recover()) return false;
@@ -145,9 +235,12 @@ internal sealed class DesktopSource : IDisposable
             if (inside.IsEmpty) return false;
             bool partial = inside != region;
             bool linear = _desktopLinear;
-            if ((partial || linear) && !EnsureShaders()) return false;
+            bool shaders = EnsureShaders();
+            if ((partial || linear) && !shaders) return false;
 
-            bool resized = EnsureTexture(region.Width, region.Height);
+            bool resized = EnsureTexture(region.Width, region.Height, shaders);
+            _size = (region.Width, region.Height);
+            bool exact = _textureSize == _size;
             bool moved = resized || _filled != region;
             var local = region.Offset(-output.Bounds.Left, -output.Bounds.Top);
             bool touched = moved || Touches(local);
@@ -160,7 +253,7 @@ internal sealed class DesktopSource : IDisposable
                 // from what is drawn now when the region is next filled.
                 if (moved) { _beforeValid = false; _comparing = false; _compareOwed = false; _unshown = false; }
                 else if (!_beforeValid) { context.CopyResource(_before, _texture); _beforeValid = true; }
-                if (!partial && !linear)
+                if (!partial && !linear && exact)
                     context.CopySubresourceRegion(_texture, 0, 0, 0, 0, _desktop, 0, new Box(local.Left, local.Top, 0, local.Right, local.Bottom, 1));
                 else Fill(local, output, linear);
                 _filled = region;
@@ -172,9 +265,17 @@ internal sealed class DesktopSource : IDisposable
         {
             // A device lost makes a new one; anything else (out of memory, a call refused) starts duplicating again later.
             if (IsDeviceLoss(ex.HResult)) Recover();
-            else { StopDuplicating(); _retryAt = Environment.TickCount64 + RetryMilliseconds; }
+            else AccessLost();
             return false;
         }
+    }
+
+    // Access to the output lost (a UAC prompt or the lock screen on the secure desktop, a mode change, a full-screen exclusive
+    // game), or a call refused: duplication starts again after RetryMilliseconds, and its first presented frame is copied whole.
+    private void AccessLost()
+    {
+        StopDuplicating();
+        _retryAt = Environment.TickCount64 + RetryMilliseconds;
     }
 
     // ---------------------------------------------------------------- duplication
@@ -197,7 +298,6 @@ internal sealed class DesktopSource : IDisposable
         {
             ReleaseDevice();
             if (!CreateDevice(output.Adapter)) { _retryAt = Environment.TickCount64 + RetryMilliseconds; return false; }
-            DeviceChanged?.Invoke();
         }
         try
         {
@@ -225,7 +325,7 @@ internal sealed class DesktopSource : IDisposable
             return false;
         }
         _output = output;
-        _desktopValid = false; _masked = false;
+        _desktopValid = false; _masked = false; _waitedFirst = false;
         _filled = null;
         return true;
     }
@@ -234,18 +334,24 @@ internal sealed class DesktopSource : IDisposable
     private bool Take()
     {
         var duplication = _duplication!;
-        var result = duplication.AcquireNextFrame(_desktopValid ? 0u : FirstFrameMilliseconds, out var info, out var resource);
+        // The first frame of a new duplication is waited for once, briefly; while none was presented (a desktop holding still)
+        // the wait is not repeated on every Update.
+        uint wait = _desktopValid || _waitedFirst ? 0u : FirstFrameMilliseconds;
+        _waitedFirst = true;
+        var result = duplication.AcquireNextFrame(wait, out var info, out var resource);
         if (result.Code == Vortice.DXGI.ResultCode.WaitTimeout.Code) return true;
         if (result.Failure)
         {
             if (IsDeviceLoss(result.Code)) Lose();
-            else { StopDuplicating(); _retryAt = Environment.TickCount64 + RetryMilliseconds; }
+            else AccessLost();
             return false;
         }
         try
         {
-            // A frame with only the pointer moved (LastPresentTime 0) changes nothing here: the pointer is never in the image.
-            if (info.LastPresentTime == 0 && _desktopValid) return true;
+            // A frame nothing was presented for (LastPresentTime 0: only the pointer moved) changes nothing here, as the pointer
+            // is never in the image. Before the copy of the output holds a frame, such a frame may hold no image at all (all
+            // black, and the parts of it that never change would then stay black): the copy waits for a presented one.
+            if (info.LastPresentTime == 0) return true;
             _masked = info.ProtectedContentMaskedOut;
             using var frame = resource.QueryInterface<ID3D11Texture2D>();
             var context = _context!;
@@ -326,10 +432,14 @@ internal sealed class DesktopSource : IDisposable
 
     // ---------------------------------------------------------------- the region
 
-    // The region texture (and its companions for the comparison) at this size; true when they were made anew.
-    private bool EnsureTexture(int width, int height)
+    // The region texture (and its companions for the comparison) for a region of this size; true when they were made anew. With
+    // the fill shader (bucket) in steps of Bucket pixels, never shrunk, and grown by at least a quarter at a time (a region
+    // growing on every frame of an opening panel makes it anew a few times, the first time only); without the shader exactly
+    // the region's size.
+    private bool EnsureTexture(int width, int height, bool bucket)
     {
-        if (_texture is not null && _textureSize == (width, height)) return false;
+        if (_texture is not null && (bucket ? _textureSize.Width >= width && _textureSize.Height >= height : _textureSize == (width, height))) return false;
+        if (bucket) { width = Grow(width, _textureSize.Width); height = Grow(height, _textureSize.Height); }
         ReleaseTexture();
         _textureSize = (width, height);
         var device = _device!;
@@ -349,18 +459,23 @@ internal sealed class DesktopSource : IDisposable
         return true;
     }
 
-    // The region from the copy of the output through the fill shader: the part beyond the output's edge repeats the edge, and a
-    // float desktop becomes 8-bit sRGB.
+    private static int Step(int size) => (Math.Max(1, size) + Bucket - 1) / Bucket * Bucket;
+    private static int Grow(int needed, int had) => needed <= had ? had : Step(Math.Max(needed, had + had / 4));
+
+    // The region from the copy of the output through the fill shader, over the whole texture: the part beyond the output's edge
+    // repeats the edge, the part of the texture beyond the region repeats the region's last column and row, and a float desktop
+    // becomes 8-bit sRGB.
     private void Fill(RECT local, Output output, bool linear)
     {
         var context = _context!;
         var parameters = new DesktopShaders.FillParameters
         {
-            OffsetX = local.Left, OffsetY = local.Top, LastX = output.Bounds.Width - 1, LastY = output.Bounds.Height - 1,
+            OffsetX = local.Left, OffsetY = local.Top,
+            LastX = Math.Min(output.Bounds.Width, local.Right) - 1, LastY = Math.Min(output.Bounds.Height, local.Bottom) - 1,
             White = _white, Linear = linear ? 1u : 0u
         };
         context.UpdateSubresource(in parameters, _fillParameters!);
-        Draw(_textureTarget!, local.Width, local.Height, _fillShader!, _desktopView!, null);
+        Draw(_textureTarget!, _textureSize.Width, _textureSize.Height, _fillShader!, _desktopView!, null);
     }
 
     // Whether the region is to be shown again (it then becomes the baseline). Each fill (filled: this call's) is compared with
@@ -394,7 +509,8 @@ internal sealed class DesktopSource : IDisposable
         {
             _compareOwed = false;
             context.Begin(_differQuery!);
-            Draw(_scratchTarget!, _textureSize.Width, _textureSize.Height, _differShader!, _textureView!, _beforeView);
+            // Only the region: the rest of the texture repeats its edge, so it differs only where the region does.
+            Draw(_scratchTarget!, _size.Width, _size.Height, _differShader!, _textureView!, _beforeView);
             context.End(_differQuery!);
             // Sent to the GPU now, so the answer is there by the next Update.
             context.Flush();
@@ -410,6 +526,7 @@ internal sealed class DesktopSource : IDisposable
     }
 
     private readonly IntPtr _queryResult = Marshal.AllocHGlobal(sizeof(ulong));
+    private readonly ID3D11ShaderResourceView[] _oneView = new ID3D11ShaderResourceView[1], _twoViews = new ID3D11ShaderResourceView[2];
 
     // One full-target triangle: the state it needs is set here and cleared after, so the renderer's own state is not assumed.
     private void Draw(ID3D11RenderTargetView target, int width, int height, ID3D11PixelShader shader, ID3D11ShaderResourceView first, ID3D11ShaderResourceView? second)
@@ -419,7 +536,10 @@ internal sealed class DesktopSource : IDisposable
         context.IASetPrimitiveTopology(PrimitiveTopology.TriangleList);
         context.VSSetShader(_vertexShader);
         context.PSSetShader(shader);
-        context.PSSetShaderResources(0, second is null ? [first] : [first, second]);
+        // The views go through arrays kept for it, not made per draw; emptied after, so they hold nothing past the draw.
+        if (second is null) { _oneView[0] = first; context.PSSetShaderResources(0, _oneView); }
+        else { _twoViews[0] = first; _twoViews[1] = second; context.PSSetShaderResources(0, _twoViews); }
+        _oneView[0] = null!; _twoViews[0] = null!; _twoViews[1] = null!;
         context.PSSetConstantBuffer(0, _fillParameters);
         context.RSSetViewport(new Viewport(0, 0, width, height));
         context.OMSetRenderTargets(target);
@@ -457,6 +577,8 @@ internal sealed class DesktopSource : IDisposable
                         [FeatureLevel.Level_11_1, FeatureLevel.Level_11_0, FeatureLevel.Level_10_1, FeatureLevel.Level_10_0], out ID3D11Device device, out ID3D11DeviceContext context);
                     if (result.Failure || device is null) return false;
                     _device = device; _context = context; _adapter = adapterLuid;
+                    // The constructor's device is the first; every later one replaces one (raised as Update returns).
+                    if (Generation++ > 0) _deviceMade = true;
                     return true;
                 }
         }
@@ -473,7 +595,6 @@ internal sealed class DesktopSource : IDisposable
         var outputs = Outputs();
         var adapter = outputs.FirstOrDefault(o => o.Adapter == _adapter)?.Adapter ?? outputs.FirstOrDefault()?.Adapter;
         if (adapter is null || !CreateDevice(adapter.Value)) { _retryAt = Environment.TickCount64 + RetryMilliseconds; return false; }
-        DeviceChanged?.Invoke();
         return true;
     }
 
@@ -526,7 +647,7 @@ internal sealed class DesktopSource : IDisposable
         _scratchTarget?.Dispose(); _scratch?.Dispose(); _beforeView?.Dispose(); _before?.Dispose();
         _textureTarget?.Dispose(); _textureView?.Dispose(); _texture?.Dispose();
         _scratchTarget = null; _scratch = null; _beforeView = null; _before = null; _textureTarget = null; _textureView = null; _texture = null;
-        _filled = null;
+        _filled = null; _textureSize = default;
         _beforeValid = false; _comparing = false; _compareOwed = false; _unshown = false; _hot = false;
     }
 
@@ -552,4 +673,14 @@ internal sealed class DesktopSource : IDisposable
     private const int ExcludedFromDda = 24;
     [StructLayout(LayoutKind.Sequential)] private struct CompositionAttribute { public int Attribute; public IntPtr Data; public int Size; }
     [DllImport("user32")] private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionAttribute data);
+    [DllImport("user32")] private static extern int GetWindowCompositionAttribute(IntPtr hwnd, ref CompositionAttribute data);
+    [DllImport("user32")] private static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [DllImport("user32")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr data);
+    [DllImport("user32")] private static extern bool EnumWindows(EnumWindowsProc proc, IntPtr data);
+    private const uint ObjectShow = 0x8002;
+    private delegate void WinEventProc(IntPtr hook, uint eventType, IntPtr hwnd, int objectId, int child, uint thread, uint time);
+    [DllImport("user32")] private static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc proc, uint process, uint thread, uint flags);
 }
