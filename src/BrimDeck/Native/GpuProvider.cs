@@ -18,8 +18,11 @@ internal sealed class GpuProvider
     private readonly GpuCounters _counters = new();
     // By LUID. Read once, and again when the counters name an adapter not described: the LUIDs change when a driver restarts.
     // Adapters still not described after that (an NPU) are remembered, so they do not have the adapters read every second.
+    // A read that fails (DXGI gone during a driver restart) keeps the last description; with none yet, it is read again every
+    // 30 samples.
     private IReadOnlyDictionary<ulong, GpuAdapter> _adapters;
     private bool _described;
+    private int _sinceDescribe;
     private readonly HashSet<ulong> _foreign = [];
 
     public GpuProvider(PdhQuery? pdh)
@@ -45,10 +48,15 @@ internal sealed class GpuProvider
             foreach (var luid in totals.Keys) unknown |= !_adapters.ContainsKey(luid) && !_foreign.Contains(luid);
             if (unknown)
             {
-                (_adapters, _described) = GpuAdapters.Read();
-                foreach (var luid in totals.Keys) if (!_adapters.ContainsKey(luid)) _foreign.Add(luid);
+                var (adapters, described) = GpuAdapters.Read();
+                if (described)
+                {
+                    _adapters = adapters;
+                    foreach (var luid in totals.Keys) if (!_adapters.ContainsKey(luid)) _foreign.Add(luid);
+                }
             }
         }
+        else if (++_sinceDescribe >= 30) { _sinceDescribe = 0; (_adapters, _described) = GpuAdapters.Read(); }
         var samples = GpuReadings.Samples(totals, _adapters, _described, Why.NoGpuMemory);
         return samples.Count > 0 ? samples : Reading<IReadOnlyList<GpuSample>>.Unavailable(Why.NoGpu);
     }
