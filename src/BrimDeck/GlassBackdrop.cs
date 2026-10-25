@@ -248,10 +248,10 @@ internal sealed class GlassBackdrop : IDisposable
         Held?.Invoke(held);
     }
 
-    // The sprite's brush for the theme's glass: the blur held to its band where the theme asks for it and Windows takes the
-    // effect, else the blur as it comes.
     private IntPtr OwnerHandle => _ownerHandle != IntPtr.Zero ? _ownerHandle : _ownerHandle = new WindowInteropHelper(_owner).Handle;
 
+    // The sprite's brush for the theme's glass: the blur held to its band where the theme asks for it and Windows takes the
+    // effect, else the blur as it comes.
     private void Dress()
     {
         var glass = PanelTheme.Current.Effects.Glass;
@@ -261,7 +261,7 @@ internal sealed class GlassBackdrop : IDisposable
         // The brush made for the theme before is let go: a switch between glass themes would otherwise keep each one.
         var previous = _sprite.Brush;
         _sprite.Brush = null;
-        previous?.Dispose();
+        GlassEffect.Release(previous);
         if (glass is { Held: true })
             try
             {
@@ -362,7 +362,7 @@ internal sealed class GlassBackdrop : IDisposable
     private void Release()
     {
         // The composition objects are let go with the window: a panel made again (a monitor added, settings applied) starts afresh.
-        if (_sprite is not null) { _sprite.Brush?.Dispose(); _sprite.Clip?.Dispose(); _sprite.Dispose(); }
+        if (_sprite is not null) { GlassEffect.Release(_sprite.Brush); _sprite.Clip?.Dispose(); _sprite.Dispose(); }
         _clip?.Dispose(); _root?.Dispose();
         _target?.Dispose(); _target = null; _sprite = null; _clip = null; _root = null;
         _window?.Dispose(); _window = null;

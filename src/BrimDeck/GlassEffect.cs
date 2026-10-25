@@ -9,8 +9,9 @@ namespace BrimDeck;
 // bringing its brightness into the theme's band, so a thinner tint reads over it. Composition takes an effect as an
 // IGraphicsEffect that also answers IGraphicsEffectD2D1Interop; Win2D, which normally provides those, is not available to a WPF
 // app, so this is that object, built in native memory from delegates: one identity with two interface pointers, the effect
-// (also IUnknown, IInspectable and IGraphicsEffectSource) and the interop. It lives as long as the brush made from it; the
-// handful made in a run are never freed.
+// (also IUnknown, IInspectable and IGraphicsEffectSource) and the interop. One is made for each band a theme asks for, with
+// the effect factory compiled from it, and both are kept for the run: every blur window (the island, each notice) only makes
+// a brush from that factory, and lets the brush and its backdrop go again (Release).
 internal static class GlassEffect
 {
     private static readonly Guid IidUnknown = new("00000000-0000-0000-C000-000000000046");
@@ -22,13 +23,25 @@ internal static class GlassEffect
     private static readonly Guid ColorMatrix = new("921F03D6-641C-47DF-852D-B4BB6153AE11");
     private const int NotImplemented = unchecked((int)0x80004001), NoInterface = unchecked((int)0x80004002);
 
+    // Used on the UI thread only, as the compositor is.
+    private static readonly Dictionary<(double Low, double High, double Saturation), CompositionEffectFactory> Factories = [];
+
     // The brush: the host backdrop through the matrix that saturates by `saturation` and maps brightness 0..1 to low..high.
     public static CompositionBrush Brush(Compositor compositor, double low, double high, double saturation)
     {
-        var effect = Create(Matrix(low, high, saturation), new CompositionEffectSourceParameter("backdrop"));
-        var brush = compositor.CreateEffectFactory(effect).CreateBrush();
+        var key = (low, high, saturation);
+        if (!Factories.TryGetValue(key, out var factory))
+            Factories[key] = factory = compositor.CreateEffectFactory(Create(Matrix(low, high, saturation), new CompositionEffectSourceParameter("backdrop")));
+        var brush = factory.CreateBrush();
         brush.SetSourceParameter("backdrop", compositor.CreateHostBackdropBrush());
         return brush;
+    }
+
+    // Lets a blur window's brush go, with the backdrop brush inside a held one.
+    public static void Release(CompositionBrush? brush)
+    {
+        if (brush is CompositionEffectBrush held) held.GetSourceParameter("backdrop")?.Dispose();
+        brush?.Dispose();
     }
 
     // D2D1_MATRIX_5X4_F, row by input channel: a saturation about the luma (Rec. 709 weights) scaled into the band, with the
