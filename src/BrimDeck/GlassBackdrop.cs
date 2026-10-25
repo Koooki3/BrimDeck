@@ -219,6 +219,9 @@ internal sealed class GlassBackdrop : IDisposable
     internal Func<bool>? StandIn { get; set; }
     // How far the island is open, 0 (collapsed) to 1 (the open panel), following its opening motion; null: never open (a notice).
     internal Func<double>? Openness { get; set; }
+    // Where the collapsed island's content row lies (its text and glyphs), in DIPs from the island's top-left; null or empty for
+    // none (the open panel, a notice). Behind it the glass calms the backdrop (Liquid.hlsl, the content row).
+    internal Func<Rect?>? ContentArea { get; set; }
 
     private void StandInFrame()
     {
@@ -449,6 +452,13 @@ internal sealed class GlassBackdrop : IDisposable
                 // How far the panel is open (its frost and the calmer backdrop behind its text, Liquid.hlsl), with its opening.
                 Open = (float)Math.Clamp(Openness?.Invoke() ?? 0, 0, 1)
             };
+            // The collapsed island's content row (island DIPs, from ContentArea), in device pixels from the glass's corner.
+            if (ContentArea?.Invoke() is { IsEmpty: false } row)
+                next = next with
+                {
+                    ContentLeft = (float)(row.Left * scale), ContentTop = (float)(row.Top * scale),
+                    ContentRight = (float)(row.Right * scale), ContentBottom = (float)(row.Bottom * scale)
+                };
             // Drawn again only when the glass changed (its shape, place, look, the press) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),
             // the desktop is looked at no oftener than the idle poll's PollMs.
