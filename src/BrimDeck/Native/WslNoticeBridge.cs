@@ -429,13 +429,15 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
         long started = Environment.TickCount64;
         try
         {
-            while (await NoticeFrames.ReadMessageAsync(stream) is { } message)
+            // A message that fails here is dropped and the next one read: any process in the distribution can send one, and
+            // ending the loop would restart the agent again and again.
+            await NoticeFrames.ReadEachAsync(stream, message =>
             {
                 if (NoticeProtocol.Validate(message) is { } problem)
                 {
                     // brim-notify waits for an answer: it hears why at once instead of "no-reply" after its wait (core-M2).
                     if (message.Type == NoticeTypes.Notify && message.Origin == "cli" && message.EventId is { } id) Send(NoticeProtocol.Reply(NoticeResults.Rejected, problem, id));
-                    continue;
+                    return;
                 }
                 if (message.Type == NoticeTypes.Status)
                 {
@@ -445,15 +447,15 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
                         AgentStates.Server => WslAgentState.Server, AgentStates.Monitor => WslAgentState.Monitor,
                         AgentStates.MonitorDenied => WslAgentState.MonitorDenied, AgentStates.NoBus => WslAgentState.NoBus, _ => WslAgentState.Failed
                     }, message.Detail ?? "");
-                    continue;
+                    return;
                 }
                 if (!NoticeIntake.AdmitFromAgent(_intake, message, Environment.TickCount64, out var refusal))
                 {
                     if (refusal is not null) Send(refusal);
-                    continue;
+                    return;
                 }
                 Received?.Invoke(message);
-            }
+            }, NoticeCenter.Log);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or ObjectDisposedException) { }
         catch (Exception ex) { NoticeCenter.Log(ex); }

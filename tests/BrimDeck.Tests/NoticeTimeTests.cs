@@ -74,6 +74,21 @@ internal static class NoticeTimeTests
         check("Times far away or unreadable are refused", Check(new NoticeMessage { Kind = "event", At = "2028-01-01 10:00" }) == "bad-time"
             && Check(new NoticeMessage { Kind = "event", At = "2026-10-20 10:00" }) == "bad-time" && Check(new NoticeMessage { Kind = "event", At = "whenever" }) == "bad-time");
         check("A countdown to a past moment is refused", Check(new NoticeMessage { Kind = "countdown", At = "2026-10-24T05:00:00Z" }) == "bad-time");
+        // Year 1 ahead of UTC and the end of year 9999 behind it lie outside what DateTimeOffset holds: refused, never thrown.
+        var behind = TimeZoneInfo.CreateCustomTimeZone("Test/Behind", TimeSpan.FromHours(-5), "Test Behind", "Test Behind");
+        string?[] edges =
+        [
+            Check(new NoticeMessage { Kind = "event", At = "0001-01-01 00:00" }),
+            Check(new NoticeMessage { Kind = "countdown", At = "0001-01-01T00:00:00+08:00" }),
+            Check(new NoticeMessage { Kind = "event", At = "15:00", Until = "0001-01-01 00:00" }),
+            NoticeTimes.Check(new NoticeMessage { Kind = "event", At = "9999-12-31 23:00" }, TimeNow, behind),
+            NoticeTimes.Check(new NoticeMessage { Kind = "countdown", At = "9999-12-31T23:00:00-05:00" }, TimeNow, behind),
+            NoticeTimes.Check(new NoticeMessage { Kind = "event", At = "9999-12-31 23:59:59" }, TimeNow, China),
+        ];
+        check("Times out of DateTimeOffset's range are refused as bad-time", edges.All(problem => problem == "bad-time"));
+        check("Out-of-range wall-clock times read as no time", NoticeTimes.FromLocal(new DateTime(1, 1, 1, 0, 0, 0), China) is null
+            && NoticeTimes.FromLocal(new DateTime(9999, 12, 31, 23, 0, 0), behind) is null
+            && NoticeTimes.ParseTime("0001-01-01 00:00", TimeNow, China) is null && NoticeTimes.ParseTime("9999-12-31 23:00", TimeNow, behind) is null);
         check("Times need a kind, and stop needs a key", Check(new NoticeMessage { At = "15:30" }) == "no-kind" && Check(new NoticeMessage { Kind = "stopwatch", Stop = true }) == "no-key"
             && Check(new NoticeMessage { Kind = "stopwatch", Stop = true, ReplaceId = "k" }) is null);
         check("A timer without text passes validation; a plain notice without text does not",
