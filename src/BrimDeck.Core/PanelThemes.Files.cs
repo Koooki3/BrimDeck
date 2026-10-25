@@ -86,6 +86,11 @@ public static partial class PanelThemes
         var baseId = NormalizeId(file.Base);
         if (baseId.Length > 0 && !IsBuiltIn(baseId)) return Loc.T($"基础主题“{file.Base}”不存在", $"The base theme \"{file.Base}\" does not exist");
         if (LayerProblem(file) is { } problem) return problem;
+        // Pixel art with glass, from the file or its base: the blur and the shadow cut would not follow the steps.
+        var baseEffects = baseId.Length > 0 && BuiltIn(baseId) is { } baseTheme ? Resolve(baseTheme).Effects : null;
+        bool glass = file.Effects?.Glass?.Tint is not null || baseEffects?.Glass is not null;
+        bool pixel = file.Effects?.Pixel is { } pixelSize ? Math.Round(Math.Clamp(double.IsFinite(pixelSize) ? pixelSize : 0, 0, 4)) > 0 : baseEffects?.Pixel > 0;
+        if (glass && pixel) return Loc.T("像素（pixel）不能与玻璃（glass）同时使用", "Pixel art (pixel) cannot be combined with glass");
         if (file.Night is { } night && LayerProblem(night) is { } nightProblem) return Loc.T("夜间外观：", "Night look: ") + nightProblem;
         foreach (var time in new[] { file.Daylight?.Day, file.Daylight?.Night })
             if (time is { Length: > 0 } && ParseTimeOfDay(time) is null) return Loc.T($"时间“{time}”不是 HH:mm", $"The time \"{time}\" is not HH:mm");
