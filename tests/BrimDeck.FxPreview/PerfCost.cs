@@ -123,7 +123,7 @@ internal static class PerfCost
                 {
                     var sample = Measure(deck, pipe, mode == 1, scenario, seconds, v => liquidOn = v);
                     (results.TryGetValue((mode, scenario), out var list) ? list : results[(mode, scenario)] = []).Add(sample);
-                    Console.WriteLine(Inv($"  round {round + 1} {(mode == 1 ? "liquid" : "blur  ")} {Names[scenario],-24} cpu {sample.CpuPct,5:0.00} %  ui {sample.UiPct,5:0.00} %  gpu {sample.GpuMsPerS,6:0.00} ms/s (process, all engines {sample.ProcessGpu,6:0.0} ms/s)  wpf {sample.WpfFps,5:0.0} fps  glass renders {sample.Renders,5:0.0}/s  ticks {sample.Ticks,5:0.0}/s  captures {sample.Captures,5:0.0}/s  follows {sample.Follows}  gpu max call {pipe.MaxCallMs:0.00} ms, disjoint {pipe.Disjoints}"));
+                    Console.WriteLine(Inv($"  round {round + 1} {(mode == 1 ? "liquid" : "blur  ")} {Names[scenario],-24} cpu {sample.CpuPct,5:0.00} %  ui {sample.UiPct,5:0.00} %  gpu {sample.GpuMsPerS,6:0.00} ms/s (process, all engines {sample.ProcessGpu,6:0.0} ms/s)  wpf {sample.WpfFps,5:0.0} fps  glass renders {sample.Renders,5:0.0}/s  ticks {sample.Ticks,5:0.0}/s  captures {sample.Captures,5:0.0}/s  follows {sample.Follows}  host calls {pipe.CallMs / sample.Seconds:0.00} ms/s, backdrop reads {pipe.BackdropMs / sample.Seconds:0.00} ms/s  gpu max call {pipe.MaxCallMs:0.00} ms, disjoint {pipe.Disjoints}"));
                 }
         music.Stop();
         Console.WriteLine();
@@ -243,7 +243,7 @@ internal static class PerfCost
         pipe.Enabled = liquid;
         pipe.Off();
         deck.SetExpanded(scenario == 1);
-        using var fake = new FakeIsland(pipe.Source);
+        var fake = new FakeIsland(pipe.Source);
         Wait(scenario == 2 ? 300 : 1500, fake);
         double gpu0 = GpuCounter.Ms();
         QueryProcessCycleTime(GetCurrentProcess(), out ulong cpu0);
@@ -263,6 +263,8 @@ internal static class PerfCost
         }
         else Wait(seconds * 1000, fake);
         wall.Stop();
+        // Gone before the counters are read (reading the GPU counter can hold the thread for a while).
+        fake.Dispose();
         QueryProcessCycleTime(GetCurrentProcess(), out ulong cpu1);
         double gpu1 = GpuCounter.Ms();
         QueryThreadCycleTime(GetCurrentThread(), out ulong ui1);
@@ -380,7 +382,14 @@ internal static class PerfCost
         }
 
         // GlassBackdrop.ReportBackdrop with automatic liquid glass not chosen: the last measure of the backdrop read.
-        private void Backdrop() => _host.Renderer?.TryBackdrop(out _);
+        private void Backdrop()
+        {
+            long t = Stopwatch.GetTimestamp();
+            _host.Renderer?.TryBackdrop(out _);
+            BackdropMs += Stopwatch.GetElapsedTime(t).TotalMilliseconds;
+        }
+        // The UI thread's wall time in the host's calls (capture, comparison, drawing, presenting) and in reading the backdrop's measure.
+        public double CallMs, BackdropMs;
 
         private void Timed(Func<bool> look)
         {
@@ -389,7 +398,9 @@ internal static class PerfCost
                 _host.Source.Device.CreateQuery(new QueryDescription(QueryType.Timestamp)), _host.Source.Device.CreateQuery(new QueryDescription(QueryType.Timestamp)));
             _context.Begin(q.Item1);
             _context.End(q.Item2);
+            long t = Stopwatch.GetTimestamp();
             look();
+            CallMs += Stopwatch.GetElapsedTime(t).TotalMilliseconds;
             _context.End(q.Item3);
             _context.End(q.Item1);
             // Sent now, so the closing timestamp is not left in the context until the next call's work flushes it.
@@ -423,7 +434,7 @@ internal static class PerfCost
             _markGpu = _gpuMs; _markFollows = _follows;
             return ms;
         }
-        public void Mark() { Collect(wait: true); _markGpu = _gpuMs; _markFollows = _follows; MaxCallMs = 0; Disjoints = 0; }
+        public void Mark() { Collect(wait: true); _markGpu = _gpuMs; _markFollows = _follows; MaxCallMs = 0; Disjoints = 0; CallMs = 0; BackdropMs = 0; }
         public double MaxCallMs; public int Disjoints;
     }
 
@@ -538,7 +549,7 @@ internal static class PerfCost
         {
             if (_window == 0 || now < _next) return;
             _next = now + 33;
-            if (_life.ElapsedMilliseconds >= 1800) { Destroy(); Make(); if (_window == 0) return; }
+            if (_life.ElapsedMilliseconds >= 1200) { Destroy(); Make(); if (_window == 0) return; }
             SetLayeredWindowAttributes(_window, 0, (byte)(1 + (++_redraw & 1)), 2);
             SetWindowText(_window, (_redraw & 1) == 0 ? "a" : "b");
             InvalidateRect(_window, 0, true);
