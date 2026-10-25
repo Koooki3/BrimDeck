@@ -31,31 +31,62 @@ public partial class MainWindow
     // parts of the compact row shown now (the cover, the title, the clock, the readings, the rings, an alert's text), in DIPs
     // from the island's top-left as drawn (the compact content's own scale included), inside the island. None while the panel
     // is open or opening, for the line (it shows no content), or while nothing is shown.
+    // Asked on every frame the glass follows: the parts are walked again only after a layout pass (Island.LayoutUpdated, which
+    // also follows the row's parts coming, going and fading, CompactRow.ArrangeOverride) or a scale of the compact content too
+    // small to scale from; the compact content's own scale (CompactScale, about its middle) is applied to the area kept.
+    private Rect _contentArea = Rect.Empty;
+    private Point _contentAreaMiddle;
+    private (double X, double Y) _contentAreaScale;
+    private bool _contentAreaStale = true;
     internal Rect? GlassContentArea()
     {
         if (_expanded || Compact.Visibility != Visibility.Visible || Compact.Opacity < .01 || !Island.IsVisible) return null;
+        double sx = CompactScale.ScaleX, sy = CompactScale.ScaleY;
+        if (_contentAreaStale || !(Math.Abs(_contentAreaScale.X) > .01 && Math.Abs(_contentAreaScale.Y) > .01))
+        {
+            _contentArea = ContentAreaNow();
+            _contentAreaScale = (sx, sy);
+            _contentAreaStale = false;
+        }
+        var area = _contentArea;
+        if (area.IsEmpty) return null;
+        if (sx != _contentAreaScale.X || sy != _contentAreaScale.Y)
+        {
+            double kx = sx / _contentAreaScale.X, ky = sy / _contentAreaScale.Y, mx = _contentAreaMiddle.X, my = _contentAreaMiddle.Y;
+            double left = mx + (area.Left - mx) * kx, right = mx + (area.Right - mx) * kx, top = my + (area.Top - my) * ky, bottom = my + (area.Bottom - my) * ky;
+            area = new Rect(new Point(left, top), new Point(right, bottom));
+        }
+        area.Intersect(new Rect(Island.RenderSize));
+        return area.IsEmpty || area.Width < 1 || area.Height < 1 ? null : area;
+    }
+
+    // The row's parts as drawn now, in the island's DIPs (not cut to it), and the compact content's middle there (the fixed
+    // point of its scale).
+    private Rect ContentAreaNow()
+    {
         var row = CompactAlert.Visibility == Visibility.Visible ? CompactAlert : CompactRings;
-        if (row.Visibility != Visibility.Visible) return null;
+        if (row.Visibility != Visibility.Visible) return Rect.Empty;
         var area = Rect.Empty;
         try
         {
+            _contentAreaMiddle = Compact.TransformToAncestor(Island).Transform(new Point(Compact.ActualWidth / 2, Compact.ActualHeight / 2));
             // The row's parts (CompactRow and the alert's row are panels of them); anything else as a whole.
-            foreach (var child in row.Children.OfType<FrameworkElement>())
+            var children = row.Children;
+            for (int i = 0; i < children.Count; i++)
             {
-                if (!child.IsVisible) continue;
-                if (child is Panel { Children.Count: > 0 } parts)
-                    foreach (var part in parts.Children.OfType<FrameworkElement>()) Add(part);
-                else Add(child);
+                if (children[i] is not FrameworkElement { IsVisible: true } child) continue;
+                if (child is Panel { Children: { Count: > 0 } parts })
+                    for (int j = 0; j < parts.Count; j++) { if (parts[j] is FrameworkElement part) Add(part, ref area); }
+                else Add(child, ref area);
             }
         }
-        catch (InvalidOperationException) { return null; }
-        area.Intersect(new Rect(Island.RenderSize));
-        return area.IsEmpty || area.Width < 1 || area.Height < 1 ? null : area;
+        catch (InvalidOperationException) { return Rect.Empty; }
+        return area;
 
-        void Add(FrameworkElement part)
+        void Add(FrameworkElement part, ref Rect into)
         {
             if (!part.IsVisible || part.Opacity < .01 || part.ActualWidth <= 0 || part.ActualHeight <= 0) return;
-            area.Union(part.TransformToAncestor(Island).TransformBounds(new Rect(part.RenderSize)));
+            into.Union(part.TransformToAncestor(Island).TransformBounds(new Rect(part.RenderSize)));
         }
     }
 
@@ -85,6 +116,7 @@ public partial class MainWindow
             _glass.Crossed += () => _app.GlassCrossed(this);
             _glass.Openness = GlassOpenness;
             _glass.ContentArea = GlassContentArea;
+            Island.LayoutUpdated += (_, _) => _contentAreaStale = true;
             OffscreenGlass();
             // Liquid glass brightens and lights its rim from the pointer and presses with it: where the pointer is over the
             // island, and whether the button is down (seen even when a button under it handles the click).

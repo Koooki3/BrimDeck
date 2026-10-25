@@ -4,43 +4,67 @@ namespace BrimDeck.LiquidGlass;
 
 // Liquid glass while the island holds still (GlassBackdrop's poll): the desktop under it is looked at now and then, and the glass
 // drawn again only when what lies behind it changed (DesktopSource's comparison; our own windows' redraws are reported over the
-// region, but their pixels are not in the capture, so they never count). How often: PollMs while the pointer moves over the
-// island (PointerActive) or the desktop changed in the last IdleAfterMs (a video), else IdlePollMs; SettleMs once after a frame
-// was drawn, to read its measure of the backdrop (automatic liquid glass). A pointer resting on the island for PointerRestMs
-// changes nothing of the glass, so it is polled at the idle pace too. A comparison sent on one tick is read on the next at the
-// same pace: never faster, because while our own island animates (a scrolling title, the equalizer) Windows reports the region
-// changed on every frame and a comparison is always out; polling at SettleMs then cost a capture and a comparison 125 times a
-// second. Counts what it did, for the debug log and the cost check (WindowsTests).
+// region, but their pixels are not in the capture, so they never count). How often: PollMs (30 a second) while the pointer is
+// over the island and moves or presses (PointerActive); StillPollMs (15 a second) while the desktop behind changed in the last
+// IdleAfterMs (a video) and the pointer is away; else IdlePollMs. While the island moves the glass follows it frame by frame
+// (Frame), and the desktop is looked at on every frame its shape changes or at PollMs. A pointer resting on the island for
+// PointerRestMs changes nothing of the glass, so it is polled as with the pointer away. A comparison sent on one tick is read on
+// the next at the same pace: never faster, because while our own island animates (a scrolling title, the equalizer) Windows
+// reports the region changed on every frame and a comparison is always out; polling at SettleMs then cost a capture and a
+// comparison 125 times a second. After a tick that drew the glass, one tick SettleMs later reads the drawing's measure of the
+// backdrop (automatic liquid glass) and looks at nothing (Settling): the next look keeps the pace from the last one. Counts
+// what it did, for the debug log and the cost check (WindowsTests). The poll's timer (DispatcherTimer) fires on the system's
+// timer tick, 15.6 ms unless something raised its resolution: StillPollMs is 62 so it lands on 4 ticks (62.5 ms, 16 a second);
+// 66 waited 5 (78 ms, under 13 a second).
 //
 // render draws the captured background and says whether it could (false: the renderer is not on the device the background was
 // captured on, LiquidHost); nothing counts as drawn then.
 internal sealed class LiquidIdle
 {
-    public const int PollMs = 33, IdlePollMs = 100, SettleMs = 8, IdleAfterMs = 2000, PointerRestMs = 2000;
+    public const int PollMs = 33, StillPollMs = 62, IdlePollMs = 100, SettleMs = 8, IdleAfterMs = 2000, PointerRestMs = 2000;
     private long _changedAt;
     public long Ticks { get; private set; }
     public long Renders { get; private set; }
     public long FrameRenders { get; private set; }
-    // What the swap chain holds (the frame drawn, over which region), and when the desktop was last looked at while following;
-    // whether the poll owes a drawing whatever the comparison says (the swap chain holds nothing of it).
+    // Ticks that only read the measure (Settling), for the debug log and the cost check.
+    public long Settles { get; private set; }
+    // What the swap chain holds (the frame drawn, over which region), and when the desktop was last looked at (following or
+    // polled); whether the poll owes a drawing whatever the comparison says (the swap chain holds nothing of it).
     private LiquidFrame _drawn;
     private RECT _drawnOver;
     private bool _holds, _owed = true;
     private long _lookedAt = long.MinValue / 2;
+    // A tick drew the glass and its measure is to be read SettleMs later (Interval); that tick is under way (Settling); a settle
+    // tick was the last one, so the next look keeps the pace from the look before it.
+    private bool _settleOwed, _settled;
 
     // The island just stopped moving: looked at often for a while, as after a change.
     public void Start(long now) => _changedAt = now;
+
+    // Whether the coming tick only reads the measure of the last drawing (Settled), looking at nothing.
+    public bool Settling { get; private set; }
+
+    // The settle tick: nothing looked at, nothing drawn; the caller reads the measure (LiquidRenderer.TryBackdrop).
+    public void Settled()
+    {
+        Settling = false;
+        _settled = true;
+        Settles++;
+    }
 
     // One look at the desktop at now (milliseconds): the glass drawn (render) only when what lies behind changed, or when the
     // swap chain holds nothing yet. False when nothing could be captured or drawn.
     public bool Tick(DesktopSource source, RECT region, Func<ID3D11Texture2D, bool> render, long now)
     {
         Ticks++;
+        Settling = false;
+        _lookedAt = now;
         if (!source.Update(region, out bool changed) || source.Texture is not { } background) return false;
         if (changed || _owed)
         {
             if (!render(background)) return false;
             _owed = false;
+            _settleOwed = true;
             Renders++;
             _changedAt = now;
         }
@@ -63,6 +87,8 @@ internal sealed class LiquidIdle
         if (same && !changed) return true;
         if (!render(source.Texture!)) return false;
         _drawn = frame; _drawnOver = region; _holds = true; _owed = false;
+        // Followed, every frame reads the measure: no settle tick owed when the poll takes over.
+        _settleOwed = false;
         FrameRenders++;
         return true;
     }
@@ -70,13 +96,27 @@ internal sealed class LiquidIdle
     // The swap chain no longer holds what was drawn (a new renderer, the glass let go or not shown for a while).
     public void Forget() { _holds = false; _owed = true; }
 
-    // The wait before the next tick: pointer, whether the pointer is over the island and moved lately (PointerActive);
-    // measuring, whether a measure of the backdrop is out (LiquidRenderer.Measuring).
+    // The wait before the next tick, and whether that tick only reads the measure (Settling): pointer, whether the pointer is
+    // over the island and moves or presses (PointerActive); measuring, whether a measure of the backdrop is out
+    // (LiquidRenderer.Measuring). After a settle tick, the pace is kept from the last look.
     public int Interval(bool pointer, bool measuring, long now)
-        => measuring ? SettleMs : pointer || now - _changedAt < IdleAfterMs ? PollMs : IdlePollMs;
+    {
+        if (measuring && _settleOwed)
+        {
+            _settleOwed = false;
+            Settling = true;
+            return SettleMs;
+        }
+        _settleOwed = false;
+        Settling = false;
+        int pace = pointer ? PollMs : now - _changedAt < IdleAfterMs ? StillPollMs : IdlePollMs;
+        if (!_settled) return pace;
+        _settled = false;
+        return (int)Math.Clamp(pace - (now - _lookedAt), 1, pace);
+    }
 
-    // Whether the pointer counts for the poll's pace: over the island and moved within PointerRestMs.
-    public static bool PointerActive(bool over, long movedAt, long now) => over && now - movedAt < PointerRestMs;
+    // Whether the pointer counts for the poll's pace: over the island and pressed, or moved within PointerRestMs.
+    public static bool PointerActive(bool over, bool down, long movedAt, long now) => over && (down || now - movedAt < PointerRestMs);
 }
 
 // One glass's capture and renderer, kept on one device (GlassBackdrop's liquid glass; the WindowsTests drive it the same way).

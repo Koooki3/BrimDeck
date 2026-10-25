@@ -100,8 +100,9 @@ internal static class SourceStart
     }
 
     // Calls done on the UI thread once: with what task found when it is done within boundMs of this call, else with null then
-    // (what it finds later is not reported here).
-    public static void Within(Task<Prepared> task, int boundMs, Action<Prepared?> done)
+    // (what it finds later is not reported here). ended, after done, even when done throws (App.StartGlance: the island waiting
+    // for the first look is shown whatever happened to it).
+    public static void Within(Task<Prepared> task, int boundMs, Action<Prepared?> done, Action? ended = null)
     {
         var dispatcher = Dispatcher.CurrentDispatcher;
         bool called = false;
@@ -111,7 +112,8 @@ internal static class SourceStart
             if (called) return;
             called = true;
             timer.Stop();
-            done(prepared);
+            try { done(prepared); }
+            finally { ended?.Invoke(); }
         }
         timer.Tick += (_, _) => Once(null);
         timer.Start();

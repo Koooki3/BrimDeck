@@ -552,7 +552,7 @@ internal sealed class GlassBackdrop : IDisposable
         {
             _debugAt = now;
             var idle = _host.Idle;
-            DebugLine(FormattableString.Invariant($"{DateTime.Now:HH:mm:ss.fff} poll ticks {idle.Ticks} renders {idle.Renders} following {_following} starts {_followStarts} frames {_steps} drawn {idle.FrameRenders} rebuilds {_host.Rebuilds} failures {_failed} retries {_retries} auto {auto} luma {_look.Luma:0.000} measures {_look.Measures} shown {(current ? "dark" : "light")} decided {(_look.Dark is { } d ? d ? "dark" : "light" : "-")}{(turn ? instant ? " -> turn now" : " -> turn" : "")}"));
+            DebugLine(FormattableString.Invariant($"{DateTime.Now:HH:mm:ss.fff} poll ticks {idle.Ticks} settles {idle.Settles} renders {idle.Renders} following {_following} starts {_followStarts} frames {_steps} drawn {idle.FrameRenders} rebuilds {_host.Rebuilds} failures {_failed} retries {_retries} auto {auto} luma {_look.Luma:0.000} measures {_look.Measures} shown {(current ? "dark" : "light")} decided {(_look.Dark is { } d ? d ? "dark" : "light" : "-")}{(turn ? instant ? " -> turn now" : " -> turn" : "")}"));
         }
         if (turn) Look?.Invoke(!current, instant);
     }
@@ -624,7 +624,9 @@ internal sealed class GlassBackdrop : IDisposable
                 if (_following || _disposed || _host is null || !LiquidShown) { _poll!.Stop(); return; }
                 try
                 {
-                    if (!_host.Tick(_liquidRegion, _pad, _liquidFrame, Environment.TickCount64)) { _poll!.Stop(); Follow(0); return; }
+                    // A settle tick only reads the last drawing's measure (LiquidIdle.Settling); the others look at the desktop.
+                    if (_host.Idle.Settling) _host.Idle.Settled();
+                    else if (!_host.Tick(_liquidRegion, _pad, _liquidFrame, Environment.TickCount64)) { _poll!.Stop(); Follow(0); return; }
                     ReportBackdrop();
                     var interval = PollInterval();
                     if (_poll!.Interval != interval) _poll.Interval = interval;
@@ -644,7 +646,7 @@ internal sealed class GlassBackdrop : IDisposable
     private TimeSpan PollInterval()
     {
         long now = Environment.TickCount64;
-        bool pointer = LiquidIdle.PointerActive(_pointer is not null, _pointerMovedAt, now);
+        bool pointer = LiquidIdle.PointerActive(_pointer is not null, _pointerDown, _pointerMovedAt, now);
         return TimeSpan.FromMilliseconds(_host?.Idle.Interval(pointer, _host.Renderer is { Measuring: true }, now) ?? LiquidIdle.IdlePollMs);
     }
 

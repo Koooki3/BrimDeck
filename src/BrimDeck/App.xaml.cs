@@ -288,15 +288,19 @@ public partial class App : Application
         IntPtr[] ours = Deck is null ? [] : [.. Decks.Select(deck => new System.Windows.Interop.WindowInteropHelper(deck).Handle).Where(handle => handle != IntPtr.Zero)];
         LiquidGlass.CaptureExclusion.Acquire([], ours);
         Glancing = true;
+        // The look taken and the exclusion let go even when taking the look throws; and the island waiting for it (AfterGlance)
+        // is shown in any case (Within's ended), never left out of sight.
         LiquidGlass.SourceStart.Within(LiquidGlass.SourceStart.Prepare(region, measure: true), GlanceBoundMs, prepared =>
         {
-            Glanced(glance, dark, prepared?.Luma);
-            // Let go once the island's glass has taken the capture (DesktopSource.Open, at Render priority) and holds the
-            // exclusion itself, so our windows do not flicker back into the capture in between. Too late, at once.
-            if (prepared is null) LiquidGlass.CaptureExclusion.Release();
-            else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, LiquidGlass.CaptureExclusion.Release);
-            if (glance == _glance) GlanceEnded();
-        });
+            try { Glanced(glance, dark, prepared?.Luma); }
+            finally
+            {
+                // Let go once the island's glass has taken the capture (DesktopSource.Open, at Render priority) and holds the
+                // exclusion itself, so our windows do not flicker back into the capture in between. Too late, at once.
+                if (prepared is null) LiquidGlass.CaptureExclusion.Release();
+                else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, LiquidGlass.CaptureExclusion.Release);
+            }
+        }, () => { if (glance == _glance) GlanceEnded(); });
         return dark;
     }
     // The first look measured: taken at once when it differs from the one shown, unless the theme was chosen again meanwhile,
