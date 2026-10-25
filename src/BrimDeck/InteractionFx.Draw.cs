@@ -161,8 +161,11 @@ internal sealed partial class FxSurface
     {
         if (Math.Abs(Dpi.DpiScaleX - _dressedDpi) > .001) DressPens();
         var press = _pressed is not null ? _press.At(now, _timing, Steps) : PressFrame.None;
-        if (_leaving is { Valid: true } leaving)
+        bool pressedLeaving = false;
+        foreach (var mark in _leaving)
         {
+            if (mark is not { Valid: true } leaving) continue;
+            pressedLeaving |= ReferenceEquals(leaving, _pressed);
             var box = Drawn(leaving, now, out double radius);
             DrawMark(dc, leaving, box, radius, LeavingPresence(leaving, now), ReferenceEquals(leaving, _pressed) ? press : PressFrame.None);
         }
@@ -171,7 +174,7 @@ internal sealed partial class FxSurface
             var box = Drawn(hover, now, out double radius);
             DrawMark(dc, hover, box, radius, HoverPresence(hover, now), ReferenceEquals(hover, _pressed) ? press : PressFrame.None);
         }
-        if (_pressed is { Valid: true } pressed && !ReferenceEquals(pressed, _hover) && !ReferenceEquals(pressed, _leaving))
+        if (_pressed is { Valid: true } pressed && !ReferenceEquals(pressed, _hover) && !pressedLeaving)
             DrawMark(dc, pressed, pressed.Box, pressed.Radius, 0, press);
         if (_focus is { Valid: true } focus) DrawFocus(dc, focus, now);
         DrawParticles(dc, now);

@@ -42,6 +42,9 @@ internal sealed class GlassBackdrop : IDisposable
     // the way the tint goes toward that each frame.
     private const double Slow = 4, Fast = 24, Ease = .35;
     private double _moving;
+    // Frames the tint stays whole after the blur is shown again: the blur reaches the screen Lag frames later, so the tint
+    // starts thinning only once it is there.
+    private int _arriving;
     private readonly Window _owner;
     // The surface the blur lies under (the island, a notice) and its shape now: corners, shoulder, and how much of its material
     // is there (0 while it is the indicator's color, 1 when it is all glass).
@@ -168,15 +171,20 @@ internal sealed class GlassBackdrop : IDisposable
         if (_recent.Count > Lag + 2) _recent.RemoveAt(0);
         // The frames Lag back and one either side, as far as there are any; the newest only on the first frame.
         int end = _recent.Count - 1, at = Math.Max(0, end - Lag);
-        var shapes = _recent.Skip(Math.Max(0, at - 1)).Take(Math.Min(end, at + 1) - Math.Max(0, at - 1) + 1).ToList();
+        int first = Math.Max(0, at - 1), last = Math.Min(end, at + 1);
         var shown = _recent[at];
         double opacity = shown.Opacity * shown.Material;
         double speed = 0;
         if (_recent.Count > 1 && _recent[^2] is var before)
-            speed = new[] { frame.Left - before.Left, frame.Top - before.Top, frame.Right - before.Right, frame.Bottom - before.Bottom }.Max(Math.Abs);
-        double fast = Math.Clamp((speed - Slow) / (Fast - Slow), 0, 1);
-        _moving += (fast * fast * (3 - 2 * fast) - _moving) * Ease;
-        if (_moving < .002) _moving = 0;
+            speed = Math.Max(Math.Max(Math.Abs(frame.Left - before.Left), Math.Abs(frame.Top - before.Top)), Math.Max(Math.Abs(frame.Right - before.Right), Math.Abs(frame.Bottom - before.Bottom)));
+        if (!_shown && opacity >= .002) _arriving = Lag + 1;
+        if (_arriving > 0) { _arriving--; _moving = 1; }
+        else
+        {
+            double fast = Math.Clamp((speed - Slow) / (Fast - Slow), 0, 1);
+            _moving += (fast * fast * (3 - 2 * fast) - _moving) * Ease;
+            if (_moving < .002) _moving = 0;
+        }
         Report(_brushHolds ? frame.Material * (1 - _moving) : 0);
         if (opacity < .002) { Conceal(); return; }
         var handle = _window!.Handle;
@@ -197,8 +205,9 @@ internal sealed class GlassBackdrop : IDisposable
         // The notch's shoulders, thinner than its corners, stay clear glass.
         double left = double.MinValue, top = double.MinValue, right = double.MaxValue, bottom = double.MaxValue, radius = 0, shoulder = 0;
         bool squareTop = true;
-        foreach (var shape in shapes)
+        for (int i = first; i <= last; i++)
         {
+            var shape = _recent[i];
             var c = shape.Corners;
             bool square = c.TopLeft < .5 && c.TopRight < .5;
             squareTop &= square;
@@ -217,7 +226,8 @@ internal sealed class GlassBackdrop : IDisposable
         _clip.CornerRadius = new Vector2((float)corner);
         _sprite!.Opacity = (float)opacity;
         // The window region: the clip's rectangle, rounded alike, so the window takes no clicks and shows nothing outside it.
-        var region = ((int)Math.Floor(left), (int)Math.Floor(Math.Max(0, clipTop)), (int)Math.Ceiling(right), (int)Math.Ceiling(bottom), (int)Math.Round(corner));
+        // A square top reaches above the window, as the clip does, so the region's rounded top corners fall outside it.
+        var region = ((int)Math.Floor(left), (int)Math.Floor(clipTop), (int)Math.Ceiling(right), (int)Math.Ceiling(bottom), (int)Math.Round(corner));
         if (region != _region)
         {
             _region = region;
@@ -267,7 +277,7 @@ internal sealed class GlassBackdrop : IDisposable
     {
         Report(0, always: false);
         Conceal();
-        _recent.Clear(); _last = null; _moving = 0;
+        _recent.Clear(); _last = null; _moving = 0; _arriving = 0;
     }
 
     // The window, its composition target and the blurred sprite, made on first use, where the panel's window is: made

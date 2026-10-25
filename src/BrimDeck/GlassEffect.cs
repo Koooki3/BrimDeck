@@ -47,7 +47,8 @@ internal static class GlassEffect
     }
 
     private sealed class State { public required float[] Matrix; public required IntPtr Source; public int Refs = 1; }
-    private static readonly Dictionary<IntPtr, State> States = [];
+    // Composition and the runtime's finalizer may add and release references from other threads.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, State> States = new();
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int QueryFn(IntPtr self, ref Guid iid, out IntPtr ppv);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate uint RefFn(IntPtr self);

@@ -129,7 +129,7 @@ public partial class MainWindow : Window
         Closed += (_, _) => PanelTheme.Changing -= BeginThemeFade;
         // The picture of a theme being left lies on the island's present shape only.
         IsVisibleChanged += (_, _) => { if (!IsVisible) EndThemeFade(); };
-        Island.SizeChanged += (_, _) => EndThemeFade();
+        Island.SizeChanged += (_, _) => EndThemeFade(quickly: true);
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         // An open panel closes as a closing, after the new context is laid out, so it gets the closing's timing and its

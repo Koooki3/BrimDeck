@@ -12,17 +12,20 @@ namespace BrimDeck;
 //   the whole island, content too, over everything, fading over ThemeFadeMs whatever the change. Readings and titles go on
 //   changing under it, and two different figures must never stand over each other for long (the monitor's rule), so the old
 //   content leaves quickly even while the old surface lingers.
-// Nothing moves with animations off; each picture is taken once, so the fade costs two bitmaps and two opacity animations.
+// Nothing moves with animations off; each picture is taken once, so the fade costs two bitmaps and two opacity animations. A
+// change during a fade lets the pictures already fading go on fading under the new ones, so nothing that was on screen
+// vanishes at once; a change of the island's shape fades them out quickly (LeaveMs), as they no longer lie on it.
 public partial class MainWindow
 {
-    private const int DaylightFadeMs = 1600, ThemeFadeMs = 320;
+    private const int DaylightFadeMs = 1600, ThemeFadeMs = 320, LeaveMs = 120;
     private Image? _themeFade, _materialFade;
 
     // PanelTheme.Changing: the old look is still on screen, and PanelTheme.Current is still the old palette. The new one is
     // drawn on the frames that follow.
     private void BeginThemeFade(bool daylight)
     {
-        EndThemeFade();
+        // Pictures still fading are left to finish on their own, under the new ones.
+        _themeFade = null; _materialFade = null;
         if (!IsVisible || !Soft.Enabled || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;
         if (Island.Child is not Panel content) return;
         double width = Island.ActualWidth, height = Island.ActualHeight;
@@ -30,7 +33,8 @@ public partial class MainWindow
         var material = new IslandBorder
         {
             Width = width, Height = height, CornerRadius = Island.CornerRadius, ShoulderRadius = Island.ShoulderRadius, MaterialOpacity = Island.MaterialOpacity,
-            Background = new SolidColorBrush(_surface.Color), Pixel = Island.Pixel
+            // The brush's opacity too: over a held blur glass is thinner than its color (GlassBackdrop.Held).
+            Background = new SolidColorBrush(_surface.Color) { Opacity = _surface.Opacity }, Pixel = Island.Pixel
         };
         PanelTheme.Dress(material, dpiScale: VisualTreeHelper.GetDpi(Island).DpiScaleX);
         _materialFade = Fade(Picture(material, width, height), daylight ? DaylightFadeMs : ThemeFadeMs);
@@ -61,7 +65,7 @@ public partial class MainWindow
     {
         var image = new Image
         {
-            Source = picture, Width = picture.Width, Height = picture.Height, Stretch = Stretch.Fill, IsHitTestVisible = false,
+            Source = picture, Width = picture.Width, Height = picture.Height, Stretch = Stretch.Fill, IsHitTestVisible = false, Tag = "fade",
             HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top
         };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
@@ -71,11 +75,28 @@ public partial class MainWindow
         return image;
     }
 
-    // Also when the island changes shape or hides: the pictures would no longer lie on it.
-    private void EndThemeFade()
+    // When the island hides, at once; when it changes shape, the pictures (which would no longer lie on it) fade out from where
+    // they are over LeaveMs, also any left from an earlier change.
+    private void EndThemeFade(bool quickly = false)
     {
-        if (_themeFade is { } top) Remove(top);
-        if (_materialFade is { } under) Remove(under);
+        foreach (var image in Fading())
+        {
+            if (!quickly || !Soft.Enabled) { Remove(image); continue; }
+            if (image.Tag is "leaving") continue;
+            image.Tag = "leaving";
+            var leave = Soft.Fade(image.Opacity, 0, LeaveMs, Soft.Out);
+            leave.Completed += (_, _) => Remove(image);
+            image.BeginAnimation(OpacityProperty, leave);
+        }
+    }
+
+    // Every picture on the island now: the current pair and any left from an earlier change.
+    private List<Image> Fading()
+    {
+        var pictures = new List<Image>();
+        if (Island.Child is Panel content) pictures.AddRange(content.Children.OfType<Image>().Where(image => image.Tag is "fade" or "leaving"));
+        pictures.AddRange(HoverZone.Children.OfType<Image>().Where(image => image.Tag is "fade" or "leaving"));
+        return pictures;
     }
 
     private void Remove(Image image)

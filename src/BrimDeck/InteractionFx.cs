@@ -148,7 +148,10 @@ internal sealed partial class FxSurface : FrameworkElement
     private int _stillFrames;
     private Rect _lastBox = Rect.Empty;
 
-    private FxMark? _hover, _leaving, _pressed, _focus;
+    private FxMark? _hover, _pressed, _focus;
+    // Marks still fading out after the pointer left them: a quick sweep across several controls leaves several fading at once.
+    // A fixed handful, so nothing is allocated; when all are taken the faintest gives way.
+    private readonly FxMark?[] _leaving = new FxMark?[3];
     private readonly PressTrack _press = new();
     private readonly FlashBudget _flashes = new();
     private double _focusAt = double.NaN;
@@ -322,7 +325,7 @@ internal sealed partial class FxSurface : FrameworkElement
         FxMark? next = null;
         if (target is not null)
         {
-            next = ReferenceEquals(target, _pressed?.Control) ? _pressed : ReferenceEquals(target, _leaving?.Control) ? _leaving : FxMark.For(target);
+            next = ReferenceEquals(target, _pressed?.Control) ? _pressed : LeavingFor(target) ?? FxMark.For(target);
             if (next is not null)
             {
                 next.Update(_scope, Dpi);
@@ -336,7 +339,7 @@ internal sealed partial class FxSurface : FrameworkElement
         {
             // Coming back to a control whose mark is still fading: from where it is.
             if (!double.IsNaN(next.LeftAt)) from = LeavingPresence(next, now);
-            if (ReferenceEquals(next, _leaving)) _leaving = null;
+            for (int i = 0; i < _leaving.Length; i++) if (ReferenceEquals(_leaving[i], next)) _leaving[i] = null;
             next.LeftAt = double.NaN; next.GlideAt = double.NaN;
         }
         if (previous is not null)
@@ -351,12 +354,37 @@ internal sealed partial class FxSurface : FrameworkElement
             else
             {
                 previous.LeftFrom = presence; previous.LeftAt = now;
-                _leaving = previous;
+                AddLeaving(previous, now);
             }
         }
         if (next is not null) { next.ShownAt = now; next.ShownFrom = from; }
         _hover = next;
         Wake();
+    }
+
+    private FxMark? LeavingFor(FrameworkElement target)
+    {
+        foreach (var mark in _leaving) if (ReferenceEquals(mark?.Control, target)) return mark;
+        return null;
+    }
+
+    private void AddLeaving(FxMark mark, double now)
+    {
+        int slot = -1;
+        double faintest = double.MaxValue;
+        for (int i = 0; i < _leaving.Length; i++)
+        {
+            if (_leaving[i] is not { } other) { slot = i; break; }
+            double presence = LeavingPresence(other, now);
+            if (presence < faintest) { faintest = presence; slot = i; }
+        }
+        _leaving[slot] = mark;
+    }
+
+    private bool AnyLeaving()
+    {
+        foreach (var mark in _leaving) if (mark is not null) return true;
+        return false;
     }
 
     // Glide to a neighbor only: a long way across the panel would sweep over everything between.
@@ -482,21 +510,22 @@ internal sealed partial class FxSurface : FrameworkElement
         }
         var dpi = Dpi;
         _hover?.Update(_scope, dpi);
-        _leaving?.Update(_scope, dpi);
+        foreach (var mark in _leaving) mark?.Update(_scope, dpi);
         if (_pressed is not null && !ReferenceEquals(_pressed, _hover)) _pressed.Update(_scope, dpi);
         if (_focus is not null && !ReferenceEquals(_focus, _hover) && !ReferenceEquals(_focus, _pressed)) _focus.Update(_scope, dpi);
 
         // A control that has gone (a page swapped, the panel closed) takes its marks with it at once; one disabled or hidden
         // while hovered fades.
         if (_hover is { Valid: false }) { if (!_hover.Control.IsVisible || PresentationSource.FromVisual(_hover.Control) is null) _hover = null; else HoverOn(null); }
-        if (_leaving is not null && (!_leaving.Valid || LeavingPresence(_leaving, now) <= 0)) _leaving = null;
+        for (int i = 0; i < _leaving.Length; i++)
+            if (_leaving[i] is { } mark && (!mark.Valid || LeavingPresence(mark, now) <= 0)) _leaving[i] = null;
         if (_pressed is not null && (!_pressed.Valid || !_press.Alive(now, _timing))) { if (_press.Down) Unwatch(); _press.Clear(); _pressed = null; _slice.Visual = null; }
         if (_focus is not null && (!_focus.Valid || now - _focusAt > _timing.Focus / 1000.0)) _focus = null;
         bool particles = StepParticles(now);
 
         using (var dc = _visual.RenderOpen()) Draw(dc, now);
 
-        bool moving = _leaving is not null || _pressed is not null || _focus is not null || particles
+        bool moving = AnyLeaving() || _pressed is not null || _focus is not null || particles
             || _hover is not null && (now - _hover.ShownAt < _timing.HoverIn / 1000.0 || !double.IsNaN(_hover.GlideAt) && now - _hover.GlideAt < _timing.Glide / 1000.0);
         var box = _hover?.Box ?? Rect.Empty;
         if (moving || box != _lastBox) _stillFrames = 0; else _stillFrames++;
@@ -526,7 +555,8 @@ internal sealed partial class FxSurface : FrameworkElement
     public void Reset()
     {
         Unwatch();
-        _hover = _leaving = _pressed = _focus = null;
+        _hover = _pressed = _focus = null;
+        Array.Clear(_leaving);
         _press.Clear(); _flashes.Clear(); _focusGate.Clear(); _slice.Visual = null; _keyPress = false;
         _lastSource = null; _lastTarget = null;
         ClearParticles();
