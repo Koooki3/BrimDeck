@@ -296,13 +296,18 @@ internal sealed class ModelDatePicker : Border
         month = new DateTime(month.Year, month.Month, 1);
         if (month == _month || month < DateTime.MinValue.AddMonths(1)) return false;
         int direction = DatePickerMotion.Direction(_month, month);
+        // The picture is taken before a month change still under way is ended, as the panel's page switch does (motion-review
+        // F17): of the calendar as it is drawn now, the month arriving and the one still leaving where and as faint as they are,
+        // so a quick second click leaves from what was on screen rather than from the grid snapped into place for a frame. The
+        // header's leaving name is the one that shows more.
+        var image = animate && Moves ? PageHandover.Capture(_calendar) : null;
+        string leavingName = _monthLeaving.Opacity > _monthText.Opacity ? _monthLeaving.Text : _monthText.Text;
         EndSlide();
-        var image = animate && Moves ? PageHandover.Capture(_page) : null;
         bool slide = image is not null;
         if (image is not null)
         {
             _leaving.Source = image.Source; _leaving.Width = image.Width; _leaving.Height = image.Height;
-            _monthLeaving.Text = _monthText.Text;
+            _monthLeaving.Text = leavingName;
         }
         _month = month;
         FillMonth();
