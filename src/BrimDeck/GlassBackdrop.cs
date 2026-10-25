@@ -111,7 +111,8 @@ internal sealed class GlassBackdrop : IDisposable
     // without BrimDeck's own windows (DesktopSource), drawn through a slab of thick glass (LiquidRenderer) whose rim lights
     // from the pointer. It takes the blur's place on the same window and follows the same delayed shape; anything it cannot do
     // (no capture, protected content, a lost device) shows the blur instead, and liquid glass is tried again every second while
-    // the blur stands in (Recover). BRIMDECK_LIQUID=0 turns it off, for comparing.
+    // the blur stands in (Recover). BRIMDECK_LIQUID=0 turns it off, for comparing. While liquid glass is in use our windows over
+    // the island are left out of Desktop Duplication (CaptureExclusion), so a recording through it does not show the island.
     // The island's surface tint (its alpha now, thickened as the panel opens), set by the island to turn liquid glass on.
     public Func<double>? LiquidTint { get; set; }
     // Whether liquid glass is what is shown now.
@@ -398,23 +399,25 @@ internal sealed class GlassBackdrop : IDisposable
             return ShowLiquid(false);
         try
         {
-            if (_host is null)
-            {
-                var source = DesktopSource.Open(OwnerHandle, _window?.Handle ?? IntPtr.Zero, out bool refused);
-                if (source is null)
-                {
-                    if (refused) _excludeRefused = true; else Failed();
-                    return ShowLiquid(false);
-                }
-                _host = new LiquidHost(source);
-                _host.Rebuilt += Rebuilt;
-            }
             double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
             int x = (int)Math.Round(shown.Left), y = (int)Math.Round(shown.Top);
             int width = Math.Max(1, (int)Math.Round(shown.Right - shown.Left)), height = Math.Max(1, (int)Math.Round(shown.Bottom - shown.Top));
             _pad = (int)Math.Ceiling(48 * scale);
             var region = new LiquidGlass.RECT(window.X + x - _pad, window.Y + y - _pad, window.X + x + width + _pad, window.Y + y + height + _pad);
             _tryRegion = region;
+            if (_host is null)
+            {
+                // The capture is made off the UI thread (SourceStart): the blur stands in until it is there, then this follows.
+                var source = DesktopSource.Open(OwnerHandle, _window?.Handle ?? IntPtr.Zero, region, _sourceDone ??= SourceDone, out var opening);
+                if (source is null)
+                {
+                    if (opening == DesktopSource.Opening.Refused) _excludeRefused = true;
+                    else if (opening == DesktopSource.Opening.Failed) Failed();
+                    return ShowLiquid(false);
+                }
+                _host = new LiquidHost(source);
+                _host.Rebuilt += Rebuilt;
+            }
             // The glass's own preset (the ported glass, its band for the theme's text); the island's tint is not drawn over it.
             var c = shown.Corners;
             // Between the looks while the theme turns between light and dark glass.
@@ -450,6 +453,13 @@ internal sealed class GlassBackdrop : IDisposable
         }
     }
 
+    // The capture being made off the UI thread is done: liquid glass is tried again at once.
+    private Action? _sourceDone;
+    private void SourceDone()
+    {
+        if (!_disposed && LiquidWanted) Follow(0);
+    }
+
     // A failure: liquid glass is tried again after RetryMs, twice as long after each failure in a row, up to RetryMaxMs.
     private void Failed()
     {
@@ -470,6 +480,10 @@ internal sealed class GlassBackdrop : IDisposable
         if (_liquid.Parent is null) _root.Children.InsertAtTop(_liquid);
     }
 
+    // The last brightness any liquid glass measured behind its island (NaN before one): automatic liquid glass chosen while
+    // another glass theme shows takes its first look from it at once (App.StartGlance).
+    public static double SeenLuma { get; private set; } = double.NaN;
+
     // A step of automatic liquid glass's look: the latest measure of what lies behind, once its answer is in, or the last one.
     private void ReportBackdrop()
     {
@@ -478,8 +492,8 @@ internal sealed class GlassBackdrop : IDisposable
         bool auto = AutoLook?.Invoke() == true;
         bool current = PanelTheme.Current.IsDark;
         bool turn = false, instant = false;
-        if (auto) turn = _look.Step(renderer, now, current, out instant);
-        else { _look.Forget(); renderer.TryBackdrop(out _); }
+        if (auto) { turn = _look.Step(renderer, now, current, out instant); if (!double.IsNaN(_look.Luma)) SeenLuma = _look.Luma; }
+        else { _look.Forget(); if (renderer.TryBackdrop(out double luma)) SeenLuma = luma; }
         if (LiquidDebug && (turn || now - _debugAt >= DebugEveryMs))
         {
             _debugAt = now;
@@ -639,7 +653,9 @@ internal sealed class GlassBackdrop : IDisposable
     // shown at all now (another theme, transparency effects off): an island merely hidden keeps it aside (SurfaceAside).
     private void Hide()
     {
-        if (!Available) SurfaceAside = false;
+        // Glass not shown at all now (another theme, transparency effects off, battery saver): liquid glass goes, its capture
+        // with it, and our windows are back in Desktop Duplication (CaptureExclusion).
+        if (!Available) { SurfaceAside = false; ReleaseLiquid(); }
         if (!SurfaceAside) Report(0, always: false);
         Conceal();
         _recent.Clear(); _last = null; _moving = 0; _arriving = 0;

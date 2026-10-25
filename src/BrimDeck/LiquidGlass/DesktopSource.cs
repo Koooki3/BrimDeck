@@ -9,7 +9,8 @@ namespace BrimDeck.LiquidGlass;
 
 // The desktop under the island, on the GPU, without BrimDeck's own windows in it: what the liquid glass refracts.
 //
-// It comes from DXGI Desktop Duplication, with our windows marked WCA_EXCLUDED_FROM_DDA (Exclude). Measured on Windows 11
+// It comes from DXGI Desktop Duplication, with our windows marked WCA_EXCLUDED_FROM_DDA (Exclude, CaptureExclusion: only while
+// liquid glass is in use, so a recording through Desktop Duplication misses the island only then). Measured on Windows 11
 // (26300) with a WPF layered window and a plain one: Desktop Duplication then shows exactly the desktop behind them (no pixel of
 // theirs, no difference from a capture with them hidden), on an 8-bit output and on one composed in 16-bit float alike, while
 // screenshots, BitBlt and Windows.Graphics.Capture still show them. WDA_EXCLUDEFROMCAPTURE would also hide them, but from every
@@ -35,8 +36,10 @@ namespace BrimDeck.LiquidGlass;
 // The first frame of a new duplication may hold no image yet (nothing presented since it started: seen all black): the copy of
 // the output is taken from the first frame that was presented, whole, and the region only after that.
 //
-// Not thread-safe: Update and everything drawn with Device's immediate context belong to one thread (BrimDeck's UI thread, where
-// GlassBackdrop draws; no other thread uses the device, so it needs no multithread protection).
+// Not thread-safe: Update and everything drawn with Device's immediate context belong to one thread at a time. A source is made,
+// and its duplication started, off the UI thread (SourceStart: making the device can take hundreds of milliseconds, more on a
+// hybrid GPU), then handed over whole to BrimDeck's UI thread, where GlassBackdrop draws; no two threads use it at once, so
+// it needs no multithread protection.
 internal sealed class DesktopSource : IDisposable
 {
     // How long after a failure to start duplicating, or a lost access, before trying again; how long Update may wait for the
@@ -99,7 +102,12 @@ internal sealed class DesktopSource : IDisposable
         var primary = outputs.FirstOrDefault(o => o.Bounds.Contains(0, 0)) ?? outputs.FirstOrDefault()
             ?? throw new NotSupportedException("No desktop output to duplicate.");
         if (!CreateDevice(primary.Adapter)) throw new NotSupportedException("No Direct3D 11 device on the desktop's adapter.");
+        Interlocked.Increment(ref _made);
     }
+
+    // Sources made in this process (the tests: a source made off the UI thread is the one opened, not made twice).
+    public static int Made => Volatile.Read(ref _made);
+    private static int _made;
 
     // A DesktopSource, or null where this machine cannot make one (no hardware adapter with an output, no Direct3D 11).
     public static DesktopSource? TryCreate()
@@ -108,22 +116,50 @@ internal sealed class DesktopSource : IDisposable
         catch (Exception ex) when (ex is NotSupportedException or SharpGen.Runtime.SharpGenException or COMException) { return null; }
     }
 
-    // The capture for an island's window and its glass window (GlassBackdrop), both left out of it, with every other window of
-    // ours that can lie over the island (ExcludeOurs). Null where there is no capture, or (refused) where Windows will not leave
-    // the island's windows out: the glass would then refract the island itself, and the blur stands in for the rest of the run.
+    // The capture for an island's window and its glass window (GlassBackdrop), made now, on this thread (the tests): see the
+    // other Open.
     public static DesktopSource? Open(IntPtr island, IntPtr glass, out bool refused)
     {
         refused = false;
         var source = TryCreate();
         if (source is null) return null;
-        if (!Exclude(island) || glass != IntPtr.Zero && !Exclude(glass))
+        if (!source.Hold(island, glass)) { source.Dispose(); refused = true; return null; }
+        return source;
+    }
+
+    public enum Opening { Opened, Pending, Failed, Refused }
+
+    // The capture for an island's window and its glass window (GlassBackdrop), both left out of it with every other window of
+    // ours that can lie over the island (CaptureExclusion), held until the source is disposed. Never made on the UI thread:
+    // the one made off it (SourceStart: for the first look, or asked for here, region being where the island's glass is) is
+    // taken; while it is being made, Pending (ready is called on this thread once it is there) and the blur stands in; Failed
+    // when it could not be made or took longer than SourceStart.BoundMs (a hybrid GPU slow to make its device); Refused where
+    // Windows will not leave the island's windows out: the glass would then refract the island itself, and the blur stands in
+    // for the rest of the run.
+    public static DesktopSource? Open(IntPtr island, IntPtr glass, RECT region, Action ready, out Opening state)
+    {
+        var source = SourceStart.Take();
+        if (source is null)
         {
-            source.Dispose();
-            refused = true;
+            if (SourceStart.TakeFailure()) state = Opening.Failed;
+            else if (SourceStart.Pending) state = SourceStart.Late ? Opening.Failed : Opening.Pending;
+            else { SourceStart.Prepare(region, measure: false); state = Opening.Pending; }
+            if (state == Opening.Pending) SourceStart.WhenDone(ready);
             return null;
         }
-        ExcludeOurs();
+        if (!source.Hold(island, glass)) { source.Dispose(); state = Opening.Refused; return null; }
+        state = Opening.Opened;
         return source;
+    }
+
+    // Sources opened for a glass and not yet disposed: while there is one, the live glass measures, and no first look is taken.
+    public static int OpenCount { get; private set; }
+    private bool _holds;
+    private bool Hold(IntPtr island, IntPtr glass)
+    {
+        if (island == IntPtr.Zero || !CaptureExclusion.Acquire(glass == IntPtr.Zero ? [island] : [island, glass])) return false;
+        _holds = true; OpenCount++;
+        return true;
     }
 
     // Device on the adapter that drives the monitor containing the region's centre (device pixels). Recreated when that changes.
@@ -149,58 +185,10 @@ internal sealed class DesktopSource : IDisposable
     // before drawing what Update captured.
     public event Action? DeviceChanged;
 
-    // Hides a window of ours from the capture (the island window, notices, the blur window, menus and tooltips): from Desktop
-    // Duplication only, so screenshots and recordings still show it. False where Windows refused it or does not keep it (the
-    // attribute read back is off): the window would then be in the capture, refracted under itself, and the caller shows the
-    // blur instead.
-    public static bool Exclude(IntPtr hwnd)
-    {
-        if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) return false;
-        var value = Marshal.AllocHGlobal(sizeof(int));
-        try
-        {
-            Marshal.WriteInt32(value, 1);
-            var data = new CompositionAttribute { Attribute = ExcludedFromDda, Data = value, Size = sizeof(int) };
-            if (SetWindowCompositionAttribute(hwnd, ref data) == 0) return false;
-            // Read back where Windows answers for the attribute; a value it did not write (-1) says nothing either way.
-            Marshal.WriteInt32(value, -1);
-            data = new CompositionAttribute { Attribute = ExcludedFromDda, Data = value, Size = sizeof(int) };
-            return GetWindowCompositionAttribute(hwnd, ref data) == 0 || Marshal.ReadInt32(value) != 0;
-        }
-        finally { Marshal.FreeHGlobal(value); }
-    }
-
-    // Every window of this process that can lie over an island is left out of the capture, now and whenever one is shown from
-    // here on: the island, notices, the glass windows, pop-ups (menus, tooltips, drop-down lists, PopupMotion's pictures), that
-    // is every topmost, tool or never-activated window. Ordinary windows (settings, dialogs) stay in it, so a recording by
-    // Desktop Duplication still shows them. The hook runs on the calling (UI) thread's message loop; installed once.
-    public static void ExcludeOurs()
-    {
-        if (_showHook != IntPtr.Zero) return;
-        EnumWindows(OurWindow, IntPtr.Zero);
-        _showHook = SetWinEventHook(ObjectShow, ObjectShow, IntPtr.Zero, Shown, (uint)Environment.ProcessId, 0, 0);
-    }
-
-    // Kept for the life of the process: Windows calls them back.
-    private static IntPtr _showHook;
-    private static readonly EnumWindowsProc OurWindow = static (hwnd, _) =>
-    {
-        GetWindowThreadProcessId(hwnd, out uint process);
-        if (process == (uint)Environment.ProcessId && Overlay(hwnd)) Exclude(hwnd);
-        return true;
-    };
-    private static readonly WinEventProc Shown = static (_, _, hwnd, objectId, child, _, _) =>
-    {
-        if (objectId == 0 && child == 0 && Overlay(hwnd)) Exclude(hwnd);
-    };
-
-    // A top-level window that can sit over the island: topmost, a tool window, or one that never activates.
-    internal static bool Overlay(IntPtr hwnd)
-    {
-        if (GetAncestor(hwnd, 2) != hwnd) return false; // GA_ROOT
-        long style = GetWindowLongPtr(hwnd, -20).ToInt64(); // GWL_EXSTYLE
-        return (style & (0x8 | 0x80 | 0x08000000)) != 0; // TOPMOST | TOOLWINDOW | NOACTIVATE
-    }
+    // Hides a window of ours from the capture (CaptureExclusion.Exclude): from Desktop Duplication only, so screenshots and
+    // most recordings still show it (not those that record through Desktop Duplication). False where Windows refused it or
+    // does not keep it: the window would then be in the capture, refracted under itself, and the caller shows the blur instead.
+    public static bool Exclude(IntPtr hwnd) => CaptureExclusion.Exclude(hwnd);
 
     // Copies the desktop under the region (device pixels, screen coordinates, already padded by the caller for refraction
     // reach) into Texture, at its top-left (Size), the texture made anew only when the region grows past it. A region over two
@@ -668,19 +656,6 @@ internal sealed class DesktopSource : IDisposable
         _disposed = true;
         ReleaseDevice();
         Marshal.FreeHGlobal(_queryResult);
+        if (_holds) { _holds = false; OpenCount--; CaptureExclusion.Release(); }
     }
-
-    private const int ExcludedFromDda = 24;
-    [StructLayout(LayoutKind.Sequential)] private struct CompositionAttribute { public int Attribute; public IntPtr Data; public int Size; }
-    [DllImport("user32")] private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionAttribute data);
-    [DllImport("user32")] private static extern int GetWindowCompositionAttribute(IntPtr hwnd, ref CompositionAttribute data);
-    [DllImport("user32")] private static extern bool IsWindow(IntPtr hwnd);
-    [DllImport("user32")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
-    [DllImport("user32", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
-    [DllImport("user32")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
-    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr data);
-    [DllImport("user32")] private static extern bool EnumWindows(EnumWindowsProc proc, IntPtr data);
-    private const uint ObjectShow = 0x8002;
-    private delegate void WinEventProc(IntPtr hook, uint eventType, IntPtr hwnd, int objectId, int child, uint thread, uint time);
-    [DllImport("user32")] private static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventProc proc, uint process, uint thread, uint flags);
 }

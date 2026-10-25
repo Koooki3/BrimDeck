@@ -9,7 +9,8 @@ using Vortice.DXGI;
 // not change: a small opaque backdrop window of one color (Backdrop) in a corner of the primary monitor holds the desktop
 // still under the region whatever else the screen shows, and the island's own redraws are faked by a small window over it, left
 // out of the capture as BrimDeck's windows are (DesktopSource.Exclude) and nearly invisible (1/255 opaque), redrawn 30 times a
-// second. The idle poll (LiquidIdle) runs as GlassBackdrop runs it, with the measure of the backdrop read on every tick
+// second. Each phase makes its own fake island and destroys it as it ends, so no window of the test stays up longer than a
+// phase (under 2 s). The idle poll (LiquidIdle) runs as GlassBackdrop runs it, with the measure of the backdrop read on every tick
 // (BackdropLook): the glass may be drawn again at most once a second, and the poll's own work, and the whole process's time
 // beyond what the test's own loop costs (the same loop with nothing polled), must stay under budgets. For comparison the poll
 // as it was (a comparison out polled every SettleMs) runs over the same redraws first; both are printed. Also the poll's pace
@@ -43,14 +44,9 @@ internal static class LiquidIdleTests
         const int width = 120, height = 24, pad = 24;
         // In the corner of the primary monitor, over a backdrop of one color (shown by each phase) that holds the desktop there still.
         var region = new RECT(10, 10, 10 + width + 2 * pad, 10 + height + 2 * pad);
-        // The fake island: a static control as a popup over the island's place, layered at 1/255, left out of the capture.
-        var window = CreateWindowEx(0x80000 | 0x8 | 0x80 | 0x8000000 | 0x20, "Static", "a", 0x80000000, region.Left + pad, region.Top + pad, width, height, 0, 0, 0, 0);
-        if (window == 0) { Console.WriteLine("SKIP: liquid idle cost (no window)."); return; }
-        try
+        _island = new RECT(region.Left + pad, region.Top + pad, region.Left + pad + width, region.Top + pad + height);
+        _islands = 0; _excluded = 0; _longestMs = 0;
         {
-            SetLayeredWindowAttributes(window, 0, 1, 2);
-            ShowWindow(window, 4);
-            check("liquid idle: the fake island is left out of the capture", DesktopSource.Exclude(window));
             using var renderer = new LiquidRenderer(source.Device);
             using var target = source.Device.CreateTexture2D(new Texture2DDescription(Format.B8G8R8A8_UNorm, width, height, 1, 1, BindFlags.RenderTarget));
             using var view = source.Device.CreateRenderTargetView(target);
@@ -62,19 +58,21 @@ internal static class LiquidIdleTests
             if (!captured) { Console.WriteLine("SKIP: liquid idle cost (capture refused)."); return; }
 
             // The test's own loop, with nothing polled, without and with the redraws: what the process spends on it is not the poll's.
-            var quiet = Phase(source, renderer, region, 0, Render, old: false, none: true);
-            var harness = Phase(source, renderer, region, window, Render, old: false, none: true);
+            var quiet = Phase(source, renderer, region, false, Render, old: false, none: true);
+            var harness = Phase(source, renderer, region, true, Render, old: false, none: true);
             // The desktop there holds still (the backdrop): without the fake redraws first.
-            var still = Phase(source, renderer, region, 0, Render, old: false);
-            var before = Phase(source, renderer, region, window, Render, old: true);
-            var after = Phase(source, renderer, region, window, Render, old: false);
+            var still = Phase(source, renderer, region, false, Render, old: false);
+            var before = Phase(source, renderer, region, true, Render, old: true);
+            var after = Phase(source, renderer, region, true, Render, old: false);
             Console.WriteLine(FormattableString.Invariant($"liquid idle, the test's own loop with nothing polled: process {quiet.ProcessMs:0.0} ms/s, with 30 fps self-redraw {harness.ProcessMs:0.0} ms/s"));
             Console.WriteLine(FormattableString.Invariant($"liquid idle, still desktop without redraws: {still.Ticks:0} ticks/s, {still.Renders:0.0} renders/s, {still.WorkMs:0.0} ms/s, process {still.ProcessMs:0.0} ms/s"));
             Console.WriteLine(FormattableString.Invariant($"liquid idle, 30 fps self-redraw over a still desktop: before {before.Ticks:0} ticks/s, {before.Renders:0.0} renders/s, {before.WorkMs:0.0} ms/s, process {before.ProcessMs:0.0} ms/s; after {after.Ticks:0} ticks/s, {after.Renders:0.0} renders/s, {after.WorkMs:0.0} ms/s, process {after.ProcessMs:0.0} ms/s"));
             // The island followed frame by frame (an animation that moves nothing of the glass) at 60 frames a second.
-            var followBefore = Phase(source, renderer, region, window, Render, old: true, follow: true, frame);
-            var followAfter = Phase(source, renderer, region, window, Render, old: false, follow: true, frame);
+            var followBefore = Phase(source, renderer, region, true, Render, old: true, follow: true, frame);
+            var followAfter = Phase(source, renderer, region, true, Render, old: false, follow: true, frame);
             Console.WriteLine(FormattableString.Invariant($"liquid idle, following at 60 fps with the glass unchanged: before {followBefore.Renders:0.0} renders/s, {followBefore.WorkMs:0.0} ms/s, process {followBefore.ProcessMs:0.0} ms/s; after {followAfter.Renders:0.0} renders/s, {followAfter.WorkMs:0.0} ms/s, process {followAfter.ProcessMs:0.0} ms/s"));
+            check(FormattableString.Invariant($"liquid idle: each phase's fake island is made, left out of the capture and destroyed with it ({_excluded}/{_islands}; the longest phase {_longestMs} ms, under 2 s)"),
+                _islands == 5 && _excluded == _islands && _longestMs < 2000);
             check(FormattableString.Invariant($"liquid idle: the backdrop holds the desktop under the region still ({still.Renders:0.0} renders/s)"), still.Renders <= .5);
             check(FormattableString.Invariant($"liquid idle: following frames that change nothing of the glass draw it at most once a second ({followAfter.Renders:0.0}/s)"), followAfter.Renders <= 1);
             check(FormattableString.Invariant($"liquid idle: following such frames costs under {BudgetMs} ms a second ({followAfter.WorkMs:0.0} ms)"), followAfter.WorkMs <= BudgetMs);
@@ -84,13 +82,45 @@ internal static class LiquidIdleTests
             check(FormattableString.Invariant($"liquid idle: and while the island redraws ({after.ProcessMs - harness.ProcessMs:0.0} ms beyond the loop's)"), after.ProcessMs - harness.ProcessMs <= ProcessBudgetMs);
             check(FormattableString.Invariant($"liquid idle: and while following frames that change nothing ({followAfter.ProcessMs - harness.ProcessMs:0.0} ms beyond the loop's)"), followAfter.ProcessMs - harness.ProcessMs <= ProcessBudgetMs);
         }
-        finally { DestroyWindow(window); }
+    }
+
+    // The fake island's place, and per run: islands made, those left out of the capture, the longest phase (its windows' life).
+    private static RECT _island;
+    private static int _islands, _excluded;
+    private static long _longestMs;
+
+    // The fake island: a static control as a popup over the island's place, layered at 1/255, left out of the capture.
+    private static nint FakeIsland()
+    {
+        var window = CreateWindowEx(0x80000 | 0x8 | 0x80 | 0x8000000 | 0x20, "Static", "a", 0x80000000, _island.Left, _island.Top, _island.Width, _island.Height, 0, 0, 0, 0);
+        if (window == 0) return 0;
+        _islands++;
+        SetLayeredWindowAttributes(window, 0, 1, 2);
+        ShowWindow(window, 4);
+        if (DesktopSource.Exclude(window)) _excluded++;
+        return window;
     }
 
     // none: the loop and the redraws only, nothing captured or drawn.
-    private static (double Ticks, double Renders, double WorkMs, double ProcessMs) Phase(DesktopSource source, LiquidRenderer renderer, RECT region, nint window, Func<ID3D11Texture2D, bool> render, bool old, bool follow = false, LiquidFrame frame = default, bool none = false)
+    private static (double Ticks, double Renders, double WorkMs, double ProcessMs) Phase(DesktopSource source, LiquidRenderer renderer, RECT region, bool island, Func<ID3D11Texture2D, bool> render, bool old, bool follow = false, LiquidFrame frame = default, bool none = false)
     {
-        using var backdrop = new Backdrop(Backdrop.Corner(200, 100), 90, 120, 150);
+        var life = Stopwatch.StartNew();
+        nint window = 0;
+        try
+        {
+            using var backdrop = new Backdrop(Backdrop.Corner(200, 100), 90, 120, 150);
+            if (island && (window = FakeIsland()) == 0) throw new InvalidOperationException("No fake island window.");
+            return Measure(source, renderer, region, window, render, old, follow, frame, none);
+        }
+        finally
+        {
+            if (window != 0) DestroyWindow(window);
+            _longestMs = Math.Max(_longestMs, life.ElapsedMilliseconds);
+        }
+    }
+
+    private static (double Ticks, double Renders, double WorkMs, double ProcessMs) Measure(DesktopSource source, LiquidRenderer renderer, RECT region, nint window, Func<ID3D11Texture2D, bool> render, bool old, bool follow, LiquidFrame frame, bool none)
+    {
         long drawn = 0;
         var idle = new LiquidIdle();
         var look = new BackdropLook();

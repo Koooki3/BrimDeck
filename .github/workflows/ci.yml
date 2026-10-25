@@ -24,7 +24,8 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Build
         run: |
-          dotnet build BrimDeck.sln -c Release
+          # Packages restored exactly as packages.lock.json records them; a lock file out of date fails the build.
+          dotnet build BrimDeck.sln -c Release -p:RestoreLockedMode=true
           if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
       - name: Core tests
         run: |
@@ -37,5 +38,5 @@ jobs:
       # Renders the interaction effects off screen at 100–175% and fails when an edge misses the device pixels.
       - name: Interaction effect checks
         run: |
-          dotnet run --project tests/BrimDeck.FxPreview -c Release
+          dotnet run --project tests/BrimDeck.FxPreview -c Release -p:RestoreLockedMode=true
           if ($LASTEXITCODE -ne 0) { throw 'Interaction effect checks failed.' }

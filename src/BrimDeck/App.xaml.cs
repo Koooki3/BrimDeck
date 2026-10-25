@@ -97,12 +97,14 @@ public partial class App : Application
         InteractionFx.Install(this);
         Notices = new NoticeCenter(this);
         Displays = Native.Displays.Current();
-        // Automatic liquid glass shows from the first paint the look what lies behind the island asks for (GlanceGlass).
+        // Automatic liquid glass shows first the Windows app theme's look, and the look what lies behind the island asks for as
+        // soon as it is measured, off the UI thread (StartGlance). Another glass theme has its capture made off it meanwhile.
         if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.GlassAuto)
         {
-            if (GlanceGlass() != PanelTheme.Current.IsDark) PanelTheme.Use(Settings, systemChanged: true);
+            if (StartGlance() != PanelTheme.Current.IsDark) PanelTheme.Use(Settings, systemChanged: true);
             MatchGlassGradient();
         }
+        else if (PanelTheme.Current.IsGlass && LiquidPossible && GlanceRegion() is { } region) LiquidGlass.SourceStart.Prepare(region, measure: false);
         MotionEnvironment.Changed += GlassEnvironmentChanged;
         GlassBackdrop.LiquidFailed += GlassEnvironmentChanged;
         Deck = new MainWindow(this); MainWindow = Deck;
@@ -211,7 +213,7 @@ public partial class App : Application
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
         // Automatic liquid glass just chosen shows at once the look what lies behind the island asks for, not the last one it had.
-        if (PanelThemes.NormalizeId(settings.PanelTheme) == PanelThemes.GlassAuto && PanelThemes.NormalizeId(previousTheme) != PanelThemes.GlassAuto) GlanceGlass();
+        if (PanelThemes.NormalizeId(settings.PanelTheme) == PanelThemes.GlassAuto && PanelThemes.NormalizeId(previousTheme) != PanelThemes.GlassAuto) StartGlance();
         PanelTheme.Use(settings);
         MatchGlassGradient();
         ScheduleDaylight();
@@ -338,26 +340,59 @@ public partial class App : Application
         PanelThemes.CarryOnTurn(other, PanelTheme.Current, Settings, glassTurn: true);
     }
     // The look automatic liquid glass takes before the island is shown (at start, and when the theme is chosen), set as
-    // PanelTheme.GlassDark: from one measure of the desktop where the island will be (BackdropLook.Glance), or the Windows app
-    // theme's when liquid glass cannot be shown there or the measure fails. The live measure then rarely has anything to turn.
-    private bool GlanceGlass()
+    // PanelTheme.GlassDark: the Windows app theme's at first, so nothing waits for the desktop to be measured. Where liquid glass
+    // can be shown, the desktop where the island will be is measured off the UI thread (SourceStart, BackdropLook.Measure) and
+    // the look it asks for shown at once, without a fade (Glanced), typically within some 300 ms; the capture made for it is
+    // handed to the island's glass (DesktopSource.Open), not made twice. A measure later than GlanceBoundMs is let go: the
+    // live glass decides once it shows. Where a glass already captures (another liquid theme was shown), its last measure decides.
+    private const int GlanceBoundMs = LiquidGlass.SourceStart.BoundMs;
+    private int _glance;
+    private bool StartGlance()
     {
         bool dark = SettingsPalette.IsDark(SettingsTheme.System);
-        // As GlassBackdrop.Available, which asks whether the theme on screen is glass: the theme just chosen is not on screen yet.
-        bool shown = MotionEnvironment.Transparency && !SystemParameters.HighContrast && !MotionEnvironment.BatterySaver && GetSystemMetrics(RemoteSession) == 0 && MainLiquidUsable
-            && Environment.GetEnvironmentVariable("BRIMDECK_LIQUID") != "0";
-        if (shown)
-        {
-            var plan = DisplayLayout.Arrange(Settings.Display, Settings.DisplayMonitors.Select(d => d.Id).ToList(), Displays.Select(d => (d.Id, d.Primary)).ToList());
-            if ((Displays.FirstOrDefault(d => d.Id == plan.Main) ?? Displays.FirstOrDefault()) is { } display)
-            {
-                // Our panels already on screen (the theme chosen in the settings) are left out, as the live glass leaves them out.
-                IntPtr[] ours = Deck is null ? [] : [.. Decks.Select(deck => new System.Windows.Interop.WindowInteropHelper(deck).Handle).Where(handle => handle != IntPtr.Zero)];
-                if (LiquidGlass.BackdropLook.Glance(display.Bounds, display.Handle, ours) is { } luma) dark = GlassAppearance.FirstLook(luma);
-            }
-        }
+        int glance = ++_glance;
+        // A glass already captures: what it last measured decides now, and it goes on deciding.
+        if (LiquidPossible && LiquidGlass.DesktopSource.OpenCount > 0 && !double.IsNaN(GlassBackdrop.SeenLuma)) dark = GlassAppearance.FirstLook(GlassBackdrop.SeenLuma);
         PanelTheme.GlassDark = dark;
+        if (!LiquidPossible || LiquidGlass.DesktopSource.OpenCount > 0 || GlanceRegion() is not { } region) return dark;
+        // Our panels already on screen (the theme chosen in the settings) are left out, as the live glass leaves them out; and
+        // the island, shown meanwhile, too (CaptureExclusion's hook).
+        IntPtr[] ours = Deck is null ? [] : [.. Decks.Select(deck => new System.Windows.Interop.WindowInteropHelper(deck).Handle).Where(handle => handle != IntPtr.Zero)];
+        LiquidGlass.CaptureExclusion.Acquire([], ours);
+        long started = Environment.TickCount64;
+        var measure = LiquidGlass.SourceStart.Prepare(region, measure: true);
+        _ = measure.ContinueWith(done => Dispatcher.BeginInvoke(() =>
+        {
+            Glanced(glance, dark, done.IsCompletedSuccessfully ? done.Result.Luma : null, Environment.TickCount64 - started);
+            // Let go once the island's glass has taken the capture (DesktopSource.Open, at Render priority) and holds the
+            // exclusion itself, so our windows do not flicker back into the capture in between.
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, LiquidGlass.CaptureExclusion.Release);
+        }), TaskScheduler.Default);
         return dark;
+    }
+    // The first look measured: shown at once when it differs from the one shown, unless the theme was chosen again meanwhile,
+    // the look was decided otherwise (the live glass, Windows' theme followed), or the measure came too late.
+    private void Glanced(int glance, bool shownDark, double? luma, long milliseconds)
+    {
+        if (Exiting || glance != _glance || luma is not { } measured || milliseconds > GlanceBoundMs
+            || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto || PanelTheme.GlassDark != shownDark || !GlassMeasures) return;
+        bool dark = GlassAppearance.FirstLook(measured);
+        if (dark == shownDark && PanelTheme.Current.IsDark == dark) return;
+        PanelTheme.GlassDark = dark;
+        _turnBy?.Stop();
+        PanelTheme.SnapGeneration = PanelTheme.Generation + 1;
+        ApplyPanelTheme(glassTurn: true);
+    }
+    // As GlassBackdrop.Available, which asks whether the theme on screen is glass: the theme just chosen is not on screen yet.
+    private bool LiquidPossible => MotionEnvironment.Transparency && !SystemParameters.HighContrast && !MotionEnvironment.BatterySaver
+        && GetSystemMetrics(RemoteSession) == 0 && MainLiquidUsable && Environment.GetEnvironmentVariable("BRIMDECK_LIQUID") != "0";
+    // Where the main island will be: the top middle of its monitor (BackdropLook.Region), in device pixels.
+    private LiquidGlass.RECT? GlanceRegion()
+    {
+        var plan = DisplayLayout.Arrange(Settings.Display, Settings.DisplayMonitors.Select(d => d.Id).ToList(), Displays.Select(d => (d.Id, d.Primary)).ToList());
+        if ((Displays.FirstOrDefault(d => d.Id == plan.Main) ?? Displays.FirstOrDefault()) is not { } display) return null;
+        var region = LiquidGlass.BackdropLook.Region(display.Bounds, display.Handle);
+        return region.IsEmpty ? null : region;
     }
     // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
     // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch

@@ -50,39 +50,52 @@ internal sealed class BackdropLook
     private const long GlanceMs = 100;
     private const int GlanceCaptures = 3;
 
-    // The mean brightness (luma 0..1, as LiquidRenderer measures it) of the desktop at the top middle of a monitor (bounds in
-    // device pixels), taken once, synchronously, so automatic liquid glass shows its look from the first paint instead of
-    // turning just after: at start, and when the theme is chosen. Null when the desktop cannot be captured within GlanceMs of the
-    // capture device being made, which takes some 50 ms more (no capture on this machine, a secure desktop, protected content),
-    // or the capture fails. Excluded windows (ours, already shown) are left out of the capture, as they are from the live glass.
-    // The pixels are only averaged, never kept.
-    public static double? Glance(System.Windows.Rect monitor, IntPtr handle, params IntPtr[] exclude)
+    // Where the island will be on a monitor (bounds in device pixels, handle its HMONITOR): the top middle, GlanceWidth by
+    // GlanceHeight DIPs at the monitor's scale, in device pixels.
+    public static RECT Region(System.Windows.Rect monitor, IntPtr handle)
     {
         double scale = handle != IntPtr.Zero && GetDpiForMonitor(handle, 0, out uint dpi, out _) == 0 && dpi > 0 ? dpi / 96.0 : 1;
         int width = (int)Math.Round(Math.Min(GlanceWidth * scale, monitor.Width)), height = (int)Math.Round(Math.Min(GlanceHeight * scale, monitor.Height));
         int left = (int)Math.Round(monitor.Left + (monitor.Width - width) / 2), top = (int)Math.Round(monitor.Top);
-        var region = new RECT(left, top, left + width, top + height);
+        return new RECT(left, top, left + width, top + height);
+    }
+
+    // The mean brightness (luma 0..1, as LiquidRenderer measures it) of the desktop at the top middle of a monitor (bounds in
+    // device pixels), taken once, synchronously, on the calling thread (the tests; BrimDeck measures off the UI thread,
+    // SourceStart). Null when the desktop cannot be captured. Excluded windows (ours, already shown) are left out of the
+    // capture, as they are from the live glass.
+    public static double? Glance(System.Windows.Rect monitor, IntPtr handle, params IntPtr[] exclude)
+    {
+        var region = Region(monitor, handle);
         if (region.IsEmpty) return null;
         foreach (var window in exclude) DesktopSource.Exclude(window);
         try
         {
             using var source = DesktopSource.TryCreate();
-            if (source is null) return null;
-            // Duplication may need a moment to hand out its first frame, and that first frame can be black (a frame with no image
-            // yet, seen on a desktop that was not black): only a capture after it is trusted.
-            var clock = Stopwatch.StartNew();
-            int captured = 0;
-            while (!(source.Update(region, out _) && ++captured >= GlanceCaptures))
-            {
-                if (clock.ElapsedMilliseconds >= GlanceMs) return null;
-                Thread.Sleep(5);
-            }
-            return source.Texture is { } texture ? MeanLuma(source.Device, texture) : null;
+            return source is null ? null : Measure(source, region);
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotSupportedException or SharpGen.Runtime.SharpGenException or DllNotFoundException)
         {
             return null;
         }
+    }
+
+    // The mean brightness of the desktop under region, captured with source (on a worker, SourceStart, for automatic liquid
+    // glass's first look). Null when nothing is captured within GlanceMs (no capture now, a secure desktop, protected
+    // content). The pixels are only averaged, never kept.
+    public static double? Measure(DesktopSource source, RECT region)
+    {
+        if (region.IsEmpty) return null;
+        // Duplication may need a moment to hand out its first frame, and that first frame can be black (a frame with no image
+        // yet, seen on a desktop that was not black): only a capture after it is trusted.
+        var clock = Stopwatch.StartNew();
+        int captured = 0;
+        while (!(source.Update(region, out _) && ++captured >= GlanceCaptures))
+        {
+            if (clock.ElapsedMilliseconds >= GlanceMs) return null;
+            Thread.Sleep(5);
+        }
+        return source.Texture is { } texture ? MeanLuma(source.Device, texture) : null;
     }
 
     // The texture's mean luma, read back through a staging copy (Rec. 709 weights on the sRGB values, as the renderer's measure).

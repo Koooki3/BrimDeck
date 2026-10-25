@@ -18,6 +18,7 @@ internal static class Program
             ShaderTests.Run(Check);
             DesktopSourceTests.Run(Check);
             GlanceTests.Run(Check);
+            CaptureExclusionTests.Run(Check);
             LiquidIdleTests.Run(Check);
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();
             Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0

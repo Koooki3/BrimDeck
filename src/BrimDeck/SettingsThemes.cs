@@ -140,8 +140,8 @@ public sealed partial class SettingsWindow
         _glassNow = chosen == PanelThemes.GlassAuto ? name : null;
         rows.Add(Row(Loc.T("名称", "Name"), name));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.")
-            : chosen == PanelThemes.GlassAuto ? Loc.T("清透的液态玻璃，按岛后方内容的明暗自动换成浅色或深色玻璃，文字随之切换，始终清晰可读。",
-                "Clear liquid glass that turns light or dark with what lies behind the island, its text following, so it always reads.") : theme.DisplayDescription;
+            : chosen == PanelThemes.GlassAuto ? Loc.T("清透的液态玻璃，按岛后方内容的明暗自动换成浅色或深色玻璃，文字随之切换，始终清晰可读。开启液态玻璃时，用 DXGI 桌面复制录屏的软件录不到岛。",
+                "Clear liquid glass that turns light or dark with what lies behind the island, its text following, so it always reads. While liquid glass is on, recorders that use DXGI desktop duplication do not capture the island.") : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         if (theme.File.Night is not null) rows.Add(DaylightRow(theme.File));
         // Automatic liquid glass with nothing to measure (App.GlassMeasures) takes the Windows app theme's look meanwhile.
