@@ -100,7 +100,7 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `shadowBlur` `shadowDepth` `shadowOpacity` | Blur, offset and opacity of the shadow | 0–40, 0–12, 0–1 |
 | `scanlines` | Horizontal scan lines in the primary text color at this opacity | 0–0.12 |
 | `glass` | Glass: `tint` is a translucent color laid over the desktop (its opacity strictly between 0 and 1), `edge` the light gathered along the inner edge (0–1), `highlight` its color. See "Glass" below | |
-| `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels) and the island's text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right | 0, or 1–4 |
+| `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels) and the island's text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right. Not with `glass`, also from the base theme: such a file is refused | 0, or 1–4 |
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain | 0–0.12 |
 
 #### Glass
@@ -141,11 +141,11 @@ The answers to the pointer are drawn on the control's own visible shape, never a
 | `secondary` | Its second tone: a gradient's end, a shadow, a ghost or a neutral bar | as `color` |
 | `highlight` | The color of the moment of a press: an indicator, a selection, a scan line, sparkles, fireflies | as `color` |
 
-Motion colors are kept readable on the surface like any other color chosen outside the theme. The "system" theme uses Windows' accent color and the quiet Fluent answers (`reveal` and `shade`, or `lift` and `sink` on a light base), with no ambient light, particles or steps; its base theme's strengths and pace stay. `Templates/theme-template.json` lists every key with its default.
+Motion colors are kept readable on the surface like any other color chosen outside the theme. The default dark and light themes (and any theme with no `motion` section anywhere in its base chain) draw nothing over the controls, which keep their own hover and press looks. The "system" theme uses Windows' accent color; over a base with answers it gives the quiet Fluent ones (`reveal` and `shade`, keeping a base's `lift` and `sink`), and over the default dark and light it draws nothing either; no ambient light, particles or steps, and its base theme's strengths and pace stay. `Templates/theme-template.json` lists every key with its default.
 
 ### Day and night looks (night, daylight)
 
-A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look by the local clock. `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default); the user can move them in Settings › Current theme › Daytime. At the hour the island's old look fades out over 1.6 seconds, like dusk; with animations off it switches at once. Both looks are held to the readability rules below.
+A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look by the local clock. A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night` ("New from current theme" copies it). `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default); the user can move them in Settings › Current theme › Daytime. At the hour the island's old look fades out over 1.6 seconds, like dusk; with animations off it switches at once. Both looks are held to the readability rules below.
 
 ## Readability
 
@@ -174,7 +174,7 @@ The demo theme was made in these five steps.
 
 **Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock and a shoreline rim (turquoise, sky, sand). By night, a moonlit sea from navy into teal, a lantern-gold clock and a soft glow under the island. The rim breathes like a swell and its colors flow like water; a glint of sun crosses now and then by day, a rarer moonlight by night. A small wave rolls in along a hovered control; a press leaves sun glints by day (`sparkle` + `star`) and lets glowing plankton rise at night (`ember` + `firefly`).
 
-**Pixel Blocks**: an unofficial pixel-art look inspired by block sandbox games such as Minecraft, using no artwork, fonts, textures or logos from any game. A deep slate surface with a 5% block grain, 2 DIP stepped corners, a bevel rim lit at the top left and shaded at the bottom right, and a hard shadow with no blur. Chat-style colors: white text, a yellow block clock (the `pixel` clock style), a green accent and a green experience-bar indicator; violet menus with a violet frame. Everything moves in four hard steps: `slot` on hover, `bevel` on press, square particles after; no ambient light, so it costs nothing while idle.
+**Pixel Blocks**: an unofficial pixel-art look inspired by block sandbox games, using no artwork, fonts, textures or logos from any game. A deep slate surface with a 5% block grain, 2 DIP stepped corners, a bevel rim lit at the top left and shaded at the bottom right, and a hard shadow with no blur. Chat-style colors: white text, a yellow block clock (the `pixel` clock style), a green accent and a green experience-bar indicator; violet menus with a violet frame. Everything moves in four hard steps: `slot` on hover, `bevel` on press, square particles after; no ambient light, so it costs nothing while idle.
 
 ## Demo: Cyberpunk: Edgerunners
 

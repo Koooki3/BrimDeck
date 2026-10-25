@@ -252,6 +252,17 @@ internal static class PanelThemeTests
         var badBand = PanelThemes.LoadFolder(Folder("held-bad", ("band.json", """{ "formatVersion": 1, "id": "band", "effects": { "glass": { "tint": "#E0F8FAFD", "backdrop": [0.5] } } }"""),
             ("opacity.json", """{ "formatVersion": 1, "id": "opacity", "effects": { "glass": { "tint": "#E0F8FAFD", "blurOpacity": 2 } } }""")));
         check("A glass band that is not two numbers from 0 to 1, or an opacity outside 0 to 1, is refused", badBand.Count == 2 && badBand.All(theme => theme.Error is not null));
+        // Pixel art and glass together would have the blur and the shadow cut follow the smooth outline past the steps.
+        var pixelGlass = PanelThemes.LoadFolder(Folder("pixel-glass",
+            ("both.json", """{ "formatVersion": 1, "id": "both", "effects": { "pixel": 2, "glass": { "tint": "#E0F8FAFD" } } }"""),
+            ("glass-on-pixel.json", """{ "formatVersion": 1, "id": "glass-on-pixel", "base": "pixel-blocks", "effects": { "glass": { "tint": "#E0F8FAFD" } } }"""),
+            ("pixel-on-glass.json", """{ "formatVersion": 1, "id": "pixel-on-glass", "base": "liquid-glass-light", "effects": { "pixel": 2 } }"""),
+            ("flat-on-glass.json", """{ "formatVersion": 1, "id": "flat-on-glass", "base": "liquid-glass-light", "effects": { "pixel": 0 } }""")));
+        check("Pixel art with glass is refused, from the file or its base; pixel 0 on glass is fine",
+            pixelGlass.Count == 4 && new[] { "both.json", "glass-on-pixel.json", "pixel-on-glass.json" }.All(name => ByFile(pixelGlass, name).Error is not null)
+            && ByFile(pixelGlass, "flat-on-glass.json").Error is null);
+        check("A theme that gets both anyway is pixel art without glass",
+            PanelThemes.Build("both", PanelThemes.Parse("""{ "formatVersion": 1, "id": "both", "effects": { "pixel": 2, "glass": { "tint": "#E0F8FAFD" } } }""")).Effects is { Pixel: 2, Glass: null });
         // A theme with a night look keeps it, with its hours: the copy's night look is the original's.
         var island = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
         var islandCopy = PanelThemes.Parse(PanelThemes.FillTemplate("copy", PanelThemes.Resolve(island), PanelThemes.IslandHoliday, island.File));

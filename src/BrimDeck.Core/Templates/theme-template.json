@@ -97,7 +97,7 @@
     "scanlines": 0,                 // 0 to 0.12: horizontal lines in the primary text color at this opacity
     "pixel": 0,                     // 0, or 1 to 4: pixel art. Corners become steps of this many DIP, text is drawn unsmoothed,
                                     // and with a rimGradient the rim is a bevel: its first color lights the edges facing up and
-                                    // left, its last shades the others
+                                    // left, its last shades the others. Not with glass: a theme with both is refused
     "texture": 0                    // 0 to 0.12, with pixel art: squares a little lighter or darker than the surface, a block's grain
     // Glass: remove the "//" to make the surface a tint over the desktop instead of a solid color. Text is held to its minimums
     // over the tint on both a black and a white desktop, so a light tint needs to be fairly dense (about 75 %). "surface" above
@@ -123,19 +123,20 @@
     },
     // How the pointer is answered: a mark drawn on the control's own visible shape (never around its box, never following the
     // pointer), a press that answers as the button goes down, holds while it is held and completes on release, and a short
-    // accent where keyboard focus lands. The settings window keeps its own styles.
-    "hover": "reveal",              // none, reveal (faint fill, edge lit from the top), lift (soft shadow outside, light top edge),
+    // accent where keyboard focus lands. The settings window keeps its own styles. "none" everywhere (the default dark and light
+    // themes) draws nothing over the controls, which keep their own hover and press looks.
+    "hover": "none",                // none, reveal (faint fill, edge lit from the top), lift (soft shadow outside, light top edge),
                                     // underline (subtle fill, 2 px bar along the bottom), caret (line highlight, caret bar at the left),
                                     // brackets (HUD corner brackets), sheen (two-color tint and edge), glow (warm inner glow, a glint)
     "hoverStrength": 0.12,          // 0 to 0.3
-    "press": "shade",               // none, shade (the shape shades and its edge firms), sink (the shadow collapses, pushed in),
+    "press": "none",                // none, shade (the shape shades and its edge firms), sink (the shadow collapses, pushed in),
                                     // indicator (the bottom bar takes the highlight), select (a selection sweeps from the caret),
                                     // lock (brackets clamp on, a chromatic ghost, a glitch slice; a scan line on release),
                                     // sparkle (the tint deepens; stars on release), ember (a warm glow swells; fireflies on release)
     "pressStrength": 0.18,          // 0 to 0.35
     "trail": 0,                     // 0 to 0.6: how strongly the particles a completed press leaves show (0: none)
     "particles": "none",            // none, dust, pixel, spark, star, firefly, neon: from the control's edges, above the content
-    "focus": "ring",                // none, ring, glow, brackets, caret: a short accent where keyboard focus lands
+    "focus": "none",                // none, ring, glow, brackets, caret: a short accent where keyboard focus lands
     "pace": 1,                      // 0.6 to 1.6: scales the pace of hover, press and focus feedback
     "steps": 0,                     // 0 (smooth) or 2 to 8: moves in that many hard steps, for a mechanical feel
     "color": "accent",              // The main mark: a color key above, a "#RRGGBB" color, or "system" (the Windows accent color)

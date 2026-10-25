@@ -14,7 +14,11 @@ namespace BrimDeck;
 // stopping puts everything back at rest.
 internal sealed class AmbientGlow : IMotionClient
 {
-    private const int CollapsedMs = 66, OpenMs = 40, SweepMs = 33;
+    // The collapsed island ticks slowest: the light is slow, and every changed frame redraws the layered window.
+    private const int CollapsedMs = 100, OpenMs = 40, SweepMs = 33;
+    // A change is drawn only once it shows: the drift and the scan line once they have moved this many device pixels, the
+    // breathing once the rim's opacity has changed by one step of eight bits.
+    private const double MinPixels = .75, MinOpacity = 1 / 255d;
     private readonly IslandBorder _island;
     private readonly Func<MotionConditions> _conditions;
     private readonly Func<bool> _open;
@@ -65,7 +69,12 @@ internal sealed class AmbientGlow : IMotionClient
     {
         var conditions = _conditions();
         bool run = _rim is not null && MotionGate.Ambient(conditions, _motion) && !HeldForBlur;
-        if (run == _running) return;
+        if (run == _running)
+        {
+            // Paused, and now motion is not allowed at all (animations turned off, high contrast): at rest at once.
+            if (!run && _pausedAt is not null && !conditions.MotionAllowed) Stop();
+            return;
+        }
         if (run)
         {
             _running = true;
@@ -108,15 +117,17 @@ internal sealed class AmbientGlow : IMotionClient
         var conditions = _conditions();
         if (_rim is null || !MotionGate.Ambient(conditions, _motion) || HeldForBlur) { Halt(conditions); return 0; }
         var frame = _motion.Ambient.At(now - _origin);
-        // Changes below what eight bits of opacity can show are left for a later frame. The drift always moves on by more than
-        // its threshold between ticks (cyberpunk: .006 of a width per collapsed tick against .0015), so a slower tick would
-        // show as coarser steps; the interval stays the theme's.
-        if (Math.Abs(frame.Rim - _rimShown) >= .002) _rim.Opacity = _rimShown = frame.Rim;
-        if (Math.Abs(frame.Drift - _driftShown) >= .0015) _drift.X = _driftShown = frame.Drift;
+        // Changes the screen cannot show yet (under a device pixel of movement, under a step of opacity) are left for a later
+        // tick, so a tick that would change nothing visible redraws nothing: the drift is in widths of the rim, the scan line
+        // in 1.3 heights of the island.
+        double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
+        double width = Math.Max(1, _island.ActualWidth * scale), height = Math.Max(1, _island.ActualHeight * scale);
+        if (Math.Abs(frame.Rim - _rimShown) >= MinOpacity) _rim.Opacity = _rimShown = frame.Rim;
+        if (Math.Abs(frame.Drift - _driftShown) * width >= MinPixels) _drift.X = _driftShown = frame.Drift;
         if (frame.Sweep >= 0)
         {
-            if (Math.Abs(frame.Sweep - _sweepShown) >= .002) { _sweepShown = frame.Sweep; _sweepShift.Y = -.65 + 1.3 * frame.Sweep; }
-            if (Math.Abs(frame.SweepOpacity - _sweepOpacityShown) >= .001) _sweep.Opacity = _sweepOpacityShown = frame.SweepOpacity;
+            if (Math.Abs(frame.Sweep - _sweepShown) * 1.3 * height >= MinPixels) { _sweepShown = frame.Sweep; _sweepShift.Y = -.65 + 1.3 * frame.Sweep; }
+            if (Math.Abs(frame.SweepOpacity - _sweepOpacityShown) >= MinOpacity) _sweep.Opacity = _sweepOpacityShown = frame.SweepOpacity;
         }
         else if (_sweepShown >= 0) { _sweepShown = -1; _sweepOpacityShown = 0; _sweep.Opacity = 0; }
         return Interval(frame.Sweep);

@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -165,8 +164,6 @@ internal sealed partial class FxSurface : FrameworkElement
     private bool _keyPress, _stylusPress;
     // The pointer last moved by touch or a pen: a panel that opens under it marks nothing as hovered (motion-review F4).
     private bool _stylusMoved;
-    // A release seen only on the physical button waits for the queued input before it lets the press go (Frame).
-    private bool _liftCheck;
 
     public event Action? Detached;
 
@@ -252,7 +249,14 @@ internal sealed partial class FxSurface : FrameworkElement
         Wake();
     }
 
-    private void Left(object sender, MouseEventArgs e) => HoverOn(null);
+    // The pointer left the panel. A press on a control that does not capture the mouse (a tab, a list item) would never hear
+    // the button come up off the window, so it backs out here, as a press dragged off its control does; a control holding the
+    // capture hears its release wherever it happens (Lifted, CaptureLost).
+    private void Left(object sender, MouseEventArgs e)
+    {
+        HoverOn(null);
+        if (_press.Down && !_keyPress && !_stylusPress && _pressed is { } held && !held.Control.IsMouseCaptured) LiftOff(false);
+    }
 
     // ui-10: a control activated from the keyboard answers as a click does: Space presses while it is held, Enter (which
     // clicks as it goes down) presses and completes at once.
@@ -493,21 +497,6 @@ internal sealed partial class FxSurface : FrameworkElement
         // Animations turned off or high contrast: nothing decorative, at once. The panel closing: what is shown fades with it.
         if (!Allowed) { Reset(); return; }
         if (!_interactive() && (_hover is not null || _press.Down)) Release();
-        // ui-4: a control that does not capture the mouse (a tab, a list item) never hears the button come up off the window,
-        // which left the press held and the frames running; the button's own state lets it go. win2 C-L10: frames run ahead of
-        // input, so the button can read as up while its own release still waits in the queue; the press backs out only if it
-        // is still held once the queued input has gone through (below Input priority, the dispatcher waits for pending input).
-        // A control holding the mouse capture always hears its release, so it is left to Lifted and CaptureLost.
-        if (_press.Down && !_keyPress && !_stylusPress && Preview is null && !_liftCheck && _pressed is { } held && !held.Control.IsMouseCaptured && !LeftButtonDown())
-        {
-            _liftCheck = true;
-            int serial = held.Serial;
-            Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
-            {
-                _liftCheck = false;
-                if (_press.Down && !_keyPress && _pressed?.Serial == serial && !LeftButtonDown()) LiftOff(false);
-            });
-        }
         var dpi = Dpi;
         _hover?.Update(_scope, dpi);
         foreach (var mark in _leaving) mark?.Update(_scope, dpi);
@@ -595,6 +584,4 @@ internal sealed partial class FxSurface : FrameworkElement
 
     // The physical button behind the primary (left) one, read now: Mouse.LeftButton follows this thread's messages, which an
     // up over another window never reaches.
-    private static bool LeftButtonDown() => (GetAsyncKeyState(SystemParameters.SwapButtons ? 0x02 : 0x01) & 0x8000) != 0;
-    [DllImport("user32")] private static extern short GetAsyncKeyState(int key);
 }

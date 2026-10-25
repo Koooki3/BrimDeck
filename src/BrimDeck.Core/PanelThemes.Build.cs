@@ -171,6 +171,9 @@ public static partial class PanelThemes
             glass = glass with { BlurOpacity = Math.Clamp(blurOpacity, 0, 1), Low = low, High = high, Saturation = Fit(effects.Glass.Saturation, 1, 2, 1) };
         }
         double pixel = Math.Round(Fit(effects.Pixel, 0, 4, 0));
+        // Pixel art and glass do not go together: the blur and the shadow cut follow the smooth outline, not the steps. A file
+        // asking for both is refused (FileProblem); one that gets both through its base chain anyway is pixel art.
+        if (pixel > 0) glass = null;
         // The texture is part of pixel art: without blocks there is nothing to mottle.
         double texture = pixel > 0 ? Fit(effects.Texture, 0, .12, 0) : 0;
         double Value(string key) { var (min, max, fallback) = EffectRange(key); return Fit(Effect(effects, key), min, max, fallback); }

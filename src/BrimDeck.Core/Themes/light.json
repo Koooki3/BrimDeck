@@ -65,6 +65,6 @@
     ]
   },
   "effects": { "shadowBlur": 16, "shadowDepth": 3, "shadowOpacity": 0.2 },
-  // A raised card: a soft shadow outside the control and a light top edge; a press collapses the shadow and shades it, as if pushed in.
-  "motion": { "hover": "lift", "hoverStrength": 0.14, "press": "sink", "pressStrength": 0.16, "trail": 0, "particles": "none", "focus": "ring", "pace": 1, "steps": 0, "color": "accent", "secondary": "shadow", "highlight": "accent" }
+  // No answers drawn over the controls: they keep their own hover and press looks, BrimDeck's default.
+  "motion": { "hover": "none", "hoverStrength": 0.14, "press": "none", "pressStrength": 0.16, "trail": 0, "particles": "none", "focus": "none", "pace": 1, "steps": 0, "color": "accent", "secondary": "shadow", "highlight": "accent" }
 }

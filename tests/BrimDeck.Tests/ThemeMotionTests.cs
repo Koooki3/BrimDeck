@@ -9,13 +9,14 @@ internal static class ThemeMotionTests
         static PanelPalette Palette(string id) => PanelThemes.Resolve(PanelThemes.BuiltIn(id)!);
         static PanelPalette Custom(string json) => PanelThemes.Build("custom", PanelThemes.Parse(json));
 
-        // Every built-in theme has its own answers to the pointer; ambient light is for the cyberpunk demo, the glass themes'
-        // drifting glint and the island's swell.
+        // Every built-in theme but the default dark and light ones (which keep BrimDeck's own control looks) has its own answers
+        // to the pointer; ambient light is for the cyberpunk demo, the glass themes' drifting glint and the island's swell.
         string[] builtIns = ["dark", "light", PanelThemes.GlassLight, PanelThemes.GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl",
             PanelThemes.IslandHoliday, PanelThemes.PixelBlocks, PanelThemes.Demo];
         string[] ambient = [PanelThemes.Demo, PanelThemes.GlassLight, PanelThemes.GlassDark, PanelThemes.IslandHoliday];
         check("Every built-in theme is listed for motion", PanelThemes.BuiltIns.Select(theme => theme.Id).Order().SequenceEqual(builtIns.Order()));
-        check("Every built-in theme answers the pointer", builtIns.All(id => Palette(id).Motion.AnyInteraction));
+        check("Every built-in theme answers the pointer except the default dark and light, which draw nothing over the controls",
+            builtIns.All(id => Palette(id).Motion.AnyInteraction == id is not ("dark" or "light")));
         check("Only the cyberpunk, glass and island themes have ambient light", builtIns.All(id => Palette(id).Motion.Ambient.Any == ambient.Contains(id)));
         check("Glass: only a slow drifting glint, no breathing, sweep or flicker; a lens on hover, no particles",
             new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion is { Hover: HoverFx.Lens, Particles: ParticleFx.None, Steps: 0 } m
@@ -35,26 +36,29 @@ internal static class ThemeMotionTests
             && cyber is { Hover: HoverFx.Brackets, Press: PressFx.Lock, Focus: FocusFx.Brackets, Color: "accent", Secondary: "shadow", Highlight: "clock", Particles: ParticleFx.None, Steps: 3, Pace: < 1 });
         check("GitHub themes are flat, precise and quick: an underline, a coral indicator, no particles",
             new[] { "github-dark", "github-light" }.All(id => Palette(id).Motion is { Hover: HoverFx.Underline, Press: PressFx.Indicator, Focus: FocusFx.Ring, Particles: ParticleFx.None, Steps: 0, Pace: < 1 }));
-        check("Dark is Fluent's reveal; light lifts and sinks",
-            Palette("dark").Motion is { Hover: HoverFx.Reveal, Press: PressFx.Shade, Focus: FocusFx.Ring, Particles: ParticleFx.None }
-            && Palette("light").Motion is { Hover: HoverFx.Lift, Press: PressFx.Sink, Secondary: "shadow" });
+        check("Dark and light keep BrimDeck's default look: no hover, press or focus marks",
+            new[] { "dark", "light" }.All(id => Palette(id).Motion is { Hover: HoverFx.None, Press: PressFx.None, Focus: FocusFx.None, Particles: ParticleFx.None, Ambient.Any: false })
+            && ThemeMotion.Default is { AnyInteraction: false });
         check("One Dark Pro is the editor: a caret, a selection",
             Palette("one-dark-pro").Motion is { Hover: HoverFx.Caret, Press: PressFx.Select, Focus: FocusFx.Caret, Particles: ParticleFx.None });
         check("Dracula sparkles in purple and pink; Night Owl glows warm with fireflies",
             Palette("dracula").Motion is { Hover: HoverFx.Sheen, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Secondary: "liked" }
             && Palette("night-owl").Motion is { Hover: HoverFx.Glow, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 });
-        // The GitHub pair and the glass pair are one material each in two tones, and share their answers.
-        check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 2
+        // The GitHub pair and the glass pair are one material each in two tones, and share their answers; dark and light share
+        // having none.
+        check("Every built-in theme has a language of its own", builtIns.Select(id => (Palette(id).Motion.Hover, Palette(id).Motion.Press)).Distinct().Count() == builtIns.Length - 3
             && Palette("github-dark").Motion.Hover == Palette("github-light").Motion.Hover);
         check("Only the mechanical and pixel themes move in steps", builtIns.All(id => (Palette(id).Motion.Steps > 0) == (id is PanelThemes.Demo or PanelThemes.PixelBlocks)));
         check("Particle styles inherit and unknown ones keep the base's",
             Custom("""{ "base": "dracula", "motion": { "particles": "firefly" } }""").Motion.Particles == ParticleFx.Firefly
             && Custom("""{ "base": "dracula", "motion": { "particles": "confetti" } }""").Motion.Particles == ParticleFx.Star);
-        var system = Palette("dark").Motion.ForSystem();
+        check("System on the default themes draws nothing either",
+            new[] { "dark", "light" }.All(id => Palette(id).Motion.ForSystem() is { AnyInteraction: false, Color: ThemeMotion.SystemAccent } system && !system.Ambient.Any));
+        var system = Palette("dracula").Motion.ForSystem();
         check("System follows the Windows accent, quietly", system is { Color: ThemeMotion.SystemAccent, Highlight: ThemeMotion.SystemAccent, Hover: HoverFx.Reveal, Press: PressFx.Shade, Particles: ParticleFx.None, Steps: 0, Focus: FocusFx.Ring } && !system.Ambient.Any
-            && system.HoverStrength == Palette("dark").Motion.HoverStrength && system.Pace == Palette("dark").Motion.Pace);
-        check("System on a light Windows keeps the light theme's lift and sink, in the Windows accent",
-            Palette("light").Motion.ForSystem() is { Hover: HoverFx.Lift, Press: PressFx.Sink, Secondary: "shadow", Color: ThemeMotion.SystemAccent });
+            && system.HoverStrength == Palette("dracula").Motion.HoverStrength && system.Pace == Palette("dracula").Motion.Pace);
+        check("System keeps a theme's lift and sink, in the Windows accent",
+            (Palette("dracula").Motion with { Hover = HoverFx.Lift, Press = PressFx.Sink, Secondary = "shadow" }).ForSystem() is { Hover: HoverFx.Lift, Press: PressFx.Sink, Secondary: "shadow", Color: ThemeMotion.SystemAccent });
         check("System never takes a theme's steps or particles", Palette(PanelThemes.Demo).Motion.ForSystem() is { Steps: 0, Particles: ParticleFx.None, Hover: HoverFx.Reveal, Press: PressFx.Shade });
 
         // Names of earlier versions still read sensibly; numbers are not names.
@@ -65,7 +69,7 @@ internal static class ThemeMotionTests
             && Custom("""{ "motion": { "hover": "edge", "press": "pulse" } }""").Motion is { Hover: HoverFx.Underline, Press: PressFx.Shade });
         check("Style names ignore case and spaces; numbers keep the base's",
             Custom("""{ "motion": { "hover": " Caret ", "press": "LOCK" } }""").Motion is { Hover: HoverFx.Caret, Press: PressFx.Lock }
-            && Custom("""{ "motion": { "hover": "3", "press": "-1", "focus": "2" } }""").Motion is { Hover: HoverFx.Reveal, Press: PressFx.Shade, Focus: FocusFx.Ring });
+            && Custom("""{ "motion": { "hover": "3", "press": "-1", "focus": "2" } }""").Motion is { Hover: HoverFx.None, Press: PressFx.None, Focus: FocusFx.None });
 
         // Inheritance, field by field along the base chain.
         var neonEdge = Custom("""{ "base": "cyberpunk-edgerunners", "motion": { "hover": "underline", "ambient": { "sweep": 0 } } }""").Motion;
@@ -87,7 +91,7 @@ internal static class ThemeMotionTests
         check("Ambient values are clamped to their ranges", wild.Ambient == new AmbientMotion(MotionSafety.BreatheMin, MotionSafety.BreatheDepthMax, MotionSafety.DriftMin,
             MotionSafety.SweepMin, MotionSafety.SweepOpacityMax, MotionSafety.FlickerMin, MotionSafety.FlickerDepthMax));
         check("Interaction values are clamped and unknown styles keep the base's",
-            wild is { Hover: HoverFx.Reveal, HoverStrength: MotionSafety.HoverMax, Press: PressFx.Shade, PressStrength: 0, ParticleStrength: MotionSafety.TrailMax, Focus: FocusFx.Brackets, Pace: MotionSafety.PaceMax, Steps: MotionSafety.StepsMax });
+            wild is { Hover: HoverFx.None, HoverStrength: MotionSafety.HoverMax, Press: PressFx.None, PressStrength: 0, ParticleStrength: MotionSafety.TrailMax, Focus: FocusFx.Brackets, Pace: MotionSafety.PaceMax, Steps: MotionSafety.StepsMax });
         check("One step is no steps; fractions round; nonsense keeps the base's",
             Custom("""{ "base": "cyberpunk-edgerunners", "motion": { "steps": 1 } }""").Motion.Steps == 0
             && Custom("""{ "motion": { "steps": 2.6 } }""").Motion.Steps == 3

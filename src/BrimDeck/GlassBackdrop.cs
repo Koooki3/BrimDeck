@@ -51,7 +51,10 @@ internal sealed class GlassBackdrop : IDisposable
     private readonly FrameworkElement _island;
     private readonly Func<(CornerRadius Corners, double Shoulder, double Material)> _shape;
     private HwndSource? _window;
+    private Windows.UI.Composition.ContainerVisual? _root;
     private SpriteVisual? _sprite;
+    // The panel's window handle, which never changes once it has one.
+    private IntPtr _ownerHandle;
     private CompositionRoundedRectangleGeometry? _clip;
     private DesktopWindowTarget? _target;
     private bool _following, _shown, _disposed;
@@ -188,7 +191,7 @@ internal sealed class GlassBackdrop : IDisposable
         Report(_brushHolds ? frame.Material * (1 - _moving) : 0);
         if (opacity < .002) { Conceal(); return; }
         var handle = _window!.Handle;
-        var owner = new WindowInteropHelper(_owner).Handle;
+        var owner = OwnerHandle;
         GetWindowRect(owner, out var rect);
         var place = (rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
         if (!_shown || place != _windowRect)
@@ -247,12 +250,18 @@ internal sealed class GlassBackdrop : IDisposable
 
     // The sprite's brush for the theme's glass: the blur held to its band where the theme asks for it and Windows takes the
     // effect, else the blur as it comes.
+    private IntPtr OwnerHandle => _ownerHandle != IntPtr.Zero ? _ownerHandle : _ownerHandle = new WindowInteropHelper(_owner).Handle;
+
     private void Dress()
     {
         var glass = PanelTheme.Current.Effects.Glass;
         if (_sprite is null || Equals(glass, _brushFor) && _sprite.Brush is not null || Composition.Compositor is not { } compositor) return;
         _brushFor = glass;
         _brushHolds = false;
+        // The brush made for the theme before is let go: a switch between glass themes would otherwise keep each one.
+        var previous = _sprite.Brush;
+        _sprite.Brush = null;
+        previous?.Dispose();
         if (glass is { Held: true })
             try
             {
@@ -301,7 +310,7 @@ internal sealed class GlassBackdrop : IDisposable
             int on = 1;
             DwmSetWindowAttribute(_window.Handle, UseHostBackdropBrush, ref on, sizeof(int));
             _target = Composition.Target(_window.Handle);
-            var root = compositor.CreateContainerVisual(); root.RelativeSizeAdjustment = Vector2.One;
+            var root = _root = compositor.CreateContainerVisual(); root.RelativeSizeAdjustment = Vector2.One;
             _sprite = compositor.CreateSpriteVisual(); _sprite.RelativeSizeAdjustment = Vector2.One; _sprite.Opacity = 0;
             _clip = compositor.CreateRoundedRectangleGeometry();
             _sprite.Clip = compositor.CreateGeometricClip(_clip);
@@ -352,7 +361,10 @@ internal sealed class GlassBackdrop : IDisposable
 
     private void Release()
     {
-        _target?.Dispose(); _target = null; _sprite = null; _clip = null;
+        // The composition objects are let go with the window: a panel made again (a monitor added, settings applied) starts afresh.
+        if (_sprite is not null) { _sprite.Brush?.Dispose(); _sprite.Clip?.Dispose(); _sprite.Dispose(); }
+        _clip?.Dispose(); _root?.Dispose();
+        _target?.Dispose(); _target = null; _sprite = null; _clip = null; _root = null;
         _window?.Dispose(); _window = null;
         _shown = false; _windowRect = null; _region = null; _recent.Clear(); _last = null; _brushFor = null;
     }
