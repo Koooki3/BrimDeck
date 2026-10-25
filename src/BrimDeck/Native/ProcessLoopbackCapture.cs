@@ -20,12 +20,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
     private float[] _buffer = new float[4096];
     private short[] _pcm = new short[4096];
     private double _analysed = double.NegativeInfinity;
-    // Seconds between analyses, and the audio the stream's buffer holds; the buffer outlasts a drain that comes late several
-    // times over. The thread waits DrainWait between drains: Windows' default timer wakes it on 15.6 ms steps, so a wait of
-    // 33 ms came back after 47 and the bars moved at 21 Hz; 30 ms comes back after 31.25 (or on time with a finer timer), and an
-    // analysis is due a little before its interval for the same reason.
-    public const double AnalysisInterval = 1 / 30d, BufferDuration = .2;
-    public static readonly TimeSpan DrainWait = TimeSpan.FromMilliseconds(30);
+    public const double AnalysisInterval = 1 / 30d;
     public AutoResetEvent Ready { get; } = new(false);
     public EqualizerSignal Signal { get; } = new(Format.SampleRate);
     public uint ProcessId { get; }
@@ -34,9 +29,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
     {
         ProcessId = processId; _client = client;
         // The documented process loopback flags; the engine converts to the requested PCM format.
-        // The buffer holds BufferDuration of audio, so packets drained every AnalysisInterval (AudioLevelMeter) are never lost.
-        _client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback | AudioClientStreamFlags.EventCallback | AudioClientStreamFlags.AutoConvertPcm,
-            (long)(BufferDuration * 10_000_000), 0, Format, Guid.Empty);
+        _client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback | AudioClientStreamFlags.EventCallback | AudioClientStreamFlags.AutoConvertPcm, 0, 0, Format, Guid.Empty);
         _client.SetEventHandle(Ready.SafeWaitHandle.DangerousGetHandle());
         _capture = _client.AudioCaptureClient;
         _client.Start();
@@ -96,6 +89,9 @@ internal sealed class ProcessLoopbackCapture : IDisposable
                 Signal.Push(_buffer.AsSpan(0, count), Format.Channels, now);
             }
             // The bars move 30 times a second (MainWindow.TickMusic) and read the analyses in between, so 30 analyses serve them.
+            // Packets arrive about every 10 ms and are drained as each arrives (AudioLevelMeter): the stream keeps only a few
+            // tens of ms whatever buffer is asked for, and draining once per analysis lost about 2 % of the audio unflagged. An
+            // analysis is due a few ms early, so it lands every third packet rather than every fourth.
             if (now - _analysed >= AnalysisInterval - .005) { _analysed = now; Signal.Advance(now); }
             return true;
         }
