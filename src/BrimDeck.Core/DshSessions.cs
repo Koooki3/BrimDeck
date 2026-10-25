@@ -126,9 +126,15 @@ public sealed class DshSessions
                 filled -= lineStart;
                 if (filled < buffer.Length) continue;
                 // A single line longer than the buffer (a large tool result) grows it instead of being split, up to the limit;
-                // beyond it the line is dropped up to its end.
+                // beyond it the line is dropped up to its end. Its last bytes are kept, so a "usage" across two dropped pieces is
+                // still seen.
                 if (buffer.Length < _maxLine) Array.Resize(ref buffer, (int)Math.Min(_maxLine, buffer.Length * 2L));
-                else { item.SkippedUsage |= buffer.AsSpan(0, filled).IndexOf("\"usage\""u8) >= 0; item.Skipping = true; filled = 0; }
+                else
+                {
+                    item.SkippedUsage |= buffer.AsSpan(0, filled).IndexOf("\"usage\""u8) >= 0; item.Skipping = true;
+                    int keep = "\"usage\""u8.Length - 1;
+                    buffer.AsSpan(filled - keep, keep).CopyTo(buffer); filled = keep;
+                }
             }
             item.Pending = buffer[..filled];
         }
@@ -150,7 +156,8 @@ public sealed class DshSessions
 
     // Each batch is a frame that decodes on its own and holds whole lines, and batches are appended in time order.
     // The batch to start from is the last one that begins before the start date, found by decoding only the first
-    // line of a few frames. Frames without a readable time (the session header) count as earlier than any date.
+    // line of a few frames. Frames without a readable time (the session header) count as earlier than any date; one whose
+    // first line is over the limit counts as later, so the search starts before it rather than past it.
     private static int FirstFrameFrom(byte[] data, List<(int Start, int Length)> frames, DateTimeOffset cutoff, int maxLine)
     {
         int low = 0, high = frames.Count - 1, found = 0;
@@ -170,8 +177,8 @@ public sealed class DshSessions
         int value;
         while ((value = decoder.ReadByte()) is >= 0 and not '\n')
         {
-            // A first line over the limit tells no time; the frame counts as earlier than any date, as one without a time does.
-            if (line.Length >= maxLine) return null;
+            // A first line over the limit tells no time; the frame counts as not before any date (FirstFrameFrom), so it is read.
+            if (line.Length >= maxLine) return DateTimeOffset.MaxValue;
             line.WriteByte((byte)value);
         }
         try
