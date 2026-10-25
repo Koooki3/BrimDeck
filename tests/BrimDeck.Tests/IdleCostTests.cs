@@ -67,6 +67,46 @@ internal static class IdleCostTests
         }
         var wrap = new MarqueeCycle(48, 24, 6, .05);
         check("Idle cost: the scrolling title's cycle wraps", Near(wrap.Wrap(wrap.Period + .25), .25) && Near(wrap.Wrap(-.25), wrap.Period - .25) && wrap.Wrap(double.NaN) == 0);
+        Resized(check);
+    }
+
+    // The title's room changes on every frame while a reading beside it eases its width: the scroll carries on from where it is,
+    // only its end moving, and never jumps back to the start.
+    private static void Resized(Action<string, bool> check)
+    {
+        var cycle = new MarqueeCycle(100, 24, 6, .04);
+        // Mid-glide (40 DIP scrolled), the room widens so only 60 or 30 DIP overflow, or narrows so 140 do.
+        double at = 1.5 + 40 / 24.0;
+        var (wider, a1) = cycle.Resized(60, .05, at);
+        var (widest, a2) = cycle.Resized(30, .05, at);
+        var (narrower, a3) = cycle.Resized(140, .03, at);
+        check("Idle cost: a title whose room changes mid-glide keeps the distance scrolled",
+            Near(a1, at) && Near(wider.Shift(a1), -40) && Near(narrower.Shift(a3), -40) && Near(a3, at) && wider.Overflow == 60 && narrower.EdgeStop == .03);
+        check("Idle cost: a title whose new end is nearer than it has scrolled stops at that end", Near(widest.Shift(a2), -30) && Near(a2, widest.GlideEnd));
+        check("Idle cost: a title resting at its start keeps its time", cycle.Resized(80, .04, .9) is var (r1, s1) && Near(s1, .9) && r1.Shift(s1) == 0);
+        check("Idle cost: a title resting at its end carries on resting there", cycle.Resized(80, .04, cycle.GlideEnd + .5) is var (r2, s2)
+            && Near(s2, r2.GlideEnd + .5) && Near(r2.Shift(s2), -80) && cycle.Resized(80, .04, cycle.Period - .01).At < r2.Period);
+        check("Idle cost: a title with nothing left to scroll comes to rest", cycle.Resized(0, 0, at) is { At: 0 } && cycle.Resized(double.NaN, 0, at).Cycle.Overflow == 0);
+
+        // A neighbour easing over 0.42 s on 60 frames a second while the title glides, as on screen: the room changes on every frame.
+        bool steady = true, forward = true;
+        double now = 1.5 + 20 / 24.0, shift = cycle.Shift(now), overflow = 100;
+        var running = cycle;
+        for (int frame = 1; frame <= 120; frame++)
+        {
+            double step = 1 / 60.0;
+            now += step;
+            double target = frame <= 25 ? 100 - 40 * Eases(frame / 25.0) : 60;
+            (running, now) = running.Resized(target, .04, now);
+            overflow = target;
+            double next = running.Shift(now);
+            // Each frame the text moves by at most one frame's glide, and only towards its end.
+            if (next > shift + 1e-9) forward = false;
+            if (shift - next > 24 * step + 1e-9) steady = false;
+            shift = next;
+        }
+        check("Idle cost: while the room eases, the title glides on without jumping back", steady && forward && running.Overflow == overflow);
+        static double Eases(double s) => s * s * (3 - 2 * s);
     }
 
     private static void Carousel(Action<string, bool> check)

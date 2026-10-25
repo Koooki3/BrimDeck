@@ -288,6 +288,17 @@ internal sealed class MusicMarquee : FrameworkElement
         _scroll = null; _running = false; _since = double.NaN; _elapsed = 0;
         _shift.X = 0; _unshift.X = 0; _left.Offset = 0; _right.Offset = 1 - EdgeStop;
     }
+    // The scroll over the new overflow, as far along as it was (MarqueeCycle.Resized): the glide's clock, made for the old end, is
+    // let go and the turn starts one for the new end from the same place.
+    private void Resize()
+    {
+        if (_scroll is not { } cycle) return;
+        double now = Eased.Now, at = Position(now);
+        ReleaseGlide();
+        (_scroll, _elapsed) = cycle.Resized(_overflow, EdgeStop, at);
+        if (_running) _since = now;
+        Turn();
+    }
     private void UpdateAnimation()
     {
         bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && _overflow > 0 && _formatted is not null;
@@ -408,7 +419,14 @@ internal sealed class MusicMarquee : FrameworkElement
                 if (_glyphs is null) OpacityMask = fade; else _fade = fade;
             }
         }
-        if (_overflow != overflow) { _overflow = overflow; ResetAnimation(); }
+        if (_overflow != overflow)
+        {
+            // The same text in a room that changed while it scrolls (a reading beside it easing its width changes the room on every
+            // frame) carries on from where it is; only a scroll that ends, or new text (ResetText), starts again.
+            bool carries = _scroll is not null && _overflow > 0 && overflow > 0;
+            _overflow = overflow;
+            if (carries) Resize(); else ResetAnimation();
+        }
         // Cover the whole box, as the carousel's background does, so the mask layer's edge is not the text's edge.
         if (overflow > 0) dc.DrawRectangle(Brushes.Transparent, null, new Rect(size));
         if (_glyphs is null) dc.PushClip(new RectangleGeometry(new Rect(size)));
