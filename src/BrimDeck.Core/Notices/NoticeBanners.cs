@@ -101,7 +101,7 @@ public sealed class BannerLedger
             var ledger = JsonSerializer.Deserialize<BannerLedger>(File.ReadAllText(path));
             if (ledger is null) return null;
             ledger.Records = (ledger.Records ?? []).Where(record => record is not null && NoticeBanners.Usable(record.AppId)
-                    && (record.PreviousValue is null ? record.Previous is null or 0 or 1 : record.Previous is null && record.PreviousValue.Kind.Length > 0 && record.PreviousValue.Data is not null))
+                    && (record.PreviousValue is null ? record.Previous is not 0 :record.Previous is null && record.PreviousValue.Kind.Length > 0 && record.PreviousValue.Data is not null))
                 .DistinctBy(record => record.AppId, StringComparer.OrdinalIgnoreCase).Take(MaxRecords).ToList();
             ledger.Released = (ledger.Released ?? []).Where(NoticeBanners.Usable).Distinct(StringComparer.OrdinalIgnoreCase).Take(MaxRecords).ToList();
             return ledger;

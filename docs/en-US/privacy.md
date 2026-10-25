@@ -21,7 +21,7 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 
 ## Files stored on this PC
 
-All files are stored in `%LOCALAPPDATA%\BrimDeck`:
+Files are stored in `%LOCALAPPDATA%\BrimDeck`, except the recent notices, which are kept in BrimDeck's install folder by default (see their row):
 
 | File | Contents |
 | --- | --- |

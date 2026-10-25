@@ -136,6 +136,12 @@ internal static class NoticeCoreTests
         check("Stale normal notices and alerts are not shown after 30 s; high priority ones still are", ended.Any(ch => ch.Ended?.Key == "hp") && c.Current("main")?.Key == "hp2"
             && c.Queued("main").Count == 0);
 
+        // The song changes while its title still shows: the new title gets its whole time, counted from the change.
+        var songs = new AttentionCoordinator();
+        songs.Submit(Item("m", AttentionKind.Track, "track", seconds: 4), T0);
+        var next = songs.Submit(Item("m", AttentionKind.Track, "track", seconds: 4), T0.AddSeconds(3));
+        check("A title shown again in place runs its whole time from the change", next is [{ Updated.Key: "track" }] && songs.NextDeadline(T0.AddSeconds(3)) == T0.AddSeconds(7));
+
         var rate = new AttentionCoordinator();
         for (int i = 0; i < 3; i++) { rate.Submit(Item("r", AttentionKind.Notice, "x" + i, "G" + i, seconds: 1), T0.AddSeconds(i * 2)); rate.Tick(T0.AddSeconds(i * 2 + 1)); }
         rate.Submit(Item("r", AttentionKind.Notice, "x3", "G3", seconds: 1), T0.AddSeconds(6));

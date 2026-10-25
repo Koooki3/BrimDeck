@@ -697,7 +697,8 @@ internal sealed class NoticeCenter : IDisposable
     public void ResetHistory()
     {
         if (_folderTrust != NoticeStorage.FolderTrust.Trusted || _loadingHistory) return;
-        _history?.Delete();
+        // Off the UI thread like other deletions (Remove); the save that follows waits for it.
+        if (_history is { } history) Remove(history.Delete);
         HistoryState = NoticeHistoryState.Empty;
         SetLoaded(true);
         QueueSave();

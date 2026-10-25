@@ -28,8 +28,11 @@ internal sealed class NoticeBannerKeeper : IDisposable
     private readonly bool _watch;
     private readonly Action<Exception> _failed;
     private readonly HashSet<string> _candidates = new(StringComparer.OrdinalIgnoreCase);
-    // One pass at a time; a request while one runs is taken up once it ends (_again).
+    // One pass at a time; a request while one runs is taken up once it ends (_again). _work guards only _busy, _again and
+    // _running and is held briefly, also on the UI thread; _pass serializes the registry and ledger work of a pass and of
+    // ReleaseAll, so the UI thread never waits on it except at exit.
     private readonly object _work = new();
+    private readonly object _pass = new();
     private Task _running = Task.CompletedTask;
     private bool _busy, _again;
     private bool _listing, _listed, _released;
@@ -85,7 +88,7 @@ internal sealed class NoticeBannerKeeper : IDisposable
         Task running;
         lock (_work) running = _running;
         try { running.Wait(TimeSpan.FromSeconds(10)); } catch (AggregateException) { }
-        lock (_work)
+        lock (_pass)
         {
             if (BannerLedger.Load(_ledgerPath) is not { } ledger || ledger.Records.Count == 0) return;
             NoticeBanners.Reconcile(new HashSet<string>(), _settings().NoticeHideBanners, ledger, _registry, () => ledger.Save(_ledgerPath));
@@ -129,7 +132,7 @@ internal sealed class NoticeBannerKeeper : IDisposable
         int released = 0;
         try
         {
-            lock (_work)
+            lock (_pass)
             {
                 if (!_released)
                 {

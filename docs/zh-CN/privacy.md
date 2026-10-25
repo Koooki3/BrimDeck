@@ -21,7 +21,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 
 ## 本机保存的文件
 
-所有文件保存在 `%LOCALAPPDATA%\BrimDeck`：
+文件保存在 `%LOCALAPPDATA%\BrimDeck`；最近通知例外，默认保存在 BrimDeck 安装目录（见对应一行）：
 
 | 文件 | 内容 |
 | --- | --- |

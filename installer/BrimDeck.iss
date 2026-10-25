@@ -544,10 +544,14 @@ begin
     Log('Some Windows banners could not be given back; notice-banners.json is kept (code ' + IntToStr(ResultCode) + ').');
 end;
 
-// Deletes the data folder but, while banners are pending, its ledger.
+// Deletes the data folder but, while banners are pending, its ledger. The ledger is never moved: everything else in the folder
+// is deleted around it, so no failed move can lose it.
 procedure DeleteDataFolder;
 var
-  Dir, Kept: String;
+  Dir: String;
+  Found: TFindRec;
+  Names: TStringList;
+  I: Integer;
 begin
   Dir := ExpandConstant('{#DataDir}');
   if not BannersPending then
@@ -555,14 +559,27 @@ begin
     DelTree(Dir, True, True, True);
     Exit;
   end;
-  Kept := ExpandConstant('{tmp}\notice-banners');
-  ForceDirectories(Kept);
-  RenameFile(Dir + '\notice-banners.json', Kept + '\notice-banners.json');
-  RenameFile(Dir + '\notice-banners.json.bak', Kept + '\notice-banners.json.bak');
-  DelTree(Dir, True, True, True);
-  ForceDirectories(Dir);
-  RenameFile(Kept + '\notice-banners.json', Dir + '\notice-banners.json');
-  RenameFile(Kept + '\notice-banners.json.bak', Dir + '\notice-banners.json.bak');
+  Names := TStringList.Create;
+  try
+    if FindFirst(Dir + '\*', Found) then
+    try
+      repeat
+        if (Found.Name <> '.') and (Found.Name <> '..') and (CompareText(Found.Name, 'notice-banners.json') <> 0)
+          and (CompareText(Found.Name, 'notice-banners.json.bak') <> 0) then
+          Names.Add(Found.Name);
+      until not FindNext(Found);
+    finally
+      FindClose(Found);
+    end;
+    for I := 0 to Names.Count - 1 do
+      if DirExists(Dir + '\' + Names[I]) then
+        DelTree(Dir + '\' + Names[I], True, True, True)
+      else
+        DeleteFile(Dir + '\' + Names[I]);
+  finally
+    Names.Free;
+  end;
+  Log('The data folder was deleted except notice-banners.json, kept for the banners not given back.');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

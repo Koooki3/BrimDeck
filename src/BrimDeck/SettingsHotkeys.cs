@@ -54,8 +54,11 @@ public sealed partial class SettingsWindow
                 "With a notice on screen, opens its details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise opens the recent notices. Unset by default, to avoid clashing with other programs.")
         };
         string Saved() => SavedHotkey(S, kind);
-        // The other shortcuts, with the names a clash message gives them.
-        IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>().Where(other => other != kind).Select(other => (SavedHotkey(S, other), HotkeyName(other)));
+        // The other shortcuts, with the names a clash message gives them; the notices one only while notices are on, as only then
+        // is it registered (App.ApplyHotkeys) and its row shown to clear it.
+        IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>()
+            .Where(other => other != kind && (other != HotkeyKind.Notices || S.NoticesEnabled))
+            .Select(other => (SavedHotkey(S, other), HotkeyName(other)));
 
         // The box keeps one size and place in every state: the text on the left, trimmed before the clear button, which
         // always holds its slot on the right and is only dimmed while nothing is set. The record button spans the whole

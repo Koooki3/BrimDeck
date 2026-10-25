@@ -267,6 +267,16 @@ internal static class NoticeBannerTests
         Apply([], ledger, registry, holding: false);
         check("Banners: and put back as it was", registry.Others.TryGetValue("App", out var back) && back == text && !registry.Keys["App"].ContainsKey("ShowBanner")
             && ledger.Records.Count == 0);
+        // A DWORD other than 0 or 1 (another tool's) is recorded, survives a reload of the ledger and comes back as it was.
+        var odd = new FakeRegistry(); odd.Keys["Odd"] = new() { ["ShowBanner"] = 2 };
+        var path = Path.Combine(Path.GetTempPath(), "brimdeck-banners-odd-" + Guid.NewGuid().ToString("N") + ".json");
+        var oddLedger = new BannerLedger();
+        NoticeBanners.Reconcile(new HashSet<string> { "Odd" }, true, oddLedger, odd, () => oddLedger.Save(path));
+        var reloaded = BannerLedger.Load(path);
+        check("Banners: a DWORD of 2 is recorded and read back", odd.Keys["Odd"]["ShowBanner"] == 0 && reloaded?.Find("Odd") is { Previous: 2 });
+        if (reloaded is not null) NoticeBanners.Reconcile(new HashSet<string>(), false, reloaded, odd, () => reloaded.Save(path));
+        check("Banners: and comes back as 2", odd.Keys["Odd"]["ShowBanner"] == 2 && !File.Exists(path));
+        File.Delete(path + BannerLedger.BackupSuffix);
     }
 
     private static void Ledger(string root, Action<string, bool> check)
@@ -285,7 +295,7 @@ internal static class NoticeBannerTests
         check("Banners: an empty ledger leaves no file", ledger.Save(path) && !File.Exists(path));
         File.WriteAllText(path, "{ not json");
         check("Banners: an unreadable ledger is not taken as empty", BannerLedger.Load(path) is null);
-        File.WriteAllText(path, """{"Records":[{"AppId":"..\\Run","Previous":1},{"AppId":"Ok","Previous":7},{"AppId":"Good","Previous":1},{"AppId":"good","Previous":null}],"Released":["C:\\x.exe","Kept"]}""");
+        File.WriteAllText(path, """{"Records":[{"AppId":"..\\Run","Previous":1},{"AppId":"Zero","Previous":0},{"AppId":"Good","Previous":1},{"AppId":"good","Previous":null}],"Released":["C:\\x.exe","Kept"]}""");
         check("Banners: records that could not have been written are dropped", BannerLedger.Load(path) is { } cleaned && cleaned.Records.Count == 1 && cleaned.Records[0].AppId == "Good"
             && cleaned.Released.SequenceEqual(["Kept"]));
         File.WriteAllText(path, """{"Records":[{"AppId":"Old","Previous":null,"CreatedKey":true}]}""");

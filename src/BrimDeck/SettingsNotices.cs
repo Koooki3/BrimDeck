@@ -146,7 +146,9 @@ public sealed partial class SettingsWindow
             void Show(bool installed) => status.Text = installed
                 ? received ? Loc.T("已安装 · 收到过通知", "Installed · notices received") : Loc.T("已安装", "Installed")
                 : received ? Loc.T("收到过通知", "Notices received") : Loc.T("未安装", "Not installed");
-            if (detected.IsCompleted) Show(detected.Result.GetValueOrDefault(source.Id));
+            // A lookup that failed in a way Detect does not expect shows "not installed" rather than breaking the page.
+            if (detected.IsCompletedSuccessfully) Show(detected.Result.GetValueOrDefault(source.Id));
+            else if (detected.IsCompleted) Show(false);
             else _ = detected.ContinueWith(task => Dispatcher.BeginInvoke(() => Show(task.Result.GetValueOrDefault(source.Id))), TaskContinuationOptions.OnlyOnRanToCompletion);
             var kinds = TextLine(source.Role switch
             {
@@ -335,7 +337,7 @@ public sealed partial class SettingsWindow
     private void NoticeSizeControls()
     {
         var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
-        var width = Dimension(Loc.T("宽度", "Width"), S.NoticesWidth, 360, 1200, value => Resize(s => s.NoticesWidth = value, DeckPage.Notices)); width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
+        var width = Dimension(Loc.T("宽度", "Width"), S.NoticesWidth, 440, 1200, value => Resize(s => s.NoticesWidth = value, DeckPage.Notices)); width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
         var height = Dimension(Loc.T("高度", "Height"), S.NoticesHeight, 140, 400, value => Resize(s => s.NoticesHeight = value, DeckPage.Notices)); height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
         Target.Children.Add(dimensions);
     }

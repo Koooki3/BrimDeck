@@ -15,7 +15,10 @@ internal static class NoticeBannerKeeperTests
     {
         public readonly Dictionary<string, int?> Banners = new(StringComparer.OrdinalIgnoreCase);
         public int Writes, Reads;
-        public BannerReading Read(string appId) { lock (Banners) { Reads++; return Banners.TryGetValue(appId, out var value) ? new(true, value, null) : new(false, null, null); } }
+        // While set and closed, reads wait for it: a pass that takes long (a slow registry, hundreds of apps).
+        public ManualResetEventSlim? Gate;
+        public readonly ManualResetEventSlim Entered = new();
+        public BannerReading Read(string appId) { Entered.Set(); Gate?.Wait(TimeSpan.FromSeconds(5)); lock (Banners) { Reads++; return Banners.TryGetValue(appId, out var value) ? new(true, value, null) : new(false, null, null); } }
         public void Write(string appId, int? showBanner) { lock (Banners) { Writes++; Banners[appId] = showBanner; } }
         public void WriteValue(string appId, BannerValue value) => throw new IOException("not used");
         public void DeleteKeyIfEmpty(string appId) { lock (Banners) if (Banners.TryGetValue(appId, out var value) && value is null) Banners.Remove(appId); }
@@ -46,6 +49,21 @@ internal static class NoticeBannerKeeperTests
         long again = clock.ElapsedMilliseconds;
         Pump(() => Settled(keeper));
         check("banner keeper: later updates neither list again nor hold the dispatcher", listed == 1 && again < 50);
+
+        // A pass still under way: another update only marks it to run again, it does not wait for the pass on the dispatcher.
+        using (var gate = new ManualResetEventSlim(false))
+        {
+            registry.Gate = gate; registry.Entered.Reset();
+            keeper.Update();
+            registry.Entered.Wait(TimeSpan.FromSeconds(5));
+            clock.Restart();
+            keeper.Update();
+            keeper.Arrived("Test.Late");
+            long during = clock.ElapsedMilliseconds;
+            gate.Set(); registry.Gate = null;
+            Pump(() => registry.Value("Test.Late") == 0);
+            check("banner keeper: an update while a pass runs leaves the dispatcher at once", during < 50 && registry.Value("Test.Late") == 0);
+        }
 
         int writes = registry.Writes;
         keeper.Arrived("Test.App5");
