@@ -14,9 +14,13 @@
 //   top left, almost none at the right and bottom; round-8 d1-offset-island.png). That one thing is not reproduced: the map
 //   is read as the page meant it, as sRGB bytes with no constant shift (LinearMap 0; 1 is the browser's, for the proof sheets).
 //   feDisplacementMap reads the backdrop at whole pixels: the shift is rounded to whole device pixels and the pixel there taken
-//   as it is. At a scale above 100 % the map is drawn up to device pixels first, bilinearly between its bytes. The backdrop the
+//   as it is. At a scale above 100 % the map is drawn up to device pixels first, by a cubic (Mitchell) between its bytes, from
+//   the element's corner snapped to whole device pixels, its texels its whole CSS size (Displacement). The backdrop the
 //   filter sees is the element's box only, mirrored past its edges (a shift longer than the box, as in a low bar, folds back
-//   again). All of this was read off the browser itself (a backdrop whose pixels encode their own place, harness fid/).
+//   again). An element between device pixels: its box (background, clip) runs from round(x) to round(x + w), half way rounding
+//   up; the filter's region from round(x) for its exact size, cut at x + w, to the nearest pixel - so where the corner
+//   snapped back, the box's last column or row has no filter (FilterEnd). All of this was read off the browser itself (a
+//   backdrop whose pixels encode their own place, harness fid/; round 9: fid/probe.py, rects.py).
 //   backdrop-filter then: blur(0.25px) (under a device pixel: left out) contrast(1.2) brightness(1.05) saturate(1.1).
 //   background: rgba(255, 255, 255, .08).
 //   box-shadow: 0 4px 8px rgba(0,0,0,.22) (outside the glass: drawn by the host), 0 -8px 20px inset rgba(0,0,0,.14).
@@ -76,6 +80,8 @@ cbuffer Frame : register(b0)
     float Band;         // how far from the shoulder its curves are worked out (device pixels)
     float LinearMap;    // 1: the map's bytes read as linear light (the browser's shift); 0: as the page meant it
     float LinearFilters;// the backdrop filtered in linear light
+    float2 BoxCss;      // the source's element in whole CSS pixels, its map's texels (Faithful; 0: the box's own size / Scale)
+    float2 FilterEnd;   // where the source's backdrop-filter ends, device pixels from the box's corner (Faithful; 0: the box's end)
 };
 
 Texture2D Background : register(t0);
@@ -225,18 +231,37 @@ float2 Bytes(float2 texel, float2 box)
     return round(saturate(Shift(texel, box) / max(MaxHalf, 1e-4) + .5) * 255);
 }
 
+// The Mitchell-Netravali cubic (B = C = 1/3), the browser's high-quality filter for drawing an image up.
+float Mitchell(float t)
+{
+    t = abs(t);
+    if (t < 1) return ((7 * t - 12) * t * t + 16.0 / 3) / 6;
+    if (t < 2) return (((-7.0 / 3 * t + 12) * t - 20) * t + 32.0 / 3) / 6;
+    return 0;
+}
+
 // The shift feDisplacementMap applies at a device pixel (island pixels from the box's corner), device pixels: the map drawn up
-// to device pixels (bilinear between texels, an 8-bit image), read in linear light where the filter runs there, and scaled.
+// to device pixels, read in linear light where the filter runs there, and scaled. The browser draws the map up (feImage) with
+// its high-quality filter, the Mitchell cubic over 4 x 4 texels, clamped to the bytes' range, and not rounded back to bytes; the
+// map's texels are CSS pixels from the box's corner (the element's, snapped to the device pixel half way rounds up to). Read
+// off the browser with the coordinate backdrop (round-9 fid/probe.py): bilinear is up to a pixel off wherever a shift is near
+// a half (at 150 %, 0.7 % of the pixels: the "rounding of .5"), the cubic matches all but 0.02 %.
 float2 Displacement(float2 pixel, float2 box)
 {
     float2 at = (floor(pixel) + .5) / Scale - .5;
-    float2 byte;
+    float2 byte = 0;
     if (Scale == 1) byte = Bytes(at, box);
     else
     {
         float2 i = floor(at), f = at - i;
-        float2 b00 = Bytes(i, box), b10 = Bytes(i + float2(1, 0), box), b01 = Bytes(i + float2(0, 1), box), b11 = Bytes(i + 1, box);
-        byte = lerp(lerp(b00, b10, f.x), lerp(b01, b11, f.x), f.y);
+        // Looped, not unrolled: sixteen copies of the map's field make a shader the driver takes over a second to build.
+        [loop] for (int y = -1; y <= 2; y++)
+        {
+            float2 row = 0;
+            [loop] for (int x = -1; x <= 2; x++) row += Mitchell(f.x - x) * Bytes(i + float2(x, y), box);
+            byte += Mitchell(f.y - y) * row;
+        }
+        byte = clamp(byte, 0, 255);
     }
     float2 v = byte / 255;
     if (LinearMap > .5) v = float2(ToLinear1(v.x), ToLinear1(v.y));
@@ -290,14 +315,16 @@ float BoxCoverage(float2 p, float2 halfSize, float r, float sigma, float narrow)
 float3 Glass(float2 p, float sd)
 {
     // The element's box (device pixels): the island, reaching TopExtra above a square top.
-    float2 boxCss = float2(Size.x, Size.y + TopExtra) / Scale;
+    // The map's texels: the source's element's whole CSS pixels (offsetWidth) when given, whatever whole device pixels its edges
+    // snap to (at 125 % a 261 px element from x = 281 spans 351.25 .. 677.5 and is drawn 327 wide; its map is still 261).
+    float2 boxCss = BoxCss.x > 0 ? BoxCss : float2(Size.x, Size.y + TopExtra) / Scale;
     float2 pixel = float2(p.x, p.y + TopExtra);
 
     // The backdrop through the map, at whole pixels, then the filters.
     float2 raw = Displacement(pixel, boxCss);
     float2 shift = floor(raw + .5);
     // The backdrop the filter sees is the element's box, mirrored past its edges (the browser's backdrop-filter edge mode).
-    float2 at = floor(pixel) + shift, box = float2(Size.x, Size.y + TopExtra);
+    float2 at = floor(pixel) + shift, box = FilterEnd.x > 0 ? FilterEnd : float2(Size.x, Size.y + TopExtra);
     // Mirrored as a tiling: a shift longer than the box (a low bar's) folds back again.
     float2 period = 2 * box, t = at - period * floor(at / period);
     at = t < box ? t : period - t - 1;
@@ -305,6 +332,9 @@ float3 Glass(float2 p, float sd)
     float3 color = Background.Load(int3(read, 0)).rgb;
     if (LinearFilters > .5) color = ToSrgb(Filters(ToLinear(color)));
     else color = Filters(color);
+    // Past the filter's region (an element between device pixels whose corner snapped back: its last column or row), the
+    // backdrop as it is.
+    if (FilterEnd.x > 0 && any(floor(pixel) >= FilterEnd)) color = Background.Load(int3(int2(floor(pixel) - float2(0, TopExtra) + Pad), 0)).rgb;
 
     // Legibility: the backdrop's brightness moved affinely into the theme's band, scaled no more than it must be.
     float a = BandA, b = max(BandB, BandA + 1e-3);

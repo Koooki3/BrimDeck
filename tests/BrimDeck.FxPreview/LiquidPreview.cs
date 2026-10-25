@@ -627,7 +627,9 @@ internal static class LiquidPreview
     // (CSS pixels) and scales. For each <name>-100.png / -150.png in the folder: <name>-<scale>.png, the background with every
     // glass over it, and ...-alpha.png, the glasses' coverage (the harness adds the source's outer shadow under them).
     //   dotnet run -c Release --project tests/BrimDeck.FxPreview -- --liquid-port <backgrounds> <output folder>
-    private static readonly (string Name, int X, int Y, int W, int H, int R)[] PortGlass =
+    // LIQUID_PORT_LAYOUT ("name,x,y,w,h,r;..." in CSS pixels, fractions allowed, as the harness pages' g=) lays out other
+    // glasses: the half-pixel cases (fractional places, odd sizes) whose edges land between device pixels.
+    private static readonly (string Name, double X, double Y, double W, double H, double R)[] PortGlass =
     [
         ("lens", 80, 60, 150, 150, 75), ("pill", 280, 80, 260, 96, 48), ("nav", 600, 40, 140, 44, 22), ("small", 610, 120, 110, 110, 55),
         ("card", 820, 40, 300, 200, 24), ("panel", 80, 290, 470, 250, 26), ("capsule", 620, 300, 470, 36, 18), ("bar", 620, 400, 500, 20, 10),
@@ -636,6 +638,18 @@ internal static class LiquidPreview
     // A CSS edge at a fractional device pixel, as the browser snaps it: half way goes down and right (LIQUID_SNAP=even rounds
     // half to even instead, for comparison).
     private static int Snap(double device) => Environment.GetEnvironmentVariable("LIQUID_SNAP") == "even" ? (int)Math.Round(device) : (int)Math.Floor(device + .5);
+
+    private static (string Name, double X, double Y, double W, double H, double R)[] PortLayout()
+    {
+        string? layout = Environment.GetEnvironmentVariable("LIQUID_PORT_LAYOUT");
+        if (string.IsNullOrWhiteSpace(layout)) return PortGlass;
+        return [.. layout.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(g =>
+        {
+            var v = g.Split(',');
+            double At(int i) => double.Parse(v[i], CultureInfo.InvariantCulture);
+            return (v[0], At(1), At(2), At(3), At(4), At(5));
+        })];
+    }
 
     public static int RunPort(string backgrounds, string folder, bool faithful = true)
     {
@@ -655,12 +669,15 @@ internal static class LiquidPreview
             decoded.CopyPixels(desktop, dw * 4, 0);
             var composed = (byte[])desktop.Clone();
             var alpha = new byte[dw * dh];
-            foreach (var g in PortGlass)
+            foreach (var g in PortLayout())
             {
                 int x = Snap(g.X * scale), y = Snap(g.Y * scale), w = Snap((g.X + g.W) * scale) - Snap(g.X * scale), h = Snap((g.Y + g.H) * scale) - Snap(g.Y * scale);
-                float r = g.R * scale;
+                float r = (float)(g.R * scale);
                 var frame = new LiquidFrame(w, h, r, r, 0, 1, 1, 1, .08f, float.NaN, float.NaN, 0, 0, 0, 0, Scale: scale, Faithful: faithful,
-                    LinearMap: variant.Contains("linearmap", StringComparison.Ordinal), LinearFilters: !variant.Contains("srgbfilters", StringComparison.Ordinal));
+                    LinearMap: variant.Contains("linearmap", StringComparison.Ordinal), LinearFilters: !variant.Contains("srgbfilters", StringComparison.Ordinal),
+                    CssWidth: (float)Math.Floor(g.W + .5), CssHeight: (float)Math.Floor(g.H + .5),
+                    // The backdrop-filter's region: from the snapped corner for the exact size, cut at the exact end (Liquid.hlsl).
+                    FilterWidth: Snap(Math.Min((g.X + g.W) * scale, x + g.W * scale)) - x, FilterHeight: Snap(Math.Min((g.Y + g.H) * scale, y + g.H * scale)) - y);
                 var glass = Render(device, renderer, desktop, dw, dh, (x, y, w, h), frame, (int)Math.Ceiling(48 * scale));
                 for (int j = 0; j < h; j++)
                     for (int i = 0; i < w; i++)
