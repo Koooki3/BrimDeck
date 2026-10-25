@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- brim-notify for Windows: sends a notice to the running BrimDeck over its per-user pipe. It is published into the
+       BrimDeck folder and shares the self-contained runtime there. -->
+  <ItemGroup>
+    <ProjectReference Include="..\BrimDeck.Protocol\BrimDeck.Protocol.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>BrimDeck.Notify</AssemblyName>
+    <ApplicationIcon>..\BrimDeck\Assets\BrimDeck.ico</ApplicationIcon>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- Kept Native AOT compatible (checked by the analyzers; its AOT compile has no warnings), so that it can be published
+         with PublishAot=true where the Visual Studio C++ linker Native AOT needs is installed. Until then it runs on the
+         shared runtime (W16). -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <Import Project="..\BrimDeck\ReleaseVersion.targets" />
+
+</Project>

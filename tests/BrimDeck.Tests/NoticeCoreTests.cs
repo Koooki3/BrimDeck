@@ -10,12 +10,13 @@ internal static class NoticeCoreTests
     public static void Run(string root, Action<string, bool> check)
     {
         Hub(check);
+        LateAndRestart(root, check);
         Coordinator(check);
         History(root, check);
         Geometry(check);
         Motion(check);
         Routing(check);
-        IconRefs(check);
+        Intake(check);
         Pages(check);
         SettingsValues(root, check);
         AuditCoreTests.Run(root, check);
@@ -104,6 +105,63 @@ internal static class NoticeCoreTests
     }
 
     // A Claude Code hook in WSL: brim-notify with one replace key per session, through the distribution's agent.
+    private static NoticeMessage Hook(string eventId, string body, DateTimeOffset created, long? ageMs, string category = "success") => new()
+    {
+        Origin = "cli", AppName = "Claude Code", Title = "Claude Code · demo", Body = body, Category = category, ReplaceId = "claude-code:s1",
+        EventId = eventId, CreatedAt = created, AgeMs = ageMs
+    };
+
+    // BrimDeck restarted: the saved notices come back, then a hook keeps sending through brim-notify, early or late.
+    private static void LateAndRestart(string root, Action<string, bool> check)
+    {
+        var before = new NoticeHub();
+        var first = before.Receive(NoticeIntake.FromPipe(Hook("ev1", "done", T0, 0)), T0);
+        check("A fresh hook notice is shown and keeps its event id", first.Present && first.Notice!.EventId == "ev1");
+        var history = new NoticeHistory(Path.Combine(root, "notices-restart"), new NoticeHistory.PlainProtector());
+        history.Save(before.Notices, before.KnownApps);
+        history.Load(out var saved, out var apps);
+        check("A notice's event id is saved with it", saved.Single().EventId == "ev1");
+        history.Delete();
+
+        var now = T0.AddMinutes(38);
+        var hub = new NoticeHub();
+        hub.Load(saved, apps, now);
+        hub.MarkAllViewed();
+        var again = hub.Receive(NoticeIntake.FromPipe(Hook("ev1", "done", T0, 0)), now);
+        check("A message recorded before the restart is a duplicate after it", again.Receipt == NoticeReceipt.Duplicate && !again.Present
+            && hub.Notices.Count == 1 && hub.UnviewedCount == 0);
+
+        var late = hub.Receive(NoticeIntake.FromPipe(Hook("ev2", "waiting", T0, 38 * 60_000L, "info")), now);
+        check("A message that waited 38 minutes is recorded, unviewed, but not shown", late.Receipt == NoticeReceipt.Updated && !late.Present && late.Reason == "late"
+            && hub.Notices.Single().Body == "waiting" && hub.UnviewedCount == 1);
+
+        // The sender's own age says the message is fresh, whatever its creation time says.
+        now = now.AddMinutes(1);
+        var fresh = hub.Receive(NoticeIntake.FromPipe(Hook("ev3", "done again", now.AddMinutes(-10), 0)), now);
+        check("A fresh message is shown by the sender's own age", fresh.Present && fresh.Receipt == NoticeReceipt.Updated);
+        check("An update shown now reads as just arrived, not as old as the notice it replaced", fresh.Notice!.ReceivedAt == now
+            && fresh.Notice.EventId == "ev3" && NoticeText.Relative(fresh.Notice.ReceivedAt, now) == Loc.T("刚刚", "Just now"));
+
+        var windowsCli = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { Title = "late", EventId = "w1", CreatedAt = now.AddMinutes(-38) }), now);
+        check("A late message from a sender on Windows' clock is judged by its creation time", windowsCli.Receipt == NoticeReceipt.Accepted && !windowsCli.Present
+            && hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { Title = "now", EventId = "w2", CreatedAt = now.AddSeconds(-2) }), now).Present);
+
+        var input = NoticeIntake.FromPipe(Hook("ev5", "x", now, 2 * 60_000L));
+        check("A high priority message may be later than a normal one", NoticeHub.Late(input, NoticePriority.Normal, now) && !NoticeHub.Late(input, NoticePriority.High, now)
+            && NoticeHub.Late(input with { Age = TimeSpan.FromMinutes(6) }, NoticePriority.High, now));
+        check("Time-kind notices and Windows' notices keep their own rules", !NoticeHub.Late(input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Countdown } }, NoticePriority.Normal, now)
+            && NoticeHub.Late(input with { Timing = new NoticeTiming { Kind = NoticeTimeKind.Mail } }, NoticePriority.Normal, now)
+            && !NoticeHub.Late(Input("w") with { CreatedAt = now.AddHours(-1) }, NoticePriority.Normal, now));
+
+        var message = new NoticeMessage { Title = "t", CreatedAt = now.AddSeconds(-90) };
+        NoticeProtocol.Stamp(message, now);
+        var stamped = new NoticeMessage { Title = "t" };
+        NoticeProtocol.Stamp(stamped, now);
+        check("A sender stamps a message's age by its own clock", message.AgeMs == 90_000 && stamped.CreatedAt == now && stamped.AgeMs == 0
+            && NoticeProtocol.Deserialize(NoticeProtocol.Serialize(message))!.AgeMs == 90_000);
+        check("A negative age is refused", NoticeProtocol.Validate(new NoticeMessage { Title = "t", AgeMs = -1 }) == "bad-age");
+    }
+
     private static AttentionItem Item(string lane, AttentionKind kind, string key, string group = "", NoticePriority priority = NoticePriority.Normal, double seconds = 6, bool refresh = false)
         => new() { Lane = lane, Kind = kind, Key = key, Group = group, Priority = priority, Duration = TimeSpan.FromSeconds(seconds), Refresh = refresh };
 
@@ -366,8 +424,11 @@ internal static class NoticeCoreTests
         check("No panels, no lane", NoticeRouting.Choose([], 1, NoticeScreen.Foreground) is null);
     }
 
-    private static void IconRefs(Action<string, bool> check)
+    private static void Intake(Action<string, bool> check)
     {
+        var pipe = NoticeIntake.FromPipe(new NoticeMessage { Title = "x", AppName = " make ", Icon = "https://example.com/a.png", EventId = "e", Category = "error", Priority = "high", Distro = "Ubuntu" });
+        check("A pipe message is a command-line notice; web icons and a named distribution are ignored", pipe.Origin == NoticeOrigin.Cli && pipe.AppKey == "cli:make" && pipe.Distro is null && pipe.IconRef is null
+            && pipe.Category == NoticeCategory.Error && pipe.PriorityHint == NoticePriority.High && pipe.Capabilities == NoticeCapabilities.None && pipe.EventId == "e");
         check("File URLs become paths", NoticeIntake.IconRef("file:///C:/icons/a.png", NoticeOrigin.Cli, null) == @"file:C:\icons\a.png");
     }
 

@@ -16,6 +16,10 @@ try {
     New-Item -ItemType Directory -Force -Path $publishPath, $outputPath | Out-Null
     # Each version gets a clean output folder, so files of an earlier release never end up in this one.
     Get-ChildItem -LiteralPath $outputPath -File | Remove-Item
+    # brim-notify for Windows shares the application's self-contained runtime. It is published first, so that the application's
+    # own publish (precompiled, ReadyToRun) writes the shared files last.
+    dotnet publish src/BrimDeck.Notify/BrimDeck.Notify.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -o $publishPath
+    if ($LASTEXITCODE -ne 0) { throw 'brim-notify publish failed.' }
     dotnet publish src/BrimDeck/BrimDeck.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -p:PublishSingleFile=false -o $publishPath
     if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
     $iscc = & (Join-Path $PSScriptRoot 'Get-InnoSetup.ps1')
