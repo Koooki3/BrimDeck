@@ -576,7 +576,7 @@ internal sealed class NoticeCenter : IDisposable
         if (quiet == Quiet) return;
         Quiet = quiet;
         if (quiet) { EndResume(); Apply(Attention.SetSuppressed(true, DateTimeOffset.UtcNow, out _)); }
-        else if (Settings.NoticeWindowsSource && _windows.State is NoticeSourceState.Polling or NoticeSourceState.Events)
+        else if (Settings.NoticeWindowsSource && _windows.State is NoticeSourceState.Polling or NoticeSourceState.Events or NoticeSourceState.EventLog)
         {
             // Still held back until the Windows list has been read again (FinishResume).
             _resuming = true;

@@ -15,7 +15,9 @@ public enum NoticeSourceState
     Denied,
     // Receiving through Windows' change events (BrimDeck runs with package identity).
     Events,
-    // Receiving by reading the notification list on a timer (no package identity).
+    // Receiving by reading the notification list after each entry in Windows' push notification log (WindowsNoticeLog).
+    EventLog,
+    // Receiving by reading the notification list on a timer (no package identity, and the log cannot be used).
     Polling,
     Failed
 }
@@ -31,6 +33,9 @@ public enum NoticeSourceState
 // full reading, the only one that can conclude that a notice was removed. The first reading after starting or being granted
 // access is a baseline: notices already there are not shown again. The first after waking hands over what arrived meanwhile
 // as Missed (WindowsNoticeList). Events are raised on a worker thread.
+// Without package identity the timer is only the fallback: while Windows' push notification log can be subscribed to
+// (WindowsNoticeLog), each entry in it wakes the loop for a full reading WindowsNoticeTriggers.Coalesce later, no probe runs,
+// and the list is otherwise read every EventSafetyInterval, as with the change event.
 internal sealed class WindowsNoticeSource : IDisposable
 {
     public const string OwnAppId = "BrimDeck.Desktop";
@@ -50,6 +55,13 @@ internal sealed class WindowsNoticeSource : IDisposable
         public readonly CancellationTokenSource Stop = new();
         public UserNotificationListener? Listener;
         public bool Events;
+        // The log subscription, taken with the listener and let go with it. Broken is set from the log's thread; failed
+        // subscriptions are counted for the whole run (WindowsNoticeTriggers.MostFailures).
+        public WindowsNoticeLog? Log;
+        public volatile bool LogBroken;
+        public int LogFailures;
+        public readonly WindowsNoticeCoalescer Coalescer = new();
+        public WindowsNoticeTrigger Trigger => Events ? WindowsNoticeTrigger.Events : Log is not null ? WindowsNoticeTrigger.EventLog : WindowsNoticeTrigger.Polling;
         public DateTimeOffset LastFull = DateTimeOffset.MinValue;
         // Until when the probe looks a few ids ahead (WindowsNoticePace.ProbeIds).
         public DateTimeOffset WideUntil = DateTimeOffset.MinValue;
@@ -155,6 +167,41 @@ internal sealed class WindowsNoticeSource : IDisposable
         Wake();
     }
 
+    // An entry in the push notification log, on the log's thread: the first of a batch wakes the loop a moment later, so the
+    // batch is read once (WindowsNoticeCoalescer). A run already stopped is not woken.
+    private void LogArrived(Run run)
+    {
+        if (!run.Coalescer.Arrive()) return;
+        _ = Task.Delay(WindowsNoticeTriggers.Coalesce).ContinueWith(_ =>
+        {
+            run.Coalescer.Fired();
+            lock (_gate) { if (_run != run) return; _dirty = true; }
+            Wake();
+        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+    }
+
+    // The log stopped delivering: the loop lets go of the subscription and takes it again (StepAsync), reading in full meanwhile.
+    private void LogBroke(Run run)
+    {
+        run.LogBroken = true;
+        lock (_gate) { if (_run != run) return; _dirty = true; }
+        Wake();
+    }
+
+    private void StartLog(Run run)
+    {
+        bool enabled = !run.Events && run.LogFailures < WindowsNoticeTriggers.MostFailures && WindowsNoticeLog.Enabled();
+        if (WindowsNoticeTriggers.Choose(run.Events, enabled, run.LogFailures) != WindowsNoticeTrigger.EventLog) return;
+        run.Log = WindowsNoticeLog.Start(() => LogArrived(run), () => LogBroke(run));
+        if (run.Log is null) run.LogFailures++;
+    }
+
+    private static void CloseLog(Run run)
+    {
+        run.Log?.Dispose();
+        run.Log = null;
+    }
+
     private async Task LoopAsync(Run run)
     {
         var token = run.Stop.Token;
@@ -187,6 +234,7 @@ internal sealed class WindowsNoticeSource : IDisposable
     {
         if (run.Listener is { } listener && run.Events)
             try { listener.NotificationChanged -= Changed; } catch (Exception ex) when (ex is COMException or InvalidOperationException) { }
+        CloseLog(run);
         run.Listener = null; run.Events = false;
     }
 
@@ -206,11 +254,17 @@ internal sealed class WindowsNoticeSource : IDisposable
             var touched = new DateTimeOffset(Interlocked.Read(ref s_lastInteraction), TimeSpan.Zero);
             active = touched > _lastActivity ? touched : _lastActivity;
         }
-        var interval = quiet ? QuietInterval : run.Events ? EventSafetyInterval : !confirmed ? WindowsNoticePace.Unconfirmed(now, active, unknownWait) : FullInterval;
-        if (!full && now - run.LastFull >= interval) full = true;
+        // A broken log subscription is taken again at once (LogBroke asked for a full reading); one that keeps breaking leaves
+        // the run polling (WindowsNoticeTriggers.Choose).
+        bool retryLog = false;
+        if (run.LogBroken) { run.LogBroken = false; CloseLog(run); run.LogFailures++; retryLog = full = true; }
+        var interval = WindowsNoticeTriggers.Interval(run.Trigger, quiet, QuietInterval, EventSafetyInterval,
+            !confirmed ? WindowsNoticePace.Unconfirmed(now, active, unknownWait) : FullInterval);
+        bool timed = false;
+        if (!full && now - run.LastFull >= interval) full = timed = true;
         // The next id is taken by the next notice for this user, so finding it means something arrived. Without access the
         // lookup finds nothing, and the next full reading reports the change of access.
-        if (!full && run.Listener is { } probe && !run.Events && !quiet && newest > 0)
+        if (!full && run.Listener is { } probe && run.Trigger == WindowsNoticeTrigger.Polling && !quiet && newest > 0)
         {
             try
             {
@@ -236,8 +290,18 @@ internal sealed class WindowsNoticeSource : IDisposable
             // Only a process with package identity gets the change event; without it subscribing fails (0x80070490).
             try { run.Listener.NotificationChanged += Changed; run.Events = true; }
             catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException) { run.Events = false; }
+            retryLog = true;
         }
-        SetState(run.Events ? NoticeSourceState.Events : NoticeSourceState.Polling, "", run);
+        // Subscribed before the reading, so a toast arriving during it is not missed.
+        if (retryLog) StartLog(run);
+        // A log turned off since (by policy, say) keeps the subscription but delivers nothing: checked at each timed reading.
+        else if (timed && run.Log is not null && !WindowsNoticeLog.Enabled()) CloseLog(run);
+        SetState(run.Trigger switch
+        {
+            WindowsNoticeTrigger.Events => NoticeSourceState.Events,
+            WindowsNoticeTrigger.EventLog => NoticeSourceState.EventLog,
+            _ => NoticeSourceState.Polling
+        }, "", run);
         int covers;
         lock (_gate) { _dirty = false; covers = _refreshes; }
         run.LastFull = now;
