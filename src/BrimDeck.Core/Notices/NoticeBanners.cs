@@ -109,10 +109,13 @@ public static class NoticeBanners
     // An application id that can name a key under SettingsKey: a registry path of non-empty parts (Windows keeps a desktop
     // program without a registered id as "{known folder}\folder\app.exe", nested keys), none of them "." or "..", without
     // control characters. Tray balloons (named by a number that changes), file paths ("C:\...") and links, which the Start
-    // menu lists but Windows never names a notification by, are left out.
+    // menu lists but Windows never names a notification by, are left out; a colon or slash may only follow the "!" of a
+    // packaged id, as in an Edge web app's ("Microsoft.MicrosoftEdge.Stable_8wekyb3d8bbwe!https://web.whatsapp.com/").
     public static bool Usable(string? appId)
     {
-        if (string.IsNullOrEmpty(appId) || appId.Length > 256 || appId.Any(char.IsControl) || appId.Contains(':') || appId.Contains('/')) return false;
+        if (string.IsNullOrEmpty(appId) || appId.Length > 256 || appId.Any(char.IsControl)) return false;
+        int bang = appId.IndexOf('!');
+        if (appId.IndexOfAny([':', '/']) is var odd and >= 0 && (bang < 0 || odd < bang)) return false;
         if (appId.StartsWith(WindowsNoticeApps.TrayPrefix, StringComparison.OrdinalIgnoreCase)) return false;
         return appId.Split('\\').All(part => part.Length > 0 && part.Trim().Length > 0 && part is not "." and not "..");
     }

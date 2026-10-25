@@ -44,7 +44,9 @@ internal static class NoticeBannerTests
     {
         check("Banners: packaged and registered ids are usable", NoticeBanners.Usable("Microsoft.VisualStudioCode") && NoticeBanners.Usable("Claude_pzs8sxrjxfjjc!Claude"));
         check("Banners: a desktop program's known-folder id is kept as nested keys", NoticeBanners.Usable(@"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"));
-        check("Banners: Start menu file paths and links are not notification ids", !NoticeBanners.Usable(@"C:\Git\cmd\git-gui.exe") && !NoticeBanners.Usable("https://example.com/"));
+        check("Banners: Start menu file paths and links are not notification ids", !NoticeBanners.Usable(@"C:\Git\cmd\git-gui.exe") && !NoticeBanners.Usable("https://example.com/")
+            && !NoticeBanners.Usable(@"\\server\share\tool.exe") && !NoticeBanners.Usable("a/b!c"));
+        check("Banners: an Edge web app's id, with its site after the \"!\", is usable", NoticeBanners.Usable("Microsoft.MicrosoftEdge.Stable_8wekyb3d8bbwe!https://web.whatsapp.com/"));
         check("Banners: tray balloons are never touched", !NoticeBanners.Usable("NotifyIconGeneratedAumid_123"));
         check("Banners: ids that could leave the key or are empty are refused", !NoticeBanners.Usable(@"..\..\Run") && !NoticeBanners.Usable(@"a\\b")
             && !NoticeBanners.Usable(@"\a") && !NoticeBanners.Usable("a\nb") && !NoticeBanners.Usable("") && !NoticeBanners.Usable(new string('a', 257)));
