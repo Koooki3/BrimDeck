@@ -53,7 +53,70 @@ internal static class LiquidPreview
         Detail(device, renderer, folder);
         Time(device, renderer);
         failures += Composition(device, renderer);
+        failures += SwitchContrast(device, renderer);
         return failures == 0 ? 0 : 1;
+    }
+
+    // Automatic liquid glass's turn, as GlassBackdrop and App run it: the glass eases from the old look to the new over 320 ms
+    // (Soft.InOut), and the text (one glyph run) turns from the old look's ink to the new one's in one step once the glass
+    // passes LiquidFrame.TextTurn over the measured backdrop. Ten points across the turn, over black, a dark gray, a light
+    // gray (#D8D8D8) and white, to dark and to light: the text then shown must keep 3:1 over the glass under it (the worst
+    // 5 percent of the pixels in the middle of the capsule).
+    private static int SwitchContrast(ID3D11Device device, LiquidRenderer renderer)
+    {
+        const double scale = 1.5;
+        int w = (int)(228 * scale), h = (int)(40 * scale), pad = (int)Math.Ceiling(48 * scale);
+        int dw = w + 2 * pad, dh = h + 2 * pad;
+        var light = LiquidFrame.Preset(false, w, h, (float)(20 * scale), (float)(20 * scale), 0, (float)scale);
+        var deep = LiquidFrame.Preset(true, w, h, (float)(20 * scale), (float)(20 * scale), 0, (float)scale);
+        (byte R, byte G, byte B) darkInk = (0x10, 0x12, 0x17), lightInk = (0xF6, 0xF7, 0xF9);
+        double worst = double.MaxValue;
+        string worstAt = "";
+        foreach (var (name, level) in new[] { ("black", 10), ("dark gray", 64), ("#D8 gray", 0xD8), ("white", 255) })
+            foreach (bool toDark in new[] { true, false })
+            {
+                var desktop = new byte[dw * dh * 4];
+                for (int i = 0; i < desktop.Length; i += 4) { desktop[i] = desktop[i + 1] = desktop[i + 2] = (byte)level; desktop[i + 3] = 255; }
+                double luma = level / 255.0;
+                bool crossed = false;
+                for (int point = 0; point < 10; point++)
+                {
+                    double t = point / 9.0;
+                    double blend = Soft.InOut.Ease(t);
+                    double dark = toDark ? blend : 1 - blend;
+                    // The turn is looked for on every frame (60 a second over the 320 ms), as GlassBackdrop does.
+                    for (int frame = 0; frame <= (int)Math.Round(t * 320 / 16.0); frame++)
+                    {
+                        double f = Math.Min(1, frame * 16 / 320.0), b = Soft.InOut.Ease(f);
+                        crossed |= LiquidFrame.TextTurns(luma, toDark ? b : 1 - b, toDark, f >= 1);
+                    }
+                    var glass = Render(device, renderer, desktop, dw, dh, (pad, pad, w, h), LiquidFrame.Blend(light, deep, (float)dark), pad);
+                    // The ink shown: the old look's until the turn, then the new one's.
+                    bool inkLight = crossed ? toDark : !toDark;
+                    var ink = inkLight ? lightInk : darkInk;
+                    var under = new List<double>();
+                    for (int y = h * 3 / 10; y < h * 7 / 10; y++)
+                        for (int x = w * 3 / 10; x < w * 7 / 10; x++)
+                        {
+                            int o = (y * w + x) * 4;
+                            under.Add(Luminance(glass[o + 2], glass[o + 1], glass[o]));
+                        }
+                    under.Sort();
+                    double bg = inkLight ? under[(int)(under.Count * .95)] : under[(int)(under.Count * .05)];
+                    double fg = Luminance(ink.R, ink.G, ink.B);
+                    double ratio = (Math.Max(bg, fg) + .05) / (Math.Min(bg, fg) + .05);
+                    if (ratio < worst) { worst = ratio; worstAt = FormattableString.Invariant($"over {name} to {(toDark ? "dark" : "light")} at {t * 320:0} ms"); }
+                }
+            }
+        bool ok = worst >= 3;
+        Console.WriteLine(FormattableString.Invariant($"{(ok ? "PASS" : "FAIL")}: automatic glass turn: the text shown keeps {worst:0.00}:1 at worst over the glass, ten points per turn ({worstAt})"));
+        return ok ? 0 : 1;
+
+        static double Luminance(byte r, byte g, byte b)
+        {
+            static double Channel(byte v) { double c = v / 255.0; return c <= .04045 ? c / 12.92 : Math.Pow((c + .055) / 1.055, 2.4); }
+            return .2126 * Channel(r) + .7152 * Channel(g) + .0722 * Channel(b);
+        }
     }
 
     private static ID3D11Device CreateDevice()

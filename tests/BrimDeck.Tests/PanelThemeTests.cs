@@ -136,10 +136,15 @@ internal static class PanelThemeTests
             bool confirmed = !look.Feed(.2, 1000) && !look.Feed(.2, 1000 + GlassAppearance.Confirm - 1) && look.Feed(.2, 1000 + GlassAppearance.Confirm) && look.Dark;
             long at = 1000 + GlassAppearance.Confirm;
             bool held = !look.Feed(.9, at + 10) && !look.Feed(.9, at + GlassAppearance.Hold - 1) && look.Feed(.9, at + GlassAppearance.Hold) && !look.Dark;
-            // A flicker shorter than Confirm (a cut in a video) never changes the look.
+            // A flicker shorter than Confirm (a video's brightness wandering) never changes the look.
             long later = at + 5000;
-            bool flicker = !look.Feed(.1, later) && !look.Feed(.9, later + 100) && !look.Feed(.1, later + 200) && !look.Feed(.1, later + 200 + GlassAppearance.Confirm - 1) && !look.Dark;
+            bool flicker = !look.Feed(.62, later - 100) && !look.Feed(.35, later) && !look.Feed(.62, later + 100) && !look.Feed(.35, later + 200) && !look.Feed(.35, later + 200 + GlassAppearance.Confirm - 1) && !look.Dark;
             check("Automatic liquid glass turns with hysteresis, confirmation and a hold, never flickering", steady && confirmed && held && flicker && !look.Feed(double.NaN, later + 9999));
+            // A big jump (a window opened behind the island) turns on its first measure, but never inside the hold.
+            var jump = new GlassAppearance(dark: true);
+            bool first = !jump.Feed(.05, 0) && jump.Feed(.85, 10) && !jump.Dark;
+            bool hold = !jump.Feed(.05, 200) && !jump.Feed(.05, 10 + GlassAppearance.Hold - 1) && jump.Feed(.05, 10 + GlassAppearance.Hold) && jump.Dark;
+            check("Automatic liquid glass turns at once on a big jump of brightness, the hold still applying", first && hold);
         }
 
         // Theme files and ids.

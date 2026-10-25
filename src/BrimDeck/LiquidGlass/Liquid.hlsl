@@ -258,12 +258,18 @@ float3 Glass(float2 p, float sd, float2 n)
 
     // The band, adaptively: only what lies outside it is moved, each pixel just far enough, with a soft knee. Light glass
     // lifts toward white (a veil), dark glass smokes toward black, both keeping the hue. Relaxed toward the rim.
-    float relax = EdgeBand * rim * sqrt(rim);
-    float low = Low * (1 - relax), high = lerp(High, 1, relax);
+    // The relaxing fades out as the background lies far outside the band (light glass over a dark page, dark glass over a
+    // light one, as while automatic glass is about to turn): a dark rim around a milky middle would read as a metal tube.
     luma = Luma(color);
+    float outside = max(Low - luma, luma - High);
+    float relax = EdgeBand * rim * sqrt(rim) * saturate(1 - outside / .35);
+    float low = Low * (1 - relax), high = lerp(High, 1, relax);
     float held = luma;
     if (low > 0) held = SoftMax(held, low, .14);
     if (high < 1) held = SoftMin(held, high, .14);
+    // How far the glass is lifting or smoking the background here: its light is held back by as much, so a highlight on
+    // a veil never blows out into a white chrome patch.
+    float veil = saturate(abs(held - luma) / .5);
     if (held > luma) color += (1 - color) * saturate((held - luma) / max(1 - luma, 1e-3));
     else
     {
@@ -295,7 +301,7 @@ float3 Glass(float2 p, float sd, float2 n)
     float2 toPointer = p - Pointer;
     float glow = Near * exp(-dot(toPointer, toPointer) / (Glow * Glow));
     float lift = (1 + .35 * Hover) * (1 + .4 * Press) * (1 + .8 * glow);
-    float amount = saturate((rimLight * .85 + inner + spec * .15 + glow * .06) * lift * Gain);
+    float amount = saturate((rimLight * .85 + (inner + spec * .15) * (1 - .7 * veil) + glow * .06) * lift * Gain * (1 - .35 * veil));
     float3 tone = lerp(float3(1, 1, 1), float3(.88, .93, 1), saturate(Dark));
     color = 1 - (1 - color) * (1 - amount * tone);
     return saturate(color);

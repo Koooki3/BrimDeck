@@ -77,6 +77,21 @@ internal readonly record struct LiquidFrame(
         };
     }
 
+    // The glass's brightness where the text of either look keeps 3:1 (dark text above about 0.38, light text below about
+    // 0.58): automatic liquid glass turns its text there. TextTurns: whether glass blended dark (0 light .. 1 dark) over a
+    // backdrop of this mean luma has reached it on its way toward the look toDark, or has arrived.
+    public const double TextTurn = .48;
+    public static bool TextTurns(double luma, double dark, bool toDark, bool arrived)
+    {
+        if (arrived) return true;
+        var light = Preset(false, 1, 1, 0, 0, 0, 1);
+        var deep = Preset(true, 1, 1, 0, 0, 0, 1);
+        double t = Math.Clamp(dark, 0, 1);
+        double low = light.BandLow + (deep.BandLow - light.BandLow) * t, high = light.BandHigh + (deep.BandHigh - light.BandHigh) * t;
+        double shown = Math.Clamp(luma, low, Math.Max(low, high));
+        return toDark ? shown <= TextTurn : shown >= TextTurn;
+    }
+
     // The bevel: 14 DIP on the open panel, and under half the height on the small collapsed island, so the rim stays a rim.
     private static float Bevel(int height, float scale) => MathF.Min(14 * scale, height * .4f);
 }
@@ -222,6 +237,8 @@ internal sealed class LiquidRenderer : IDisposable
 
     // The mean luma (0..1, sRGB) of the background under the island, from the last copy whose answer is in; false while none
     // is (the next frame's copy goes out once this one is read).
+    // Whether a measure is out, to be read on a later frame.
+    public bool Measuring => _measuring;
     public bool TryBackdrop(out double luma)
     {
         luma = 0;

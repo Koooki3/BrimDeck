@@ -129,6 +129,17 @@ internal sealed class GlassBackdrop : IDisposable
     // once (no fade) for the first decision.
     public Func<bool>? AutoLook { get; set; }
     public event Action<bool, bool>? Look;
+    // A turn of automatic liquid glass: the glass eases toward the new look first (Lead), and once what it shows over the
+    // backdrop reaches the brightness where either look's text reads (LiquidFrame.TextTurn), Crossed is raised and the theme,
+    // the text with it, turns at once; the glass goes on easing. The text is never shown twice, and keeps its contrast.
+    public event Action? Crossed;
+    private bool? _lead;
+    private bool _crossed;
+    public void Lead(bool dark)
+    {
+        _lead = dark; _crossed = false;
+        Follow(0);
+    }
     private readonly BackdropLook _look = new();
     // BRIMDECK_LIQUID_DEBUG=1: a line in %LOCALAPPDATA%\BrimDeck\liquid.log every DebugEveryMs and at every decision.
     private static readonly bool LiquidDebug = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_DEBUG") == "1";
@@ -210,7 +221,8 @@ internal sealed class GlassBackdrop : IDisposable
         double dt = _easedAt == 0 ? 16 : Math.Clamp(now - _easedAt, 0, 100);
         _easedAt = now;
         double hover = _pointer is null ? 0 : 1, press = _pointerDown ? 1 : 0;
-        double dark = PanelTheme.Current.IsDark ? 1 : 0;
+        if (_lead == PanelTheme.Current.IsDark) _lead = null;
+        double dark = (_lead ?? PanelTheme.Current.IsDark) ? 1 : 0;
         if (_dark < 0 || !Soft.Enabled) _dark = _darkFrom = _darkTo = dark;
         else if (dark != _darkTo && PanelTheme.Generation == PanelTheme.SnapGeneration) _dark = _darkFrom = _darkTo = dark;
         else if (dark != _darkTo) { _darkFrom = _dark; _darkTo = dark; _darkSince = now; }
@@ -219,6 +231,11 @@ internal sealed class GlassBackdrop : IDisposable
         {
             double progress = Math.Clamp((now - _darkSince) / DarkFadeMs, 0, 1);
             _dark = progress >= 1 ? _darkTo : _darkFrom + (_darkTo - _darkFrom) * Soft.InOut.Ease(progress);
+        }
+        if (_lead is { } lead && !_crossed && LiquidFrame.TextTurns(double.IsNaN(_look.Luma) ? .5 : _look.Luma, _dark, lead, _dark == _darkTo))
+        {
+            _crossed = true;
+            Crossed?.Invoke();
         }
         if (!Soft.Enabled) { _hover = hover; _press = press; return false; }
         _hover += (hover - _hover) * (1 - Math.Exp(-dt / (hover > _hover ? HoverInMs : HoverOutMs) * 3));
@@ -477,7 +494,7 @@ internal sealed class GlassBackdrop : IDisposable
     // A comparison out is read soon; the desktop is looked at often while the pointer is over the island or it changed lately
     // (a video), and less often once it has been still for a while, so a change still shows within about IdlePollMs.
     private TimeSpan PollInterval() => TimeSpan.FromMilliseconds(
-        _source is { Comparing: true } ? SettleMs
+        _source is { Comparing: true } || _renderer is { Measuring: true } ? SettleMs
         : _pointer is not null || Environment.TickCount64 - _changedAt < IdleAfterMs ? PollMs
         : IdlePollMs);
 

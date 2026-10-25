@@ -60,6 +60,9 @@ internal static class PanelTheme
     // A theme change to show at once, without the fade (the first look automatic liquid glass decides): the Generation it
     // becomes. MainWindow.ThemeFade and GlassBackdrop skip their fades into it.
     public static int SnapGeneration { get; set; } = -1;
+    // A theme change whose text turns in one step, with no crossfade of the old look over the new (automatic liquid glass's
+    // turn, where the glass itself eases across): MainWindow.ThemeFade skips it; the glass does not.
+    public static int QuietGeneration { get; set; } = -1;
     // Whether the chosen theme is one that follows something outside the theme file ("system", "liquid-glass").
     public static bool Follows(string? id) => PanelThemes.NormalizeId(id) is PanelThemes.SystemId or PanelThemes.GlassAuto;
 

@@ -31,6 +31,7 @@ public partial class MainWindow
             // Automatic liquid glass takes its look from what lies behind the island (App.BackdropMeasured).
             _glass.AutoLook = () => _app.AutoLookFrom(this);
             _glass.Look += (dark, instant) => _app.TurnGlass(this, dark, instant);
+            _glass.Crossed += () => _app.GlassCrossed(this);
             // Liquid glass lights its rim from the pointer and presses with it: where the pointer is over the island, and
             // whether the button is down (seen even when a button under it handles the click).
             Island.MouseMove += (_, e) => _glass.Pointer(e.GetPosition(Island), e.LeftButton == MouseButtonState.Pressed);
@@ -50,6 +51,9 @@ public partial class MainWindow
         if (glass) { Island.LayoutUpdated += CutShadow; CutShadow(null, EventArgs.Empty); }
         else { Island.LayoutUpdated -= CutShadow; ShadowHost.Clip = null; _shadowCutKey = null; }
     }
+
+    // Automatic liquid glass turning: the glass eases toward the new look ahead of the theme (GlassBackdrop.Lead).
+    internal void LeadGlass(bool dark) => _glass?.Lead(dark);
 
     // Liquid glass draws its own rim light and edge, following the pointer; the island's painted rim and edge light would lie
     // over it as a stroke (a white ring on dark glass, a 3D button's edge), so they step aside while it is shown and come back

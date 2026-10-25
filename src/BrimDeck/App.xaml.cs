@@ -217,15 +217,42 @@ public partial class App : Application
         if (!reload) _settingsWindow?.PanelThemeChanged();
     }
     // Automatic liquid glass ("liquid-glass"): the main island's glass measures what lies behind it and decides the look
-    // (GlassBackdrop, BackdropLook, GlassAppearance). A change is a change of theme, so the island dissolves into the other look
-    // as for any theme change (MainWindow.ThemeFade) while the glass eases across (GlassBackdrop); the first decision, at start
-    // or when the theme is chosen, is shown at once (PanelTheme.SnapGeneration).
+    // (GlassBackdrop, BackdropLook, GlassAppearance). The first decision, at start or when the theme is chosen, is shown at
+    // once (PanelTheme.SnapGeneration). A later one turns the glass first (MainWindow.LeadGlass); the theme, and with it every
+    // text and icon brush, turns in one step when the glass passes the brightness where both looks' text reads
+    // (GlassBackdrop.Crossed), without the theme's crossfade (PanelTheme.QuietGeneration), so no glyph is ever drawn twice.
+    // TurnByMs is the latest the theme follows, should the glass not report (no liquid glass shown).
+    private const int TurnByMs = 600;
+    private System.Windows.Threading.DispatcherTimer? _turnBy;
     internal bool AutoLookFrom(MainWindow deck) => !Exiting && deck == Deck && PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.GlassAuto;
     internal void TurnGlass(MainWindow deck, bool dark, bool instant)
     {
         if (!AutoLookFrom(deck) || PanelTheme.GlassDark == dark && PanelTheme.Current.IsDark == dark) return;
         PanelTheme.GlassDark = dark;
-        if (instant) PanelTheme.SnapGeneration = PanelTheme.Generation + 1;
+        if (instant || !Soft.Enabled)
+        {
+            _turnBy?.Stop();
+            PanelTheme.SnapGeneration = PanelTheme.Generation + 1;
+            ApplyPanelTheme(systemChanged: true);
+            return;
+        }
+        foreach (var each in Decks.ToList()) each.LeadGlass(dark);
+        if (_turnBy is null)
+        {
+            _turnBy = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(TurnByMs) };
+            _turnBy.Tick += (_, _) => TurnTheme();
+        }
+        _turnBy.Stop(); _turnBy.Start();
+    }
+    internal void GlassCrossed(MainWindow deck)
+    {
+        if (deck == Deck) TurnTheme();
+    }
+    private void TurnTheme()
+    {
+        _turnBy?.Stop();
+        if (Exiting || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto || PanelTheme.Current.IsDark == PanelTheme.GlassDark) return;
+        PanelTheme.QuietGeneration = PanelTheme.Generation + 1;
         ApplyPanelTheme(systemChanged: true);
     }
     // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
