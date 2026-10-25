@@ -220,7 +220,7 @@ internal sealed partial class FxSurface : FrameworkElement
     private void EnsureDressed()
     {
         // "System" and the theme it stands for share a palette, so the choice itself is part of what the layer was dressed for.
-        bool system = Preview?.SystemTheme ?? PanelThemes.NormalizeId(Settings?.PanelTheme) == PanelThemes.SystemId;
+        bool system = Preview?.SystemTheme ?? PanelTheme.Follows(Settings?.PanelTheme);
         int generation = Preview?.Palette is null ? PanelTheme.Generation : _generation < 0 ? 0 : _generation;
         if (_generation != generation || system != _dressedSystem || _generation < 0)
         {

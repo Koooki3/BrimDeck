@@ -41,14 +41,17 @@ public sealed partial class SettingsWindow
         var chosen = PanelThemes.NormalizeId(S.PanelTheme);
         var users = PanelTheme.UserThemes;
         ThemeSection(Loc.T("基础", "Basics"));
-        ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
-            .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
+        // Automatic liquid glass comes first among the glass themes, its fixed light and dark looks after it.
+        var basics = PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card).ToList();
+        int glass = basics.FindIndex(card => card.Id == PanelThemes.GlassLight);
+        basics.Insert(glass < 0 ? basics.Count : glass, (PanelThemes.GlassAuto, Loc.T("液态玻璃（自动）", "Liquid Glass (auto)"), PanelTheme.Find(PanelThemes.GlassAuto)));
+        ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)), .. basics], chosen);
         ThemeSection(Loc.T("主题扩展", "Theme extensions"));
         ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Extension).Select(Card)], chosen);
         CustomSection(users, chosen);
         _themeDetails = Collect(() => ThemeDetails(chosen, users)); _content.Children.Add(_themeDetails);
         // Miniatures of cards no longer on the page (a theme file renamed or removed) are let go.
-        var cards = new[] { PanelThemes.SystemId }.Concat(PanelThemes.BuiltIns.Select(t => t.Id)).Concat(users.Where(t => t.Usable).Select(t => t.Id)).ToHashSet();
+        var cards = new[] { PanelThemes.SystemId, PanelThemes.GlassAuto }.Concat(PanelThemes.BuiltIns.Select(t => t.Id)).Concat(users.Where(t => t.Usable).Select(t => t.Id)).ToHashSet();
         foreach (var key in _themePreviews.Keys.Where(key => !cards.Contains(key.Card) || key.Language != Loc.Language).ToList()) _themePreviews.Remove(key);
         static (string Id, string Name, PanelThemeInfo Theme) Card(PanelThemeInfo theme) => (theme.Id, theme.DisplayName, theme);
     }
@@ -125,12 +128,15 @@ public sealed partial class SettingsWindow
     {
         bool kept = PanelTheme.KeptLastGood;
         var theme = kept ? PanelTheme.ShownTheme : PanelTheme.Find(chosen);
-        bool missing = !kept && chosen != PanelThemes.SystemId && !PanelThemes.IsBuiltIn(chosen) && users.All(t => !t.Usable || t.Id != chosen);
+        bool missing = !kept && !PanelTheme.Follows(chosen) && !PanelThemes.IsBuiltIn(chosen) && users.All(t => !t.Usable || t.Id != chosen);
         SectionTitle(Loc.T("当前主题", "Current theme"));
         var rows = new List<FrameworkElement>();
-        string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")") : theme.DisplayName;
+        string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")")
+            : chosen == PanelThemes.GlassAuto ? Loc.T("液态玻璃（自动，当前：", "Liquid Glass (auto, now: ") + theme.DisplayName + Loc.T("）", ")") : theme.DisplayName;
         rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
-        string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
+        string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.")
+            : chosen == PanelThemes.GlassAuto ? Loc.T("清透的液态玻璃，按岛后方内容的明暗自动换成浅色或深色玻璃，文字随之切换，始终清晰可读。",
+                "Clear liquid glass that turns light or dark with what lies behind the island, its text following, so it always reads.") : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         if (theme.File.Night is not null) rows.Add(DaylightRow(theme.File));
         // Glass needs Windows' transparency effects; without them it is drawn opaque, and the page says why.

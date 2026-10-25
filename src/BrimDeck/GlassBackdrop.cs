@@ -119,6 +119,14 @@ internal sealed class GlassBackdrop : IDisposable
     // Hover and press, eased toward the pointer's state; the time they were last eased.
     private double _hover, _press;
     private long _easedAt;
+    // How dark the glass's look is now (0 light .. 1 dark): when the theme turns between them (automatic liquid glass), the
+    // glass eases across over the theme's own fade (MainWindow.ThemeFadeMs, Soft.InOut) while the old text fades out over it.
+    private double _dark = -1, _darkFrom, _darkTo;
+    private long _darkSince;
+    private const double DarkFadeMs = 320;
+    // What lies behind the island now (its mean luma, 0..1), for automatic liquid glass; measured on the frames drawn and read
+    // on later ones (LiquidRenderer.TryBackdrop).
+    public event Action<double>? Backdrop;
     // While the island holds still, the desktop under it is looked at for a change (a video, a window moving): every PollMs
     // while the pointer is over the island or the desktop changed in the last IdleAfterMs, else every IdlePollMs; SettleMs
     // after a comparison went out, to read its answer.
@@ -195,12 +203,21 @@ internal sealed class GlassBackdrop : IDisposable
         double dt = _easedAt == 0 ? 16 : Math.Clamp(now - _easedAt, 0, 100);
         _easedAt = now;
         double hover = _pointer is null ? 0 : 1, press = _pointerDown ? 1 : 0;
+        double dark = PanelTheme.Current.IsDark ? 1 : 0;
+        if (_dark < 0 || !Soft.Enabled) _dark = _darkFrom = _darkTo = dark;
+        else if (dark != _darkTo) { _darkFrom = _dark; _darkTo = dark; _darkSince = now; }
+        bool turning = _dark != _darkTo;
+        if (turning)
+        {
+            double progress = Math.Clamp((now - _darkSince) / DarkFadeMs, 0, 1);
+            _dark = progress >= 1 ? _darkTo : _darkFrom + (_darkTo - _darkFrom) * Soft.InOut.Ease(progress);
+        }
         if (!Soft.Enabled) { _hover = hover; _press = press; return false; }
         _hover += (hover - _hover) * (1 - Math.Exp(-dt / (hover > _hover ? HoverInMs : HoverOutMs) * 3));
         _press += (press - _press) * (1 - Math.Exp(-dt / (press > _press ? PressDownMs : PressUpMs) * 3));
         if (Math.Abs(_hover - hover) < .003) _hover = hover;
         if (Math.Abs(_press - press) < .003) _press = press;
-        return _hover != hover || _press != press;
+        return _hover != hover || _press != press || turning;
     }
 
     private Frame? Measure()
@@ -342,19 +359,23 @@ internal sealed class GlassBackdrop : IDisposable
             double alpha = tint(), whole = glass.Tint.A / 255d;
             float open = whole < 1 ? (float)Math.Clamp((alpha - whole) / ((1 - whole) * .35), 0, 1) : 0;
             var c = shown.Corners;
-            bool dark = PanelTheme.Current.IsDark;
-            var preset = LiquidFrame.Preset(dark, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale);
+            // Between the looks while the theme turns between light and dark glass; the theme's band only once there.
+            double darkness = _dark < 0 ? (PanelTheme.Current.IsDark ? 1 : 0) : _dark;
+            var preset = LiquidFrame.Blend(LiquidFrame.Preset(false, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale),
+                LiquidFrame.Preset(true, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale), (float)darkness);
+            bool settled = darkness is 0 or 1;
             var pointer = _pointer;
             _liquidFrame = preset with
             {
-                BandLow = glass.Held ? MathF.Max(preset.BandLow, (float)glass.Low) : preset.BandLow,
-                BandHigh = glass.Held ? MathF.Min(preset.BandHigh, (float)glass.High) : preset.BandHigh,
+                BandLow = glass.Held && settled ? MathF.Max(preset.BandLow, (float)glass.Low) : preset.BandLow,
+                BandHigh = glass.Held && settled ? MathF.Min(preset.BandHigh, (float)glass.High) : preset.BandHigh,
                 Open = open,
                 PointerX = pointer is { } p ? (float)(p.X * scale) : float.NaN, PointerY = pointer is { } q ? (float)(q.Y * scale) : float.NaN,
                 Hover = (float)_hover, Press = (float)_press, Morph = (float)_moving
             };
             _liquidRegion = region;
             _renderer.Render(background, _pad, _liquidFrame);
+            ReportBackdrop();
             _liquid!.Offset = new Vector3(x, y, 0);
             _liquid.Size = new Vector2(width, height);
             _liquidClip!.Offset = new Vector2((float)(left - x), (float)(top - y));
@@ -368,6 +389,12 @@ internal sealed class GlassBackdrop : IDisposable
             _liquidFailed = true; ReleaseLiquid();
             return ShowLiquid(false);
         }
+    }
+
+    // The last measure of what lies behind, once its answer is in.
+    private void ReportBackdrop()
+    {
+        if (_renderer is not null && Backdrop is not null && _renderer.TryBackdrop(out double luma)) Backdrop(luma);
     }
 
     private bool ShowLiquid(bool shown)
@@ -399,6 +426,7 @@ internal sealed class GlassBackdrop : IDisposable
                 {
                     if (!_source.Update(_liquidRegion, out bool changed) || _source.Texture is not { } background) { _poll!.Stop(); Follow(0); return; }
                     if (changed) { _renderer.Render(background, _pad, _liquidFrame); _changedAt = Environment.TickCount64; }
+                    ReportBackdrop();
                     var interval = PollInterval();
                     if (_poll!.Interval != interval) _poll.Interval = interval;
                 }

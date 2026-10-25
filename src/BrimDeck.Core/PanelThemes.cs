@@ -32,6 +32,8 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 public static partial class PanelThemes
 {
     public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
+    // "liquid-glass": liquid glass that takes its light or dark look from what lies behind the island (GlassAppearance).
+    public const string GlassAuto = "liquid-glass";
     public const string GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", IslandHoliday = "island-holiday", PixelBlocks = "pixel-blocks";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2;
 
@@ -147,12 +149,14 @@ public static partial class PanelThemes
         return text.Length > 64 ? text[..64] : text;
     }
 
-    // The theme an id stands for, among the built-in themes and the given user themes. "system" follows the Windows app theme.
+    // The theme an id stands for, among the built-in themes and the given user themes. "system" follows the Windows app theme,
+    // "liquid-glass" the look of what lies behind the glass (glassDark).
     // An id that names nothing, such as a theme whose file was removed, falls back to the dark theme; the setting is kept.
-    public static PanelThemeInfo Find(string id, bool systemDark, IReadOnlyList<PanelThemeInfo> user)
+    public static PanelThemeInfo Find(string id, bool systemDark, IReadOnlyList<PanelThemeInfo> user, bool glassDark = false)
     {
         id = NormalizeId(id);
         if (id == SystemId) id = systemDark ? Dark : Light;
+        else if (id == GlassAuto) id = glassDark ? GlassDark : GlassLight;
         return BuiltIn(id) ?? user.FirstOrDefault(theme => theme.Usable && theme.Id == id) ?? BuiltIn(Dark)!;
     }
 }

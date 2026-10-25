@@ -187,6 +187,12 @@ float SoftMax(float a, float b, float k) { float h = max(k - abs(a - b), 0) / k;
 float SoftMin(float a, float b, float k) { float h = max(k - abs(a - b), 0) / k; return min(a, b) - h * h * k * .25; }
 
 // The surface's slope over the bevel at x (0 at the rim, 1 where it is flat): the convex squircle z = (1 - (1 - x)^4)^(1/4).
+float Profile(float x)
+{
+    float u = 1 - saturate(x);
+    return pow(max(1 - u * u * u * u, 0), .25);
+}
+
 float Slope(float x)
 {
     float u = 1 - clamp(x, .004, 1);
@@ -202,12 +208,16 @@ float3 Glass(float2 p, float sd, float2 n)
     float x = saturate(depth / thickness);
     float rim = 1 - x;
     float slope = Slope(x);
-    float3 surface = normalize(float3(n * slope, 1));
-    // The ray from the eye refracted into the slab: how far it leaves the vertical, as a tangent (1.118 at a vertical wall).
+    float3 surface = normalize(float3(n * slope * .8, 1));
+    // The ray from the eye refracted into the slab (IOR 1.5) travels through the glass down to the background: how far it
+    // lands from where it entered is its tangent off the vertical times the glass's height there, which rises with the bevel
+    // (the kube.io method). Steep at the rim, the glass is thin there, so the very edge shifts little and nothing smears; the
+    // shift peaks inside the bevel, where the magnification shows, and is nothing over the flat middle.
     float3 ray = refract(float3(0, 0, -1), surface, 1 / 1.5);
-    float bend = length(ray.xy) / max(-ray.z, 1e-3) / 1.118;
+    float tilt = length(ray.xy) / max(-ray.z, 1e-3);
+    float height = thickness * 1.6 * Profile(x) + 4 * Scale;
     float strength = Refraction * (1 + .7 * Press + .6 * Morph);
-    float shift = strength * thickness * bend;
+    float shift = strength * tilt * height;
 
     // The convex rim bends the ray inward: the background is read from further inside, magnified out to the edge. Red bends
     // a little less than blue, only near the outer edge.
@@ -217,12 +227,12 @@ float3 Glass(float2 p, float sd, float2 n)
     // text; a calm one stays clear.
     // Only inside the rim's outer part, where the frost begins (the edge's subsamples never need it).
     float busy = 0;
-    [branch] if (x > .15) busy = saturate(abs(Luma(Read(at, Frost)) - Luma(Read(at, Frost + 3))) * 5);
+    [branch] if (x > .6) busy = saturate(abs(Luma(Read(at, Frost)) - Luma(Read(at, Frost + 3))) * 5);
     float frostLevel = Frost + .8 * Open + 1.2 * busy;
-    float level = frostLevel * smoothstep(.15, 1, x);
+    float level = frostLevel * smoothstep(.6, 1, x);
     // The middle's frost: a few reads on a small golden-angle spiral, so the mips' blocks do not show. Where it covers
     // wholly (the flat middle, most of the open panel) the sharp reads are not made.
-    float frost = smoothstep(.35, 1, x);
+    float frost = smoothstep(.7, 1, x);
     float3 color = 0;
     [branch] if (frost < 1)
     {
@@ -248,7 +258,7 @@ float3 Glass(float2 p, float sd, float2 n)
 
     // The band, adaptively: only what lies outside it is moved, each pixel just far enough, with a soft knee. Light glass
     // lifts toward white (a veil), dark glass smokes toward black, both keeping the hue. Relaxed toward the rim.
-    float relax = EdgeBand * rim * rim;
+    float relax = EdgeBand * rim * sqrt(rim);
     float low = Low * (1 - relax), high = lerp(High, 1, relax);
     luma = Luma(color);
     float held = luma;
@@ -266,9 +276,12 @@ float3 Glass(float2 p, float sd, float2 n)
 
     // A crisp line along the very rim, a soft highlight inside the lit bevel, a narrow glint; a press narrows and brightens
     // them, hover lifts them a little, and the pointer's light gathers on the stretch of rim nearest it.
-    float line1 = exp(-depth / (1.1 * Scale));
+    // The line lies just inside the edge (a device pixel at 100%), so the outermost pixel keeps the glass's own color and the
+    // outline stays crisp against any background; it falls off sharply outward and softly inward.
+    float ring = depth - .8 * Scale;
+    float line1 = ring < 0 ? exp(-ring * ring / (.3 * Scale * Scale)) : exp(-ring / Scale);
     float rimLight = line1 * (.15 + .85 * towards * towards + .3 * away * away);
-    float inner = Sheen * exp(-depth / (thickness * .5)) * (.8 * pow(towards, 1.5) + .2 * away);
+    float inner = Sheen * exp(-depth / (thickness * .35)) * (.8 * pow(towards, 1.5) + .2 * away);
     float3 light = normalize(float3(Light * .77, .64));
     float3 half1 = normalize(light + float3(0, 0, 1));
     float spec = pow(saturate(dot(surface, half1)), 70 * (1 + 1.5 * Press)) * rim * rim * pow(towards, 1.5);
@@ -276,7 +289,7 @@ float3 Glass(float2 p, float sd, float2 n)
     float glow = Near * exp(-dot(toPointer, toPointer) / (Glow * Glow));
     float lift = (1 + .35 * Hover) * (1 + .4 * Press) * (1 + .8 * glow);
     float amount = saturate((rimLight * .85 + inner + spec * .15 + glow * .06) * lift * Gain);
-    float3 tone = Dark > .5 ? float3(.88, .93, 1) : float3(1, 1, 1);
+    float3 tone = lerp(float3(1, 1, 1), float3(.88, .93, 1), saturate(Dark));
     color = 1 - (1 - color) * (1 - amount * tone);
     return saturate(color);
 }

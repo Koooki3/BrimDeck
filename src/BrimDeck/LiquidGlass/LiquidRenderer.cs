@@ -17,7 +17,8 @@ namespace BrimDeck.LiquidGlass;
 //   Tint: a thin tint over the glass, straight color and alpha (the preset's: legibility comes from the band, not the tint, so
 //     the WPF surface over the glass stays transparent).
 //   Thickness: the bevel's width, how far in from the edge the glass bends the background.
-//   Refraction: how far the rim shifts the background, in bevel widths (about the displacement at the rim / Thickness).
+//   Refraction: the strength of the bend: the refracted ray's tangent times the glass's height over the background (1 is
+//     the kube.io method's; the height is 1.6 bevel widths at the flat, rising with the bevel).
 //   Dispersion: 0..1, red and blue spread apart at the rim.
 //   PointerX, PointerY: the pointer in island pixels, NaN while it is away; the light then stays where it was and turns back
 //     to top-left as Hover eases to 0, so the caller's easing of Hover is all the easing there is.
@@ -53,11 +54,28 @@ internal readonly record struct LiquidFrame(
     // the background lies outside it; a thin tint, a light frost, a little vibrancy.
     public static LiquidFrame Preset(bool dark, int width, int height, float cornerTop, float cornerBottom, float shoulder, float scale) => dark
         ? new(width, height, cornerTop, cornerBottom, shoulder, 0x12 / 255f, 0x14 / 255f, 0x19 / 255f, .08f,
-            Thickness: Bevel(height, scale), Refraction: 1.45f, Dispersion: .35f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 1,
-            BandLow: 0, BandHigh: .28f, Saturation: 1.35f, EdgeBand: .12f, Frost: 1.5f + MathF.Log2(scale), Scale: scale, Light: 1, Shade: .25f, Sheen: .3f)
+            Thickness: Bevel(height, scale), Refraction: 1.25f, Dispersion: .35f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 1,
+            BandLow: 0, BandHigh: .28f, Saturation: 1.35f, EdgeBand: 0, Frost: 1.5f + MathF.Log2(scale), Scale: scale, Light: 1, Shade: .25f, Sheen: .3f)
         : new(width, height, cornerTop, cornerBottom, shoulder, 1, 1, 1, .05f,
-            Thickness: Bevel(height, scale), Refraction: 1.45f, Dispersion: .35f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 0,
-            BandLow: .85f, BandHigh: 1, Saturation: 1.3f, EdgeBand: .25f, Frost: 1.5f + MathF.Log2(scale), Scale: scale, Light: 1, Shade: .4f, Sheen: .2f);
+            Thickness: Bevel(height, scale), Refraction: 1.25f, Dispersion: .35f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 0,
+            BandLow: .85f, BandHigh: 1, Saturation: 1.3f, EdgeBand: .6f, Frost: 1.5f + MathF.Log2(scale), Scale: scale, Light: 1, Shade: .4f, Sheen: .2f);
+
+    // Between two looks (light glass to dark as automatic liquid glass turns), t from a to b: every look's value in between,
+    // the shape and the pointer a's.
+    public static LiquidFrame Blend(in LiquidFrame a, in LiquidFrame b, float t)
+    {
+        t = Math.Clamp(t, 0, 1);
+        if (t <= 0) return a;
+        if (t >= 1) return b with { Width = a.Width, Height = a.Height, CornerTop = a.CornerTop, CornerBottom = a.CornerBottom, Shoulder = a.Shoulder };
+        float L(float x, float y) => x + (y - x) * t;
+        return a with
+        {
+            Tint_R = L(a.Tint_R, b.Tint_R), Tint_G = L(a.Tint_G, b.Tint_G), Tint_B = L(a.Tint_B, b.Tint_B), TintAlpha = L(a.TintAlpha, b.TintAlpha),
+            Thickness = L(a.Thickness, b.Thickness), Refraction = L(a.Refraction, b.Refraction), Dispersion = L(a.Dispersion, b.Dispersion),
+            Dark = L(a.Dark, b.Dark), BandLow = L(a.BandLow, b.BandLow), BandHigh = L(a.BandHigh, b.BandHigh), Saturation = L(a.Saturation, b.Saturation),
+            EdgeBand = L(a.EdgeBand, b.EdgeBand), Frost = L(a.Frost, b.Frost), Light = L(a.Light, b.Light), Shade = L(a.Shade, b.Shade), Sheen = L(a.Sheen, b.Sheen)
+        };
+    }
 
     // The bevel: 14 DIP on the open panel, and under half the height on the small collapsed island, so the rim stays a rim.
     private static float Bevel(int height, float scale) => MathF.Min(14 * scale, height * .4f);
@@ -135,6 +153,7 @@ internal sealed class LiquidRenderer : IDisposable
     internal void Draw(ID3D11Texture2D background, int pad, in LiquidFrame frame, ID3D11RenderTargetView target)
     {
         var view = Mips(background);
+        Sample(pad, frame.Width, frame.Height);
         Write(frame, background.Description, pad);
         var context = _context;
         context.OMSetRenderTargets(target);
@@ -171,6 +190,72 @@ internal sealed class LiquidRenderer : IDisposable
         _context.CopySubresourceRegion(_mips, 0, 0, 0, 0, background, 0);
         _context.GenerateMips(_mipsView!);
         return _mipsView!;
+    }
+
+    // ----- What lies behind -----
+    // The mean brightness of the background under the island, for automatic liquid glass (GlassAppearance): a small mip (at
+    // most MeasureTexels across) is copied to a staging texture after the mips are made, and read on a later frame, never
+    // waited for. One copy is out at a time.
+    private const int MeasureTexels = 32;
+    private ID3D11Texture2D? _measure;
+    private (int Width, int Height, int Level) _measureFor;
+    private bool _measuring;
+    private (int Pad, int Width, int Height) _measuredRegion;
+    private readonly byte[] _measureRow = new byte[MeasureTexels * 4 * 2];
+
+    private void Sample(int pad, int width, int height)
+    {
+        if (_measuring || _mips is null) return;
+        var d = _mips.Description;
+        int level = 0, w = (int)d.Width, h = (int)d.Height;
+        while (w > MeasureTexels && level + 1 < (int)d.MipLevels) { w = Math.Max(1, w / 2); h = Math.Max(1, h / 2); level++; }
+        if (_measure is null || _measureFor != (w, h, level))
+        {
+            _measure?.Dispose();
+            _measure = _device.CreateTexture2D(new Texture2DDescription(d.Format, (uint)w, (uint)h, 1, 1, BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read));
+            _measureFor = (w, h, level);
+        }
+        _context.CopySubresourceRegion(_measure, 0, 0, 0, 0, _mips, (uint)level);
+        _measuredRegion = (pad, width, height);
+        _measuring = true;
+    }
+
+    // The mean luma (0..1, sRGB) of the background under the island, from the last copy whose answer is in; false while none
+    // is (the next frame's copy goes out once this one is read).
+    public bool TryBackdrop(out double luma)
+    {
+        luma = 0;
+        if (!_measuring || _measure is null) return false;
+        if (_context.Map(_measure, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.DoNotWait, out var mapped).Failure) return false;
+        try
+        {
+            var (w, h, level) = _measureFor;
+            double step = 1 << level, sum = 0;
+            int count = 0;
+            var (pad, width, height) = _measuredRegion;
+            for (int y = 0; y < h; y++)
+            {
+                double cy = (y + .5) * step - pad;
+                if (cy < 0 || cy > height) continue;
+                Marshal.Copy(mapped.DataPointer + (nint)(y * mapped.RowPitch), _measureRow, 0, w * 4);
+                for (int x = 0; x < w; x++)
+                {
+                    double cx = (x + .5) * step - pad;
+                    if (cx < 0 || cx > width) continue;
+                    int o = x * 4;
+                    sum += (.0722 * _measureRow[o] + .7152 * _measureRow[o + 1] + .2126 * _measureRow[o + 2]) / 255;
+                    count++;
+                }
+            }
+            if (count == 0) return false;
+            luma = sum / count;
+            return true;
+        }
+        finally
+        {
+            _context.Unmap(_measure, 0);
+            _measuring = false;
+        }
     }
 
     private void Write(in LiquidFrame f, Texture2DDescription background, int pad)
@@ -295,7 +380,7 @@ internal sealed class LiquidRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
         _target?.Dispose(); _swapChain?.Dispose();
-        _mipsView?.Dispose(); _mips?.Dispose();
+        _mipsView?.Dispose(); _mips?.Dispose(); _measure?.Dispose();
         // The immediate context is not let go: Vortice keeps one wrapper for the device, which the capture side uses too.
         _sampler.Dispose(); _constants.Dispose(); _pixel.Dispose(); _vertex.Dispose();
     }

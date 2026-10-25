@@ -28,6 +28,8 @@ public partial class MainWindow
                 LiquidEdge(_glass.LiquidShown);
             };
             _glass.LiquidTint = () => _surface.Color.A / 255d;
+            // Automatic liquid glass takes its look from what lies behind the island (App.BackdropMeasured).
+            _glass.Backdrop += luma => _app.BackdropMeasured(this, luma);
             // Liquid glass lights its rim from the pointer and presses with it: where the pointer is over the island, and
             // whether the button is down (seen even when a button under it handles the click).
             Island.MouseMove += (_, e) => _glass.Pointer(e.GetPosition(Island), e.LeftButton == MouseButtonState.Pressed);

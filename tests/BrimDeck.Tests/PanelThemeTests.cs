@@ -127,6 +127,20 @@ internal static class PanelThemeTests
         check("The demo theme carries its effects", demo.HasOverlay && demo.Effects.RimGradient.Count == 3 && demo.Effects.ShadowDepth == 0 && demo.Effects.Scanlines > 0);
         check("System follows the Windows app theme", PanelThemes.Find("system", true, []).Id == "dark" && PanelThemes.Find("SYSTEM", false, []).Id == "light");
         check("An unknown theme shows as dark", PanelThemes.Find("gone", false, []).Id == "dark");
+        check("Automatic liquid glass shows the glass look its backdrop asks for", PanelThemes.Find(PanelThemes.GlassAuto, true, [], glassDark: false).Id == PanelThemes.GlassLight
+            && PanelThemes.Find("Liquid Glass", false, [], glassDark: true).Id == PanelThemes.GlassDark);
+        {
+            var look = new GlassAppearance(dark: false);
+            // Mid-grey between the thresholds changes nothing; a dark backdrop must last Confirm; then it holds for Hold.
+            bool steady = !look.Feed(.5, 0) && !look.Feed(.45, 100) && !look.Dark;
+            bool confirmed = !look.Feed(.2, 1000) && !look.Feed(.2, 1000 + GlassAppearance.Confirm - 1) && look.Feed(.2, 1000 + GlassAppearance.Confirm) && look.Dark;
+            long at = 1000 + GlassAppearance.Confirm;
+            bool held = !look.Feed(.9, at + 10) && !look.Feed(.9, at + GlassAppearance.Hold - 1) && look.Feed(.9, at + GlassAppearance.Hold) && !look.Dark;
+            // A flicker shorter than Confirm (a cut in a video) never changes the look.
+            long later = at + 5000;
+            bool flicker = !look.Feed(.1, later) && !look.Feed(.9, later + 100) && !look.Feed(.1, later + 200) && !look.Feed(.1, later + 200 + GlassAppearance.Confirm - 1) && !look.Dark;
+            check("Automatic liquid glass turns with hysteresis, confirmation and a hold, never flickering", steady && confirmed && held && flicker && !look.Feed(double.NaN, later + 9999));
+        }
 
         // Theme files and ids.
         var folder = Folder("themes",

@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using BrimDeck;
+using BrimDeck.Core;
 using BrimDeck.LiquidGlass;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
@@ -384,6 +385,101 @@ internal static class LiquidPreview
         Time(device, renderer);
         Time(device, renderer);
         return 0;
+    }
+
+    // Automatic liquid glass, simulated at 60 frames a second as GlassBackdrop and App run it: the capsule (228 x 40, 150%) over a
+    // background white on the left and black on the right glides from the white side to the black and back. Each frame is
+    // drawn with the look blended as GlassBackdrop eases it, the backdrop measured by the renderer (TryBackdrop, read a frame
+    // later), the look decided by GlassAppearance, and the text crossfading as MainWindow.ThemeFade does (the old text over
+    // the new, fading over 320 ms). Writes auto-switch.png: one tile every 200 ms, with the time, the measure, the look and
+    // the blend under each.
+    public static int RunAuto(string folder)
+    {
+        Directory.CreateDirectory(folder);
+        const double scale = 1.5;
+        int dw = (int)(1200 * scale), dh = (int)(300 * scale);
+        var desktop = new byte[dw * dh * 4];
+        for (int y = 0; y < dh; y++)
+            for (int x = 0; x < dw; x++)
+            {
+                byte v = x < dw / 2 ? (byte)255 : (byte)10;
+                int o = (y * dw + x) * 4; desktop[o] = desktop[o + 1] = desktop[o + 2] = v; desktop[o + 3] = 255;
+            }
+        using var device = CreateDevice();
+        using var renderer = new LiquidRenderer(device);
+        var shape = TopShapes[1];
+        int w = (int)Math.Round(shape.Width * scale), h = (int)Math.Round(shape.Height * scale), top = (int)Math.Round(shape.Y * scale);
+        // Where the capsule's centre is at time t (ms): white side, glide, black side, glide back, white side.
+        double CentreAt(double t) => t < 1000 ? 300 : t < 1600 ? 300 + 600 * Soft.InOut.Ease((t - 1000) / 600) : t < 3600 ? 900 : t < 4200 ? 900 - 600 * Soft.InOut.Ease((t - 3600) / 600) : 300;
+        GlassAppearance? look = null;
+        double dark = -1, from = 0, to = 0; long since = -10000;
+        double lastLuma = double.NaN;
+        var tiles = new List<(BitmapSource Tile, string Label)>();
+        int pad = (int)Math.Ceiling(48 * scale);
+        for (int frameIndex = 0; frameIndex <= 360; frameIndex++)
+        {
+            long now = (long)Math.Round(frameIndex * 1000 / 60.0);
+            double centre = CentreAt(now) * scale;
+            var at = ((int)Math.Round(centre - w / 2.0), top, w, h);
+            double target = look?.Dark == true ? 1 : 0;
+            if (dark < 0) dark = from = to = target;
+            else if (target != to) { from = dark; to = target; since = now; }
+            if (dark != to) { double p = Math.Clamp((now - since) / 320.0, 0, 1); dark = p >= 1 ? to : from + (to - from) * Soft.InOut.Ease(p); }
+            var frame = LiquidFrame.Blend(LiquidFrame.Preset(false, w, h, (float)(shape.Top * scale), (float)(shape.Bottom * scale), 0, (float)scale),
+                LiquidFrame.Preset(true, w, h, (float)(shape.Top * scale), (float)(shape.Bottom * scale), 0, (float)scale), (float)dark);
+            var glass = Render(device, renderer, desktop, dw, dh, at, frame, pad);
+            if (renderer.TryBackdrop(out double luma))
+            {
+                lastLuma = luma;
+                if (look is null) { look = new GlassAppearance(false); look.Reset(luma < .5, now); }
+                else look.Feed(luma, now);
+            }
+            if (frameIndex % 12 != 0) continue;
+            // The text: the new look's under the old look's picture fading out (ThemeFade), from when the look changed.
+            double textFade = 1 - Soft.InOut.Ease(Math.Clamp((now - since) / 320.0, 0, 1));
+            int margin = (int)(26 * scale);
+            int tx = Math.Clamp(at.Item1 - margin, 0, dw - 1), tw = Math.Min(dw - tx, w + 2 * margin), th = top + h + margin;
+            var tile = ComposeAuto(desktop, dw, glass, at, tx, 0, tw, th, to > .5, textFade, scale);
+            string measured = double.IsNaN(lastLuma) ? "-" : lastLuma.ToString("0.00", CultureInfo.InvariantCulture);
+            tiles.Add((tile, FormattableString.Invariant($"{now / 1000.0:0.0} s  luma {measured}  {(look?.Dark == true ? "dark" : "light")}  blend {dark:0.00}")));
+        }
+        int cw = tiles.Max(t => t.Tile.PixelWidth), ch = tiles[0].Tile.PixelHeight, columns = 5, rows = (tiles.Count + columns - 1) / columns;
+        const int gap = 10, label = 20;
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+        {
+            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x1C, 0x1C, 0x1E)), null, new Rect(0, 0, columns * (cw + gap) + gap, rows * (ch + label + gap) + gap));
+            for (int i = 0; i < tiles.Count; i++)
+            {
+                double x = gap + i % columns * (cw + gap), y = gap + i / columns * (ch + label + gap);
+                dc.DrawImage(tiles[i].Tile, new Rect(x, y, tiles[i].Tile.PixelWidth, ch));
+                dc.DrawText(new FormattedText(tiles[i].Label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 13, Brushes.White, 1), new Point(x, y + ch + 2));
+            }
+        }
+        var sheet = new RenderTargetBitmap(columns * (cw + gap) + gap, rows * (ch + label + gap) + gap, 96, 96, PixelFormats.Pbgra32);
+        sheet.Render(visual);
+        Save(sheet, Path.Combine(folder, "auto-switch.png"));
+        Console.WriteLine("Wrote auto-switch.png");
+        return 0;
+    }
+
+    // The glass over the desktop with the text of the look now, and the old look's text over it fading out (oldText: its opacity).
+    private static BitmapSource ComposeAuto(byte[] desktop, int dw, byte[] glass, (int X, int Y, int Width, int Height) at, int tx, int ty, int tw, int th, bool dark, double oldText, double scale)
+    {
+        var plain = Compose(desktop, dw, glass, at, tx, ty, tw, th, dark, scale);
+        if (oldText <= .001) return plain;
+        var old = Compose(desktop, dw, glass, at, tx, ty, tw, th, !dark, scale);
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+        {
+            dc.DrawImage(plain, new Rect(0, 0, tw, th));
+            dc.PushOpacity(oldText);
+            dc.DrawImage(old, new Rect(0, 0, tw, th));
+            dc.Pop();
+        }
+        var bitmap = new RenderTargetBitmap(tw, th, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        return bitmap;
     }
 
     public static int RunBackgrounds(string backgrounds, string folder)
