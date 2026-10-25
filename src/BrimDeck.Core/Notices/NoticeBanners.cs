@@ -10,11 +10,12 @@ namespace BrimDeck.Core.Notices;
 // reads it.
 //
 // BrimDeck changes nothing else: only that value, only under HKCU. Before it writes, it records what was there (no key, no
-// value, 0 or 1) in its own ledger (BannerLedger), and restores exactly that when the switch goes off, an application is set
-// to off or muted in BrimDeck, notices or the Windows source are switched off, Windows no longer lets BrimDeck read
-// notifications, BrimDeck exits, or BrimDeck is uninstalled (BrimDeck.exe --restore-banners). The ledger is written before the
-// registry, so a crash between the two never leaves a change BrimDeck does not know about; the next start finishes the job.
-public readonly record struct BannerReading(bool KeyExists, int? ShowBanner, int? Enabled)
+// value, 0, 1, or a value of another kind) in its own ledger (BannerLedger), and restores exactly that when the switch goes
+// off, an application is set to off or muted in BrimDeck, notices or the Windows source are switched off, Windows no longer
+// lets BrimDeck read notifications, BrimDeck exits, or BrimDeck is uninstalled (BrimDeck.exe --restore-banners). The ledger is
+// written to the disk before the registry, with each new record marked pending until its value is written, so a crash between
+// the two never leaves a change BrimDeck does not know about, nor one it mistakes for the user's; the next start finishes the job.
+public readonly record struct BannerReading(bool KeyExists, int? ShowBanner, int? Enabled, BannerValue? Other = null)
 {
     // The user switched the application's notifications off in Windows: none reach the notification center, so BrimDeck could
     // not show them either. Such an application is never touched.
@@ -22,22 +23,35 @@ public readonly record struct BannerReading(bool KeyExists, int? ShowBanner, int
     public bool BannerOff => ShowBanner == 0;
 }
 
+// A ShowBanner that is not a DWORD (written by hand or by some tool), kept as its registry kind ("String", "QWord", "Binary",
+// ...) and its data in text (binary data in Base64, a multi-string's lines joined by '\n'), so that it can be put back as it was.
+public sealed record BannerValue(string Kind, string Data);
+
 // Windows' per-application notification settings (NoticeBannerRegistry in the app; a dictionary in the tests).
 public interface IBannerRegistry
 {
     BannerReading Read(string appId);
     // Sets ShowBanner (creating the application's key if needed); null deletes the value.
     void Write(string appId, int? showBanner);
+    // Puts back a ShowBanner of another kind, as it was.
+    void WriteValue(string appId, BannerValue value);
     // Deletes the application's key if it holds no value and no subkey (one BrimDeck created and Windows never used).
     void DeleteKeyIfEmpty(string appId);
 }
 
-// What BrimDeck changed for one application: the ShowBanner it found (null: none) and whether it had to create the key.
+// What BrimDeck changed for one application: the ShowBanner it found (Previous for a DWORD, PreviousValue for another kind, both
+// null: none), whether it had to create the key, and whether the record is still pending: saved, but BrimDeck's 0 perhaps not
+// written yet.
 public sealed class BannerRecord
 {
     public string AppId { get; set; } = "";
     public int? Previous { get; set; }
+    public BannerValue? PreviousValue { get; set; }
     public bool CreatedKey { get; set; }
+    public bool Pending { get; set; }
+
+    // Whether the application's value is still the one found before BrimDeck changed it.
+    internal bool Unchanged(BannerReading reading) => !reading.BannerOff && reading.ShowBanner == Previous && Equals(reading.Other, PreviousValue);
 }
 
 public enum BannerState
@@ -59,10 +73,11 @@ public enum BannerState
 
 // BrimDeck's record of the banners it turned off, kept in its data folder apart from settings.json: the uninstaller reads it,
 // and a settings file restored from a snapshot or another version can never lose it. Released lists the applications whose
-// banner the user turned on again while the switch was on; BrimDeck leaves them alone until the switch goes off.
+// banner the user turned on again while the switch was on; BrimDeck leaves them alone until the switch goes off. Each save
+// reaches the disk before it replaces the file, and keeps the one before as a backup (BackupSuffix), read when the file is not.
 public sealed class BannerLedger
 {
-    public const string FileName = "notice-banners.json";
+    public const string FileName = "notice-banners.json", BackupSuffix = ".bak";
     public const int MaxRecords = 2000;
     public List<BannerRecord> Records { get; set; } = [];
     public List<string> Released { get; set; } = [];
@@ -70,16 +85,23 @@ public sealed class BannerLedger
     public BannerRecord? Find(string appId) => Records.FirstOrDefault(record => string.Equals(record.AppId, appId, StringComparison.OrdinalIgnoreCase));
     public bool IsReleased(string appId) => Released.Contains(appId, StringComparer.OrdinalIgnoreCase);
 
-    // Null when the file exists but cannot be read: then nothing is turned off or restored, so records BrimDeck cannot see are
-    // never written over. No file is an empty ledger.
+    // Null when neither the file nor its backup can be read: then nothing is turned off or restored, so records BrimDeck cannot
+    // see are never written over. No file is an empty ledger.
     public static BannerLedger? Load(string path)
+    {
+        if (!File.Exists(path) && !File.Exists(path + BackupSuffix)) return new BannerLedger();
+        return Read(path) ?? Read(path + BackupSuffix);
+    }
+
+    private static BannerLedger? Read(string path)
     {
         try
         {
-            if (!File.Exists(path)) return new BannerLedger();
+            if (!File.Exists(path)) return null;
             var ledger = JsonSerializer.Deserialize<BannerLedger>(File.ReadAllText(path));
             if (ledger is null) return null;
-            ledger.Records = (ledger.Records ?? []).Where(record => record is not null && NoticeBanners.Usable(record.AppId) && record.Previous is null or 0 or 1)
+            ledger.Records = (ledger.Records ?? []).Where(record => record is not null && NoticeBanners.Usable(record.AppId)
+                    && (record.PreviousValue is null ? record.Previous is null or 0 or 1 : record.Previous is null && record.PreviousValue.Kind.Length > 0 && record.PreviousValue.Data is not null))
                 .DistinctBy(record => record.AppId, StringComparer.OrdinalIgnoreCase).Take(MaxRecords).ToList();
             ledger.Released = (ledger.Released ?? []).Where(NoticeBanners.Usable).Distinct(StringComparer.OrdinalIgnoreCase).Take(MaxRecords).ToList();
             return ledger;
@@ -92,10 +114,16 @@ public sealed class BannerLedger
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            if (Records.Count == 0 && Released.Count == 0) { File.Delete(path); return true; }
+            if (Records.Count == 0 && Released.Count == 0) { File.Delete(path); File.Delete(path + BackupSuffix); return true; }
             var temporary = path + ".tmp";
-            File.WriteAllText(temporary, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(temporary, path, true);
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(this, new JsonSerializerOptions { WriteIndented = true });
+            using (var file = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                file.Write(bytes);
+                file.Flush(flushToDisk: true);
+            }
+            if (File.Exists(path)) File.Replace(temporary, path, path + BackupSuffix, ignoreMetadataErrors: true);
+            else File.Move(temporary, path);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
@@ -139,14 +167,17 @@ public static class NoticeBanners
     }
 
     // Brings Windows in line with what is wanted: restores what is no longer wanted, then records and turns off what is. The
-    // ledger is saved (save says whether that worked) after the restorations and before any new value is written. Returns each
-    // touched application's state. An application whose banner was turned on again outside BrimDeck joins ledger.Released while
-    // the switch is on (holding), so the two never fight; with the switch off, Released is cleared.
-    public static Dictionary<string, BannerState> Reconcile(IReadOnlySet<string> wanted, bool holding, BannerLedger ledger, IBannerRegistry registry, Func<bool> save)
+    // ledger is saved (save says whether that worked) after the restorations and before any new value is written, and once more
+    // when the new values are in. Returns each touched application's state. switchOn is the user's switch itself, whether or not
+    // it applies right now: while it is on, an application whose banner was turned on again outside BrimDeck joins
+    // ledger.Released (also when it is found while restoring, as on quitting), so the two never fight; switched off, Released is
+    // cleared.
+    public static Dictionary<string, BannerState> Reconcile(IReadOnlySet<string> wanted, bool switchOn, BannerLedger ledger, IBannerRegistry registry, Func<bool> save)
     {
         var states = new Dictionary<string, BannerState>(StringComparer.OrdinalIgnoreCase);
-        bool changed = !holding && ledger.Released.Count > 0;
-        if (!holding) ledger.Released.Clear();
+        bool changed = !switchOn && ledger.Released.Count > 0;
+        if (!switchOn) ledger.Released.Clear();
+        void Release(string appId) { if (switchOn && !ledger.IsReleased(appId)) ledger.Released.Add(appId); }
         // Restorations first. Each is safe to repeat: a value already restored no longer reads as BrimDeck's 0, so a crash before
         // the ledger is saved only leaves a record the next run drops.
         foreach (var record in ledger.Records.ToList())
@@ -154,27 +185,43 @@ public static class NoticeBanners
             try
             {
                 var reading = registry.Read(record.AppId);
-                if (wanted.Contains(record.AppId) && !reading.NotificationsOff)
+                bool keep = wanted.Contains(record.AppId) && !reading.NotificationsOff;
+                if (record.Pending)
+                {
+                    // Saved, and then perhaps stopped before BrimDeck's 0 was written: a value still as it was found is no change
+                    // of the user's. It is written now if the application is still wanted, else the record just goes.
+                    if (reading.BannerOff || record.Unchanged(reading))
+                    {
+                        record.Pending = false; changed = true;
+                        if (keep && !reading.BannerOff && !TurnOff(record, registry)) { ledger.Records.Remove(record); states[record.AppId] = BannerState.Failed; continue; }
+                        if (keep) { states[record.AppId] = BannerState.TurnedOff; continue; }
+                        if (reading.BannerOff) Restore(record, registry);
+                        else if (record.CreatedKey && record.Previous is null && record.PreviousValue is null) registry.DeleteKeyIfEmpty(record.AppId);
+                        ledger.Records.Remove(record);
+                        states[record.AppId] = reading.NotificationsOff ? BannerState.NotificationsOff : BannerState.None;
+                        continue;
+                    }
+                }
+                if (keep)
                 {
                     if (reading.BannerOff) { states[record.AppId] = BannerState.TurnedOff; continue; }
                     // Turned on again outside BrimDeck: that is the user's (or the application's) choice now.
                     ledger.Records.Remove(record); changed = true;
-                    if (holding && !ledger.IsReleased(record.AppId)) ledger.Released.Add(record.AppId);
+                    Release(record.AppId);
                     states[record.AppId] = BannerState.Released;
                     continue;
                 }
                 // Restored only where BrimDeck's 0 is still there; a value changed since is left as it is.
-                if (reading.BannerOff && record.Previous != 0) registry.Write(record.AppId, record.Previous);
-                if (record.CreatedKey && record.Previous is null) registry.DeleteKeyIfEmpty(record.AppId);
+                if (reading.BannerOff) Restore(record, registry);
                 ledger.Records.Remove(record); changed = true;
                 // Turned on again outside BrimDeck before this restoration (quitting gives everything back at once): with the
                 // switch still on, that app stays the user's at the next start too.
-                if (holding && !reading.BannerOff && !reading.NotificationsOff && !ledger.IsReleased(record.AppId)) ledger.Released.Add(record.AppId);
+                if (!reading.BannerOff && !reading.NotificationsOff) Release(record.AppId);
                 states[record.AppId] = reading.NotificationsOff ? BannerState.NotificationsOff : BannerState.None;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { states[record.AppId] = BannerState.Failed; }
         }
-        // Then the new ones: all recorded and saved before Windows is changed.
+        // Then the new ones: all recorded as pending and saved before Windows is changed.
         var fresh = new List<BannerRecord>();
         foreach (var appId in wanted)
         {
@@ -185,7 +232,7 @@ public static class NoticeBanners
                 if (reading.NotificationsOff) { states[appId] = BannerState.NotificationsOff; continue; }
                 if (reading.BannerOff) { states[appId] = BannerState.AlreadyOff; continue; }
                 if (ledger.Records.Count >= BannerLedger.MaxRecords) { states[appId] = BannerState.Failed; continue; }
-                var record = new BannerRecord { AppId = appId, Previous = reading.ShowBanner, CreatedKey = !reading.KeyExists };
+                var record = new BannerRecord { AppId = appId, Previous = reading.ShowBanner, PreviousValue = reading.Other, CreatedKey = !reading.KeyExists, Pending = true };
                 ledger.Records.Add(record); fresh.Add(record);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { states[appId] = BannerState.Failed; }
@@ -197,20 +244,36 @@ public static class NoticeBanners
             foreach (var record in fresh) { ledger.Records.Remove(record); states[record.AppId] = BannerState.Failed; }
             return states;
         }
-        bool dropped = false;
+        if (fresh.Count == 0) return states;
         foreach (var record in fresh)
         {
-            try
-            {
-                registry.Write(record.AppId, 0);
-                // Read back: a value Windows (or a policy) does not keep would leave the banner on while BrimDeck reports it off.
-                if (registry.Read(record.AppId).BannerOff) { states[record.AppId] = BannerState.TurnedOff; continue; }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
-            ledger.Records.Remove(record); dropped = true;
+            if (TurnOff(record, registry)) { record.Pending = false; states[record.AppId] = BannerState.TurnedOff; continue; }
+            ledger.Records.Remove(record);
             states[record.AppId] = BannerState.Failed;
         }
-        if (dropped) save();
+        // The pending marks go (a failed save leaves them, which the next run settles as above).
+        save();
         return states;
+    }
+
+    // Writes BrimDeck's 0 and reads it back: a value Windows (or a policy) does not keep would leave the banner on while BrimDeck
+    // reports it off. False when it did not stay.
+    private static bool TurnOff(BannerRecord record, IBannerRegistry registry)
+    {
+        try
+        {
+            registry.Write(record.AppId, 0);
+            return registry.Read(record.AppId).BannerOff;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { return false; }
+    }
+
+    // Puts back what was there before BrimDeck's 0: the value, a value of another kind, or none (and the key, if BrimDeck made
+    // it and Windows has not used it since).
+    private static void Restore(BannerRecord record, IBannerRegistry registry)
+    {
+        if (record.PreviousValue is { } value) registry.WriteValue(record.AppId, value);
+        else if (record.Previous != 0) registry.Write(record.AppId, record.Previous);
+        if (record.CreatedKey && record.Previous is null && record.PreviousValue is null) registry.DeleteKeyIfEmpty(record.AppId);
     }
 }

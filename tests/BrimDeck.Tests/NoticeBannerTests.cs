@@ -8,13 +8,15 @@ internal static class NoticeBannerTests
 {
     private sealed class FakeRegistry : IBannerRegistry
     {
-        // Keys that exist, and their DWORD values by name.
+        // Keys that exist, and their DWORD values by name; a ShowBanner of another kind in Others.
         public readonly Dictionary<string, Dictionary<string, int>> Keys = new(StringComparer.OrdinalIgnoreCase);
+        public readonly Dictionary<string, BannerValue> Others = new(StringComparer.OrdinalIgnoreCase);
         public bool FailWrites, Ignore;
         public int Writes;
 
         public BannerReading Read(string appId) => Keys.TryGetValue(appId, out var values)
-            ? new(true, values.TryGetValue("ShowBanner", out var banner) ? banner : null, values.TryGetValue("Enabled", out var enabled) ? enabled : null)
+            ? new(true, values.TryGetValue("ShowBanner", out var banner) ? banner : null, values.TryGetValue("Enabled", out var enabled) ? enabled : null,
+                Others.TryGetValue(appId, out var other) ? other : null)
             : new(false, null, null);
 
         public void Write(string appId, int? showBanner)
@@ -23,11 +25,20 @@ internal static class NoticeBannerTests
             Writes++;
             // A Windows that no longer keeps the value (a policy, a later version): the write goes nowhere.
             if (Ignore) return;
+            Others.Remove(appId);
             if (showBanner is { } value) { if (!Keys.TryGetValue(appId, out var values)) Keys[appId] = values = []; values["ShowBanner"] = value; }
             else if (Keys.TryGetValue(appId, out var values)) values.Remove("ShowBanner");
         }
 
-        public void DeleteKeyIfEmpty(string appId) { if (Keys.TryGetValue(appId, out var values) && values.Count == 0) Keys.Remove(appId); }
+        public void WriteValue(string appId, BannerValue value)
+        {
+            if (FailWrites) throw new UnauthorizedAccessException();
+            Writes++;
+            if (!Keys.TryGetValue(appId, out var values)) Keys[appId] = values = [];
+            values.Remove("ShowBanner"); Others[appId] = value;
+        }
+
+        public void DeleteKeyIfEmpty(string appId) { if (Keys.TryGetValue(appId, out var values) && values.Count == 0 && !Others.ContainsKey(appId)) Keys.Remove(appId); }
     }
 
     internal static void Run(string root, Action<string, bool> check)
@@ -36,6 +47,8 @@ internal static class NoticeBannerTests
         Wanted(check);
         Reconcile(check);
         Released(check);
+        Pending(check);
+        OtherKinds(check);
         Ledger(root, check);
         SettingsRoundTrip(root, check);
     }
@@ -146,12 +159,12 @@ internal static class NoticeBannerTests
         check("Banners: nothing changes in Windows when the ledger cannot be written", states["App"] == BannerState.Failed && noSave.Writes == 0
             && noSaveLedger.Records.Count == 0 && !noSave.Keys.ContainsKey("App"));
         var order = new FakeRegistry(); var orderLedger = new BannerLedger();
-        bool recordedFirst = false;
-        Apply(["A", "B"], orderLedger, order, () => { recordedFirst = order.Writes == 0 && orderLedger.Records.Count == 2; return true; });
-        check("Banners: every record is saved before any ShowBanner is written", recordedFirst && order.Keys["A"]["ShowBanner"] == 0 && order.Keys["B"]["ShowBanner"] == 0);
+        bool? recordedFirst = null;
+        Apply(["A", "B"], orderLedger, order, () => { recordedFirst ??= order.Writes == 0 && orderLedger.Records.Count == 2; return true; });
+        check("Banners: every record is saved before any ShowBanner is written", recordedFirst == true && order.Keys["A"]["ShowBanner"] == 0 && order.Keys["B"]["ShowBanner"] == 0);
         int batch = 0;
         Apply(new HashSet<string>(Enumerable.Range(0, 200).Select(i => "App" + i)), new BannerLedger(), new FakeRegistry(), () => { batch++; return true; });
-        check("Banners: many apps are recorded with one save", batch == 1);
+        check("Banners: many apps are recorded with one save, and their pending marks cleared with one more", batch == 2);
         var denied = new FakeRegistry { FailWrites = true }; var deniedLedger = new BannerLedger();
         states = Apply(["App"], deniedLedger, denied);
         check("Banners: a refused registry write leaves no record behind", states["App"] == BannerState.Failed && deniedLedger.Records.Count == 0);
@@ -209,6 +222,53 @@ internal static class NoticeBannerTests
         check("Banners: switching off after the user's change keeps it and remembers nothing", offLedger.Released.Count == 0 && off.Keys["App"]["ShowBanner"] == 1);
     }
 
+    // A record saved as pending, and BrimDeck stopped before its 0 was written: the next run writes it (or, no longer wanted,
+    // drops the record), and never takes the unchanged value for the user's.
+    private static void Pending(Action<string, bool> check)
+    {
+        var registry = new FakeRegistry(); registry.Keys["App"] = new() { ["ShowBanner"] = 1 }; registry.Keys["Gone"] = new() { ["ShowBanner"] = 1 };
+        var ledger = new BannerLedger { Records = [new() { AppId = "App", Previous = 1, Pending = true }, new() { AppId = "Gone", Previous = 1, Pending = true }] };
+        var states = Apply(["App"], ledger, registry, holding: true);
+        check("Banners: a pending record whose 0 was never written is finished at the next start", states["App"] == BannerState.TurnedOff
+            && registry.Keys["App"]["ShowBanner"] == 0 && ledger.Find("App") is { Pending: false } && !ledger.IsReleased("App"));
+        check("Banners: a pending record no longer wanted just goes, leaving the value as it was", ledger.Find("Gone") is null && registry.Keys["Gone"]["ShowBanner"] == 1
+            && !ledger.IsReleased("Gone"));
+        var done = new FakeRegistry(); done.Keys["App"] = new() { ["ShowBanner"] = 0 };
+        var doneLedger = new BannerLedger { Records = [new() { AppId = "App", Previous = null, CreatedKey = false, Pending = true }] };
+        Apply(["App"], doneLedger, done, holding: true);
+        check("Banners: a pending record whose 0 was written is simply kept", doneLedger.Find("App") is { Pending: false } && done.Keys["App"]["ShowBanner"] == 0);
+        var user = new FakeRegistry(); user.Keys["App"] = new() { ["ShowBanner"] = 1 };
+        var userLedger = new BannerLedger { Records = [new() { AppId = "App", Previous = null, Pending = true }] };
+        Apply(["App"], userLedger, user, holding: true);
+        check("Banners: a pending record whose value changed otherwise is the user's", userLedger.IsReleased("App") && user.Keys["App"]["ShowBanner"] == 1);
+        // Saved twice: once with every new record pending before anything is written, once when they are in.
+        var order = new FakeRegistry(); var orderLedger = new BannerLedger(); var pendingAtSave = new List<bool>();
+        Apply(["A"], orderLedger, order, () => { pendingAtSave.Add(orderLedger.Find("A")?.Pending == true); return true; }, holding: true);
+        check("Banners: new records are saved pending, then saved again once written", pendingAtSave.SequenceEqual([true, false]));
+        // The switch, not whether it applies now, decides about a banner turned on again (Windows source off meanwhile).
+        var paused = new FakeRegistry(); var pausedLedger = new BannerLedger();
+        Apply(["App"], pausedLedger, paused, holding: true);
+        paused.Keys["App"]["ShowBanner"] = 1;
+        NoticeBanners.Reconcile(new HashSet<string>(), true, pausedLedger, paused, () => true);
+        check("Banners: with the switch on but not applying, a banner turned on again is still remembered", pausedLedger.IsReleased("App"));
+        NoticeBanners.Reconcile(new HashSet<string>(), true, pausedLedger, paused, () => true);
+        check("Banners: and the list is kept until the switch goes off", pausedLedger.IsReleased("App"));
+    }
+
+    // A ShowBanner of another kind than a DWORD is recorded and put back as it was.
+    private static void OtherKinds(Action<string, bool> check)
+    {
+        var registry = new FakeRegistry(); var text = new BannerValue("String", "1");
+        registry.Keys["App"] = []; registry.Others["App"] = text;
+        var ledger = new BannerLedger();
+        Apply(["App"], ledger, registry, holding: true);
+        check("Banners: a value of another kind is recorded with its kind", ledger.Find("App") is { Previous: null, PreviousValue: { Kind: "String", Data: "1" } }
+            && registry.Keys["App"]["ShowBanner"] == 0 && !registry.Others.ContainsKey("App"));
+        Apply([], ledger, registry, holding: false);
+        check("Banners: and put back as it was", registry.Others.TryGetValue("App", out var back) && back == text && !registry.Keys["App"].ContainsKey("ShowBanner")
+            && ledger.Records.Count == 0);
+    }
+
     private static void Ledger(string root, Action<string, bool> check)
     {
         string folder = Path.Combine(root, "banners");
@@ -230,6 +290,21 @@ internal static class NoticeBannerTests
             && cleaned.Released.SequenceEqual(["Kept"]));
         File.WriteAllText(path, """{"Records":[{"AppId":"Old","Previous":null,"CreatedKey":true}]}""");
         check("Banners: a ledger written before the released list reads with none", BannerLedger.Load(path) is { Records.Count: 1, Released.Count: 0 });
+        File.Delete(path);
+        // Each save keeps the one before as a backup, read when the file itself is damaged.
+        var first = new BannerLedger { Records = [new() { AppId = "First", Previous = 1 }] };
+        var second = new BannerLedger { Records = [new() { AppId = "First", Previous = 1 }, new() { AppId = "Second", Previous = null }] };
+        check("Banners: saving twice keeps the earlier ledger as the backup", first.Save(path) && second.Save(path) && File.Exists(path + BannerLedger.BackupSuffix)
+            && BannerLedger.Load(path) is { Records.Count: 2 });
+        File.WriteAllText(path, "{ cut off");
+        check("Banners: a damaged ledger falls back to its backup", BannerLedger.Load(path) is { } fallback && fallback.Find("First") is not null && fallback.Find("Second") is null);
+        File.WriteAllText(path + BannerLedger.BackupSuffix, "also damaged");
+        check("Banners: with both damaged nothing is assumed", BannerLedger.Load(path) is null);
+        File.WriteAllText(path + BannerLedger.BackupSuffix, """{"Records":[{"AppId":"First","Previous":1}]}""");
+        File.Delete(path);
+        check("Banners: a backup alone is still read", BannerLedger.Load(path) is { } alone && alone.Find("First") is not null);
+        new BannerLedger().Save(path);
+        check("Banners: an empty ledger removes its backup too", !File.Exists(path) && !File.Exists(path + BannerLedger.BackupSuffix));
     }
 
     private static void SettingsRoundTrip(string root, Action<string, bool> check)

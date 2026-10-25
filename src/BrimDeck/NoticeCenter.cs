@@ -84,8 +84,9 @@ internal sealed class NoticeCenter : IDisposable
         _app = app; _dispatcher = app.Dispatcher;
         Hub = new NoticeHub(key => _app.Settings.NoticeRule(key));
         // Windows refusing access gives the banners back; the ledger lives in the data folder, next to settings.json.
-        Banners = new NoticeBannerKeeper(() => _app.Settings, _dispatcher, app.Store.DirectoryPath,
-            () => _windows.State is not (NoticeSourceState.NeedsAccess or NoticeSourceState.Denied));
+        Banners = new NoticeBannerKeeper(() => _app.Settings, _dispatcher, NoticeBannerRegistry.LedgerPath(app.Store.DirectoryPath),
+            () => _windows.State is not (NoticeSourceState.NeedsAccess or NoticeSourceState.Denied), new NoticeBannerRegistry(),
+            () => [.. NoticeBannerRegistry.StartMenu(), .. NoticeBannerRegistry.Configured()], [WindowsNoticeSource.OwnAppId], Log);
         Banners.Changed += () => Changed?.Invoke();
         Icons = new NoticeIcons(_dispatcher, _windows.LogoAsync);
         _quiet = new NoticeQuiet(_dispatcher);

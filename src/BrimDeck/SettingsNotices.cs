@@ -66,7 +66,8 @@ public sealed partial class SettingsWindow
     {
         var banners = center.Banners;
         if (banners.LedgerUnreadable)
-            return (Loc.T("无法读取 notice-banners.json，横幅保持原样，没有做任何改动。", "notice-banners.json cannot be read, so the banners were left as they are."), true);
+            return (Loc.T("无法读取横幅记录 notice-banners.json（及其备份），BrimDeck 没有再做改动，但之前关掉的横幅可能仍关着。请在 Windows 设置 › 系统 › 通知 中逐个打开需要的应用的“显示通知横幅”，然后删除数据文件夹里的 notice-banners.json 和 notice-banners.json.bak。",
+                "The banner record notice-banners.json (and its backup) cannot be read. BrimDeck changed nothing more, but banners it turned off earlier may still be off: turn \"Show notification banners\" back on for the apps you want in Windows Settings › System › Notifications, then delete notice-banners.json and notice-banners.json.bak in the data folder."), true);
         if (!S.NoticeHideBanners) return ("", false);
         if (!banners.Holding)
             return (Loc.T("灵动提示或 Windows 应用通知未在接收，Windows 横幅保持原样。", "Dynamic notices or Windows app notifications are not being received, so Windows' banners are left as they are."), false);

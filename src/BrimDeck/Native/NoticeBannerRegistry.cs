@@ -22,13 +22,47 @@ internal sealed class NoticeBannerRegistry : IBannerRegistry
         {
             using var key = Registry.CurrentUser.OpenSubKey(Path(appId));
             if (key is null) return new(false, null, null);
-            return new(true, Dword(key, ShowBanner), Dword(key, Enabled));
+            return new(true, Dword(key, ShowBanner), Dword(key, Enabled), Other(key));
         }
         catch (ArgumentException) { throw new IOException("Unusable application id."); }
     }
 
-    // A value of another kind (a string someone wrote) reads as no value: Windows only honors DWORDs.
+    // Only a DWORD is Windows' switch; a value of another kind (a string someone wrote) is not, and is kept as it is (Other).
     private static int? Dword(RegistryKey key, string name) => key.GetValue(name) is int value && key.GetValueKind(name) == RegistryValueKind.DWord ? value : null;
+
+    private static BannerValue? Other(RegistryKey key)
+    {
+        if (key.GetValue(ShowBanner, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not { } value) return null;
+        var kind = key.GetValueKind(ShowBanner);
+        return kind switch
+        {
+            RegistryValueKind.DWord => null,
+            RegistryValueKind.String or RegistryValueKind.ExpandString => new(kind.ToString(), (string)value),
+            RegistryValueKind.MultiString => new(kind.ToString(), string.Join('\n', (string[])value)),
+            RegistryValueKind.QWord => new(kind.ToString(), ((long)value).ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            RegistryValueKind.Binary => new(kind.ToString(), Convert.ToBase64String((byte[])value)),
+            _ => new(RegistryValueKind.Binary.ToString(), Convert.ToBase64String(value as byte[] ?? []))
+        };
+    }
+
+    public void WriteValue(string appId, BannerValue value)
+    {
+        try
+        {
+            if (!Enum.TryParse<RegistryValueKind>(value.Kind, out var kind)) throw new IOException("Unknown value kind.");
+            object data = kind switch
+            {
+                RegistryValueKind.String or RegistryValueKind.ExpandString => value.Data,
+                RegistryValueKind.MultiString => value.Data.Split('\n'),
+                RegistryValueKind.QWord => long.Parse(value.Data, System.Globalization.CultureInfo.InvariantCulture),
+                RegistryValueKind.Binary => Convert.FromBase64String(value.Data),
+                _ => throw new IOException("Unknown value kind.")
+            };
+            using var key = Registry.CurrentUser.CreateSubKey(Path(appId), writable: true);
+            key.SetValue(ShowBanner, data, kind);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException) { throw new IOException("The earlier value cannot be written back.", ex); }
+    }
 
     public void Write(string appId, int? showBanner)
     {
@@ -126,12 +160,12 @@ internal sealed class NoticeBannerRegistry : IBannerRegistry
     public static string LedgerPath(string dataFolder) => System.IO.Path.Combine(dataFolder, BannerLedger.FileName);
 
     // Gives every banner BrimDeck turned off back to Windows (the uninstaller runs BrimDeck.exe --restore-banners). Returns
-    // whether everything recorded was restored.
+    // whether everything recorded was restored; when not, the ledger stays for another try, and the uninstaller keeps it.
     public static bool RestoreAll(string dataFolder)
     {
         string path = LedgerPath(dataFolder);
         if (BannerLedger.Load(path) is not { } ledger) return false;
-        NoticeBanners.Reconcile(new HashSet<string>(), holding: false, ledger, new NoticeBannerRegistry(), () => ledger.Save(path));
+        NoticeBanners.Reconcile(new HashSet<string>(), switchOn: false, ledger, new NoticeBannerRegistry(), () => ledger.Save(path));
         return ledger.Records.Count == 0;
     }
 }

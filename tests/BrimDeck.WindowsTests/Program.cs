@@ -16,7 +16,7 @@ internal static class Program
             CheckWindowChrome();
             NoticeProtectionTests.Run(Check);
             var bannerRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-WindowsTests-" + Guid.NewGuid().ToString("N"));
-            try { NoticeBannerRegistryTests.Run(bannerRoot, Check); }
+            try { NoticeBannerRegistryTests.Run(bannerRoot, Check); NoticeBannerKeeperTests.Run(System.IO.Path.Combine(bannerRoot, "keeper"), Check); }
             finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
             BrimDeck.MainWindow.CheckShadowLifetime();
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();

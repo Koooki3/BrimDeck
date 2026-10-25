@@ -146,6 +146,8 @@ var
   DesktopShortcut: Boolean;
   DesktopCheck, LaunchCheck: TNewCheckBox;
   DeleteUserData: Boolean;
+  // The banners BrimDeck turned off could not all be given back (RestoreNoticeBanners): its ledger is kept for another try.
+  BannersPending: Boolean;
 
 function HasParam(const Name: String): Boolean;
 var
@@ -542,14 +544,42 @@ end;
 // Dynamic notices can turn off other applications' Windows banners (NoticeBanners). BrimDeck gives them back when it exits;
 // this gives back any it could not (a crash, a killed process), from its ledger in the data folder, before the program files
 // go. The uninstaller runs as the user (or, for an all-users install, elevated as the same user), whose HKCU holds them. After
-// an over-the-shoulder elevation by another account it finds that account's (empty) data folder and does nothing.
+// an over-the-shoulder elevation by another account it finds that account's (empty) data folder and does nothing. When not
+// everything could be given back, the ledger (notice-banners.json and its .bak) stays even if user data is deleted, so that a
+// later install restores the rest or the user can read what was changed.
 procedure RestoreNoticeBanners;
 var
   ResultCode: Integer;
 begin
-  if FileExists(ExpandConstant('{app}\{#MainExe}')) then
-    Exec(ExpandConstant('{app}\{#MainExe}'), '--restore-banners "' + ExpandConstant('{#DataDir}') + '"',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  BannersPending := FileExists(ExpandConstant('{#DataDir}\notice-banners.json')) or FileExists(ExpandConstant('{#DataDir}\notice-banners.json.bak'));
+  if not BannersPending then
+    Exit;
+  if FileExists(ExpandConstant('{app}\{#MainExe}')) and Exec(ExpandConstant('{app}\{#MainExe}'), '--restore-banners "' + ExpandConstant('{#DataDir}') + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+    BannersPending := False
+  else
+    Log('Some Windows banners could not be given back; notice-banners.json is kept (code ' + IntToStr(ResultCode) + ').');
+end;
+
+// Deletes the data folder but, while banners are pending, its ledger.
+procedure DeleteDataFolder;
+var
+  Dir, Kept: String;
+begin
+  Dir := ExpandConstant('{#DataDir}');
+  if not BannersPending then
+  begin
+    DelTree(Dir, True, True, True);
+    Exit;
+  end;
+  Kept := ExpandConstant('{tmp}\notice-banners');
+  ForceDirectories(Kept);
+  RenameFile(Dir + '\notice-banners.json', Kept + '\notice-banners.json');
+  RenameFile(Dir + '\notice-banners.json.bak', Kept + '\notice-banners.json.bak');
+  DelTree(Dir, True, True, True);
+  ForceDirectories(Dir);
+  RenameFile(Kept + '\notice-banners.json', Dir + '\notice-banners.json');
+  RenameFile(Kept + '\notice-banners.json.bak', Dir + '\notice-banners.json.bak');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -561,7 +591,7 @@ begin
   end
   else if (CurUninstallStep = usPostUninstall) and DeleteUserData and not HasParam('/UPGRADE') then
   begin
-    DelTree(ExpandConstant('{#DataDir}'), True, True, True);
+    DeleteDataFolder;
     // The recent notices are kept in the install folder by default (NoticeStorage); they are user data too.
     DelTree(ExpandConstant('{app}\notices'), True, True, True);
   end

@@ -40,6 +40,17 @@ internal static class NoticeBannerRegistryTests
             using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
                 check("banners: an application with notifications off is not written", states[appId] == BannerState.NotificationsOff && key?.GetValueKind("ShowBanner") == RegistryValueKind.String);
             check("banners: the Start menu lists applications by their ids", NoticeBannerRegistry.StartMenu() is { Count: > 0 } apps && apps.Any(NoticeBanners.Usable));
+
+            // A ShowBanner of another kind is put back with its kind and data.
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, throwOnMissingSubKey: false);
+            using (var key = Registry.CurrentUser.CreateSubKey(keyPath)) key.SetValue("ShowBanner", "yes", RegistryValueKind.ExpandString);
+            var other = new BannerLedger();
+            NoticeBanners.Reconcile(new HashSet<string>([appId]), true, other, registry, () => true);
+            bool off = registry.Read(appId).BannerOff;
+            NoticeBanners.Reconcile(new HashSet<string>(), false, other, registry, () => true);
+            using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
+                check("banners: a value of another kind is turned off and put back as it was", off && key?.GetValueKind("ShowBanner") == RegistryValueKind.ExpandString
+                    && key.GetValue("ShowBanner", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string == "yes");
         }
         finally
         {
