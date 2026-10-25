@@ -85,16 +85,33 @@ public partial class MainWindow
     // Starts the boot. The panel stays out of sight until the dispatcher is idle: on BrimDeck's start the first frames come
     // late while the panel is built and the data read, which ate the dot and the first half of the swell. A panel that is busy
     // longer than BootWait boots anyway. The panel is out of sight from the start (the constructor), so the window is never
-    // seen before it has its place on the monitor.
+    // seen before it has its place on the monitor. While automatic liquid glass measures its first look (App.Glancing, at most
+    // SourceStart.BoundMs) it waits out of sight too, so the look it boots in is the measured one, never cut to on screen.
     private void Boot()
     {
         if (_poweringOff || _app.Exiting || _retiring) return;
-        if (_expanded || IsSuppressed || !CanAnimateLifecycle) { SetImmediate(HoverZone, OpacityProperty, 1d); return; }
+        if (_expanded || IsSuppressed || !CanAnimateLifecycle)
+        {
+            if (_expanded || IsSuppressed || !_app.Glancing) { SetImmediate(HoverZone, OpacityProperty, 1d); return; }
+            // No boot to play: the island appears once the first look is decided (a hotkey opening it meanwhile, EndBoot, sooner).
+            SetImmediate(HoverZone, OpacityProperty, 0d);
+            _bootWaiting = true;
+            int held = ++_boot;
+            _app.AfterGlance(() => { if (held != _boot) return; _bootWaiting = false; SetImmediate(HoverZone, OpacityProperty, 1d); });
+            return;
+        }
         SetImmediate(HoverZone, OpacityProperty, 0d);
         _bootWaiting = true;
         int boot = ++_boot;
         var wait = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher) { Interval = TimeSpan.FromMilliseconds(BootWait) };
-        void Start() { wait.Stop(); if (boot == _boot) BeginBoot(); }
+        bool started = false;
+        void Start()
+        {
+            wait.Stop();
+            if (started || boot != _boot) return;
+            started = true;
+            _app.AfterGlance(() => { if (boot == _boot) BeginBoot(); });
+        }
         wait.Tick += (_, _) => Start();
         wait.Start();
         Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, Start);

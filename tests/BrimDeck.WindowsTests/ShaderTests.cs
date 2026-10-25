@@ -33,6 +33,13 @@ internal static class ShaderTests
         var clock = Stopwatch.StartNew();
         using (new LiquidRenderer(capture.Device)) { }
         var first = clock.Elapsed.TotalMilliseconds;
-        check($"liquid glass: a renderer is made without compiling ({first:0} ms)", first < 500);
+        // Cold, the driver turns the precompiled bytecode into its own (some 375-600 ms here, varying run to run; compiling the
+        // source at run time took some 4 s): the bound only tells the two apart. Warm, on the same device, it takes next to
+        // nothing: what the app's glass pays, its shaders made once before on a worker (SourceStart.Warm).
+        check($"liquid glass: a renderer is made without compiling ({first:0} ms)", first < 1500);
+        clock.Restart();
+        using (new LiquidRenderer(capture.Device)) { }
+        var again = clock.Elapsed.TotalMilliseconds;
+        check($"liquid glass: a renderer made again on the same device is quick ({again:0.0} ms)", again < 50);
     }
 }

@@ -342,11 +342,28 @@ public partial class App : Application
     // The look automatic liquid glass takes before the island is shown (at start, and when the theme is chosen), set as
     // PanelTheme.GlassDark: the Windows app theme's at first, so nothing waits for the desktop to be measured. Where liquid glass
     // can be shown, the desktop where the island will be is measured off the UI thread (SourceStart, BackdropLook.Measure) and
-    // the look it asks for shown at once, without a fade (Glanced), typically within some 300 ms; the capture made for it is
-    // handed to the island's glass (DesktopSource.Open), not made twice. A measure later than GlanceBoundMs is let go: the
-    // live glass decides once it shows. Where a glass already captures (another liquid theme was shown), its last measure decides.
+    // the look it asks for taken at once, without a fade (Glanced), typically within some 300 ms; the capture made for it is
+    // handed to the island's glass (DesktopSource.Open), not made twice. A measure not back within GlanceBoundMs is let go then
+    // (SourceStart.Within): the exclusion is released and the live glass decides once it shows. Where a glass already captures
+    // (another liquid theme was shown), its last measure decides.
+    // While the first look is measured (Glancing) an island booting waits out of sight (MainWindow.Boot, AfterGlance), so the
+    // look it then takes is never seen to cut from the Windows app theme's: it appears in the measured look at once.
     private const int GlanceBoundMs = LiquidGlass.SourceStart.BoundMs;
     private int _glance;
+    private Action? _afterGlance;
+    internal bool Glancing { get; private set; }
+    // Calls then once the first look is decided (at once when it is not being measured).
+    internal void AfterGlance(Action then)
+    {
+        if (Glancing) _afterGlance += then; else then();
+    }
+    private void GlanceEnded()
+    {
+        Glancing = false;
+        var then = _afterGlance;
+        _afterGlance = null;
+        then?.Invoke();
+    }
     private bool StartGlance()
     {
         bool dark = SettingsPalette.IsDark(SettingsTheme.System);
@@ -354,27 +371,28 @@ public partial class App : Application
         // A glass already captures: what it last measured decides now, and it goes on deciding.
         if (LiquidPossible && LiquidGlass.DesktopSource.OpenCount > 0 && !double.IsNaN(GlassBackdrop.SeenLuma)) dark = GlassAppearance.FirstLook(GlassBackdrop.SeenLuma);
         PanelTheme.GlassDark = dark;
-        if (!LiquidPossible || LiquidGlass.DesktopSource.OpenCount > 0 || GlanceRegion() is not { } region) return dark;
+        if (!LiquidPossible || LiquidGlass.DesktopSource.OpenCount > 0 || GlanceRegion() is not { } region) { GlanceEnded(); return dark; }
         // Our panels already on screen (the theme chosen in the settings) are left out, as the live glass leaves them out; and
         // the island, shown meanwhile, too (CaptureExclusion's hook).
         IntPtr[] ours = Deck is null ? [] : [.. Decks.Select(deck => new System.Windows.Interop.WindowInteropHelper(deck).Handle).Where(handle => handle != IntPtr.Zero)];
         LiquidGlass.CaptureExclusion.Acquire([], ours);
-        long started = Environment.TickCount64;
-        var measure = LiquidGlass.SourceStart.Prepare(region, measure: true);
-        _ = measure.ContinueWith(done => Dispatcher.BeginInvoke(() =>
+        Glancing = true;
+        LiquidGlass.SourceStart.Within(LiquidGlass.SourceStart.Prepare(region, measure: true), GlanceBoundMs, prepared =>
         {
-            Glanced(glance, dark, done.IsCompletedSuccessfully ? done.Result.Luma : null, Environment.TickCount64 - started);
+            Glanced(glance, dark, prepared?.Luma);
             // Let go once the island's glass has taken the capture (DesktopSource.Open, at Render priority) and holds the
-            // exclusion itself, so our windows do not flicker back into the capture in between.
-            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, LiquidGlass.CaptureExclusion.Release);
-        }), TaskScheduler.Default);
+            // exclusion itself, so our windows do not flicker back into the capture in between. Too late, at once.
+            if (prepared is null) LiquidGlass.CaptureExclusion.Release();
+            else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, LiquidGlass.CaptureExclusion.Release);
+            if (glance == _glance) GlanceEnded();
+        });
         return dark;
     }
-    // The first look measured: shown at once when it differs from the one shown, unless the theme was chosen again meanwhile,
-    // the look was decided otherwise (the live glass, Windows' theme followed), or the measure came too late.
-    private void Glanced(int glance, bool shownDark, double? luma, long milliseconds)
+    // The first look measured: taken at once when it differs from the one shown, unless the theme was chosen again meanwhile,
+    // the look was decided otherwise (the live glass, Windows' theme followed), or the measure came too late (null).
+    private void Glanced(int glance, bool shownDark, double? luma)
     {
-        if (Exiting || glance != _glance || luma is not { } measured || milliseconds > GlanceBoundMs
+        if (Exiting || glance != _glance || luma is not { } measured
             || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto || PanelTheme.GlassDark != shownDark || !GlassMeasures) return;
         bool dark = GlassAppearance.FirstLook(measured);
         if (dark == shownDark && PanelTheme.Current.IsDark == dark) return;
