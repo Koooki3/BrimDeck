@@ -91,7 +91,7 @@ internal sealed partial class NoticeWindow : Window
         PreviewKeyDown += KeyPressed;
         Deactivated += (_, _) => { if (_keyboard) EndKeyboard(); };
         _app.Notices.Icons.Loaded += IconLoaded;
-        Closed += (_, _) => { _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
+        Closed += (_, _) => { _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _announceLater?.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
         // ui-3: moved to a monitor with another scale while it shows, the material is made again for that scale.
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
