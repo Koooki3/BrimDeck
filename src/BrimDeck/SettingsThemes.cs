@@ -169,26 +169,37 @@ public sealed partial class SettingsWindow
     }
 
     // A theme with a night look: when its day begins and ends, in half hours. The theme's own hours are saved as no setting,
-    // so a later change to the theme's hours still reaches those who never moved them.
+    // so a later change to the theme's hours still reaches those who never moved them. A time between the half hours (a theme
+    // file's 06:45) is listed as it is, so moving the other box does not round it.
     private FrameworkElement DaylightRow(PanelThemeFile file)
     {
         var (day, night) = PanelThemes.DaylightHours(file, S.ThemeDaylight);
-        var times = Enumerable.Range(0, 48).Select(i => TimeSpan.FromMinutes(30 * i)).ToList();
-        ComboBox Pick(TimeSpan value, string name)
+        var steps = Enumerable.Range(0, 48).Select(i => TimeSpan.FromMinutes(30 * i)).ToList();
+        (ComboBox Box, List<TimeSpan> Times) Pick(TimeSpan value, string name)
         {
+            var times = steps.Contains(value) ? steps : [.. steps.Append(value).Order()];
             var box = new ComboBox { Width = 84, Style = (Style)FindResource("SettingsCombo"), ItemsSource = times.Select(PanelThemes.FormatTimeOfDay).ToList(),
-                SelectedIndex = times.FindIndex(time => time >= value) is var at and >= 0 ? at : 0 };
+                SelectedIndex = times.IndexOf(value) is var at and >= 0 ? at : 0 };
             AutomationProperties.SetName(box, name); PopupMotion.Attach(box);
-            return box;
+            return (box, times);
         }
-        var from = Pick(day, Loc.T("白天开始", "Day begins"));
-        var to = Pick(night, Loc.T("夜晚开始", "Night begins"));
+        var (from, fromTimes) = Pick(day, Loc.T("白天开始", "Day begins"));
+        var (to, toTimes) = Pick(night, Loc.T("夜晚开始", "Night begins"));
         // A day of no length is no choice: the box just changed goes back to what it showed, so the row never shows unsaved hours.
+        // Going back changes the selection again, which saves nothing.
         int shownFrom = from.SelectedIndex, shownTo = to.SelectedIndex;
+        bool reverting = false;
         void Save(ComboBox changed)
         {
-            var (d, n) = (times[Math.Max(0, from.SelectedIndex)], times[Math.Max(0, to.SelectedIndex)]);
-            if (d == n) { changed.SelectedIndex = ReferenceEquals(changed, from) ? shownFrom : shownTo; return; }
+            if (reverting) return;
+            var (d, n) = (fromTimes[Math.Max(0, from.SelectedIndex)], toTimes[Math.Max(0, to.SelectedIndex)]);
+            if (d == n)
+            {
+                reverting = true;
+                changed.SelectedIndex = ReferenceEquals(changed, from) ? shownFrom : shownTo;
+                reverting = false;
+                return;
+            }
             shownFrom = from.SelectedIndex; shownTo = to.SelectedIndex;
             Change(s => s.ThemeDaylight = (d, n) == PanelThemes.DaylightHours(file) ? "" : PanelThemes.FormatDaylight(d, n));
         }
