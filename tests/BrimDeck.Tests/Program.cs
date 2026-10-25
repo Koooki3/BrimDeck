@@ -44,6 +44,7 @@ try
     await DshUsageTests.Run(root, Check);
     await KimiUsageTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
+    await CursorUsageTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[

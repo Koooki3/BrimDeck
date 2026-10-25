@@ -23,6 +23,9 @@ public static class MediaAppTarget
         if (lower.Contains("qqmusic")) return "QQMusic";
         if (lower.Contains("msedge")) return "msedge";
         if (lower.Contains("chrome")) return "chrome";
+        // "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App" would otherwise become "AppleInc". Apple Music's sound comes from its
+        // AMPLibraryAgent.exe, not AppleMusic.exe (measured in the audio sessions); its window is matched by package family.
+        if (lower.Contains("applemusic")) return "AMPLibraryAgent";
         return Path.GetFileNameWithoutExtension(appId.Split('!')[0]);
     }
 

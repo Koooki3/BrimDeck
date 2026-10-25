@@ -126,7 +126,7 @@ internal static class MusicTests
                 foreach (bool timeline in new[] { true, false })
                 foreach (bool lyrics in new[] { true, false })
                 {
-                    var l = MusicLayout.Calculate(w, h, lyrics, timeline, logMode: true); var c = l.Metrics;
+                    var l = MusicLayout.Calculate(w, h, lyrics, timeline, fullControlEntry: true); var c = l.Metrics;
                     string at = $"{w}x{h} timeline={timeline} lyrics={lyrics}";
                     double barTop = l.ProgressY + (c.SeekRow - c.Bar) / 2, inkTop = l.ControlsY + c.Play / 8;
                     double upperBottom = (timeline ? barTop : inkTop) - c.SectionGap;
