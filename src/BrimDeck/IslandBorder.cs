@@ -119,7 +119,9 @@ public sealed class IslandBorder : Border
         var key = (RenderSize, ShoulderRadius, CornerRadius, Inset, step, RimWidth);
         if (_outlineKey == key) return _outline;
         _outlineKey = key;
-        (_outline, _bevel) = Shape(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, Inset, step, RimWidth, dpi);
+        // Stepped, the inset (the shadow caster's) is whole device pixels too, so its steps stay on them at 125 % or 175 %.
+        double inset = step > 0 ? Math.Round(Inset * dpi, MidpointRounding.AwayFromZero) / dpi : Inset;
+        (_outline, _bevel) = Shape(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, inset, step, RimWidth, dpi);
         return _outline;
     }
 
