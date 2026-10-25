@@ -24,7 +24,8 @@
 //   backdrop-filter then: blur(0.25px) (under a device pixel: left out) contrast(1.2) brightness(1.05) saturate(1.1).
 //   background: rgba(255, 255, 255, .08).
 //   box-shadow: 0 4px 8px rgba(0,0,0,.22) (outside the glass: drawn by the host), 0 -8px 20px inset rgba(0,0,0,.14).
-//   Pressed (a button): the inset glow 0 0 16px 3px rgba(255,255,255,.55) and inset 0 -8px 16px rgba(0,0,0,.18), at once.
+//   Pressed (a button): the inset glow 0 0 16px 3px rgba(255,255,255,.55) and inset 0 -8px 16px rgba(0,0,0,.18); the source
+//   switches them at once, here they fade in and out with the press (Press, eased).
 //   Shadows are Gaussian (deviation = blur / 2) over the rounded box, worked out as the browser does: the box's edge function
 //   along x (erf) integrated over y with the Gaussian.
 // Lengths in the source are CSS pixels: here device pixels over Scale.
@@ -84,7 +85,7 @@ cbuffer Frame : register(b0)
     float BandA;        // the backdrop's brightness under the island: 2nd and 98th percentiles (sRGB luma, unfiltered)
     float BandB;
     float Narrow;       // how far the inset shadow's sides are narrowed (0 none, 1 to nothing), for a square top
-    float Press;        // 0 or 1, the pressed shadows
+    float Press;        // 0..1, eased (GlassFeedback): the pressed shadows and inner glow
     float Dark;
     float Band;         // how far from the shoulder its curves are worked out (device pixels)
     float LinearMap;    // 1: the map's bytes read as linear light (the browser's shift); 0: as the page meant it
@@ -106,7 +107,7 @@ SamplerState Smooth : register(s0);
 
 // The most contrast left behind the open panel's text, and how far the band may move the glass's mean brightness from the
 // backdrop's (dark glass on a dark page, light glass on a light one).
-static const float Cap = 1.5, Calm = .6, Vibrancy = 1.2, ChromaFloor = .55;
+static const float Cap = 1.5, Calm = .6, BusyCalm = .3, Vibrancy = 1.2, ChromaFloor = .55, RimDip = 10, RowReach = 8;
 
 struct Vertex { float4 Position : SV_Position; };
 
@@ -378,7 +379,7 @@ float Knees(float l, float least, float most)
 // The port's glass (filtered and tinted) mapped into the band the theme's text needs (see the head of the file). calm: how far
 // what lies behind is calmed (the open panel, the collapsed island's content row): its contrast held within Cap:1 about the
 // mean, and, on the open panel, drawn toward that mean as a steadier surface would (Calm).
-float3 Legible(float3 port, float calm, float open)
+float3 Legible(float3 port, float3 behind, float calm, float open)
 {
     if (Low <= 0 && High >= 1) return port;
     float t = Tint.a, tl = Luma(Tint.rgb);
@@ -450,7 +451,9 @@ float3 Legible(float3 port, float calm, float open)
             capped = m < lo ? lo + (l - qa) * k2 : hi - (qb - l) * k2;
         }
         capped = clamp(capped, lo, hi);
-        capped = lerp(capped, m, Calm * open);
+        // Then drawn toward that mean as a steadier surface would, the more so the busier the backdrop (its spread).
+        float busy = saturate((xb - xa - .1) / .5);
+        capped = lerp(capped, m, saturate(Calm + BusyCalm * busy) * open);
         l = lerp(l, capped, calm);
     }
     // Colour: only the luma is compressed; the chroma keeps about min(1, 1.5 k) of the port's, never under ChromaFloor (k the band's compression, not
@@ -458,7 +461,11 @@ float3 Legible(float3 port, float calm, float open)
     // saturation of what they show), as far as it stays in gamut (the luma kept exactly).
     float3 d = port - x;
     float3 room = d > 0 ? (1 - l) / max(d, 1e-5) : d < 0 ? l / max(-d, 1e-5) : 1e5;
-    return l + d * min(min(1, max(1.5 * band, ChromaFloor)) * Vibrancy, min(room.x, min(room.y, room.z)));
+    // Never more colourful than the port's glass, nor than the backdrop itself there (no cast a compressed yellow turns olive in).
+    float own = max(port.r, max(port.g, port.b)) - min(port.r, min(port.g, port.b));
+    float under = max(behind.r, max(behind.g, behind.b)) - min(behind.r, min(behind.g, behind.b));
+    float keep = min(min(1, max(1.5 * band, ChromaFloor) * Vibrancy), under / max(own, 1e-4));
+    return l + d * min(keep, min(room.x, min(room.y, room.z)));
 }
 
 float3 Glass(float2 p, float sd, float2 n)
@@ -480,16 +487,24 @@ float3 Glass(float2 p, float sd, float2 n)
     int2 read = int2(at - float2(0, TopExtra) + Pad);
     float3 color = Background.Load(int3(read, 0)).rgb;
     // The collapsed island's content row: calmed behind its text and glyphs, feathered at its edges, never under the rim band.
+    // Where text can sit is frosted as Apple's regular material is; the clear lens is kept to the rim band (a fifth of the
+    // shorter side, at most RimDip) and the collapsed island's empty ends.
+    float rim = min(.2 * min(Size.x, Size.y), RimDip * Scale), inner = saturate((-sd - rim) / Feather);
     float row = 0;
     if (Content.z > Content.x)
     {
-        float2 inside = min(p - Content.xy, Content.zw - p);
-        float rim = .2 * min(Size.x, Size.y);
-        row = saturate(min(inside.x, inside.y) / Feather + 1) * saturate((-sd - rim) / Feather);
+        // The content row, reaching RowReach past its text on either side, feathered. On a low shape (the bar, under 40 DIP)
+        // the text fills the height: the rim band and the feather there shrink with it, down to nothing at 20 DIP.
+        float low = saturate((min(Size.x, Size.y) / Scale - 20) / 20), feather = max(Feather * low, Scale);
+        float2 inside = min(p - (Content.xy - float2(RowReach * Scale, 0)), (Content.zw + float2(RowReach * Scale, 0)) - p);
+        row = saturate(min(inside.x, inside.y) / feather + 1) * saturate((-sd - rim * low) / feather);
     }
-    // The open panel: frosted, its radius growing as it opens (no crossfade from sharp); the content row a little.
-    float frost = max(FrostRadius * Open, ContentFrost * row);
+    // The open panel: frosted inside the rim band, its radius growing with the square root of the opening (no crossfade from
+    // sharp: what lies behind is unreadable a quarter of the way open); the collapsed content row alike.
+    float opened = sqrt(saturate(Open));
+    float frost = max(FrostRadius * opened * inner, ContentFrost * row);
     [branch] if (frost > .75) color = Frost(float2(read), frost);
+    float3 unfiltered = color;
     if (LinearFilters > .5) color = ToSrgb(Filters(ToLinear(color)));
     else color = Filters(color);
     // Past the filter's region (an element between device pixels whose corner snapped back: its last column or row), the
@@ -497,7 +512,7 @@ float3 Glass(float2 p, float sd, float2 n)
     if (FilterEnd.x > 0 && any(floor(pixel) >= FilterEnd)) color = Background.Load(int3(int2(floor(pixel) - float2(0, TopExtra) + Pad), 0)).rgb;
 
     // The element's background, then legibility (see the head of the file).
-    color = Legible(lerp(color, Tint.rgb, Tint.a), max(saturate(Open * 1.5), row), Open);
+    color = Legible(lerp(color, Tint.rgb, Tint.a), lerp(unfiltered, Tint.rgb, Tint.a), max(saturate(opened * 1.5) * inner, row), max(opened * inner, row));
 
     // Hover: the glass brightens a little, and its rim catches more light on the side toward the pointer.
     [branch] if (Hover > 0)

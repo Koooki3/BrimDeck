@@ -393,6 +393,7 @@ internal static partial class LiquidPages
             double median = ratios[ratios.Count / 2], low = ratios[ratios.Count / 10];
             Report(median >= 4.5 && low >= 3, $"{name}: primary text against the glass under it: median {median:0.0}:1, 10th percentile {low:0.0}:1 over {ratios.Count} pixels{sample} (wanted 4.5:1 and 3:1)");
         }
+        Comfort(name, layer, glass, under, composed, dw, gx, gy);
         // Secondary text wants 4.5:1 as the primary does; tertiary (the clock, captions, hints) 3:1, its 10th percentile 2:1.
         Contrast(name, "secondary", secondary, 4.5, 3);
         Contrast(name, "tertiary", tertiary, 3, 2);
@@ -414,6 +415,47 @@ internal static partial class LiquidPages
             double wanted = Math.Min(3, (count == 0 ? 0 : lightness / count) * .22 * .3);
             Report(mean >= wanted && mean > 0, $"{name}: the shadow shows below the island (darkens by {mean:0.0} levels on average 2 to 7 DIPs under it, wanted {wanted:0.0}; shadow host shown: {layer.ShadowShown})");
         }
+    }
+
+    // Reading comfort against an opaque theme: in the text's boxes (every pixel the page draws text in, grown by 3 DIPs), the
+    // detail of what lies behind (mean luma gradient of the glass alone) over the detail of the text itself (the gradient of
+    // what the page adds). On an opaque surface what lies behind has none: (text + behind) / text is 1. Wanted: at most 1.2
+    // (round 11, D15: as comfortable to read as the default theme).
+    private static void Comfort(string name, Layer layer, byte[] glass, byte[] under, byte[] composed, int dw, int gx, int gy)
+    {
+        int w = layer.W, h = layer.H, grow = (int)Math.Round(3 * Scale);
+        var text = new bool[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int l = ((layer.Y + y) * layer.Width + layer.X + x) * 4;
+                int alpha = layer.Pixels[l + 3];
+                if (alpha < 64) continue;
+                int lr = layer.Pixels[l + 2] * 255 / alpha, lg = layer.Pixels[l + 1] * 255 / alpha, lb = layer.Pixels[l] * 255 / alpha;
+                bool primary = Math.Abs(lr - layer.Text.R) <= 24 && Math.Abs(lg - layer.Text.G) <= 24 && Math.Abs(lb - layer.Text.B) <= 24;
+                if (primary || layer.Runs[(layer.Y + y) * layer.Width + layer.X + x] > 0) text[y * w + x] = true;
+            }
+        var box = new bool[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                if (text[y * w + x])
+                    for (int yy = Math.Max(0, y - grow); yy <= Math.Min(h - 1, y + grow); yy++)
+                        for (int xx = Math.Max(0, x - grow); xx <= Math.Min(w - 1, x + grow); xx++) box[yy * w + xx] = true;
+        double L(byte[] p, int x, int y) { int d = ((gy + y) * dw + gx + x) * 4; return Lightness(p, d); }
+        double behind = 0, signal = 0; int count = 0;
+        for (int y = 0; y < h - 1; y++)
+            for (int x = 0; x < w - 1; x++)
+            {
+                if (!box[y * w + x] || glass[(y * w + x) * 4 + 3] < 250 || glass[((y + 1) * w + x + 1) * 4 + 3] < 250) continue;
+                double u = L(under, x, y), ux = L(under, x + 1, y), uy = L(under, x, y + 1);
+                double c = L(composed, x, y) - u, cx = L(composed, x + 1, y) - ux, cy = L(composed, x, y + 1) - uy;
+                behind += Math.Abs(ux - u) + Math.Abs(uy - u);
+                signal += Math.Abs(cx - c) + Math.Abs(cy - c);
+                count++;
+            }
+        if (count < 50 || signal <= 0) { Console.WriteLine($"NOTE: {name}: no text boxes to weigh reading comfort in"); return; }
+        double ratio = (signal + behind) / signal;
+        Report(ratio <= 1.2, FormattableString.Invariant($"{name}: reading comfort: behind the text {behind / count:0.00} levels/px of detail against the text's own {signal / count:0.00}, (text + behind) / text {ratio:0.00} (an opaque theme 1.00; wanted at most 1.2)"));
     }
 
     private static void Contrast(string name, string which, List<double> ratios, double wanted, double least)

@@ -19,8 +19,9 @@ namespace BrimDeck.LiquidGlass;
 //   CornerTop, CornerBottom, Shoulder: as the island draws them; CornerTop 0 is a square top (the open panel, the notch).
 //   Tint: the glass's background, straight color and alpha (the source's rgba(255, 255, 255, .08)).
 //   PointerX, PointerY: the pointer in island pixels, NaN while it is away.
-//   Hover, Press, Morph: 0..1, eased by the caller. Hover lights the glass from the pointer (the source's .lit-glow), Press
-//     gives the source's pressed shadows and thicker ring (strength 1.2), Morph thickens the ring as the shape changes.
+//   Hover, Press: 0..1, eased by the caller (GlassFeedback: the monitor page's hover time; Soft.Press down, Soft.Quick up).
+//     Hover brightens the glass a little and lights its rim toward the pointer; Press fades in the source's pressed shadows
+//     and inner glow. Morph: unused (0).
 //   Dark: 1 for the dark look.
 //   BandLow, BandHigh: the band of brightness the theme's text was fitted to (PanelGlass.Low/High; 0, 1 for none): only a
 //     background outside it is moved, just far enough (legibility, see Liquid.hlsl).
@@ -402,7 +403,7 @@ internal sealed class LiquidRenderer : IDisposable
             BandA = _bandA, BandB = _bandB,
             // A square top's sides: the inset shadow there is a gray band down the whole panel; narrowed to about half.
             Narrow = top > 0 || f.Faithful ? 0 : 1.2f,
-            Press = f.Press > .5f ? 1 : 0, Dark = f.Dark, Band = 24 * scale,
+            Press = Math.Clamp(f.Press, 0, 1), Dark = f.Dark, Band = 24 * scale,
             LinearMap = f.LinearMap ? 1 : 0, LinearFilters = f.LinearFilters ? 1 : 0,
             BoxCssX = css ? boxW : 0, BoxCssY = css ? boxH : 0,
             FilterEndX = f.Faithful && f.FilterWidth > 0 && f.FilterHeight > 0 ? Math.Min(f.FilterWidth, w) : 0,
@@ -420,7 +421,8 @@ internal sealed class LiquidRenderer : IDisposable
 
     private const float RingCss = 90;
     // The open panel's frost, DIP (Liquid.hlsl, Frost: a Gaussian of about three quarters of it).
-    private const float FrostDip = 12, ContentFrostDip = 4, FeatherDip = 4;
+    // The frosts are Apple's regular material, about: 32 DIP on the open panel, 12 behind the collapsed content row.
+    private const float FrostDip = 32, ContentFrostDip = 12, FeatherDip = 6;
     private float _maxHalf;
     private (float, float, float, float, float, bool) _maxFor;
 
