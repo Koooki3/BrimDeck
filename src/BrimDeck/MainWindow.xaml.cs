@@ -562,6 +562,7 @@ public partial class MainWindow : Window
         double width = expanded ? _pageWidth : shape.Surface.Width;
         // A floating panel is taller than its page by headerExtra, the space above its header.
         double height = expanded ? pageHeight + headerExtra : shape.Surface.Height;
+        if (expanded) _glassOpenHeight = height;
         // Every compact style opens into the same panel, hanging from the screen edge or, below a lowered capsule, rounded all round.
         double panelRadius = PanelHeader.PanelRadius;
         var radius = expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)

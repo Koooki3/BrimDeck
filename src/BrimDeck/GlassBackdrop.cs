@@ -217,6 +217,8 @@ internal sealed class GlassBackdrop : IDisposable
     // which need a window on screen. Set, every update decides through it whether liquid glass is shown for this frame, and the
     // rest goes as on screen (LiquidShown, SurfaceAside, Held). In the app it is always null.
     internal Func<bool>? StandIn { get; set; }
+    // How far the island is open, 0 (collapsed) to 1 (the open panel), following its opening motion; null: never open (a notice).
+    internal Func<double>? Openness { get; set; }
 
     private void StandInFrame()
     {
@@ -443,7 +445,9 @@ internal sealed class GlassBackdrop : IDisposable
             {
                 // The source switches its pressed shadows at once, and has no hover light or morph of its own: only the press
                 // reaches the glass (the pointer's moves, a change of hover or of the shape's speed alone draw nothing new).
-                Press = _pointerDown && _pointer is not null ? 1 : 0
+                Press = _pointerDown && _pointer is not null ? 1 : 0,
+                // How far the panel is open (its frost and the calmer backdrop behind its text, Liquid.hlsl), with its opening.
+                Open = (float)Math.Clamp(Openness?.Invoke() ?? 0, 0, 1)
             };
             // Drawn again only when the glass changed (its shape, place, look, the press) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),

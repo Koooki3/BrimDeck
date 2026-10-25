@@ -14,18 +14,18 @@ internal static class ShaderTests
             LiquidRenderer.EmbeddedHash() == LiquidRenderer.SourceHash(source));
         check("liquid glass: the shader source is plain ASCII", source.All(b => b < 128));
         // The liquid looks' text over the darkest (light) or brightest (dark) glass the legibility band lets through: the light
-        // glass's floor without its white tint (the stricter case), the dark glass's ceiling under its dark base.
+        // glass's floor without its white tint (the stricter case), the dark glass's ceiling under its thin dark base.
         byte Gray(float v) => (byte)Math.Round(v * 255);
         var floor = new ThemeColor(255, Gray(LiquidFrame.TextLight), Gray(LiquidFrame.TextLight), Gray(LiquidFrame.TextLight));
         var ceiling = ThemeColor.Mix(new ThemeColor(255, Gray(LiquidFrame.TextDark), Gray(LiquidFrame.TextDark), Gray(LiquidFrame.TextDark)),
-            new ThemeColor(255, 0x12, 0x14, 0x19), .3);
+            new ThemeColor(255, 0x12, 0x14, 0x19), .08);
         foreach (var (id, glass) in new[] { ("liquid-glass-light", floor), ("liquid-glass-dark", ceiling) })
         {
             var palette = PanelThemes.Resolve(PanelThemes.BuiltIn(id)!);
-            foreach (var key in new[] { "textPrimary", "textSecondary" })
+            foreach (var (key, least) in new[] { ("textPrimary", 4.5), ("textSecondary", 4.5), ("textTertiary", 3.0) })
             {
                 double ratio = ThemeColor.Contrast(palette[key].Over(glass), glass);
-                check($"liquid glass: {id} {key} keeps 4.5:1 over the glass's band ({ratio:0.00})", ratio >= 4.5);
+                check($"liquid glass: {id} {key} keeps {least:0.0}:1 over the glass's band ({ratio:0.00})", ratio >= least);
             }
         }
         using var capture = DesktopSource.TryCreate();

@@ -55,19 +55,21 @@ internal readonly record struct LiquidFrame(
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
     private const float SourceHeight = 44, Thin = 28;
-    // The backdrop's brightness (sRGB luma) where the themes' body text keeps 4.5:1 with a little to spare: dark text
-    // (#101217) over at least TextLight, light text (#F6F7F9) over at most TextDark.
-    public const float TextLight = .52f, TextDark = .44f;
+    // The backdrop's brightness (sRGB luma, before the glass's own tint) where the themes' text keeps 4.5:1 with a little to
+    // spare: dark text (#101217) over at least TextLight, light text (#F6F7F9) over at most TextDark (with the tints, about
+    // .56 and .33).
+    public const float TextLight = .52f, TextDark = .352f;
 
     // The two looks, at a display scale, for a shape and size: the source's glass in both. Light: its white background
-    // (rgba(255,255,255,.08)) and the backdrop lifted to at least TextLight; dark: a dark base (#121419 at .3) and the backdrop
-    // brought down to at most TextDark, so the theme's text keeps 4.5:1 (see Liquid.hlsl, Legibility).
+    // (rgba(255,255,255,.08)) and the backdrop lifted to at least TextLight; dark: as thin a dark base (#121419 at .08) and the
+    // backdrop brought down to at most TextDark, so the theme's text keeps 4.5:1 (see Liquid.hlsl, Legibility). The dark base
+    // is no thicker than the light one: on a dark page the dark glass is the page's own darkness, not darker.
     public static LiquidFrame Preset(bool dark, int width, int height, float cornerTop, float cornerBottom, float shoulder, float scale)
     {
         float css = height / MathF.Max(.5f, scale);
         float fit = MathF.Min(1, css / SourceHeight);
         float thin = MathF.Min(1, css / Thin);
-        return new(width, height, cornerTop, cornerBottom, shoulder, dark ? 0x12 / 255f : 1, dark ? 0x14 / 255f : 1, dark ? 0x19 / 255f : 1, dark ? .3f : .08f,
+        return new(width, height, cornerTop, cornerBottom, shoulder, dark ? 0x12 / 255f : 1, dark ? 0x14 / 255f : 1, dark ? 0x19 / 255f : 1, .08f,
             PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: dark ? 1 : 0,
             BandLow: dark ? 0 : TextLight, BandHigh: dark ? TextDark : 1, Scale: scale,
             InsetY: -8 * fit, InsetBlur: 20 * fit, InsetAlpha: .14f * thin * thin);
@@ -191,7 +193,10 @@ internal sealed class LiquidRenderer : IDisposable
         _vertex = device.CreateVertexShader(vertex);
         _pixel = device.CreatePixelShader(pixel);
         _constants = device.CreateBuffer(new BufferDescription((uint)Unsafe.SizeOf<Constants>(), BindFlags.ConstantBuffer, ResourceUsage.Default, CpuAccessFlags.None));
+        // The frost reads the mips filtered (Liquid.hlsl, Frost); everything else is read texel by texel.
+        _smooth = device.CreateSamplerState(SamplerDescription.LinearClamp);
     }
+    private readonly ID3D11SamplerState _smooth;
 
     // A Composition brush showing the rendered glass at its size from the brush's top-left (no stretch): the caller places the
     // sprite, or the brush's offset, at the island's top-left.
@@ -221,7 +226,8 @@ internal sealed class LiquidRenderer : IDisposable
     internal void Draw(ID3D11Texture2D background, int pad, in LiquidFrame frame, ID3D11RenderTargetView target)
     {
         var view = Mips(background);
-        Sample(pad, frame.Width, frame.Height);
+        // The open panel's band is fitted to its frosted backdrop: measured from a mip as coarse as the frost.
+        Sample(pad, frame.Width, frame.Height, frame.Open > .5f && !frame.Faithful ? (int)MathF.Log2(MathF.Max(1, FrostDip * MathF.Max(.5f, frame.Scale))) : 0);
         Write(frame, background.Description, pad);
         var context = _context;
         context.OMSetRenderTargets(target);
@@ -235,6 +241,7 @@ internal sealed class LiquidRenderer : IDisposable
         context.PSSetShader(_pixel);
         context.PSSetConstantBuffer(0, _constants);
         context.PSSetShaderResource(0, view);
+        context.PSSetSampler(0, _smooth);
         context.Draw(3, 0);
         // The background is copied into the mips next frame: it must not stay bound as a shader input meanwhile.
         context.PSSetShaderResource(0, null!);
@@ -261,26 +268,27 @@ internal sealed class LiquidRenderer : IDisposable
 
     // ----- What lies behind -----
     // The mean brightness of the background under the island, for automatic liquid glass (GlassAppearance): a small mip (at
-    // most MeasureTexels across) is copied to a staging texture after the mips are made, and read on a later frame, never
-    // waited for. One copy is out at a time.
-    private const int MeasureTexels = 128;
+    // most MeasureTexels across: fine enough that a word on a page shows in the percentiles) is copied to a staging texture
+    // after the mips are made, and read on a later frame, never waited for. One copy is out at a time. The percentiles come
+    // from a histogram (no sort: a measure of the open panel reads some 37,000 texels).
+    private const int MeasureTexels = 512, Bins = 1024;
     private ID3D11Texture2D? _measure;
     private (int Width, int Height, int Level) _measureFor;
     private bool _measuring;
     private (int Pad, int Width, int Height) _measuredRegion;
     private readonly byte[] _measureRow = new byte[MeasureTexels * 4 * 2];
-    private readonly float[] _lumas = new float[MeasureTexels * MeasureTexels * 4];
+    private readonly int[] _histogram = new int[Bins];
     // The backdrop's brightness under the island, its 2nd and 98th percentiles (sRGB luma), from the last measure: the band
     // the glass moves it into (legibility) is scaled from these. Before any, the widest.
-    private float _bandA, _bandB = 1;
+    private float _bandA, _bandB = 1, _bandMean = .5f;
     public (float Low, float High) Band => (_bandA, _bandB);
 
-    private void Sample(int pad, int width, int height)
+    private void Sample(int pad, int width, int height, int least)
     {
         if (_measuring || _mips is null) return;
         var d = _mips.Description;
         int level = 0, w = (int)d.Width, h = (int)d.Height;
-        while (w > MeasureTexels && level + 1 < (int)d.MipLevels) { w = Math.Max(1, w / 2); h = Math.Max(1, h / 2); level++; }
+        while ((w > MeasureTexels || level < least) && level + 1 < (int)d.MipLevels && w > 1 && h > 1) { w = Math.Max(1, w / 2); h = Math.Max(1, h / 2); level++; }
         if (_measure is null || _measureFor != (w, h, level))
         {
             _measure?.Dispose();
@@ -310,7 +318,7 @@ internal sealed class LiquidRenderer : IDisposable
             double step = 1 << level, sum = 0;
             int count = 0;
             var (pad, width, height) = _measuredRegion;
-            int n = 0;
+            Array.Clear(_histogram);
             for (int y = 0; y < h; y++)
             {
                 double cy = (y + .5) * step - pad;
@@ -324,13 +332,13 @@ internal sealed class LiquidRenderer : IDisposable
                     double l = (.0722 * _measureRow[o] + .7152 * _measureRow[o + 1] + .2126 * _measureRow[o + 2]) / 255;
                     sum += l;
                     count++;
-                    if (n < _lumas.Length) _lumas[n++] = (float)l;
+                    _histogram[Math.Min(Bins - 1, (int)(l * Bins))]++;
                 }
             }
             if (count == 0) return false;
             luma = sum / count;
-            Array.Sort(_lumas, 0, n);
-            _bandA = _lumas[(int)(n * .02)]; _bandB = _lumas[Math.Min(n - 1, (int)(n * .98))];
+            _bandMean = (float)luma;
+            _bandA = Percentile(.02); _bandB = Percentile(.98);
             return true;
         }
         finally
@@ -338,6 +346,20 @@ internal sealed class LiquidRenderer : IDisposable
             _context.Unmap(_measure, 0);
             _measuring = false;
         }
+    }
+
+    // The luma below which the given share of the last measure's texels lie (the middle of its bin).
+    private float Percentile(double share)
+    {
+        int total = 0;
+        foreach (int c in _histogram) total += c;
+        int wanted = (int)(total * share), seen = 0;
+        for (int i = 0; i < Bins; i++)
+        {
+            seen += _histogram[i];
+            if (seen > wanted) return (i + .5f) / Bins;
+        }
+        return 1;
     }
 
     private void Write(in LiquidFrame f, Texture2DDescription background, int pad)
@@ -382,12 +404,16 @@ internal sealed class LiquidRenderer : IDisposable
             LinearMap = f.LinearMap ? 1 : 0, LinearFilters = f.LinearFilters ? 1 : 0,
             BoxCssX = css ? boxW : 0, BoxCssY = css ? boxH : 0,
             FilterEndX = f.Faithful && f.FilterWidth > 0 && f.FilterHeight > 0 ? Math.Min(f.FilterWidth, w) : 0,
-            FilterEndY = f.Faithful && f.FilterWidth > 0 && f.FilterHeight > 0 ? Math.Min(f.FilterHeight, h + extra) : 0
+            FilterEndY = f.Faithful && f.FilterWidth > 0 && f.FilterHeight > 0 ? Math.Min(f.FilterHeight, h + extra) : 0,
+            // The open panel's frost: about FrostDip across, faded in with the opening; never on the source's own glass.
+            Open = f.Faithful ? 0 : Math.Clamp(f.Open, 0, 1), FrostRadius = FrostDip * scale, BandMean = _bandMean
         };
         _context.UpdateSubresource(in c, _constants);
     }
 
     private const float RingCss = 90;
+    // The open panel's frost, DIP (Liquid.hlsl, Frost: a Gaussian of about three quarters of it).
+    private const float FrostDip = 12;
     private float _maxHalf;
     private (float, float, float, float, float, bool) _maxFor;
 
@@ -502,7 +528,7 @@ internal sealed class LiquidRenderer : IDisposable
         _target?.Dispose(); _swapChain?.Dispose();
         _mipsView?.Dispose(); _mips?.Dispose(); _measure?.Dispose();
         // The immediate context is not let go: Vortice keeps one wrapper for the device, which the capture side uses too.
-        _constants.Dispose(); _pixel.Dispose(); _vertex.Dispose();
+        _constants.Dispose(); _smooth.Dispose(); _pixel.Dispose(); _vertex.Dispose();
     }
 
     // The shader's constant buffer (Liquid.hlsl, Frame), in its order: 16 floats a row, nothing straddling a row.
@@ -520,5 +546,6 @@ internal sealed class LiquidRenderer : IDisposable
         public float BandA, BandB, Narrow, Press;
         public float Dark, Band, LinearMap, LinearFilters;
         public float BoxCssX, BoxCssY, FilterEndX, FilterEndY;
+        public float Open, FrostRadius, BandMean, Spare;
     }
 }

@@ -17,6 +17,15 @@ public partial class MainWindow
     private bool _shadowCut;
     // The blur under glass (GlassBackdrop), made with the window; it stays out of the way for other themes.
     private GlassBackdrop? _glass;
+    // The open panel's height the last time it opened (SetExpanded): how far the island is open is read from its height between
+    // the collapsed shape's and this, so it follows the opening motion as it is drawn.
+    private double _glassOpenHeight;
+    internal double GlassOpenness()
+    {
+        double closed = Collapsed.Surface.Height, open = _glassOpenHeight, now = Island.ActualHeight;
+        if (!(open > closed + 1) || !double.IsFinite(now)) return _expanded ? 1 : 0;
+        return Math.Clamp((now - closed) / (open - closed), 0, 1);
+    }
 
     private void ApplyMaterial()
     {
@@ -34,6 +43,7 @@ public partial class MainWindow
             _glass.AutoLook = () => _app.AutoLookFrom(this);
             _glass.Look += (dark, instant) => _app.TurnGlass(this, dark, instant);
             _glass.Crossed += () => _app.GlassCrossed(this);
+            _glass.Openness = GlassOpenness;
             OffscreenGlass();
             // Liquid glass lights its rim from the pointer and presses with it: where the pointer is over the island, and
             // whether the button is down (seen even when a button under it handles the click).

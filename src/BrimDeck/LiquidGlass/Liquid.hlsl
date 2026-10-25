@@ -36,11 +36,20 @@
 //   The source's uv field stretches with the element (a wide pill gets a wide, shallow ring, its ends pulled from the far
 //   middle): here it is the source's field for a square of the shape's shorter side, its middle stretched along the longer one.
 //   Low shapes take a smaller inset shadow (InsetY, InsetBlur, InsetAlpha from the renderer).
-//   Legibility (Low, High): the backdrop's brightness under the island (its 2nd and 98th percentiles, BandA..BandB,
-//   measured by the renderer) is moved affinely into the band the theme's text needs - light glass lifts it to at least Low,
-//   dark glass brings it down to at most High from its dark tint - scaled no more than it must be, so the detail behind keeps
-//   its relative contrast; only the few pixels past the percentiles (a word on a page, finer than the measure's grain) are
-//   held to the band one by one, with a soft knee.
+//   Legibility (Low, High; Legible): the glass as the port draws it (filtered, tinted) is mapped on its luma alone, its chroma
+//   following in proportion (no channel lifted on its own), monotonically (no two pixels change places), into the band the
+//   theme's text needs: light glass at least Low, dark glass at most High (both as they are after the tint). The backdrop's 2nd
+//   and 98th percentiles (BandA, BandB, measured by the renderer before the filters) are passed through the filters and the
+//   tint here, so the map is fitted to the glass the port draws. It only compresses, about an anchor: the dark glass about its
+//   darkest end (color = a + (color - a) k), which is never left darker than the backdrop's own darkest (the port's linear-light
+//   contrast crushes a dark page to black: that much is given back), the light glass alike about its brightest. Only where the
+//   anchor itself is past the band does the whole range shift, and only as far as the band asks (its slope growing from 0 as
+//   the anchor goes past, so the map changes continuously with the backdrop). The few pixels
+//   past the percentiles (a word on a page, finer than the measure's grain) are held to the band with a soft knee.
+//   Open panel (Open, the island's own opening, eased as it opens): the backdrop is frosted (FrostRadius, from the mips) and
+//   what lies behind the panel's text is held within Cap:1 of contrast about the backdrop's mean (BandMean), so a page behind
+//   cannot compete with the page on it.
+//   The capsule, the notch and the bar (Open 0) stay clear, the port's own glass.
 // The output is premultiplied; outside the outline it is transparent. Edge pixels take their coverage from four subsamples.
 
 cbuffer Frame : register(b0)
@@ -72,7 +81,7 @@ cbuffer Frame : register(b0)
     float InsetY;       // the inset shadow: offset (CSS pixels, negative: up), blur, opacity
     float InsetBlur;
     float InsetAlpha;
-    float BandA;        // the backdrop's brightness under the island: 5th and 95th percentiles (sRGB luma)
+    float BandA;        // the backdrop's brightness under the island: 2nd and 98th percentiles (sRGB luma, unfiltered)
     float BandB;
     float Narrow;       // how far the inset shadow's sides are narrowed (0 none, 1 to nothing), for a square top
     float Press;        // 0 or 1, the pressed shadows
@@ -82,9 +91,18 @@ cbuffer Frame : register(b0)
     float LinearFilters;// the backdrop filtered in linear light
     float2 BoxCss;      // the source's element in whole CSS pixels, its map's texels (Faithful; 0: the box's own size / Scale)
     float2 FilterEnd;   // where the source's backdrop-filter ends, device pixels from the box's corner (Faithful; 0: the box's end)
+    float Open;         // 0 closed .. 1 the open panel (eased with the island's opening)
+    float FrostRadius;  // the open panel's frost, device pixels
+    float BandMean;     // the backdrop's mean brightness under the island (sRGB luma, unfiltered)
+    float Spare;
 };
 
 Texture2D Background : register(t0);
+SamplerState Smooth : register(s0);
+
+// The most contrast left behind the open panel's text, and how far the band may move the glass's mean brightness from the
+// backdrop's (dark glass on a dark page, light glass on a light one).
+static const float Cap = 1.5, Keep = 0;
 
 struct Vertex { float4 Position : SV_Position; };
 
@@ -196,6 +214,7 @@ float3 ToSrgb(float3 c) { return c <= .0031308 ? c * 12.92 : 1.055 * pow(max(c, 
 float SoftMax(float a, float b, float k) { float h = max(k - abs(a - b), 0) / k; return max(a, b) + h * h * k * .25; }
 float SoftMin(float a, float b, float k) { float h = max(k - abs(a - b), 0) / k; return min(a, b) - h * h * k * .25; }
 float ToLinear1(float c) { return c <= .04045 ? c / 12.92 : pow((c + .055) / 1.055, 2.4); }
+float ToSrgb1(float c) { return c <= .0031308 ? c * 12.92 : 1.055 * pow(max(c, 0), 1 / 2.4) - .055; }
 
 // The source's roundedRectSDF.
 float RoundedRect(float x, float y, float w, float h, float r)
@@ -251,6 +270,13 @@ float2 Displacement(float2 pixel, float2 box)
     float2 at = (floor(pixel) + .5) / Scale - .5;
     float2 byte = 0;
     if (Scale == 1) byte = Bytes(at, box);
+    else if (Faithful < .5)
+    {
+        // The island: bilinear between the four bytes around (a fifth of the cubic's cost; the cubic's difference, a shift near a
+        // half rounded the other way, is a pixel here and there and only shows against the browser, on the proof sheets).
+        float2 i = floor(at), f = at - i;
+        byte = lerp(lerp(Bytes(i, box), Bytes(i + float2(1, 0), box), f.x), lerp(Bytes(i + float2(0, 1), box), Bytes(i + 1, box), f.x), f.y);
+    }
     else
     {
         float2 i = floor(at), f = at - i;
@@ -312,6 +338,112 @@ float BoxCoverage(float2 p, float2 halfSize, float r, float sigma, float narrow)
     return value;
 }
 
+// The open panel's frost: the backdrop around a point (background pixels) under a Gaussian of about FrostRadius * .75, from the
+// mips (5 x 5 taps, half the radius apart, each a filtered read of the mip a quarter of the radius wide).
+float3 Frost(float2 read)
+{
+    float r = max(FrostRadius, 1);
+    float level = max(log2(r) - 1, 0);
+    float3 sum = 0;
+    float weight = 0;
+    [loop] for (int y = -2; y <= 2; y++)
+        [loop] for (int x = -2; x <= 2; x++)
+        {
+            float w = exp(-(x * x + y * y) / 4.5);
+            sum += w * Background.SampleLevel(Smooth, (read + .5 + float2(x, y) * r * .5) * Inverse, level).rgb;
+            weight += w;
+        }
+    return sum / weight;
+}
+
+// The luma of a gray (sRGB) through the filters.
+float FilteredLuma(float v)
+{
+    float3 c = v;
+    return LinearFilters > .5 ? ToSrgb(Filters(ToLinear(c))).g : Filters(c).g;
+}
+
+// The band's soft knees: what the measure, at its grain, could not see (a word on a page) held to the band.
+float Knees(float l, float least, float most)
+{
+    if (least >= 0) l = SoftMax(l, least, .1);
+    if (most <= 1) l = SoftMin(l, most, .1);
+    return saturate(l);
+}
+
+// The port's glass (filtered and tinted; raw: the same backdrop unfiltered, tinted) mapped into the band the theme's text needs
+// (see the head of the file).
+float3 Legible(float3 port, float3 raw)
+{
+    if (Low <= 0 && High >= 1) return port;
+    float t = Tint.a, tl = Luma(Tint.rgb);
+    // What is mapped: the port's glass, but for the dark look never darker than the backdrop itself (the port's contrast, in
+    // linear light, crushes a dark page to black), and for the light look never brighter (it lifts a light page). Its 2nd and
+    // 98th percentiles and its mean, from the backdrop's.
+    float dark = High < 1 ? 1 : 0;
+    float p = Luma(port), r = Luma(raw);
+    float3 c = (dark > 0 ? r > p : r < p) ? raw : port;
+    float x = Luma(c);
+    float au = BandA, bu = max(BandB, BandA + 1e-3);
+    float xa = lerp(FilteredLuma(au), tl, t), xb = lerp(FilteredLuma(bu), tl, t), xm = lerp(FilteredLuma(BandMean), tl, t);
+    float ra = lerp(au, tl, t), rb = lerp(bu, tl, t), rm = lerp(BandMean, tl, t);
+    if (dark > 0) { xa = max(xa, ra); xb = max(xb, rb); xm = max(xm, rm); }
+    else { xa = min(xa, ra); xb = min(xb, rb); xm = min(xm, rm); }
+    xb = max(xb, xa + 1e-3);
+    float range = xb - xa;
+    float least = Low > 0 ? lerp(Low, 1, t) : -1, most = High < 1 ? lerp(High, tl, t) : 2;
+    float slope = 1, offset = 0;
+    if (Low > 0 && xa < least)
+    {
+        // Compressed only, its bottom to the floor; its top never above the backdrop's own (anchor), and its mean kept to
+        // within Keep (the anchor moves down only as far as that asks). Past the band (the top itself under the floor), the
+        // whole range shifts up just to the floor, its slope growing from 0 as the top goes past.
+        float anchored = (xb - least) / range;
+        float kept = xm > least ? (xm + Keep - least) / max(xm - xa, 1e-3) : 1e5;
+        slope = anchored >= 0 ? saturate(min(anchored, kept)) : min(1, (1 - least) / range) * saturate(-anchored * 4);
+        offset = least - xa * slope;
+    }
+    if (High < 1 && xb > most)
+    {
+        // Compressed only, its top to the ceiling; its bottom never below the backdrop's own (color = a + (color - a) k, the
+        // anchor a), and its mean kept to within Keep. Past the band, the whole range shifts down just to the ceiling.
+        float anchored = (most - xa) / range;
+        float kept = xm < most ? (most - xm + Keep) / max(xb - xm, 1e-3) : 1e5;
+        slope = anchored >= 0 ? saturate(min(anchored, kept)) : min(1, most / range) * saturate(-anchored * 4);
+        offset = most - xb * slope;
+    }
+    float l = Knees(x * slope + offset, least, most), k = slope;
+    [branch] if (Open > 0)
+    {
+        // The open panel: what lies behind its text kept within Cap:1, about the backdrop's mean (so a page behind keeps its
+        // brightness), inside the band.
+        float m = Knees(xm * slope + offset, least, most);
+        float y = ToLinear1(m) + .05, spread = sqrt(Cap);
+        float lo = ToSrgb1(y / spread - .05), hi = ToSrgb1(y * spread - .05);
+        if (lo < least) { lo = least; hi = ToSrgb1((ToLinear1(least) + .05) * Cap - .05); }
+        if (hi > most) { hi = most; lo = ToSrgb1((ToLinear1(most) + .05) / Cap - .05); }
+        // Compressed about the mean, so it stays (when the window holds it: else from the window's near side), as far as the
+        // range must to fit the window.
+        float qa = xa * slope + offset, qb = max(xb * slope + offset, qa + 1e-3), k2, capped;
+        if (m >= lo && m <= hi)
+        {
+            k2 = min(1, min((hi - m) / max(qb - m, 1e-3), (m - lo) / max(m - qa, 1e-3)));
+            capped = m + (l - m) * k2;
+        }
+        else
+        {
+            k2 = min(1, (hi - lo) / (qb - qa));
+            capped = m < lo ? lo + (l - qa) * k2 : hi - (qb - l) * k2;
+        }
+        l = lerp(l, clamp(capped, lo, hi), Open);
+        k *= lerp(1, k2, Open);
+    }
+    // The chroma follows the luma's compression, as far as it stays in gamut (the luma kept exactly).
+    float3 d = c - x;
+    float3 room = d > 0 ? (1 - l) / max(d, 1e-5) : d < 0 ? l / max(-d, 1e-5) : 1e5;
+    return l + d * min(k, min(room.x, min(room.y, room.z)));
+}
+
 float3 Glass(float2 p, float sd)
 {
     // The element's box (device pixels): the island, reaching TopExtra above a square top.
@@ -330,41 +462,17 @@ float3 Glass(float2 p, float sd)
     at = t < box ? t : period - t - 1;
     int2 read = int2(at - float2(0, TopExtra) + Pad);
     float3 color = Background.Load(int3(read, 0)).rgb;
+    // The open panel: frosted, from the mips, as it opens.
+    [branch] if (Open > 0) color = lerp(color, Frost(float2(read)), Open);
+    float3 unfiltered = color;
     if (LinearFilters > .5) color = ToSrgb(Filters(ToLinear(color)));
     else color = Filters(color);
     // Past the filter's region (an element between device pixels whose corner snapped back: its last column or row), the
     // backdrop as it is.
     if (FilterEnd.x > 0 && any(floor(pixel) >= FilterEnd)) color = Background.Load(int3(int2(floor(pixel) - float2(0, TopExtra) + Pad), 0)).rgb;
 
-    // Legibility: the backdrop's brightness moved affinely into the theme's band, scaled no more than it must be.
-    float a = BandA, b = max(BandB, BandA + 1e-3);
-    if (Low > 0 && a < Low)
-    {
-        float k = min(1, (1 - Low) / (b - a));
-        color = Low + (color - a) * k;
-    }
-    if (High < 1 && b > High)
-    {
-        float k = min(1, High / (b - a));
-        color = High - (b - color) * k;
-    }
-    color = saturate(color);
-    // What the measure, at a few pixels' grain, could not see (a dark word on a light page, a bright one on a dark page) is
-    // still lifted, or brought down, just as far as the band asks, with a soft knee: only those pixels.
-    float luma = Luma(color);
-    if (Low > 0 && luma < Low + .1)
-    {
-        float held = SoftMax(luma, Low, .1);
-        color += (1 - color) * saturate((held - luma) / max(1 - luma, 1e-3));
-    }
-    if (High < 1 && luma > High - .1)
-    {
-        float held = SoftMin(luma, High, .1);
-        color *= held / max(luma, 1e-3);
-    }
-
-    // The element's background.
-    color = lerp(color, Tint.rgb, Tint.a);
+    // The element's background, then legibility (see the head of the file).
+    color = Legible(lerp(color, Tint.rgb, Tint.a), lerp(unfiltered, Tint.rgb, Tint.a));
 
     // The inset shadows: dark where the box moved by the offset, blurred, does not cover. Pressed, the source's inner glow
     // (white where the box shrunk by its spread, blurred, does not cover) and its deeper bottom shadow, at once.

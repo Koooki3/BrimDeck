@@ -275,10 +275,14 @@ internal static class LiquidPreview
             using var target = device.CreateTexture2D(new Texture2DDescription(Vortice.DXGI.Format.B8G8R8A8_UNorm, (uint)at.Width, (uint)at.Height, 1, 1, BindFlags.RenderTarget));
             using var view = device.CreateRenderTargetView(target);
             // The glass takes the backdrop's band of brightness from its own measure of it (a frame later on screen): measured
-            // here first, and drawn again with it.
+            // here first, and drawn again with it. (A measure still out from the last render, of another backdrop, is read and
+            // dropped first, or the first draw would not send this one's.)
+            renderer.MeasureNow(out _);
             renderer.Draw(background, pad, frame, view);
             renderer.MeasureNow(out _);
             renderer.Draw(background, pad, frame, view);
+            // The measure the second draw sent, read so none is left out for the next render.
+            renderer.MeasureNow(out _);
             return Read(device, target, at.Width, at.Height);
         }
         finally { handle.Free(); }
@@ -785,7 +789,12 @@ internal static class LiquidPreview
                         if (look == "lgw") frame = frame with { Faithful = true, BandLow = 0, BandHigh = 1 };
                         // The island's glass with no band (what legibility starts from, for the detail it keeps).
                         if (look == "plain") frame = frame with { BandLow = 0, BandHigh = 1 };
+                        // LIQUID_FLAT: no inset shadow and no frost, so the band's map alone can be read off pixel by pixel (the
+                        // order check, harness checks9.py).
+                        if (Environment.GetEnvironmentVariable("LIQUID_FLAT") == "1") frame = frame with { InsetAlpha = 0, Open = 0 };
                         var glass = Render(device, renderer, desktop, dw, dh, at, frame, (int)Math.Ceiling(48 * scale));
+                        if (Environment.GetEnvironmentVariable("LIQUID_DEBUG") == "1")
+                            Console.WriteLine(FormattableString.Invariant($"band {stem} {shape.Name} {look}: {renderer.Band.Low:0.000}..{renderer.Band.High:0.000}"));
                         var composed = (byte[])desktop.Clone();
                         var alpha = new byte[dw * dh];
                         for (int y = 0; y < h; y++)

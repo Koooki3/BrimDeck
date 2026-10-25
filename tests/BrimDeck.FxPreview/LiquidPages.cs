@@ -45,7 +45,7 @@ internal static class LiquidPages
     // One page drawn: the panel's layer (premultiplied BGRA, the root's size in device pixels) and the island's rectangle in it.
     // Runs marks the pixels inside the theme's secondary (2) and tertiary (3) text runs (TextBlocks drawn in that brush).
     private sealed record Layer(byte[] Pixels, int Width, int Height, int X, int Y, int W, int H, double CornerTop, double CornerBottom, double Shoulder, bool ShadowShown, Color Text, bool HasText,
-        byte[] Runs, Color Secondary, Color Tertiary);
+        byte[] Runs, Color Secondary, Color Tertiary, double Open);
 
     // BrimDeck's own App (never run) and its MainWindow, whose stage lies in a source that is never shown, with the notices and
     // no updates. Also used by ShadowCost (with animations on).
@@ -193,7 +193,8 @@ internal static class LiquidPages
         var c = island.CornerRadius;
         Color secondary = PanelTheme.ColorOf("textSecondary"), tertiary = PanelTheme.ColorOf("textTertiary");
         return new Layer(pixels, width, height, x, y, w, h, c.TopLeft * Scale, c.BottomLeft * Scale, island.ShoulderRadius * Scale, deck.ShadowHost.Opacity > 0,
-            PanelTheme.ColorOf("textPrimary"), page != Page.Capsule, Runs(root, deck.Stage, width, height, secondary, tertiary), secondary, tertiary);
+            PanelTheme.ColorOf("textPrimary"), page != Page.Capsule, Runs(root, deck.Stage, width, height, secondary, tertiary), secondary, tertiary,
+            deck.GlassOpenness());
     }
 
     // The secondary and tertiary text runs: every TextBlock shown whose brush (its own or inherited) is the theme's secondary
@@ -246,7 +247,9 @@ internal static class LiquidPages
         for (int y = 0; y < dh; y++) Buffer.BlockCopy(background, Math.Min(y, bh - 1) * bw * 4, desktop, y * dw * 4, dw * 4);
         // The island at the top centre, as on the monitor; the layer is shifted by as much.
         int gx = (int)Math.Round((dw - layer.W) / 2.0), gy = layer.Y, ox = layer.X - gx;
-        var frame = LiquidFrame.Preset(dark, layer.W, layer.H, (float)layer.CornerTop, (float)layer.CornerBottom, (float)layer.Shoulder, (float)Scale);
+        // How far the panel is open, as the app gives it to the glass (MainWindow.GlassOpenness): its frost and calmer backdrop.
+        var frame = LiquidFrame.Preset(dark, layer.W, layer.H, (float)layer.CornerTop, (float)layer.CornerBottom, (float)layer.Shoulder, (float)Scale)
+            with { Open = (float)layer.Open };
         var glass = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H), frame, (int)Math.Ceiling(48 * Scale));
         var under = (byte[])desktop.Clone();
         for (int y = 0; y < layer.H; y++)
