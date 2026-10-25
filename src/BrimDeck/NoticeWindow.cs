@@ -888,7 +888,8 @@ internal sealed partial class NoticeWindow : Window
     private void ViewAll()
     {
         var deck = _deck;
-        bool byKey = InputManager.Current.MostRecentInputDevice is KeyboardDevice;
+        // Chosen from the keyboard, the panel takes the keyboard on as the notices hotkey gives it; Dismiss ends it here.
+        bool byKey = _keyboard;
         Dismiss(false);
         deck.OpenNoticesPage(byKey);
     }

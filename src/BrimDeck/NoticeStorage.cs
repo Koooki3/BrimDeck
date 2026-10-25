@@ -222,7 +222,8 @@ internal static class NoticeStorage
                 Directory.CreateDirectory(into);
                 foreach (var icon in Directory.EnumerateFiles(icons, "*.png"))
                 {
-                    // Saved icons only (not their temporary files), and none that is a link.
+                    // Only *.png is listed, so an icon's temporary file (.tmp) never comes up; of those, only names BrimDeck itself
+                    // gives a saved icon (OwnName), and none that is a link.
                     if (!NoticeHistory.OwnName(Path.GetFileName(icon), inIcons: true) || NoticeHistory.Linked(icon)) continue;
                     var moved = Path.Combine(into, Path.GetFileName(icon));
                     if (!File.Exists(moved)) File.Move(icon, moved); else File.Delete(icon);
