@@ -25,6 +25,8 @@ internal sealed class AmbientGlow : IMotionClient
     private Brush? _rim;
     private double _origin, _rimShown = 1, _driftShown, _sweepShown = -1, _sweepOpacityShown;
     private bool _running;
+    // When the light was paused (Eased time), so it goes on from the same moment of its cycle when it runs again.
+    private double? _pausedAt;
 
     public AmbientGlow(IslandBorder island, Panel content, Func<MotionConditions> conditions, Func<bool> open)
     {
@@ -61,17 +63,40 @@ internal sealed class AmbientGlow : IMotionClient
     // Starts or stops the light for the current conditions.
     public void Update()
     {
-        bool run = _rim is not null && MotionGate.Ambient(_conditions(), _motion) && !HeldForBlur;
+        var conditions = _conditions();
+        bool run = _rim is not null && MotionGate.Ambient(conditions, _motion) && !HeldForBlur;
         if (run == _running) return;
-        if (run) { _running = true; _origin = Eased.Now; MotionTicker.Add(this, Interval(-1)); }
-        else Stop();
+        if (run)
+        {
+            _running = true;
+            _origin = _pausedAt is { } paused ? _origin + (Eased.Now - paused) : Eased.Now;
+            _pausedAt = null;
+            _sweep.BeginAnimation(UIElement.OpacityProperty, null); _sweep.Opacity = 0;
+            MotionTicker.Add(this, Interval(-1));
+        }
+        else Halt(conditions);
     }
+
+    // Motion still allowed (the panel opening over glass, the indicator line, a locked session, battery saver, the display off):
+    // the light holds where it is rather than jumping back to rest, and a passing scan line fades out. With motion not allowed
+    // (animations off, high contrast) it is put at rest at once.
+    private void Halt(in MotionConditions conditions)
+    {
+        if (!conditions.MotionAllowed || _rim is null) { Stop(); return; }
+        if (_running) MotionTicker.Remove(this);
+        _running = false;
+        _pausedAt = Eased.Now;
+        if (_sweep.Opacity > 0) _sweep.BeginAnimation(UIElement.OpacityProperty, Soft.Fade(_sweep.Opacity, 0, LeaveMs, Soft.Out));
+        _sweepShown = -1; _sweepOpacityShown = 0;
+    }
+    private const int LeaveMs = 200;
 
     public void Stop()
     {
         if (_running) MotionTicker.Remove(this);
         _running = false;
-        _sweep.Opacity = 0;
+        _pausedAt = null;
+        _sweep.BeginAnimation(UIElement.OpacityProperty, null); _sweep.Opacity = 0;
         if (_rim is not null) _rim.Opacity = 1;
         _drift.X = 0;
         _rimShown = 1; _driftShown = 0; _sweepShown = -1; _sweepOpacityShown = 0;
@@ -80,7 +105,8 @@ internal sealed class AmbientGlow : IMotionClient
     public int Tick(double now)
     {
         if (!_running) return 0;
-        if (_rim is null || !MotionGate.Ambient(_conditions(), _motion) || HeldForBlur) { Stop(); return 0; }
+        var conditions = _conditions();
+        if (_rim is null || !MotionGate.Ambient(conditions, _motion) || HeldForBlur) { Halt(conditions); return 0; }
         var frame = _motion.Ambient.At(now - _origin);
         // Changes below what eight bits of opacity can show are left for a later frame. The drift always moves on by more than
         // its threshold between ticks (cyberpunk: .006 of a width per collapsed tick against .0015), so a slower tick would
