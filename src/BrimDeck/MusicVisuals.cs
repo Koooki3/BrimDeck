@@ -307,7 +307,7 @@ internal sealed class MusicMarquee : FrameworkElement
     private double EdgeStop => _fadeWidth > 0 ? Math.Min(.5, EdgeWidth / _fadeWidth) : 0;
     private void ResetAnimation()
     {
-        _turn?.Stop(); ReleaseGlide();
+        _turn?.Stop(); ReleaseGlide(); ShowGliding();
         _scroll = null; _running = false; _since = double.NaN; _elapsed = 0;
         _shift.X = 0; _unshift.X = 0; _left.Offset = 0; _right.Offset = 1 - EdgeStop;
     }
@@ -344,7 +344,8 @@ internal sealed class MusicMarquee : FrameworkElement
 
     // Shows where the cycle stands and, while it runs, waits for its next turn: a rest shows its still values with no clock
     // running, and just before it ends the glide starts on a clock of its own (CycleTurn.Lead), which lets go at the next turn.
-    private void Turn()
+    private void Turn() { TurnClock(); ShowGliding(); }
+    private void TurnClock()
     {
         if (_scroll is not { } cycle) { _turn?.Stop(); return; }
         // The time counted here follows the glide's clock, so the two never drift apart.
@@ -393,13 +394,11 @@ internal sealed class MusicMarquee : FrameworkElement
         glide.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new LinearDoubleKeyFrame(edge, At(ramp)), new DiscreteDoubleKeyFrame(edge, At(travel))));
         glide.Children.Add(Track(new DiscreteDoubleKeyFrame(1 - edge, At(0)), new DiscreteDoubleKeyFrame(1 - edge, At(travel - ramp)), new LinearDoubleKeyFrame(1, At(travel))));
         glide.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new LinearDoubleKeyFrame(cycle.Overflow, At(travel))));
-        bool was = _glide is not null;
         _glide = (ClockGroup)glide.CreateClock(true);
         _shift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_glide.Children[0]);
         _left.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[1]);
         _right.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[2]);
         _unshift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_glide.Children[3]);
-        if (!was) Gliding?.Invoke(true);
     }
     private void ReleaseGlide()
     {
@@ -409,7 +408,16 @@ internal sealed class MusicMarquee : FrameworkElement
         _unshift.ApplyAnimationClock(TranslateTransform.XProperty, null);
         _left.ApplyAnimationClock(GradientStop.OffsetProperty, null);
         _right.ApplyAnimationClock(GradientStop.OffsetProperty, null);
-        Gliding?.Invoke(false);
+    }
+    // Gliding is raised once a turn has settled, and only when whether a clock glides has changed: a turn that lets one clock go
+    // and starts the next (a new room for the text) raised it twice, and the bars' timer was stopped and started again for it.
+    private bool _glidingShown;
+    private void ShowGliding()
+    {
+        bool gliding = _glide is not null;
+        if (gliding == _glidingShown) return;
+        _glidingShown = gliding;
+        Gliding?.Invoke(gliding);
     }
     protected override void OnRender(DrawingContext dc) { if (_glyphs is null) Draw(dc, RenderSize); }
     // The size comes from the element that draws: the child renders during this element's arrange, before its own size is set.
