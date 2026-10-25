@@ -1,58 +1,122 @@
 namespace BrimDeck.Core;
 
-// Which look automatic liquid glass ("liquid-glass") takes, from the mean brightness of what lies behind the island (luma 0..1,
-// sRGB): dark glass with light text over dark content, light glass with dark text over light content, as Apple's glass adapts.
-// The text keeps its contrast either way, and the glass stays clear instead of being held to a slab.
-// It never flickers: it turns dark only below DarkBelow and light only above LightAbove (between, it stays as it is), the
-// brightness must stay past the threshold for Confirm (a cut in a video, a window passing), and after a change it holds for at
-// least the hold. A jump of more than BigJump between two measures (a window opened or closed behind the island) needs no
-// waiting for Confirm, but still two new measures past the threshold in a row (JumpMeasures), so one odd frame (a flash in a
-// video, a measure taken mid-repaint) never turns it. The hold starts at Hold and doubles, up to MaxHold, for every change that
-// comes within Restless of the hold ending (a video flashing between black and white would otherwise turn the theme every
-// second); a change after a quieter while starts from Hold again. Times are milliseconds on any steady clock.
-public sealed class GlassAppearance(bool dark)
+// Which look automatic liquid glass ("liquid-glass") takes from what lies behind the island: dark glass with light text over
+// dark content, light glass with dark text over light content, as Apple's glass adapts; the text keeps its contrast either way.
+//   The measure: the mean of the middle of the backdrop's brightness (sRGB luma 0..1 between its LowQuantile and HighQuantile,
+//   RangeMean), so a bright logo or subtitle over a dark video, or a dark sidebar beside a white page, does not pull it.
+//   The Windows app mode is the prior (AppDark): in dark mode the glass turns light only above DarkModeToLight and back below
+//   DarkModeToDark; in light mode it turns dark only below LightModeToDark and back above LightModeToLight. The first decision
+//   leans the same way (FirstLook). A dark-mode user keeps dark glass over most backdrops, and gets light glass over a white
+//   page, where the light text could no longer read (Windows' vendor guidance: vendor-benchmark §2.3).
+//   Smoothing: an exponential moving average of the log of the measure with time constant Tau, the step weighted by the time
+//   since the last measure (1 - e^(-Δt/Tau)), so it is the same at any frame rate; the thresholds above (a Schmitt trigger)
+//   are compared with it. After a change the look holds for at least Dwell; a change that comes within Restless of the hold
+//   ending doubles the hold, up to MaxHold (a backdrop that keeps flipping), and a change after a quieter while starts from
+//   Dwell again.
+//   Video: while most of the backdrop changes from capture to capture (more than VideoShare of its pixels, answers no further
+//   apart than VideoGap) for longer than VideoAfter, the backdrop is a video (or a scroll, a fade) and the look holds: its
+//   cuts and flashes never turn it. Only a backdrop that stays past the threshold for VideoEscape turns it meanwhile (a video
+//   that has become bright for good). The video state ends VideoGap after the last large change.
+//   Held: while the open panel is shown (Apple: large surfaces do not flip) or the island is pressed, nothing turns, so a turn
+//   never runs over the panel's or the press's own motion; the measure goes on, and once released the look may turn after
+//   Settle.
+// Times are milliseconds on any steady clock.
+public sealed class GlassAppearance(bool dark, bool appDark)
 {
-    public const double DarkBelow = .40, LightAbove = .60;
-    public const long Confirm = 150, Hold = 1000, MaxHold = 8000, Restless = 4000;
-    public const double BigJump = .45;
-    public const int JumpMeasures = 2;
+    public const double DarkModeToLight = .72, DarkModeToDark = .55, LightModeToDark = .28, LightModeToLight = .45;
+    public const double LowQuantile = .2, HighQuantile = .8;
+    public const double Tau = 400;
+    public const long Dwell = 1750, MaxHold = 8000, Restless = 4000, Settle = 250;
+    public const double VideoShare = .5;
+    public const long VideoAfter = 1000, VideoGap = 400, VideoEscape = 5000;
+    // The darkest measure the log is taken of (a black backdrop would otherwise weigh without bound).
+    private const double Floor = .02;
 
-    // The look a first measure, with nothing shown before it, decides: whichever side of the middle of the two thresholds it is.
-    public static bool FirstLook(double luma) => luma < (DarkBelow + LightAbove) / 2;
+    // The look a first measure, with nothing shown before it, decides, leaning toward the Windows app mode.
+    public static bool FirstLook(double luma, bool appDark) => appDark ? !(luma > DarkModeToLight) : luma < LightModeToDark;
+
+    // The mean of the measures between the low and high quantiles of a histogram whose bins split 0..1 evenly (a bin's
+    // measures taken at its middle, a bin cut by a quantile counted in part). NaN for an empty histogram.
+    public static double RangeMean(ReadOnlySpan<int> histogram, double low = LowQuantile, double high = HighQuantile)
+    {
+        long total = 0;
+        foreach (int count in histogram) total += count;
+        if (total == 0 || histogram.Length == 0) return double.NaN;
+        double from = total * Math.Clamp(low, 0, 1), to = total * Math.Clamp(high, 0, 1);
+        if (to <= from) to = Math.Min(total, from + 1);
+        double seen = 0, sum = 0, weight = 0;
+        for (int i = 0; i < histogram.Length && seen < to; i++)
+        {
+            double next = seen + histogram[i];
+            double taken = Math.Min(next, to) - Math.Max(seen, from);
+            if (taken > 0) { sum += taken * (i + .5) / histogram.Length; weight += taken; }
+            seen = next;
+        }
+        return weight > 0 ? sum / weight : double.NaN;
+    }
 
     public bool Dark { get; private set; } = dark;
+    public bool AppDark { get; private set; } = appDark;
+    // The thresholds the smoothed measure is compared with now.
+    public double ToLight => AppDark ? DarkModeToLight : LightModeToLight;
+    public double ToDark => AppDark ? DarkModeToDark : LightModeToDark;
+    // The smoothed measure (NaN before the first).
+    public double Smoothed => double.IsNaN(_log) ? double.NaN : Math.Exp(_log);
     // How long the look holds after its last change now.
-    public long HoldFor { get; private set; } = Hold;
-    // The last change of either kind (the hold runs from it), and the last one this decided (restlessness counts from it).
-    private long _changedAt = long.MinValue / 2, _turnedAt = long.MinValue / 2, _pendingSince = -1;
-    private double _fed = double.NaN;
-    private bool _jumped;
-    // New measures past the threshold since the pending change started.
-    private int _fresh;
+    public long HoldFor { get; private set; } = Dwell;
+    // Whether the backdrop is a video now (see above).
+    public bool Video => _movingSince >= 0 && _movedAt - _movingSince >= VideoAfter;
 
-    // A measure at now. Fresh tells a new measure from the last one fed again (the backdrop holding still is fed on every step,
-    // so the confirmation can pass without a new frame): only new ones count toward a jump. True when the look changed (Dark
-    // tells which).
-    public bool Feed(double luma, long now, bool fresh = true)
+    private double _log = double.NaN;
+    private long _fedAt;
+    // The last change of either kind (the hold runs from it), the last one this decided (restlessness counts from it), since
+    // when the smoothed measure has been past the threshold (-1: it is not), and before when nothing turns (released).
+    private long _changedAt = long.MinValue / 2, _turnedAt = long.MinValue / 2, _pastSince = -1, _calmUntil = long.MinValue / 2;
+    private bool _held;
+    // Since when large changes have come no further apart than VideoGap (-1: none), and the last one.
+    private long _movingSince = -1, _movedAt = long.MinValue / 2;
+
+    // A measure at now (the same measure fed again while the backdrop holds still: the average still moves toward it). Held:
+    // the open panel shown or the island pressed. True when the look changed (Dark tells which).
+    public bool Feed(double luma, long now, bool held = false)
     {
         if (!double.IsFinite(luma)) return false;
-        bool jump = fresh && double.IsFinite(_fed) && Math.Abs(luma - _fed) > BigJump;
-        if (fresh) _fed = luma;
-        bool wants = Dark ? luma <= LightAbove : luma < DarkBelow;
-        if (wants == Dark) { _pendingSince = -1; _jumped = false; _fresh = 0; return false; }
-        if (_pendingSince < 0) { _pendingSince = now; _jumped = jump; _fresh = fresh ? 1 : 0; }
-        else { _jumped |= jump; if (fresh) _fresh++; }
-        bool confirmed = now - _pendingSince >= Confirm || _jumped && _fresh >= JumpMeasures;
-        if (!confirmed || now - _changedAt < HoldFor) return false;
-        HoldFor = now - _turnedAt < HoldFor + Restless ? Math.Min(HoldFor * 2, MaxHold) : Hold;
-        Dark = wants; _changedAt = _turnedAt = now; _pendingSince = -1; _jumped = false; _fresh = 0;
+        double log = Math.Log(Math.Max(luma, Floor));
+        if (double.IsNaN(_log)) _log = log;
+        else _log += (1 - Math.Exp(-Math.Max(0, now - _fedAt) / Tau)) * (log - _log);
+        _fedAt = now;
+        if (_movingSince >= 0 && now - _movedAt > VideoGap) _movingSince = -1;
+        if (_held && !held) _calmUntil = now + Settle;
+        _held = held;
+        double smoothed = Math.Exp(_log);
+        bool wants = Dark ? !(smoothed > ToLight) : smoothed < ToDark;
+        if (wants == Dark) { _pastSince = -1; return false; }
+        if (_pastSince < 0) _pastSince = now;
+        if (held || now < _calmUntil || now - _changedAt < HoldFor) return false;
+        if (Video && now - _pastSince < VideoEscape) return false;
+        HoldFor = now - _turnedAt < HoldFor + Restless ? Math.Min(HoldFor * 2, MaxHold) : Dwell;
+        Dark = wants; _changedAt = _turnedAt = now; _pastSince = -1;
         return true;
     }
 
-    // Set from outside (the Windows app theme before the first measure, a theme turned by someone else): counts as a change for
-    // the hold, without lengthening it.
+    // How much of the backdrop changed since the capture before (0..1, the share of its pixels), when a capture compared it.
+    public void Changed(double share, long now)
+    {
+        if (!(share > VideoShare)) return;
+        if (_movingSince < 0 || now - _movedAt > VideoGap) _movingSince = now;
+        _movedAt = now;
+    }
+
+    // Set from outside (a theme turned by someone else): counts as a change for the hold, without lengthening it.
     public void Reset(bool dark, long now)
     {
-        Dark = dark; _changedAt = now; _pendingSince = -1; _jumped = false; _fresh = 0;
+        Dark = dark; _changedAt = now; _pastSince = -1;
+    }
+
+    // The Windows app mode changed: the thresholds lean the other way, and the look may turn at once (no hold).
+    public void Prior(bool appDark)
+    {
+        if (appDark == AppDark) return;
+        AppDark = appDark; _changedAt = long.MinValue / 2; _pastSince = -1;
     }
 }

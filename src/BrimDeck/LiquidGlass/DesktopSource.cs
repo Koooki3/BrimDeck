@@ -179,6 +179,10 @@ internal sealed class DesktopSource : IDisposable
 
     // Whether a comparison is out: the next Update, soon, tells whether the region changed.
     public bool Comparing => _comparing || _compareOwed;
+    // The comparisons answered so far, and the share of the region's pixels the last one found changed (0..1): how much of
+    // the backdrop a video or a scroll moves (automatic liquid glass holds its look over a video, GlassAppearance.Changed).
+    public int Compared { get; private set; }
+    public double ChangedShare { get; private set; }
 
     // Raised as Update returns when Device was replaced during it (adapter or monitor change, device lost): the renderer must be
     // made again. Never raised inside Update, where a caller's frame still holds the old renderer; the caller checks Generation
@@ -485,6 +489,7 @@ internal sealed class DesktopSource : IDisposable
             {
                 _comparing = false;
                 _hot = !answered || result.Failure || Marshal.ReadInt64(_queryResult) != 0;
+                if (answered && result.Success) { ChangedShare = Math.Clamp(Marshal.ReadInt64(_queryResult) / (double)Math.Max(1, _size.Width * _size.Height), 0, 1); Compared++; }
                 show = _hot && _unshown;
             }
         }

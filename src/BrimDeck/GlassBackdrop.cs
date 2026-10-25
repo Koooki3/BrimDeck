@@ -158,10 +158,11 @@ internal sealed class GlassBackdrop : IDisposable
     // Hover and press, eased toward the pointer's state on the monitor's hover and BrimDeck's press times (GlassFeedback).
     private readonly GlassFeedback _feedback = new(Soft.Hover, Soft.Press, Soft.Quick);
     // How dark the glass's look is now (0 light .. 1 dark): when the theme turns between them (automatic liquid glass), the
-    // glass eases across over the theme's own fade (MainWindow.ThemeFadeMs, Soft.InOut) while the old text fades out over it.
+    // glass eases across over DarkFadeMs (Soft.InOut), as calmly as WinUI's acrylic tint transition (some 500 ms), and the
+    // text turns in one step where both looks' text reads (Crossed).
     private double _dark = -1, _darkFrom, _darkTo;
     private long _darkSince;
-    private const double DarkFadeMs = 320;
+    internal const double DarkFadeMs = 500;
     // Automatic liquid glass: whether it is chosen (set by the island), and the look decided from what lies behind the island
     // (BackdropLook, stepped on every frame drawn and every tick of the poll). Look is raised when the look should change, at
     // once (no fade) for the first decision.
@@ -539,20 +540,33 @@ internal sealed class GlassBackdrop : IDisposable
     public static double SeenLuma { get; private set; } = double.NaN;
 
     // A step of automatic liquid glass's look: the latest measure of what lies behind, once its answer is in, or the last one.
+    // The look shown is the one the glass is turning to, if it is (Lead). Nothing turns while the panel is open or opening
+    // (its look is the one of the moment it opened, Apple's rule for large glass) or while the island is pressed, so a turn
+    // never runs over those motions; adaptivity resumes once they are over (GlassAppearance's held).
     private void ReportBackdrop()
     {
         if (_host?.Renderer is not { } renderer) return;
         long now = Environment.TickCount64;
         bool auto = AutoLook?.Invoke() == true;
-        bool current = PanelTheme.Current.IsDark;
+        bool current = _lead ?? PanelTheme.Current.IsDark;
         bool turn = false, instant = false;
-        if (auto) { turn = _look.Step(renderer, now, current, out instant); if (!double.IsNaN(_look.Luma)) SeenLuma = _look.Luma; }
-        else { _look.Forget(); if (renderer.TryBackdrop(out double luma)) SeenLuma = luma; }
+        if (auto)
+        {
+            bool held = Openness?.Invoke() > .001 || _pointerDown || _feedback.Press > .01;
+            _look.AppDark = LiquidTheme.AppDark;
+            turn = _look.Step(renderer, now, current, out instant, _host.Source, held);
+            if (!double.IsNaN(_look.Middle)) SeenLuma = _look.Middle;
+        }
+        else
+        {
+            _look.Forget();
+            if (renderer.TryBackdrop(out _) && GlassAppearance.RangeMean(renderer.Histogram) is var middle && double.IsFinite(middle)) SeenLuma = middle;
+        }
         if (LiquidDebug && (turn || now - _debugAt >= DebugEveryMs))
         {
             _debugAt = now;
             var idle = _host.Idle;
-            DebugLine(FormattableString.Invariant($"{DateTime.Now:HH:mm:ss.fff} poll ticks {idle.Ticks} settles {idle.Settles} renders {idle.Renders} following {_following} starts {_followStarts} frames {_steps} drawn {idle.FrameRenders} rebuilds {_host.Rebuilds} failures {_failed} retries {_retries} auto {auto} luma {_look.Luma:0.000} measures {_look.Measures} shown {(current ? "dark" : "light")} decided {(_look.Dark is { } d ? d ? "dark" : "light" : "-")}{(turn ? instant ? " -> turn now" : " -> turn" : "")}"));
+            DebugLine(FormattableString.Invariant($"{DateTime.Now:HH:mm:ss.fff} poll ticks {idle.Ticks} settles {idle.Settles} renders {idle.Renders} following {_following} starts {_followStarts} frames {_steps} drawn {idle.FrameRenders} rebuilds {_host.Rebuilds} failures {_failed} retries {_retries} auto {auto} luma {_look.Luma:0.000} middle {_look.Middle:0.000} smoothed {_look.Smoothed:0.000} video {_look.Video} app {(LiquidTheme.AppDark ? "dark" : "light")} measures {_look.Measures} shown {(current ? "dark" : "light")} decided {(_look.Dark is { } d ? d ? "dark" : "light" : "-")}{(turn ? instant ? " -> turn now" : " -> turn" : "")}"));
         }
         if (turn) Look?.Invoke(!current, instant);
     }

@@ -54,14 +54,15 @@ internal static class GlanceTests
         context.CopyResource(staging, texture);
         var map = context.Map(staging, 0, Vortice.Direct3D11.MapMode.Read);
         var row = new byte[width * 4];
-        double sum = 0;
+        // The mean of the middle of the brightness, as the first look takes it (GlassAppearance.RangeMean).
+        var histogram = new int[256];
         for (int y = 0; y < height; y++)
         {
             Marshal.Copy(map.DataPointer + (nint)(y * map.RowPitch), row, 0, row.Length);
-            for (int o = 0; o < row.Length; o += 4) sum += .0722 * row[o] + .7152 * row[o + 1] + .2126 * row[o + 2];
+            for (int o = 0; o < row.Length; o += 4) histogram[Math.Min(255, (int)(.0722 * row[o] + .7152 * row[o + 1] + .2126 * row[o + 2]))]++;
         }
         context.Unmap(staging, 0);
-        return sum / 255 / (width * height);
+        return BrimDeck.Core.GlassAppearance.RangeMean(histogram);
     }
 
     [DllImport("shcore")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);

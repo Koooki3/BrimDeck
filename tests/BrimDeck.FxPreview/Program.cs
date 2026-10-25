@@ -80,6 +80,9 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--liquid-time") return LiquidPreview.TimeOnly();
         // Automatic liquid glass turning light and dark over a split background: --liquid-auto <output folder>.
         if (args.Length > 1 && args[0] == "--liquid-auto") return LiquidPreview.RunAuto(args[1]);
+        // Automatic liquid glass's decision over video-like backdrops, in both Windows app modes, against the round-11 decision:
+        // --liquid-looks.
+        if (args.Length > 0 && args[0] == "--liquid-looks") return LiquidLooks.Run();
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
         if (args.Length > 1 && args[0] == "--sheet")
         {

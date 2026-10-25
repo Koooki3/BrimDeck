@@ -232,6 +232,8 @@ public partial class App : Application
         Dispatcher.BeginInvoke(() =>
         {
             if (Exiting) return;
+            // Automatic liquid glass's prior follows the Windows app mode (GlassAppearance.Prior: it may turn at once).
+            LiquidTheme.ReadAppMode();
             if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId) ApplyPanelTheme(systemChanged: true);
             // Automatic liquid glass with nothing to measure follows the Windows app theme too. Otherwise the theme page's
             // "System" card shows the Windows mode whichever theme is chosen.
@@ -280,7 +282,7 @@ public partial class App : Application
         bool dark = SettingsPalette.IsDark(SettingsTheme.System);
         int glance = ++_glance;
         // A glass already captures: what it last measured decides now, and it goes on deciding.
-        if (LiquidPossible && LiquidGlass.DesktopSource.OpenCount > 0 && !double.IsNaN(GlassBackdrop.SeenLuma)) dark = GlassAppearance.FirstLook(GlassBackdrop.SeenLuma);
+        if (LiquidPossible && LiquidGlass.DesktopSource.OpenCount > 0 && !double.IsNaN(GlassBackdrop.SeenLuma)) dark = GlassAppearance.FirstLook(GlassBackdrop.SeenLuma, LiquidTheme.AppDark);
         LiquidTheme.Dark = dark;
         if (!LiquidPossible || LiquidGlass.DesktopSource.OpenCount > 0 || GlanceRegion() is not { } region) { GlanceEnded(); return dark; }
         // Our panels already on screen (the theme chosen in the settings) are left out, as the live glass leaves them out; and
@@ -309,7 +311,7 @@ public partial class App : Application
     {
         if (Exiting || glance != _glance || luma is not { } measured
             || !LiquidTheme.IsAuto(Settings.PanelTheme) || LiquidTheme.Dark != shownDark || !GlassMeasures) return;
-        bool dark = GlassAppearance.FirstLook(measured);
+        bool dark = GlassAppearance.FirstLook(measured, LiquidTheme.AppDark);
         if (dark == shownDark && PanelTheme.Current.IsDark == dark) return;
         LiquidTheme.Dark = dark;
         _turnBy?.Stop();

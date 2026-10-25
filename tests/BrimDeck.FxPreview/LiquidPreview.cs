@@ -127,7 +127,7 @@ internal static class LiquidPreview
         return max;
     }
 
-    // Automatic liquid glass's turn, as GlassBackdrop and App run it: the glass eases from the old look to the new over 320 ms
+    // Automatic liquid glass's turn, as GlassBackdrop and App run it: the glass eases from the old look to the new over GlassBackdrop.DarkFadeMs (500 ms)
     // (Soft.InOut), and the text (one glyph run) turns from the old look's ink to the new one's in one step once the glass
     // passes LiquidFrame.TextTurn over the measured backdrop. Ten points across the turn, over black, a dark gray, a light
     // gray (#D8D8D8) and white, to dark and to light: the text then shown must keep 3:1 over the glass under it (the worst
@@ -154,10 +154,10 @@ internal static class LiquidPreview
                     double t = point / 9.0;
                     double blend = Soft.InOut.Ease(t);
                     double dark = toDark ? blend : 1 - blend;
-                    // The turn is looked for on every frame (60 a second over the 320 ms), as GlassBackdrop does.
-                    for (int frame = 0; frame <= (int)Math.Round(t * 320 / 16.0); frame++)
+                    // The turn is looked for on every frame (60 a second over the glass's ease), as GlassBackdrop does.
+                    for (int frame = 0; frame <= (int)Math.Round(t * GlassBackdrop.DarkFadeMs / 16.0); frame++)
                     {
-                        double f = Math.Min(1, frame * 16 / 320.0), b = Soft.InOut.Ease(f);
+                        double f = Math.Min(1, frame * 16 / GlassBackdrop.DarkFadeMs), b = Soft.InOut.Ease(f);
                         crossed |= LiquidFrame.TextTurns(luma, toDark ? b : 1 - b, toDark, f >= 1);
                     }
                     var glass = Render(device, renderer, desktop, dw, dh, (pad, pad, w, h), LiquidFrame.Blend(light, deep, (float)dark), pad);
@@ -175,7 +175,7 @@ internal static class LiquidPreview
                     double bg = inkLight ? under[(int)(under.Count * .95)] : under[(int)(under.Count * .05)];
                     double fg = Luminance(ink.R, ink.G, ink.B);
                     double ratio = (Math.Max(bg, fg) + .05) / (Math.Min(bg, fg) + .05);
-                    if (ratio < worst) { worst = ratio; worstAt = FormattableString.Invariant($"over {name} to {(toDark ? "dark" : "light")} at {t * 320:0} ms"); }
+                    if (ratio < worst) { worst = ratio; worstAt = FormattableString.Invariant($"over {name} to {(toDark ? "dark" : "light")} at {t * GlassBackdrop.DarkFadeMs:0} ms"); }
                 }
             }
         bool ok = worst >= 3;
@@ -543,7 +543,7 @@ internal static class LiquidPreview
     // background white on the left and black on the right glides from the white side to the black and back. Each frame is
     // drawn with the look blended as GlassBackdrop eases it, the backdrop measured by the renderer (TryBackdrop, read a frame
     // later), the look decided by GlassAppearance, and the text crossfading as MainWindow.ThemeFade does (the old text over
-    // the new, fading over 320 ms). Writes auto-switch.png: one tile every 200 ms, with the time, the measure, the look and
+    // the new, fading over the glass's ease). Writes auto-switch.png: one tile every 200 ms, with the time, the measure, the look and
     // the blend under each.
     public static int RunAuto(string folder)
     {
@@ -564,6 +564,7 @@ internal static class LiquidPreview
         // Where the capsule's centre is at time t (ms): white side, glide, black side, glide back, white side.
         double CentreAt(double t) => t < 1000 ? 300 : t < 1600 ? 300 + 600 * Soft.InOut.Ease((t - 1000) / 600) : t < 3600 ? 900 : t < 4200 ? 900 - 600 * Soft.InOut.Ease((t - 3600) / 600) : 300;
         GlassAppearance? look = null;
+        bool appDark = Environment.GetEnvironmentVariable("LIQUID_APP_MODE") != "light";
         double dark = -1, from = 0, to = 0; long since = -10000;
         double lastLuma = double.NaN;
         var tiles = new List<(BitmapSource Tile, string Label)>();
@@ -576,19 +577,22 @@ internal static class LiquidPreview
             double target = look?.Dark == true ? 1 : 0;
             if (dark < 0) dark = from = to = target;
             else if (target != to) { from = dark; to = target; since = now; }
-            if (dark != to) { double p = Math.Clamp((now - since) / 320.0, 0, 1); dark = p >= 1 ? to : from + (to - from) * Soft.InOut.Ease(p); }
+            if (dark != to) { double p = Math.Clamp((now - since) / GlassBackdrop.DarkFadeMs, 0, 1); dark = p >= 1 ? to : from + (to - from) * Soft.InOut.Ease(p); }
             var frame = LiquidFrame.Blend(LiquidFrame.Preset(false, w, h, (float)(shape.Top * scale), (float)(shape.Bottom * scale), 0, (float)scale),
                 LiquidFrame.Preset(true, w, h, (float)(shape.Top * scale), (float)(shape.Bottom * scale), 0, (float)scale), (float)dark);
             var glass = Render(device, renderer, desktop, dw, dh, at, frame, pad);
-            if (renderer.TryBackdrop(out double luma))
+            // The decision as BackdropLook steps it: the mean of the middle of the measure, fed on every frame (the last one again
+            // until a new one is in), leaning toward the Windows app mode (LIQUID_APP_MODE=light for light; dark by default).
+            // Render reads its own measure (MeasureNow), so the histogram is that of this frame's backdrop.
+            lastLuma = GlassAppearance.RangeMean(renderer.Histogram);
+            if (!double.IsNaN(lastLuma))
             {
-                lastLuma = luma;
-                if (look is null) { look = new GlassAppearance(false); look.Reset(luma < .5, now); }
-                else look.Feed(luma, now);
+                if (look is null) { bool first = GlassAppearance.FirstLook(lastLuma, appDark); look = new GlassAppearance(first, appDark); look.Reset(first, now); }
+                look.Feed(lastLuma, now);
             }
             if (frameIndex % 12 != 0) continue;
             // The text: the new look's under the old look's picture fading out (ThemeFade), from when the look changed.
-            double textFade = 1 - Soft.InOut.Ease(Math.Clamp((now - since) / 320.0, 0, 1));
+            double textFade = 1 - Soft.InOut.Ease(Math.Clamp((now - since) / GlassBackdrop.DarkFadeMs, 0, 1));
             int margin = (int)(26 * scale);
             int tx = Math.Clamp(at.Item1 - margin, 0, dw - 1), tw = Math.Min(dw - tx, w + 2 * margin), th = top + h + margin;
             var tile = ComposeAuto(desktop, dw, glass, at, tx, 0, tw, th, to > .5, textFade, scale);
