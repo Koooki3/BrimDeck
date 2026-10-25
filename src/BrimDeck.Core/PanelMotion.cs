@@ -60,4 +60,11 @@ public sealed class MoveTurn
     // new target; 1 when it turns nothing back.
     public double Share(long now, bool opening, double width, double height, double toWidth, double toHeight)
         => Turns(now, opening) ? PanelMotion.RemainingShare((width, _width, toWidth), (height, _height, toHeight)) : 1;
+
+    // A lay-out the same way as the move still under way (the closing surface given a new collapsed width by its content)
+    // carries that move on rather than starting a whole one: from where the surface is, at once, over what is left of the move
+    // and never under RedirectMin of a whole one (length), so it reads as one move and not as a closing that stops and starts
+    // over. 0 when no such move is under way: the lay-out is then a move of its own.
+    public int Carried(long now, bool opening, int length)
+        => length > 0 && now < _ends && opening == _opening ? (int)Math.Max(_ends - now, Math.Round(length * PanelMotion.RedirectMin)) : 0;
 }

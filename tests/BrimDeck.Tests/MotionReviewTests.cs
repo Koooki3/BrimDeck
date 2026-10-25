@@ -45,8 +45,13 @@ internal static class MotionReviewTests
             && turn.Share(2600, true, 200, 36, 480, 300) == 1);
         check("Motion review: opening while the closing is under way turns it back",
             turn.Turns(2100, true) && turn.Share(2100, true, 400, 250, 480, 300) is >= .4 and < 1);
+        // The collapsed surface laid out again mid-closing (a new collapsed width) carries the closing on.
+        check("Motion review: a lay-out during a closing carries it on over what is left of it", turn.Carried(2100, false, 360) == 170
+            && turn.Carried(2250, false, 360) == 144 && turn.Carried(2100, false, 0) == 0);
+        check("Motion review: a lay-out after the closing, or against the move under way, is a move of its own",
+            turn.Carried(2270, false, 360) == 0 && turn.Carried(2100, true, 360) == 0);
         turn.Started(3000, 0, opening: true, 480, 300);
-        check("Motion review: a move without animation leaves nothing to turn back", !turn.Turns(3000, false));
+        check("Motion review: a move without animation leaves nothing to turn back", !turn.Turns(3000, false) && turn.Carried(3000, true, 360) == 0);
 
         // F7: the picture beneath a pop-up waits for its entrance, and then follows changes once a hover has settled.
         var popup = new PopupPicture();

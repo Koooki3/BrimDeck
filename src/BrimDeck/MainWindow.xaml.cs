@@ -534,6 +534,10 @@ public partial class MainWindow : Window
         long now = Environment.TickCount64;
         bool redirect = turning && duration > 0 && _turn.Turns(now, expanded);
         if (redirect) duration = (int)Math.Round(duration * _turn.Share(now, expanded, Island.Width, Island.Height, width, height));
+        // The collapsed surface laid out again while it is still closing (its content asked for a new width) carries the closing
+        // on, on the same drawer curve, rather than holding for the closing's delay and starting a whole new move.
+        int carried = !turning && !expanded ? _turn.Carried(now, false, duration) : 0;
+        if (carried > 0) duration = carried;
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
@@ -565,10 +569,10 @@ public partial class MainWindow : Window
         _booting = false; _morphingShape = false;
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
-        if (turning) _turn.Started(now, duration, expanded, width, height);
+        if (turning || carried > 0) _turn.Started(now, duration, expanded, width, height);
         // The opening spring is most of the way there within a fifth of the move, so the content follows soon after it.
         Track content = expanded ? new(.12, .8) : new(0, .30);
-        Track surface = reshaping || morphing || booting || expanded ? new(0, 1) : new(PanelMotion.CloseSurfaceStart(redirect), line ? .92 : 1);
+        Track surface = reshaping || morphing || booting || expanded ? new(0, 1) : new(PanelMotion.CloseSurfaceStart(redirect || carried > 0), line ? .92 : 1);
         // Between forms the corners turn early: a notch becoming a capsule rounds its flat top long before it has its new size,
         // rather than showing a square top over round bottom corners for most of the move.
         Track cornerTrack = morphing ? new(0, .4) : surface;
