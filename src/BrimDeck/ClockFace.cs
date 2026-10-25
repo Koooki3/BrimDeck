@@ -44,7 +44,7 @@ internal sealed class ClockFace : FrameworkElement
     {
         ClockStyle.Stacked => Loc.T("双行", "Two lines"), ClockStyle.Digits => Loc.T("叠放", "Stacked digits"), ClockStyle.Dots => Loc.T("点阵", "Dot matrix"),
         ClockStyle.Segment => Loc.T("数码管", "Seven segment"), ClockStyle.Neon => Loc.T("霓虹", "Neon"), ClockStyle.Serif => Loc.T("衬线", "Serif"),
-        ClockStyle.Wide => Loc.T("宽体", "Wide"), ClockStyle.Condensed => Loc.T("窄体", "Condensed"), ClockStyle.Pixel => Loc.T("像素", "Pixel"), _ =>Loc.T("简约", "Simple")
+        ClockStyle.Wide => Loc.T("宽体", "Wide"), ClockStyle.Condensed => Loc.T("窄体", "Condensed"), ClockStyle.Pixel => Loc.T("像素", "Pixel"), _ => Loc.T("简约", "Simple")
     };
     // The cover color is used when a song with a cover is playing; otherwise the clock takes the theme's clock color, which
     // "white" stands for. Every color is drawn as the theme can read it on its surface (see PanelTheme.Readable).
