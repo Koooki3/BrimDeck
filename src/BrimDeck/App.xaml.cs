@@ -216,25 +216,16 @@ public partial class App : Application
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         if (!reload) _settingsWindow?.PanelThemeChanged();
     }
-    // Automatic liquid glass ("liquid-glass"): the main island measures what lies behind it (GlassBackdrop.Backdrop) and the look
-    // follows with hysteresis (GlassAppearance). A change is a change of theme, so the island dissolves into the other look as
-    // for any theme change (MainWindow.ThemeFade) while the glass eases across (GlassBackdrop). The first measure is taken as it is.
-    private GlassAppearance? _appearance;
-    internal void BackdropMeasured(MainWindow deck, double luma)
+    // Automatic liquid glass ("liquid-glass"): the main island's glass measures what lies behind it and decides the look
+    // (GlassBackdrop, BackdropLook, GlassAppearance). A change is a change of theme, so the island dissolves into the other look
+    // as for any theme change (MainWindow.ThemeFade) while the glass eases across (GlassBackdrop); the first decision, at start
+    // or when the theme is chosen, is shown at once (PanelTheme.SnapGeneration).
+    internal bool AutoLookFrom(MainWindow deck) => !Exiting && deck == Deck && PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.GlassAuto;
+    internal void TurnGlass(MainWindow deck, bool dark, bool instant)
     {
-        if (Exiting || deck != Deck || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return;
-        long now = Environment.TickCount64;
-        bool changed;
-        if (_appearance is null)
-        {
-            _appearance = new GlassAppearance(PanelTheme.GlassDark);
-            bool dark = luma < (GlassAppearance.DarkBelow + GlassAppearance.LightAbove) / 2;
-            changed = dark != PanelTheme.GlassDark;
-            _appearance.Reset(dark, now);
-        }
-        else changed = _appearance.Feed(luma, now);
-        if (!changed) return;
-        PanelTheme.GlassDark = _appearance.Dark;
+        if (!AutoLookFrom(deck) || PanelTheme.GlassDark == dark && PanelTheme.Current.IsDark == dark) return;
+        PanelTheme.GlassDark = dark;
+        if (instant) PanelTheme.SnapGeneration = PanelTheme.Generation + 1;
         ApplyPanelTheme(systemChanged: true);
     }
     // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at

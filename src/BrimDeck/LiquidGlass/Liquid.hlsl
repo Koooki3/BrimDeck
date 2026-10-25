@@ -265,7 +265,14 @@ float3 Glass(float2 p, float sd, float2 n)
     if (low > 0) held = SoftMax(held, low, .14);
     if (high < 1) held = SoftMin(held, high, .14);
     if (held > luma) color += (1 - color) * saturate((held - luma) / max(1 - luma, 1e-3));
-    else color *= held / max(luma, 1e-3);
+    else
+    {
+        // Smoked toward the glass's own deep tint rather than scaled toward black, so a light gray behind dark glass turns to
+        // deep glass, not to dull charcoal; the brightness lands where the band says all the same.
+        float deep = Luma(Tint.rgb);
+        if (luma > deep + .02 && held >= deep) color = lerp(Tint.rgb, color, saturate((held - deep) / (luma - deep)));
+        else color *= held / max(luma, 1e-3);
+    }
     color = lerp(color, Tint.rgb, Tint.a);
 
     // Light from the pointer's side (or the top left). Opposite it the rim darkens a little in the background's own hue.

@@ -196,7 +196,7 @@ internal sealed class LiquidRenderer : IDisposable
     // The mean brightness of the background under the island, for automatic liquid glass (GlassAppearance): a small mip (at
     // most MeasureTexels across) is copied to a staging texture after the mips are made, and read on a later frame, never
     // waited for. One copy is out at a time.
-    private const int MeasureTexels = 32;
+    private const int MeasureTexels = 64;
     private ID3D11Texture2D? _measure;
     private (int Width, int Height, int Level) _measureFor;
     private bool _measuring;

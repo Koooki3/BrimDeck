@@ -9,7 +9,7 @@ namespace BrimDeck.Core;
 public sealed class GlassAppearance(bool dark)
 {
     public const double DarkBelow = .40, LightAbove = .60;
-    public const long Confirm = 250, Hold = 1000;
+    public const long Confirm = 150, Hold = 1000;
 
     public bool Dark { get; private set; } = dark;
     private long _changedAt = long.MinValue / 2, _pendingSince = -1;

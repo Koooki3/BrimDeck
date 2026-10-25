@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using BrimDeck.Core;
 using BrimDeck.LiquidGlass;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
@@ -60,10 +61,70 @@ internal static class DesktopSourceTests
         else Console.WriteLine("SKIP: desktop capture on a second monitor (one monitor).");
         Console.WriteLine($"desktop capture: device replaced {deviceChanges} times; primary {primary.Width}x{primary.Height}, {monitors.Count} monitors");
 
+        LiveLook(check, source, primary);
+
         // What a frame costs, at the top of the primary monitor (where the island is) and lower down: Update for two seconds, and
         // how often the desktop under the region changed.
         Measure(source, region, "top");
         Measure(source, region.Offset(0, primary.Height / 2), "middle");
+    }
+
+    // Automatic liquid glass on the live path, as GlassBackdrop runs it while the island holds still: the desktop under an
+    // island-sized region at the top of the primary monitor captured (DesktopSource), the glass drawn only when the capture
+    // reports a change (the idle poll), the renderer's measure read back (LiquidRenderer.TryBackdrop) and the decision stepped
+    // on every 100 ms tick (BackdropLook, GlassAppearance). Checks that the measure is the captured desktop's own brightness
+    // under the island, that the first measure decides at once, and that with the wrong look shown over a backdrop that holds
+    // still (no new frame drawn) the look still turns within the hold and the confirmation: the bug where a still backdrop,
+    // measured once, never confirmed its look.
+    private static void LiveLook(Action<string, bool> check, DesktopSource source, RECT monitor)
+    {
+        const int width = 342, height = 60, pad = 72;
+        var region = new RECT(monitor.Left + monitor.Width / 2 - width / 2 - pad, monitor.Top - pad, monitor.Left + monitor.Width / 2 + width / 2 + pad, monitor.Top + height + pad);
+        if (!UpdateSoon(source, region, out _)) { Console.WriteLine("SKIP: liquid look (no capture)."); return; }
+        using var renderer = new LiquidRenderer(source.Device);
+        using var target = source.Device.CreateTexture2D(new Texture2DDescription(Format.B8G8R8A8_UNorm, width, height, 1, 1, BindFlags.RenderTarget));
+        using var view = source.Device.CreateRenderTargetView(target);
+        var frame = LiquidFrame.Preset(false, width, height, 30, 30, 0, 1.5f);
+        var look = new BackdropLook();
+        bool shown = false, firstInstant = false, decidedFirst = false;
+        long turnedAt = -1, wrongFrom = -1;
+        int drawn = 0;
+        for (int tick = 0; tick < 40; tick++)
+        {
+            long now = tick * 100L;
+            if (!source.Update(region, out bool changed) || source.Texture is not { } texture) continue;
+            if (tick == 0 || changed) { renderer.Draw(texture, pad, frame, view); drawn++; }
+            Thread.Sleep(15);
+            if (look.Step(renderer, now, shown, out bool instant))
+            {
+                if (!decidedFirst) firstInstant = instant;
+                shown = !shown;
+                if (wrongFrom >= 0 && turnedAt < 0) turnedAt = now;
+            }
+            if (!decidedFirst && look.Dark is not null)
+            {
+                decidedFirst = true;
+                // The wrong look is shown from here (the theme turned the other way meanwhile).
+                shown = !look.Dark.Value; wrongFrom = now;
+            }
+        }
+        // The measure against the captured desktop's own mean luma under the island.
+        double expected = 0;
+        var pixels = Read(source);
+        int bw = width + 2 * pad;
+        for (int y = pad; y < pad + height; y++)
+            for (int x = pad; x < pad + width; x++)
+            {
+                int o = (y * bw + x) * 4;
+                expected += (.0722 * pixels[o] + .7152 * pixels[o + 1] + .2126 * pixels[o + 2]) / 255;
+            }
+        expected /= width * height;
+        check(FormattableString.Invariant($"liquid look: the measure is the captured desktop under the island (measured {look.Luma:0.000}, desktop {expected:0.000}, {look.Measures} measures, {drawn} frames drawn)"),
+            look.Measures > 0 && Math.Abs(look.Luma - expected) < .06);
+        check("liquid look: the first measure decides at once", decidedFirst && firstInstant);
+        long latency = turnedAt - wrongFrom;
+        check($"liquid look: over a still backdrop the wrong look turns within the hold and the confirmation ({latency} ms)",
+            turnedAt >= 0 && latency <= GlassAppearance.Hold + GlassAppearance.Confirm + 200);
     }
 
     private static void Measure(DesktopSource source, RECT region, string name)

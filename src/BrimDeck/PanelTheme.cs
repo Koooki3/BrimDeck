@@ -57,6 +57,9 @@ internal static class PanelTheme
     // Automatic liquid glass: whether it shows its dark look, as the island's backdrop decided (MainWindow.Appearance); until a
     // first measure, the Windows app theme's.
     public static bool GlassDark { get; set; } = SettingsPalette.IsDark(SettingsTheme.System);
+    // A theme change to show at once, without the fade (the first look automatic liquid glass decides): the Generation it
+    // becomes. MainWindow.ThemeFade and GlassBackdrop skip their fades into it.
+    public static int SnapGeneration { get; set; } = -1;
     // Whether the chosen theme is one that follows something outside the theme file ("system", "liquid-glass").
     public static bool Follows(string? id) => PanelThemes.NormalizeId(id) is PanelThemes.SystemId or PanelThemes.GlassAuto;
 

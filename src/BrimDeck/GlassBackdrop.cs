@@ -124,9 +124,16 @@ internal sealed class GlassBackdrop : IDisposable
     private double _dark = -1, _darkFrom, _darkTo;
     private long _darkSince;
     private const double DarkFadeMs = 320;
-    // What lies behind the island now (its mean luma, 0..1), for automatic liquid glass; measured on the frames drawn and read
-    // on later ones (LiquidRenderer.TryBackdrop).
-    public event Action<double>? Backdrop;
+    // Automatic liquid glass: whether it is chosen (set by the island), and the look decided from what lies behind the island
+    // (BackdropLook, stepped on every frame drawn and every tick of the poll). Look is raised when the look should change, at
+    // once (no fade) for the first decision.
+    public Func<bool>? AutoLook { get; set; }
+    public event Action<bool, bool>? Look;
+    private readonly BackdropLook _look = new();
+    // BRIMDECK_LIQUID_DEBUG=1: a line in %LOCALAPPDATA%\BrimDeck\liquid.log every DebugEveryMs and at every decision.
+    private static readonly bool LiquidDebug = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_DEBUG") == "1";
+    private const long DebugEveryMs = 2000;
+    private long _debugAt;
     // While the island holds still, the desktop under it is looked at for a change (a video, a window moving): every PollMs
     // while the pointer is over the island or the desktop changed in the last IdleAfterMs, else every IdlePollMs; SettleMs
     // after a comparison went out, to read its answer.
@@ -205,6 +212,7 @@ internal sealed class GlassBackdrop : IDisposable
         double hover = _pointer is null ? 0 : 1, press = _pointerDown ? 1 : 0;
         double dark = PanelTheme.Current.IsDark ? 1 : 0;
         if (_dark < 0 || !Soft.Enabled) _dark = _darkFrom = _darkTo = dark;
+        else if (dark != _darkTo && PanelTheme.Generation == PanelTheme.SnapGeneration) _dark = _darkFrom = _darkTo = dark;
         else if (dark != _darkTo) { _darkFrom = _dark; _darkTo = dark; _darkSince = now; }
         bool turning = _dark != _darkTo;
         if (turning)
@@ -391,10 +399,34 @@ internal sealed class GlassBackdrop : IDisposable
         }
     }
 
-    // The last measure of what lies behind, once its answer is in.
+    // A step of automatic liquid glass's look: the latest measure of what lies behind, once its answer is in, or the last one.
     private void ReportBackdrop()
     {
-        if (_renderer is not null && Backdrop is not null && _renderer.TryBackdrop(out double luma)) Backdrop(luma);
+        if (_renderer is null) return;
+        long now = Environment.TickCount64;
+        bool auto = AutoLook?.Invoke() == true;
+        bool current = PanelTheme.Current.IsDark;
+        bool turn = false, instant = false;
+        if (auto) turn = _look.Step(_renderer, now, current, out instant);
+        else { _look.Forget(); _renderer.TryBackdrop(out _); }
+        if (LiquidDebug && (turn || now - _debugAt >= DebugEveryMs))
+        {
+            _debugAt = now;
+            DebugLine(FormattableString.Invariant($"{DateTime.Now:HH:mm:ss.fff} auto {auto} luma {_look.Luma:0.000} measures {_look.Measures} shown {(current ? "dark" : "light")} decided {(_look.Dark is { } d ? d ? "dark" : "light" : "-")}{(turn ? instant ? " -> turn now" : " -> turn" : "")}"));
+        }
+        if (turn) Look?.Invoke(!current, instant);
+    }
+
+    private static void DebugLine(string line)
+    {
+        try
+        {
+            var file = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BrimDeck", "liquid.log");
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file)!);
+            if (System.IO.File.Exists(file) && new System.IO.FileInfo(file).Length > 1 << 20) System.IO.File.Move(file, file + ".1", true);
+            System.IO.File.AppendAllText(file, line + Environment.NewLine);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { }
     }
 
     private bool ShowLiquid(bool shown)
