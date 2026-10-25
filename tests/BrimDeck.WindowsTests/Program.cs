@@ -62,7 +62,7 @@ internal static class Program
     private static void CheckSettledClip()
     {
         foreach (var (name, corners, shoulder) in new[] { ("notch", new CornerRadius(0, 0, 12, 12), 16d), ("capsule", new CornerRadius(18), 0d) })
-            foreach (bool glass in new[] { false, true })
+            foreach (string look in new[] { "", "edge light", "pixel bevel" })
                 foreach (double scale in new[] { 1d, 1.5 })
                 {
                     byte[] Draw(bool settled)
@@ -70,7 +70,9 @@ internal static class Program
                         var island = new BrimDeck.IslandBorder { Width = 300, Height = 36, Background = System.Windows.Media.Brushes.Black, CornerRadius = corners,
                             ShoulderRadius = shoulder, MaterialOpacity = 1, RimWidth = 1, RimBrush = System.Windows.Media.Brushes.White, ClipToBounds = true,
                             SettledClip = settled };
-                        if (glass) island.EdgeBrush = System.Windows.Media.Brushes.White;
+                        if (look == "edge light") island.EdgeBrush = System.Windows.Media.Brushes.White;
+                        // The pixel theme's stepped outline, whose rim is a bevel (light on the edges facing up and left).
+                        if (look == "pixel bevel") { island.Pixel = 2; island.BevelBrush = System.Windows.Media.Brushes.Gray; }
                         island.Measure(new Size(300, 36)); island.Arrange(new Rect(0, 0, 300, 36)); island.UpdateLayout();
                         var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)(300 * scale), (int)(36 * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
                         bitmap.Render(island);
@@ -83,7 +85,7 @@ internal static class Program
                     // whole pixels at full strength.
                     int outside = 0, strongest = 0;
                     for (int i = 3; i < rounded.Length; i += 4) if (rounded[i] == 0 && rest[i] > 8) { outside++; strongest = Math.Max(strongest, rest[i]); }
-                    Check($"the {name}{(glass ? " with an edge light" : "")} at rest draws nothing past its rounded outline at {scale * 100:0}% ({outside} faint edge pixels, strongest alpha {strongest})",
+                    Check($"the {name}{(look.Length > 0 ? " with a " + look : "")} at rest draws nothing past its rounded outline at {scale * 100:0}% ({outside} faint edge pixels, strongest alpha {strongest})",
                         strongest <= 64 && outside <= 16);
                 }
     }
