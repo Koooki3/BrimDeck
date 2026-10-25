@@ -18,7 +18,7 @@ Windows 原生应用，使用 C# 与 WPF 开发，注重性能与流畅度。
 
 <p><a href="#功能">功能</a> · <a href="#安装">安装</a> · <a href="#快速开始">快速开始</a> · <a href="#隐私">隐私</a> · <a href="#常见问题">常见问题</a> · <a href="#参与开发">参与开发</a> · <a href="README.md">English</a></p>
 
-<img src="docs/zh-CN/images/hero.png" width="100%" alt="BrimDeck 从屏幕顶部的刘海展开为 AI 用量面板，再切换到音乐页，最后收起">
+<img src="docs/zh-CN/images/hero.png" width="100%" alt="BrimDeck 从屏幕顶部的刘海展开为 AI 用量面板，依次切换到音乐页和系统监控页，最后收起">
 
 </div>
 
@@ -27,6 +27,7 @@ Windows 原生应用，使用 C# 与 WPF 开发，注重性能与流畅度。
 - **额度集中显示**：Claude、Codex、Cursor、Antigravity 等工具的额度集中在一个面板上，不必逐个打开网页、命令行或应用查看。
 - **简化额度查询操作**：平时收起在屏幕顶部，鼠标移上去即展开，移开即收起。
 - **媒体控制**：内联预览与控制正在播放的歌曲，封面、律动条与歌词随音乐变化。
+- **系统监控**：CPU、内存、网速等读数常驻在刘海或胶囊中，一眼即可看到。
 - **全屏免打扰**：全屏玩游戏或看视频时自动隐藏，避免误触展开；可在设置中调整。
 - **开箱即用**：自动识别本机已登录的 Claude、Codex、Cursor 等工具，无需填写密钥或重新登录。
 - **Windows 原生**：基于 .NET 与 WPF 构建，以较低的资源占用提供流畅的动画体验。
@@ -57,11 +58,13 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
   <img src="docs/zh-CN/images/compact-alert.png" width="388" alt="配额提醒：Claude 5 小时已用 91%">
 
+- 刘海与胶囊可以显示系统读数，与配额环、音乐并排显示。
+
+  <img src="docs/zh-CN/images/compact-monitor.png" width="474" alt="刘海中的系统读数：配额环旁显示核心柱、CPU、内存、GPU 与网速">
+
 - 刘海、胶囊和指示条的尺寸与位置可在设置中调整。
 
 - 窗口最大化时默认切换为指示条，全屏游戏或视频播放时默认隐藏，避免误触展开。
-
-- 刘海、胶囊、提示与展开面板支持面板主题：跟随系统、深色、浅色，内置 One Dark Pro、GitHub、Dracula、Night Owl 等开源主题，也可以按[主题制作指南](docs/zh-CN/themes.md)制作自定义主题；任何主题下文字与数据都会保持清晰可读。
 
 ### AI 用量
 
@@ -75,17 +78,6 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 可自定义配额提供商，并分别设置各列的配额与用量统计来源，详见[支持的工具](docs/zh-CN/ai-tools.md)。
 
-### 系统监控
-
-- 大号显示 CPU 占用，旁边以柔和曲线显示最近一分钟走势；每个逻辑处理器一根柱，性能核与能效核分色显示，柱上刻度表示当前频率（指向柱可看数值）；旁边以小图显示 GPU。点击即可改为以 GPU 为主：按引擎（3D、复制、视频解码与编码等）各一根柱，专用显存与显卡名称悬停可见，CPU 则缩为小图。
-- 内存占用、缓存与已提交内存；物理网卡的下载与上传速度，附最近一分钟的曲线。
-- 按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行，可选简略或详细，面板够宽时分两列；两个应用只差一点时列表不会来回跳动。点击应用可查看详情卡片。
-- 拖动展开面板的底边、左右两边或底角即可调整大小（AI 用量、系统监控、媒体三个页面都支持），布局随之逐级变化。可抓取范围略超出边缘，指针靠近时浮现把手，悬停的边缘以主题强调色发光；尺寸以柔和的弹簧跟随指针。
-- 刘海和胶囊也能显示系统读数：ftop 式的核心柱、CPU、内存、GPU 与网速，或三个环形仪表，或自选内容，与配额环、音乐并排显示。放不下时自动加宽；拖动两端可手动设定宽度（最大化窗口时显示的细线也可以），双击两端恢复自动。
-- 默认跟随面板主题取色；也可选 ftop 的海洋、石墨、暖色三套配色，并按主题深浅自动使用对应的深色或浅色版本。只在页面或读数显示时读取系统数据，进程只在页面打开时读取。
-
-本页参考并改编自 Nongfsq 的 macOS 系统监控 [ftop](https://github.com/Nongfsq/ftop)（MIT 许可证）。
-
 ### 音乐
 
 <img src="docs/zh-CN/images/music.png" width="63%" alt="音乐页：封面、歌名、歌词、进度条和播放控制">
@@ -95,14 +87,29 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 支持接入 Windows 系统媒体控制的播放器，并对部分播放器做了专门优化，详见[播放器支持](docs/zh-CN/music-players.md)。
 
+### 系统监控
+
+<img src="docs/zh-CN/images/monitor.png" width="100%" alt="系统监控页：CPU 占用与各核心使用率、GPU、内存、网速，以及占用最高的应用">
+
+- 实时显示 CPU、GPU、内存的占用和网络速度，以及每个核心的使用率。
+- 按 CPU 或内存列出占用最高的应用，点击应用可查看详情。
+- 配色默认跟随面板主题，也提供多种预设配色，并支持自定义。
+
+本页参考并改编自 Nongfsq 的 macOS 系统监控 [ftop](https://github.com/Nongfsq/ftop)（MIT 许可证）。
+
+### 面板主题
+
+<img src="docs/zh-CN/images/themes.png" width="100%" alt="同一个 AI 用量页在深色、浅色、Night Owl、Dracula、赛博朋克：边缘行者主题，以及一个自定义主题示例下的样子">
+
+- 内置深色、浅色、One Dark Pro、GitHub Dark、GitHub Light、Dracula、Night Owl、赛博朋克：边缘行者等主题。
+- 可以在设置的“面板主题”页修改背景、前景、强调色等颜色，并保存为自定义主题；也可以按[主题制作指南](docs/zh-CN/themes.md)编写主题文件。
+
 ## 安装
 
-需要 Windows 11（x64）。
+需要 Windows 11（x64）。对 Windows 10（2004 及以上版本）提供有限支持。
 
 1. 从 [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest) 下载并运行 `BrimDeck-<版本>-Setup.exe`。
 2. 如出现“Windows 已保护你的电脑”提示，点击“更多信息”→“仍要运行”。
-
-有新版本时，打开设置即可收到更新提示，下载并校验后可直接在应用内安装。
 
 ## 快速开始
 
@@ -133,6 +140,9 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 ## 参与开发
 
 欢迎通过 [Issues](https://github.com/MoFeng2223/BrimDeck/issues) 反馈问题、提出功能建议，或申请适配更多工具与播放器，也欢迎提交 Pull Request 参与开发。
+
+- Pull Request 请以 `dev` 分支为目标，不要直接合入 `main`。
+- 后续规划见 [BrimDeck 路线图](https://github.com/MoFeng2223/BrimDeck/discussions/57)。功能建议可以在帖子下讨论，想认领其中某项功能时，也可以直接在帖子下留言。其他话题可以在 [Discussions](https://github.com/MoFeng2223/BrimDeck/discussions) 中讨论。
 
 ## 许可证
 
