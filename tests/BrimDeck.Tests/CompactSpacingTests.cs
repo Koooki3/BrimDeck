@@ -217,6 +217,29 @@ internal static class CompactSpacingTests
         }
         check("Compact spacing: a part on its way in or out moves its neighbours a little at a time", smooth);
         check("Compact spacing: a part that has left takes no room and no gap", closes);
+
+        // A title on its way in grows into its room as any other part does, its neighbours moving a little at a time; arrived, it
+        // takes the room a title that was always there has.
+        bool grows = true, gentle = true; string where = "";
+        foreach (var width in new[] { 200d, 260, 420 })
+        {
+            CompactSpacing.Placement? last = null;
+            for (int k = 0; k <= 100; k++)
+            {
+                double p = k / 100.0;
+                var parts = new[] { new CompactSpacing.Part(20, 1), new(0, p), new(44, 1), new(18, 1), new(33, 1) };
+                var now = CompactSpacing.Arrange(parts, 1, 120, width, 8, 1, 1);
+                if (Math.Abs(now.Room[1] - Math.Round(now.TitleRoom * p)) > 1e-9) grows = false;
+                if (last is not null)
+                    for (int i = 0; i < parts.Length; i++)
+                        if (((i != 1 || k > 1) && Math.Abs(now.Left[i] - last.Left[i]) > 4 || now.Room[1] < last.Room[1]) && gentle) { gentle = false; where = $": w{width} p{p} part{i} {last.Left[i]}->{now.Left[i]} room {last.Room[1]}->{now.Room[1]}"; }
+                last = now;
+            }
+            var settled = CompactSpacing.Arrange(Parts(20, 0, 44, 18, 33), 1, 120, width, 8, 1, 1);
+            grows &= last!.Left.SequenceEqual(settled.Left) && last.Room.SequenceEqual(settled.Room);
+        }
+        check("Compact spacing: a title on its way in grows into its room instead of taking all of it at once", grows);
+        check("Compact spacing: a title on its way in moves its neighbours a little at a time" + where, gentle);
     }
 
     // A figure that flickers between short and long keeps the room of the long one; it gives it back after a while.

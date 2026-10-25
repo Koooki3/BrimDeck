@@ -150,7 +150,8 @@ internal sealed class CompactRow : Panel
             var element = slot.Element;
             // The title fills its room; the other parts keep their size and stand in the middle of their room.
             bool fills = part == RowPart.Text;
-            if (fills && slot.Shown) slot.Room = room;
+            // Its full room: one arriving takes a share of it (CompactSpacing), and leaves from the room it was growing into.
+            if (fills && slot.Shown) slot.Room = placed.TitleRoom;
             double logical = fills ? room : slot.Width;
             double childWidth = fills ? room : element.DesiredSize.Width, childHeight = element.DesiredSize.Height;
             double left = x + (room - logical) / 2;

@@ -22,7 +22,8 @@ public static class CompactSpacing
 
     public readonly record struct Part(double Width, double Presence);
 
-    // Left and Room are in DIPs, one per part (both 0 for a part that is absent); Gap is the gap between two fully present parts.
+    // Left and Room are in DIPs, one per part (both 0 for a part that is absent); Gap is the gap between two fully present parts;
+    // TitleRoom is the title's room when fully present (its Room is that times its presence while it arrives).
     // Presence: how present each part is placed, its own presence or less for a part that gives up its room sooner.
     public sealed record Placement(double[] Left, double[] Room, double Gap, double TitleRoom, double[] Presence);
 
@@ -90,22 +91,30 @@ public static class CompactSpacing
         // Parts rounded to whole pixels may come to a pixel or two more than the row: the gaps give it up, alike.
         if (available - fixedRoom - u * gaps < 0 && gaps > 1e-9) u = Math.Max(0, Math.Min(u, Math.Floor((available - fixedRoom) / gaps)));
         double free = Math.Max(0, available - fixedRoom - u * gaps);
+        double maxExtra = Math.Floor(u * (MaxGap - 1));
+        double Extra(double left) => gaps > 1e-9 ? Math.Max(0, Math.Min(maxExtra, Math.Floor(left / gaps + 1e-9))) : 0;
+        // The title's room when fully present: up to TitleMax first, then, once the gaps are at their widest, up to its text.
         double titleRoom = 0;
         if (hasTitle)
         {
             // A title too long for even the room it is promised still takes what there is.
             titleRoom = Math.Floor(Math.Min(free, Math.Min(want, cap)));
-            free -= titleRoom;
+            double rest = free - titleRoom;
+            rest -= Extra(rest) * gaps;
+            if (want > titleRoom) titleRoom += Math.Floor(Math.Max(0, Math.Min(rest, want - titleRoom)));
         }
-        double extra = gaps > 1e-9 ? Math.Max(0, Math.Min(Math.Floor(u * (MaxGap - 1)), Math.Floor(free / gaps + 1e-9))) : 0;
+        // A title on its way in grows into that room as it arrives, as every other part does (one on its way out is an ordinary
+        // part); the room it does not take yet widens the gaps and stands at both ends, as it did before the title came.
+        double titlePlaced = hasTitle ? (placed[title] >= 1 ? titleRoom : Math.Round(titleRoom * placed[title])) : 0;
+        free -= titlePlaced;
+        double extra = Extra(free);
         free -= extra * gaps;
-        if (hasTitle && want > titleRoom) { double more = Math.Floor(Math.Min(free, want - titleRoom)); titleRoom += more; free -= more; }
         double gap = u + extra;
         double x = Math.Floor(Math.Max(0, free) / 2);
         for (int i = 0; i < n; i++)
         {
             if (placed[i] <= 0) continue;
-            if (i == title) room[i] = titleRoom;
+            if (i == title) room[i] = titlePlaced;
             left[i] = x;
             x += room[i] + gap * placed[i];
         }
