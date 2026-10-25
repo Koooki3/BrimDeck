@@ -24,7 +24,7 @@ internal static class MotionEnvironment
     public static event Action? Changed;
     private static Dispatcher? _dispatcher;
     private static HwndSource? _power;
-    private static IntPtr _displayNotification;
+    private static IntPtr _displayNotification, _saverNotification;
 
     public static void Install(Dispatcher dispatcher)
     {
@@ -49,6 +49,7 @@ internal static class MotionEnvironment
         SystemEvents.UserPreferenceChanged -= PreferenceChanged;
         SystemParameters.StaticPropertyChanged -= SystemParameterChanged;
         if (_displayNotification != IntPtr.Zero) { UnregisterPowerSettingNotification(_displayNotification); _displayNotification = IntPtr.Zero; }
+        if (_saverNotification != IntPtr.Zero) { UnregisterPowerSettingNotification(_saverNotification); _saverNotification = IntPtr.Zero; }
         _power?.Dispose(); _power = null;
         _recheck?.Stop(); _recheck = null;
         _dispatcher = null; Changed = null;
@@ -153,6 +154,10 @@ internal static class MotionEnvironment
             _power.AddHook(PowerMessage);
             var setting = SessionDisplayStatus;
             _displayNotification = RegisterPowerSettingNotification(_power.Handle, ref setting, 0);
+            // Battery saver (energy saver on Windows 11 24H2 and later) is announced by GUID_POWER_SAVING_STATUS, as
+            // SYSTEM_POWER_STATUS's documentation asks; a change of power source (PowerModeChanged) need not come with it.
+            var saver = PowerSavingStatus;
+            _saverNotification = RegisterPowerSettingNotification(_power.Handle, ref saver, 0);
         }
         catch (Exception ex) when (ex is Win32Exception or EntryPointNotFoundException) { _power?.Dispose(); _power = null; }
     }
@@ -161,8 +166,18 @@ internal static class MotionEnvironment
     {
         const int PowerBroadcast = 0x0218, PowerSettingChange = 0x8013;
         if (message != PowerBroadcast || wParam != PowerSettingChange || lParam == IntPtr.Zero) return IntPtr.Zero;
-        // POWERBROADCAST_SETTING: the setting's GUID, the data's length, then the data: 0 off, 1 on, 2 dimmed (still seen).
-        if (Marshal.PtrToStructure<Guid>(lParam) != SessionDisplayStatus || Marshal.ReadInt32(lParam, 16) < 4) return IntPtr.Zero;
+        // POWERBROADCAST_SETTING: the setting's GUID, the data's length, then the data.
+        var setting = Marshal.PtrToStructure<Guid>(lParam);
+        if (Marshal.ReadInt32(lParam, 16) < 4) return IntPtr.Zero;
+        if (setting == PowerSavingStatus)
+        {
+            // 1 while the saver is on.
+            bool saver = Marshal.ReadInt32(lParam, 20) != 0;
+            if (saver != BatterySaver) { BatterySaver = saver; Changed?.Invoke(); }
+            return IntPtr.Zero;
+        }
+        // The display: 0 off, 1 on, 2 dimmed (still seen).
+        if (setting != SessionDisplayStatus) return IntPtr.Zero;
         bool off = Marshal.ReadInt32(lParam, 20) == 0;
         // Coming back on, the lock state is asked again, in case an unlock went by while the light was stopped.
         Set(off ? null : SessionLocked() ?? Locked, off);
@@ -191,6 +206,7 @@ internal static class MotionEnvironment
     private struct PowerStatus { public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag; public int BatteryLifeTime, BatteryFullLifeTime; }
     [DllImport("kernel32")] private static extern bool GetSystemPowerStatus(out PowerStatus status);
     private static readonly Guid SessionDisplayStatus = new("2B84C20E-AD23-4DDF-93DB-05FFBD7EFCA5");
+    private static readonly Guid PowerSavingStatus = new("E00958C0-C213-4ACE-AC77-FECCED2EEEA5");
     [DllImport("user32")] private static extern IntPtr RegisterPowerSettingNotification(IntPtr recipient, ref Guid setting, int flags);
     [DllImport("user32")] private static extern bool UnregisterPowerSettingNotification(IntPtr handle);
     [DllImport("wtsapi32", SetLastError = true)]
