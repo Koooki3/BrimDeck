@@ -233,7 +233,8 @@ public partial class MainWindow : Window
         UpdateCollapsedGeometry(bounds, work, scale);
         double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
         _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
-        // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it).
+        // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
+        // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
         _widestPage = Fit(DeckPages.Largest(Settings).Width);
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
