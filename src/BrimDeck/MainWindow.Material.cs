@@ -2,6 +2,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using static BrimDeck.Tracks;
 
 namespace BrimDeck;
 
@@ -35,9 +37,9 @@ public partial class MainWindow
             // Liquid glass lights its rim from the pointer and presses with it: where the pointer is over the island, and
             // whether the button is down (seen even when a button under it handles the click).
             Island.MouseMove += (_, e) => _glass.Pointer(e.GetPosition(Island), e.LeftButton == MouseButtonState.Pressed);
-            Island.MouseLeave += (_, _) => _glass.Pointer(null, false);
-            Island.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler((_, e) => _glass.Pointer(e.GetPosition(Island), true)), true);
-            Island.AddHandler(PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler((_, e) => _glass.Pointer(e.GetPosition(Island), false)), true);
+            Island.MouseLeave += (_, _) => { _glass.Pointer(null, false); Jelly(false); };
+            Island.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler((_, e) => { _glass.Pointer(e.GetPosition(Island), true); Jelly(true); }), true);
+            Island.AddHandler(PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler((_, e) => { _glass.Pointer(e.GetPosition(Island), false); Jelly(false); }), true);
         }
         _glass.Update();
         bool glass = PanelTheme.GlassShown;
@@ -52,8 +54,49 @@ public partial class MainWindow
         else { Island.LayoutUpdated -= CutShadow; ShadowHost.Clip = null; _shadowCutKey = null; }
     }
 
+    // The press of liquid-glass-web's glass (xiaofangstudio, MIT): pressed, it squashes at once to scale(1 + k, 1 - .45 k) about
+    // its middle; released, it springs back over JellyBackMs as 1 - e^(-5t) cos 9t (SpringEase). k is the source's .1 for a
+    // glass as wide as its buttons (JellyWidth), less on a wider island. Only the collapsed island (a press in the open panel
+    // is a press of one of its controls), only over liquid glass, and not with animations off. The glass follows the island's
+    // shape through its transform (GlassBackdrop.Measure), as it follows the boot's dot.
+    private ScaleTransform? _jelly;
+    private bool _jellyDown;
+    private const double JellyK = .1, JellyWidth = 140, JellyBackMs = 500;
+    private void Jelly(bool down)
+    {
+        if (down == _jellyDown) return;
+        if (down && (_expanded || _glass?.LiquidShown != true || !Soft.Enabled)) return;
+        _jellyDown = down;
+        if (_jelly is null)
+        {
+            if (_dotSquash is null || _dotLift is null)
+            {
+                _dotSquash = new ScaleTransform(); _dotLift = new TranslateTransform();
+                Island.RenderTransformOrigin = new Point(.5, 1);
+                Island.RenderTransform = new TransformGroup { Children = { _dotSquash, _dotLift } };
+            }
+            if (Island.RenderTransform is not TransformGroup group) return;
+            _jelly = new ScaleTransform();
+            group.Children.Insert(0, _jelly);
+        }
+        // About the middle: the group's origin is the bottom middle (the dot's floor).
+        _jelly.CenterY = -Island.ActualHeight / 2;
+        if (down)
+        {
+            double k = JellyK * Math.Min(1, JellyWidth / Math.Max(1, Island.ActualWidth));
+            SetImmediate(_jelly, ScaleTransform.ScaleXProperty, 1 + k);
+            SetImmediate(_jelly, ScaleTransform.ScaleYProperty, 1 - .45 * k);
+            _glass?.Follow(0);
+            return;
+        }
+        var spring = new SpringEase();
+        foreach (var property in new[] { ScaleTransform.ScaleXProperty, ScaleTransform.ScaleYProperty })
+            _jelly.BeginAnimation(property, new DoubleAnimation((double)_jelly.GetValue(property), 1, TimeSpan.FromMilliseconds(JellyBackMs)) { EasingFunction = spring }, HandoffBehavior.SnapshotAndReplace);
+        _glass?.Follow(JellyBackMs + 50);
+    }
+
     // Automatic liquid glass turning: the glass eases toward the new look ahead of the theme (GlassBackdrop.Lead).
-    internal void LeadGlass(bool dark) => _glass?.Lead(dark);
+    internal void LeadGlass(bool? dark) => _glass?.Lead(dark);
 
     // Liquid glass draws its own rim light and edge, following the pointer; the island's painted rim and edge light would lie
     // over it as a stroke (a white ring on dark glass, a 3D button's edge), so they step aside while it is shown and come back

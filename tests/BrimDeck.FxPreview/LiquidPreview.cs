@@ -225,7 +225,7 @@ internal static class LiquidPreview
 
     private static LiquidFrame Frame(Shape shape, bool dark, double scale, (int X, int Y, int Width, int Height) at, (double X, double Y)? pointer, double press)
     {
-        var frame = LiquidFrame.Preset(dark, at.Width, at.Height, (float)(shape.Top * scale), (float)(shape.Bottom * scale), (float)(shape.Shoulder * scale), (float)scale) with { Open = shape.Name == "panel" ? 1 : 0 };
+        var frame = LiquidFrame.Preset(dark, at.Width, at.Height, (float)(shape.Top * scale), (float)(shape.Bottom * scale), (float)(shape.Shoulder * scale), (float)scale) with { Open = shape.Name.StartsWith("panel", StringComparison.Ordinal) ? 1 : 0 };
         return pointer is { } p
             ? frame with { PointerX = (float)(p.X * at.Width), PointerY = (float)(p.Y * at.Height), Hover = 1, Press = (float)press }
             : frame with { Press = (float)press };
@@ -439,6 +439,9 @@ internal static class LiquidPreview
         new("capsule", 228, 40, 20, 20, 0, 8),
         new("notch", 210, 34, 0, 13, 8, 0),
         new("panel", 470, 250, 0, 26, 0, 0),
+        // The user's own cases: the open panel at 585 x 288, and the thin bar over a maximized window (680 x 20).
+        new("panel585", 585, 288, 0, 26, 0, 0),
+        new("bar", 680, 20, 10, 10, 0, 2),
     ];
 
     public static int TimeOnly()
@@ -545,6 +548,117 @@ internal static class LiquidPreview
         return bitmap;
     }
 
+    // The port proof: the glass liquid-glass-web draws in its showcase (lgw.html in the harness lays out the same glasses),
+    // drawn by the renderer in the source's own uv field (Faithful) over the same backgrounds, at the same places and sizes
+    // (CSS pixels) and scales. For each <name>-100.png / -150.png in the folder: <name>-<scale>.png, the background with every
+    // glass over it, and ...-alpha.png, the glasses' coverage (the harness adds the source's outer shadow under them).
+    //   dotnet run -c Release --project tests/BrimDeck.FxPreview -- --liquid-port <backgrounds> <output folder>
+    private static readonly (string Name, int X, int Y, int W, int H, int R)[] PortGlass =
+    [
+        ("lens", 80, 60, 150, 150, 75), ("pill", 280, 80, 260, 96, 48), ("nav", 600, 40, 140, 44, 22), ("small", 610, 120, 110, 110, 55),
+        ("card", 820, 40, 300, 200, 24), ("panel", 80, 290, 470, 250, 26), ("capsule", 620, 300, 470, 36, 18), ("bar", 620, 400, 500, 20, 10),
+    ];
+
+    public static int RunPort(string backgrounds, string folder, bool faithful = true)
+    {
+        Directory.CreateDirectory(folder);
+        using var device = CreateDevice();
+        using var renderer = new LiquidRenderer(device);
+        foreach (var file in Directory.GetFiles(backgrounds, "*-100.png").Concat(Directory.GetFiles(backgrounds, "*-150.png")).Order())
+        {
+            string stem = Path.GetFileNameWithoutExtension(file);
+            float scale = stem.EndsWith("-150", StringComparison.Ordinal) ? 1.5f : 1;
+            var decoded = new FormatConvertedBitmap(BitmapFrame.Create(new Uri(Path.GetFullPath(file)), BitmapCreateOptions.None, BitmapCacheOption.OnLoad), PixelFormats.Bgra32, null, 0);
+            int dw = decoded.PixelWidth, dh = decoded.PixelHeight;
+            var desktop = new byte[dw * dh * 4];
+            decoded.CopyPixels(desktop, dw * 4, 0);
+            var composed = (byte[])desktop.Clone();
+            var alpha = new byte[dw * dh];
+            foreach (var g in PortGlass)
+            {
+                int x = (int)Math.Round(g.X * scale), y = (int)Math.Round(g.Y * scale), w = (int)Math.Round(g.W * scale), h = (int)Math.Round(g.H * scale);
+                float r = g.R * scale;
+                var frame = new LiquidFrame(w, h, r, r, 0, 1, 1, 1, .08f, float.NaN, float.NaN, 0, 0, 0, 0, Scale: scale, Faithful: faithful);
+                var glass = Render(device, renderer, desktop, dw, dh, (x, y, w, h), frame, (int)Math.Ceiling(48 * scale));
+                for (int j = 0; j < h; j++)
+                    for (int i = 0; i < w; i++)
+                    {
+                        int o = (j * w + i) * 4, d = ((y + j) * dw + x + i) * 4;
+                        double a = glass[o + 3] / 255d;
+                        for (int c = 0; c < 3; c++) composed[d + c] = (byte)Math.Clamp(Math.Round(glass[o + c] + (1 - a) * composed[d + c]), 0, 255);
+                        alpha[(y + j) * dw + x + i] = Math.Max(alpha[(y + j) * dw + x + i], glass[o + 3]);
+                    }
+            }
+            Save(BitmapSource.Create(dw, dh, 96, 96, PixelFormats.Bgra32, null, composed, dw * 4), Path.Combine(folder, stem + ".png"));
+            Save(BitmapSource.Create(dw, dh, 96, 96, PixelFormats.Gray8, null, alpha, dw), Path.Combine(folder, stem + "-alpha.png"));
+            Console.WriteLine("Ported over " + stem);
+        }
+        return 0;
+    }
+
+    // Every state the glass takes, over a few backgrounds, both looks: the capsule, the wide capsule, the notch, the thin bar,
+    // the open panel at its sizes (the pages: monitor 470 x 250, music 534 x 299, notices 481 x 300, the user's 585 x 288), the
+    // opening's frames between the capsule and the panel (a quarter, half, three quarters), and the capsule pressed and hovered.
+    // Writes states-<background>.png. The pages' own content is WPF's and is not drawn here.
+    //   dotnet run -c Release --project tests/BrimDeck.FxPreview -- --liquid-states <backgrounds> <output folder>
+    public static int RunStates(string backgrounds, string folder)
+    {
+        Directory.CreateDirectory(folder);
+        const double scale = 1.5;
+        using var device = CreateDevice();
+        using var renderer = new LiquidRenderer(device);
+        Shape Mid(double t) => new($"opening {t * 100:0}%", 228 + (470 - 228) * t, 40 + (250 - 40) * t, t < .5 ? 20 * (1 - 2 * t) : 0, 20 + (26 - 20) * t, 0, 8 * (1 - t));
+        var states = new List<(Shape Shape, double Press, (double, double)? Pointer)>
+        {
+            (TopShapes[1], 0, null), (TopShapes[1], 1, (.3, .5)), (TopShapes[1], 0, (.2, .45)), (TopShapes[0], 0, null), (TopShapes[2], 0, null),
+            (new("bar", 680, 20, 10, 10, 0, 2), 0, null), (Mid(.25), 0, null), (Mid(.5), 0, null), (Mid(.75), 0, null),
+            (new("monitor 470x250", 470, 250, 0, 26, 0, 0), 0, null), (new("music 534x299", 534, 299, 0, 26, 0, 0), 0, null),
+            (new("notices 481x300", 481, 300, 0, 26, 0, 0), 0, null), (new("user 585x288", 585, 288, 0, 26, 0, 0), 0, null),
+        };
+        foreach (var file in Directory.GetFiles(backgrounds, "*-150.png").Order())
+        {
+            string bg = Path.GetFileNameWithoutExtension(file)[..^4];
+            if (bg is not ("grayui" or "chrome-dark" or "video" or "chrome-light")) continue;
+            var decoded = new FormatConvertedBitmap(BitmapFrame.Create(new Uri(Path.GetFullPath(file)), BitmapCreateOptions.None, BitmapCacheOption.OnLoad), PixelFormats.Bgra32, null, 0);
+            int dw = decoded.PixelWidth, dh = decoded.PixelHeight;
+            var desktop = new byte[dw * dh * 4];
+            decoded.CopyPixels(desktop, dw * 4, 0);
+            var tiles = new List<(BitmapSource Tile, string Label)>();
+            foreach (bool dark in new[] { false, true })
+                foreach (var (shape, press, pointer) in states)
+                {
+                    int w = (int)Math.Round(shape.Width * scale), h = (int)Math.Round(shape.Height * scale);
+                    var at = ((int)Math.Round((dw - w) / 2.0), (int)Math.Round(shape.Y * scale), w, h);
+                    var frame = Frame(shape, dark, scale, at, pointer, press) with { Open = shape.Height > 100 ? 1 : 0 };
+                    var glass = Render(device, renderer, desktop, dw, dh, at, frame, (int)Math.Ceiling(48 * scale));
+                    int margin = (int)(16 * scale);
+                    int tx = Math.Max(0, at.Item1 - margin), tw = Math.Min(dw - tx, w + 2 * margin), th = Math.Min(dh, at.Item2 + h + margin);
+                    tiles.Add((Compose(desktop, dw, glass, at, tx, 0, tw, th, dark, scale),
+                        $"{(dark ? "dark" : "light")} · {shape.Name}{(press > 0 ? " · pressed" : pointer is not null ? " · hovered" : "")}"));
+                }
+            const int gap = 10, label = 18, columns = 4;
+            int cw = 360, rows = (tiles.Count + columns - 1) / columns;
+            var heights = tiles.Select(t => t.Tile.PixelHeight * cw / (double)t.Tile.PixelWidth).ToList();
+            double rowHeight = heights.Max();
+            var visual = new DrawingVisual();
+            using (var dc = visual.RenderOpen())
+            {
+                dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x1C, 0x1C, 0x1E)), null, new Rect(0, 0, columns * (cw + gap) + gap, rows * (rowHeight + label + gap) + gap));
+                for (int i = 0; i < tiles.Count; i++)
+                {
+                    double x = gap + i % columns * (cw + gap), y = gap + i / columns * (rowHeight + label + gap);
+                    dc.DrawText(new FormattedText(tiles[i].Label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 12, Brushes.White, 1), new Point(x, y));
+                    dc.DrawImage(tiles[i].Tile, new Rect(x, y + label, cw, heights[i]));
+                }
+            }
+            var sheet = new RenderTargetBitmap(columns * (cw + gap) + gap, (int)(rows * (rowHeight + label + gap) + gap), 96, 96, PixelFormats.Pbgra32);
+            sheet.Render(visual);
+            Save(sheet, Path.Combine(folder, $"states-{bg}.png"));
+            Console.WriteLine("Wrote states-" + bg);
+        }
+        return 0;
+    }
+
     public static int RunBackgrounds(string backgrounds, string folder)
     {
         Directory.CreateDirectory(folder);
@@ -560,13 +674,16 @@ internal static class LiquidPreview
             var desktop = new byte[dw * dh * 4];
             decoded.CopyPixels(desktop, dw * 4, 0);
             foreach (var shape in TopShapes)
-                foreach (bool dark in new[] { false, true })
+                foreach (string look in new[] { "light", "dark", "lgw" })
                     foreach (bool hover in new[] { false, true })
                     {
-                        if (hover && shape.Name != "capsule") continue;
+                        if (hover && (shape.Name != "capsule" || look == "lgw")) continue;
+                        bool dark = look == "dark";
                         int w = (int)Math.Round(shape.Width * scale), h = (int)Math.Round(shape.Height * scale);
                         var at = ((int)Math.Round((dw - w) / 2.0), (int)Math.Round(shape.Y * scale), w, h);
                         var frame = Frame(shape, dark, scale, at, hover ? (.2, .45) : null, 0);
+                        // liquid-glass-web as it is (the proven port, its own uv field, no band): the reference column.
+                        if (look == "lgw") frame = frame with { Faithful = true, BandLow = 0, BandHigh = 1 };
                         var glass = Render(device, renderer, desktop, dw, dh, at, frame, (int)Math.Ceiling(48 * scale));
                         var composed = (byte[])desktop.Clone();
                         var alpha = new byte[dw * dh];
@@ -578,7 +695,7 @@ internal static class LiquidPreview
                                 for (int c = 0; c < 3; c++) composed[d + c] = (byte)Math.Clamp(Math.Round(glass[g + c] + (1 - a) * desktop[d + c]), 0, 255);
                                 alpha[(at.Item2 + y) * dw + at.Item1 + x] = glass[g + 3];
                             }
-                        string name = $"{bg}-{shape.Name}-{(dark ? "dark" : "light")}-{scale * 100:0}{(hover ? "-hover" : "")}";
+                        string name = $"{bg}-{shape.Name}-{look}-{scale * 100:0}{(hover ? "-hover" : "")}";
                         Save(BitmapSource.Create(dw, dh, 96, 96, PixelFormats.Bgra32, null, composed, dw * 4), Path.Combine(folder, name + ".png"));
                         Save(BitmapSource.Create(dw, dh, 96, 96, PixelFormats.Gray8, null, alpha, dw), Path.Combine(folder, name + "-alpha.png"));
                     }

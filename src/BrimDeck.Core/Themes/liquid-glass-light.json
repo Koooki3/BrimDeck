@@ -41,7 +41,7 @@
     "coverOutline": "#1F000000",
     "scrollThumb": "#A9AEB8",
     "rim": "#B3FFFFFF",
-    "shadow": "#1B2A44",
+    "shadow": "#000000",
     "indicator": "#A4A8B0",
     "indicatorProgress": "#33363C",
     "switchFill": "#0D000000",
@@ -73,9 +73,10 @@
     // A specular rim: bright where light strikes the top left, dim along the long edges, catching again at the bottom right.
     "rimGradient": ["#F2FFFFFF", "#80FFFFFF", "#4DFFFFFF", "#59FFFFFF", "#D9FFFFFF"],
     "rimWidth": 1.25,
-    "shadowBlur": 22,
+    // The shadow of liquid-glass-web's glass (box-shadow: 0 4px 8px rgba(0,0,0,.22); MIT), kept while the panel is open.
+    "shadowBlur": 12,
     "shadowDepth": 4,
-    "shadowOpacity": 0.2,
+    "shadowOpacity": 0.22,
     // Over Windows' blur the backdrop is held bright (85 % to full brightness) and its colors doubled in saturation, so the tint
     // keeps a fifth of its alpha there: what lies behind shows through as soft color, never darker than the glass over black.
     "glass": { "tint": "#E0F8FAFD", "edge": 0.6, "highlight": "#FFFFFF", "blurOpacity": 0.2, "backdrop": [0.85, 1], "saturation": 2 }

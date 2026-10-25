@@ -135,7 +135,8 @@ internal sealed class GlassBackdrop : IDisposable
     public event Action? Crossed;
     private bool? _lead;
     private bool _crossed;
-    public void Lead(bool dark)
+    // null: no turn under way (automatic liquid glass no longer chosen), the glass follows the theme again.
+    public void Lead(bool? dark)
     {
         _lead = dark; _crossed = false;
         Follow(0);
@@ -165,7 +166,10 @@ internal sealed class GlassBackdrop : IDisposable
     {
         if (_disposed || _following) return;
         if (!Available || !_owner.IsVisible) { Hide(); return; }
-        if (Measure() is { } now && now == _last && Equals(_brushFor, PanelTheme.Current.Effects.Glass)) return;
+        // An island not shown (hidden, collapsed to nothing) has nothing to follow: following it would stop on its first frame,
+        // and every layout pass (a scrolling title redraws many a second) would start it again.
+        if (Measure() is not { } now) { Hide(); return; }
+        if (now == _last && Equals(_brushFor, PanelTheme.Current.Effects.Glass)) return;
         Follow(0);
     }
 

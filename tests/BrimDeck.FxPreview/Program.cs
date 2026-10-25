@@ -44,6 +44,10 @@ internal static class Program
         if (args.Length > 1 && args[0] == "--liquid") return LiquidPreview.Run(args[1]);
         // The same over top-of-screen backgrounds, for the comparison with the references: --liquid-bg <backgrounds> <output folder>.
         if (args.Length > 2 && args[0] == "--liquid-bg") return LiquidPreview.RunBackgrounds(args[1], args[2]);
+        // The port proof (the glass as liquid-glass-web draws it): --liquid-port <backgrounds> <output folder> [--island].
+        if (args.Length > 2 && args[0] == "--liquid-port") return LiquidPreview.RunPort(args[1], args[2], !args.Contains("--island"));
+        // Every state of the glass (shapes, opening frames, pressed, hovered, the pages' sizes): --liquid-states <backgrounds> <output folder>.
+        if (args.Length > 2 && args[0] == "--liquid-states") return LiquidPreview.RunStates(args[1], args[2]);
         // Only the GPU timing of a liquid glass frame: --liquid-time.
         if (args.Length > 0 && args[0] == "--liquid-time") return LiquidPreview.TimeOnly();
         // Automatic liquid glass turning light and dark over a split background: --liquid-auto <output folder>.

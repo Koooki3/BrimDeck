@@ -72,9 +72,10 @@
     // A cool specular rim: brightest at the top left, a faint line along the long edges, a second catch at the bottom right.
     "rimGradient": ["#C7FFFFFF", "#4DFFFFFF", "#24FFFFFF", "#2EFFFFFF", "#8CFFFFFF"],
     "rimWidth": 1.25,
-    "shadowBlur": 24,
-    "shadowDepth": 6,
-    "shadowOpacity": 0.42,
+    // The shadow of liquid-glass-web's glass (box-shadow: 0 4px 8px rgba(0,0,0,.22); MIT), kept while the panel is open.
+    "shadowBlur": 12,
+    "shadowDepth": 4,
+    "shadowOpacity": 0.22,
     // Over Windows' blur the backdrop is held dark (at most 28 % brightness) with its colors half again as saturated, so the
     // tint keeps under a sixth of its alpha there and what lies behind glows through as deep color.
     "glass": { "tint": "#C8121419", "edge": 0.45, "highlight": "#E8F2FF", "blurOpacity": 0.15, "backdrop": [0, 0.28], "saturation": 1.5 }

@@ -210,6 +210,8 @@ public partial class App : Application
     {
         var previous = PanelTheme.Current;
         bool changed = PanelTheme.Use(Settings, reload, systemChanged);
+        // A turn of automatic liquid glass under way ends with any other theme chosen.
+        if (changed && PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { _turnBy?.Stop(); foreach (var each in Decks.ToList()) each.LeadGlass(null); }
         ScheduleDaylight();
         if (!changed) return;
         if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
@@ -251,7 +253,10 @@ public partial class App : Application
     private void TurnTheme()
     {
         _turnBy?.Stop();
-        if (Exiting || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto || PanelTheme.Current.IsDark == PanelTheme.GlassDark) return;
+        if (Exiting) return;
+        // Automatic liquid glass given up meanwhile: the glass, led toward a look the theme will not take, follows the theme again.
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { foreach (var each in Decks.ToList()) each.LeadGlass(null); return; }
+        if (PanelTheme.Current.IsDark == PanelTheme.GlassDark) return;
         PanelTheme.QuietGeneration = PanelTheme.Generation + 1;
         ApplyPanelTheme(systemChanged: true);
     }

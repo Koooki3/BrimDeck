@@ -11,54 +11,52 @@ using WinRT;
 
 namespace BrimDeck.LiquidGlass;
 
-// One frame of liquid glass. Sizes are device pixels; the shape is the island's (IslandBorder.BuildOutline) at this size.
+// One frame of liquid glass (Liquid.hlsl, a port of xiaofangstudio/liquid-glass-web). Sizes are device pixels; the shape is the
+// island's (IslandBorder.BuildOutline) at this size.
 //   Width, Height: the island; the swap chain is resized to it.
 //   CornerTop, CornerBottom, Shoulder: as the island draws them; CornerTop 0 is a square top (the open panel, the notch).
-//   Tint: a thin tint over the glass, straight color and alpha (the preset's: legibility comes from the band, not the tint, so
-//     the WPF surface over the glass stays transparent).
-//   Thickness: the bevel's width, how far in from the edge the glass bends the background.
-//   Refraction: the strength of the bend: the refracted ray's tangent times the glass's height over the background (1 is
-//     the kube.io method's; the height is 1.6 bevel widths at the flat, rising with the bevel).
-//   Dispersion: 0..1, red and blue spread apart at the rim.
-//   PointerX, PointerY: the pointer in island pixels, NaN while it is away; the light then stays where it was and turns back
-//     to top-left as Hover eases to 0, so the caller's easing of Hover is all the easing there is.
-//   Hover, Press, Morph: 0..1, eased by the caller; Morph pulses the refraction while the shape changes.
-//   Dark: 1 for a dark glass theme (a cooler, dimmer light).
-// Added:
-//   BandLow, BandHigh: the band of brightness the theme's text was fitted to (PanelGlass.Low/High; 0, 1 for none). The middle
-//     is held to it adaptively: only a background outside it is moved, just far enough (see Liquid.hlsl).
-//   Saturation: the colors behind the glass, this much more saturated (vibrancy).
-//   EdgeBand: 0..1, how far that band relaxes at the rim, where the refraction shows and no text sits.
-//   Frost: the middle's frost as a mip level of the background (1 is a 2 px blur, 2 a 4 px one); a busy background and the
-//     open panel take a little more.
-//   Scale: the display scale (device pixels per DIP), which sizes the rim line.
-//   Light: overall strength of the highlights and rim.
+//   Tint: the glass's background, straight color and alpha (the source's rgba(255, 255, 255, .08)).
+//   PointerX, PointerY: the pointer in island pixels, NaN while it is away.
+//   Hover, Press, Morph: 0..1, eased by the caller. Hover lights the glass from the pointer (the source's .lit-glow), Press
+//     gives the source's pressed shadows and thicker ring (strength 1.2), Morph thickens the ring as the shape changes.
+//   Dark: 1 for the dark look.
+//   BandLow, BandHigh: the band of brightness the theme's text was fitted to (PanelGlass.Low/High; 0, 1 for none): only a
+//     background outside it is moved, just far enough (legibility, see Liquid.hlsl).
+//   Scale: device pixels per DIP (the source's CSS pixel).
 //   Open: 0 collapsed .. 1 the open panel.
-//   Shade: how much the rim darkens opposite the light, in the background's own hue. Sheen: the soft highlight inside the lit bevel.
+//   Ref, Edge, Rad: the source's refraction, ring thickness and inner corner (its sliders; 1, 1, .6 by default).
+//   Contrast, Brightness, Saturate: the source's backdrop-filter (1.2, 1.05, 1.1).
+//   InsetY, InsetBlur, InsetAlpha: the source's inset shadow (0 -8px 20px rgba(0,0,0,.14)), shrunk for low shapes.
+//   Faithful: the source's own uv field (the proof sheets), not the island's.
 internal readonly record struct LiquidFrame(
     int Width, int Height,
     float CornerTop, float CornerBottom, float Shoulder,
     float Tint_R, float Tint_G, float Tint_B, float TintAlpha,
-    float Thickness,
-    float Refraction,
-    float Dispersion,
     float PointerX, float PointerY,
     float Hover, float Press,
     float Morph,
     float Dark,
-    float BandLow = 0, float BandHigh = 1, float Saturation = 1, float EdgeBand = 0,
-    float Frost = 1.5f, float Scale = 1, float Light = 1, float Open = 0, float Shade = 0, float Sheen = 0)
+    float BandLow = 0, float BandHigh = 1, float Scale = 1, float Open = 0,
+    float Ref = 1, float Edge = 1, float Rad = .6f,
+    float Contrast = 1.2f, float Brightness = 1.05f, float Saturate = 1.1f,
+    float InsetY = -8, float InsetBlur = 20, float InsetAlpha = .14f, bool Faithful = false)
 {
-    // The defaults for BrimDeck's two glass themes at a display scale, for a shape and size. Clear glass in both: the band is
-    // the theme's (liquid-glass-light: .85..1 for its dark text; liquid-glass-dark: 0...28 for its light text), held only where
-    // the background lies outside it; a thin tint, a light frost, a little vibrancy.
-    public static LiquidFrame Preset(bool dark, int width, int height, float cornerTop, float cornerBottom, float shoulder, float scale) => dark
-        ? new(width, height, cornerTop, cornerBottom, shoulder, 0x12 / 255f, 0x14 / 255f, 0x19 / 255f, .08f,
-            Thickness: Bevel(height, scale), Refraction: 1.25f, Dispersion: .35f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 1,
-            BandLow: 0, BandHigh: .28f, Saturation: 1.35f, EdgeBand: 0, Frost: 1.5f + MathF.Log2(scale), Scale: scale, Light: 1, Shade: .25f, Sheen: .3f)
-        : new(width, height, cornerTop, cornerBottom, shoulder, 1, 1, 1, .05f,
-            Thickness: Bevel(height, scale), Refraction: 1.25f, Dispersion: .35f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 0,
-            BandLow: .85f, BandHigh: 1, Saturation: 1.3f, EdgeBand: .6f, Frost: 1.5f + MathF.Log2(scale), Scale: scale, Light: 1, Shade: .4f, Sheen: .2f);
+    // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
+    // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
+    private const float SourceHeight = 44, Thin = 28;
+
+    // The two looks, at a display scale, for a shape and size: the source's glass in both, white-tinted; the theme's band for its
+    // text (liquid-glass-light: .85..1 for dark text; liquid-glass-dark: 0...28 for light text).
+    public static LiquidFrame Preset(bool dark, int width, int height, float cornerTop, float cornerBottom, float shoulder, float scale)
+    {
+        float css = height / MathF.Max(.5f, scale);
+        float fit = MathF.Min(1, css / SourceHeight);
+        float thin = MathF.Min(1, css / Thin);
+        return new(width, height, cornerTop, cornerBottom, shoulder, 1, 1, 1, .08f,
+            PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: dark ? 1 : 0,
+            BandLow: dark ? 0 : .85f, BandHigh: dark ? .28f : 1, Scale: scale,
+            InsetY: -8 * fit, InsetBlur: 20 * fit, InsetAlpha: .14f * thin * thin);
+    }
 
     // Between two looks (light glass to dark as automatic liquid glass turns), t from a to b: every look's value in between,
     // the shape and the pointer a's.
@@ -71,9 +69,7 @@ internal readonly record struct LiquidFrame(
         return a with
         {
             Tint_R = L(a.Tint_R, b.Tint_R), Tint_G = L(a.Tint_G, b.Tint_G), Tint_B = L(a.Tint_B, b.Tint_B), TintAlpha = L(a.TintAlpha, b.TintAlpha),
-            Thickness = L(a.Thickness, b.Thickness), Refraction = L(a.Refraction, b.Refraction), Dispersion = L(a.Dispersion, b.Dispersion),
-            Dark = L(a.Dark, b.Dark), BandLow = L(a.BandLow, b.BandLow), BandHigh = L(a.BandHigh, b.BandHigh), Saturation = L(a.Saturation, b.Saturation),
-            EdgeBand = L(a.EdgeBand, b.EdgeBand), Frost = L(a.Frost, b.Frost), Light = L(a.Light, b.Light), Shade = L(a.Shade, b.Shade), Sheen = L(a.Sheen, b.Sheen)
+            Dark = L(a.Dark, b.Dark), BandLow = L(a.BandLow, b.BandLow), BandHigh = L(a.BandHigh, b.BandHigh)
         };
     }
 
@@ -92,8 +88,52 @@ internal readonly record struct LiquidFrame(
         return toDark ? shown <= TextTurn : shown >= TextTurn;
     }
 
-    // The bevel: 14 DIP on the open panel, and under half the height on the small collapsed island, so the rim stays a rim.
-    private static float Bevel(int height, float scale) => MathF.Min(14 * scale, height * .4f);
+    // ----- The source's displacement map -----
+
+    // The source's roundedRectSDF.
+    private static double RoundedRect(double x, double y, double w, double h, double r)
+    {
+        double qx = Math.Abs(x) - w + r, qy = Math.Abs(y) - h + r;
+        return Math.Min(Math.Max(qx, qy), 0) + Math.Sqrt(Math.Max(qx, 0) * Math.Max(qx, 0) + Math.Max(qy, 0) * Math.Max(qy, 0)) - r;
+    }
+    private static double SmoothStep(double a, double b, double t) { t = Math.Clamp((t - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+
+    // The shift at a texel (CSS pixels, in a box w x h), as Liquid.hlsl's Shift works it out: the source's field or the island's.
+    public static (double X, double Y) Shift(double x, double y, double w, double h, double edge, double strength, double rad, bool faithful)
+    {
+        double e = .15 / edge / strength;
+        if (faithful)
+        {
+            double ix = x / w - .5, iy = y / h - .5;
+            double s = SmoothStep(0, 1, SmoothStep(.8, 0, RoundedRect(ix, iy, .3, .2, rad) - e));
+            return (ix * (s - 1) * w, iy * (s - 1) * h);
+        }
+        double m = Math.Min(w, h), ex = (w - m) / 2, ey = (h - m) / 2;
+        double qx = x + .5 - w / 2, qy = y + .5 - h / 2;
+        double sx = Math.Clamp(qx, -ex, ex), sy = Math.Clamp(qy, -ey, ey);
+        double t = SmoothStep(0, 1, SmoothStep(.8, 0, RoundedRect(qx / m, qy / m, .3 + ex / m, .2 + ey / m, rad) - e));
+        return ((qx - sx) * (t - 1), (qy - sy) * (t - 1));
+    }
+
+    // Half the largest shift over the map, as the source normalises it (maxScale * .5): over every texel of the box (CSS pixels)
+    // for the source exactly; for the island every step-th inside and every texel along the edges, where the largest lie, which
+    // costs little as the shape animates.
+    public static double MaxHalf(double w, double h, double edge, double strength, double rad, bool faithful)
+    {
+        int W = Math.Max(2, (int)Math.Round(w)), H = Math.Max(2, (int)Math.Round(h));
+        int step = faithful ? 1 : Math.Max(1, (int)Math.Sqrt(W * (double)H / 20000));
+        double max = 0;
+        void At(int x, int y)
+        {
+            var (dx, dy) = Shift(x, y, W, H, edge, strength, rad, faithful);
+            max = Math.Max(max, Math.Max(Math.Abs(dx), Math.Abs(dy)));
+        }
+        for (int y = 0; y < H; y += step)
+            for (int x = 0; x < W; x += step) At(x, y);
+        for (int x = 0; x < W; x++) { At(x, 0); At(x, H - 1); }
+        for (int y = 0; y < H; y++) { At(0, y); At(W - 1, y); }
+        return max * .5;
+    }
 }
 
 // Liquid glass: the desktop under the island (captured by the caller, padded around it, BrimDeck's own windows left out) drawn
@@ -107,8 +147,6 @@ internal readonly record struct LiquidFrame(
 internal sealed class LiquidRenderer : IDisposable
 {
     private const Format Pixels = Format.B8G8R8A8_UNorm;
-    // The light's default direction in the island's plane, toward the top-left (y down).
-    private static readonly float DefaultAngle = MathF.Atan2(-.85f, -.55f);
 
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
@@ -285,23 +323,19 @@ internal sealed class LiquidRenderer : IDisposable
         float limit = MathF.Max(0, MathF.Min(shoulder > 0 ? h - depth : h / 2, side));
         float bottom = Math.Clamp(f.CornerBottom, 0, limit);
         float top = shoulder > 0 ? 0 : Math.Clamp(f.CornerTop, 0, MathF.Min(w, h) / 2);
-        // The bevel never reaches past the middle of the shape, where the normals of opposite edges meet.
-        float inner = top > 0 ? MathF.Min(w, h) / 2 : MathF.Min(h, side);
-        float thickness = Math.Clamp(f.Thickness, 1, MathF.Max(1, inner * .65f));
+        float scale = MathF.Max(.5f, f.Scale);
+        // A square top (the panel, the notch) lies against the screen's edge: the source's box reaches above it, so its ring
+        // and inset shadow show along the sides and the bottom only.
+        float extra = top > 0 || f.Faithful ? 0 : h * .6f + 20 * scale;
+        float strength = 1 + .2f * Math.Clamp(f.Press, 0, 1) + .2f * Math.Clamp(f.Morph, 0, 1);
+        // The source's ring is a fifth of the glass's shorter side, fit for its buttons and lenses; on a larger island (the open
+        // panel) it is kept to about RingCss CSS pixels.
+        float edge = f.Faithful ? f.Edge : f.Edge * MathF.Max(1, MathF.Min(w, h + extra) / scale / RingCss);
+        var key = (w, h + extra, scale, edge, strength, f.Rad, f.Faithful);
+        if (key != _maxFor) { _maxHalf = (float)LiquidFrame.MaxHalf(w / scale, (h + extra) / scale, edge, strength, f.Rad, f.Faithful); _maxFor = key; }
 
         if (float.IsFinite(f.PointerX) && float.IsFinite(f.PointerY)) { _pointerX = f.PointerX; _pointerY = f.PointerY; }
         bool known = float.IsFinite(_pointerX);
-        float hover = Math.Clamp(f.Hover, 0, 1);
-        // The light comes from the pointer's side of the island (from above when it is over the middle), turned toward from
-        // the default angle by Hover.
-        float angle = DefaultAngle;
-        if (known && hover > 0)
-        {
-            float vx = (_pointerX - w / 2) / MathF.Max(1, w / 2 - h / 2 + 1), vy = (_pointerY - h / 2) / MathF.Max(1, h / 2) - .6f;
-            float toward = MathF.Atan2(vy, vx);
-            float turn = MathF.IEEERemainder(toward - angle, MathF.Tau);
-            angle += turn * hover;
-        }
         var c = new Constants
         {
             Width = w, Height = h,
@@ -309,16 +343,23 @@ internal sealed class LiquidRenderer : IDisposable
             Pad = pad, HalfWidth = w / 2, Side = side, Shoulder = shoulder, Depth = depth,
             CornerTop = top, CornerBottom = bottom, SideTop = shoulder > 0 ? depth : top > 0 ? top : -1e4f,
             TintR = f.Tint_R, TintG = f.Tint_G, TintB = f.Tint_B, TintA = Math.Clamp(f.TintAlpha, 0, 1),
-            Thickness = thickness, Refraction = MathF.Max(0, f.Refraction), Dispersion = Math.Clamp(f.Dispersion, 0, 1), Frost = MathF.Max(0, f.Frost),
-            PointerX = known ? _pointerX : -1e4f, PointerY = known ? _pointerY : -1e4f, Near = known ? hover : 0, Hover = hover,
-            LightX = MathF.Cos(angle), LightY = MathF.Sin(angle),
-            Press = Math.Clamp(f.Press, 0, 1), Morph = Math.Clamp(f.Morph, 0, 1), Dark = f.Dark,
-            Low = Math.Clamp(f.BandLow, 0, 1), High = Math.Clamp(f.BandHigh, 0, 1), Saturation = MathF.Max(0, f.Saturation), EdgeBand = Math.Clamp(f.EdgeBand, 0, 1),
-            Scale = MathF.Max(.5f, f.Scale), Gain = MathF.Max(0, f.Light), Glow = MathF.Max(12 * f.Scale, h * .9f),
-            Open = Math.Clamp(f.Open, 0, 1), Shade = Math.Clamp(f.Shade, 0, 1), Sheen = MathF.Max(0, f.Sheen)
+            Scale = scale, Ref = MathF.Max(0, f.Ref), Edge = MathF.Max(.05f, edge), Rad = Math.Clamp(f.Rad, 0, 1),
+            MaxHalf = _maxHalf, Faithful = f.Faithful ? 1 : 0, TopExtra = extra, Strength = strength,
+            Contrast = f.Contrast, Brightness = f.Brightness, Saturate = f.Saturate, Low = Math.Clamp(f.BandLow, 0, 1),
+            High = Math.Clamp(f.BandHigh, 0, 1), InsetY = f.InsetY, InsetBlur = MathF.Max(.1f, f.InsetBlur), InsetAlpha = Math.Clamp(f.InsetAlpha, 0, 1),
+            PointerX = known ? _pointerX : -1e4f, PointerY = known ? _pointerY : -1e4f,
+            Lit = known ? LitMax * Math.Clamp(f.Hover, 0, 1) : 0, Press = Math.Clamp(f.Press, 0, 1),
+            Dark = f.Dark, Band = 24 * scale
         };
         _context.UpdateSubresource(in c, _constants);
     }
+
+    // The pointer's light at full hover: the source lights a glass this much (.lit-glow at a press, 1) from a source of light
+    // touching it; the pointer over the island is a gentler one.
+    private const float LitMax = .35f;
+    private const float RingCss = 90;
+    private float _maxHalf;
+    private (float, float, float, float, float, float, bool) _maxFor;
 
     // The swap chain, its buffers at least the frame's size: they grow (in steps of 64 pixels, so an opening panel does not
     // reallocate every frame) and never shrink, and the source size shows only the frame's part of them, from the top-left.
@@ -410,11 +451,11 @@ internal sealed class LiquidRenderer : IDisposable
         public float Pad, HalfWidth, Side, Shoulder;
         public float Depth, CornerTop, CornerBottom, SideTop;
         public float TintR, TintG, TintB, TintA;
-        public float Thickness, Refraction, Dispersion, Frost;
-        public float PointerX, PointerY, Near, Hover;
-        public float LightX, LightY, Press, Morph;
-        public float Dark, Low, High, Saturation;
-        public float EdgeBand, Scale, Gain, Glow;
-        public float Open, Shade, Sheen, Spare;
+        public float Scale, Ref, Edge, Rad;
+        public float MaxHalf, Faithful, TopExtra, Strength;
+        public float Contrast, Brightness, Saturate, Low;
+        public float High, InsetY, InsetBlur, InsetAlpha;
+        public float PointerX, PointerY, Lit, Press;
+        public float Dark, Band, Spare0, Spare1;
     }
 }
