@@ -65,6 +65,7 @@ public partial class MainWindow
         {
             if (Island.RimWidth == 0 && Island.EdgeBrush is null) return;
             Island.RimWidth = 0; Island.EdgeBrush = null; _liquidEdge = true;
+            _ambient?.Update();
         }
         else if (_liquidEdge)
         {
@@ -72,6 +73,7 @@ public partial class MainWindow
             var palette = PanelTheme.Current;
             Island.RimWidth = palette.Effects.RimWidth;
             Island.EdgeBrush = PanelTheme.GlassShown ? PanelTheme.EdgeBrush(palette) : null;
+            _ambient?.Update();
         }
     }
 

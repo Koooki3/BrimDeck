@@ -16,6 +16,7 @@ internal static class Program
             CheckWindowChrome();
             NoticeProtectionTests.Run(Check);
             DesktopSourceTests.Run(Check);
+            LiquidIdleTests.Run(Check);
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();
             Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
                 && work.Width > 0 && work.Height > 0 && scale > 0);

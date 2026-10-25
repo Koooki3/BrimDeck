@@ -19,7 +19,7 @@ public partial class MainWindow
     private void InitializeMotion()
     {
         var content = (Panel)Island.Child;
-        _ambient = new AmbientGlow(Island, content, MotionState, () => _expanded);
+        _ambient = new AmbientGlow(Island, content, MotionState, () => _expanded, () => _glass?.LiquidShown == true);
         _fx = InteractionFx.Island(this, Island, content, () => _expanded && !_preview);
         IsVisibleChanged += (_, _) => _ambient.Update();
         MotionEnvironment.Changed += EnvironmentChanged;

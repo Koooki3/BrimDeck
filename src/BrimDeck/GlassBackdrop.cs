@@ -145,15 +145,15 @@ internal sealed class GlassBackdrop : IDisposable
     private static readonly bool LiquidDebug = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_DEBUG") == "1";
     private const long DebugEveryMs = 2000;
     private long _debugAt;
-    // While the island holds still, the desktop under it is looked at for a change (a video, a window moving): every PollMs
-    // while the pointer is over the island or the desktop changed in the last IdleAfterMs, else every IdlePollMs; SettleMs
-    // after a comparison went out, to read its answer.
+    // While the island holds still, the desktop under it is looked at for a change (a video, a window moving): LiquidIdle.
     private DispatcherTimer? _poll;
     private LiquidFrame _liquidFrame;
     private LiquidGlass.RECT _liquidRegion;
     private int _pad;
-    private long _changedAt;
-    private const int PollMs = 33, IdlePollMs = 100, SettleMs = 8, IdleAfterMs = 2000;
+    // How often, and what a tick does: LiquidIdle.
+    private readonly LiquidIdle _idle = new();
+    // Frames followed and times following started, for the debug log.
+    private long _steps, _followStarts;
     private const double HoverInMs = 120, HoverOutMs = 260, PressDownMs = 60, PressUpMs = 220;
 
     // Windows can draw the blur now: the glass theme is shown (transparency effects on, no high contrast), battery saver is off,
@@ -178,6 +178,7 @@ internal sealed class GlassBackdrop : IDisposable
         _still = 0;
         if (_following) return;
         _following = true;
+        _followStarts++;
         Poll(false);
         System.Windows.Media.CompositionTarget.Rendering += OnRendering;
         Step();
@@ -195,6 +196,7 @@ internal sealed class GlassBackdrop : IDisposable
 
     private void Step()
     {
+        _steps++;
         if (_disposed) { Stop(); return; }
         if (!Available || !_owner.IsVisible || Measure() is not { } frame) { Hide(); Stop(); return; }
         bool changed = frame != _last || !Equals(_brushFor, PanelTheme.Current.Effects.Glass);
@@ -363,7 +365,7 @@ internal sealed class GlassBackdrop : IDisposable
             }
             if (_renderer is null)
             {
-                _renderer = new LiquidRenderer(_source.Device);
+                _renderer = new LiquidRenderer(_source.Device); _idle.Forget();
                 _liquid ??= compositor.CreateSpriteVisual();
                 _liquidClip ??= compositor.CreateRoundedRectangleGeometry();
                 _liquid.Clip ??= compositor.CreateGeometricClip(_liquidClip);
@@ -377,7 +379,6 @@ internal sealed class GlassBackdrop : IDisposable
             int width = Math.Max(1, (int)Math.Round(shown.Right - shown.Left)), height = Math.Max(1, (int)Math.Round(shown.Bottom - shown.Top));
             _pad = (int)Math.Ceiling(48 * scale);
             var region = new LiquidGlass.RECT(window.X + x - _pad, window.Y + y - _pad, window.X + x + width + _pad, window.Y + y + height + _pad);
-            if (!_source.Update(region, out _) || _source.Texture is not { } background) return ShowLiquid(false);
             // The glass's own preset: clear glass held to the theme's band only where the background lies outside it (the
             // band is the one the theme's text was fitted to, never wider). The island's tint thickening as the panel opens
             // says how open it is, which takes a little more frost; the tint itself is not drawn over the glass.
@@ -390,7 +391,7 @@ internal sealed class GlassBackdrop : IDisposable
                 LiquidFrame.Preset(true, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale), (float)darkness);
             bool settled = darkness is 0 or 1;
             var pointer = _pointer;
-            _liquidFrame = preset with
+            var next = preset with
             {
                 BandLow = glass.Held && settled ? MathF.Max(preset.BandLow, (float)glass.Low) : preset.BandLow,
                 BandHigh = glass.Held && settled ? MathF.Min(preset.BandHigh, (float)glass.High) : preset.BandHigh,
@@ -398,8 +399,13 @@ internal sealed class GlassBackdrop : IDisposable
                 PointerX = pointer is { } p ? (float)(p.X * scale) : float.NaN, PointerY = pointer is { } q ? (float)(q.Y * scale) : float.NaN,
                 Hover = (float)_hover, Press = (float)_press, Morph = (float)_moving
             };
-            _liquidRegion = region;
-            _renderer.Render(background, _pad, _liquidFrame);
+            // Drawn again only when the glass changed (its shape, place, look, the pointer's light) or what lies behind it did;
+            // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),
+            // the desktop is looked at no oftener than the idle poll's PollMs.
+            var renderer = _renderer;
+            int pad = _pad;
+            if (!_idle.Frame(_source, region, next, background => renderer.Render(background, pad, next), Environment.TickCount64)) return ShowLiquid(false);
+            _liquidFrame = next; _liquidRegion = region;
             ReportBackdrop();
             _liquid!.Offset = new Vector3(x, y, 0);
             _liquid.Size = new Vector2(width, height);
@@ -429,7 +435,7 @@ internal sealed class GlassBackdrop : IDisposable
         if (LiquidDebug && (turn || now - _debugAt >= DebugEveryMs))
         {
             _debugAt = now;
-            DebugLine(FormattableString.Invariant($"{DateTime.Now:HH:mm:ss.fff} auto {auto} luma {_look.Luma:0.000} measures {_look.Measures} shown {(current ? "dark" : "light")} decided {(_look.Dark is { } d ? d ? "dark" : "light" : "-")}{(turn ? instant ? " -> turn now" : " -> turn" : "")}"));
+            DebugLine(FormattableString.Invariant($"{DateTime.Now:HH:mm:ss.fff} poll ticks {_idle.Ticks} renders {_idle.Renders} following {_following} starts {_followStarts} frames {_steps} drawn {_idle.FrameRenders} auto {auto} luma {_look.Luma:0.000} measures {_look.Measures} shown {(current ? "dark" : "light")} decided {(_look.Dark is { } d ? d ? "dark" : "light" : "-")}{(turn ? instant ? " -> turn now" : " -> turn" : "")}"));
         }
         if (turn) Look?.Invoke(!current, instant);
     }
@@ -456,6 +462,7 @@ internal sealed class GlassBackdrop : IDisposable
     // A new device (another adapter, a lost one): the renderer is made again on the next frame.
     private void Rebuild()
     {
+        _idle.Forget();
         _renderer?.Dispose(); _renderer = null;
         _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () => Follow(0));
     }
@@ -473,8 +480,7 @@ internal sealed class GlassBackdrop : IDisposable
                 if (_following || _disposed || _source is null || _renderer is null || !LiquidShown) { _poll!.Stop(); return; }
                 try
                 {
-                    if (!_source.Update(_liquidRegion, out bool changed) || _source.Texture is not { } background) { _poll!.Stop(); Follow(0); return; }
-                    if (changed) { _renderer.Render(background, _pad, _liquidFrame); _changedAt = Environment.TickCount64; }
+                    if (!_idle.Tick(_source, _liquidRegion, background => _renderer.Render(background, _pad, _liquidFrame), Environment.TickCount64)) { _poll!.Stop(); Follow(0); return; }
                     ReportBackdrop();
                     var interval = PollInterval();
                     if (_poll!.Interval != interval) _poll.Interval = interval;
@@ -485,21 +491,16 @@ internal sealed class GlassBackdrop : IDisposable
                 }
             };
         }
-        // The island just stopped moving: looked at often for a while, as after a change.
-        _changedAt = Environment.TickCount64;
+        _idle.Start(Environment.TickCount64);
         _poll.Interval = PollInterval();
         _poll.Start();
     }
 
-    // A comparison out is read soon; the desktop is looked at often while the pointer is over the island or it changed lately
-    // (a video), and less often once it has been still for a while, so a change still shows within about IdlePollMs.
-    private TimeSpan PollInterval() => TimeSpan.FromMilliseconds(
-        _source is { Comparing: true } || _renderer is { Measuring: true } ? SettleMs
-        : _pointer is not null || Environment.TickCount64 - _changedAt < IdleAfterMs ? PollMs
-        : IdlePollMs);
+    private TimeSpan PollInterval() => TimeSpan.FromMilliseconds(_idle.Interval(_pointer is not null, _renderer is { Measuring: true }, Environment.TickCount64));
 
     private void ReleaseLiquid()
     {
+        _idle.Forget();
         _poll?.Stop();
         LiquidShown = false;
         _renderer?.Dispose(); _renderer = null;
