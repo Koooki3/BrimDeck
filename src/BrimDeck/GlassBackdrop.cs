@@ -5,6 +5,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using BrimDeck.Core;
+using BrimDeck.LiquidGlass;
 using Windows.UI.Composition;
 using Windows.UI.Composition.Desktop;
 using WinRT;
@@ -100,6 +101,32 @@ internal sealed class GlassBackdrop : IDisposable
         Follow(0);
     }
 
+    // ----- Liquid glass (prototype) -----
+    // Under the island, glass themes can show true refraction instead of the blur: the desktop under the island, captured
+    // without BrimDeck's own windows (DesktopSource), drawn through a slab of thick glass (LiquidRenderer) whose rim lights
+    // from the pointer. It takes the blur's place on the same window and follows the same delayed shape; anything it cannot do
+    // (no capture, protected content, a lost device) shows the blur instead. BRIMDECK_LIQUID=0 turns it off, for comparing.
+    // The island's surface tint (its alpha now, thickened as the panel opens), set by the island to turn liquid glass on.
+    public Func<double>? LiquidTint { get; set; }
+    // Whether liquid glass is what is shown now: the island's own tint then steps aside, as the glass draws it.
+    public bool LiquidShown { get; private set; }
+    private static readonly bool LiquidOff = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID") == "0";
+    private DesktopSource? _source;
+    private LiquidRenderer? _renderer;
+    private SpriteVisual? _liquid;
+    private CompositionRoundedRectangleGeometry? _liquidClip;
+    private bool _liquidFailed;
+    // Hover and press, eased toward the pointer's state; the time they were last eased.
+    private double _hover, _press;
+    private long _easedAt;
+    // While the island holds still, the desktop under it is looked at this often for a change (a video, a window moving).
+    private DispatcherTimer? _poll;
+    private LiquidFrame _liquidFrame;
+    private LiquidGlass.RECT _liquidRegion;
+    private int _pad;
+    private const int PollMs = 33;
+    private const double HoverInMs = 120, HoverOutMs = 260, PressDownMs = 60, PressUpMs = 220;
+
     // Windows can draw the blur now: the glass theme is shown (transparency effects on, no high contrast), battery saver is off,
     // the session is local, and composition started.
     public static bool Available => PanelTheme.GlassShown && !MotionEnvironment.BatterySaver && GetSystemMetrics(RemoteSession) == 0 && Composition.Ready;
@@ -122,6 +149,7 @@ internal sealed class GlassBackdrop : IDisposable
         _still = 0;
         if (_following) return;
         _following = true;
+        Poll(false);
         System.Windows.Media.CompositionTarget.Rendering += OnRendering;
         Step();
     }
@@ -131,6 +159,7 @@ internal sealed class GlassBackdrop : IDisposable
         if (!_following) return;
         _following = false;
         System.Windows.Media.CompositionTarget.Rendering -= OnRendering;
+        Poll(true);
     }
 
     private void OnRendering(object? sender, EventArgs e) => Step();
@@ -140,7 +169,8 @@ internal sealed class GlassBackdrop : IDisposable
         if (_disposed) { Stop(); return; }
         if (!Available || !_owner.IsVisible || Measure() is not { } frame) { Hide(); Stop(); return; }
         bool changed = frame != _last || !Equals(_brushFor, PanelTheme.Current.Effects.Glass);
-        if (!changed && _moving == 0 && ++_still >= StillFrames && Environment.TickCount64 >= _followUntil) { Stop(); return; }
+        bool easing = EaseLiquid();
+        if (!changed && !easing && _moving == 0 && ++_still >= StillFrames && Environment.TickCount64 >= _followUntil) { Stop(); return; }
         if (changed) _still = 0;
         _last = frame;
         if (!EnsureWindow()) { Stop(); return; }
@@ -153,6 +183,21 @@ internal sealed class GlassBackdrop : IDisposable
         {
             Composition.Fail(); Hide(); Stop();
         }
+    }
+
+    // Hover and press move toward the pointer's state, quickly in and more slowly out, on time not frames. True while moving.
+    private bool EaseLiquid()
+    {
+        long now = Environment.TickCount64;
+        double dt = _easedAt == 0 ? 16 : Math.Clamp(now - _easedAt, 0, 100);
+        _easedAt = now;
+        double hover = _pointer is null ? 0 : 1, press = _pointerDown ? 1 : 0;
+        if (!Soft.Enabled) { _hover = hover; _press = press; return false; }
+        _hover += (hover - _hover) * (1 - Math.Exp(-dt / (hover > _hover ? HoverInMs : HoverOutMs) * 3));
+        _press += (press - _press) * (1 - Math.Exp(-dt / (press > _press ? PressDownMs : PressUpMs) * 3));
+        if (Math.Abs(_hover - hover) < .003) _hover = hover;
+        if (Math.Abs(_press - press) < .003) _press = press;
+        return _hover != hover || _press != press;
     }
 
     private Frame? Measure()
@@ -238,7 +283,11 @@ internal sealed class GlassBackdrop : IDisposable
         _clip!.Offset = new Vector2((float)left, (float)clipTop);
         _clip.Size = new Vector2((float)(right - left), (float)(bottom - clipTop));
         _clip.CornerRadius = new Vector2((float)corner);
-        _sprite!.Opacity = (float)opacity;
+        // Liquid glass covers the whole outline, shoulders too (its shader draws the shape), inside the same recent shapes.
+        double outerLeft = left - shoulder - inset, outerRight = right + shoulder + inset, outerBottom = bottom + inset;
+        bool liquid = Liquid(shown, outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
+        _sprite!.Opacity = liquid ? 0 : (float)opacity;
+        if (liquid) { left = outerLeft; right = outerRight; bottom = outerBottom; corner = radius; }
         // The window region: the clip's rectangle, rounded alike, so the window takes no clicks and shows nothing outside it.
         // A square top reaches above the window, as the clip does, so the region's rounded top corners fall outside it.
         var region = ((int)Math.Floor(left), (int)Math.Floor(clipTop), (int)Math.Ceiling(right), (int)Math.Ceiling(bottom), (int)Math.Round(corner));
@@ -249,6 +298,119 @@ internal sealed class GlassBackdrop : IDisposable
             // The window owns the region from here on.
             if (handleRegion != IntPtr.Zero && SetWindowRgn(handle, handleRegion, true) == 0) DeleteObject(handleRegion);
         }
+    }
+
+    // Liquid glass for this frame, at the delayed shape, clipped to the recent shapes (window pixels); false shows the blur.
+    private bool Liquid(Frame shown, double left, double top, double right, double bottom, double radius, double opacity)
+    {
+        if (LiquidTint is not { } tint || LiquidOff || _liquidFailed || Composition.Compositor is not { } compositor || _root is null
+            || PanelTheme.Current.Effects.Glass is not { } glass || _windowRect is not { } window)
+            return ShowLiquid(false);
+        try
+        {
+            if (_source is null)
+            {
+                _source = DesktopSource.TryCreate();
+                if (_source is null) { _liquidFailed = true; return ShowLiquid(false); }
+                _source.DeviceChanged += Rebuild;
+                DesktopSource.Exclude(OwnerHandle);
+                if (_window is not null) DesktopSource.Exclude(_window.Handle);
+            }
+            if (_renderer is null)
+            {
+                _renderer = new LiquidRenderer(_source.Device);
+                _liquid ??= compositor.CreateSpriteVisual();
+                _liquidClip ??= compositor.CreateRoundedRectangleGeometry();
+                _liquid.Clip ??= compositor.CreateGeometricClip(_liquidClip);
+                var previous = _liquid.Brush;
+                _liquid.Brush = _renderer.CreateBrush(compositor);
+                previous?.Dispose();
+                if (_liquid.Parent is null) _root.Children.InsertAtTop(_liquid);
+            }
+            double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
+            int x = (int)Math.Round(shown.Left), y = (int)Math.Round(shown.Top);
+            int width = Math.Max(1, (int)Math.Round(shown.Right - shown.Left)), height = Math.Max(1, (int)Math.Round(shown.Bottom - shown.Top));
+            _pad = (int)Math.Ceiling(48 * scale);
+            var region = new LiquidGlass.RECT(window.X + x - _pad, window.Y + y - _pad, window.X + x + width + _pad, window.Y + y + height + _pad);
+            if (!_source.Update(region, out _) || _source.Texture is not { } background) return ShowLiquid(false);
+            // The tint the island would draw (thickened as the panel opens), thinned as over the held blur: the glass keeps the
+            // contrast the theme was fitted to.
+            double alpha = tint();
+            double thin = glass.Held ? PanelTheme.HeldOpacity(alpha) * alpha : alpha;
+            var c = shown.Corners;
+            bool dark = PanelTheme.Current.IsDark;
+            var preset = LiquidFrame.Preset(dark, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale);
+            var pointer = _pointer;
+            _liquidFrame = preset with
+            {
+                Tint_R = glass.Tint.R / 255f, Tint_G = glass.Tint.G / 255f, Tint_B = glass.Tint.B / 255f, TintAlpha = (float)thin,
+                BandLow = glass.Held ? (float)glass.Low : 0, BandHigh = glass.Held ? (float)glass.High : 1, Saturation = glass.Held ? (float)glass.Saturation : 1,
+                PointerX = pointer is { } p ? (float)(p.X * scale) : float.NaN, PointerY = pointer is { } q ? (float)(q.Y * scale) : float.NaN,
+                Hover = (float)_hover, Press = (float)_press, Morph = (float)_moving
+            };
+            _liquidRegion = region;
+            _renderer.Render(background, _pad, _liquidFrame);
+            _liquid!.Offset = new Vector3(x, y, 0);
+            _liquid.Size = new Vector2(width, height);
+            _liquidClip!.Offset = new Vector2((float)(left - x), (float)(top - y));
+            _liquidClip.Size = new Vector2((float)Math.Max(0, right - left), (float)Math.Max(0, bottom - top));
+            _liquidClip.CornerRadius = new Vector2((float)radius);
+            _liquid.Opacity = (float)opacity;
+            return ShowLiquid(true);
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotSupportedException or SharpGen.Runtime.SharpGenException or DllNotFoundException)
+        {
+            _liquidFailed = true; ReleaseLiquid();
+            return ShowLiquid(false);
+        }
+    }
+
+    private bool ShowLiquid(bool shown)
+    {
+        if (!shown && _liquid is not null) _liquid.Opacity = 0;
+        LiquidShown = shown;
+        return shown;
+    }
+
+    // A new device (another adapter, a lost one): the renderer is made again on the next frame.
+    private void Rebuild()
+    {
+        _renderer?.Dispose(); _renderer = null;
+        _owner.Dispatcher.BeginInvoke(DispatcherPriority.Render, () => Follow(0));
+    }
+
+    // The island holds still: the desktop under it may still change. Looked at every PollMs; a change redraws the glass.
+    private void Poll(bool on)
+    {
+        if (!on || !LiquidShown) { _poll?.Stop(); return; }
+        if (_poll is null)
+        {
+            _poll = new DispatcherTimer(DispatcherPriority.Render, _owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(PollMs) };
+            _poll.Tick += (_, _) =>
+            {
+                if (_following || _disposed || _source is null || _renderer is null || !LiquidShown) { _poll!.Stop(); return; }
+                try
+                {
+                    if (!_source.Update(_liquidRegion, out bool changed) || _source.Texture is not { } background) { _poll!.Stop(); Follow(0); return; }
+                    if (changed) _renderer.Render(background, _pad, _liquidFrame);
+                }
+                catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or SharpGen.Runtime.SharpGenException)
+                {
+                    _poll!.Stop(); _liquidFailed = true; ReleaseLiquid(); Follow(0);
+                }
+            };
+        }
+        _poll.Start();
+    }
+
+    private void ReleaseLiquid()
+    {
+        _poll?.Stop();
+        LiquidShown = false;
+        _renderer?.Dispose(); _renderer = null;
+        if (_source is not null) { _source.DeviceChanged -= Rebuild; _source.Dispose(); _source = null; }
+        if (_liquid is not null) { _liquid.Brush?.Dispose(); _liquid.Clip?.Dispose(); _liquid.Dispose(); _liquid = null; }
+        _liquidClip?.Dispose(); _liquidClip = null;
     }
 
     // On every frame followed: the island's tint may be changing too (thickening as the panel opens).
@@ -287,6 +449,7 @@ internal sealed class GlassBackdrop : IDisposable
     // No blur now, the window kept for the next time.
     private void Conceal()
     {
+        ShowLiquid(false); Poll(false);
         if (_sprite is not null) _sprite.Opacity = 0;
         if (_shown && _window is not null) ShowWindowNative(_window.Handle, Hidden);
         _shown = false;
@@ -372,6 +535,7 @@ internal sealed class GlassBackdrop : IDisposable
 
     private void Release()
     {
+        ReleaseLiquid();
         // The composition objects are let go with the window: a panel made again (a monitor added, settings applied) starts afresh.
         if (_sprite is not null) { GlassEffect.Release(_sprite.Brush); _sprite.Clip?.Dispose(); _sprite.Dispose(); }
         _clip?.Dispose(); _root?.Dispose();

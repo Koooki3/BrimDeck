@@ -21,7 +21,9 @@ public partial class MainWindow
         {
             _glass = new GlassBackdrop(this, Island);
             // Over a held blur the tint thins with it, frame by frame.
-            _glass.Held += held => _surface.Opacity = 1 + held * (PanelTheme.HeldOpacity(_surface.Color.A / 255d) - 1);
+            // Liquid glass draws the tint itself, so the surface steps aside under it as the blur's tint thins.
+            _glass.Held += held => _surface.Opacity = _glass.LiquidShown ? 1 - held : 1 + held * (PanelTheme.HeldOpacity(_surface.Color.A / 255d) - 1);
+            _glass.LiquidTint = () => _surface.Color.A / 255d;
             // Liquid glass lights its rim from the pointer and presses with it: where the pointer is over the island, and
             // whether the button is down (seen even when a button under it handles the click).
             Island.MouseMove += (_, e) => _glass.Pointer(e.GetPosition(Island), e.LeftButton == MouseButtonState.Pressed);
