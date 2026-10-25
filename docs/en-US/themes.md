@@ -112,7 +112,7 @@ A theme can carry a night look: `night` holds the `colors`, `apps`, `effects` an
 }
 ```
 
-A theme that names such a theme as its `base` does not inherit its night look. "New from current theme", and saving an edit as a new theme, start the new file from the day look and carry the source theme's `night` and `daylight` along.
+A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night`. "New from current theme", and saving an edit as a new theme, start the new file from the day look and carry the source theme's `night` and `daylight` along.
 
 ## Readability
 
