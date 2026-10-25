@@ -26,6 +26,13 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 
 手动填写的来源与 Grok Bot 没有本地用量记录，"今日"和"七日"可以另选一个工具统计。
 
+## WSL 中的用量
+
+在"设置 › 配额与统计"中打开"同步 WSL 中的用量统计"后，BrimDeck 会读取已安装的 WSL 子系统中 Claude Code 与 Codex CLI 的会话记录，计入 Claude 与 Codex 的 Token 用量与费用。目前只有 Claude 与 Codex 支持 WSL。
+
+- 读取范围为每个子系统中 root 用户和 `/home` 下各用户的记录；Docker Desktop 与 Rancher Desktop 自带的子系统不会读取。
+- 读取时会启动尚未运行的 WSL 子系统，因此这个选项默认关闭。
+
 ## Claude 与 Grok Bot 的"联网获取额度"
 
 配额来源为 Claude 或 Grok Bot 的行可以展开，每一行可以单独开关"联网获取额度"（默认开启）：
