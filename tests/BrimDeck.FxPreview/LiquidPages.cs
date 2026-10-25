@@ -24,14 +24,30 @@ using Path = System.IO.Path;
 // notices and the AI usage page (empty: its settings entry), in liquid glass light and dark. Each page is checked: its content
 // is drawn (not blank), the glass shows through it (a page that paints the island over, a black page, fails), its text and
 // glyphs keep contrast against the glass under them, and the shadow shows below the island.
-//   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --liquid-pages <backgrounds folder> <output folder>
+//   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --liquid-pages <backgrounds folder> <output folder> [--scale 125]
 // The backgrounds are *-150.png files (1800 x 450 device pixels); without any, grayui-150, chrome-dark-150 and video-150 are
-// looked for by name.
+// looked for by name. The display scale is 150 percent unless --scale (or BRIMDECK_PAGES_SCALE) gives another, in percent
+// (100, 125, 150, 175): the same backgrounds are used at every scale, and the sheets of another scale than 150 are named
+// pages-<background>-at<percent>.png.
 internal static class LiquidPages
 {
-    private const double Scale = 1.5;
+    // Device pixels per DIP; set before the offscreen panel is made (Run), 1.5 for ShadowCost.
+    private static double Scale { get; set; } = 1.5;
     // The monitor the panel lays out for, device pixels: 1920 x 1080 DIPs with a 48 DIP taskbar at the bottom.
-    private static readonly Rect Monitor = new(0, 0, 1920 * Scale, 1080 * Scale), Work = new(0, 0, 1920 * Scale, 1032 * Scale);
+    private static Rect Monitor => new(0, 0, 1920 * Scale, 1080 * Scale);
+    private static Rect Work => new(0, 0, 1920 * Scale, 1032 * Scale);
+
+    // The scale asked for: --scale <percent> among the arguments, else BRIMDECK_PAGES_SCALE, else 150 percent; null when what
+    // was given is not a scale (0.5 to 4, in percent or as a factor).
+    internal static double? ScaleFrom(string[] args)
+    {
+        int at = Array.IndexOf(args, "--scale");
+        string? given = at >= 0 && at + 1 < args.Length ? args[at + 1] : Environment.GetEnvironmentVariable("BRIMDECK_PAGES_SCALE");
+        if (string.IsNullOrWhiteSpace(given)) return 1.5;
+        if (!double.TryParse(given.Trim().TrimEnd('%'), NumberStyles.Float, CultureInfo.InvariantCulture, out double value)) return null;
+        if (value > 4) value /= 100;
+        return value is >= .5 and <= 4 ? value : null;
+    }
     private static int _failures;
 
     private enum Page { Capsule, MusicCover, MusicPlain, Monitor, Notices, Usage }
@@ -98,8 +114,10 @@ internal static class LiquidPages
         root.Resources = again;
     }
 
-    public static int Run(string backgrounds, string folder)
+    public static int Run(string backgrounds, string folder, double scale = 1.5)
     {
+        Scale = scale;
+        Console.WriteLine($"Display scale: {Scale * 100:0} %");
         var files = Directory.GetFiles(backgrounds, "*-150.png").Order().ToList();
         var wanted = new[] { "grayui-150.png", "chrome-dark-150.png", "video-150.png" };
         if (files.Count > 3 && wanted.All(name => files.Any(file => Path.GetFileName(file) == name)))
@@ -145,8 +163,9 @@ internal static class LiquidPages
                     tiles.Add(($"{label} · {(look == PanelThemes.GlassDark ? "liquid dark" : "liquid light")}", tile, column, row));
                 }
             var sheet = Sheet(name, tiles);
-            LiquidPreview.Save(sheet, Path.Combine(folder, $"pages-{name}.png"));
-            Console.WriteLine($"Wrote pages-{name}.png");
+            string sheetName = Math.Abs(Scale - 1.5) < .001 ? $"pages-{name}.png" : $"pages-{name}-at{Scale * 100:0}.png";
+            LiquidPreview.Save(sheet, Path.Combine(folder, sheetName));
+            Console.WriteLine($"Wrote {sheetName}");
         }
         Console.WriteLine(_failures == 0 ? "PASS: all page checks" : $"{_failures} page checks failed");
         return _failures == 0 ? 0 : 1;
@@ -282,11 +301,15 @@ internal static class LiquidPages
 
     // ----- Checks -----
 
+    // A primary text pixel: its layer alpha at least Core (a glyph's core), or at least SoftCore standing in for small text;
+    // the pixels of it wanted on a page with text, at 150 %.
+    private const int Core = 230, SoftCore = 192, MinimumText = 20;
+
     private static void Check(string name, Layer layer, byte[] glass, byte[] under, byte[] composed, int dw, int gx, int gy)
     {
         int area = 0, drawn = 0, through = 0, changed = 0;
         var ratios = new List<double>();
-        List<double> secondary = [], tertiary = [];
+        List<double> soft = [], secondary = [], tertiary = [];
         for (int y = 0; y < layer.H; y++)
             for (int x = 0; x < layer.W; x++)
             {
@@ -300,15 +323,17 @@ internal static class LiquidPages
                 if (difference <= 8) through++;
                 if (difference > 24) changed++;
                 // Text: drawn (nearly) opaque in the theme's primary text color (titles, names, figures); the cover, the plates, the
-                // scroll thumb and the bars are other colors.
-                if (alpha >= 230)
+                // scroll thumb and the bars are other colors. Small text at a low scale has few pixels that opaque (its strokes
+                // are a pixel or two wide, their cores antialiased): the next most covered ones (Soft) stand in when there are
+                // too few (see below).
+                if (alpha >= SoftCore)
                 {
                     int r = composed[d + 2], g = composed[d + 1], b = composed[d];
                     int lr = layer.Pixels[l + 2] * 255 / alpha, lg = layer.Pixels[l + 1] * 255 / alpha, lb = layer.Pixels[l] * 255 / alpha;
                     if (Math.Abs(lr - layer.Text.R) <= 24 && Math.Abs(lg - layer.Text.G) <= 24 && Math.Abs(lb - layer.Text.B) <= 24)
                     {
                         double ink = Luminance(r, g, b), ground = Luminance(under[d + 2], under[d + 1], under[d]);
-                        ratios.Add((Math.Max(ink, ground) + .05) / (Math.Min(ink, ground) + .05));
+                        (alpha >= Core ? ratios : soft).Add((Math.Max(ink, ground) + .05) / (Math.Min(ink, ground) + .05));
                     }
                 }
                 // Secondary and tertiary text: inside their runs, the glyphs' cores (drawn at the brush's own alpha, in its color).
@@ -326,13 +351,23 @@ internal static class LiquidPages
         double share = area == 0 ? 0 : drawn / (double)area, clear = area == 0 ? 0 : through / (double)area, moved = area == 0 ? 0 : changed / (double)area;
         Report(area > 0 && share >= .005 && moved >= .005, $"{name}: the page is drawn ({share:P1} of the island covered by content, {moved:P1} changed from the glass alone)");
         Report(clear >= .35, $"{name}: the glass shows through the page ({clear:P1} of the island is the glass unchanged; a page painted over, as a black page, has none)");
+        // The pixels wanted scale with the text's area (20 at 150 %): the same text has about 9 core pixels at 100 % for every
+        // 20 at 150 %. Where the cores alone are fewer (a page with little primary text: the empty AI usage page's names, at
+        // 100 %, has 10), the next most covered pixels join them (pages-100.log of round 9 failed there for that alone).
+        int needed = Math.Max(MinimumText / 3, (int)Math.Round(MinimumText * Scale * Scale / 2.25));
+        string sample = "";
+        if (ratios.Count < needed && ratios.Count + soft.Count >= needed)
+        {
+            sample = $" (with {soft.Count} pixels covered {SoftCore * 100 / 255}..{Core * 100 / 255 - 1} %: only {ratios.Count} were nearly opaque)";
+            ratios.AddRange(soft);
+        }
         ratios.Sort();
-        if (ratios.Count < 20 && !layer.HasText) Console.WriteLine($"NOTE: {name}: no primary text on it (the collapsed row shows the cover, the rings and the equalizer); its contrast is not checked");
-        else if (ratios.Count < 20) Report(false, $"{name}: text contrast: only {ratios.Count} pixels of the theme's text color found");
+        if (ratios.Count < needed && !layer.HasText) Console.WriteLine($"NOTE: {name}: no primary text on it (the collapsed row shows the cover, the rings and the equalizer); its contrast is not checked");
+        else if (ratios.Count < needed) Report(false, $"{name}: text contrast: only {ratios.Count} pixels of the theme's text color found ({soft.Count} more partly covered; wanted {needed} at {Scale * 100:0} %)");
         else
         {
             double median = ratios[ratios.Count / 2], low = ratios[ratios.Count / 10];
-            Report(median >= 4.5 && low >= 3, $"{name}: primary text against the glass under it: median {median:0.0}:1, 10th percentile {low:0.0}:1 over {ratios.Count} pixels (wanted 4.5:1 and 3:1)");
+            Report(median >= 4.5 && low >= 3, $"{name}: primary text against the glass under it: median {median:0.0}:1, 10th percentile {low:0.0}:1 over {ratios.Count} pixels{sample} (wanted 4.5:1 and 3:1)");
         }
         // Secondary text wants 4.5:1 as the primary does; tertiary (the clock, captions, hints) 3:1, its 10th percentile 2:1.
         Contrast(name, "secondary", secondary, 4.5, 3);
@@ -393,7 +428,7 @@ internal static class LiquidPages
         using (var dc = visual.RenderOpen())
         {
             dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x1C, 0x1C, 0x20)), null, new Rect(0, 0, width, height));
-            dc.DrawText(new FormattedText($"{name} — the real panel (MainWindow, offscreen) over LiquidRenderer's glass at 150 %, with its shadow",
+            dc.DrawText(new FormattedText($"{name} — the real panel (MainWindow, offscreen) over LiquidRenderer's glass at {Scale * 100:0} %, with its shadow",
                 CultureInfo.InvariantCulture, FlowDirection.LeftToRight, face, 18, Brushes.White, 1), new Point(gap, 10));
             foreach (var (text, tile, column, row) in tiles)
             {

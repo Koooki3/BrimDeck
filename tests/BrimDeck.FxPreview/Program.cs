@@ -32,7 +32,15 @@ internal static class Program
     {
         // The real panel's pages over liquid glass (LiquidPages): --liquid-pages <backgrounds> <output folder>. It needs BrimDeck's own
         // App (never run) instead of a plain Application, so it starts before one is made.
-        if (args.Length > 2 && args[0] == "--liquid-pages") return LiquidPages.Run(args[1], args[2]);
+        // [--scale <percent>] (or BRIMDECK_PAGES_SCALE) draws them at another display scale than 150 percent.
+        if (args.Length > 2 && args[0] == "--liquid-pages")
+        {
+            if (LiquidPages.ScaleFrom(args) is not { } pagesScale) { Console.WriteLine("FAIL: --scale (or BRIMDECK_PAGES_SCALE) wants a display scale such as 100, 125, 150 or 175"); return 1; }
+            return LiquidPages.Run(args[1], args[2], pagesScale);
+        }
+        // The glass's answers to the pointer and its accessibility (GlassAccess): hover and press, the content row, transparency
+        // effects off and animations off, on the real panel offscreen: --glass-access.
+        if (args.Length > 0 && args[0] == "--glass-access") return GlassAccess.Run();
         // What the island's shadow costs while the panel opens and closes over liquid glass (ShadowCost): --shadow-cost [cycles].
         if (args.Length > 0 && args[0] == "--shadow-cost") return ShadowCost.Run(args.Length > 1 && int.TryParse(args[1], out int cycles) ? cycles : 6);
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };

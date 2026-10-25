@@ -21,6 +21,13 @@ internal static class MotionEnvironment
     public static bool DisplayOff { get; private set; }
     // Windows' "transparency effects" (Settings › Personalization › Colors). A glass theme is drawn opaque while it is off.
     public static bool Transparency { get; private set; } = ReadTransparency();
+    // For the offscreen checks only (tests/BrimDeck.FxPreview --glass-access): transparency effects as Windows would report
+    // them, without touching the setting itself.
+    internal static void SimulateTransparency(bool on)
+    {
+        if (Transparency == on) return;
+        Transparency = on; Changed?.Invoke();
+    }
     public static event Action? Changed;
     private static Dispatcher? _dispatcher;
     private static HwndSource? _power;
