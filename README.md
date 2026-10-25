@@ -97,7 +97,7 @@ Works with players that use Windows media controls, with extra support for some 
 
 <img src="docs/en-US/images/monitor.png" width="100%" alt="System monitor page: CPU usage and each core, GPU, memory, network speed and the busiest apps">
 
-- Shows CPU, GPU and memory usage and network speed in real time, along with the usage of each core.
+- Shows CPU, GPU and memory usage and network speed in real time, along with the usage of each core. With more than one graphics card, the discrete one shows by default; click the large GPU reading to show the next card, or choose one under Settings › System monitor › GPU.
 - Lists the busiest apps by CPU or memory; click an app for its details.
 - Colors follow the panel theme by default; several preset color schemes are offered, and you can make your own.
 

@@ -286,7 +286,8 @@ public partial class App : Application
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
         bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
         if (Exiting || Monitor is null && !wanted) return;
-        if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
+        // The sampler reads the choice of graphics adapter on its own thread, where each part is read whole.
+        if (Monitor is null) { Monitor = new SystemSampler(Dispatcher, () => (Settings.MonitorGpu, Settings.MonitorGpuName)); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
         Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
