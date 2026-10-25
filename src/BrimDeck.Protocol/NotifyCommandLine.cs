@@ -31,7 +31,7 @@ public static class NotifyCommandLine
               --id ID            Message id; a retry with the same id is shown once
               --progress N       Task progress, 0 to 100
           -t, --title TEXT       Title (for run: replaces the program name)
-              --at TIME          When: 15:30, 2026-10-24 15:30, or ISO 8601 with offset
+              --at TIME          When: 15:30, YYYY-MM-DD 15:30, or ISO 8601 with offset
               --in DURATION      When, from now: 25m, 1h30m, 90s
               --ends TIME        An event's end
               --remind DURATION  How long before an event's start to remind (default 0)
@@ -83,6 +83,11 @@ public static class NotifyCommandLine
                 else
                 {
                     if (index + 1 >= args.Count) return Fail(arg + " needs a value");
+                    // A forgotten value must not take the next option as its own (brim-notify x -s -r build): only a title or
+                    // body may start with "-"; another value that does is given as --name=value.
+                    string next = args[index + 1];
+                    if (name is not ("-b" or "--body" or "-t" or "--title") && next.Length > 1 && next[0] == '-' && !IsNumber(next))
+                        return Fail(arg + " needs a value");
                     value = args[++index];
                 }
                 switch (name)

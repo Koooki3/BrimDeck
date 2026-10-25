@@ -343,6 +343,8 @@ public sealed class DeckSettings
     // Dynamic notices (see Notices/). Off until the user switches them on; each source has its own switch.
     public bool NoticesEnabled { get; set; }
     public bool NoticeWindowsSource { get; set; } = true;
+    // Turns off other applications' own Windows banners while BrimDeck shows their notices (NoticeBanners); off by default.
+    public bool NoticeHideBanners { get; set; }
     // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
     // copied into a distribution only once the user chooses it.
     public List<string> NoticeWslDistros { get; set; } = [];

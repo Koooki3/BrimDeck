@@ -23,6 +23,8 @@ try
     NoticeCoreTests.Run(root, Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeTimeTests.Run(Check);
+    NoticeEventLogTests.Run(Check);
+    NoticeBannerTests.Run(root, Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     EqualizerSignalTests.Run(Check);

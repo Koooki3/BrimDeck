@@ -108,6 +108,11 @@ public sealed class AttentionCoordinator
         if (lane.Current is { } current && current.Key == item.Key)
         {
             current.Payload = item.Payload;
+            // The next song's title shows for its whole time, not what was left of the one before (the panel times it from now).
+            if (item.Kind == AttentionKind.Track)
+            {
+                if (lane.Held) current.Remaining = item.Duration; else lane.Ends = now + item.Duration;
+            }
             // Progress keeps the island a little longer, at most twice the notice's duration like a merged burst: a long
             // task does not keep the island (or the notices waiting behind it) for as long as it runs.
             if (item.Refresh && !lane.Held && lane.Ends - now < MinimumRemaining && now - current.StartedAt < current.Duration * 2) lane.Ends = now + MinimumRemaining;

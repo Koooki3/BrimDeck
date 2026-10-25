@@ -1,6 +1,6 @@
 # Dynamic notices
 
-When a notification arrives, the notch, capsule or indicator grows out of its place and shows the application's icon, title and summary; hover for about a quarter of a second or click to see the details, and a few seconds later it returns to its shape. Windows' own banners and notification center stay as they are; BrimDeck shows its own copy alongside. Everything is processed on this PC, without any cloud service.
+When a notification arrives, the notch, capsule or indicator grows out of its place and shows the application's icon, title and summary; hover for about a quarter of a second or click to see the details, and a few seconds later it returns to its shape. By default Windows' own banners and notification center stay as they are and BrimDeck shows its own copy alongside; to see each notification only once, switch on "Turn off other apps' notification banners" (see below). Everything is processed on this PC, without any cloud service.
 
 ## Turning them on
 
@@ -17,17 +17,27 @@ Settings › Notices › Dynamic notices › Turn on dynamic notices (off by def
 | brim-notify | `BrimDeck.Notify.exe` on Windows and `brim-notify` in WSL send notices directly. | On |
 | WSL desktop notifications | Standard desktop notifications (freedesktop D-Bus, such as `notify-send`) in the chosen distributions. | Off, per distribution |
 
-### Windows: polling and event mode
+### Windows: event log mode and polling
 
-As an ordinary desktop program BrimDeck gets no change events from Windows, so it **polls**: every 2.5 seconds it checks for a new notification (about 2.5 ms of CPU) and reads the whole list every 15 seconds; a new notice usually appears within 0.2–2.6 seconds. Measured idle cost: about 0.36% of one core.
+As an ordinary desktop program BrimDeck gets no change events from Windows. Windows' push notification platform writes an entry to its log (Applications and Services Logs › Microsoft › Windows › PushNotification-Platform › Operational) for every notification delivered to the current user, and any user may subscribe to that log, so BrimDeck uses **event log mode** by default: about 0.1 s after each entry it reads the notification list; otherwise it reads it only every 60 seconds, with practically no idle cost. A new notice usually appears within 0.03–1 second (the log service hands entries over in batches about once a second).
 
-With the **identity package** registered it switches to **event mode**, with practically no idle cost. `identity\Register-NoticeIdentity.ps1` in BrimDeck's folder registers, for the current user, a package that holds only a manifest and uses the install folder as its external location: nothing is copied or moved and no administrator rights are needed. Windows registers such an unsigned package only in Developer Mode; without it, keep polling — everything works the same. Note that Developer Mode is a system-wide setting: while it is on, any unsigned app package can be installed on this PC, not only BrimDeck's identity package; unless the small saving of event mode matters to you, leave it off. Uninstalling BrimDeck removes the registration of the user who uninstalls it; upgrading keeps it. Other Windows users of the same PC who registered it run `Register-NoticeIdentity.ps1 -Remove` themselves (Windows does not let an ordinary account remove another user's package).
+When that log is turned off (by group policy, say), cannot be subscribed to or keeps failing, BrimDeck **polls** instead: every 2.5 seconds it checks for a new notification (about 2.5 ms of CPU) and reads the whole list every 15 seconds; a new notice usually appears within 0.2–2.6 seconds, at an idle cost of about 0.36% of one core. The status line in the settings shows which mode is in use.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File "<BrimDeck folder>\identity\Register-NoticeIdentity.ps1"
-```
+Early test builds offered an identity package (`BrimDeck.Notices`) that needed Developer Mode, for an event mode; it is no longer needed, and the installer no longer manages it. If you registered it, remove it in PowerShell with `Get-AppxPackage BrimDeck.Notices | Remove-AppxPackage`, and turn Developer Mode off again if you do not need it otherwise.
 
 If Windows has not yet decided whether BrimDeck may read notifications, the settings page shows "Allow access". A refusal can be changed in Windows Settings › Privacy & security › Notifications.
+
+### Windows: turning off other apps' notification banners
+
+Settings › Notices › Sources › Turn off other apps' notification banners (off by default). When it is on, BrimDeck turns off "Show notification banners" in Windows for other apps, so a notification shows once, on the island; it still goes to the notification center, where BrimDeck reads it.
+
+- **What changes**: only the DWORD value `ShowBanner` (set to 0) under `HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\<app id>` of the current user, the value Windows Settings › System › Notifications › an app › "Show notification banners" writes. No administrator rights are needed and nothing is restarted.
+- **Which apps**: the apps in the Start menu (`shell:AppsFolder`) and those already in Windows' notification settings; an app installed later is added at BrimDeck's next start or with its first notification.
+- **Which not**: BrimDeck itself; apps set to off or muted under "Apps" (their notifications show only in Windows; setting an app to off or muted gives its banner back); apps whose notifications are off in Windows; apps whose banner was already off. Sites in a browser share the browser's setting.
+- **How it is undone**: before changing anything, BrimDeck records the previous state (no value, 0 or 1) in `%LOCALAPPDATA%\BrimDeck\notice-banners.json`. Switching this off, switching off dynamic notices or "Windows app notifications", Windows no longer letting BrimDeck read notifications, quitting or uninstalling BrimDeck restores it: a value that was not there is deleted, one that was is written back, and only where BrimDeck's 0 is still there. Anything BrimDeck could not restore after an unexpected exit is restored at its next start.
+- **Your own changes**: if you turn an app's banner on again in Windows while this is on, BrimDeck keeps your choice and leaves that app alone; switching this off clears that list.
+- **Sound**: only the banner goes, not the sound. Measured on Windows 11 26300: with `ShowBanner` at 0 no banner appears and the notification sound still plays; turn off "Play a sound" for an app in Windows Settings to silence it.
+- **Note**: `ShowBanner` is not documented by Windows, and a later version may stop reading it. BrimDeck reads the value back after writing it and says so in the settings when Windows did not keep it; if banners still appear with this on, turn them off per app in Windows Settings › System › Notifications (the settings page has an "Open Windows notification settings" button).
 
 ### Windows: application names, icons and categories
 
@@ -118,7 +128,7 @@ brim-notify event "Weekly" --at 15:00 --remind 10m --ends 16:00
 brim-notify "New mail" --kind mail
 ```
 
-- Times: `15:30` (the next 15:30) or `2026-10-24 15:30`, read in **Windows' time zone** (also from a WSL distribution set to another zone); or ISO 8601 with an offset, such as `2026-10-24T15:30:00+08:00`. A time daylight saving skips moves to just after the change; one it repeats is the earlier.
+- Times: `15:30` (the next 15:30) or a date and time such as `YYYY-MM-DD 15:30`, read in **Windows' time zone** (also from a WSL distribution set to another zone); or ISO 8601 with an offset, such as `YYYY-MM-DDT15:30:00+08:00`. A local time skipped by a daylight saving change moves to just after the change; a local time it repeats means the earlier of the two.
 - Durations: `90s`, `25m`, `1h30m`, `2d`; countdowns from 1 second to 31 days, reminders at most 7 days ahead of the start, times from 1 day ago to 1 year ahead. A duration counts from when BrimDeck receives it, whatever the WSL clock says.
 - Without `-r` a key is made up and printed on standard output, for `brim-notify stop KEY`; sending again with the same `-r` starts it over.
 - Countdowns and events still running continue after a restart while "Keep recent notices" is on; an event not reminded yet is not removed by the retention.
@@ -150,7 +160,7 @@ brim-notify "New mail" --kind mail
 
 | Case | Result |
 |---|---|
-| Windows 11 (26300) without the identity package | Snapshot readable; change events unavailable, so polling; end to end 0.2–2.3 s |
+| Windows 11 (26300) | Snapshot readable; change events unavailable, so event log mode, end to end 0.03–1 s; polling while the log is off, end to end 0.2–2.3 s |
 | Icons of Windows notifications | Packaged apps give their icon; otherwise the application's initial |
 | Opening the source application | Packaged apps through the app list; desktop apps by the id registered with their Start menu shortcut; otherwise the details say so |
 | WSL Ubuntu 26.04 (systemd session bus, no notification service) | The agent serves; gdbus/notify-send notices show; buttons send `ActionInvoked` and `NotificationClosed` back |
@@ -158,4 +168,4 @@ brim-notify "New mail" --kind mail
 | Several monitors (negative coordinates, 125% secondary) | Shows on the foreground window's monitor, placed and scaled correctly |
 | 8 built-in themes × notch, capsule, indicator | Each checked by eye |
 
-Cases not tested here (actual behavior on the lock screen, event mode with the identity package registered) follow the design and may need confirming on your system.
+Cases not tested here (actual behavior on the lock screen) follow the design and may need confirming on your system.

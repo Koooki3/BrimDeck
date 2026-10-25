@@ -17,12 +17,25 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
-        Console.OutputEncoding = new UTF8Encoding(false);
-        var command = NotifyCommandLine.Parse(args);
-        if (command.Kind == NotifyCommandKind.Stdio) return await RelayAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
-        return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
-            Unreachable: "BrimDeck is not running, or dynamic notices are switched off in its settings.",
-            NotReceiving: "BrimDeck is not receiving notices (not running, or dynamic notices are off)."));
+        // UTF-8 for what brim-notify prints, then the console's own code page back: the console is shared with the shell and
+        // what runs after. Without a console the setting may fail, which must not keep the notice from being sent.
+        Encoding? previous = null;
+        try { previous = Console.OutputEncoding; Console.OutputEncoding = new UTF8Encoding(false); }
+        catch (IOException) { previous = null; }
+        try
+        {
+            var command = NotifyCommandLine.Parse(args);
+            if (command.Kind == NotifyCommandKind.Stdio) return await RelayAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
+            return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
+                Unreachable: "BrimDeck is not running, or dynamic notices are switched off in its settings.",
+                NotReceiving: "BrimDeck is not receiving notices (not running, or dynamic notices are off)."));
+        }
+        finally
+        {
+            if (previous is not null)
+                try { Console.OutputEncoding = previous; }
+                catch (IOException) { }
+        }
     }
 
     private static string Version => typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0";

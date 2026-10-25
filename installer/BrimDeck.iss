@@ -153,6 +153,8 @@ var
   DesktopShortcut: Boolean;
   DesktopCheck, LaunchCheck: TNewCheckBox;
   DeleteUserData: Boolean;
+  // The banners BrimDeck turned off could not all be given back (RestoreNoticeBanners): its ledger is kept for another try.
+  BannersPending: Boolean;
 
 function HasParam(const Name: String): Boolean;
 var
@@ -546,15 +548,62 @@ begin
     RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', '{#RunValue}');
 end;
 
-// The optional identity package for dynamic notices (identity\Register-NoticeIdentity.ps1) points at this folder. A real
-// uninstall removes it for the current user; an upgrade keeps it, since the new version is installed in the same place.
-procedure RemoveNoticeIdentity;
+// Dynamic notices can turn off other applications' Windows banners (NoticeBanners). BrimDeck gives them back when it exits;
+// this gives back any it could not (a crash, a killed process), from its ledger in the data folder, before the program files
+// go. The uninstaller runs as the user (or, for an all-users install, elevated as the same user), whose HKCU holds them. After
+// an over-the-shoulder elevation by another account it finds that account's (empty) data folder and does nothing. When not
+// everything could be given back, the ledger (notice-banners.json and its .bak) stays even if user data is deleted, so that a
+// later install restores the rest or the user can read what was changed.
+procedure RestoreNoticeBanners;
 var
   ResultCode: Integer;
 begin
-  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -NonInteractive -Command "Get-AppxPackage -Name BrimDeck.Notices | Remove-AppxPackage"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  BannersPending := FileExists(ExpandConstant('{#DataDir}\notice-banners.json')) or FileExists(ExpandConstant('{#DataDir}\notice-banners.json.bak'));
+  if not BannersPending then
+    Exit;
+  if FileExists(ExpandConstant('{app}\{#MainExe}')) and Exec(ExpandConstant('{app}\{#MainExe}'), '--restore-banners "' + ExpandConstant('{#DataDir}') + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+    BannersPending := False
+  else
+    Log('Some Windows banners could not be given back; notice-banners.json is kept (code ' + IntToStr(ResultCode) + ').');
+end;
+
+// Deletes the data folder but, while banners are pending, its ledger. The ledger is never moved: everything else in the folder
+// is deleted around it, so no failed move can lose it.
+procedure DeleteDataFolder;
+var
+  Dir: String;
+  Found: TFindRec;
+  Names: TStringList;
+  I: Integer;
+begin
+  Dir := ExpandConstant('{#DataDir}');
+  if not BannersPending then
+  begin
+    DelTree(Dir, True, True, True);
+    Exit;
+  end;
+  Names := TStringList.Create;
+  try
+    if FindFirst(Dir + '\*', Found) then
+    try
+      repeat
+        if (Found.Name <> '.') and (Found.Name <> '..') and (CompareText(Found.Name, 'notice-banners.json') <> 0)
+          and (CompareText(Found.Name, 'notice-banners.json.bak') <> 0) then
+          Names.Add(Found.Name);
+      until not FindNext(Found);
+    finally
+      FindClose(Found);
+    end;
+    for I := 0 to Names.Count - 1 do
+      if DirExists(Dir + '\' + Names[I]) then
+        DelTree(Dir + '\' + Names[I], True, True, True)
+      else
+        DeleteFile(Dir + '\' + Names[I]);
+  finally
+    Names.Free;
+  end;
+  Log('The data folder was deleted except notice-banners.json, kept for the banners not given back.');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -562,11 +611,11 @@ begin
   if (CurUninstallStep = usUninstall) and not HasParam('/UPGRADE') then
   begin
     RemoveStartupEntry;
-    RemoveNoticeIdentity;
+    RestoreNoticeBanners;
   end
   else if (CurUninstallStep = usPostUninstall) and DeleteUserData and not HasParam('/UPGRADE') then
   begin
-    DelTree(ExpandConstant('{#DataDir}'), True, True, True);
+    DeleteDataFolder;
     // The recent notices are kept in the install folder by default (NoticeStorage); they are user data too.
     DelTree(ExpandConstant('{app}\notices'), True, True, True);
   end
