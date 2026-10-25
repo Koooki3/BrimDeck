@@ -87,10 +87,10 @@ internal static class PopupMotion
             {
                 refresh.Stop();
                 // The first picture; a change while the list entered (the pointer onto an option) may still be fading its hover
-                // in, so it is taken again right after and once that has settled, as for any change.
+                // in, so it is taken once more when that has settled. This one is that frame's picture already.
                 bool missed = schedule.Enter();
                 if (placed.Ghost == ghost && element.IsVisible) Take(element, picture);
-                if (missed) Changed();
+                if (missed) { refresh.Interval = settled; refresh.Start(); }
             };
             refresh.Start();
             void Changed()

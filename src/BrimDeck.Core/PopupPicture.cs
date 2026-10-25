@@ -5,14 +5,14 @@ namespace BrimDeck.Core;
 // faded in and showed through it, a few DIPs off. The first picture is taken once it has entered; after that, each change
 // that can alter the list is taken at once and once more when a hover's fade has settled. A change while it entered is kept
 // for then: the first picture may catch its hover half faded in (and the list closing then left with a half-tinted option), so
-// it is taken again right after the first one, as any change is.
+// it is taken again once a hover's fade has settled.
 public sealed class PopupPicture
 {
     private bool _missed;
     public bool Entered { get; private set; }
 
     // The pop-up has entered: its first picture is taken now. Returns whether something changed while it entered, which is
-    // then taken as a change right after it (once; later calls return false).
+    // then taken again once a hover's fade has settled (once; later calls return false).
     public bool Enter()
     {
         Entered = true;
