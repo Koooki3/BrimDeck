@@ -26,6 +26,13 @@ The same tool can appear in several columns. It is read only once, and totals ar
 
 Sources you enter by hand and Grok Bot have no local usage records; choose another tool as the usage app for Today and Week.
 
+## Usage in WSL
+
+When "Include usage from WSL" is turned on in Settings › Quotas and usage, BrimDeck reads the Claude Code and Codex CLI session records inside installed WSL distributions and counts them in the tokens and cost of Claude and Codex. Only Claude and Codex support WSL at present.
+
+- The records of the root user and of every user under `/home` in each distribution are read. The distributions that Docker Desktop and Rancher Desktop add are not read.
+- Reading starts a distribution that is not running, so this option is off by default.
+
 ## Fetch quota online for Claude and Grok Bot
 
 Rows whose quota source is Claude or Grok Bot can be expanded, and each row has its own "Fetch quota online" switch (on by default):
