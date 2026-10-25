@@ -410,6 +410,17 @@ internal sealed class ModelDatePicker : Border
 
     private double CellWidth => _calendar.ActualWidth > 0 ? _calendar.ActualWidth / DatePickerMotion.Columns : Inner / DatePickerMotion.Columns;
 
+    // The day buttons are laid out on whole device pixels (the window's layout rounding): each at its column's offset rounded,
+    // all of them the width rounded. A marker at rest takes exactly its button's place and size, so it neither sits a fraction
+    // of a pixel off the button's hover nor gets soft edges at 125 or 150 %; on its way between two cells it moves evenly
+    // between their places (at: the eased column or row; step: a cell's size; scale: device pixels per DIP).
+    private static double OnPixels(double dips, double scale) => scale > 0 && double.IsFinite(scale) ? Math.Round(dips * scale) / scale : dips;
+    private static double Along(double at, double step, double scale)
+    {
+        double low = Math.Floor(at), from = OnPixels(low * step, scale);
+        return at <= low ? from : from + (at - low) * (OnPixels((low + 1) * step, scale) - from);
+    }
+
     // The band's half cells take their places once the grid has a size.
     private void LayOut()
     {
@@ -425,7 +436,8 @@ internal sealed class ModelDatePicker : Border
                 Canvas.SetLeft(rect, x + side * half - side * .5); Canvas.SetTop(rect, y);
             }
         }
-        foreach (var marker in _markers) marker.Face.Width = width;
+        double faceWidth = OnPixels(width, VisualTreeHelper.GetDpi(this).DpiScaleX);
+        foreach (var marker in _markers) marker.Face.Width = faceWidth;
         _fieldMark.Width = Math.Max(0, (_body.ActualWidth > 0 ? _body.ActualWidth : Inner) - FieldGap) / 2;
         Apply(Clock());
     }
@@ -461,11 +473,13 @@ internal sealed class ModelDatePicker : Border
         for (int f = 0; f < 2; f++) { _fieldValues[f].Opacity = _fieldFade[f].At(now); moving |= _fieldFade[f].Moving(now); }
         for (int i = 0; i < _band.Length; i++) { _band[i].Opacity = _bandFade[i].At(now); moving |= _bandFade[i].Moving(now); }
         double width = CellWidth;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        double faceWidth = OnPixels(width, dpi.DpiScaleX), faceHeight = OnPixels(CellHeight, dpi.DpiScaleY);
         foreach (var marker in _markers)
         {
-            double x = marker.Column.At(now) * width, y = marker.Row.At(now) * CellHeight, presence = marker.Presence.At(now);
+            double x = Along(marker.Column.At(now), width, dpi.DpiScaleX), y = Along(marker.Row.At(now), CellHeight, dpi.DpiScaleY), presence = marker.Presence.At(now);
             marker.Shift.X = x; marker.Shift.Y = y;
-            marker.Clip.Rect = new Rect(x, y, width, CellHeight);
+            marker.Clip.Rect = new Rect(x, y, faceWidth, faceHeight);
             marker.Face.Opacity = marker.Ink.Opacity = presence;
             moving |= marker.Column.Moving(now) || marker.Row.Moving(now) || marker.Presence.Moving(now);
         }
