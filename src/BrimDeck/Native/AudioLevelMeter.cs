@@ -52,6 +52,7 @@ internal sealed class AudioLevelMeter : IDisposable
         double nextPeak = 0;
         // A player may create its audio session after it reports playback; look again with growing pauses.
         int searchDelay = 1000;
+        WaitHandle[]? waits = null;
         try
         {
             while (true)
@@ -81,9 +82,11 @@ internal sealed class AudioLevelMeter : IDisposable
                     }
                     Volatile.Write(ref _peak, peak);
                 }
-                // With a capture, the packets wait in its buffer (ProcessLoopbackCapture.BufferDuration) and are drained once per
-                // analysis: woken for every 10 ms packet, the thread ran three times as often for the same bars.
-                if (capture is not null) _wake.WaitOne(ProcessLoopbackCapture.DrainWait);
+                if (capture is not null)
+                {
+                    if (waits?[1] != capture.Ready) waits = [_wake, capture.Ready];
+                    WaitHandle.WaitAny(waits, 20);
+                }
                 else if (_sessions.Count > 0) _wake.WaitOne(33);
                 else if (target is null) _wake.WaitOne();
                 else if (!_wake.WaitOne(searchDelay))
