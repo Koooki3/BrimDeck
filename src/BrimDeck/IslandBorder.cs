@@ -90,8 +90,18 @@ public sealed class IslandBorder : Border
         if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
         if (EdgeBrush is { } edge)
         {
-            _edge ??= EdgePens(edge);
-            DrawEdge(drawingContext, _edge, outline);
+            // At rest (SettledClip) no clip takes the pens' outer halves, so each band is its inner half alone, as a ring.
+            if (_settledClip)
+            {
+                drawingContext.PushOpacity(1d / EdgeBands.Length);
+                foreach (var band in EdgeBands) drawingContext.DrawGeometry(edge, null, Ring(outline, band));
+                drawingContext.Pop();
+            }
+            else
+            {
+                _edge ??= EdgePens(edge);
+                DrawEdge(drawingContext, _edge, outline);
+            }
         }
         if (RimWidth > 0)
         {
@@ -104,8 +114,13 @@ public sealed class IslandBorder : Border
             {
                 // A rim brush the ambient light animates (AmbientGlow) stays unfrozen, and so does its pen: freezing the pen would
                 // freeze the brush. Its changes then reach the screen without this method running again.
-                if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); if (RimBrush.IsFrozen) _rim.Freeze(); }
-                drawingContext.DrawGeometry(null, _rim, outline);
+                // The pen is twice the rim and the layout clip takes its outer half; at rest the rim is that inner half as a ring.
+                if (_settledClip) drawingContext.DrawGeometry(RimBrush, null, Ring(outline, RimWidth));
+                else
+                {
+                    if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); if (RimBrush.IsFrozen) _rim.Freeze(); }
+                    drawingContext.DrawGeometry(null, _rim, outline);
+                }
             }
         }
         if (fading) drawingContext.Pop();
@@ -121,6 +136,18 @@ public sealed class IslandBorder : Border
     {
         get => _settledClip;
         set { if (_settledClip == value) return; _settledClip = value; InvalidateArrange(); InvalidateVisual(); }
+    }
+    // A band's inner half along the outline as a filled ring, per width, for the outline they were made from: made only at rest,
+    // so never on an animation's frames.
+    private readonly Dictionary<double, Geometry> _rings = [];
+    private Geometry? _ringsOutline;
+    private Geometry Ring(Geometry outline, double width)
+    {
+        if (!ReferenceEquals(_ringsOutline, outline)) { _rings.Clear(); _ringsOutline = outline; }
+        if (_rings.TryGetValue(width, out var ring)) return ring;
+        ring = Geometry.Combine(outline, outline.GetWidenedPathGeometry(new Pen(Brushes.Black, width * 2)), GeometryCombineMode.Intersect, null);
+        ring.Freeze();
+        return _rings[width] = ring;
     }
     private RectangleGeometry? _bounds;
     private Geometry Bounds()
