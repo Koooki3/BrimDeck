@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace BrimDeck;
@@ -21,6 +22,12 @@ public partial class MainWindow
             _glass = new GlassBackdrop(this, Island);
             // Over a held blur the tint thins with it, frame by frame.
             _glass.Held += held => _surface.Opacity = 1 + held * (PanelTheme.HeldOpacity(_surface.Color.A / 255d) - 1);
+            // Liquid glass lights its rim from the pointer and presses with it: where the pointer is over the island, and
+            // whether the button is down (seen even when a button under it handles the click).
+            Island.MouseMove += (_, e) => _glass.Pointer(e.GetPosition(Island), e.LeftButton == MouseButtonState.Pressed);
+            Island.MouseLeave += (_, _) => _glass.Pointer(null, false);
+            Island.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler((_, e) => _glass.Pointer(e.GetPosition(Island), true)), true);
+            Island.AddHandler(PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler((_, e) => _glass.Pointer(e.GetPosition(Island), false)), true);
         }
         _glass.Update();
         bool glass = PanelTheme.GlassShown;

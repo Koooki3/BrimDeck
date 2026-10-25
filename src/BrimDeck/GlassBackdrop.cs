@@ -89,6 +89,17 @@ internal sealed class GlassBackdrop : IDisposable
         if (PresentationSource.FromVisual(owner) is HwndSource main) main.AddHook(OwnerMessage); else owner.SourceInitialized += (_, _) => (PresentationSource.FromVisual(owner) as HwndSource)?.AddHook(OwnerMessage);
     }
 
+    // The pointer over the island (DIP, the island's own coordinates; null when away) and whether its button is down: liquid
+    // glass lights its rim from it and presses with it. The light eases toward it on the frames that follow.
+    private Point? _pointer;
+    private bool _pointerDown;
+    public void Pointer(Point? at, bool down)
+    {
+        if (_pointer == at && _pointerDown == down) return;
+        _pointer = at; _pointerDown = down;
+        Follow(0);
+    }
+
     // Windows can draw the blur now: the glass theme is shown (transparency effects on, no high contrast), battery saver is off,
     // the session is local, and composition started.
     public static bool Available => PanelTheme.GlassShown && !MotionEnvironment.BatterySaver && GetSystemMetrics(RemoteSession) == 0 && Composition.Ready;
