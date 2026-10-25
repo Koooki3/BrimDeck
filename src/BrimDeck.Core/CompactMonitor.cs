@@ -177,46 +177,6 @@ public static class CompactMonitor
         }
     }
 
-    // The width of each reading: a ring with its figure (the ring and the room after it) or alone, the core columns, a rate.
-    public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, double figure, double bareRing, double columns, double rate) => item => item switch
-    {
-        CompactMonitorItems.Columns => columns,
-        CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu => (values & item) != 0 ? ring + figure : bareRing,
-        CompactMonitorItems.Download or CompactMonitorItems.Upload => rate,
-        _ => 0
-    };
-    // Rings alone, as Brief showed them, sit closer together.
-    public static bool RingsOnly(CompactMonitorItems shown, CompactMonitorItems values) => shown != CompactMonitorItems.None && (shown & ~Rings) == 0 && (shown & values) == 0;
-
-    // The shown readings left to right in the order given, each with its left edge from the start of the strip. Each takes its
-    // width and the gap after it in proportion to how present it is (1 when settled), so the row closes up smoothly as one
-    // leaves; Total is the width they take together.
-    public static (List<(CompactMonitorItems Item, double X, double Width, double Presence)> Items, double Total) Arrange(IEnumerable<CompactMonitorItems> order,
-        CompactMonitorItems shown, Func<CompactMonitorItems, double> width, double gap, Func<CompactMonitorItems, double> presence)
-    {
-        var items = new List<(CompactMonitorItems, double, double, double)>();
-        return (items, Arrange([.. order.Distinct()], shown, width, gap, presence, items));
-    }
-
-    // The same into a list the caller keeps (cleared first), returning Total: the strip arranges its readings on every redraw,
-    // and allocates nothing for it. The order must name each item once.
-    public static double Arrange(IReadOnlyList<CompactMonitorItems> order, CompactMonitorItems shown, Func<CompactMonitorItems, double> width, double gap,
-        Func<CompactMonitorItems, double> presence, List<(CompactMonitorItems Item, double X, double Width, double Presence)> items)
-    {
-        items.Clear();
-        double x = 0, last = 0;
-        for (int i = 0; i < order.Count; i++)
-        {
-            var item = order[i];
-            if ((shown & item) == 0 || !Order.Contains(item)) continue;
-            double p = Math.Clamp(presence(item), 0, 1), w = Math.Max(0, width(item));
-            if (p <= 0) continue;
-            items.Add((item, x, w, p));
-            x += (w + gap) * p; last = p;
-        }
-        return Math.Max(0, x - gap * last);
-    }
-
     // The width of the items side by side with this gap between them.
     public static double Width(CompactMonitorItems items, Func<CompactMonitorItems, double> width, double gap)
     {
@@ -236,17 +196,18 @@ public static class CompactMonitor
     {
         if (!double.IsFinite(available) || available <= 0) return CompactMonitorItems.None;
         var shown = items & CompactMonitorItems.All;
-        foreach (var item in LeaveOrder)
+        // By index, as in Width: an interface's enumerator would be allocated on every arrange.
+        for (int i = 0; i < LeaveOrder.Count; i++)
         {
             if (Width(shown, width, gap) <= available + 1e-9) return shown;
-            shown &= ~item;
+            shown &= ~LeaveOrder[i];
         }
         return Width(shown, width, gap) <= available + 1e-9 ? shown : CompactMonitorItems.None;
     }
 
-    // Whether a region of the collapsed row this wide shows any of the readings. Readings wider than their region scroll in it,
-    // so any room shows some; a region squeezed to nothing shows none, and the sampler is not run for them.
-    public static bool HasRoom(double region) => double.IsFinite(region) && region > 0;
+    // Whether the collapsed row's readings are sampled: while the row admits any of them (CompactMusicLayout) or one is still
+    // fading out. With none admitted and none fading, nothing of them shows and the sampler rests (MonitorStrip.Showing).
+    public static bool Sampled(CompactMonitorItems admitted, bool fading) => (admitted & CompactMonitorItems.All) != CompactMonitorItems.None || fading;
 }
 
 // The colors of the collapsed readings at each level (ReadingLevels), from the color scheme. The normal state has a color per

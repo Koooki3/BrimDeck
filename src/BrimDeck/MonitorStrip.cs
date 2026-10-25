@@ -111,7 +111,6 @@ internal sealed class MonitorStrip : FrameworkElement
     private double ColumnsWidth(int cores) => Math.Min(Math.Round(56 * _scale), cores * Math.Max(1.5, 2 * _scale) + (cores - 1) * Math.Max(.5, _scale));
 
     private CompactMonitorItems Shown => _shown;
-    public double PreferredWidth => CompactMonitor.Width(Shown, _itemWidth, _gap);
     // What the collapsed row fits (CompactMusicLayout): each chosen reading's widest width in the order they stay, and the
     // space between two.
     public IReadOnlyList<double> Candidates => [.. CompactMonitor.Priority.Where(item => (Shown & item) != 0).Select(_itemWidth)];
@@ -166,7 +165,7 @@ internal sealed class MonitorStrip : FrameworkElement
     }
     // Whether the row admitted any reading or one is still fading out: otherwise nothing of the strip shows and it needs no
     // readings (MainWindow.UpdateMonitorDemand).
-    public bool Showing(double now) => _admitted is not { } admitted || admitted != CompactMonitorItems.None || _presence.Any(now);
+    public bool Showing(double now) => _admitted is not { } admitted || CompactMonitor.Sampled(admitted, _presence.Any(now));
     public bool Moving(double now) => _presence.Moving(now);
 
     public void Update(MonitorSnapshot? snapshot)

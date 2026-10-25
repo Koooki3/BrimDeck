@@ -1,8 +1,8 @@
 using BrimDeck.Core;
 
 // What the collapsed row costs while nothing changes: the scrolling title and the carousels wait out their rests on a timer and
-// run a clock only while they move, with the values of the storyboards they replace; the readings are sampled only while they
-// have room; the strip's measuring and arranging allocate nothing per reading.
+// run a clock only while they move, with the values of the storyboards they replace; the readings are sampled only while the
+// row admits one or one fades out; a reading's width starts frames only for a change that shows; measuring allocates nothing.
 internal static class IdleCostTests
 {
     public static void Run(Action<string, bool> check)
@@ -203,9 +203,11 @@ internal static class IdleCostTests
 
     private static void Readings(Action<string, bool> check)
     {
-        // Only a region with room shows readings; squeezed to nothing, the sampler is not run for them.
-        check("Idle cost: readings with room are sampled", CompactMonitor.HasRoom(.5) && CompactMonitor.HasRoom(120));
-        check("Idle cost: readings without room are not sampled", !CompactMonitor.HasRoom(0) && !CompactMonitor.HasRoom(-3) && !CompactMonitor.HasRoom(double.NaN) && !CompactMonitor.HasRoom(double.PositiveInfinity));
+        // The readings are sampled while the row admits any or one still fades out (MonitorStrip.Showing); with none admitted and
+        // none fading, the sampler is not run for them.
+        check("Idle cost: readings the row admits are sampled", CompactMonitor.Sampled(CompactMonitorItems.Cpu, false) && CompactMonitor.Sampled(CompactMonitorItems.All, false));
+        check("Idle cost: a reading still fading out is sampled", CompactMonitor.Sampled(CompactMonitorItems.None, true));
+        check("Idle cost: readings the row has no room for are not sampled", !CompactMonitor.Sampled(CompactMonitorItems.None, false) && !CompactMonitor.Sampled((CompactMonitorItems)(1 << 20), false));
 
         // A reading's width (ReadingWidth) starts frames only for a change that shows: a reading that does not show, or a change of
         // less than a device pixel, takes its new width at once; one that shows eases to a wider figure.
@@ -232,19 +234,14 @@ internal static class IdleCostTests
         check("Idle cost: every whole percent's figure is the formatted one", Enumerable.Range(0, 2001).Select(i => i / 2000d - .0001)
             .Append(double.NaN).Append(2).Append(-1).All(share => MonitorFormat.WholePercent(share).ToString(System.Globalization.CultureInfo.InvariantCulture) == MonitorFormat.Percent(share)));
 
-        // Arranging into a kept list gives what the old arrangement gave, and allocates nothing.
-        CompactMonitorItems[] order = [CompactMonitorItems.Download, CompactMonitorItems.Cpu, CompactMonitorItems.Columns, CompactMonitorItems.Upload, CompactMonitorItems.Memory, CompactMonitorItems.Gpu];
-        var shown = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Download | CompactMonitorItems.Columns;
-        double now = .3;
-        Func<CompactMonitorItems, double> width = item => item == CompactMonitorItems.Columns ? 30 : 41, presence = item => item == CompactMonitorItems.Memory ? now : 1;
-        var (old, oldTotal) = CompactMonitor.Arrange(order, shown, width, 6, presence);
-        var kept = new List<(CompactMonitorItems Item, double X, double Width, double Presence)>();
-        double total = CompactMonitor.Arrange(order, shown, width, 6, presence, kept);
-        check("Idle cost: the kept arrangement is the old one", total == oldTotal && kept.SequenceEqual(old));
+        // Measuring and fitting the readings (MonitorStrip's own fit) allocates nothing.
+        var chosen = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Download | CompactMonitorItems.Columns;
+        Func<CompactMonitorItems, double> width = item => item == CompactMonitorItems.Columns ? 30 : 41;
+        double total = CompactMonitor.Width(chosen, width, 6);
         long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++) { total = CompactMonitor.Arrange(order, shown, width, 6, presence, kept); total += CompactMonitor.Width(shown, width, 6); }
+        for (int i = 0; i < 1000; i++) { total += CompactMonitor.Width(chosen, width, 6); total += (int)CompactMonitor.Fit(chosen, width, 6, 100 + i % 80); }
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        check($"Idle cost: arranging and measuring the readings allocates nothing ({allocated} B for 1000)", allocated == 0);
+        check($"Idle cost: measuring and fitting the readings allocates nothing ({allocated} B for 1000)", allocated == 0 && total > 0);
 
         // The busiest core sets the columns' level as Max did, a share that is not a number passed over.
         static MonitorSnapshot Cores(params double[] usage) => MonitorSnapshot.Empty(usage.Length, "") with
