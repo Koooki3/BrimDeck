@@ -10,9 +10,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <Compile Include="..\..\src\BrimDeck\Native\SettingsChrome.cs" Link="SettingsChrome.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\ProcessLoopbackCapture.cs" Link="ProcessLoopbackCapture.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeProtection.cs" Link="NoticeProtection.cs" />
+    <Compile Include="..\..\src\BrimDeck\LiquidGlass\*.cs" LinkBase="LiquidGlass" />
   </ItemGroup>
 </Project>
