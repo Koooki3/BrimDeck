@@ -44,11 +44,17 @@ public static class NoticeTimes
 
     // The moment a time names, seen from now in the given zone. A clock time alone is its next occurrence (today, or tomorrow
     // when it has passed). A wall-clock time the zone skips (the hour lost when daylight saving starts) moves forward by the
-    // gap; one it repeats (the hour gained when it ends) is the earlier of the two. Null when the text is not a time.
+    // gap; one it repeats (the hour gained when it ends) is the earlier of the two. Null when the text is not a time, or names
+    // one outside the range DateTimeOffset can hold.
     public static DateTimeOffset? ParseTime(string? text, DateTimeOffset now, TimeZoneInfo zone)
     {
         if (string.IsNullOrWhiteSpace(text) || text.Length > MaxText) return null;
-        text = text.Trim();
+        try { return ParseTimeUnchecked(text.Trim(), now, zone); }
+        catch (ArgumentOutOfRangeException) { return null; }
+    }
+
+    private static DateTimeOffset? ParseTimeUnchecked(string text, DateTimeOffset now, TimeZoneInfo zone)
+    {
         if (HasOffset(text) && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var absolute)) return absolute;
         if (TimeOnly.TryParseExact(text, ["H:mm", "H:mm:ss"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var clock))
         {
@@ -69,8 +75,15 @@ public static class NoticeTimes
         return tail.IndexOfAny('+', '-') > 0;
     }
 
-    // A wall-clock time in the zone as a moment.
-    public static DateTimeOffset FromLocal(DateTime local, TimeZoneInfo zone)
+    // A wall-clock time in the zone as a moment. Null when the moment falls outside what DateTimeOffset can hold (year 1 in a
+    // zone ahead of UTC, the last day of year 9999 in one behind it): such a time comes from outside BrimDeck and must not throw.
+    public static DateTimeOffset? FromLocal(DateTime local, TimeZoneInfo zone)
+    {
+        try { return FromLocalUnchecked(local, zone); }
+        catch (ArgumentOutOfRangeException) { return null; }
+    }
+
+    private static DateTimeOffset FromLocalUnchecked(DateTime local, TimeZoneInfo zone)
     {
         local = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
         if (zone.IsInvalidTime(local))

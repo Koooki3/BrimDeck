@@ -202,24 +202,29 @@ internal static class NoticeStorage
     }
 
     // Moves the saved notices and their icons from one folder into another that has no saved notices of its own (life-L1).
-    // True when the file moved.
+    // True when the file moved. The old folder may never have been checked (notices were not kept while it was chosen): only
+    // BrimDeck's own file names move, and nothing through a link, as NoticeHistory.Delete removes them (N50-7).
     public static bool Move(string from, string folder)
     {
         if (string.Equals(Path.GetFullPath(from), Path.GetFullPath(folder), StringComparison.OrdinalIgnoreCase)) return false;
         try
         {
+            if (NoticeHistory.Linked(from)) return false;
             var file = Path.Combine(from, "notices.dat");
             var target = Path.Combine(folder, "notices.dat");
-            if (!File.Exists(file) || File.Exists(target)) return false;
+            if (!File.Exists(file) || File.Exists(target) || NoticeHistory.Linked(file)) return false;
             Directory.CreateDirectory(folder);
             File.Move(file, target);
             var icons = Path.Combine(from, "icons");
-            if (Directory.Exists(icons))
+            if (Directory.Exists(icons) && !NoticeHistory.Linked(icons))
             {
                 var into = Path.Combine(folder, "icons");
                 Directory.CreateDirectory(into);
                 foreach (var icon in Directory.EnumerateFiles(icons, "*.png"))
                 {
+                    // Only *.png is listed, so an icon's temporary file (.tmp) never comes up; of those, only names BrimDeck itself
+                    // gives a saved icon (OwnName), and none that is a link.
+                    if (!NoticeHistory.OwnName(Path.GetFileName(icon), inIcons: true) || NoticeHistory.Linked(icon)) continue;
                     var moved = Path.Combine(into, Path.GetFileName(icon));
                     if (!File.Exists(moved)) File.Move(icon, moved); else File.Delete(icon);
                 }

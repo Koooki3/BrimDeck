@@ -47,6 +47,26 @@ internal static class NoticeWslOpsTests
         check("An answered one gives its reply", answered is ({ Result: NoticeResults.Accepted, EventId: "e1" }, true));
         check("brim-notify waits longer than the agent waits for BrimDeck", WslLink.CliReplyWait > WslLink.AgentReplyWait + TimeSpan.FromSeconds(2));
         check("A late answer is reported as unreachable, not as refused", NotifyCli.Report(NoticeProtocol.Reply(NoticeResults.Rejected, "no-reply"), "x") == NotifyCli.Unreachable);
+        await ReaderSurvives(check);
+    }
+
+    // N50-1: one message the reader fails on (an out-of-range time from any process in the distribution) is dropped, and the
+    // agent's later messages are still read; the agent is not restarted over it.
+    private static async Task ReaderSurvives(Action<string, bool> check)
+    {
+        using var frames = new MemoryStream();
+        await NoticeFrames.WriteAsync(frames, new NoticeMessage { Title = "first", Kind = "event", At = "0001-01-01 00:00" });
+        await NoticeFrames.WriteAsync(frames, new NoticeMessage { Title = "second" });
+        frames.Position = 0;
+        var handled = new List<string?>();
+        var failures = new List<Exception>();
+        await NoticeFrames.ReadEachAsync(frames, message =>
+        {
+            handled.Add(message.Title);
+            if (message.Title == "first") throw new ArgumentOutOfRangeException(nameof(message));
+        }, failures.Add).WaitAsync(TimeSpan.FromSeconds(5));
+        check("A message the reader fails on is dropped and the next one read", handled.SequenceEqual(["first", "second"]) && failures.Count == 1);
+        check("An out-of-range time no longer throws in validation", NoticeProtocol.Validate(new NoticeMessage { Kind = "event", At = "0001-01-01 00:00" }) == "bad-time");
     }
 
     // W4: the CLI socket notices its file is gone instead of listening on, unreachable, for good.
