@@ -276,7 +276,11 @@ public partial class MainWindow : Window
             bool appearing = !IsVisible;
             if (!IsVisible) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
-            SetExpanded(_expanded, !animatePage || !wasVisible);
+            // Settings apply at once, except over a closing still under way: a change that gives the collapsed surface a new
+            // width (a reading switched on or off) carries the closing on to it (MoveTurn.Carried) rather than ending it in one
+            // frame.
+            bool closing = !_expanded && _turn.Underway(Environment.TickCount64, opening: false);
+            SetExpanded(_expanded, !wasVisible || !animatePage && !closing);
         }
         UpdatePointerTracking();
         RenderUsage();
@@ -635,6 +639,10 @@ public partial class MainWindow : Window
         long now = Environment.TickCount64;
         bool redirect = turning && duration > 0 && fromNotice is null && _turn.Turns(now, expanded);
         if (redirect) duration = (int)Math.Round(duration * _turn.Share(now, expanded, Island.Width, Island.Height, width, height));
+        // The collapsed surface laid out again while it is still closing (its content asked for a new width) carries the closing
+        // on, on the same drawer curve, rather than holding for the closing's delay and starting a whole new move.
+        int carried = !turning && !expanded ? _turn.Carried(now, false, duration) : 0;
+        if (carried > 0) duration = carried;
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
@@ -665,15 +673,17 @@ public partial class MainWindow : Window
         _booting = false; _morphingShape = false;
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
-        // How long the panel's closing runs: a notice that arrives meanwhile waits for it (MainWindow.Notices.cs).
+        // How long the panel's closing runs: a notice that arrives meanwhile waits for it (MainWindow.Notices.cs). A closing
+        // carried on to a new collapsed width runs until the carried move ends.
         if (expanded) _collapseEnds = 0;
-        else if (wasExpanded) _collapseEnds = duration > 0 ? now + duration : 0;
+        else if (wasExpanded || carried > 0) _collapseEnds = duration > 0 ? now + duration : 0;
         if (!expanded) SettleClip(duration);
-        if (turning) _turn.Started(now, duration, expanded, width, height);
+        if (turning || carried > 0) _turn.Started(now, duration, expanded, width, height);
         // The opening and closing tracks are NoticeMotion's Panel* (a notice moves on the same ones); the boot's, the style
         // morph's and the indicator's own variations stay here.
         Track content = expanded ? NoticeMotion.PanelOpenContent : NoticeMotion.PanelCloseContent;
-        Track surface = reshaping || morphing || booting || expanded ? NoticeMotion.PanelOpenSurface : line ? new(redirect ? 0 : .12, .92) : NoticeMotion.ReturnSurfaceFor(redirect);
+        bool atOnce = redirect || carried > 0;
+        Track surface = reshaping || morphing || booting || expanded ? NoticeMotion.PanelOpenSurface : line ? new(atOnce ? 0 : .12, .92) : NoticeMotion.ReturnSurfaceFor(atOnce);
         // Between forms the corners turn early: a notch becoming a capsule rounds its flat top long before it has its new size,
         // rather than showing a square top over round bottom corners for most of the move.
         Track cornerTrack = morphing ? new(0, .4) : surface;
