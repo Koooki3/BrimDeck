@@ -127,10 +127,15 @@ public partial class MainWindow
         var from = PageContent(before);
         var picture = animate ? PageHandover.Capture(from) : null;
         var place = PageHandover.Place(from);
+        // The recent notices count as seen before the page is built (ShowPage builds it): marked after, the new fresh set and
+        // the viewed marks changed what the page shows, and the whole page was built a second time at background priority in
+        // the middle of the switch, which stalled it. Marked now, the change arrives while another page still shows.
+        if (page == DeckPage.Notices && changed && _expanded) NoticesPageShown();
         ShowPage(page, animatePage: changed && _expanded && !_preview);
         bool back = DeckPages.Order.ToList().IndexOf(page) < DeckPages.Order.ToList().IndexOf(before);
         _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
-        if (page == DeckPage.Notices && _expanded) NoticesPageShown();
+        // Chosen again while it shows (the notices hotkey on an open panel): what arrived since counts as seen too.
+        if (page == DeckPage.Notices && !changed && _expanded) NoticesPageShown();
     }
     private FrameworkElement PageContent(DeckPage page) => page switch { DeckPage.Music => MusicContent, DeckPage.Monitor => MonitorContent, DeckPage.Notices => NoticesContent, _ => UsageContent };
     private void ShowPage(DeckPage page, bool animatePage)

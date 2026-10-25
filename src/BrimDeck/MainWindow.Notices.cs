@@ -205,9 +205,10 @@ public partial class MainWindow
         if (!DeckPages.Shown(Settings, DeckPage.Notices)) return;
         if (_expanded) { SelectPage(DeckPage.Notices); return; }
         SelectPage(DeckPage.Notices, remember: false);
+        // Opening marks the list seen before it draws the page (SetExpanded): marked here afterwards, the page was built a second
+        // time in the middle of the opening.
         _keepPageOnOpen = true;
         try { OpenFromHotkey(byKey); } finally { _keepPageOnOpen = false; }
-        if (_expanded) NoticesPageShown();
     }
 
     private void NoticesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Notices);

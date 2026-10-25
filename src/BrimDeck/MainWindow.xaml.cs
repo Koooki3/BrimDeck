@@ -565,13 +565,13 @@ public partial class MainWindow : Window
         ContentCanvas.Height = ExpandedContent.Height;
         // The recent notices page is drawn only while it shows (NoticesChanged), so notices that arrived while the panel was
         // closed are not on it yet: it is drawn again before the panel opens, and what it lists counts as seen as on a page
-        // switch (the notices hotkey does that itself once open).
+        // switch, the notices hotkey's opening too.
         if (expanded && !wasExpanded && !_preview && CurrentPage == DeckPage.Notices && _app.Notices is not null)
         {
             // Marking the list seen raises Changed; the page is drawn here once, not again at background priority mid-opening.
             bool queued = _noticesRenderQueued;
             _noticesRenderQueued = true;
-            try { if (!_keepPageOnOpen) NoticesPageShown(); RenderNotices(); }
+            try { NoticesPageShown(); RenderNotices(); }
             finally { _noticesRenderQueued = queued; }
         }
         int duration = !instant && Settings.Animations && SystemParameters.ClientAreaAnimation ? Settings.AnimationDuration : 0;
