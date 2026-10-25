@@ -305,8 +305,9 @@ public partial class MainWindow : Window
     {
         var before = Collapsed;
         UpdateCollapsedGeometry();
-        if (Equals(Collapsed.Surface, before.Surface)) return;
+        // The settings' width slider starts at what the content must show, which may have changed with the same surface.
         _app.CollapsedChanged();
+        if (Equals(Collapsed.Surface, before.Surface)) return;
         if (_expanded) return;
         // A surface that no longer lies within the window (wider, or moved along a screen edge) places the window again.
         if (Collapsed.Surface.X < _windowOffset || Collapsed.Surface.X + Collapsed.Surface.Width > _windowOffset + Width) ApplySettings(); else SetExpanded(false);
@@ -319,6 +320,10 @@ public partial class MainWindow : Window
     public (double OffsetMin, double OffsetMax, double TopMin, double TopMax, double WidthMin, double WidthMax) CurrentCollapsedRanges(CompactStyle style, double width, double height)
     {
         var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip);
+        // The notch and the capsule are never narrower than what their content must show (CollapsedGeometry.Resolve), so the slider
+        // does not offer widths the surface would not take.
+        if (style is CompactStyle.Notch or CompactStyle.Capsule)
+            widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, height, _compactRequired)));
         var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width, MonitorBoundsDip, WorkDip);
         var (topMin, topMax) = style switch
         {
