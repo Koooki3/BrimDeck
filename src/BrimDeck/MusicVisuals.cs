@@ -34,12 +34,13 @@ internal static class MusicVisuals
     }
     internal static Border Cover(BitmapSource? image, double size, double radius, bool outlined = false)
     {
+        double corner = PanelTheme.Corner(radius);
         var content = new Grid { Background = UI.Brush(PanelTheme.Hex("coverPlaceholder")) };
         if (image is not null) content.Children.Add(new Image { Source = image, Stretch = Stretch.UniformToFill });
         else content.Children.Add(Icon("music", size * .34));
-        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush(PanelTheme.Hex("coverOutline")), StrokeThickness = 1, RadiusX = radius, RadiusY = radius, Margin = new Thickness(.5), IsHitTestVisible = false });
-        content.Clip = new RectangleGeometry(new Rect(0, 0, size, size), radius, radius);
-        return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(PanelTheme.Corner(radius)), Child = content };
+        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush(PanelTheme.Hex("coverOutline")), StrokeThickness = 1, RadiusX = corner, RadiusY = corner, Margin = new Thickness(.5), IsHitTestVisible = false });
+        content.Clip = new RectangleGeometry(new Rect(0, 0, size, size), corner, corner);
+        return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(corner), Child = content };
     }
     // The color taken from the cover, or the theme's equalizer color when there is no cover or it gives none.
     internal static Brush Accent(BitmapSource? source) => Accent(source, out _);
