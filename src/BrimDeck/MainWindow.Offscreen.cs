@@ -21,7 +21,7 @@ public partial class MainWindow
         : WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
 
     // Whether liquid glass is shown under the island now.
-    private bool LiquidGlassShown => _glass?.LiquidShown == true;
+    private bool LiquidGlassShown => LiquidTheme.Shown(_glass);
 
     internal void UseOffscreen(Rect bounds, Rect work, double scale)
     {

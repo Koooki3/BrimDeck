@@ -58,10 +58,9 @@ internal readonly record struct LiquidFrame(
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
     private const float SourceHeight = 44, Thin = 28;
-    // The backdrop's brightness (sRGB luma, before the glass's own tint) where the themes' text keeps 4.5:1 with a little to
-    // spare: dark text (#101217) over at least TextLight, light text (#F6F7F9) over at most TextDark (with the tints, about
-    // .56 and .33).
-    public const float TextLight = .52f, TextDark = .40f;
+    // The backdrop's brightness band where the liquid glass themes' text keeps 4.5:1 (LiquidTheme.TextLight, TextDark; the
+    // values are the theme's, PanelThemes.LiquidTextLight and LiquidTextDark).
+    public const float TextLight = BrimDeck.Core.PanelThemes.LiquidTextLight, TextDark = BrimDeck.Core.PanelThemes.LiquidTextDark;
 
     // The two looks, at a display scale, for a shape and size: the source's glass in both. Light: its white background
     // (rgba(255,255,255,.08)) and the backdrop lifted to at least TextLight; dark: as thin a dark base (#121419 at .08) and the

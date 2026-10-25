@@ -33,14 +33,6 @@ public static partial class PanelThemes
         return true;
     }
 
-    // A theme that turned by itself (Windows switching "system" between dark and light, a theme's night hours, automatic liquid
-    // glass taking the other look): a preset gradient carries over, so the clock stays in the look's own colors (one look's
-    // gradients are unreadable on the other's glass). Returns whether the settings need saving: never for a turn of automatic
-    // liquid glass (glassTurn), which over a flashing video comes every few seconds and is decided again at every start, so the
-    // carried gradient is only kept in memory until something else is saved.
-    public static bool CarryOnTurn(PanelPalette previous, PanelPalette next, DeckSettings settings, bool glassTurn)
-        => CarryGradient(previous, next, settings) && !glassTurn;
-
     // Switches the clock to the style and color the palette suggests. Every chain ends at the dark theme, which names a clock,
     // so only an empty field leaves that part of the clock as it is. The custom color and gradient count only when used.
     public static void ApplyClock(PanelPalette palette, DeckSettings settings)

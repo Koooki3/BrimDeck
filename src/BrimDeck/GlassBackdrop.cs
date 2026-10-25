@@ -108,8 +108,8 @@ internal sealed class GlassBackdrop : IDisposable
     }
 
     // ----- Liquid glass (prototype) -----
-    // Under the island, glass themes can show true refraction instead of the blur: the desktop under the island, captured
-    // without BrimDeck's own windows (DesktopSource), drawn through a slab of thick glass (LiquidRenderer) whose rim lights
+    // Under the island, liquid glass themes (LiquidTheme) show true refraction instead of the blur: the desktop under the island,
+    // captured without BrimDeck's own windows (DesktopSource), drawn through a slab of thick glass (LiquidRenderer) whose rim lights
     // from the pointer. It takes the blur's place on the same window and follows the same delayed shape; anything it cannot do
     // (no capture, protected content, a lost device) shows the blur instead, and liquid glass is tried again every second while
     // the blur stands in (Recover). BRIMDECK_LIQUID=0 turns it off, for comparing. While liquid glass is in use our windows over
@@ -225,7 +225,7 @@ internal sealed class GlassBackdrop : IDisposable
     private void StandInFrame()
     {
         if (!PanelTheme.GlassShown) { ShowLiquid(false); SurfaceAside = false; Report(0, always: false); return; }
-        bool liquid = ShowLiquid(LiquidTint is not null && !LiquidOff && PanelTheme.Current.Effects.Glass is not null && StandIn!());
+        bool liquid = ShowLiquid(LiquidTint is not null && !LiquidOff && LiquidTheme.Renders && StandIn!());
         Decided(liquid, Math.Clamp(_shape().Material, 0, 1));
     }
 
@@ -286,7 +286,7 @@ internal sealed class GlassBackdrop : IDisposable
         if (_lead == PanelTheme.Current.IsDark) _lead = null;
         double dark = (_lead ?? PanelTheme.Current.IsDark) ? 1 : 0;
         if (_dark < 0 || !Soft.Enabled) _dark = _darkFrom = _darkTo = dark;
-        else if (dark != _darkTo && PanelTheme.Generation == PanelTheme.SnapGeneration) _dark = _darkFrom = _darkTo = dark;
+        else if (dark != _darkTo && PanelTheme.Generation == LiquidTheme.SnapGeneration) _dark = _darkFrom = _darkTo = dark;
         else if (dark != _darkTo) { _darkFrom = _dark; _darkTo = dark; _darkSince = now; }
         bool turning = _dark != _darkTo;
         if (turning)
@@ -417,6 +417,8 @@ internal sealed class GlassBackdrop : IDisposable
     // Liquid glass for this frame, at the delayed shape, clipped to the recent shapes (window pixels); false shows the blur.
     private bool Liquid(Frame shown, double left, double top, double right, double bottom, double radius, double opacity)
     {
+        // Another glass theme (only the liquid glass themes render, LiquidTheme): the blur, and liquid glass's capture goes with it.
+        if (!LiquidTheme.Renders) { ReleaseLiquid(); return ShowLiquid(false); }
         if (LiquidTint is not { } tint || LiquidOff || _liquidFailed || _excludeRefused || Composition.Compositor is null || _root is null
             || PanelTheme.Current.Effects.Glass is not { } glass || _windowRect is not { } window)
             return ShowLiquid(false);
@@ -584,7 +586,7 @@ internal sealed class GlassBackdrop : IDisposable
 
     // Liquid glass would be shown but the blur is, in its place (a failure, no capture for now).
     private bool LiquidWanted => LiquidTint is not null && !LiquidOff && !_excludeRefused && !_disposed && _shown && !LiquidShown
-        && PanelTheme.Current.Effects.Glass is not null && Available;
+        && LiquidTheme.Renders && Available;
 
     // Tries liquid glass again every RetryMs while it is wanted: after a failure once its wait is over, else once the capture
     // answers again (the lock screen or a UAC prompt gone, protected content closed); following the island then shows it.

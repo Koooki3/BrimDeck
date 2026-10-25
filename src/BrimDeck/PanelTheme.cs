@@ -51,37 +51,13 @@ internal static class PanelTheme
         _loaded = true;
     }
 
-    // The theme an id stands for now, "system" following the Windows app theme, "liquid-glass" the look of what lies behind the
-    // island (GlassDark).
-    public static PanelThemeInfo Find(string id) => PanelThemes.Find(id, PanelThemes.NormalizeId(id) == PanelThemes.SystemId && SettingsPalette.IsDark(SettingsTheme.System), UserThemes, GlassDark);
-    // Automatic liquid glass: whether it shows its dark look, as the island's backdrop decided (MainWindow.Appearance); until a
-    // first measure, the Windows app theme's.
-    public static bool GlassDark { get; set; } = SettingsPalette.IsDark(SettingsTheme.System);
-    // A theme change to show at once, without the fade (the first look automatic liquid glass decides): the Generation it
-    // becomes. MainWindow.ThemeFade and GlassBackdrop skip their fades into it.
-    public static int SnapGeneration { get; set; } = -1;
-    // A theme change whose text turns in one step, with no crossfade of the old look over the new (automatic liquid glass's
-    // turn, where the glass itself eases across): MainWindow.ThemeFade skips it; the glass does not.
-    public static int QuietGeneration { get; set; } = -1;
-    // Whether the chosen theme is one that follows something outside the theme file ("system", "liquid-glass").
-    public static bool Follows(string? id) => PanelThemes.NormalizeId(id) is PanelThemes.SystemId or PanelThemes.GlassAuto;
+    // The theme an id stands for now, "system" following the Windows app theme (automatic liquid glass its look, LiquidTheme.Look).
+    public static PanelThemeInfo Find(string id) => PanelThemes.Find(LiquidTheme.Look(id), PanelThemes.NormalizeId(id) == PanelThemes.SystemId && SettingsPalette.IsDark(SettingsTheme.System), UserThemes);
 
     // Resolves the theme the settings choose and, when it differs from the one in use, makes it current. Returns whether it changed.
     // Theme files change only through a reload, so the same choice resolves to the same palette unless Windows has switched
     // between light and dark (systemChanged) while "system" is chosen.
     public static bool Use(DeckSettings settings, bool reload = false, bool systemChanged = false)
-    {
-        bool changed = Choose(settings, reload, systemChanged);
-        // A fade skipped for the change that was to come (SnapGeneration, QuietGeneration) is let go when no change came, or it
-        // would skip the fade of a later, unrelated one (a theme chosen by hand).
-        if (!changed)
-        {
-            if (SnapGeneration == Generation + 1) SnapGeneration = -1;
-            if (QuietGeneration == Generation + 1) QuietGeneration = -1;
-        }
-        return changed;
-    }
-    private static bool Choose(DeckSettings settings, bool reload, bool systemChanged)
     {
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
         // New hours for the day and night looks count as a change too.

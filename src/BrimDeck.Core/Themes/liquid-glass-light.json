@@ -14,6 +14,8 @@
   "author": "BrimDeck",
   "license": "Apache-2.0",
   "base": "light",
+  // Drawn as liquid glass (the refraction renderer); only built-in themes can declare it (PanelThemes.IsLiquid).
+  "renderer": "liquid",
   "colors": {
     "surface": "#F1F4F8",
     "textPrimary": "#101217",

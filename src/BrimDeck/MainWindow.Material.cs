@@ -131,7 +131,7 @@ public partial class MainWindow
     private void Jelly(bool down)
     {
         if (down == _jellyDown) return;
-        if (down && (_expanded || _glass?.LiquidShown != true || !Soft.Enabled)) return;
+        if (down && (_expanded || !LiquidGlassShown || !Soft.Enabled)) return;
         if (!down && _expanded) { ResetJelly(); return; }
         _jellyDown = down;
         if (_jelly is null)

@@ -45,6 +45,17 @@ internal static class GlassAccess
             var island = deck.Island;
             Report(deck.OffscreenGlassState.Shown, "liquid glass is shown (the stand-in host)");
 
+            // Liquid glass is a base theme of its own (#55): a theme of the user's with glass is the blur, even one declaring the
+            // liquid renderer and based on a liquid glass theme; the built-in liquid glass theme starts the renderer again.
+            var custom = PanelThemes.Build("glassy", PanelThemes.Parse("""{ "id": "glassy", "base": "liquid-glass-light", "renderer": "liquid", "effects": { "glass": { "tint": "#E0F8FAFD" } } }"""));
+            PanelTheme.Show(custom);
+            Frame(deck, root);
+            Report(PanelTheme.GlassShown && !LiquidTheme.Renders && !deck.OffscreenGlassState.Shown && !deck.OffscreenGlassState.Aside,
+                "a custom theme with effects.glass shows glass (the blur), never the liquid renderer");
+            LiquidPages.UseLook(app, deck, root, PanelThemes.GlassLight);
+            Frame(deck, root);
+            Report(LiquidTheme.Renders && deck.OffscreenGlassState.Shown, "the built-in liquid glass theme starts the liquid renderer again");
+
             // The content row: the collapsed row's parts, inside the island.
             var row = deck.GlassContentArea();
             var frame = glass.PreviewFrame();

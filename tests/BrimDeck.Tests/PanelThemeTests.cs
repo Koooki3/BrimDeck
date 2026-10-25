@@ -127,8 +127,8 @@ internal static class PanelThemeTests
         check("The demo theme carries its effects", demo.HasOverlay && demo.Effects.RimGradient.Count == 3 && demo.Effects.ShadowDepth == 0 && demo.Effects.Scanlines > 0);
         check("System follows the Windows app theme", PanelThemes.Find("system", true, []).Id == "dark" && PanelThemes.Find("SYSTEM", false, []).Id == "light");
         check("An unknown theme shows as dark", PanelThemes.Find("gone", false, []).Id == "dark");
-        check("Automatic liquid glass shows the glass look its backdrop asks for", PanelThemes.Find(PanelThemes.GlassAuto, true, [], glassDark: false).Id == PanelThemes.GlassLight
-            && PanelThemes.Find("Liquid Glass", false, [], glassDark: true).Id == PanelThemes.GlassDark);
+        check("Automatic liquid glass shows the glass look its backdrop asks for", PanelThemes.Find(PanelThemes.LiquidLook(PanelThemes.GlassAuto, glassDark: false), true, []).Id == PanelThemes.GlassLight
+            && PanelThemes.Find(PanelThemes.LiquidLook("Liquid Glass", glassDark: true), false, []).Id == PanelThemes.GlassDark && PanelThemes.LiquidLook("system", true) == "system");
         {
             var look = new GlassAppearance(dark: false);
             // Mid-grey between the thresholds changes nothing; a dark backdrop must last Confirm; then it holds for Hold.
@@ -180,10 +180,34 @@ internal static class PanelThemeTests
             var darkLook = BuiltIn(PanelThemes.GlassDark);
             var turned = new DeckSettings { ClockGradient = [.. lightLook.ClockGradients[1].Stops] };
             var system = new DeckSettings { ClockGradient = [.. lightLook.ClockGradients[1].Stops] };
-            bool glassSaves = PanelThemes.CarryOnTurn(lightLook, darkLook, turned, glassTurn: true);
-            bool systemSaves = PanelThemes.CarryOnTurn(lightLook, darkLook, system, glassTurn: false);
-            check("A turn of automatic liquid glass carries the clock gradient without saving the settings",
-                !glassSaves && turned.ClockGradient.SequenceEqual(darkLook.ClockGradients[1].Stops) && systemSaves && system.ClockGradient.SequenceEqual(darkLook.ClockGradients[1].Stops));
+            PanelThemes.CarryOnGlassTurn(lightLook, darkLook, turned);
+            bool systemSaves = PanelThemes.CarryGradient(lightLook, darkLook, system);
+            check("A turn of automatic liquid glass carries the clock gradient as Windows switching \"system\" does",
+                turned.ClockGradient.SequenceEqual(darkLook.ClockGradients[1].Stops) && systemSaves && system.ClockGradient.SequenceEqual(darkLook.ClockGradients[1].Stops));
+        }
+        {
+            // Liquid glass is a base theme of its own (#55): only the built-in liquid glass themes are drawn by the liquid renderer;
+            // a theme's "glass" effect is the plain blur for any theme, and a user's file cannot claim the renderer or the ids.
+            var liquidFolder = Folder("liquid-themes",
+                ("glassy.json", """{ "id": "glassy", "name": "Glassy", "base": "dark", "effects": { "glass": { "tint": "#C8121419", "edge": 0.4 } } }"""),
+                ("claims.json", """{ "id": "claims", "name": "Claims", "base": "liquid-glass-light", "renderer": "liquid", "effects": { "glass": { "tint": "#E0F8FAFD" } } }"""),
+                ("thief.json", """{ "id": "liquid-glass-light", "name": "Thief", "renderer": "liquid", "effects": { "glass": { "tint": "#E0F8FAFD" } } }"""),
+                ("auto.json", """{ "id": "liquid-glass", "name": "Auto", "renderer": "LIQUID" }"""));
+            var found = PanelThemes.LoadFolder(liquidFolder);
+            var glassy = PanelThemes.Resolve(ByFile(found, "glassy.json"));
+            check("A custom theme with effects.glass is glass drawn as the blur, never by the liquid renderer",
+                ByFile(found, "glassy.json").Usable && glassy.IsGlass && !PanelThemes.IsLiquid(glassy) && !PanelThemes.IsLiquid("glassy"));
+            var claims = ByFile(found, "claims.json");
+            var claimedPalette = PanelThemes.Resolve(claims);
+            check("A user's theme declaring the liquid renderer, based on liquid glass, is usable glass but never drawn as liquid glass",
+                claims.Usable && claims.File.Renderer == "liquid" && claimedPalette.IsGlass && !PanelThemes.IsLiquid(claimedPalette) && !PanelThemes.IsLiquid(claims.Id));
+            check("A user's file can take neither a liquid glass theme's id nor automatic liquid glass's",
+                !ByFile(found, "thief.json").Usable && !ByFile(found, "auto.json").Usable
+                && PanelThemes.Find(PanelThemes.GlassLight, false, found).BuiltIn && found.All(theme => !theme.Usable || !PanelThemes.IsLiquid(PanelThemes.Resolve(theme))));
+            var liquid = PanelThemes.BuiltIns.Where(theme => PanelThemes.IsLiquid(PanelThemes.Resolve(theme))).Select(theme => theme.Id).Order(StringComparer.Ordinal).ToList();
+            check("Only the built-in liquid glass themes, and automatic liquid glass's looks, are drawn as liquid glass",
+                liquid.SequenceEqual([PanelThemes.GlassDark, PanelThemes.GlassLight]) && PanelThemes.IsLiquid(PanelThemes.LiquidLook(PanelThemes.GlassAuto, true))
+                && PanelThemes.IsLiquid(PanelThemes.LiquidLook(PanelThemes.GlassAuto, false)) && !PanelThemes.IsLiquid(PanelThemes.Dark) && !PanelThemes.IsLiquid(PanelThemes.GlassAuto));
         }
 
         // Theme files and ids.
