@@ -21,6 +21,8 @@ As an ordinary desktop program BrimDeck gets no change events from Windows. Wind
 
 When that log is turned off (by group policy, say), cannot be subscribed to or keeps failing, BrimDeck **polls** instead: every 2.5 seconds it checks for a new notification (about 2.5 ms of CPU) and reads the whole list every 15 seconds; a new notice usually appears within 0.2–2.6 seconds, at an idle cost of about 0.36% of one core. The status line in the settings shows which mode is in use.
 
+Early test builds offered an identity package (`BrimDeck.Notices`) that needed Developer Mode, for an event mode; it is no longer needed, and the installer no longer manages it. If you registered it, remove it in PowerShell with `Get-AppxPackage BrimDeck.Notices | Remove-AppxPackage`, and turn Developer Mode off again if you do not need it otherwise.
+
 If Windows has not yet decided whether BrimDeck may read notifications, the settings page shows "Allow access". A refusal can be changed in Windows Settings › Privacy & security › Notifications.
 
 ### Windows: turning off other apps' notification banners
