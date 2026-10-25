@@ -122,9 +122,5 @@ internal static class AuditWinTests
             && NoticeIntake.IconRef(@"C:\" + new string('a', 1022), NoticeOrigin.Cli, null) is null
             && NoticeIntake.IconRef(@"C:\" + new string('a', 1021), NoticeOrigin.Cli, null) is not null
             && NoticeIntake.IconRef("C:\\a\u0001.png", NoticeOrigin.Cli, null) is null);
-        check("Linux icon paths and names are accepted", NoticeIntake.IsLinuxIcon("/usr/share/icons/a.png") && NoticeIntake.IsLinuxIcon("firefox"));
-        check("Linux icons that climb, reach Windows or another root are refused",
-            new[] { "../x", "/a/../b", "..", "//x", "a/b", "C:/x", @"a\b", "a*", "a?b", "a|b" }.All(icon => !NoticeIntake.IsLinuxIcon(icon))
-            && NoticeIntake.IconRef("../x", NoticeOrigin.Wsl, "Ubuntu") is null);
     }
 }

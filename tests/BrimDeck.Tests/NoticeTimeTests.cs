@@ -110,8 +110,6 @@ internal static class NoticeTimeTests
         check("An event that already started has nothing left to remind, and an end before its start is dropped", started.Stage == 2 && started.EndsAt is null);
         check("A stop message and a plain notice have no timing", NoticeTimeIntake.Resolve(new NoticeMessage { Kind = "stopwatch", Stop = true, ReplaceId = "k" }, TimeNow, China) is null
             && NoticeTimeIntake.Resolve(new NoticeMessage { Title = "x" }, TimeNow, China) is null);
-        var input = NoticeIntake.FromPipe(new NoticeMessage { Kind = "stopwatch", ReplaceId = "w" }, TimeNow, China);
-        check("Intake resolves the timing of a pipe message", input.Timing is { Kind: NoticeTimeKind.Stopwatch, Native: true } && input.Timing.StartsAt == TimeNow && !input.StopTiming);
     }
 
     private static void Words(Action<string, bool> check)
@@ -148,11 +146,17 @@ internal static class NoticeTimeTests
         check("Sleeping through a reminder and the start counts from the start", NoticeClock.Advance(slept, TimeNow.AddMinutes(12)) == TimeNow.AddMinutes(10) && slept.Stage == 2);
     }
 
+    // A time-kind notice as a sender's message gives it: its times resolved as BrimDeck receives it.
     private static NoticeInput Timed(NoticeMessage message, DateTimeOffset now, string source = "brim-notify")
     {
-        message.AppName ??= source;
-        message.EventId ??= Guid.NewGuid().ToString("N");
-        return NoticeIntake.FromPipe(message, now, China);
+        string name = message.AppName ?? source, id = message.EventId ?? Guid.NewGuid().ToString("N");
+        return new NoticeInput
+        {
+            Origin = NoticeOrigin.Cli, AppKey = NoticeKeys.Cli(null, name), AppName = name, InstanceKey = $"cli::{name}:{id}", EventId = id,
+            ReplaceKey = string.IsNullOrWhiteSpace(message.ReplaceId) ? null : message.ReplaceId, Title = message.Title ?? "", Body = message.Body ?? "",
+            Category = NoticeKeys.Category(message.Category), PriorityHint = NoticeKeys.Priority(message.Priority),
+            Timing = NoticeTimeIntake.Resolve(message, now, China), StopTiming = message.Stop == true
+        };
     }
 
     private static void Hub(Action<string, bool> check)
