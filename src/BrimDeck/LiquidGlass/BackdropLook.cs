@@ -9,35 +9,55 @@ namespace BrimDeck.LiquidGlass;
 // and every tick of its poll): the renderer's latest measure of the backdrop (LiquidRenderer.TryBackdrop, which only has a new
 // one after a frame was drawn) is kept, and the last one known is fed to the decision on every step, so a backdrop that holds
 // still (a window that stays under the island, which draws no new frame) still gets its look once the confirmation has passed.
-// Only a new measure counts as one toward a jump (GlassAppearance.Feed). The first measure decides at once (instant: shown
-// without a fade); the look the app chose before the island was shown (Glance) is usually the same, so nothing turns then.
+// The decision (GlassAppearance) takes the mean of the middle of the measure (RangeMean of the renderer's histogram), leans
+// toward the Windows app mode (AppDark), holds over a video (the capture's comparisons, DesktopSource.ChangedShare) and while
+// held (the open panel, a press). The first measure decides at once (instant: shown without a fade); the look the app chose
+// before the island was shown (Glance) is usually the same, so nothing turns then.
 internal sealed class BackdropLook
 {
     private GlassAppearance? _look;
-    // The last measure (NaN before the first), and how many have come in.
+    private int _compared = -1;
+    // The last measure's mean brightness (NaN before the first; the glass's text turn reads it, LiquidFrame.TextTurns), the
+    // mean of its middle the decision takes, and how many have come in.
     public double Luma { get; private set; } = double.NaN;
+    public double Middle { get; private set; } = double.NaN;
     public int Measures { get; private set; }
     public bool? Dark => _look?.Dark;
+    public bool Video => _look?.Video == true;
+    public double Smoothed => _look?.Smoothed ?? double.NaN;
+    // The Windows app mode (dark), the decision's prior: set before each step.
+    public bool AppDark { get; set; }
 
-    // One step at now (milliseconds), the look shown now being current. True when the look should change: to Dark, at once
-    // when instant.
-    public bool Step(LiquidRenderer renderer, long now, bool current, out bool instant)
+    // One step at now (milliseconds), the look shown now (or being turned to) being current. Source: the capture, whose
+    // comparisons tell how much of the backdrop changes (a video); held: the open panel shown or the island pressed, when
+    // nothing turns. True when the look should change: to Dark, at once when instant.
+    public bool Step(LiquidRenderer renderer, long now, bool current, out bool instant, DesktopSource? source = null, bool held = false)
     {
         instant = false;
-        bool fresh = renderer.TryBackdrop(out double luma);
-        if (fresh) { Luma = luma; Measures++; }
-        if (double.IsNaN(Luma)) return false;
+        if (renderer.TryBackdrop(out double luma))
+        {
+            double middle = GlassAppearance.RangeMean(renderer.Histogram);
+            Luma = luma; Middle = double.IsFinite(middle) ? middle : luma; Measures++;
+        }
+        if (source is not null && source.Compared != _compared)
+        {
+            if (_compared >= 0) _look?.Changed(source.ChangedShare, now);
+            _compared = source.Compared;
+        }
+        if (double.IsNaN(Middle)) return false;
         if (_look is null)
         {
-            bool dark = GlassAppearance.FirstLook(Luma);
-            _look = new GlassAppearance(dark);
+            bool dark = GlassAppearance.FirstLook(Middle, AppDark);
+            _look = new GlassAppearance(dark, AppDark);
             _look.Reset(dark, now);
+            _look.Feed(Middle, now, held);
             instant = true;
             return dark != current;
         }
+        _look.Prior(AppDark);
         // The theme was turned by someone else meanwhile (its own hours, a reload): the decision starts from what is shown.
         if (_look.Dark != current) _look.Reset(current, now);
-        return _look.Feed(Luma, now, fresh);
+        return _look.Feed(Middle, now, held);
     }
 
     // Automatic liquid glass is not chosen now: the next time it is, its first measure decides at once again.
@@ -111,13 +131,13 @@ internal sealed class BackdropLook
         {
             int width = (int)description.Width, height = (int)description.Height;
             var row = new byte[width * 4];
-            double sum = 0;
+            var histogram = new int[256];
             for (int y = 0; y < height; y++)
             {
                 Marshal.Copy(map.DataPointer + (nint)(y * map.RowPitch), row, 0, row.Length);
-                for (int o = 0; o < row.Length; o += 4) sum += .0722 * row[o] + .7152 * row[o + 1] + .2126 * row[o + 2];
+                for (int o = 0; o < row.Length; o += 4) histogram[Math.Min(255, (int)(.0722 * row[o] + .7152 * row[o + 1] + .2126 * row[o + 2]))]++;
             }
-            return sum / 255 / Math.Max(1, width * height);
+            return GlassAppearance.RangeMean(histogram);
         }
         finally { context.Unmap(staging, 0); }
     }

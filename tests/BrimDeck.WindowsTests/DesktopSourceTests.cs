@@ -251,7 +251,7 @@ internal static class DesktopSourceTests
     // the poll's ticks), the renderer's measure read back (LiquidRenderer.TryBackdrop) and the decision stepped on every 100 ms
     // tick (BackdropLook, GlassAppearance). Checks that the measure is the backdrop's own brightness, that the first measure
     // decides at once (light glass), and that with the wrong look shown over a backdrop that holds still (no new frame drawn)
-    // the look still turns within the hold and the confirmation: the bug where a still backdrop, measured once, never
+    // the look still turns within the dwell: the bug where a still backdrop, measured once, never
     // confirmed its look.
     private static void LiveLook(Action<string, bool> check)
     {
@@ -292,8 +292,8 @@ internal static class DesktopSourceTests
             look.Measures > 0 && Math.Abs(look.Luma - expected) < .02);
         check("liquid look: the first measure decides at once, light glass over a light backdrop", decidedFirst && firstInstant && look.Dark == false);
         long latency = turnedAt - wrongFrom;
-        check($"liquid look: over a still backdrop the wrong look turns within the hold and the confirmation ({latency} ms)",
-            turnedAt >= 0 && latency <= GlassAppearance.Hold + GlassAppearance.Confirm + 200);
+        check($"liquid look: over a still backdrop the wrong look turns within the dwell ({latency} ms)",
+            turnedAt >= 0 && latency <= GlassAppearance.Dwell + 300);
     }
 
     // What a followed frame whose glass changes (the pointer's light easing) allocates on the live path: nothing of the host's

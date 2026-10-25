@@ -16,7 +16,9 @@
   // Drawn as liquid glass (the refraction renderer); only built-in themes can declare it (PanelThemes.IsLiquid).
   "renderer": "liquid",
   "colors": {
-    "surface": "#1A1C21",
+    // The opaque surface (transparency effects off, high contrast, the blur's fallback): Windows' dark acrylic fallback
+    // color (microsoft-ui-xaml, MIT), so the island matches the system's flyouts and Start menu then.
+    "surface": "#2C2C2C",
     "textPrimary": "#F6F7F9",
     "textSecondary": "#E8EDEFF5",
     "textTertiary": "#99EDEFF5",

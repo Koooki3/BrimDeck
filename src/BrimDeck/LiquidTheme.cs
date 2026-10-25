@@ -24,6 +24,10 @@ internal static class LiquidTheme
     // Automatic liquid glass: whether it shows its dark look, as the island's backdrop decided (App.TurnGlass); until a first
     // measure, the Windows app theme's.
     public static bool Dark { get; set; } = SettingsPalette.IsDark(SettingsTheme.System);
+    // The Windows app mode (dark), read only: the prior of automatic liquid glass's decision (GlassAppearance), which keeps
+    // to it unless the backdrop clearly asks for the other look. Read again when Windows' preferences change (App).
+    public static bool AppDark { get; private set; } = SettingsPalette.IsDark(SettingsTheme.System);
+    public static void ReadAppMode() => AppDark = SettingsPalette.IsDark(SettingsTheme.System);
     // The theme id a choice stands for now: automatic liquid glass its look (PanelTheme.Find), any other id as it is.
     public static string Look(string id) => PanelThemes.LiquidLook(id, Dark);
 
@@ -58,8 +62,9 @@ public partial class App
     // once (LiquidTheme.SnapGeneration). A later one turns the glass first (MainWindow.LeadGlass); the theme, and with it every
     // text and icon brush, turns in one step when the glass passes the brightness where both looks' text reads
     // (GlassBackdrop.Crossed), without the theme's crossfade (LiquidTheme.QuietGeneration), so no glyph is ever drawn twice.
-    // TurnByMs is the latest the theme follows, should the glass not report (no liquid glass shown).
-    private const int TurnByMs = 600;
+    // TurnByMs is the latest the theme follows, should the glass not report (no liquid glass shown): past the glass's own
+    // ease (GlassBackdrop.DarkFadeMs), at whose end the text turns at the latest.
+    private const int TurnByMs = (int)GlassBackdrop.DarkFadeMs + 150;
     private DispatcherTimer? _turnBy;
     internal bool AutoLookFrom(MainWindow deck) => !Exiting && deck == Deck && LiquidTheme.IsAuto(Settings.PanelTheme);
     internal void TurnGlass(MainWindow deck, bool dark, bool instant)

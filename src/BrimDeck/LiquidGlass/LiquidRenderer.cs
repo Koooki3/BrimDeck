@@ -534,6 +534,9 @@ internal sealed class LiquidRenderer : IDisposable
     // the glass moves it into (legibility) is scaled from these. Before any, the widest.
     private float _bandA, _bandB = 1, _bandMean = .5f;
     public (float Low, float High) Band => (_bandA, _bandB);
+    // The last measure's histogram (Bins bins over luma 0..1): automatic liquid glass takes the mean of its middle
+    // (GlassAppearance.RangeMean, BackdropLook).
+    public ReadOnlySpan<int> Histogram => _histogram;
 
     private void Sample(int pad, int width, int height, int least)
     {
