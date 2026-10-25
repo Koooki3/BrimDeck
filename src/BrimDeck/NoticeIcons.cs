@@ -6,7 +6,6 @@ using System.Windows.Media.Imaging;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Native;
-using BrimDeck.Protocol;
 
 namespace BrimDeck;
 
@@ -15,7 +14,7 @@ namespace BrimDeck;
 // as they are; icons inside WSL only while that distribution's agent runs, so that showing a notice never starts a
 // distribution. Nothing is downloaded. Lookups run in the background; Loaded is raised on the UI thread for each icon that
 // arrives later.
-internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher, Func<string, Task<byte[]?>> windowsLogo, Func<string, bool> distributionRunning)
+internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher, Func<string, Task<byte[]?>> windowsLogo)
 {
     // Enough for the rows the notices page lists at once and the apps in the settings; an icon let go of is read again when
     // asked for, and only its own plate is filled then (MainWindow.NoticeIconLoaded), so nothing loops.
@@ -69,9 +68,6 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         await dispatcher.InvokeAsync(() =>
         {
             _loading.Remove(iconRef);
-            // A WSL icon that could not be read while its distribution was stopped is tried again later; one its running
-            // distribution does not have is remembered as missing, like any other.
-            if (image is null && WslDistribution(iconRef) is { } distro && !distributionRunning(distro)) return;
             if (_cache.Remove(iconRef, out var earlier)) _order.Remove(earlier.Node);
             _cache[iconRef] = (image, accent, _order.AddFirst(iconRef));
             while (_order.Count > Capacity) { _cache.Remove(_order.Last!.Value); _order.RemoveLast(); }
@@ -103,45 +99,16 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
             catch (ArgumentException) { return null; }
             return ThroughLinks(path) ? null : ReadImageFile(path);
         }
-        if (WslDistribution(iconRef) is { } distro)
-        {
-            string icon = iconRef[(5 + distro.Length)..];
-            if (!distributionRunning(distro)) return null;
-            string root = @"\\wsl.localhost\" + distro;
-            foreach (var path in WslCandidates(icon))
-            {
-                string full = root + path.Replace('/', '\\');
-                // A folder on the way that is a link is refused as on a local drive (any process in the distribution can make
-                // one, and Windows would follow it); looked at only for a file that is there, as most candidates are not.
-                if (!File.Exists(full) || ThroughLinks(full, root)) continue;
-                if (ReadImageFile(full) is { } found) return found;
-            }
-        }
         return null;
     }
 
-    // The distribution of a "wsl:<distribution>:<icon>" reference, if it names one by a valid distribution name: the name
-    // becomes part of a \\wsl.localhost path, which must not reach anywhere else.
-    private static string? WslDistribution(string iconRef)
-    {
-        if (!iconRef.StartsWith("wsl:", StringComparison.Ordinal)) return null;
-        int colon = iconRef.IndexOf(':', 4);
-        return colon > 4 && NoticeIntake.IsDistroName(iconRef[4..colon]) ? iconRef[4..colon] : null;
-    }
-
-    // An absolute path as given; an icon name in the usual theme and pixmap folders, at sizes WPF can read (PNG, not SVG).
-    // The agent looks in the same places when it resolves an icon that is a link (LinuxIcons.Resolve).
-    public static IEnumerable<string> WslCandidates(string icon)
-        => NoticeIntake.IsLinuxIcon(icon) ? LinuxIcons.Candidates(icon) : [];
-
     // Whether a folder on the way to the file is a link or junction; a folder link may lead to a network share. Folders are
-    // looked at up to the drive's root, or up to root (a distribution's \\wsl.localhost share).
-    private static bool ThroughLinks(string path, string? root = null)
+    // looked at up to the drive's root.
+    private static bool ThroughLinks(string path)
     {
         try
         {
-            int top = root?.Length ?? 3;
-            for (var folder = Path.GetDirectoryName(Path.GetFullPath(path)); folder is not null && folder.TrimEnd('\\').Length > top; folder = Path.GetDirectoryName(folder))
+            for (var folder = Path.GetDirectoryName(Path.GetFullPath(path)); folder is not null && folder.TrimEnd('\\').Length > 3; folder = Path.GetDirectoryName(folder))
                 if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0) return true;
             return false;
         }

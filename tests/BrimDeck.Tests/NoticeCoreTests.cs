@@ -457,21 +457,21 @@ internal static class NoticeCoreTests
     private static void SettingsValues(string root, Action<string, bool> check)
     {
         var defaults = new DeckSettings();
-        check("Notices are off by default, with no WSL distribution", !defaults.NoticesEnabled && defaults.NoticeWslDistros.Count == 0 && defaults.NoticeWindowsSource
+        check("Notices are off by default", !defaults.NoticesEnabled && defaults.NoticeWindowsSource
             && defaults.NoticeHistory && defaults.NoticeHistoryHours == 24 && defaults.NoticeHotkey == "" && defaults.NoticeDuration == 6 && defaults.NoticeHighDuration == 8);
         var odd = new DeckSettings
         {
             NoticeScreen = (NoticeScreen)42, NoticeDuration = 0, NoticeHistoryHours = 100_000, NoticesWidth = double.PositiveInfinity,
-            NoticeWslDistros = ["Ubuntu", " ubuntu ", "", "Debian", @"..\..\server\share", "a b"], NoticeHistoryFolder = @"relative\notices",
+            NoticeHistoryFolder = @"relative\notices",
             NoticeApps = [new() { Key = "a", AccentColor = "ff0000", Priority = (NoticePriority)9, Privacy = (NoticePrivacy)9 }, new() { Key = "a" }, new() { Key = " " }]
         };
         odd.Normalize();
         check("Notice settings are normalized", odd.NoticeScreen == NoticeScreen.Foreground && odd.NoticeDuration == 2 && odd.NoticeHistoryHours == 168
-            && odd.NoticesWidth == 460 && odd.NoticeWslDistros.SequenceEqual(["Ubuntu", "Debian"]) && odd.NoticeHistoryFolder == "" && odd.NoticeApps.Count == 1 && odd.NoticeApps[0].AccentColor == "#FF0000"
+            && odd.NoticesWidth == 460 && odd.NoticeHistoryFolder == "" && odd.NoticeApps.Count == 1 && odd.NoticeApps[0].AccentColor == "#FF0000"
             && odd.NoticeApps[0].Priority == NoticePriority.Normal && odd.NoticeApps[0].Privacy is null);
         var copy = odd.Copy();
-        copy.NoticeApps[0].Muted = true; copy.NoticeWslDistros.Add("Arch");
-        check("Copies do not share notice rules or distributions", !odd.NoticeApps[0].Muted && odd.NoticeWslDistros.Count == 2);
+        copy.NoticeApps[0].Muted = true;
+        check("Copies do not share notice rules", !odd.NoticeApps[0].Muted);
         var store = new SettingsStore(Path.Combine(root, "notice-settings"), "1.2.0");
         var saved = new DeckSettings { NoticesEnabled = true, NoticePrivacy = NoticePrivacy.TitleOnly, LastPage = DeckPage.Notices, NoticesPausedUntil = T0, NoticeApps = [new() { Key = "windows:X", Name = "X", Priority = NoticePriority.High }] };
         store.Save(saved);

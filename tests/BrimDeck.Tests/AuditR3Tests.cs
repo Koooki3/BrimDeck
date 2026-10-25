@@ -12,18 +12,10 @@ internal static class AuditR3Tests
 
     public static void Run(string root, Action<string, bool> check)
     {
-        Builtins(check);
         PendingLimit(check);
         Links(check);
         Cleaning(check);
         Folder(root, check);
-    }
-
-    private static void Builtins(Action<string, bool> check)
-    {
-        check("r3 N2: call and start read their arguments again and are refused", WindowsPrograms.Reparses("call") && WindowsPrograms.Reparses("START")
-            && !WindowsPrograms.Reparses("echo") && !WindowsPrograms.Reparses("callme"));
-        check("r3 N2: they are no builtins run through cmd any more", !WindowsPrograms.IsBuiltin("call") && !WindowsPrograms.IsBuiltin("start") && WindowsPrograms.IsBuiltin("echo"));
     }
 
     private static NoticeInput Watch(string app, string key, DateTimeOffset? created = null) => new()

@@ -97,8 +97,8 @@ Works with players that use Windows media controls, with extra support for some 
 
 ### Dynamic notices
 
-- When a notification arrives, the notch, capsule or indicator grows out of its place with the application's icon, title and summary; hover for the details, open the application or use the notice's buttons, and it returns to its shape. Notices take the panel theme.
-- Receives Windows app notifications, desktop notifications in WSL (off by default, per distribution) and notices sent with `brim-notify`, such as `brim-notify run -- dotnet test`, which reports the result when the command ends.
+- When a notification arrives, the notch, capsule or indicator grows out of its place with the application's icon, title and summary; hover for the details or open the application, and it returns to its shape. Notices take the panel theme.
+- Receives Windows app notifications; alarms, mail and event reminders among them are recognized and shown by kind.
 - Never takes the focus or interrupts the open panel; nothing pops up while locked, in full screen, in a focus session or presenting, with one summary afterwards; recent notices are kept encrypted on this PC for 24 hours, which can be switched off. Off by default; see [Dynamic notices](docs/en-US/notices.md).
 
 ## Install

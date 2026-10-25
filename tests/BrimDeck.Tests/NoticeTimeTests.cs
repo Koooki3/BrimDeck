@@ -1,7 +1,6 @@
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.Protocol;
-using BrimDeck.Protocol.DBus;
 
 // Time-kind notices: brim-notify's timer, stopwatch and event, the times they carry, BrimDeck's own reminders, the live words,
 // and sorting Windows' Clock, Outlook, calendar and Teams notifications into kinds. Fixed clocks and made-up time zones only.
@@ -27,7 +26,6 @@ internal static class NoticeTimeTests
             Durations(check);
             Times(check);
             Checks(check);
-            CommandLine(check);
             Resolve(check);
             Words(check);
             Hub(check);
@@ -98,35 +96,6 @@ internal static class NoticeTimeTests
         var back = NoticeProtocol.Deserialize(NoticeProtocol.Serialize(new NoticeMessage { Kind = "event", At = "15:00", LeadMs = 600000, Until = "16:00", Stop = false }));
         check("Time fields travel in the frame", json.Contains("\"kind\":\"countdown\"", StringComparison.Ordinal) && json.Contains("\"inMs\":5000", StringComparison.Ordinal)
             && back is { Kind: "event", At: "15:00", LeadMs: 600000, Until: "16:00", Stop: false });
-        var mail = FreedesktopNotifications.ToNotice(["thunderbird", 0u, "", "New mail", "From Ann", new List<object>(), new Dictionary<object, object> { ["category"] = new DBusVariant("s", "email.arrived") }, -1], 1);
-        check("A Linux mail client's notice is a mail notice", mail.Kind == NoticeTimes.Mail && mail.Category == "message");
-    }
-
-    private static void CommandLine(Action<string, bool> check)
-    {
-        var timer = NotifyCommandLine.Parse(["timer", "25m", "番茄"]);
-        check("timer takes a duration and a title", timer.Kind == NotifyCommandKind.Send && timer.Message is { Kind: "countdown", InMs: 1_500_000, Title: "番茄", AppName: "brim-notify" }
-            && timer.Message.ReplaceId!.StartsWith("countdown-", StringComparison.Ordinal) && NotifyCommandLine.PrintsKey(timer.Message));
-        var at = NotifyCommandLine.Parse(["timer", "--at", "15:30", "开会", "-r", "meet"]);
-        check("timer takes --at and keeps a given key", at.Message is { Kind: "countdown", At: "15:30", InMs: null, Title: "开会", ReplaceId: "meet" });
-        check("timer without a time, or with a bad one, is refused", NotifyCommandLine.Parse(["timer"]).Kind == NotifyCommandKind.Error
-            && NotifyCommandLine.Parse(["timer", "0s"]).Kind == NotifyCommandKind.Error && NotifyCommandLine.Parse(["timer", "soon"]).Kind == NotifyCommandKind.Error
-            && NotifyCommandLine.Parse(["timer", "--at", "15:00", "--in", "5m"]).Kind == NotifyCommandKind.Error);
-        var watch = NotifyCommandLine.Parse(["stopwatch", "构建", "-r", "b1"]);
-        check("stopwatch starts now under its key", watch.Message is { Kind: "stopwatch", Title: "构建", ReplaceId: "b1", InMs: null }
-            && NotifyCommandLine.Parse(["stopwatch", "--in", "5m"]).Kind == NotifyCommandKind.Error);
-        var meeting = NotifyCommandLine.Parse(["event", "周会", "--at", "15:00", "--remind", "10m", "--ends", "16:00"]);
-        check("event takes its start, reminder and end", meeting.Message is { Kind: "event", At: "15:00", LeadMs: 600_000, Until: "16:00", Title: "周会" }
-            && NotifyCommandLine.Parse(["event", "--at", "15:00"]).Kind == NotifyCommandKind.Error && NotifyCommandLine.Parse(["event", "周会"]).Kind == NotifyCommandKind.Error);
-        var stop = NotifyCommandLine.Parse(["stop", "b1", "-s", "make"]);
-        check("stop names one key", stop.Message is { Stop: true, ReplaceId: "b1", AppName: "make" } && !NotifyCommandLine.PrintsKey(stop.Message)
-            && NotifyCommandLine.Parse(["stop"]).Kind == NotifyCommandKind.Error && NotifyCommandLine.Parse(["stop", "a", "b"]).Kind == NotifyCommandKind.Error
-            && NotifyCommandLine.Parse(["stop", "a", "--at", "15:00"]).Kind == NotifyCommandKind.Error);
-        check("Time options belong to timer and event", NotifyCommandLine.Parse(["x", "--at", "15:00"]).Kind == NotifyCommandKind.Error
-            && NotifyCommandLine.Parse(["timer", "5m", "--ends", "16:00"]).Kind == NotifyCommandKind.Error && NotifyCommandLine.Parse(["timer", "5m", "--kind", "mail"]).Kind == NotifyCommandKind.Error);
-        check("--kind labels a plain notice as alarm or mail", NotifyCommandLine.Parse(["新邮件", "--kind", "MAIL"]).Message?.Kind == "mail"
-            && NotifyCommandLine.Parse(["x", "--kind", "event"]).Kind == NotifyCommandKind.Error && !NotifyCommandLine.PrintsKey(NotifyCommandLine.Parse(["x", "--kind", "alarm"]).Message!));
-        check("The help lists the time commands", NotifyCommandLine.Usage.Contains("brim-notify timer", StringComparison.Ordinal) && NotifyCommandLine.Usage.Contains("brim-notify stop KEY", StringComparison.Ordinal));
     }
 
     private static void Resolve(Action<string, bool> check)
