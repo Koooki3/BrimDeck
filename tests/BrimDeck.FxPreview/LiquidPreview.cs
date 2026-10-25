@@ -301,9 +301,17 @@ internal static class LiquidPreview
         return pixels;
     }
 
+    // How far a shape stands for the open panel: the panels and pages 1, "opening N%" N / 100, the collapsed shapes 0.
+    private static double OpenOf(Shape shape) => shape.Name.StartsWith("opening ", StringComparison.Ordinal)
+        ? double.Parse(shape.Name[8..^1], System.Globalization.CultureInfo.InvariantCulture) / 100
+        : shape.Name.StartsWith("panel", StringComparison.Ordinal) || shape.Name.Contains('x', StringComparison.Ordinal) && shape.Height >= 200 ? 1 : 0;
+
     private static LiquidFrame Frame(Shape shape, bool dark, double scale, (int X, int Y, int Width, int Height) at, (double X, double Y)? pointer, double press)
     {
-        var frame = LiquidFrame.Preset(dark, at.Width, at.Height, (float)(shape.Top * scale), (float)(shape.Bottom * scale), (float)(shape.Shoulder * scale), (float)scale) with { Open = shape.Name.StartsWith("panel", StringComparison.Ordinal) ? 1 : 0 };
+        var frame = LiquidFrame.Preset(dark, at.Width, at.Height, (float)(shape.Top * scale), (float)(shape.Bottom * scale), (float)(shape.Shoulder * scale), (float)scale) with { Open = (float)OpenOf(shape) };
+        // A collapsed shape's content row, as the island lays it out: between its rounded ends, its whole height.
+        if (OpenOf(shape) == 0 && at.Height < 80 * scale)
+            frame = frame with { ContentLeft = at.Height * .5f, ContentTop = 0, ContentRight = at.Width - at.Height * .5f, ContentBottom = at.Height };
         return pointer is { } p
             ? frame with { PointerX = (float)(p.X * at.Width), PointerY = (float)(p.Y * at.Height), Hover = 1, Press = (float)press }
             : frame with { Press = (float)press };

@@ -61,7 +61,7 @@ internal readonly record struct LiquidFrame(
     // The backdrop's brightness (sRGB luma, before the glass's own tint) where the themes' text keeps 4.5:1 with a little to
     // spare: dark text (#101217) over at least TextLight, light text (#F6F7F9) over at most TextDark (with the tints, about
     // .56 and .33).
-    public const float TextLight = .52f, TextDark = .352f;
+    public const float TextLight = .52f, TextDark = .40f;
 
     // The two looks, at a display scale, for a shape and size: the source's glass in both. Light: its white background
     // (rgba(255,255,255,.08)) and the backdrop lifted to at least TextLight; dark: as thin a dark base (#121419 at .08) and the
@@ -409,14 +409,19 @@ internal sealed class LiquidRenderer : IDisposable
             FilterEndX = f.Faithful && f.FilterWidth > 0 && f.FilterHeight > 0 ? Math.Min(f.FilterWidth, w) : 0,
             FilterEndY = f.Faithful && f.FilterWidth > 0 && f.FilterHeight > 0 ? Math.Min(f.FilterHeight, h + extra) : 0,
             // The open panel's frost: about FrostDip across, faded in with the opening; never on the source's own glass.
-            Open = f.Faithful ? 0 : Math.Clamp(f.Open, 0, 1), FrostRadius = FrostDip * scale, BandMean = _bandMean
+            Open = f.Faithful ? 0 : Math.Clamp(f.Open, 0, 1), FrostRadius = FrostDip * scale, BandMean = _bandMean,
+            // The collapsed island's content row: a light frost behind it (ContentFrostDip), feathered over FeatherDip.
+            ContentFrost = ContentFrostDip * scale, Feather = FeatherDip * scale,
+            ContentLeft = f.Faithful ? 0 : f.ContentLeft, ContentTop = f.ContentTop, ContentRight = f.Faithful ? 0 : f.ContentRight, ContentBottom = f.ContentBottom,
+            Hover = f.Faithful || !float.IsFinite(f.PointerX) || !float.IsFinite(f.PointerY) ? 0 : Math.Clamp(f.Hover, 0, 1),
+            PointerX = float.IsFinite(f.PointerX) ? f.PointerX : -1e4f, PointerY = float.IsFinite(f.PointerY) ? f.PointerY : -1e4f
         };
         _context.UpdateSubresource(in c, _constants);
     }
 
     private const float RingCss = 90;
     // The open panel's frost, DIP (Liquid.hlsl, Frost: a Gaussian of about three quarters of it).
-    private const float FrostDip = 12;
+    private const float FrostDip = 12, ContentFrostDip = 4, FeatherDip = 4;
     private float _maxHalf;
     private (float, float, float, float, float, bool) _maxFor;
 
@@ -549,6 +554,8 @@ internal sealed class LiquidRenderer : IDisposable
         public float BandA, BandB, Narrow, Press;
         public float Dark, Band, LinearMap, LinearFilters;
         public float BoxCssX, BoxCssY, FilterEndX, FilterEndY;
-        public float Open, FrostRadius, BandMean, Spare;
+        public float Open, FrostRadius, BandMean, ContentFrost;
+        public float ContentLeft, ContentTop, ContentRight, ContentBottom;
+        public float Hover, PointerX, PointerY, Feather;
     }
 }
