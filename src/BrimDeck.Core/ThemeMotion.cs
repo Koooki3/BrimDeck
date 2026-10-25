@@ -118,15 +118,21 @@ public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double Ho
     double ParticleStrength, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent")
 {
     public const string SystemAccent = "system";
-    public static readonly ThemeMotion Default = new(AmbientMotion.None, HoverFx.Reveal, .12, PressFx.Shade, .18, 0, FocusFx.Ring, 1, "accent", "accent");
+    // Without a motion section anywhere in the base chain, nothing is drawn over the controls: they keep their own hover and
+    // press looks, as the default dark and light themes do.
+    public static readonly ThemeMotion Default = new(AmbientMotion.None, HoverFx.None, .12, PressFx.None, .18, 0, FocusFx.None, 1, "accent", "accent");
     public bool AnyInteraction => Hover != HoverFx.None && HoverStrength > 0 || Press != PressFx.None && PressStrength > 0 || ParticleStrength > 0 && Particles != ParticleFx.None || Focus != FocusFx.None;
 
     // "system" follows Windows: its accent color and the quiet Fluent answers (a light theme's lift and sink stay), with no
-    // ambient light, particles or steps. The base theme's strengths and pace stay.
+    // ambient light, particles or steps. The base theme's strengths and pace stay, and a base without answers (the default dark
+    // and light themes) keeps none.
     public ThemeMotion ForSystem() => this with
     {
-        Ambient = AmbientMotion.None, Hover = Hover == HoverFx.Lift ? HoverFx.Lift : HoverFx.Reveal, Press = Press == PressFx.Sink ? PressFx.Sink : PressFx.Shade,
-        ParticleStrength = 0, Particles = ParticleFx.None, Steps = 0, Focus = FocusFx.Ring, Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
+        Ambient = AmbientMotion.None,
+        Hover = Hover switch { HoverFx.None => HoverFx.None, HoverFx.Lift => HoverFx.Lift, _ => HoverFx.Reveal },
+        Press = Press switch { PressFx.None => PressFx.None, PressFx.Sink => PressFx.Sink, _ => PressFx.Shade },
+        ParticleStrength = 0, Particles = ParticleFx.None, Steps = 0, Focus = Focus == FocusFx.None ? FocusFx.None : FocusFx.Ring,
+        Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
     };
 
     // A motion color as the palette draws it: a key of the palette, a color, or the Windows accent (systemAccent; the palette's
