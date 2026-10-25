@@ -6,29 +6,20 @@ namespace BrimDeck.Core;
 // direction of travel as the panel's page switch does, the old month leaving before the new one arrives so two sets of figures
 // never fade over each other.
 
-// The durations in milliseconds, from the animation length chosen in settings (100 to 1000 ms, 360 by default). At the default
-// they are the panel's own: a glide is the monitor's sort pill (Soft.Choose), a band or a message the short swap (Soft.Short),
-// a month leaves in about a seventh of a second and arrives in the monitor's move (Soft.Move), and an enabled state eases in
-// the monitor's hover time (Eased.Hover).
+// The durations in milliseconds: the panel's own feedback timings, which do not follow the animation length chosen in settings
+// (the panel's hover and press feedback do not either). A glide is the monitor's sort pill (Soft.Choose), a band, a message or a
+// changed date the short swap (Soft.Short), a month leaves in about a seventh of a second and arrives in the monitor's move
+// (Soft.Move), and an enabled state eases in the panel's hover time (Soft.Hover).
 // Glide: a marker or the active field's outline moving. Band: a cell of the range band. Leave and Arrive: a month change.
 // Message: the validation message opening or closing. Enable: a button becoming available or not. Dissolve: a changed date.
 public readonly record struct DatePickerTiming(int Glide, int Band, int Leave, int Arrive, int Message, int Enable, int Dissolve)
 {
-    public static DatePickerTiming From(int animationDuration)
-    {
-        // The settings' own range (Settings.Normalize).
-        double d = Math.Clamp(animationDuration, 100, 1000);
-        static int Ms(double value, double min, double max) => (int)Math.Round(Math.Clamp(value, min, max));
-        return new(Ms(d * .875, 90, 875), Ms(d * 2 / 3, 70, 670), Ms(d * .4, 50, 400), Ms(d * 7 / 6, 120, 1000), Ms(d * 2 / 3, 70, 670),
-            Ms(d * .45, 50, 450), Ms(d * 2 / 3, 70, 670));
-    }
+    // Soft.Short.
+    private const int Short = 240;
 
-    // The animation length a new settings file has (Settings.AnimationDuration).
-    public const int DefaultLength = 360;
-
-    // What the picker uses: the timings at the default length, whatever the panel's animation length, so the picker keeps the
-    // pace of the panel's own feedback (Soft.Hover, Soft.Choose, Soft.Move), which does not follow that setting either.
-    public static readonly DatePickerTiming Fixed = From(DefaultLength);
+    // What the picker uses.
+    public static readonly DatePickerTiming Fixed = new(Glide: (int)(Eased.Seconds * 750), Band: Short, Leave: 144, Arrive: (int)(Eased.Seconds * 1000),
+        Message: Short, Enable: (int)(Eased.Hover * 1000), Dissolve: Short);
 
     // The new month starts to arrive once the old one has nearly gone (DatePickerMotion.HandOver).
     public int ArriveDelay => (int)Math.Round(Leave * DatePickerMotion.HandOver);
