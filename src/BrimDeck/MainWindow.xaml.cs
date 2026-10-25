@@ -607,6 +607,9 @@ public partial class MainWindow : Window
         if (reshaping) duration = (int)(duration * 1.25);
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
+        // How long the panel's closing runs: a notice that arrives meanwhile waits for it (MainWindow.Notices.cs).
+        if (expanded) _collapseEnds = 0;
+        else if (wasExpanded) _collapseEnds = duration > 0 ? Environment.TickCount64 + duration : 0;
         // The opening spring is most of the way there within a fifth of the move, so the content follows soon after it.
         Track content = expanded ? new(.12, .8) : new(0, .30);
         Track surface = reshaping || morphing || booting || expanded ? new(0, 1) : new(.12, line ? .92 : 1);
