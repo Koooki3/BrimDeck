@@ -260,7 +260,8 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
     // BrimDeck read ($4): a file replaced on Windows after BrimDeck read it is not installed (sec-M2). The hash is taken with
     // whichever of sha256sum, busybox, openssl and python3 the distribution has (C-L7). Everything that can refuse is checked
     // before the agent is copied, so a refusal costs no copy (P3). Prints "conflict" when brim-notify was left alone. Exit
-    // codes: 3 the folder is refused, 4 the copy's hash differs, 5 no tool can take the hash (InstallFailure).
+    // codes: 3 the folder is refused, 4 the copy's hash differs, 5 no tool can take the hash, 6 the agent on Windows cannot be
+    // reached from the distribution (wslpath fails or Windows' drives are not mounted) (InstallFailure).
     // sh needs plain line feeds; a raw string takes the source file's line endings, which Git on Windows checks out as CRLF.
     private static readonly string InstallScript = $$"""
         set -eu
@@ -282,7 +283,8 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
         # A step that fails leaves no temporary file of BrimDeck's behind.
         trap 'rm -f "$dir"/.new.??????' EXIT
         put() { t=$(mktemp "$dir/.new.XXXXXX"); cat > "$t"; chmod "$2" "$t"; mv -f "$t" "$1"; }
-        src=$(wslpath -u "$1")
+        src=$(wslpath -u "$1" 2>/dev/null) || src=""
+        if [ -z "$src" ] || [ ! -r "$src" ]; then echo "refused: Windows' drives cannot be reached from here (automount off?)" >&2; exit 6; fi
         t=$(mktemp "$dir/.new.XXXXXX")
         cat < "$src" > "$t"
         sum=$(sha "$t")
@@ -511,11 +513,12 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
 
     // Says why the install script failed (C-L7), and waits RepeatedInstallFailure when it failed the same way for the same
     // agent file last time (P3). Only a failure that will recur by itself counts (M4): the folder refused (3), the copy differing
-    // (4), no hashing tool (5). A timeout (a cold start of WSL) or another code (a full disk, a failed read) is retried as usual.
+    // (4), no hashing tool (5), Windows' drives out of reach (6, automount turned off). A timeout (a cold start of WSL) or
+    // another code (a full disk, a failed read) is retried as usual.
     private void InstallFailed(string hash, int? code)
     {
         bool repeated;
-        lock (_gate) { repeated = code is 3 or 4 or 5 && _installFailure == (hash, code); _installFailure = (hash, code); }
+        lock (_gate) { repeated = code is 3 or 4 or 5 or 6 && _installFailure == (hash, code); _installFailure = (hash, code); }
         Retry(InstallFailure(code), repeated ? RepeatedInstallFailure : null);
     }
 
@@ -524,6 +527,7 @@ internal sealed class WslNoticeAgent(string distribution, Task? previous = null)
         3 => Loc.T("无法安装：~/.local/share/brimdeck 是链接、不属于该用户，或其他用户可写入", "cannot install: ~/.local/share/brimdeck is a link, not the user's own, or writable by others"),
         4 => Loc.T("无法安装：复制后的代理与 BrimDeck 读到的不一致", "cannot install: the copied agent differs from the one BrimDeck read"),
         5 => Loc.T("无法安装：发行版中没有 sha256sum、busybox、openssl 或 python3", "cannot install: the distribution has no sha256sum, busybox, openssl or python3"),
+        6 => Loc.T("无法安装：发行版中无法访问 Windows 磁盘（可能关闭了 automount）", "cannot install: the distribution cannot reach Windows' drives (automount may be off)"),
         null => Loc.T("安装超时或无法运行 wsl.exe", "install timed out, or wsl.exe could not run"),
         _ => "install (" + code + ")"
     };
