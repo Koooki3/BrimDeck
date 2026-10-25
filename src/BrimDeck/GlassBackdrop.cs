@@ -115,7 +115,12 @@ internal sealed class GlassBackdrop : IDisposable
     private LiquidRenderer? _renderer;
     private SpriteVisual? _liquid;
     private CompositionRoundedRectangleGeometry? _liquidClip;
-    private bool _liquidFailed;
+    // Liquid glass could not be shown on this window (no capture, a lost device): it shows the blur from now on. LiquidUsable
+    // tells the app, and LiquidFailed when it happens, so automatic liquid glass, which then has nothing to measure, follows the
+    // Windows app theme instead (App.GlassMeasures).
+    private bool _liquidFailed { get; set { if (field == value) return; field = value; if (value) LiquidFailed?.Invoke(); } }
+    public bool LiquidUsable => !LiquidOff && !_liquidFailed;
+    public static event Action? LiquidFailed;
     // Hover and press, eased toward the pointer's state; the time they were last eased.
     private double _hover, _press;
     private long _easedAt;

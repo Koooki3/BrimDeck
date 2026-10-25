@@ -29,6 +29,9 @@ public sealed partial class SettingsWindow
     private bool _themesFresh;
     // The "当前主题" section, replaced alone when a card is chosen.
     private StackPanel? _themeDetails;
+    // Automatic liquid glass's name with the look it shows now, in the "当前主题" section: a turn of the look only renames it
+    // (GlassTurned), as it can come every few seconds over a video.
+    private TextBlock? _glassNow;
     // Each card's miniature, kept while its palette stays the same; a file theme gets a new palette each time it is read.
     private readonly Dictionary<(string Card, string Language), (PanelPalette Palette, FrameworkElement Preview)> _themePreviews = [];
 
@@ -132,13 +135,19 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("当前主题", "Current theme"));
         var rows = new List<FrameworkElement>();
         string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")")
-            : chosen == PanelThemes.GlassAuto ? Loc.T("液态玻璃（自动，当前：", "Liquid Glass (auto, now: ") + theme.DisplayName + Loc.T("）", ")") : theme.DisplayName;
-        rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
+            : chosen == PanelThemes.GlassAuto ? GlassTitle(theme) : theme.DisplayName;
+        var name = TextLine(title, 12, TextSecondary);
+        _glassNow = chosen == PanelThemes.GlassAuto ? name : null;
+        rows.Add(Row(Loc.T("名称", "Name"), name));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.")
             : chosen == PanelThemes.GlassAuto ? Loc.T("清透的液态玻璃，按岛后方内容的明暗自动换成浅色或深色玻璃，文字随之切换，始终清晰可读。",
                 "Clear liquid glass that turns light or dark with what lies behind the island, its text following, so it always reads.") : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         if (theme.File.Night is not null) rows.Add(DaylightRow(theme.File));
+        // Automatic liquid glass with nothing to measure (App.GlassMeasures) takes the Windows app theme's look meanwhile.
+        if (chosen == PanelThemes.GlassAuto && !_app.GlassMeasures)
+            rows.Add(Row(Loc.T("提示", "Note"), Wrapped(Loc.T("现在无法测量岛后方的明暗（节电模式、远程会话、透明效果关闭、高对比度或无法捕获屏幕），自动外观暂时跟随 Windows 的应用主题。",
+                "What lies behind the island cannot be measured now (battery saver, a remote session, transparency effects off, high contrast, or no screen capture), so the auto look follows the Windows app theme meanwhile."), false)));
         // Glass needs Windows' transparency effects; without them it is drawn opaque, and the page says why.
         if (PanelThemes.Resolve(theme).IsGlass && (!MotionEnvironment.Transparency || SystemParameters.HighContrast))
             rows.Add(Row(Loc.T("提示", "Note"), Wrapped(SystemParameters.HighContrast
@@ -389,6 +398,16 @@ public sealed partial class SettingsWindow
             try { Process.Start(new ProcessStartInfo("notepad.exe", "\"" + path + "\"") { UseShellExecute = true }); }
             catch (Win32Exception error) { SaveStatus(error.Message, true); }
         }
+    }
+
+    private static string GlassTitle(PanelThemeInfo theme) => Loc.T("液态玻璃（自动，当前：", "Liquid Glass (auto, now: ") + theme.DisplayName + Loc.T("）", ")");
+
+    // Automatic liquid glass took its other look: only the name of the look shown changes on the theme page. The rest of the
+    // settings shows the look of when it was built until it is built again, as a turn can come every few seconds.
+    internal void GlassTurned()
+    {
+        if (IsLoaded && _page == ThemePage && _glassNow is not null && PanelThemes.NormalizeId(S.PanelTheme) == PanelThemes.GlassAuto)
+            _glassNow.Text = GlassTitle(PanelTheme.Find(PanelThemes.GlassAuto));
     }
 
     // The panel theme changed without this page, or Windows switched between light and dark (the "System" card shows it).
