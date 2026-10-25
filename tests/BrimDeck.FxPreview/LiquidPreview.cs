@@ -84,12 +84,18 @@ internal static class LiquidPreview
                 (Color.FromRgb(0xFF, 0xE0, 0x3D), 640, 10, 40), (Color.FromRgb(0x7C, 0xFF, 0x4F), 260, 200, 60), (Color.FromRgb(0xFF, 0x6A, 0x00), 90, 230, 50)
             ];
             foreach (var (color, x, y, r) in discs) dc.DrawEllipse(new SolidColorBrush(color), null, new Point(x, y), r, r);
+            // A photograph instead, as the references are shown over (LIQUID_PHOTO: an image file); the document window stays.
+            if (Environment.GetEnvironmentVariable("LIQUID_PHOTO") is { Length: > 0 } photo && File.Exists(photo))
+                dc.DrawRectangle(new ImageBrush(new System.Windows.Media.Imaging.BitmapImage(new Uri(photo))) { Stretch = Stretch.UniformToFill }, null, new Rect(0, 0, DesktopWidth, DesktopHeight));
+            bool photoShown = Environment.GetEnvironmentVariable("LIQUID_PHOTO") is { Length: > 0 } shown && File.Exists(shown);
+            if (!photoShown) {
             var grid = new Pen(new SolidColorBrush(Color.FromArgb(0x90, 0xFF, 0xFF, 0xFF)), 1);
             for (double x = 0; x <= DesktopWidth; x += 20) dc.DrawLine(grid, new Point(x + .5, 0), new Point(x + .5, DesktopHeight));
             for (double y = 0; y <= DesktopHeight; y += 20) dc.DrawLine(grid, new Point(0, y + .5), new Point(DesktopWidth, y + .5));
             var stripe = new SolidColorBrush(Color.FromArgb(0xC0, 0x10, 0x10, 0x18));
             for (double x = -200; x < DesktopWidth; x += 26)
                 dc.DrawGeometry(stripe, null, Geometry.Parse(FormattableString.Invariant($"M {x},120 L {x + 10},120 L {x + 70},180 L {x + 60},180 Z")));
+            }
             // A document window across the middle and right.
             var window = new Rect(400, 90, 330, 300);
             dc.DrawRoundedRectangle(Brushes.White, new Pen(new SolidColorBrush(Color.FromRgb(0xC8, 0xCC, 0xD4)), 1), window, 8, 8);

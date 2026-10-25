@@ -189,68 +189,61 @@ float3 Glass(float2 p, float sd, float2 n)
     float strength = Refraction * (1 + .7 * Press + .6 * Morph);
     float shift = strength * thickness * bend;
 
-    // The rim: the background shifted outward along the normal, red a little less than blue, nearly sharp at the edge and
-    // softer inward, so the frost of the middle comes on without a seam.
-    float spread = Dispersion * (1 + Morph) * .35;
-    float frost = smoothstep(.12, .95, x);
-    float3 color = 0;
-    if (frost < 1)
-    {
-        float level = lerp(.25, Frost - 1, smoothstep(0, .7, x));
-        float3 rim;
-        rim.r = Read(p + n * shift * (1 - spread), level).r;
-        rim.g = Read(p + n * shift, level).g;
-        rim.b = Read(p + n * shift * (1 + spread), level).b;
-        color = rim * (1 - frost);
-    }
+    // A convex rim bends the ray inward, as a lens does: the background is read from further inside, so what lies under
+    // the rim is drawn magnified out to the edge. Red bends a little less than blue, only near the outer edge. Sharp at the
+    // rim, the reads soften toward the middle's light frost.
+    float spread = Dispersion * (1 + Morph) * .3 * (1 - x) * (1 - x);
+    float level = lerp(0, Frost, smoothstep(0, 1, x));
+    float2 at = p - n * shift;
+    float3 color;
+    color.r = Read(at + n * shift * spread, level).r;
+    color.g = Read(at, level).g;
+    color.b = Read(at - n * shift * spread, level).b;
+    // The middle's frost: a few reads on a small golden-angle spiral, so the mips' blocks do not show.
+    float frost = smoothstep(.3, 1, x);
     if (frost > 0)
     {
-        // The middle: a frost of twelve reads from the mips on a golden-angle spiral, so neither the mips' blocks nor fine
-        // lines behind show through as bands.
-        float level = Frost - 1.5;
-        float radius = exp2(Frost) * 1.3;
-        float2 at = p + n * shift;
+        float radius = exp2(Frost) * .9;
         float3 f = 0;
-        [unroll] for (int i = 0; i < 12; i++)
+        [unroll] for (int i = 0; i < 6; i++)
         {
-            float r = radius * sqrt((i + .5) / 12);
+            float r = radius * sqrt((i + .5) / 6);
             float a = i * 2.39996323;
-            f += Read(at + r * float2(cos(a), sin(a)), level);
+            f += Read(at + r * float2(cos(a), sin(a)), Frost);
         }
-        color += f / 12 * frost;
+        color = lerp(color, f / 6, frost);
     }
 
-    // The band: saturated about the luma and mapped into Low..High, opened toward 0..1 at the rim.
+    // The band: the brightness (luma) mapped into Low..High, opened toward 0..1 at the rim, and the color laid back over
+    // it, saturated. Text contrast rests on the brightness, which the band holds; the hue is kept, so the glass shows the
+    // colors behind it, pastel on light glass and deep on dark, instead of a gray of the band's brightness.
     float luma = dot(color, float3(.2126, .7152, .0722));
-    color = max(lerp(luma.xxx, color, Saturation), 0);
-    float open = EdgeBand * (1 - x) * (1 - x) * (3 - 2 * (1 - x)) ;
+    float open = EdgeBand * (1 - x) * (1 - x) * (3 - 2 * (1 - x));
     float low = lerp(Low, 0, open), high = lerp(High, 1, open);
-    color = low + (high - low) * color;
+    float held = low + (high - low) * luma;
+    float3 chroma = (color - luma) * Saturation;
+    // Room for the color within 0..1 around the held brightness, so it is scaled rather than clipped (which would shift
+    // its brightness out of the band).
+    float3 up = chroma > 0 ? (1 - held) / max(chroma, 1e-4) : (held) / max(-chroma, 1e-4);
+    float room = saturate(min(min(up.r, up.g), up.b));
+    color = held + chroma * room;
     color = lerp(color, Tint.rgb, Tint.a);
 
-    // Light. The light's direction rises 40 degrees over the plane; its highlight on the bevel narrows with a press.
-    float hover = Hover;
+    // Light: a crisp line along the very rim, bright on the side facing the light (the pointer, or top-left) and faint
+    // opposite, and a narrow glint on the bevel there. A press narrows and brightens it; hover lifts it a little.
+    float towards = saturate(dot(n, Light)), away = saturate(-dot(n, Light));
+    float line1 = exp(-depth / (.55 * Scale));
+    float rimLight = line1 * (.35 + .65 * pow(towards, 2) + .25 * pow(away, 3));
     float3 light = normalize(float3(Light * .77, .64));
     float3 half1 = normalize(light + float3(0, 0, 1));
-    float3 half2 = normalize(float3(-light.xy, light.z) + float3(0, 0, 1));
-    float shine = 24 * (1 + 2.5 * Press);
-    float facing = dot(n, Light);
-    float bevel = 1 - x;
-    float spec = pow(saturate(dot(surface, half1)), shine) * bevel;
-    float back = pow(saturate(dot(surface, half2)), shine) * bevel * .38;
-    // The rim line: a device pixel and a half wide, brightest facing the light.
-    float line1 = exp(-depth / (.9 * Scale));
-    float rimLight = line1 * (.22 + .78 * pow(saturate(facing * .5 + .5), 3));
-    // The pointer's glow: the light gathers on the stretch of rim nearest it, and faintly over the glass under it.
+    float bevel = (1 - x) * (1 - x);
+    float spec = pow(saturate(dot(surface, half1)), 80 * (1 + 1.5 * Press)) * bevel * pow(towards, 1.5);
+    // The pointer's light gathers on the stretch of rim nearest it.
     float2 toPointer = p - Pointer;
     float glow = Near * exp(-dot(toPointer, toPointer) / (Glow * Glow));
-    float lift = (1 + .6 * hover) * (1 + .5 * Press);
-    float amount = (spec * (.55 + .45 * Press) + back + rimLight * .55) * lift * (1 + 1.4 * glow) + glow * (.05 + .25 * bevel * bevel);
-    // Fresnel: the steep rim reflects a little of the sky.
-    float fresnel = pow(1 - surface.z, 3) * .35;
-    float3 sky = Dark > .5 ? float3(.75, .8, .88) : float3(1, 1, 1);
-    color = lerp(color, sky, fresnel * Gain * (Dark > .5 ? .6 : 1));
-    color += amount * Gain * (Dark > .5 ? float3(.82, .88, 1) : float3(1, 1, 1));
+    float lift = (1 + .35 * Hover) * (1 + .4 * Press) * (1 + .8 * glow);
+    float amount = (rimLight * .55 + spec * .5) * lift;
+    color += amount * Gain * (Dark > .5 ? float3(.85, .9, 1) * .8 : float3(1, 1, 1));
     return saturate(color);
 }
 

@@ -49,11 +49,14 @@ internal readonly record struct LiquidFrame(
     // 0..28, saturation 1.5, tint #121419 at .15 of C8).
     public static LiquidFrame Preset(bool dark, int width, int height, float cornerTop, float cornerBottom, float shoulder, float scale) => dark
         ? new(width, height, cornerTop, cornerBottom, shoulder, 0x12 / 255f, 0x14 / 255f, 0x19 / 255f, 30 / 255f,
-            Thickness: 12 * scale, Refraction: .9f, Dispersion: .45f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 1,
-            BandLow: 0, BandHigh: .28f, Saturation: 1.5f, EdgeBand: .55f, Frost: 4.5f + MathF.Log2(scale), Scale: scale, Light: .8f)
+            Thickness: Bevel(height, scale), Refraction: 1.3f, Dispersion: .5f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 1,
+            BandLow: 0, BandHigh: .3f, Saturation: 2.2f, EdgeBand: .6f, Frost: 2f + MathF.Log2(scale), Scale: scale, Light: .8f)
         : new(width, height, cornerTop, cornerBottom, shoulder, 0xF8 / 255f, 0xFA / 255f, 0xFD / 255f, 45 / 255f,
-            Thickness: 12 * scale, Refraction: .9f, Dispersion: .45f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 0,
-            BandLow: .85f, BandHigh: 1, Saturation: 2, EdgeBand: .8f, Frost: 4.5f + MathF.Log2(scale), Scale: scale, Light: 1);
+            Thickness: Bevel(height, scale), Refraction: 1.3f, Dispersion: .5f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 0,
+            BandLow: .9f, BandHigh: 1, Saturation: 1.8f, EdgeBand: 0, Frost: 2f + MathF.Log2(scale), Scale: scale, Light: 1);
+
+    // The bevel: 14 DIP on the open panel, and under half the height on the small collapsed island, so the rim stays a rim.
+    private static float Bevel(int height, float scale) => MathF.Min(14 * scale, height * .4f);
 }
 
 // Liquid glass: the desktop under the island (captured by the caller, padded around it, BrimDeck's own windows left out) drawn

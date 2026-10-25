@@ -344,7 +344,9 @@ internal sealed class GlassBackdrop : IDisposable
             _liquidFrame = preset with
             {
                 Tint_R = glass.Tint.R / 255f, Tint_G = glass.Tint.G / 255f, Tint_B = glass.Tint.B / 255f, TintAlpha = (float)thin,
-                BandLow = glass.Held ? (float)glass.Low : 0, BandHigh = glass.Held ? (float)glass.High : 1, Saturation = glass.Held ? (float)glass.Saturation : 1,
+                // The glass's own band, never wider than the theme's: the contrast rules were checked over the theme's band.
+                BandLow = glass.Held ? MathF.Max(preset.BandLow, (float)glass.Low) : preset.BandLow,
+                BandHigh = glass.Held ? MathF.Min(preset.BandHigh, (float)glass.High) : preset.BandHigh,
                 PointerX = pointer is { } p ? (float)(p.X * scale) : float.NaN, PointerY = pointer is { } q ? (float)(q.Y * scale) : float.NaN,
                 Hover = (float)_hover, Press = (float)_press, Morph = (float)_moving
             };
