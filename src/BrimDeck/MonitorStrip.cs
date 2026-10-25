@@ -22,11 +22,20 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly double _scale, _font, _dial, _gap, _row, _dpi;
     private readonly Func<CompactMonitorItems, double> _width;
     private MonitorSnapshot? _snapshot;
+    // Made once, as the strip measures and draws on every reading: the readings in order, each once, the delegates it hands to
+    // CompactMonitor (a method group or a lambda passed each time would be allocated each time), and the list they are
+    // arranged into.
+    private readonly CompactMonitorItems[] _orderOnce;
+    private readonly Func<CompactMonitorItems, double> _itemWidth, _presenceNow;
+    private readonly List<(CompactMonitorItems Item, double X, double Width, double Presence)> _arranged = [];
+    private double _now;
 
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi)
     {
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered;
         _order = [.. readings.Select(reading => reading.Item)];
+        _orderOnce = [.. _order.Distinct()];
+        _itemWidth = ItemWidth; _presenceNow = item => _presence.At(item, _now);
         _shown = CompactMonitor.Shown(readings); _values = CompactMonitor.Values(readings);
         _scale = CompactMusicLayout.SafeScale(scale);
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
@@ -79,23 +88,26 @@ internal sealed class MonitorStrip : FrameworkElement
         _actual.Clear();
         if (!_tight) return;
         var s = _snapshot;
-        double text(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace);
-        foreach (var item in CompactMonitor.Order)
+        for (int i = 0; i < CompactMonitor.Order.Count; i++)
         {
+            var item = CompactMonitor.Order[i];
             if ((Shown & item) == 0) continue;
             double? share = item switch { CompactMonitorItems.Cpu => s?.Cpu.OrDefault?.Usage, CompactMonitorItems.Memory => s?.Memory.OrDefault?.UsedFraction, CompactMonitorItems.Gpu => s?.Gpu.OrDefault?.Usage, _ => null };
             _actual[item] = item switch
             {
-                CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu when (_values & item) != 0 => _dial + Math.Round(4 * _scale) + text(GaugeFigure(share)),
-                CompactMonitorItems.Download => Math.Round(9 * _scale) + Math.Round(3 * _scale) + text(RateFigure(s?.Network.OrDefault?.DownBytesPerSecond)),
-                CompactMonitorItems.Upload => Math.Round(9 * _scale) + Math.Round(3 * _scale) + text(RateFigure(s?.Network.OrDefault?.UpBytesPerSecond)),
+                CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu when (_values & item) != 0 => _dial + Math.Round(4 * _scale) + FigureWidth(GaugeFigure(share)),
+                CompactMonitorItems.Download => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.DownBytesPerSecond)),
+                CompactMonitorItems.Upload => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.UpBytesPerSecond)),
                 _ => _width(item)
             };
         }
-        _tightWidth = DevicePixels.Up(CompactMonitor.Width(Shown, ItemWidth, _gap), _dpi);
+        _tightWidth = DevicePixels.Up(CompactMonitor.Width(Shown, _itemWidth, _gap), _dpi);
     }
+    private double FigureWidth(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace);
 
-    private static string GaugeFigure(double? share) => share is { } v ? MonitorFormat.Percent(v) + "%" : "—";
+    // Every whole percent's figure, made once: the gauges show one on every reading.
+    private static readonly string[] Percents = [.. Enumerable.Range(0, 101).Select(percent => MonitorFormat.Percent(percent / 100d) + "%")];
+    private static string GaugeFigure(double? share) => share is { } v ? Percents[MonitorFormat.WholePercent(v)] : "—";
     private static string RateFigure(double? rate)
     {
         var q = rate is { } r ? MonitorFormat.CompactRate(r) : new MonitorFormat.Quantity("—", "");
@@ -106,7 +118,7 @@ internal sealed class MonitorStrip : FrameworkElement
     // carries it on, as the old row no longer draws.
     protected override Size ArrangeOverride(Size finalSize)
     {
-        if (_presence.Set(Shown, CompactMonitor.Fit(Shown, ItemWidth, _gap, finalSize.Width)) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
+        if (_presence.Set(Shown, CompactMonitor.Fit(Shown, _itemWidth, _gap, finalSize.Width)) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
         return finalSize;
     }
     private bool Step(double now) { InvalidateVisual(); return _presence.Moving(now); }
@@ -115,11 +127,12 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), center = _row / 2, now = Eased.Now;
         // Each reading takes its width and the gap after it in proportion to how present it is, so the row closes up smoothly.
-        var (items, total) = CompactMonitor.Arrange(_order, Shown, ItemWidth, _gap, item => _presence.At(item, now));
+        _now = now;
+        double total = CompactMonitor.Arrange(_orderOnce, Shown, _itemWidth, _gap, _presenceNow, _arranged);
         if (total <= 0) return;
         double start = _centered ? (w - total) / 2 : w - total;
         var s = _snapshot;
-        foreach (var (item, at, width, presence) in items)
+        foreach (var (item, at, width, presence) in _arranged)
         {
             double x = start + at;
             // A reading on its way in or out is drawn smaller and fainter, centred in the room it has.
@@ -133,22 +146,26 @@ internal sealed class MonitorStrip : FrameworkElement
                 drawing.PushTransform(new TranslateTransform(offset, 0));
             }
             double left = Math.Round(x);
+            // Each reading in the color of its level (ReadingLevels); the core columns take theirs core by core.
+            var level = ReadingLevels.Of(item, s);
+            string color = _colors.At(item, level);
             switch (item)
             {
                 case CompactMonitorItems.Columns: Columns(drawing, left, width, center, s?.Cpu.OrDefault); break;
-                case CompactMonitorItems.Cpu: Gauge(drawing, left, center, s?.Cpu.OrDefault?.Usage, _colors.Normal(item), "C", (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Cpu: Gauge(drawing, left, center, s?.Cpu.OrDefault?.Usage, color, level, "C", (_values & item) != 0, ppd); break;
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
-                    Gauge(drawing, left, center, memory?.UsedFraction, memory is null ? UI.Tertiary : _colors.Memory(memory.Level), "M", (_values & item) != 0, ppd); break;
-                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, _colors.Normal(item), "G", (_values & item) != 0, ppd); break;
-                case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, _colors.Normal(item), ppd); break;
-                case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, _colors.Normal(item), ppd); break;
+                    Gauge(drawing, left, center, memory?.UsedFraction, memory is null ? UI.Tertiary : color, level, "M", (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, color, level, "G", (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
+                case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
         }
     }
 
-    // The cores as thin columns, fastest kind first, in their colors; their tops show the load at a glance.
+    // The cores as thin columns, fastest kind first, in their colors; their tops show the load at a glance, and a busy core
+    // takes the warning or critical color by its own load.
     private void Columns(DrawingContext drawing, double x, double width, double center, CpuSample? cpu)
     {
         double height = Math.Round(14 * _scale), top = Math.Round(center - height / 2);
@@ -160,57 +177,38 @@ internal sealed class MonitorStrip : FrameworkElement
             var core = cpu.Cores[i];
             double cx = x + i * (column + gap), fill = Math.Max(1.5, core.Usage * height);
             drawing.DrawRectangle(UI.Brush(UI.Fill), null, new Rect(cx, top, column, height));
-            drawing.DrawRectangle(UI.Brush(_colors.Core(core.Group, groups)), null, new Rect(cx, top + height - fill, column, fill));
+            drawing.DrawRectangle(UI.Brush(CoreColor(core.Group, groups, ReadingLevels.OfShare(core.Usage))), null, new Rect(cx, top + height - fill, column, fill));
         }
+    }
+    // A core's color is mixed from the strip's colors, which it keeps: each is mixed once, not for every core on every reading.
+    private readonly Dictionary<(int Group, int Groups, MemoryLevel Level), string> _coreColors = [];
+    private string CoreColor(int group, int groups, MemoryLevel level)
+    {
+        if (!_coreColors.TryGetValue((group, groups, level), out var color)) _coreColors[(group, groups, level)] = color = _colors.Core(group, groups, level);
+        return color;
     }
 
     // A dial open at the bottom with the reading's letter inside, and the figure after it when it shows one: the gap tells it from
     // the full quota rings beside it, and a letter stays legible at this size where a glyph does not.
-    private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, string letter, bool figured, double ppd)
+    private void Gauge(DrawingContext drawing, double x, double center, double? share, string color, MemoryLevel level, string letter, bool figured, double ppd)
     {
-        Dial(drawing, x, center, share, color, letter, ppd);
+        // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
+        MonitorDraw.Dial(drawing, new Point(x + _dial / 2, center), _dial, Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), Math.Max(1, 7 * _scale), share, color, letter, ppd);
         if (!figured) return;
-        var text = MonitorDraw.Text(GaugeFigure(share), _font, UI.Primary, ppd);
+        var text = MonitorDraw.Text(GaugeFigure(share), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + _dial + Math.Round(4 * _scale), Math.Round(center + _font * .36));
     }
 
-    // Three quarters of a circle, from lower left over the top to lower right, filled clockwise by the share. Its centre sits a
-    // little low, so the open circle looks centred in the row; the letter is centred on its own outline, not on the font's box.
-    private const double DialStart = Math.PI * 1.25, DialSweep = Math.PI * 1.5;
-    private void Dial(DrawingContext drawing, double x, double center, double? share, string color, string letter, double ppd)
-    {
-        // As thick as a quota ring and on the same track, so its whole outline shows even at a low share.
-        double size = _dial, ring = Math.Max(1.2, CompactMusicLayout.Half(2 * _scale)), radius = size / 2 - ring / 2;
-        var c = new Point(x + size / 2, center + .5 * _scale);
-        DialArc(drawing, c, radius, ring, 1, PanelTheme.Hex("ringTrack"));
-        if (share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
-        var text = MonitorDraw.Text(letter, Math.Max(1, 7 * _scale), UI.Primary, ppd, strong: true);
-        var bounds = text.BuildGeometry(new Point()).Bounds;
-        if (!bounds.IsEmpty) drawing.DrawText(text, new Point(c.X - bounds.X - bounds.Width / 2, c.Y - bounds.Y - bounds.Height / 2));
-    }
-
-    private static void DialArc(DrawingContext drawing, Point c, double radius, double thickness, double fraction, string color)
-    {
-        Point at(double angle) => new(c.X + radius * Math.Sin(angle), c.Y - radius * Math.Cos(angle));
-        double sweep = DialSweep * fraction;
-        var figure = new PathFigure { StartPoint = at(DialStart), IsClosed = false };
-        figure.Segments.Add(new ArcSegment(at(DialStart + sweep), new Size(radius, radius), 0, sweep > Math.PI, SweepDirection.Clockwise, true));
-        var geometry = new PathGeometry([figure]); geometry.Freeze();
-        var pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-        pen.Freeze();
-        drawing.DrawGeometry(null, pen, geometry);
-    }
+    // A figure keeps the text color while its reading is normal and takes the level's color at the warning and critical
+    // levels, as the quota bars' numbers do.
+    private static string FigureColor(MemoryLevel level, string color) => level == MemoryLevel.Normal ? UI.Primary : color;
 
     // An arrow and the rate in at most four characters and a letter: "84K", "1.2M".
-    private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, double? rate, string color, double ppd)
+    private void Rate(DrawingContext drawing, double x, double center, MonitorGlyph glyph, double? rate, string color, MemoryLevel level, double ppd)
     {
-        double size = Math.Round(9 * _scale), scale = size / 16;
-        var pen = new Pen(UI.Brush(color), Math.Max(1, 1.4 * _scale) / scale) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
-        pen.Freeze();
-        drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, x, center - size / 2));
-        drawing.DrawGeometry(null, pen, MonitorDraw.Glyph(glyph));
-        drawing.Pop();
-        var text = MonitorDraw.Text(RateFigure(rate), _font, UI.Primary, ppd);
+        double size = Math.Round(9 * _scale);
+        MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.4 * _scale), glyph, color);
+        var text = MonitorDraw.Text(RateFigure(rate), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 }
@@ -238,5 +236,10 @@ internal sealed class StripPresence
     }
 
     public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
-    public bool Moving(double now) => _items.Values.Any(eased => eased.Moving(now));
+    public bool Moving(double now)
+    {
+        // Asked on every frame of a transition; the dictionary's own enumerator allocates nothing.
+        foreach (var eased in _items.Values) if (eased.Moving(now)) return true;
+        return false;
+    }
 }

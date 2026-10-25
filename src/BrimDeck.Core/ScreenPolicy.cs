@@ -2,6 +2,17 @@ namespace BrimDeck.Core;
 
 public static class ScreenPolicy
 {
+    // What changed between two polls of the foreground window: the context itself, only the app behind it, or nothing.
+    // The panel folds away only for a context change; an app change under the same context re-resolves the app rules
+    // without touching its shape.
+    public enum ForegroundChange { None, Context, App }
+
+    public static ForegroundChange WhatChanged(ScreenContext context, string appName, string appPath,
+        ScreenContext previousContext, string previousName, string previousPath)
+        => context != previousContext ? ForegroundChange.Context
+         : appName != previousName || appPath != previousPath ? ForegroundChange.App
+         : ForegroundChange.None;
+
     public static ScreenContext Classify(bool exclusive, bool coversMonitor, bool hasCaption, bool maximized)
     {
         if (exclusive) return ScreenContext.Exclusive;
@@ -10,18 +21,10 @@ public static class ScreenPolicy
         return coversMonitor ? ScreenContext.Borderless : ScreenContext.Desktop;
     }
 
-    // Whether the foreground app is exempt from the fullscreen rules. The name is the process name and the path the
-    // executable; either one saved in an exception is enough. An entry that names a path also matches by name, so it keeps
+    // Whether a saved rule is about the app the context was detected for. The name is the process name and the path the
+    // executable; either one saved in a rule is enough. A rule that names a path also matches by name, so it keeps
     // working when the executable's path cannot be read, for example for a process running as administrator.
-    public static bool IsException(string? processName, string? imagePath, IEnumerable<FullscreenException>? exceptions)
-    {
-        if (exceptions is null) return false;
-        foreach (var exception in exceptions)
-            if (Matches(exception, processName, imagePath)) return true;
-        return false;
-    }
-
-    public static bool Matches(FullscreenException? exception, string? processName, string? imagePath)
+    public static bool Matches(FullscreenRule? exception, string? processName, string? imagePath)
     {
         if (exception is null) return false;
         if (NormalizePath(exception.Path).Length > 0 && NormalizePath(imagePath).Length > 0 &&
@@ -31,7 +34,7 @@ public static class ScreenPolicy
 
     // The setting list's identity: the path when one is saved, the process name otherwise. Case and slash direction do not
     // make a second entry.
-    public static string Key(FullscreenException exception)
+    public static string Key(FullscreenRule exception)
         => NormalizePath(exception.Path) is { Length: > 0 } path
             ? "path:" + path.ToLowerInvariant()
             : "name:" + NormalizeName(exception.Name).ToLowerInvariant();

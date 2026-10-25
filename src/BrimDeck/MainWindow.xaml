@@ -10,14 +10,24 @@
          The zone starts at the island's left edge: its left margin places the island within the window (see SetExpanded). -->
     <Grid x:Name="HoverZone" HorizontalAlignment="Left" VerticalAlignment="Top" Background="{x:Null}"
           MouseEnter="Island_MouseEnter" MouseLeave="Island_MouseLeave">
-      <Grid x:Name="IslandShadow" HorizontalAlignment="Left" VerticalAlignment="Top"
-            Width="{Binding ActualWidth, ElementName=Island}" Height="{Binding ActualHeight, ElementName=Island}"
-            Margin="{Binding Margin, ElementName=Island}" Opacity="0" IsHitTestVisible="False">
-        <Grid.Effect>
-          <DropShadowEffect Color="Black" BlurRadius="14" ShadowDepth="4" Direction="270" Opacity="0.28"/>
-        </Grid.Effect>
-        <local:IslandBorder Background="{Binding Background, ElementName=Island}" CornerRadius="{Binding CornerRadius, ElementName=Island}"
-                            ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}" Inset="1"/>
+      <!-- The shadow is drawn from a cached picture: WPF blurs an effect again whenever anything drawn over it changes (the
+           scrolling title, the equalizer, a carousel), and the cache keeps the blurred result (dropped while the island changes
+           size or its color, MainWindow.Shadow.cs). The effect must stay on the child for the cache to hold it; the shadow fades on
+           ShadowHost, outside the cache, so a fade reuses the picture. ShadowBounds reaches past
+           the blur by whole device pixels, so the picture lies on the pixel grid and looks exactly as the shadow drawn
+           directly (FitShadowCache). -->
+      <Grid x:Name="ShadowHost" HorizontalAlignment="Left" VerticalAlignment="Top" Opacity="0" IsHitTestVisible="False">
+        <Grid.CacheMode><BitmapCache EnableClearType="False" SnapsToDevicePixels="True"/></Grid.CacheMode>
+        <Rectangle x:Name="ShadowBounds" Fill="Transparent" Margin="-20"/>
+        <Grid x:Name="IslandShadow" HorizontalAlignment="Left" VerticalAlignment="Top"
+              Width="{Binding ActualWidth, ElementName=Island}" Height="{Binding ActualHeight, ElementName=Island}"
+              Margin="{Binding Margin, ElementName=Island}" IsHitTestVisible="False">
+          <Grid.Effect>
+            <DropShadowEffect Color="Black" BlurRadius="14" ShadowDepth="4" Direction="270" Opacity="0.28"/>
+          </Grid.Effect>
+          <local:IslandBorder Background="{Binding Background, ElementName=Island}" CornerRadius="{Binding CornerRadius, ElementName=Island}"
+                              ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}" Inset="1"/>
+        </Grid>
       </Grid>
       <!-- In compact form this strip covers the whole bounding box from the screen edge down, including the notch shoulders,
            the rounded corners and the gap above the capsule. It sits below the island so compact content keeps its own hit testing.

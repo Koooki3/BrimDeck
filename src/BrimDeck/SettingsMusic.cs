@@ -12,9 +12,11 @@ namespace BrimDeck;
 public sealed partial class SettingsWindow
 {
     private DeckPage _previewPage;
-    private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true) where T : notnull
+    // keepPreview marks the segments alone as preview controls, so a press on the rest of the row still ends the preview.
+    private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true, bool keepPreview = false) where T : notnull
     {
         var strip = new UniformGrid { Columns = options.Length, Width = 292, IsEnabled = enabled };
+        if (keepPreview) KeepPreview(strip);
         foreach (var option in options)
         {
             var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = option.Label, GroupName = title, IsChecked = EqualityComparer<T>.Default.Equals(option.Value, selected) };

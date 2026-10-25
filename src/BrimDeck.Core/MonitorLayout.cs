@@ -1,12 +1,22 @@
+using System.Text.Json.Serialization;
+
 namespace BrimDeck.Core;
 
 // The system monitor page's color schemes: ftop's three palettes by Nongfsq (https://github.com/Nongfsq/ftop, MIT License;
-// see ThirdPartyNotices.txt), and Theme, which takes the colors of the panel theme in use (the app resolves it, as only it
-// knows the theme). Saved as numbers, so new members go at the end.
-public enum MonitorPalette { Sea, Graphite, Warm, Theme }
+// see ThirdPartyNotices.txt), Theme, which takes the colors of the panel theme in use (the app resolves it, as only it knows
+// the theme), and Custom, a scheme of the user's own (MonitorCustomColors). Saved as numbers, so new members go at the end.
+public enum MonitorPalette { Sea, Graphite, Warm, Theme, Custom }
 
-// The colors of one of ftop's palettes on a dark or a light panel theme. Theme has no fixed colors and gives Sea's here.
-public sealed record MonitorColors(string Performance, string Efficiency, string Gpu, string Normal, string Warning, string Critical)
+// The colors of a scheme, in the order the settings list them: Cpu the CPU readings and the fastest cores, Efficiency the
+// slowest cores (the kinds between take the colors between), then memory, GPU, download and upload. The collapsed readings
+// and the expanded page take the same ones.
+public enum MonitorRole { Cpu, Efficiency, Memory, Gpu, Download, Upload }
+
+// The colors of one of ftop's palettes on a dark or a light panel theme. Theme and Custom have no fixed colors and give Sea's
+// here. ftop's palettes have three main colors; memory and upload take the efficiency color, download the performance color.
+// Warning and Critical are not part of a scheme: they are the collapsed readings' colors at those levels (ReadingLevels),
+// which the app takes from the settings or the panel theme; For gives fixed ones.
+public sealed record MonitorColors(string Performance, string Efficiency, string Memory, string Gpu, string Download, string Upload, string Warning, string Critical)
 {
     public static MonitorColors For(MonitorPalette palette, bool dark = true)
     {
@@ -19,31 +29,93 @@ public sealed record MonitorColors(string Performance, string Efficiency, string
             (_, true) => ("#5B9BFF", "#45D1BD", "#B294FF"),
             _ => ("#1F5FE0", "#0B8F7E", "#7A4FD6")
         };
-        return dark ? new(performance, efficiency, gpu, "#4FD17F", "#F0B54A", "#FF6B5E") : new(performance, efficiency, gpu, "#1C9A50", "#B26A00", "#D23F31");
+        var (warning, critical) = dark ? ("#F0B54A", "#FF6B5E") : ("#B26A00", "#D23F31");
+        return new(performance, efficiency, efficiency, gpu, performance, efficiency, warning, critical);
     }
 
     // The Theme scheme from a theme's colors (opaque "#RRGGBB"): the accent for the fastest cores, and for the slowest cores and
     // the GPU the first of the theme's other colors (cyan, pink, lime, amber in that order) that is clearly not a color already
-    // taken, so a theme whose accent is its cyan still tells the kinds of core apart.
-    public static MonitorColors FromTheme(string accent, IReadOnlyList<string> others, string normal, string warning, string critical)
+    // taken, so a theme whose accent is its cyan still tells the kinds of core apart. Memory, download and upload as in For.
+    public static MonitorColors FromTheme(string accent, IReadOnlyList<string> others, string warning, string critical)
     {
         const double Apart = 64;
         string Pick(params string[] taken) => others.FirstOrDefault(color => taken.All(other => ColorMath.Distance(color, other) >= Apart))
             ?? others.Where(color => !taken.Contains(color, StringComparer.OrdinalIgnoreCase)).DefaultIfEmpty(taken[^1]).First();
         string efficiency = Pick(accent), gpu = Pick(accent, efficiency);
-        return new(accent, efficiency, gpu, normal, warning, critical);
+        return new(accent, efficiency, efficiency, gpu, accent, efficiency, warning, critical);
     }
+
+    public string this[MonitorRole role] => role switch
+    {
+        MonitorRole.Efficiency => Efficiency, MonitorRole.Memory => Memory, MonitorRole.Gpu => Gpu, MonitorRole.Download => Download,
+        MonitorRole.Upload => Upload, _ => Performance
+    };
+    public MonitorColors With(MonitorRole role, string color) => role switch
+    {
+        MonitorRole.Efficiency => this with { Efficiency = color }, MonitorRole.Memory => this with { Memory = color }, MonitorRole.Gpu => this with { Gpu = color },
+        MonitorRole.Download => this with { Download = color }, MonitorRole.Upload => this with { Upload = color }, _ => this with { Performance = color }
+    };
+    // Every color as drawn (the app moves them to read on the panel theme).
+    public MonitorColors Map(Func<string, string> drawn) =>
+        new(drawn(Performance), drawn(Efficiency), drawn(Memory), drawn(Gpu), drawn(Download), drawn(Upload), drawn(Warning), drawn(Critical));
 
     // Core groups run from the performance color to the efficiency color in even steps, so a processor with any number of
     // kinds of core has a color for each.
     public string Core(int group, int groups) => ColorMath.Mix(Performance, Efficiency, groups > 1 ? Math.Clamp(group, 0, groups - 1) / (double)(groups - 1) : 0);
-    public string Memory(MemoryLevel level) => level switch { MemoryLevel.Critical => Critical, MemoryLevel.Elevated => Warning, _ => Normal };
+    // A collapsed reading's color at a level: its own color in the normal state, the warning or critical color above it.
+    public string Level(MemoryLevel level, string normal) => level switch { MemoryLevel.Critical => Critical, MemoryLevel.Elevated => Warning, _ => normal };
 
     public static string Name(MonitorPalette palette) => palette switch
     {
         MonitorPalette.Graphite => Loc.T("石墨", "Graphite"), MonitorPalette.Warm => Loc.T("暖色", "Warm"), MonitorPalette.Theme => Loc.T("跟随主题", "Theme"),
-        _ => Loc.T("海洋", "Sea")
+        MonitorPalette.Custom => Loc.T("自定义", "Custom"), _ => Loc.T("海洋", "Sea")
     };
+}
+
+// The Custom scheme: the preset it starts from (Base, never Custom) and the colors changed from it, "#RRGGBB" each, or null to
+// follow the base. The colors not changed keep following the base, so they still suit a light or a dark panel theme.
+public sealed class MonitorCustomColors
+{
+    public MonitorPalette Base { get; set; } = MonitorPalette.Theme;
+    public string? Cpu { get; set; }
+    public string? Efficiency { get; set; }
+    public string? Memory { get; set; }
+    public string? Gpu { get; set; }
+    public string? Download { get; set; }
+    public string? Upload { get; set; }
+
+    public string? Get(MonitorRole role) => role switch
+    {
+        MonitorRole.Efficiency => Efficiency, MonitorRole.Memory => Memory, MonitorRole.Gpu => Gpu, MonitorRole.Download => Download,
+        MonitorRole.Upload => Upload, _ => Cpu
+    };
+    public void Set(MonitorRole role, string? color)
+    {
+        switch (role)
+        {
+            case MonitorRole.Efficiency: Efficiency = color; break;
+            case MonitorRole.Memory: Memory = color; break;
+            case MonitorRole.Gpu: Gpu = color; break;
+            case MonitorRole.Download: Download = color; break;
+            case MonitorRole.Upload: Upload = color; break;
+            default: Cpu = color; break;
+        }
+    }
+    // Whether any color differs from the base's.
+    [JsonIgnore] public bool Changed => Enum.GetValues<MonitorRole>().Any(role => Get(role) is not null);
+    // The base's colors with the changed ones over them, each as drawn (by default as given).
+    public MonitorColors Over(MonitorColors colors, Func<string, string>? drawn = null) =>
+        Enum.GetValues<MonitorRole>().Aggregate(colors, (result, role) => Get(role) is { } own ? result.With(role, drawn is null ? own : drawn(own)) : result);
+    // What the expanded page is built from (part of its key).
+    [JsonIgnore] public string Key => string.Join(",", Enum.GetValues<MonitorRole>().Select(Get).Prepend(Base.ToString()));
+    public MonitorCustomColors Copy() => (MonitorCustomColors)MemberwiseClone();
+    // The base is a fixed scheme or Theme; a color that is not "#RRGGBB" follows the base.
+    public void Normalize()
+    {
+        if (!Enum.IsDefined(Base) || Base == MonitorPalette.Custom) Base = MonitorPalette.Theme;
+        foreach (var role in Enum.GetValues<MonitorRole>())
+            Set(role, AppPresets.NormalizeColor(Get(role)) is { Length: > 0 } valid ? valid : null);
+    }
 }
 
 public enum ListPlacement { None, Side, Below }

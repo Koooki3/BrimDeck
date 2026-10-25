@@ -12,19 +12,30 @@ public enum ScreenContext { Desktop, Maximized, Borderless, Exclusive }
 public enum DisplayPlacement { Primary, Chosen }
 // A chosen monitor: its device path, and its name at the time, so that a disconnected monitor can still be named.
 public sealed record ChosenDisplay(string Id, string Name);
-// An app whose full-screen windows keep the panel in its normal style, such as a desktop beautification tool. Path is the
-// executable when it is known; an entry with only a name matches any process of that name.
-public sealed record FullscreenException(string Name = "", string Path = "");
+// One app's own answers to the three window rules, as "app rules": for each of the three contexts the app can be in, the
+// panel can follow the global rules (null) or choose one of the behaviors they offer. An app with all three set to Normal
+// is the full-screen exception as it began: its covering windows leave the panel alone. Path is the executable when it is
+// known; an entry with only a name matches any process of that name.
+public sealed record FullscreenRule(string Name = "", string Path = "")
+{
+    public WindowBehavior? Maximized { get; init; }
+    public WindowBehavior? Borderless { get; init; }
+    public WindowBehavior? Exclusive { get; init; }
+}
 // ZCode reads the ZCode desktop application's local request records and its signed-in Coding Plan quota.
 // Dsh reads the DeepSeek account or API key that DeepSeek Harness (desktop app or local web app) signed in with; DeepSeek uses a key entered by hand.
 // GrokBot reads the weekly allowance of the Grok Bot desktop app; it is a quota source only.
+// Kimi reads the plan quota of the account Kimi Code (CLI, desktop app or VS Code extension) signed in with, and its local session records;
+// KimiApi reads the same plan quota with a Kimi Code API key entered by hand.
 // Statistics sources are saved as numbers. 8 and 9 were a short-lived split of Claude and are retired:
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
-public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14 }
+public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
 public enum DeckPage { Usage, Music, Monitor }
 public enum DefaultDeckPage { Last, Usage, Music, Monitor }
+// What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
+public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
 // The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left and the
 // equalizer and the clock at the right; Music places only the title or lyric. Saved as numbers, so new members go at the end.
@@ -130,8 +141,8 @@ public static class AppPresets
     public static string Name(ProviderId id) => ProviderCatalog.Name(id);
     // The original preset colors: coral for Claude, mint for Codex, periwinkle for Antigravity, light gray for Cursor.
     public static string ThemeColor(ProviderId id) => id switch
-    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#3A538D", ProviderId.Dsh => "#6081DA",
-      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
+    { ProviderId.Claude => "#E5A385", ProviderId.Codex => "#98DBB0", ProviderId.Antigravity => "#9CB9FF", ProviderId.ZCode => "#3A538D", ProviderId.Dsh => "#6081DA", ProviderId.Kimi => "#68CDEB",
+      ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => ManualColor, _ => "#D4D5DF" };
     // Sources entered by hand share one purple by default.
     public const string ManualColor = "#CC9EED";
     public static int Level(double usedPercent) => usedPercent >= CriticalPercent ? 2 : usedPercent >= WarningPercent ? 1 : 0;
@@ -240,8 +251,12 @@ public sealed class DeckSettings
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;
-    // The mouse wheel walks the shown pages while the panel is expanded; scrolling parts of a page keep their wheel.
-    public bool MouseWheelPages { get; set; } = true;
+    // What the mouse wheel does while the panel is expanded; scrolling parts of a page keep their wheel.
+    public MouseWheelAction MouseWheel { get; set; } = MouseWheelAction.Pages;
+    // Read only to carry the switch of a file saved before MouseWheel existed; Normalize moves it across and the member
+    // then disappears from the saved file.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? MouseWheelPages { get; set; }
     public DeckPage LastPage { get; set; }
     public double Width { get; set; } = 520;
     public double Height { get; set; } = 200;
@@ -256,7 +271,11 @@ public sealed class DeckSettings
     public WindowBehavior Exclusive { get; set; } = WindowBehavior.Hide;
     // Applications whose windows are not counted as full screen, so that a desktop beautification tool does not hide the
     // panel. Empty by default: every app follows the three rules above.
-    public List<FullscreenException> FullscreenExceptions { get; set; } = [];
+    public List<FullscreenRule> FullscreenRules { get; set; } = [];
+    // Read only to carry the exceptions of a file saved before app rules existed; Normalize moves them across and the
+    // member then disappears from the saved file.
+    public sealed record LegacyFullscreenException(string Name = "", string Path = "");
+    public List<LegacyFullscreenException> FullscreenExceptions { get; set; } = [];
     public DisplayPlacement Display { get; set; }
     // Kept while Display is Primary, so that choosing displays again restores them.
     public List<ChosenDisplay> DisplayMonitors { get; set; } = [];
@@ -266,6 +285,12 @@ public sealed class DeckSettings
     public double MonitorWidth { get; set; } = MonitorSizes.Default.Width;
     public double MonitorHeight { get; set; } = MonitorSizes.Default.Height;
     public MonitorPalette MonitorPalette { get; set; } = MonitorPalette.Theme;
+    // The Custom scheme's colors; kept while another scheme is chosen.
+    public MonitorCustomColors MonitorCustomColors { get; set; } = new();
+    // The collapsed readings' colors at the warning and critical levels (ReadingLevels), "#RRGGBB", or null for the panel
+    // theme's warning and critical colors. The expanded page does not change color by level.
+    public string? CompactWarningColor { get; set; }
+    public string? CompactCriticalColor { get; set; }
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     public bool MonitorProcesses { get; set; } = true;
@@ -357,21 +382,39 @@ public sealed class DeckSettings
         if (entries.Count == 0) { if (enabled && Apps.Count < AppPresets.MaximumApps) Apps.Add(new AppEntry { QuotaSource = id, UsageSource = id }); }
         else foreach (var entry in entries) entry.Enabled = enabled;
     }
-    public WindowBehavior Behavior(ScreenContext context) => context switch
+    // The behavior a context calls for: the app's own rule first, where it chooses one for that context, and the global
+    // rules everywhere else. The app is the one the context was detected for; a null app, as on the desktop, has no rule.
+    public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null)
     {
-        ScreenContext.Maximized => Maximized, ScreenContext.Borderless => Borderless,
-        ScreenContext.Exclusive => Exclusive, _ => WindowBehavior.Normal
-    };
+        if (processName is not null || imagePath is not null)
+            foreach (var rule in FullscreenRules)
+                if (ScreenPolicy.Matches(rule, processName, imagePath))
+                {
+                    var own = context switch
+                    {
+                        ScreenContext.Maximized => rule.Maximized, ScreenContext.Borderless => rule.Borderless,
+                        ScreenContext.Exclusive => rule.Exclusive, _ => null
+                    };
+                    if (own is { } choice) return choice;
+                    break;
+                }
+        return context switch
+        {
+            ScreenContext.Maximized => Maximized, ScreenContext.Borderless => Borderless,
+            ScreenContext.Exclusive => Exclusive, _ => WindowBehavior.Normal
+        };
+    }
     public DeckSettings Copy()
     {
         var copy = (DeckSettings)MemberwiseClone();
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
+        copy.MonitorCustomColors = (MonitorCustomColors ?? new()).Copy();
         copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
-        copy.FullscreenExceptions = [.. FullscreenExceptions ?? []];
+        copy.FullscreenRules = FullscreenRules.Select(rule => rule with { }).ToList();
         return copy;
     }
     public void Normalize()
@@ -402,6 +445,10 @@ public sealed class DeckSettings
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
+        MonitorCustomColors ??= new();
+        MonitorCustomColors.Normalize();
+        CompactWarningColor = AppPresets.NormalizeColor(CompactWarningColor) is { Length: > 0 } warning ? warning : null;
+        CompactCriticalColor = AppPresets.NormalizeColor(CompactCriticalColor) is { Length: > 0 } critical ? critical : null;
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
@@ -410,6 +457,7 @@ public sealed class DeckSettings
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
         CompactReadings = Core.CompactMonitor.Normalize(CompactReadings);
+        Core.CompactMonitor.MoveColors(this);
         CompactMonitor = Core.CompactMonitor.Preset(CompactReadings) ?? CompactMonitorMode.Custom;
         CompactMonitorItems = Core.CompactMonitor.Shown(CompactReadings);
         if (!Enum.IsDefined(MusicText)) MusicText = CompactMusicText.None;
@@ -447,13 +495,29 @@ public sealed class DeckSettings
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
         if (!Enum.IsDefined(Exclusive)) Exclusive = WindowBehavior.Hide;
         if (!Enum.IsDefined(Display)) Display = DisplayPlacement.Primary;
+        // A file saved before MouseWheel had the page switch turned off as MouseWheelPages = false.
+        if (MouseWheelPages is false) MouseWheel = MouseWheelAction.None;
+        MouseWheelPages = null;
+        if (!Enum.IsDefined(MouseWheel)) MouseWheel = MouseWheelAction.Pages;
+        // A file saved before app rules carried plain exceptions: each becomes a rule that keeps the panel's own style in
+        // all three contexts, which is what an exception did.
+        if (FullscreenExceptions is { Count: > 0 } legacy)
+        {
+            var carried = legacy.Where(entry => entry is not null)
+                .Select(entry => new FullscreenRule(ScreenPolicy.NormalizeName(entry.Name), ScreenPolicy.NormalizePath(entry.Path))
+                    { Maximized = WindowBehavior.Normal, Borderless = WindowBehavior.Normal, Exclusive = WindowBehavior.Normal });
+            FullscreenRules = carried.Concat(FullscreenRules ?? []).ToList();
+            FullscreenExceptions = [];
+        }
         // A path-only entry takes its name from the executable, so it can also be matched when the path cannot be read.
-        FullscreenExceptions = (FullscreenExceptions ?? []).OfType<FullscreenException>()
-            .Select(e => new FullscreenException(ScreenPolicy.NormalizeName(e.Name), ScreenPolicy.NormalizePath(e.Path)))
-            .Select(e => e.Name.Length == 0 && e.Path.Length > 0 ? e with { Name = System.IO.Path.GetFileNameWithoutExtension(e.Path) } : e)
-            .Where(e => e.Name.Length > 0 || e.Path.Length > 0)
+        FullscreenRules = (FullscreenRules ?? []).OfType<FullscreenRule>()
+            .Select(r => new FullscreenRule(ScreenPolicy.NormalizeName(r.Name), ScreenPolicy.NormalizePath(r.Path))
+                { Maximized = Valid(r.Maximized), Borderless = Valid(r.Borderless), Exclusive = Valid(r.Exclusive) })
+            .Select(r => r.Name.Length == 0 && r.Path.Length > 0 ? r with { Name = System.IO.Path.GetFileNameWithoutExtension(r.Path) } : r)
+            .Where(r => r.Name.Length > 0 || r.Path.Length > 0)
             .DistinctBy(ScreenPolicy.Key, StringComparer.OrdinalIgnoreCase)
             .Take(AppPresets.MaximumFullscreenExceptions).ToList();
+        static WindowBehavior? Valid(WindowBehavior? choice) => choice is null || Enum.IsDefined(choice.Value) ? choice : null;
         DisplayMonitors = (DisplayMonitors ?? []).OfType<ChosenDisplay>().Where(d => !string.IsNullOrWhiteSpace(d.Id))
             .Select(d => new ChosenDisplay(d.Id.Trim(), (d.Name ?? "").Trim())).DistinctBy(d => d.Id).ToList();
         if (Display == DisplayPlacement.Chosen && DisplayMonitors.Count == 0) Display = DisplayPlacement.Primary;

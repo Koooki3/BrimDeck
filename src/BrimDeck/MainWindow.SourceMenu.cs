@@ -61,6 +61,7 @@ public partial class MainWindow
 
     private void WatchSourceMenu(ContextMenu menu)
     {
+        PopupMotion.Attach(menu, () => menu.Template?.FindName("Chrome", menu) as UIElement);
         SizeChangedEventHandler resized = (_, _) => { if (menu.IsOpen) ResizeSourceMenu(menu); };
         menu.Opened += (_, _) =>
         {

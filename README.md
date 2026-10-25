@@ -18,7 +18,7 @@ A native Windows app built with C# and WPF, designed for performance and smoothn
 
 <p><a href="#features">Features</a> · <a href="#install">Install</a> · <a href="#quick-start">Quick start</a> · <a href="#privacy">Privacy</a> · <a href="#faq">FAQ</a> · <a href="#contributing">Contributing</a> · <a href="README.zh-CN.md">简体中文</a></p>
 
-<img src="docs/en-US/images/hero.png" width="100%" alt="BrimDeck opens from the notch at the top of the screen into the AI usage panel, switches to the music page, then collapses">
+<img src="docs/en-US/images/hero.png" width="100%" alt="BrimDeck opens from the notch at the top of the screen into the AI usage panel, switches to the music page and then the system monitor page, then collapses">
 
 </div>
 
@@ -27,6 +27,7 @@ A native Windows app built with C# and WPF, designed for performance and smoothn
 - **All quotas in one place**: Quotas for Claude, Codex, Cursor, Antigravity and more are shown in a single panel, so you no longer open each website, command line or app to check them.
 - **Quota checks made simple**: BrimDeck stays collapsed at the top of the screen. Move the pointer over it to open it, and move away to close it.
 - **Media control**: Preview and control the song that is playing inline; the cover, equalizer and lyrics follow the music.
+- **System monitor**: CPU, memory, network speed and other readings stay in the notch or capsule, visible at a glance.
 - **No interruptions in full screen**: Hides automatically while you play full-screen games or watch full-screen video, so it never opens by accident. Adjustable in settings.
 - **Works out of the box**: Detects Claude, Codex, Cursor and other tools already signed in on this PC. No keys to enter and no extra sign-in.
 - **Native Windows**: Built on .NET and WPF to deliver smooth animation with low resource use.
@@ -57,11 +58,13 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
   <img src="docs/en-US/images/compact-alert.png" width="390" alt="Quota notice: Claude 5-hour 91% used">
 
+- Notch and Capsule can show system readings next to the quota rings and the music.
+
+  <img src="docs/en-US/images/compact-monitor.png" width="474" alt="System readings in the notch: core columns, CPU, memory, GPU and network speed beside the quota rings">
+
 - The size and position of the Notch, Capsule and Indicator can be adjusted in settings.
 
 - By default it turns into the Indicator when a window is maximized, and hides during full-screen games or video so it never opens by accident.
-
-- The Notch, Capsule, notices and the expanded panel follow a panel theme: System, Dark or Light, built-in open-source themes such as One Dark Pro, GitHub, Dracula and Night Owl, or a custom theme made with the [theme guide](docs/en-US/themes.md). Text and figures stay readable in every theme.
 
 ### AI usage
 
@@ -75,17 +78,6 @@ BrimDeck sits at the top center of the screen and comes in three styles: Notch (
 
 You can choose the quota providers and set the quota and usage source of each column separately. See [Supported tools](docs/en-US/ai-tools.md).
 
-### System monitor
-
-- The processor's usage large, with the last minute as a soft line beside it, and one column per logical processor, performance cores and efficiency cores in their own colors, each with a tick for its current frequency (point at a column for its figures); the GPU shows small beside them. Click it to show the GPU large instead: a column per engine (3D, copy, video decode and encode…), its dedicated memory and name on hover, and the processor small.
-- Memory in use, cached and committed, and download and upload speed over the physical network adapters with the last minute as a line.
-- The busiest apps by CPU or memory, with the processes of one program folded into one row, compact or detailed, in two columns on a wide panel; the list does not reshuffle when two apps trade places by a point. Click an app for its card.
-- Drag the open panel's bottom edge, sides or corners to resize it, on every page (AI usage, system monitor and media); the layout follows step by step. The grips reach a little beyond the edges, handles appear as the pointer nears them, and the edge under the pointer lights in the theme's accent; the size follows the pointer on a soft spring.
-- The notch and the capsule can show the readings too: ftop's strip of core columns, CPU, memory, GPU and network, three ring gauges, or readings of your choice, next to the quota rings and the music. They widen to fit; drag either end to set the width yourself (the line shown beside a maximized window too), double-click an end to let them fit again.
-- Follows the panel theme by default, taking its colors from the theme in use; ftop's Sea, Graphite and Warm schemes are also offered, in their light or dark variant to suit the theme. The system is read only while the page or the readings are shown, and processes only while the page is open.
-
-The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT License), a system monitor for macOS.
-
 ### Music
 
 <img src="docs/en-US/images/music.png" width="63%" alt="Music page: cover, title, lyrics, progress bar and playback controls">
@@ -95,14 +87,29 @@ The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT
 
 Works with players that use Windows media controls, with extra support for some players. See [Supported players](docs/en-US/music-players.md).
 
+### System monitor
+
+<img src="docs/en-US/images/monitor.png" width="100%" alt="System monitor page: CPU usage and each core, GPU, memory, network speed and the busiest apps">
+
+- Shows CPU, GPU and memory usage and network speed in real time, along with the usage of each core.
+- Lists the busiest apps by CPU or memory; click an app for its details.
+- Colors follow the panel theme by default; several preset color schemes are offered, and you can make your own.
+
+The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT License), a system monitor for macOS.
+
+### Panel themes
+
+<img src="docs/en-US/images/themes.png" width="100%" alt="The same AI usage page in the Dark, Light, Night Owl, Dracula and Cyberpunk: Edgerunners themes, and in an example custom theme">
+
+- Built-in themes include Dark, Light, One Dark Pro, GitHub Dark, GitHub Light, Dracula, Night Owl and Cyberpunk: Edgerunners.
+- On the Panel theme page in settings, you can change the background, foreground, accent and other colors and save them as a custom theme, or write a theme file by following the [theme guide](docs/en-US/themes.md).
+
 ## Install
 
-Requires Windows 11 (x64).
+Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited support.
 
 1. Download and run `BrimDeck-<version>-Setup.exe` from [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest).
 2. If Windows shows "Windows protected your PC", select "More info", then "Run anyway".
-
-When a new version is available, you are notified when you open the settings; it is downloaded, verified and installed from within the app.
 
 ## Quick start
 
@@ -133,6 +140,9 @@ No. Costs come from the amounts reported by each service or from public model pr
 ## Contributing
 
 You are welcome to report problems, suggest features or ask for more tools and players in [Issues](https://github.com/MoFeng2223/BrimDeck/issues), and to contribute through pull requests.
+
+- Open pull requests against the `dev` branch, not `main`.
+- Upcoming work is listed in the [BrimDeck roadmap](https://github.com/MoFeng2223/BrimDeck/discussions/57). Suggest features under that post, and reply there when you want to take on one of its items. Other topics are welcome in [Discussions](https://github.com/MoFeng2223/BrimDeck/discussions).
 
 ## License
 

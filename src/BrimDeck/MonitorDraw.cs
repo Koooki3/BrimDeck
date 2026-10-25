@@ -10,22 +10,19 @@ namespace BrimDeck;
 // Drawing shared by the system monitor's page and its collapsed strip. The page draws itself in a few elements that render
 // directly instead of a tree of text blocks and borders: a new reading changes what they draw, never the layout, so it costs
 // one redraw of the panel and no measuring. The look follows ftop by Nongfsq (https://github.com/Nongfsq/ftop, MIT License;
-// see ThirdPartyNotices.txt): a round badge with a glyph leads every figure, and a badge with an arc is a gauge.
-internal enum MonitorGlyph { Cpu, Gpu, Memory, Down, Up }
+// see ThirdPartyNotices.txt). The page and the collapsed strip lead their figures alike: CPU, memory and GPU with a dial
+// carrying the reading's letter (Dial), the rates with an arrow (Arrow).
+internal enum MonitorGlyph { Down, Up }
 
 internal static class MonitorDraw
 {
-    // The glyphs on a 16 unit grid, stroked.
+    // The arrows on a 16 unit grid, stroked.
     private static readonly Dictionary<MonitorGlyph, Geometry> Glyphs = new()
     {
-        [MonitorGlyph.Cpu] = Frozen("M5,4 H11 Q12,4 12,5 V11 Q12,12 11,12 H5 Q4,12 4,11 V5 Q4,4 5,4 Z M6.5,1.5 V4 M9.5,1.5 V4 M6.5,12 V14.5 M9.5,12 V14.5 M1.5,6.5 H4 M1.5,9.5 H4 M12,6.5 H14.5 M12,9.5 H14.5"),
-        [MonitorGlyph.Gpu] = Frozen("M1.5,4.5 H14.5 V11.5 H1.5 Z M4,11.5 V14 M7,11.5 V14 M10,6 A2,2 0 1 1 9.99,6 M10,8 V8.01"),
-        [MonitorGlyph.Memory] = Frozen("M1.5,5 H14.5 V11 H1.5 Z M4,11 V13.5 M7,11 V13.5 M10,11 V13.5 M13,11 V13.5 M4.5,7.5 V8.5 M8,7.5 V8.5 M11.5,7.5 V8.5"),
         [MonitorGlyph.Down] = Frozen("M8,2.5 V13 M3.8,8.8 L8,13 L12.2,8.8"),
         [MonitorGlyph.Up] = Frozen("M8,13.5 V3 M3.8,7.2 L8,3 L12.2,7.2"),
     };
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
-    public static Geometry Glyph(MonitorGlyph glyph) => Glyphs[glyph];
 
     // Text set once per string, size, weight and color: the same figures come back every second, so they are not laid out again.
     private static readonly Dictionary<(string, double, bool, bool, string, double), FormattedText> Texts = [];
@@ -51,40 +48,94 @@ internal static class MonitorDraw
     // The text's baseline placed at y, so figures of different sizes on one line sit on one baseline.
     public static void Baseline(DrawingContext drawing, FormattedText text, double x, double baseline) => drawing.DrawText(text, new Point(x, baseline - text.Baseline));
 
-    // A badge: a faint disc with the glyph in the color, and, as a gauge, a ring around it whose arc is the share, from the top
-    // clockwise as on ftop.
-    public static void Badge(DrawingContext drawing, Point center, double size, MonitorGlyph glyph, string color, double? share)
+    // A dial: three quarters of a circle, from lower left over the top to lower right, on the quota rings' track, filled clockwise
+    // by the share, with the reading's letter inside. The gap tells it from the full quota rings beside it in the collapsed row,
+    // and a letter stays legible at that size where a glyph does not. Its centre sits a thirty-second of its size below the
+    // centre given, so the open circle looks centred; the letter is centred on its own outline, not on the font's box.
+    private const double DialStart = Math.PI * 1.25, DialSweep = Math.PI * 1.5;
+    public static void Dial(DrawingContext drawing, Point center, double size, double ring, double letterSize, double? share, string color, string letter, double ppd)
     {
-        double radius = size / 2;
-        drawing.DrawEllipse(UI.Brush(UI.Fill), null, center, radius, radius);
-        if (share is { } fraction)
+        double radius = size / 2 - ring / 2;
+        var c = new Point(center.X, center.Y + size / 32);
+        DialArc(drawing, c, radius, ring, 1, PanelTheme.Hex("ringTrack"));
+        if (share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
+        var text = Text(letter, letterSize, UI.Primary, ppd, strong: true);
+        // Filled as its outline rather than drawn as text: WPF puts a glyph run's baseline on whole device pixels and hints the
+        // glyph to them, which at a fractional scale left the letter up to a pixel above the ring's centre (0.7 px at 150 %). The
+        // outline is rasterised exactly where it lies, as the ring is, so the two share their centre at any scale. Unhinted, it
+        // comes out lighter than the text did (about two thirds of its ink at 150 %); a stroke around it gives the weight back
+        // evenly on every side, so the centre stays. The text renderer darkens a letter by a fraction of a pixel that grows much
+        // more slowly than the letter, so the stroke follows the square root of its size in device pixels (about half a pixel at
+        // 150 %, and close to the text's weight up to 300 %); below 8 px it shrinks with the letter, which keeps the
+        // counters of a 100 % letter open.
+        // The outline, its bounds and its stroke are made once per letter, size, scale and text color (the page and the collapsed
+        // row redraw their dials on every reading and every frame of a move).
+        var key = (letter, letterSize, ppd, UI.Primary);
+        if (!Letters.TryGetValue(key, out var made))
         {
-            double ring = Math.Max(1.2, size * .09), r = radius - ring / 2;
-            var track = new Pen(UI.Brush(UI.Track), ring); track.Freeze();
-            drawing.DrawEllipse(null, track, center, r, r);
-            Arc(drawing, center, r, ring, Math.Clamp(fraction, 0, 1), color);
+            var outline = text.BuildGeometry(new Point()); outline.Freeze();
+            double pixels = letterSize * ppd;
+            var stroke = new Pen(UI.Brush(UI.Primary), Math.Min(.06 * pixels, .17 * Math.Sqrt(pixels)) / ppd) { LineJoin = PenLineJoin.Round };
+            stroke.Freeze();
+            if (Letters.Count > 64) Letters.Clear();
+            Letters[key] = made = (outline, outline.Bounds, stroke);
         }
-        double glyphSize = size * .52, scale = glyphSize / 16;
-        var pen = new Pen(UI.Brush(color), 1.5 / scale * Math.Max(.85, size / 22)) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
-        pen.Freeze();
-        drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, center.X - glyphSize / 2, center.Y - glyphSize / 2));
-        drawing.DrawGeometry(null, pen, Glyphs[glyph]);
+        var (glyph, bounds, weight) = made;
+        if (bounds.IsEmpty) return;
+        drawing.PushTransform(Placed(new Matrix(1, 0, 0, 1, c.X - bounds.X - bounds.Width / 2, c.Y - bounds.Y - bounds.Height / 2)));
+        drawing.DrawGeometry(UI.Brush(UI.Primary), weight, glyph);
         drawing.Pop();
     }
 
-    // An arc of a circle from the top, clockwise, round at its ends.
-    public static void Arc(DrawingContext drawing, Point center, double radius, double thickness, double fraction, string color)
+    private static void DialArc(DrawingContext drawing, Point c, double radius, double thickness, double fraction, string color)
     {
-        if (fraction <= .002) return;
-        var pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        // The whole track is the same on every reading while the dial holds its place; only the share's arc is made anew.
+        bool track = fraction >= 1;
+        if (!track || !Tracks.TryGetValue((c, radius, thickness), out var geometry))
+        {
+            Point at(double angle) => new(c.X + radius * Math.Sin(angle), c.Y - radius * Math.Cos(angle));
+            double sweep = DialSweep * fraction;
+            var figure = new PathFigure { StartPoint = at(DialStart), IsClosed = false };
+            figure.Segments.Add(new ArcSegment(at(DialStart + sweep), new Size(radius, radius), 0, sweep > Math.PI, SweepDirection.Clockwise, true));
+            geometry = new PathGeometry([figure]); geometry.Freeze();
+            if (track) { if (Tracks.Count > 32) Tracks.Clear(); Tracks[(c, radius, thickness)] = geometry; }
+        }
+        drawing.DrawGeometry(null, Stroke(ArcPens, color, thickness, PenLineJoin.Miter), geometry);
+    }
+
+    // A rate's arrow in the color, stroked, in a square of the size with its top left corner at the point.
+    public static void Arrow(DrawingContext drawing, Point at, double size, double thickness, MonitorGlyph glyph, string color)
+    {
+        double scale = size / 16;
+        drawing.PushTransform(Placed(new Matrix(scale, 0, 0, scale, at.X, at.Y)));
+        drawing.DrawGeometry(null, Stroke(ArrowPens, color, thickness / scale, PenLineJoin.Round), Glyphs[glyph]);
+        drawing.Pop();
+    }
+
+    // What the dials and the arrows draw with, kept across redraws: the page and the collapsed row keep their sizes, colors and
+    // places from one reading to the next, and each redraw made them again (the letters' outlines and strokes, the tracks, the
+    // pens and the transforms that place them). Keys hold everything the drawing depends on; each table is emptied when it
+    // grows past a handful of entries, as when a dial moves across the row.
+    private static readonly Dictionary<(string Letter, double Size, double Ppd, string Color), (Geometry Glyph, Rect Bounds, Pen Weight)> Letters = [];
+    private static readonly Dictionary<(Point Center, double Radius, double Thickness), Geometry> Tracks = [];
+    private static readonly Dictionary<(string Color, double Thickness), Pen> ArcPens = [], ArrowPens = [];
+    private static readonly Dictionary<Matrix, Transform> Places = [];
+
+    private static Pen Stroke(Dictionary<(string Color, double Thickness), Pen> pens, string color, double thickness, PenLineJoin join)
+    {
+        if (pens.TryGetValue((color, thickness), out var pen)) return pen;
+        pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = join };
         pen.Freeze();
-        if (fraction >= .999) { drawing.DrawEllipse(null, pen, center, radius, radius); return; }
-        double angle = fraction * Math.PI * 2;
-        var figure = new PathFigure { StartPoint = new Point(center.X, center.Y - radius), IsClosed = false };
-        figure.Segments.Add(new ArcSegment(new Point(center.X + radius * Math.Sin(angle), center.Y - radius * Math.Cos(angle)), new Size(radius, radius), 0,
-            fraction > .5, SweepDirection.Clockwise, true));
-        var geometry = new PathGeometry([figure]); geometry.Freeze();
-        drawing.DrawGeometry(null, pen, geometry);
+        if (pens.Count > 64) pens.Clear();
+        return pens[(color, thickness)] = pen;
+    }
+
+    private static Transform Placed(Matrix place)
+    {
+        if (Places.TryGetValue(place, out var known)) return known;
+        var transform = new MatrixTransform(place); transform.Freeze();
+        if (Places.Count > 64) Places.Clear();
+        return Places[place] = transform;
     }
 
     // A color made fainter, for the second segment of a bar and the fill under a sparkline.

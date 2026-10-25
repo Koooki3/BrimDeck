@@ -12,6 +12,20 @@ Each theme remembers the theme, warning and critical colors of the app columns a
 
 The theme extensions are ported from open-source VS Code themes and use their colors under each theme's MIT License: [One Dark Pro](https://github.com/Binaryify/OneDark-Pro), [GitHub Theme](https://github.com/primer/github-vscode-theme), [Dracula Official](https://github.com/dracula/visual-studio-code) and [Night Owl](https://github.com/sdras/night-owl-vscode-theme). The copyright and license notices of these projects ship with BrimDeck in `ThirdPartyNotices.txt`.
 
+## Changing colors in settings
+
+A theme can be adjusted without writing a file. Under "Colors" in **Settings › Panel theme**:
+
+- **Background, foreground and accent**: changing one of them makes the colors that follow from it again. The background sets the surface and the pop-ups; the foreground sets the text, dividers and fills; the accent sets keyboard focus, chosen dates and the date range. When the background turns from dark to light (or the reverse) and the foreground would no longer read on it, the foreground changes too.
+- **Advanced**: lists every color, the default app colors and the effects (rim width, shadow, scan lines). A translucent color keeps its opacity when a new color is picked.
+
+A changed item is marked "Unsaved" and can be undone on its own, or all at once with "Undo all changes". **Changes take effect only once saved**: until then the panel and the theme cards stay as they are. While there are changes, cards under "Custom" turn into save cards:
+
+- **Save current theme** (blue, in place of "New from current theme"): saves the current theme with the changes as a new custom theme and switches to it. A built-in theme cannot be changed and is saved this way only.
+- **Overwrite current theme** (amber, in place of the chosen custom theme's card): writes the changes into that theme's file. Only the changed values are rewritten; comments and layout stay as they were.
+
+Unsaved changes are kept while BrimDeck runs and are lost when it exits. The surface and rim gradients, the clock's preset colors and gradients, and the color picker's presets are still set in the theme file.
+
 ## Theme files
 
 Like a VS Code theme extension, a theme is a JSON file:
@@ -32,7 +46,7 @@ The smallest theme is a few lines:
 }
 ```
 
-The full template is [`theme-template.json`](../../src/BrimDeck.Core/Templates/theme-template.json). It lists every color, app color and effect with its use and contrast minimum. **New from current theme** on the settings page fills the template with every value of the current theme and opens it; when you save, the page reloads it and the panel updates.
+The full template is [`theme-template.json`](../../src/BrimDeck.Core/Templates/theme-template.json). It lists every color, app color and effect with its use and contrast minimum. **New from current theme** on the settings page fills the template with every value of the current theme, saves it as a new custom theme and switches to it; open it afterwards from "Open themes folder" or the file link under "Current theme". While the settings page is shown, saving a theme file reloads it and the panel updates.
 
 ### Colors
 
@@ -60,7 +74,7 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 
 ### App colors (apps)
 
-The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `manual` (every source entered by hand), `other`, and `warning` and `critical`. A color chosen for a column in "Quotas and usage" takes precedence.
+The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `kimi`, `manual` (every source entered by hand), `other`, and `warning` and `critical`. A color chosen for a column in "Quotas and usage" takes precedence.
 
 ### Clock
 

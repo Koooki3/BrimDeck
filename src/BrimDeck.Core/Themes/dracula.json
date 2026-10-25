@@ -51,10 +51,10 @@
   },
   "apps": {
     "claude": "#FFB86C", "codex": "#50FA7B", "antigravity": "#8BE9FD", "cursor": "#BDBFD0", "zcode": "#BD93F9",
-    "dsh": "#8BE9FD", "grokBot": "#BDBFD0", "manual": "#FF79C6", "other": "#BDBFD0", "warning": "#F1FA8C", "critical": "#FF5555"
+    "dsh": "#8BE9FD", "grokBot": "#BDBFD0", "kimi": "#4FC1E9", "manual": "#FF79C6", "other": "#BDBFD0", "warning": "#F1FA8C", "critical": "#FF5555"
   },
   "clock": {
-    "style": "neon", "color": "gradient", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"],
+    "style": "minimal", "color": "default",
     "palette": { "amber": "#FFB86C", "cyan": "#8BE9FD", "pink": "#FF79C6", "lime": "#50FA7B" },
     "gradients": [
       { "name": "日落", "nameEn": "Sunset", "stops": ["#FFB86C", "#FF79C6", "#BD93F9"] },

@@ -11,13 +11,13 @@ namespace BrimDeck;
 // measuring anything; values ease to each reading in a little under half a second (Eased, Motion) and then rest. Hover and press
 // feedback fades in and out over Soft.Quick in the same way.
 
-// A badge, a figure with its unit, and a detail after it, on one baseline: "(cpu) 47 % 3.41 GHz". Aligned right, the badge
-// still leads and the whole line ends at the right edge. As a button it lights its badge under the pointer and takes clicks.
+// A dial with the reading's letter (MonitorDraw.Dial, as the collapsed strip has it), a figure with its unit, and a detail after
+// it, on one baseline: "(C) 47 % 3.41 GHz". Aligned right, the dial still leads and the whole line ends at the right edge. As a
+// button it lights its dial under the pointer and takes clicks.
 // The main gauge fills the room after its figure with the last minute's trend (Trend), a soft line in its own color.
 internal sealed class FigureGauge : FrameworkElement
 {
-    private readonly MonitorGlyph _glyph;
-    private readonly string _color;
+    private readonly string _letter, _color;
     private readonly double _figure, _small;
     private readonly bool _right, _button;
     private Eased _share, _hover = new(0, Eased.Hover);
@@ -31,9 +31,9 @@ internal sealed class FigureGauge : FrameworkElement
     public IReadOnlyList<double> Trend { set { if (!ReferenceEquals(value, _history)) { _history = value; InvalidateVisual(); } } }
     public event Action? Clicked;
 
-    public FigureGauge(MonitorGlyph glyph, string color, double figure, double small, bool right = false, string? button = null)
+    public FigureGauge(string letter, string color, double figure, double small, bool right = false, string? button = null)
     {
-        _glyph = glyph; _color = color; _figure = figure; _small = small; _right = right; _button = button is not null;
+        _letter = letter; _color = color; _figure = figure; _small = small; _right = right; _button = button is not null;
         Height = Math.Ceiling(figure * 1.4);
         if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); Focusable = false; }
     }
@@ -47,6 +47,10 @@ internal sealed class FigureGauge : FrameworkElement
         else if (changed || share is not null) InvalidateVisual();
     }
     private bool Step(double now) { InvalidateVisual(); return _share.Moving(now) || _hover.Moving(now); }
+    // A dial's ring and letter for its size, in the collapsed strip's proportions (a ring an eighth of the dial thinned a little,
+    // as the page's dials are larger; a letter seven sixteenths of it).
+    public static double DialRing(double size) => Math.Max(1.2, size * .1);
+    public static double DialLetter(double size) => Math.Max(1, size * 7 / 16);
     private void Hover(bool on) { if (_hover.Set(on ? 1 : 0, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, Height);
@@ -70,7 +74,7 @@ internal sealed class FigureGauge : FrameworkElement
             drawing.DrawEllipse(UI.Brush(_pressed ? PanelTheme.Hex("pressed") : PanelTheme.Hex("hover")), null, center, badge / 2 + 2, badge / 2 + 2);
             drawing.Pop();
         }
-        MonitorDraw.Badge(drawing, center, badge, _glyph, _color, _hasShare ? _share.At(now) : null);
+        MonitorDraw.Dial(drawing, center, badge, DialRing(badge), DialLetter(badge), _hasShare ? _share.At(now) : null, _color, _letter, ppd);
         // The figures change once per reading; while the arc moves they are placed as they were drawn.
         double start = x + badge + gap;
         if (_history.Count >= 3 && !_right)
@@ -162,7 +166,11 @@ internal sealed class ColumnGraph : FrameworkElement
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
 
-    private double LabelHeight => _labels ? Math.Ceiling(_label * 2.5) : 0;
+    // The room under the columns for their figures. With the figure line alone, the line's baseline sits on the graph's bottom
+    // edge, level with the foot of the graph beside it (the engines' names and the small cores); a second line needs room for both.
+    private double LabelHeight(double ppd) => !_labels ? 0
+        : _columns.Any(c => c.Sub is { Length: > 0 }) ? Math.Ceiling(_label * 2.5)
+        : 3 + Math.Ceiling(MonitorDraw.Text("3D", _label, UI.Primary, ppd, strong: true).Baseline);
 
     private (double[] X, double Width) Geometry(double width)
     {
@@ -179,7 +187,7 @@ internal sealed class ColumnGraph : FrameworkElement
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double w = ActualWidth, h = ActualHeight - LabelHeight, ppd = MonitorDraw.PixelsPerDip(this), now = Eased.Now;
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), h = ActualHeight - LabelHeight(ppd), now = Eased.Now;
         if (_button) drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
         var (xs, column) = Geometry(w);
         if (xs.Length == 0 || h <= 4) return;
@@ -315,8 +323,8 @@ internal sealed class MemoryBlock : FrameworkElement
     {
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), now = Eased.Now, line = Math.Ceiling(_body * 1.7), badge = Math.Round(_body + 5);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
-        string color = _memory is { } m ? _colors.Memory(m.Level) : UI.Tertiary;
-        MonitorDraw.Badge(drawing, new Point(badge / 2, line / 2), badge, MonitorGlyph.Memory, color, _memory is null ? null : _used.At(now));
+        string color = _memory is null ? UI.Tertiary : _colors.Memory;
+        MonitorDraw.Dial(drawing, new Point(badge / 2, line / 2), badge, FigureGauge.DialRing(badge), FigureGauge.DialLetter(badge), _memory is null ? null : _used.At(now), color, "M", ppd);
         double x = badge + Math.Round(_body * .5), baseline = Math.Round(line / 2 + _body * .38);
         var figure = MonitorDraw.Text(_memory is { } mem ? MonitorFormat.Gigabytes(mem.Used) : "—", _body + 1, UI.Primary, ppd, strong: true);
         MonitorDraw.Baseline(drawing, figure, x, baseline); x += figure.WidthIncludingTrailingWhitespace;
@@ -387,14 +395,16 @@ internal sealed class NetworkBlock : FrameworkElement
     {
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), line = Math.Ceiling(_body * 1.7), half = Math.Floor((w - 12) / 2);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
-        Half(drawing, 0, half, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _down, _colors.Performance, ppd);
-        Half(drawing, half + 12, half, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _up, _colors.Efficiency, ppd);
+        Half(drawing, 0, half, line, MonitorGlyph.Down, _rates?.DownBytesPerSecond, _down, _colors.Download, ppd);
+        Half(drawing, half + 12, half, line, MonitorGlyph.Up, _rates?.UpBytesPerSecond, _up, _colors.Upload, ppd);
     }
 
     private void Half(DrawingContext drawing, double left, double width, double line, MonitorGlyph glyph, double? rate, IReadOnlyList<double> history, string color, double ppd)
     {
         double badge = Math.Round(_body + 5), baseline = Math.Round(line / 2 + _body * .38);
-        MonitorDraw.Badge(drawing, new Point(left + badge / 2, line / 2), badge, glyph, color, null);
+        // The arrow in the room a dial takes, as large against it as the collapsed strip draws it, so the figures line up with memory's.
+        double arrow = Math.Round(badge * 9 / 16);
+        MonitorDraw.Arrow(drawing, new Point(left + (badge - arrow) / 2, line / 2 - arrow / 2), arrow, Math.Max(1, arrow * .155), glyph, color);
         double x = left + badge + Math.Round(_body * .5);
         var q = rate is { } r ? MonitorFormat.Rate(r) : new MonitorFormat.Quantity("—", "");
         var number = MonitorDraw.Text(q.Number, _body + 1, UI.Primary, ppd, strong: true);

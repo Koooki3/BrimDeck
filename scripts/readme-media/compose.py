@@ -129,8 +129,9 @@ def hero(render, out):
     arrow_pressed, hot_pressed = cursor(scale, pressed=True)
 
     expand, switch, collapse, end = marks["expand"], marks["switch"], marks["collapse"], marks["end"]
-    button = marks["musicButton"]
-    music = marks["musicPanel"]
+    monitor_switch = marks["monitorSwitch"]
+    button, monitor_button = marks["musicButton"], marks["monitorButton"]
+    music, monitor = marks["musicPanel"], marks["monitorPanel"]
     start = (660, 262)
     keys = [
         (0.0, *start),
@@ -140,8 +141,12 @@ def hero(render, out):
         (switch - .35, button["x"] + 2, button["y"] + 2),
         (switch + .35, button["x"] + 2, button["y"] + 2),
         (switch + .95, music["x"] + music["width"] * .56, 168),
-        (collapse - .6, music["x"] + music["width"] * .56, 168),
-        (collapse, music["x"] + music["width"] * .62, music["height"] + 34),
+        (monitor_switch - .9, music["x"] + music["width"] * .56, 168),
+        (monitor_switch - .35, monitor_button["x"] + 2, monitor_button["y"] + 2),
+        (monitor_switch + .35, monitor_button["x"] + 2, monitor_button["y"] + 2),
+        (monitor_switch + .95, monitor["x"] + monitor["width"] * .3, 150),
+        (collapse - .6, monitor["x"] + monitor["width"] * .3, 150),
+        (collapse, monitor["x"] + monitor["width"] * .4, monitor["height"] + 34),
         (end, *start),
     ]
     times = [f["time"] for f in frames]
@@ -163,7 +168,7 @@ def hero(render, out):
         canvas = background.copy()
         canvas.alpha_composite(frame_at(t), (round(ox * scale), 0))
         x, y = path_at(keys, t)
-        pressed = switch - .08 <= t <= switch + .06
+        pressed = any(s - .08 <= t <= s + .06 for s in (switch, monitor_switch))
         sprite, spot = (arrow_pressed, hot_pressed) if pressed else (arrow, hot)
         canvas.alpha_composite(sprite, (round((ox + x) * scale) - spot[0], round(y * scale) - spot[1]))
         output.append(rounded(canvas, round(12 * scale)))
@@ -183,10 +188,11 @@ def still(render, out, name, margin=(48, 0, 48, 48), scale=2, radius=12):
     rounded(canvas, round(radius * scale)).save(out / f"{name}.png", optimize=True)
 
 
-def clock_grid(render, out, name="compact-clock", columns=2, scale=2, margin=(36, 0, 36, 30), radius=10, gap=10):
+def clock_grid(render, out, name="compact-clock", columns=2, scale=2, margin=(36, 0, 36, 30), radius=10, gap=10, listing="clocks.json"):
     """Clock samples in a grid. Each cell is framed exactly like compact-notch.png, so at the same README scale
-    (width x 0.45) its notch shows at the same size; a small label sits in the bottom padding."""
-    data = json.loads((render / "clocks.json").read_text(encoding="utf-8"))
+    (width x 0.45) its notch shows at the same size; a small label sits in the bottom padding. The panel themes use the
+    same grid with their own listing."""
+    data = json.loads((render / listing).read_text(encoding="utf-8"))
     font = None
     for face in (r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\segoeui.ttf"):
         try:
@@ -230,12 +236,16 @@ def window_shot(render, out, name, scale=1.5, margin=40, radius=8):
 def main():
     render, out = Path(sys.argv[1]), Path(sys.argv[2])
     out.mkdir(parents=True, exist_ok=True)
-    for name in ["usage", "details", "music"]:
-        still(render, out, name)
-    for name in ["compact-notch", "compact-notch-lyrics", "compact-capsule", "compact-line", "compact-alert"]:
-        still(render, out, name, margin=(36, 0, 36, 30), radius=10)
+    for name in ["usage", "details", "music", "monitor"]:
+        if (render / f"{name}.png").exists():
+            still(render, out, name)
+    for name in ["compact-notch", "compact-notch-lyrics", "compact-capsule", "compact-line", "compact-alert", "compact-monitor"]:
+        if (render / f"{name}.png").exists():
+            still(render, out, name, margin=(36, 0, 36, 30), radius=10)
     if (render / "clocks.json").exists():
         clock_grid(render, out)
+    if (render / "themes.json").exists():
+        clock_grid(render, out, "themes", margin=(24, 0, 24, 30), listing="themes.json")
     if (render / "settings.png").exists():
         window_shot(render, out, "settings")
     icon = Image.open(Path(__file__).resolve().parents[2] / "src" / "BrimDeck" / "Assets" / "BrimDeck.ico")

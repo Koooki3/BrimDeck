@@ -19,6 +19,7 @@ try
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);
+    PanelThemeEditorTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
@@ -28,6 +29,7 @@ try
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
     CurvesTests.Run(Check);
+    IdleCostTests.Run(Check);
     DotMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     NeteaseLogTests.Run(Check);
@@ -35,11 +37,12 @@ try
     await AppUpdateTests.Run(root, Check);
     await InstallerUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
-    FullscreenExceptionTests.Run(Check);
+    FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);
     await ConfiguredProviderTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);
     await DshUsageTests.Run(root, Check);
+    await KimiUsageTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
@@ -715,7 +718,9 @@ sealed class CatalogHandler(string json) : HttpMessageHandler
     public bool SawAuthorization { get; private set; }
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        Calls++; SawAuthorization |= request.Headers.Authorization is not null;
+        // Only catalog requests are counted; the Moonshot AI endpoint requests that follow each update are not.
+        if (request.RequestUri!.AbsolutePath == "/api/v1/models") Calls++;
+        SawAuthorization |= request.Headers.Authorization is not null;
         return Task.FromResult(new HttpResponseMessage(Fail ? System.Net.HttpStatusCode.ServiceUnavailable : System.Net.HttpStatusCode.OK) { Content = new StringContent(Json) });
     }
 }

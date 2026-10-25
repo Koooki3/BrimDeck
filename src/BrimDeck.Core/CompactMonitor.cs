@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace BrimDeck.Core;
 
 // The system monitor's choices beyond its colors. All are saved as numbers, so new members go at the end.
@@ -21,14 +23,29 @@ public enum CompactMonitorItems
 // One reading of the collapsed strip as set in the settings' table; its place there is its place in the strip, left to right.
 // ShowValue: a dial (CPU, memory, GPU) shows its percentage after it, or, off, the dial alone with its letter inside, which is
 // narrower; the core columns carry no figure and the rates are always text, so it means nothing for them.
-// Color: "#RRGGBB" in place of the palette's color in the reading's normal state, or null to follow the palette.
+// The readings take their colors from the color scheme (CompactMonitor.Roles), as the expanded page does, and at the warning
+// and critical levels the collapsed readings' level colors (DeckSettings.CompactWarningColor). Color, ExtraColors,
+// WarningColor and CriticalColor are the reading's own colors from before the custom scheme: "#RRGGBB" in place of the
+// scheme's in the normal state, for the further channels in the normal state (the core columns' slowest kind of core), and at
+// the warning and critical levels. They are kept to read older files, which DeckSettings.Normalize moves into the custom
+// scheme and the level colors (CompactMonitor.MoveColors), and are not written.
 public sealed class CompactReading
 {
     public CompactMonitorItems Item { get; set; }
     public bool Visible { get; set; } = true;
     public bool ShowValue { get; set; } = true;
-    public string? Color { get; set; }
-    public CompactReading Copy() => (CompactReading)MemberwiseClone();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Color { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string?>? ExtraColors { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? WarningColor { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? CriticalColor { get; set; }
+    [JsonIgnore] public bool HasOwnColors => Color is not null || WarningColor is not null || CriticalColor is not null || ExtraColors?.Any(color => color is not null) == true;
+    public void ResetColors() { Color = WarningColor = CriticalColor = null; ExtraColors = null; }
+    public CompactReading Copy()
+    {
+        var copy = (CompactReading)MemberwiseClone();
+        copy.ExtraColors = ExtraColors?.ToList();
+        return copy;
+    }
 }
 
 // What the collapsed row shows of the system and how it gives way when the row is short: whole readings leave one by one,
@@ -45,6 +62,41 @@ public static class CompactMonitor
     // The readings with a figure that can be hidden.
     public const CompactMonitorItems Rings = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu;
     public static bool HasValueChoice(CompactMonitorItems item) => item is CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu;
+    // The colors a reading has in its normal state: the core columns one for the fastest and one for the slowest kind of core,
+    // the others one. Every reading has besides the collapsed readings' warning and critical colors (ReadingLevels).
+    public static int Channels(CompactMonitorItems item) => Roles.TryGetValue(item, out var roles) ? roles.Length : 1;
+    // The color scheme's color of each channel of a reading in its normal state.
+    public static readonly IReadOnlyDictionary<CompactMonitorItems, MonitorRole[]> Roles = new Dictionary<CompactMonitorItems, MonitorRole[]>
+    {
+        [CompactMonitorItems.Columns] = [MonitorRole.Cpu, MonitorRole.Efficiency], [CompactMonitorItems.Cpu] = [MonitorRole.Cpu],
+        [CompactMonitorItems.Memory] = [MonitorRole.Memory], [CompactMonitorItems.Gpu] = [MonitorRole.Gpu],
+        [CompactMonitorItems.Download] = [MonitorRole.Download], [CompactMonitorItems.Upload] = [MonitorRole.Upload]
+    };
+    public static MonitorRole Role(CompactMonitorItems item, int channel = 0) =>
+        Roles.TryGetValue(item, out var roles) ? roles[Math.Clamp(channel, 0, roles.Length - 1)] : MonitorRole.Cpu;
+
+    // Settings saved before the custom scheme gave the collapsed readings their own colors; they leave the readings. Normal-state
+    // colors become the custom scheme's over the scheme in use, which the readings followed otherwise: the CPU color is the CPU
+    // reading's, else the core columns' fastest. Warning and critical colors become the collapsed readings' level colors: the
+    // first a reading sets, in the table's order.
+    public static void MoveColors(DeckSettings settings)
+    {
+        var readings = settings.CompactReadings;
+        if (!readings.Any(reading => reading.HasOwnColors)) return;
+        var moved = settings.MonitorPalette == MonitorPalette.Custom ? settings.MonitorCustomColors.Copy() : new MonitorCustomColors { Base = settings.MonitorPalette };
+        CompactReading? Of(CompactMonitorItems item) => readings.FirstOrDefault(reading => reading.Item == item);
+        void Take(MonitorRole role, string? color) { if (color is not null) moved.Set(role, color); }
+        Take(MonitorRole.Cpu, Of(CompactMonitorItems.Cpu)?.Color ?? Of(CompactMonitorItems.Columns)?.Color);
+        Take(MonitorRole.Efficiency, Of(CompactMonitorItems.Columns)?.ExtraColors?.FirstOrDefault());
+        Take(MonitorRole.Memory, Of(CompactMonitorItems.Memory)?.Color);
+        Take(MonitorRole.Gpu, Of(CompactMonitorItems.Gpu)?.Color);
+        Take(MonitorRole.Download, Of(CompactMonitorItems.Download)?.Color);
+        Take(MonitorRole.Upload, Of(CompactMonitorItems.Upload)?.Color);
+        if (moved.Changed) { settings.MonitorCustomColors = moved; settings.MonitorPalette = MonitorPalette.Custom; }
+        settings.CompactWarningColor ??= readings.Select(reading => reading.WarningColor).FirstOrDefault(color => color is not null);
+        settings.CompactCriticalColor ??= readings.Select(reading => reading.CriticalColor).FirstOrDefault(color => color is not null);
+        foreach (var reading in readings) reading.ResetColors();
+    }
 
     // What an old mode showed (settings saved before the table; see Readings).
     public static CompactMonitorItems Items(CompactMonitorMode mode, CompactMonitorItems custom) => mode switch
@@ -62,13 +114,19 @@ public static class CompactMonitor
         return [.. Order.Select(item => new CompactReading { Item = item, Visible = (shown & item) != 0, ShowValue = mode != CompactMonitorMode.Brief })];
     }
 
-    // Every reading once, in the saved order: unknown and repeated readings are dropped, missing ones join hidden at the end, and
-    // a color that is not "#RRGGBB" follows the palette.
+    // Every reading once, in the saved order: unknown and repeated readings are dropped, missing ones join hidden at the end,
+    // a color that is not "#RRGGBB" follows the palette, and colors for channels a reading does not have are dropped.
     public static List<CompactReading> Normalize(IEnumerable<CompactReading?>? readings)
     {
+        static string? Valid(string? color) => AppPresets.NormalizeColor(color) is { Length: > 0 } valid ? valid : null;
+        static List<string?>? Extra(CompactReading reading)
+        {
+            var extra = Enumerable.Range(0, Channels(reading.Item) - 1).Select(index => Valid(reading.ExtraColors?.ElementAtOrDefault(index))).ToList();
+            return extra.Any(color => color is not null) ? extra : null;
+        }
         var list = (readings ?? []).OfType<CompactReading>().Where(reading => Order.Contains(reading.Item)).DistinctBy(reading => reading.Item)
-            .Select(reading => new CompactReading { Item = reading.Item, Visible = reading.Visible, ShowValue = reading.ShowValue,
-                Color = AppPresets.NormalizeColor(reading.Color) is { Length: > 0 } color ? color : null }).ToList();
+            .Select(reading => new CompactReading { Item = reading.Item, Visible = reading.Visible, ShowValue = reading.ShowValue, Color = Valid(reading.Color),
+                ExtraColors = Extra(reading), WarningColor = Valid(reading.WarningColor), CriticalColor = Valid(reading.CriticalColor) }).ToList();
         list.AddRange(Order.Where(item => list.All(reading => reading.Item != item)).Select(item => new CompactReading { Item = item, Visible = false }));
         return list;
     }
@@ -122,24 +180,36 @@ public static class CompactMonitor
         CompactMonitorItems shown, Func<CompactMonitorItems, double> width, double gap, Func<CompactMonitorItems, double> presence)
     {
         var items = new List<(CompactMonitorItems, double, double, double)>();
+        return (items, Arrange([.. order.Distinct()], shown, width, gap, presence, items));
+    }
+
+    // The same into a list the caller keeps (cleared first), returning Total: the strip arranges its readings on every redraw,
+    // and allocates nothing for it. The order must name each item once.
+    public static double Arrange(IReadOnlyList<CompactMonitorItems> order, CompactMonitorItems shown, Func<CompactMonitorItems, double> width, double gap,
+        Func<CompactMonitorItems, double> presence, List<(CompactMonitorItems Item, double X, double Width, double Presence)> items)
+    {
+        items.Clear();
         double x = 0, last = 0;
-        foreach (var item in order.Distinct())
+        for (int i = 0; i < order.Count; i++)
         {
+            var item = order[i];
             if ((shown & item) == 0 || !Order.Contains(item)) continue;
             double p = Math.Clamp(presence(item), 0, 1), w = Math.Max(0, width(item));
             if (p <= 0) continue;
             items.Add((item, x, w, p));
             x += (w + gap) * p; last = p;
         }
-        return (items, Math.Max(0, x - gap * last));
+        return Math.Max(0, x - gap * last);
     }
 
     // The width of the items side by side with this gap between them.
     public static double Width(CompactMonitorItems items, Func<CompactMonitorItems, double> width, double gap)
     {
         double total = 0; int count = 0;
-        foreach (var item in Order)
+        // By index: asked on every reading of a scrolling strip, and an interface's enumerator would be allocated each time.
+        for (int i = 0; i < Order.Count; i++)
         {
+            var item = Order[i];
             if ((items & item) == 0) continue;
             total += Math.Max(0, width(item)); count++;
         }
@@ -158,23 +228,26 @@ public static class CompactMonitor
         }
         return Width(shown, width, gap) <= available + 1e-9 ? shown : CompactMonitorItems.None;
     }
+
+    // Whether a region of the collapsed row this wide shows any of the readings. Readings wider than their region scroll in it,
+    // so any room shows some; a region squeezed to nothing shows none, and the sampler is not run for them.
+    public static bool HasRoom(double region) => double.IsFinite(region) && region > 0;
 }
 
-// The colors of the collapsed readings: a reading's own color where one is set, else the palette's. Memory keeps the
-// palette's warning and critical colors at those levels; its own color replaces only the normal one.
-public sealed record StripColors(MonitorColors Palette, IReadOnlyDictionary<CompactMonitorItems, string> Own)
+// The colors of the collapsed readings at each level (ReadingLevels), from the color scheme. The normal state has a color per
+// channel (CompactMonitor.Roles: the core columns one for the fastest and one for the slowest kind of core); the warning and
+// critical states the collapsed readings' warning and critical colors.
+public sealed class StripColors(MonitorColors palette)
 {
-    public StripColors(MonitorColors palette) : this(palette, new Dictionary<CompactMonitorItems, string>()) { }
-    // The palette's color of each reading in its normal state.
-    public string Default(CompactMonitorItems item) => item switch
-    {
-        CompactMonitorItems.Memory => Palette.Normal, CompactMonitorItems.Gpu => Palette.Gpu, CompactMonitorItems.Upload => Palette.Efficiency, _ => Palette.Performance
-    };
-    public string Normal(CompactMonitorItems item) => Own.TryGetValue(item, out var color) ? color : Default(item);
-    public string Memory(MemoryLevel level) => level == MemoryLevel.Normal ? Normal(CompactMonitorItems.Memory) : Palette.Memory(level);
-    // With their own color the cores run from it, for the fastest kind, part of the way to the palette's slowest-core color.
-    public string Core(int group, int groups) => Own.TryGetValue(CompactMonitorItems.Columns, out var color)
-        ? ColorMath.Mix(color, Palette.Efficiency, groups > 1 ? .45 * Math.Clamp(group, 0, groups - 1) / (groups - 1) : 0) : Palette.Core(group, groups);
+    public MonitorColors Palette { get; } = palette;
+
+    public string Normal(CompactMonitorItems item, int channel = 0) => Palette[CompactMonitor.Role(item, channel)];
+    public string At(CompactMonitorItems item, MemoryLevel level, int channel = 0) => Palette.Level(level, Normal(item, channel));
+    public string Memory(MemoryLevel level) => At(CompactMonitorItems.Memory, level);
+
+    // A core column's color: in the normal state the kinds of core run from the CPU color, for the fastest kind, to the
+    // efficiency color in even steps; at the warning and critical levels the scheme's color for that level.
+    public string Core(int group, int groups, MemoryLevel level = MemoryLevel.Normal) => Palette.Level(level, Palette.Core(group, groups));
 }
 
 // Widths on whole device pixels, for a DIP width and the device pixels per DIP (1.5 at 150 %). The collapsed row rounds its

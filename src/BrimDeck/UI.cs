@@ -73,6 +73,16 @@ internal static class UI
         block.Height = lineHeight;
         return block;
     }
+    // Whether a single-line text is cut off by its ellipsis at its current width, checked when needed so that resizing and
+    // reused rows are always measured afresh.
+    public static bool IsCut(TextBlock block)
+    {
+        double shown = block.ActualWidth;
+        block.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        bool cut = block.DesiredSize.Width > shown + .5;
+        block.InvalidateMeasure();
+        return cut;
+    }
     public static Button Button(string text, Action click, bool active = false)
     {
         var button = new Button { Content = text, Background = Brush(active ? "#293A55" : "#222224"), BorderBrush = Brush(active ? "#4D83D1" : "#333336"),

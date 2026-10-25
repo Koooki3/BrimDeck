@@ -61,6 +61,19 @@ public static partial class PanelThemes
         return found;
     }
 
+    // Themes of the user's in the order they were added: by the time their files were created, then by name. A file that cannot
+    // be read for its time goes last.
+    public static IEnumerable<PanelThemeInfo> InAddedOrder(IEnumerable<PanelThemeInfo> themes)
+    {
+        static DateTime Created(string? path)
+        {
+            try { return path is not null && File.Exists(path) ? File.GetCreationTimeUtc(path) : DateTime.MaxValue; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return DateTime.MaxValue; }
+        }
+        return themes.Select(theme => (Theme: theme, Created: Created(theme.Path))).OrderBy(entry => entry.Created)
+            .ThenBy(entry => entry.Theme.Path, StringComparer.OrdinalIgnoreCase).Select(entry => entry.Theme);
+    }
+
     // Why a theme file cannot be used, or null. Colors that only need adjusting are not problems (see Build).
     private static string? FileProblem(PanelThemeFile file, string id)
     {

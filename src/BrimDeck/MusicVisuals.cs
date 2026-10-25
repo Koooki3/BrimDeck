@@ -78,6 +78,13 @@ internal static class MusicVisuals
         }
         catch (Exception) { return UI.Brush(PanelTheme.Hex("equalizer")); }
     }
+    // The state of a move's clock as the scrolling regions plan their turns with it (CycleTurn).
+    internal static MoveClock MoveClockOf(Clock clock) => clock.CurrentState switch
+    {
+        ClockState.Active => MoveClock.Active,
+        ClockState.Filling => MoveClock.Filling,
+        _ => clock.CurrentTime is null ? MoveClock.Waiting : MoveClock.None
+    };
     // Coordinates from the element's own width. A relative brush spans everything the element draws,
     // including rings scrolled out of view, so its fades would follow the content instead of the edges.
     internal static Brush Fade(double width, double edge)
@@ -184,7 +191,15 @@ internal sealed class MusicMarquee : FrameworkElement
     private string _text = "";
     private double _fontSize = 11.5, _overflow, _fadeWidth = -1;
     private FormattedText? _formatted;
-    private ClockGroup? _scroll;
+    // The scroll's cycle (MarqueeCycle), null until the text first scrolls. The rests are waited out on a timer (_turn) and a
+    // clock runs only while the text glides (_glide): one clock repeating the whole cycle ticked at 60 frames a second through
+    // the rests too, for as long as a song played. _since is when the scroll last went on (Eased.Now), NaN while it is held;
+    // _elapsed is where the cycle stood then.
+    private MarqueeCycle? _scroll;
+    private PromptTimer? _turn;
+    private ClockGroup? _glide;
+    private CycleStretch? _glideMove;
+    private double _since = double.NaN, _elapsed;
     private bool _scrolling, _running, _hovered;
     public MusicMarquee()
     {
@@ -261,51 +276,95 @@ internal sealed class MusicMarquee : FrameworkElement
     private double EdgeStop => _fadeWidth > 0 ? Math.Min(.5, EdgeWidth / _fadeWidth) : 0;
     private void ResetAnimation()
     {
-        _scroll?.Controller?.Remove(); _scroll = null; _running = false;
-        _shift.ApplyAnimationClock(TranslateTransform.XProperty, null); _shift.X = 0;
-        _unshift.ApplyAnimationClock(TranslateTransform.XProperty, null); _unshift.X = 0;
-        _left.ApplyAnimationClock(GradientStop.OffsetProperty, null); _left.Offset = 0;
-        _right.ApplyAnimationClock(GradientStop.OffsetProperty, null); _right.Offset = 1 - EdgeStop;
+        _turn?.Stop(); ReleaseGlide();
+        _scroll = null; _running = false; _since = double.NaN; _elapsed = 0;
+        _shift.X = 0; _unshift.X = 0; _left.Offset = 0; _right.Offset = 1 - EdgeStop;
     }
     private void UpdateAnimation()
     {
         bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && _overflow > 0 && _formatted is not null;
-        if (_scroll is null && running)
-        {
-            double travel = _overflow / Speed, ramp = Math.Min(travel, EdgeWidth / Speed), edge = EdgeStop;
-            static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
-            var duration = TimeSpan.FromSeconds(3 + travel);
-            DoubleAnimationUsingKeyFrames Track(params DoubleKeyFrame[] frames)
-            { var track = new DoubleAnimationUsingKeyFrames { Duration = duration }; foreach (var frame in frames) track.KeyFrames.Add(frame); return track; }
-            // Rest, glide to the end, rest, start again. Each fade grows or shrinks over the first
-            // or last Edge of travel, so it follows how much of the text is hidden on that side.
-            var cycle = new ParallelTimeline { Duration = duration, RepeatBehavior = RepeatBehavior.Forever };
-            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new DiscreteDoubleKeyFrame(0, At(1.5)),
-                new LinearDoubleKeyFrame(-_overflow, At(1.5 + travel)), new DiscreteDoubleKeyFrame(-_overflow, At(3 + travel))));
-            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new DiscreteDoubleKeyFrame(0, At(1.5)),
-                new LinearDoubleKeyFrame(edge, At(1.5 + ramp)), new DiscreteDoubleKeyFrame(edge, At(3 + travel))));
-            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(1 - edge, At(0)), new DiscreteDoubleKeyFrame(1 - edge, At(1.5 + travel - ramp)),
-                new LinearDoubleKeyFrame(1, At(1.5 + travel)), new DiscreteDoubleKeyFrame(1, At(3 + travel))));
-            cycle.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new DiscreteDoubleKeyFrame(0, At(1.5)),
-                new LinearDoubleKeyFrame(_overflow, At(1.5 + travel)), new DiscreteDoubleKeyFrame(_overflow, At(3 + travel))));
-            // Animate the retained drawing at WPF's render cadence. A background
-            // DispatcherTimer can be delayed by input and must not drive text motion.
-            _scroll = (ClockGroup)cycle.CreateClock(true);
-            _shift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_scroll.Children[0]);
-            _left.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_scroll.Children[1]);
-            _right.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_scroll.Children[2]);
-            _unshift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_scroll.Children[3]);
-            _running = true;
-        }
+        // Rest, glide to the end, rest, start again (MarqueeCycle).
+        if (_scroll is null && running) { _scroll = new MarqueeCycle(_overflow, Speed, EdgeWidth, EdgeStop); _elapsed = 0; }
         if (_scroll is not null && _running != running)
         {
-            if (running) _scroll.Controller!.Resume(); else _scroll.Controller!.Pause();
+            // Held, the text stays where the cycle stood, with no clock or timer left behind.
+            double now = Eased.Now;
+            if (running) _since = now;
+            else { _elapsed = Position(now); _since = double.NaN; }
             _running = running;
+            Turn();
         }
         // Scrolling text takes the animated quality, which follows fractional offsets smoothly; otherwise WPF chooses, so resting
         // text gets the static quality and the island's scaling still counts as motion. The mode is a composition flag and does not
         // draw the text again.
         TextOptions.SetTextHintingMode(Painter, _running ? TextHintingMode.Animated : TextHintingMode.Auto);
+    }
+
+    // Where the cycle stands at a time, in seconds from its start.
+    private double At(double now) => _scroll is { } cycle ? cycle.Wrap(double.IsNaN(_since) ? _elapsed : _elapsed + now - _since) : 0;
+    // The same, taken from the glide's clock while it runs: that is where the text is on screen (CycleTurn.Where).
+    private double Position(double now)
+    {
+        double at = At(now);
+        if (_scroll is not { } cycle || _glide is null || _glideMove is not { } move) return at;
+        return cycle.Wrap(CycleTurn.Where(at, move, MusicVisuals.MoveClockOf(_glide), _glide.CurrentTime?.TotalSeconds ?? double.NaN));
+    }
+
+    // Shows where the cycle stands and, while it runs, waits for its next turn: a rest shows its still values with no clock
+    // running, and just before it ends the glide starts on a clock of its own (CycleTurn.Lead), which lets go at the next turn.
+    private void Turn()
+    {
+        if (_scroll is not { } cycle) { _turn?.Stop(); return; }
+        // The time counted here follows the glide's clock, so the two never drift apart.
+        double now = Eased.Now, at = Position(now);
+        _elapsed = at; if (_running) _since = now;
+        _turn ??= new PromptTimer(Dispatcher, Turn);
+        if (_running && _glide is not null && _glideMove is { } gliding && CycleTurn.Holds(MusicVisuals.MoveClockOf(_glide), at, gliding))
+        {
+            // Woken while the clock still glides: it finishes on its own, and the turn comes back for its end.
+            _turn.Interval = TimeSpan.FromSeconds(gliding.End - at + .005); _turn.Start();
+            return;
+        }
+        ReleaseGlide();
+        _shift.X = cycle.Shift(at); _unshift.X = cycle.Unshift(at); _left.Offset = cycle.Left(at); _right.Offset = cycle.Right(at);
+        if (!_running) { _turn?.Stop(); return; }
+        var stretch = cycle.StretchAt(at);
+        var turn = CycleTurn.Plan(stretch, cycle.StretchAt(stretch.End), at);
+        if (turn.Move is { } move) { Glide(cycle, -turn.Into); _glideMove = move; }
+        // A hair past the turn; a timer that still lands short of it only waits out what is left.
+        _turn.Interval = TimeSpan.FromSeconds(turn.Wait + .005);
+        _turn.Start();
+    }
+
+    // The glide from the start to the end of the text, beginning in `delay` seconds (negative: that far into it), on WPF's render
+    // cadence: a background DispatcherTimer can be delayed by input and must not drive text motion. Each track holds its last
+    // value until the next turn takes it off; the keyframes are the cycle's own between its two rests.
+    private void Glide(MarqueeCycle cycle, double delay)
+    {
+        double travel = cycle.Travel, ramp = cycle.Ramp, edge = cycle.EdgeStop;
+        static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
+        var duration = TimeSpan.FromSeconds(travel);
+        DoubleAnimationUsingKeyFrames Track(params DoubleKeyFrame[] frames)
+        { var track = new DoubleAnimationUsingKeyFrames { Duration = duration }; foreach (var frame in frames) track.KeyFrames.Add(frame); return track; }
+        var glide = new ParallelTimeline { Duration = duration, BeginTime = TimeSpan.FromSeconds(delay), FillBehavior = FillBehavior.HoldEnd };
+        glide.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new LinearDoubleKeyFrame(-cycle.Overflow, At(travel))));
+        glide.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new LinearDoubleKeyFrame(edge, At(ramp)), new DiscreteDoubleKeyFrame(edge, At(travel))));
+        glide.Children.Add(Track(new DiscreteDoubleKeyFrame(1 - edge, At(0)), new DiscreteDoubleKeyFrame(1 - edge, At(travel - ramp)), new LinearDoubleKeyFrame(1, At(travel))));
+        glide.Children.Add(Track(new DiscreteDoubleKeyFrame(0, At(0)), new LinearDoubleKeyFrame(cycle.Overflow, At(travel))));
+        _glide = (ClockGroup)glide.CreateClock(true);
+        _shift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_glide.Children[0]);
+        _left.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[1]);
+        _right.ApplyAnimationClock(GradientStop.OffsetProperty, (AnimationClock)_glide.Children[2]);
+        _unshift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_glide.Children[3]);
+    }
+    private void ReleaseGlide()
+    {
+        if (_glide is null) return;
+        _glide.Controller?.Remove(); _glide = null; _glideMove = null;
+        _shift.ApplyAnimationClock(TranslateTransform.XProperty, null);
+        _unshift.ApplyAnimationClock(TranslateTransform.XProperty, null);
+        _left.ApplyAnimationClock(GradientStop.OffsetProperty, null);
+        _right.ApplyAnimationClock(GradientStop.OffsetProperty, null);
     }
     protected override void OnRender(DrawingContext dc) { if (_glyphs is null) Draw(dc, RenderSize); }
     // The size comes from the element that draws: the child renders during this element's arrange, before its own size is set.
@@ -358,15 +417,23 @@ internal sealed class MusicMarquee : FrameworkElement
 // view, rest there, then fade back to the start and begin again. The quota rings and the system readings use it.
 internal abstract class GlideCarousel : Grid
 {
-    internal const double StartHold = 2.5, EndHold = 2, Speed = 12, Fade = .25, FadeEdge = 3;
+    internal const double StartHold = GlideCycle.StartHold, EndHold = GlideCycle.EndHold, Speed = GlideCycle.Speed, Fade = GlideCycle.Fade, FadeEdge = 3;
     private FrameworkElement? _strip;
-    private Storyboard? _cycle;
-    private bool _discrete, _enabled, _paused, _begun;
+    // The cycle (GlideCycle), null while there is no travel. The rests are waited out on a timer (_turn) and an animation clock
+    // runs only while the strip moves (_move: the glide, or the fade back to the start): a storyboard repeating forever kept
+    // WPF's animation clock ticking at 60 frames a second through the rests too, and so did its discrete keyframes with
+    // animations off. _since is when the cycle last went on (Eased.Now), NaN while it is held; _elapsed is where it stood then.
+    private GlideCycle? _cycle;
+    private PromptTimer? _turn;
+    private ClockGroup? _move;
+    private CycleStretch? _moving;
+    private bool _discrete, _enabled, _paused;
+    private double _since = double.NaN;
     private TimeSpan _elapsed;
     public bool Rotates { get; protected set; }
     public double Travel { get; private set; }
     // Position within the cycle; the window hands it to the next carousel so a rebuild continues where this one was.
-    public TimeSpan Elapsed => _begun ? _cycle!.GetCurrentTime(this) ?? _elapsed : _elapsed;
+    public TimeSpan Elapsed => _cycle is not null ? TimeSpan.FromSeconds(Position(Eased.Now)) : _elapsed;
 
     // Starts the cycle that moves the strip (with a TranslateTransform) left by travel and back.
     protected void Glide(FrameworkElement strip, double travel, TimeSpan elapsed, bool animate)
@@ -381,62 +448,124 @@ internal abstract class GlideCarousel : Grid
     // A new travel for a strip whose width changed; the cycle carries on from the same time. No travel leaves it at rest.
     protected void Retarget(double travel)
     {
-        if (_cycle is not null && _begun) { _elapsed = Elapsed; _cycle.Remove(this); _begun = false; }
+        if (_cycle is not null)
+        {
+            // The new cycle carries on from the same time (where the strip is on screen); a running one counts on from now. A move
+            // under way is taken up again with the new travel.
+            double now = Eased.Now;
+            _elapsed = TimeSpan.FromSeconds(Position(now));
+            if (!double.IsNaN(_since)) _since = now;
+            Release();
+        }
         Travel = Math.Max(0, travel);
         if (Travel <= 0)
         {
-            _cycle = null;
+            _cycle = null; _turn?.Stop(); _since = double.NaN;
             if (_strip?.RenderTransform is TranslateTransform shift) shift.X = 0;
+            if (_strip is not null) _strip.Opacity = 1;
             return;
         }
-        _cycle = Cycle();
-        _elapsed = TimeSpan.FromTicks(_elapsed.Ticks % _cycle.Duration.TimeSpan.Ticks);
+        var cycle = new GlideCycle(Travel, _discrete);
+        _cycle = cycle;
+        _elapsed = TimeSpan.FromSeconds(cycle.Wrap(_elapsed.TotalSeconds));
+        bool running = !double.IsNaN(_since);
         Update();
-    }
-    private Storyboard Cycle()
-    {
-        double move = Travel / Speed, end = StartHold + move, reset = end + EndHold;
-        static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
-        var shift = new DoubleAnimationUsingKeyFrames();
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(StartHold)));
-        if (_discrete) shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(end)));
-        else shift.KeyFrames.Add(new SplineDoubleKeyFrame(-Travel, At(end), new KeySpline(.4, 0, .6, 1)));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(reset + (_discrete ? 0 : Fade))));
-        shift.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(reset + (_discrete ? 0 : Fade))));
-        var cycle = new Storyboard { Duration = TimeSpan.FromSeconds(reset + (_discrete ? 0 : 2 * Fade)), RepeatBehavior = RepeatBehavior.Forever };
-        Storyboard.SetTarget(shift, _strip); Storyboard.SetTargetProperty(shift, new PropertyPath("(UIElement.RenderTransform).(TranslateTransform.X)"));
-        cycle.Children.Add(shift);
-        if (!_discrete)
-        {
-            // The return to the start is a short fade, so the reset never reads as a backwards scroll.
-            var fade = new DoubleAnimationUsingKeyFrames();
-            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(0)));
-            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(reset)));
-            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, At(reset + Fade)));
-            fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, At(reset + 2 * Fade)));
-            Storyboard.SetTarget(fade, _strip); Storyboard.SetTargetProperty(fade, new PropertyPath(OpacityProperty));
-            cycle.Children.Add(fade);
-        }
-        return cycle;
+        // Update turns only when it starts or holds the cycle; one that runs on takes the new travel here.
+        if (running && !double.IsNaN(_since)) Turn();
     }
     public void SetRunning(bool enabled, bool paused) { _enabled = enabled; _paused = paused; Update(); }
+
+    // Where the cycle stands at a time, in seconds from its start.
+    private double At(double now) => _cycle is { } cycle ? cycle.Wrap(double.IsNaN(_since) ? _elapsed.TotalSeconds : _elapsed.TotalSeconds + now - _since) : 0;
+    // The same, taken from the move's clock while it runs: that is where the strip is on screen (CycleTurn.Where).
+    private double Position(double now)
+    {
+        double at = At(now);
+        if (_cycle is not { } cycle || _move is null || _moving is not { } move) return at;
+        return cycle.Wrap(CycleTurn.Where(at, move, MusicVisuals.MoveClockOf(_move), _move.CurrentTime?.TotalSeconds ?? double.NaN));
+    }
+
+    // Runs while it is loaded, visible, enabled and not paused; held, it still shows where the cycle stands (a carousel built in
+    // place of one that was past its glide), with no clock or timer left behind.
     private void Update()
     {
         if (_cycle is null) return;
-        if (!IsLoaded || !IsVisible)
+        bool run = IsLoaded && IsVisible && _enabled && !_paused;
+        if (run == !double.IsNaN(_since)) { if (!run) Turn(); return; }
+        double now = Eased.Now;
+        if (run) _since = now;
+        else { _elapsed = TimeSpan.FromSeconds(Position(now)); _since = double.NaN; }
+        Turn();
+    }
+
+    // Shows where the cycle stands and, while it runs, waits for its next turn: a rest shows its still values with no clock
+    // running, and just before it ends the next move (the glide, or the fade back to the start) starts on a clock of its own
+    // (CycleTurn.Lead), which lets go at the next turn. Without animations every stretch is a rest, and the strip only jumps.
+    private void Turn()
+    {
+        if (_cycle is not { } cycle || _strip?.RenderTransform is not TranslateTransform shift) { _turn?.Stop(); return; }
+        // The time counted here follows the move's clock, so the two never drift apart.
+        double now = Eased.Now, at = Position(now);
+        bool running = !double.IsNaN(_since);
+        _elapsed = TimeSpan.FromSeconds(at); if (running) _since = now;
+        _turn ??= new PromptTimer(Dispatcher, Turn);
+        if (running && _move is not null && _moving is { } moving && CycleTurn.Holds(MusicVisuals.MoveClockOf(_move), at, moving))
         {
-            // Release the clocks while detached; a later load resumes from the saved position.
-            if (_begun) { _elapsed = Elapsed; _cycle.Remove(this); _begun = false; }
+            // Woken while the clock still moves the strip: it finishes on its own, and the turn comes back for its end.
+            _turn.Interval = TimeSpan.FromSeconds(moving.End - at + .005); _turn.Start();
             return;
         }
-        if (!_begun)
+        Release();
+        shift.X = cycle.Shift(at); _strip.Opacity = cycle.Opacity(at);
+        if (!running) { _turn.Stop(); return; }
+        var stretch = cycle.StretchAt(at);
+        var turn = CycleTurn.Plan(stretch, cycle.StretchAt(stretch.End), at);
+        if (turn.Move is { } move) Move(cycle, shift, move, -turn.Into);
+        // A hair past the turn; a timer that still lands short of it only waits out what is left.
+        _turn.Interval = TimeSpan.FromSeconds(turn.Wait + .005);
+        _turn.Start();
+    }
+
+    // One move of the cycle, beginning in `delay` seconds (negative: that far into it), with the keyframes the cycle had there.
+    // The glide eases from the start to the end; the reset fades out, jumps back to the start and fades in, so it never reads as
+    // a backwards scroll. Each holds its last value until the next turn takes it off.
+    private void Move(GlideCycle cycle, TranslateTransform shift, CycleStretch move, double delay)
+    {
+        static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
+        var length = TimeSpan.FromSeconds(move.End - move.Start);
+        var group = new ParallelTimeline { BeginTime = TimeSpan.FromSeconds(delay), Duration = length, FillBehavior = FillBehavior.HoldEnd };
+        bool glide = move.Start < cycle.GlideEnd;
+        if (glide)
         {
-            _cycle.Begin(this, true); _begun = true;
-            if (_elapsed > TimeSpan.Zero) _cycle.Seek(this, _elapsed, TimeSeekOrigin.BeginTime);
-            _cycle.Pause(this);
+            var slide = new DoubleAnimationUsingKeyFrames { Duration = length };
+            slide.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(0)));
+            slide.KeyFrames.Add(new SplineDoubleKeyFrame(-Travel, At(move.End - move.Start),
+                new KeySpline(GlideCycle.CurveX1, GlideCycle.CurveY1, GlideCycle.CurveX2, GlideCycle.CurveY2)));
+            group.Children.Add(slide);
         }
-        if (_enabled && !_paused) _cycle.Resume(this); else _cycle.Pause(this);
+        else
+        {
+            var back = new DoubleAnimationUsingKeyFrames { Duration = length };
+            back.KeyFrames.Add(new DiscreteDoubleKeyFrame(-Travel, At(0)));
+            back.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(Fade)));
+            var fade = new DoubleAnimationUsingKeyFrames { Duration = length };
+            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, At(0)));
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(0, At(Fade)));
+            fade.KeyFrames.Add(new LinearDoubleKeyFrame(1, At(2 * Fade)));
+            group.Children.Add(back); group.Children.Add(fade);
+        }
+        _move = (ClockGroup)group.CreateClock(true); _moving = move;
+        shift.ApplyAnimationClock(TranslateTransform.XProperty, (AnimationClock)_move.Children[0]);
+        if (!glide) _strip!.ApplyAnimationClock(OpacityProperty, (AnimationClock)_move.Children[1]);
+    }
+
+    // Takes the move's clock off the strip; the strip keeps the still values set after it.
+    private void Release()
+    {
+        if (_move is null) return;
+        _move.Controller?.Remove(); _move = null; _moving = null;
+        if (_strip?.RenderTransform is TranslateTransform shift) shift.ApplyAnimationClock(TranslateTransform.XProperty, null);
+        _strip?.ApplyAnimationClock(OpacityProperty, null);
     }
 }
 

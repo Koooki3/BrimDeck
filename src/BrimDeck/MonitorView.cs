@@ -7,26 +7,34 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // A monitor color scheme as the panel draws it on the panel theme in use: ftop's palettes in their light or dark variant by the
-// theme, or the theme's own colors (its accent and its cyan, pink and lime), each moved just far enough to read on the theme's
-// surface. The page is built again when the theme changes (PanelTheme.Generation is part of its key).
+// theme, or the theme's own colors (its accent and its cyan, pink and lime), or the custom colors over the scheme they start
+// from, each moved just far enough to read on the theme's surface. The page is built again when the theme changes
+// (PanelTheme.Generation is part of its key). The warning and critical colors are the collapsed readings' own settings, or the
+// panel theme's.
 internal static class MonitorThemeColors
 {
-    public static MonitorColors For(MonitorPalette palette)
+    public static MonitorColors For(DeckSettings settings) => For(settings.MonitorPalette, settings.MonitorCustomColors) with
     {
+        Warning = Warning(settings), Critical = Critical(settings)
+    };
+    public static string Warning(DeckSettings settings) => Drawn(settings.CompactWarningColor ?? PanelTheme.WarningDefault);
+    public static string Critical(DeckSettings settings) => Drawn(settings.CompactCriticalColor ?? PanelTheme.CriticalDefault);
+
+    public static MonitorColors For(MonitorPalette palette, MonitorCustomColors custom)
+    {
+        if (palette == MonitorPalette.Custom)
+            return custom.Over(For(custom.Base == MonitorPalette.Custom ? MonitorPalette.Theme : custom.Base, custom), Drawn);
         var theme = PanelTheme.Current;
         if (palette == MonitorPalette.Theme)
             return MonitorColors.FromTheme(Drawn(theme["accent"].ToString()),
                 [.. new[] { ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Amber }.Select(color => Drawn(theme.ClockPreset(color).ToString()))],
-                Drawn(theme.ClockPreset(ClockColor.Lime).ToString()), Drawn(PanelTheme.WarningDefault), Drawn(PanelTheme.CriticalDefault));
-        var colors = MonitorColors.For(palette, theme.IsDark);
-        return new(Drawn(colors.Performance), Drawn(colors.Efficiency), Drawn(colors.Gpu), Drawn(colors.Normal), Drawn(colors.Warning), Drawn(colors.Critical));
+                Drawn(PanelTheme.WarningDefault), Drawn(PanelTheme.CriticalDefault));
+        return MonitorColors.For(palette, theme.IsDark).Map(Drawn);
     }
     // Opaque "#RRGGBB" as drawn on the theme, which ColorMath needs for the core groups' shades and for telling colors apart.
     private static string Drawn(string color) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color)));
 
-    // The collapsed readings' colors: the palette's, and each reading's own color as drawn on the theme, as the app colors are.
-    public static StripColors Strip(MonitorPalette palette, IEnumerable<CompactReading> readings) =>
-        new(For(palette), readings.Where(reading => reading.Color is { Length: > 0 }).ToDictionary(reading => reading.Item, reading => Drawn(reading.Color!)));
+    public static StripColors Strip(DeckSettings settings) => new(For(settings));
 }
 
 // The system monitor page, after ftop's panel: the main gauge large with its columns (the processor's cores, or the graphics
@@ -68,8 +76,8 @@ internal sealed class MonitorView : Grid
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(headMini) });
-        _cpuGauge = new FigureGauge(MonitorGlyph.Cpu, colors.Performance, cpuMain ? layout.Figure : layout.Body + 1, layout.Caption, right: !cpuMain, button: cpuMain ? null : swapToCpu);
-        _gpuGauge = new FigureGauge(MonitorGlyph.Gpu, colors.Gpu, cpuMain ? layout.Body + 1 : layout.Figure, layout.Caption, right: cpuMain, button: cpuMain ? swapToGpu : null);
+        _cpuGauge = new FigureGauge("C", colors.Performance, cpuMain ? layout.Figure : layout.Body + 1, layout.Caption, right: !cpuMain, button: cpuMain ? null : swapToCpu);
+        _gpuGauge = new FigureGauge("G", colors.Gpu, cpuMain ? layout.Body + 1 : layout.Figure, layout.Caption, right: cpuMain, button: cpuMain ? swapToGpu : null);
         var big = cpuMain ? _cpuGauge : _gpuGauge; var small = cpuMain ? _gpuGauge : _cpuGauge;
         small.VerticalAlignment = VerticalAlignment.Center;
         SetColumn(small, 1); head.Children.Add(big); head.Children.Add(small);
