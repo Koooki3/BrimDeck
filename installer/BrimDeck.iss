@@ -111,7 +111,6 @@ UninstallQuestion=确定要卸载 {#AppName} 吗？
 UninstallButton=卸载
 DeleteUserData=删除用户数据
 Uninstalled={#AppName} 已卸载。
-FolderNotSecured=无法为安装文件夹设置单独的访问权限：%1%n%n这个文件夹仍沿用上级文件夹的权限，这台电脑上的其他用户可能可以修改其中的程序。建议改装到 Program Files，或用户自己的 AppData\Local\Programs 下。
 en.ExitFirstTitle=Quit {#AppName} first
 en.ExitFirstText={#AppName} is running. Right-click the {#AppName} icon in the notification area of the taskbar, choose "Exit", then click "Retry".
 en.DesktopShortcut=Create a desktop shortcut
@@ -121,7 +120,6 @@ en.UninstallQuestion=Do you want to uninstall {#AppName}?
 en.UninstallButton=Uninstall
 en.DeleteUserData=Delete user data
 en.Uninstalled={#AppName} was uninstalled.
-en.FolderNotSecured=Setup could not give the install folder rights of its own: %1%n%nThe folder keeps the rights of the folder above it, so other users of this computer may be able to change the program in it. Installing into Program Files, or into AppData\Local\Programs of your own profile, is recommended.
 
 ; The folder's rights are settled before any file is copied into it (SecureAppDir).
 [Dirs]
@@ -312,13 +310,11 @@ end;
 // Gives such a folder the rights of Program Files: it stops inheriting from its parent; SYSTEM and Administrators have full
 // control and Users may read and run. Installed for the current user, that user also has full control, so in-app updates
 // keep working without an administrator prompt. Subfolders with rights of their own keep them. If the rights cannot be set,
-// or Setup cannot write to the folder with them, the folder inherits its parent's rights as before, so the files can still
-// be copied and updates keep working; the user is told the folder may be changed by other users (sec-M2).
+// or Setup cannot write to the folder with them, the folder inherits its parent's rights as before, so updates keep working.
 procedure SecureAppDir;
 var
   Dir, Grants, Sid: String;
   ResultCode: Integer;
-  Secured: Boolean;
 begin
   Dir := ExpandConstant('{app}');
   if not NeedsOwnRights(Dir) then
@@ -328,39 +324,26 @@ begin
   end;
   // Every account by SID, so the names need no translation and cannot be mistaken for another account.
   Grants := '"*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"';
-  Secured := True;
   if not IsAdminInstallMode then
   begin
     Sid := CurrentUserSid;
     if Sid = '' then
     begin
       Log('The install folder keeps its inherited rights, because the current user''s SID could not be read: ' + Dir);
-      Secured := False;
-    end
-    else
-      Grants := Grants + ' "*' + Sid + ':(OI)(CI)F"';
+      Exit;
+    end;
+    Grants := Grants + ' "*' + Sid + ':(OI)(CI)F"';
   end;
-  if Secured then
+  if Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /inheritance:r /grant:r ' + Grants + ' /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0) then
+    Log('The install folder no longer inherits rights from its parent: ' + Dir)
+  else
+    Log('The install folder rights could not be set (code ' + IntToStr(ResultCode) + '): ' + Dir);
+  if not CanWrite(Dir) then
   begin
-    if Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /inheritance:r /grant:r ' + Grants + ' /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
-      and (ResultCode = 0) then
-      Log('The install folder no longer inherits rights from its parent: ' + Dir)
-    else
-    begin
-      Log('The install folder rights could not be set (code ' + IntToStr(ResultCode) + '): ' + Dir);
-      Secured := False;
-    end;
-    if not CanWrite(Dir) then
-    begin
-      Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /reset /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Log('Setup could not write to the install folder, so it inherits its parent''s rights again (code ' + IntToStr(ResultCode) + '): ' + Dir);
-      Secured := False;
-    end;
+    Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /reset /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('Setup could not write to the install folder, so it inherits its parent''s rights again (code ' + IntToStr(ResultCode) + '): ' + Dir);
   end;
-  // Not silently: a folder other users can change lets them replace the program that runs as this user. Updates run with
-  // /SUPPRESSMSGBOXES and only log it.
-  if not Secured then
-    SuppressibleMsgBox(FmtMessage(CustomMessage('FolderNotSecured'), [Dir]), mbError, MB_OK, IDOK);
 end;
 
 // Returns <path> from a command line such as "<path>\unins000.exe" /SILENT /UI.
