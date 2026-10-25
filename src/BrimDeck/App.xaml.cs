@@ -57,15 +57,15 @@ public partial class App : Application
     {
         base.OnStartup(e);
         // WPF raises Startup from the first dispatcher pass after the App is made, run or not: an App made for the offscreen
-        // page sheets (UseOffscreen) starts nothing (no instance check, no signal to a running BrimDeck, no window).
-        if (_offscreen) return;
+        // page sheets (UseOffscreen) starts nothing (no instance check, no signal to a running BrimDeck, no window), nor does an
+        // App in a test harness (AppInstance.ForTest), whose instance names are its own in any case.
+        if (_offscreen || AppInstance.IsTest) return;
         // Menus and tooltips on the panel take the theme's text rendering as they open (PanelTheme.Text).
         EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ContextMenu), System.Windows.Controls.ContextMenu.OpenedEvent, new RoutedEventHandler((sender, _) => PanelTheme.Text((FrameworkElement)sender)));
         EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ToolTip), System.Windows.Controls.ToolTip.OpenedEvent, new RoutedEventHandler((sender, _) => PanelTheme.Text((FrameworkElement)sender)));
         Resources[SystemParameters.VerticalScrollBarWidthKey] = 7.0;
-        var suffix = Environment.UserName;
-        var eventName = "Local\\BrimDeck.Settings." + suffix;
-        _mutex = new Mutex(true, "Local\\BrimDeck.Instance." + suffix, out var first);
+        var eventName = AppInstance.Settings;
+        _mutex = new Mutex(true, AppInstance.Mutex, out var first);
         if (!first)
         {
             try { using var existing = EventWaitHandle.OpenExisting(eventName); existing.Set(); } catch (WaitHandleCannotBeOpenedException) { }
@@ -149,6 +149,7 @@ public partial class App : Application
     internal MainWindow UseOffscreen(DeckSettings settings, Rect bounds, Rect work, double scale)
     {
         _offscreen = true;
+        AppInstance.ForTest();
         Settings = settings;
         UseLanguage();
         Notices = new NoticeCenter(this);

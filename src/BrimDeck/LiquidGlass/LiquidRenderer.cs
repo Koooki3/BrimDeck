@@ -30,8 +30,9 @@ namespace BrimDeck.LiquidGlass;
 //   Contrast, Brightness, Saturate: the source's backdrop-filter (1.2, 1.05, 1.1).
 //   InsetY, InsetBlur, InsetAlpha: the source's inset shadow (0 -8px 20px rgba(0,0,0,.14)), shrunk for low shapes.
 //   Faithful: the source's own uv field (the proof sheets), not the island's.
-//   LinearMap, LinearFilters: the source as the browser draws it, its filter in linear light (see Liquid.hlsl); off, as the
-//     page meant it (sRGB).
+//   LinearFilters: the backdrop filtered in linear light, as the browser draws the source (see Liquid.hlsl); off, in sRGB.
+//   LinearMap: the map's bytes read as linear light, the browser's constant shift (only for the proof sheets: it makes the
+//     island's ring lopsided); off, the default, as the page meant it (sRGB bytes, no shift).
 internal readonly record struct LiquidFrame(
     int Width, int Height,
     float CornerTop, float CornerBottom, float Shoulder,
@@ -44,7 +45,7 @@ internal readonly record struct LiquidFrame(
     float Ref = 1, float Edge = 1, float Rad = .6f,
     float Contrast = 1.2f, float Brightness = 1.05f, float Saturate = 1.1f,
     float InsetY = -8, float InsetBlur = 20, float InsetAlpha = .14f, bool Faithful = false,
-    bool LinearMap = true, bool LinearFilters = true)
+    bool LinearMap = false, bool LinearFilters = true)
 {
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.

@@ -49,6 +49,9 @@ internal static class LiquidPages
     {
         // BrimDeck's own App, made but never run. WPF raises its Startup on the first dispatcher pass whether it runs or not, so it
         // is marked offscreen (UseOffscreen) before anything here lets the dispatcher run: its OnStartup then starts nothing.
+        // Its instance names are this process's own besides (AppInstance.ForTest): even an App that started could not reach the
+        // user's BrimDeck.
+        AppInstance.ForTest();
         var app = new App();
         app.InitializeComponent();
         var settings = new DeckSettings

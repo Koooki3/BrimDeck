@@ -642,8 +642,8 @@ internal static class LiquidPreview
         Directory.CreateDirectory(folder);
         using var device = CreateDevice();
         using var renderer = new LiquidRenderer(device);
-        // LIQUID_PORT_VARIANT: "srgbmap" and "srgbfilters" turn the source's linear-light reading off (as the page meant it), to
-        // show what each part of the browser's way contributes.
+        // LIQUID_PORT_VARIANT: "linearmap" reads the map as the browser does (its constant shift, which the product leaves out);
+        // "srgbfilters" filters in sRGB, to show what each part of the browser's way contributes.
         string variant = Environment.GetEnvironmentVariable("LIQUID_PORT_VARIANT") ?? "";
         foreach (var file in Directory.GetFiles(backgrounds, "*.png").Where(f => int.TryParse(Path.GetFileNameWithoutExtension(f).Split('-')[^1], out _)).Order())
         {
@@ -660,7 +660,7 @@ internal static class LiquidPreview
                 int x = Snap(g.X * scale), y = Snap(g.Y * scale), w = Snap((g.X + g.W) * scale) - Snap(g.X * scale), h = Snap((g.Y + g.H) * scale) - Snap(g.Y * scale);
                 float r = g.R * scale;
                 var frame = new LiquidFrame(w, h, r, r, 0, 1, 1, 1, .08f, float.NaN, float.NaN, 0, 0, 0, 0, Scale: scale, Faithful: faithful,
-                    LinearMap: !variant.Contains("srgbmap", StringComparison.Ordinal), LinearFilters: !variant.Contains("srgbfilters", StringComparison.Ordinal));
+                    LinearMap: variant.Contains("linearmap", StringComparison.Ordinal), LinearFilters: !variant.Contains("srgbfilters", StringComparison.Ordinal));
                 var glass = Render(device, renderer, desktop, dw, dh, (x, y, w, h), frame, (int)Math.Ceiling(48 * scale));
                 for (int j = 0; j < h; j++)
                     for (int i = 0; i < w; i++)

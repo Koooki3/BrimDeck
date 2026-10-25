@@ -722,6 +722,8 @@ try
     retired.Normalize();
     Check("Retired split Claude statistics return to Claude while later sources keep their saved numbers",
         retired.Apps.Select(app => app.UsageSource).SequenceEqual([ProviderId.Claude, ProviderId.Claude, ProviderId.ZCode]));
+    // Last: it gives this process a test scope for good.
+    AppInstanceTests.Run(Check);
     Console.WriteLine($"\n{passed} checks passed.");
 }
 

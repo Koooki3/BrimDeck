@@ -8,9 +8,11 @@
 //   into an 8-bit canvas (Uint8ClampedArray, rounded), normalised by half the largest (MaxHalf), and feDisplacementMap's scale
 //   is MaxHalf * ref: every shift is clamped to a quarter of the largest and stepped in 1/255ths.
 //   The page sets the filter's interpolation space as "colorInterpolationFilters", which the browser ignores (SVG attributes
-//   are hyphenated), so the filter runs in linearRGB: the map's bytes are read as linear light (LinearMap) - a byte of 128, no
-//   shift, reads as .216, and every shift gains a constant -.284 * MaxHalf * ref - and the backdrop's colours are filtered in
-//   linear light too (LinearFilters). That is what the user saw and liked, and it is what is reproduced.
+//   are hyphenated), so the filter runs in linearRGB: the backdrop's colours are filtered in linear light (LinearFilters), and
+//   that is reproduced. The browser also reads the map's bytes as linear light - a byte of 128, no shift, reads as .216, and
+//   every shift gains a constant -.284 * MaxHalf * ref - which on a symmetric island makes the ring lopsided (strong at the
+//   top left, almost none at the right and bottom; round-8 d1-offset-island.png). That one thing is not reproduced: the map
+//   is read as the page meant it, as sRGB bytes with no constant shift (LinearMap 0; 1 is the browser's, for the proof sheets).
 //   feDisplacementMap reads the backdrop at whole pixels: the shift is rounded to whole device pixels and the pixel there taken
 //   as it is. At a scale above 100 % the map is drawn up to device pixels first, bilinearly between its bytes. The backdrop the
 //   filter sees is the element's box only, mirrored past its edges (a shift longer than the box, as in a low bar, folds back
@@ -72,7 +74,7 @@ cbuffer Frame : register(b0)
     float Press;        // 0 or 1, the pressed shadows
     float Dark;
     float Band;         // how far from the shoulder its curves are worked out (device pixels)
-    float LinearMap;    // the map's bytes read as linear light (the source as the browser draws it)
+    float LinearMap;    // 1: the map's bytes read as linear light (the browser's shift); 0: as the page meant it
     float LinearFilters;// the backdrop filtered in linear light
 };
 
