@@ -215,7 +215,12 @@ internal sealed class AgentHost
             var reply = await bus.CallBusAsync("RequestName", "su", FreedesktopNotifications.Name, DoNotQueue);
             owner = reply.Body is [uint result, ..] && result == PrimaryOwner;
             // Server before the claim ends, so that no call falls between the two.
-            if (owner) await ReportAsync(AgentStates.Server);
+            if (owner)
+            {
+                // No longer watching another service: its monitor would pass every Notify on a second time.
+                if (_monitorBus is { } watching) { _monitorBus = null; await watching.DisposeAsync(); }
+                await ReportAsync(AgentStates.Server);
+            }
         }
         finally { lock (_gate) _claiming = false; }
         if (!owner) await WatchAsync();
