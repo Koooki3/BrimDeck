@@ -124,6 +124,8 @@ public partial class MainWindow
 
     // Automatic liquid glass turning: the glass eases toward the new look ahead of the theme (GlassBackdrop.Lead).
     internal void LeadGlass(bool? dark) => _glass?.Lead(dark);
+    // Whether this island's liquid glass can be shown (GlassBackdrop.LiquidUsable); true before the glass is made.
+    internal bool LiquidUsable => _glass?.LiquidUsable != false;
 
     // Liquid glass draws its own rim light and edge, following the pointer; the island's painted rim and edge light would lie
     // over it as a stroke (a white ring on dark glass, a 3D button's edge), so they step aside while it is shown and come back

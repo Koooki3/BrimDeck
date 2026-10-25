@@ -137,7 +137,13 @@ internal sealed class GlassBackdrop : IDisposable
     private CompositionRoundedRectangleGeometry? _liquidClip;
     // A failure (no capture, the renderer refused): tried again after _retryAt, sooner after one failure than after many. A
     // window Windows will not leave out of the capture (DesktopSource.Exclude) turns liquid glass off for the run.
-    private bool _liquidFailed, _excludeRefused;
+    private bool _excludeRefused;
+    // Liquid glass could not be shown on this window (no capture, a lost device): the blur is shown until a retry succeeds.
+    // LiquidUsable tells the app, and LiquidFailed when it happens, so automatic liquid glass, which then has nothing to
+    // measure, follows the Windows app theme meanwhile (App.GlassMeasures).
+    private bool _liquidFailed { get; set { if (field == value) return; field = value; if (value) LiquidFailed?.Invoke(); } }
+    public bool LiquidUsable => !LiquidOff && !_liquidFailed && !_excludeRefused;
+    public static event Action? LiquidFailed;
     private int _failures;
     private long _retryAt;
     private const int RetryMs = 1000, RetryMaxMs = 60_000;

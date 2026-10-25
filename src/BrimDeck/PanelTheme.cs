@@ -71,6 +71,18 @@ internal static class PanelTheme
     // between light and dark (systemChanged) while "system" is chosen.
     public static bool Use(DeckSettings settings, bool reload = false, bool systemChanged = false)
     {
+        bool changed = Choose(settings, reload, systemChanged);
+        // A fade skipped for the change that was to come (SnapGeneration, QuietGeneration) is let go when no change came, or it
+        // would skip the fade of a later, unrelated one (a theme chosen by hand).
+        if (!changed)
+        {
+            if (SnapGeneration == Generation + 1) SnapGeneration = -1;
+            if (QuietGeneration == Generation + 1) QuietGeneration = -1;
+        }
+        return changed;
+    }
+    private static bool Choose(DeckSettings settings, bool reload, bool systemChanged)
+    {
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
         // New hours for the day and night looks count as a change too.
         if (!reload && !systemChanged && _loaded && chosen == _chosen && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night) return false;

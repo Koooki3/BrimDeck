@@ -93,8 +93,17 @@ public partial class App : Application
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
         InteractionFx.Install(this);
         Notices = new NoticeCenter(this);
+        Displays = Native.Displays.Current();
+        // Automatic liquid glass shows from the first paint the look what lies behind the island asks for (GlanceGlass).
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.GlassAuto)
+        {
+            if (GlanceGlass() != PanelTheme.Current.IsDark) PanelTheme.Use(Settings, systemChanged: true);
+            MatchGlassGradient();
+        }
+        MotionEnvironment.Changed += GlassEnvironmentChanged;
+        GlassBackdrop.LiquidFailed += GlassEnvironmentChanged;
         Deck = new MainWindow(this); MainWindow = Deck;
-        Displays = Native.Displays.Current(); AssignDisplays();
+        AssignDisplays();
         Deck.Show();
         Notices.ApplySettings();
         InitializeHotkeys();
@@ -177,12 +186,16 @@ public partial class App : Application
         bool syncEnabled = settings.UsageAutoSync && !Settings.UsageAutoSync;
         // A new collapsed style morphs every panel's surface into its form (MainWindow.MorphShape).
         bool styleChanged = settings.Style != Settings.Style;
+        var previousTheme = Settings.PanelTheme;
         settings.Normalize(); Settings = settings;
         ApplyHotkeys();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
+        // Automatic liquid glass just chosen shows at once the look what lies behind the island asks for, not the last one it had.
+        if (PanelThemes.NormalizeId(settings.PanelTheme) == PanelThemes.GlassAuto && PanelThemes.NormalizeId(previousTheme) != PanelThemes.GlassAuto) GlanceGlass();
         PanelTheme.Use(settings);
+        MatchGlassGradient();
         ScheduleDaylight();
         AssignDisplays();
         foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
@@ -200,23 +213,28 @@ public partial class App : Application
         {
             if (Exiting) return;
             if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId) ApplyPanelTheme(systemChanged: true);
-            // The theme page's "System" card shows the Windows mode whichever theme is chosen.
-            else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
+            // Automatic liquid glass with nothing to measure follows the Windows app theme too. Otherwise the theme page's
+            // "System" card shows the Windows mode whichever theme is chosen.
+            else if (!FollowWindowsGlass()) _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
         });
     }
     // Makes the chosen panel theme current (reading the theme folder again when asked) and repaints every panel if it changed.
     // When Windows switches "system" between dark and light, a preset clock gradient carries over as it does when a theme is chosen.
-    internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false)
+    // A turn of automatic liquid glass (glassTurn) carries it too, so the clock stays readable on the other look, but saves
+    // nothing (PanelThemes.CarryOnTurn: it can come every few seconds over a video, and the look is decided again at every start)
+    // and only names the new look on the theme page instead of building the settings page again.
+    internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false, bool glassTurn = false)
     {
         var previous = PanelTheme.Current;
-        bool changed = PanelTheme.Use(Settings, reload, systemChanged);
+        bool changed = PanelTheme.Use(Settings, reload, systemChanged || glassTurn);
         // A turn of automatic liquid glass under way ends with any other theme chosen.
         if (changed && PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { _turnBy?.Stop(); foreach (var each in Decks.ToList()) each.LeadGlass(null); }
         ScheduleDaylight();
         if (!changed) return;
-        if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
+        if ((systemChanged || glassTurn) && PanelThemes.CarryOnTurn(previous, PanelTheme.Current, Settings, glassTurn)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
-        if (!reload) _settingsWindow?.PanelThemeChanged();
+        if (reload) return;
+        if (glassTurn) _settingsWindow?.GlassTurned(); else _settingsWindow?.PanelThemeChanged();
     }
     // Automatic liquid glass ("liquid-glass"): the main island's glass measures what lies behind it and decides the look
     // (GlassBackdrop, BackdropLook, GlassAppearance). The first decision, at start or when the theme is chosen, is shown at
@@ -229,13 +247,14 @@ public partial class App : Application
     internal bool AutoLookFrom(MainWindow deck) => !Exiting && deck == Deck && PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.GlassAuto;
     internal void TurnGlass(MainWindow deck, bool dark, bool instant)
     {
-        if (!AutoLookFrom(deck) || PanelTheme.GlassDark == dark && PanelTheme.Current.IsDark == dark) return;
+        // With nothing to measure, the Windows app theme decides (FollowWindowsGlass); a last measure still under way is let go.
+        if (!AutoLookFrom(deck) || !GlassMeasures || PanelTheme.GlassDark == dark && PanelTheme.Current.IsDark == dark) return;
         PanelTheme.GlassDark = dark;
         if (instant || !Soft.Enabled)
         {
             _turnBy?.Stop();
             PanelTheme.SnapGeneration = PanelTheme.Generation + 1;
-            ApplyPanelTheme(systemChanged: true);
+            ApplyPanelTheme(glassTurn: true);
             return;
         }
         foreach (var each in Decks.ToList()) each.LeadGlass(dark);
@@ -258,7 +277,69 @@ public partial class App : Application
         if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) { foreach (var each in Decks.ToList()) each.LeadGlass(null); return; }
         if (PanelTheme.Current.IsDark == PanelTheme.GlassDark) return;
         PanelTheme.QuietGeneration = PanelTheme.Generation + 1;
-        ApplyPanelTheme(systemChanged: true);
+        ApplyPanelTheme(glassTurn: true);
+    }
+
+    // Whether automatic liquid glass can measure what lies behind the island: liquid glass can be shown on the main island
+    // (transparency effects on, no high contrast, no battery saver, a local session, and the capture has not failed there).
+    // Otherwise it follows the Windows app theme, as "system" does, and the theme page says so.
+    internal bool GlassMeasures => GlassBackdrop.Available && MainLiquidUsable;
+    private bool MainLiquidUsable => Deck?.LiquidUsable != false;
+    // Automatic liquid glass with nothing to measure takes the Windows app theme's look. True when that turned the theme.
+    private bool FollowWindowsGlass()
+    {
+        if (Exiting || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto || GlassMeasures) return false;
+        bool dark = SettingsPalette.IsDark(SettingsTheme.System);
+        if (PanelTheme.GlassDark == dark && PanelTheme.Current.IsDark == dark) return false;
+        PanelTheme.GlassDark = dark;
+        _turnBy?.Stop();
+        foreach (var each in Decks.ToList()) each.LeadGlass(null);
+        ApplyPanelTheme(glassTurn: true);
+        return true;
+    }
+    // Something that decides whether liquid glass can be shown changed (battery saver, transparency effects, the capture
+    // failing): automatic liquid glass may have to follow Windows now, and the theme page's note may change.
+    private bool? _glassMeasured;
+    private void GlassEnvironmentChanged()
+    {
+        if (Dispatcher.HasShutdownStarted) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (Exiting || Deck is null || PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return;
+            bool measures = GlassMeasures;
+            bool turned = FollowWindowsGlass();
+            if (measures != _glassMeasured) { bool known = _glassMeasured is not null; _glassMeasured = measures; if (known && !turned) _settingsWindow?.PanelThemeChanged(onlyThemePage: true); }
+        });
+    }
+    // Automatic liquid glass shown at start or just chosen: a clock gradient that is a preset of its other look (the look saved
+    // last time, or the one the theme card was chosen in) becomes this look's, as it does when the look turns.
+    private void MatchGlassGradient()
+    {
+        if (PanelThemes.NormalizeId(Settings.PanelTheme) != PanelThemes.GlassAuto) return;
+        var other = PanelThemes.Resolve(PanelTheme.Find(PanelTheme.Current.IsDark ? PanelThemes.GlassLight : PanelThemes.GlassDark));
+        PanelThemes.CarryOnTurn(other, PanelTheme.Current, Settings, glassTurn: true);
+    }
+    // The look automatic liquid glass takes before the island is shown (at start, and when the theme is chosen), set as
+    // PanelTheme.GlassDark: from one measure of the desktop where the island will be (BackdropLook.Glance), or the Windows app
+    // theme's when liquid glass cannot be shown there or the measure fails. The live measure then rarely has anything to turn.
+    private bool GlanceGlass()
+    {
+        bool dark = SettingsPalette.IsDark(SettingsTheme.System);
+        // As GlassBackdrop.Available, which asks whether the theme on screen is glass: the theme just chosen is not on screen yet.
+        bool shown = MotionEnvironment.Transparency && !SystemParameters.HighContrast && !MotionEnvironment.BatterySaver && GetSystemMetrics(RemoteSession) == 0 && MainLiquidUsable
+            && Environment.GetEnvironmentVariable("BRIMDECK_LIQUID") != "0";
+        if (shown)
+        {
+            var plan = DisplayLayout.Arrange(Settings.Display, Settings.DisplayMonitors.Select(d => d.Id).ToList(), Displays.Select(d => (d.Id, d.Primary)).ToList());
+            if ((Displays.FirstOrDefault(d => d.Id == plan.Main) ?? Displays.FirstOrDefault()) is { } display)
+            {
+                // Our panels already on screen (the theme chosen in the settings) are left out, as the live glass leaves them out.
+                IntPtr[] ours = Deck is null ? [] : [.. Decks.Select(deck => new System.Windows.Interop.WindowInteropHelper(deck).Handle).Where(handle => handle != IntPtr.Zero)];
+                if (LiquidGlass.BackdropLook.Glance(display.Bounds, display.Handle, ours) is { } luma) dark = GlassAppearance.FirstLook(luma);
+            }
+        }
+        PanelTheme.GlassDark = dark;
+        return dark;
     }
     // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
     // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch
@@ -379,8 +460,10 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         // A settings change still waiting for its timer (made during the exit animation) is written before the last wait (life-L13).
-        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; InteractionFx.Uninstall(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; MotionEnvironment.Changed -= GlassEnvironmentChanged; GlassBackdrop.LiquidFailed -= GlassEnvironmentChanged; InteractionFx.Uninstall(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
+    [DllImport("user32")] private static extern int GetSystemMetrics(int index);
+    private const int RemoteSession = 0x1000;
 }

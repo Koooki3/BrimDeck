@@ -140,11 +140,50 @@ internal static class PanelThemeTests
             long later = at + 5000;
             bool flicker = !look.Feed(.62, later - 100) && !look.Feed(.35, later) && !look.Feed(.62, later + 100) && !look.Feed(.35, later + 200) && !look.Feed(.35, later + 200 + GlassAppearance.Confirm - 1) && !look.Dark;
             check("Automatic liquid glass turns with hysteresis, confirmation and a hold, never flickering", steady && confirmed && held && flicker && !look.Feed(double.NaN, later + 9999));
-            // A big jump (a window opened behind the island) turns on its first measure, but never inside the hold.
+            // A big jump (a window opened behind the island) turns on its second new measure past the threshold, without waiting
+            // for the confirmation, but never inside the hold. The last measure fed again (a backdrop holding still) is no new one.
             var jump = new GlassAppearance(dark: true);
-            bool first = !jump.Feed(.05, 0) && jump.Feed(.85, 10) && !jump.Dark;
-            bool hold = !jump.Feed(.05, 200) && !jump.Feed(.05, 10 + GlassAppearance.Hold - 1) && jump.Feed(.05, 10 + GlassAppearance.Hold) && jump.Dark;
-            check("Automatic liquid glass turns at once on a big jump of brightness, the hold still applying", first && hold);
+            bool first = !jump.Feed(.05, 0) && !jump.Feed(.85, 10) && !jump.Feed(.85, 20, fresh: false) && jump.Dark && jump.Feed(.86, 43) && !jump.Dark;
+            bool hold = !jump.Feed(.05, 200) && !jump.Feed(.04, 43 + GlassAppearance.Hold - 1) && jump.Feed(.04, 43 + GlassAppearance.Hold) && jump.Dark;
+            check("Automatic liquid glass turns on two new measures after a big jump of brightness, the hold still applying", first && hold);
+            // One odd frame (a flash in a video) jumps but is not confirmed by the next measure, so nothing turns.
+            var flash = new GlassAppearance(dark: true);
+            bool odd = !flash.Feed(.05, 0) && !flash.Feed(.95, 33) && !flash.Feed(.05, 66) && !flash.Feed(.95, 99) && !flash.Feed(.05, 132) && flash.Dark;
+            // A backdrop that jumped and then holds still (one new measure, fed again) turns once the confirmation has passed.
+            var still = new GlassAppearance(dark: true);
+            bool settled = !still.Feed(.05, 0) && !still.Feed(.9, 10) && !still.Feed(.9, 10 + GlassAppearance.Confirm - 1, fresh: false) && still.Feed(.9, 10 + GlassAppearance.Confirm, fresh: false) && !still.Dark;
+            check("Automatic liquid glass never turns on one odd frame, and a still backdrop after a jump turns after the confirmation", odd && settled);
+        }
+        {
+            // A video flashing between black and white every half second, measured every frame for a minute: each turn soon after
+            // the last doubles the hold up to MaxHold, so the theme turns about ten times instead of sixty.
+            var look = new GlassAppearance(dark: false);
+            var turns = new List<long>();
+            for (long now = 0; now < 60_000; now += 33)
+                if (look.Feed(now / 500 % 2 == 0 ? .05 : .95, now)) turns.Add(now);
+            var gaps = turns.Zip(turns.Skip(1), (a, b) => b - a).ToList();
+            bool slowed = turns.Count is >= 6 and <= 12 && gaps.Count >= 5 && gaps[0] >= GlassAppearance.Hold && gaps[1] >= 2 * GlassAppearance.Hold
+                && gaps.Skip(4).All(gap => gap >= GlassAppearance.MaxHold) && look.HoldFor == GlassAppearance.MaxHold;
+            // After a quiet while the hold is back to Hold: a backdrop that stays as shown, then one change.
+            long calm = turns[^1] + GlassAppearance.MaxHold + GlassAppearance.Restless + 1000;
+            bool shown = look.Dark;
+            for (long now = turns[^1] + 33; now < calm; now += 33) look.Feed(shown ? .05 : .95, now);
+            bool turned = false;
+            for (long now = calm; now < calm + 1000 && !turned; now += 33) turned = look.Feed(shown ? .95 : .05, now);
+            check($"Automatic liquid glass holds longer the more often it turns, and short again after a quiet while ({turns.Count} turns a minute)",
+                slowed && turned && look.Dark != shown && look.HoldFor == GlassAppearance.Hold);
+        }
+        {
+            // A turn of automatic liquid glass carries a preset clock gradient to the other look's, in memory only; Windows
+            // switching "system" carries it and saves.
+            var lightLook = BuiltIn(PanelThemes.GlassLight);
+            var darkLook = BuiltIn(PanelThemes.GlassDark);
+            var turned = new DeckSettings { ClockGradient = [.. lightLook.ClockGradients[1].Stops] };
+            var system = new DeckSettings { ClockGradient = [.. lightLook.ClockGradients[1].Stops] };
+            bool glassSaves = PanelThemes.CarryOnTurn(lightLook, darkLook, turned, glassTurn: true);
+            bool systemSaves = PanelThemes.CarryOnTurn(lightLook, darkLook, system, glassTurn: false);
+            check("A turn of automatic liquid glass carries the clock gradient without saving the settings",
+                !glassSaves && turned.ClockGradient.SequenceEqual(darkLook.ClockGradients[1].Stops) && systemSaves && system.ClockGradient.SequenceEqual(darkLook.ClockGradients[1].Stops));
         }
 
         // Theme files and ids.
