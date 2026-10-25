@@ -189,7 +189,7 @@ internal static class LiquidPreview
         }
     }
 
-    private static ID3D11Device CreateDevice()
+    internal static ID3D11Device CreateDevice()
     {
         FeatureLevel[] levels = [FeatureLevel.Level_11_1, FeatureLevel.Level_11_0];
         if (D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport, levels, out ID3D11Device? device).Success && device is not null) return device;
@@ -256,7 +256,7 @@ internal static class LiquidPreview
     }
 
     // The renderer's output for the island at its place on the desktop: premultiplied BGRA rows, Width x Height.
-    private static byte[] Render(ID3D11Device device, LiquidRenderer renderer, byte[] desktop, int dw, int dh, (int X, int Y, int Width, int Height) at, in LiquidFrame frame, int pad)
+    internal static byte[] Render(ID3D11Device device, LiquidRenderer renderer, byte[] desktop, int dw, int dh, (int X, int Y, int Width, int Height) at, in LiquidFrame frame, int pad)
     {
         // The padded region, the desktop's edge rows repeated where it runs off the screen (as at the top for the notch).
         int bw = at.Width + 2 * pad, bh = at.Height + 2 * pad;
@@ -832,7 +832,7 @@ internal static class LiquidPreview
     [StructLayout(LayoutKind.Sequential)] private struct DispatcherQueueOptions { public int Size, Type, Apartment; }
     [DllImport("CoreMessaging.dll")] private static extern int CreateDispatcherQueueController(DispatcherQueueOptions options, out IntPtr controller);
 
-    private static void Save(BitmapSource bitmap, string path)
+    internal static void Save(BitmapSource bitmap, string path)
     {
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));

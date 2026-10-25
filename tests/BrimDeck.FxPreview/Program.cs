@@ -30,6 +30,9 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // The real panel's pages over liquid glass (LiquidPages): --liquid-pages <backgrounds> <output folder>. It needs BrimDeck's own
+        // App (never run) instead of a plain Application, so it starts before one is made.
+        if (args.Length > 2 && args[0] == "--liquid-pages") return LiquidPages.Run(args[1], args[2]);
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         foreach (var key in new[] { "PanelKeyboardFocus", "PanelWideKeyboardFocus", "PanelOutsetKeyboardFocus" }) app.Resources[key] = new Style();
         app.Resources["AppTextFont"] = new FontFamily("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");

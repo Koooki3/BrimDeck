@@ -56,6 +56,9 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // WPF raises Startup from the first dispatcher pass after the App is made, run or not: an App made for the offscreen
+        // page sheets (UseOffscreen) starts nothing (no instance check, no signal to a running BrimDeck, no window).
+        if (_offscreen) return;
         // Menus and tooltips on the panel take the theme's text rendering as they open (PanelTheme.Text).
         EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ContextMenu), System.Windows.Controls.ContextMenu.OpenedEvent, new RoutedEventHandler((sender, _) => PanelTheme.Text((FrameworkElement)sender)));
         EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ToolTip), System.Windows.Controls.ToolTip.OpenedEvent, new RoutedEventHandler((sender, _) => PanelTheme.Text((FrameworkElement)sender)));
@@ -138,6 +141,20 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) => { Write(args.Exception); args.Handled = !Exiting; };
         AppDomain.CurrentDomain.UnhandledException += (_, args) => Write(args.ExceptionObject);
         TaskScheduler.UnobservedTaskException += (_, args) => { Write(args.Exception); args.SetObserved(); };
+    }
+    // For the offscreen page sheets only (tests/BrimDeck.FxPreview --liquid-pages, MainWindow.Offscreen.cs): an App that is never
+    // run (its OnStartup returns at once, so nothing is read, saved, listened to or shown) takes these settings, a notice center whose
+    // sources are never started, and its main panel, laid out for the given monitor and never shown.
+    private bool _offscreen;
+    internal MainWindow UseOffscreen(DeckSettings settings, Rect bounds, Rect work, double scale)
+    {
+        _offscreen = true;
+        Settings = settings;
+        UseLanguage();
+        Notices = new NoticeCenter(this);
+        Deck = new MainWindow(this);
+        Deck.UseOffscreen(bounds, work, scale);
+        return Deck;
     }
     // Names used by XAML templates follow the language through these resources.
     private void UseLanguage()

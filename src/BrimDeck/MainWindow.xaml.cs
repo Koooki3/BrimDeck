@@ -229,7 +229,7 @@ public partial class MainWindow : Window
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
-        var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
+        var (bounds, work, scale) = Screen();
         UpdateCollapsedGeometry(bounds, work, scale);
         double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
         _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
@@ -274,7 +274,8 @@ public partial class MainWindow : Window
         else
         {
             bool appearing = !IsVisible;
-            if (!IsVisible) Show();
+            // Drawn offscreen (MainWindow.Offscreen.cs), the window is never shown.
+            if (!IsVisible && _offscreen is null) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
             SetExpanded(_expanded, !animatePage || !wasVisible);
         }
@@ -304,7 +305,7 @@ public partial class MainWindow : Window
     // and work-area changes call (see the window hook in the constructor and App.DisplaysChanged).
     private void UpdateCollapsedGeometry()
     {
-        var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
+        var (bounds, work, scale) = Screen();
         UpdateCollapsedGeometry(bounds, work, scale);
     }
     private void UpdateCollapsedGeometry(Rect bounds, Rect work, double scale)
@@ -399,7 +400,8 @@ public partial class MainWindow : Window
     // ApplySettings runs next. Pop-ups are closed rather than repainted.
     private void ApplyTheme()
     {
-        double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
+        // The stage's scale is the window's; drawn offscreen, the stage lies in a source of its own (MainWindow.Offscreen.cs).
+        double dpi = PresentationSource.FromVisual(Stage) is null ? 1 : VisualTreeHelper.GetDpi(Stage).DpiScaleX;
         if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi && _glassShown == PanelTheme.GlassShown) return;
         // A new scale alone only redraws the scan lines, which are laid out in device pixels.
         bool sameTheme = _themeGeneration == PanelTheme.Generation && _glassShown == PanelTheme.GlassShown;
@@ -701,7 +703,7 @@ public partial class MainWindow : Window
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
         // Liquid glass keeps its shadow open too, as the glass it is ported from does: over a flat page it is what lifts it.
-        Animate(ShadowHost, OpacityProperty, (!expanded || _glass?.LiquidShown == true) && !line ? 1 : 0, duration, shadow, easeOut);
+        Animate(ShadowHost, OpacityProperty, (!expanded || LiquidGlassShown) && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
         var tone = indicator ? PanelTheme.ColorOf("indicator") : expanded ? PanelTheme.PanelSurfaceColor : PanelTheme.SurfaceColor;

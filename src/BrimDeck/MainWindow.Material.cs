@@ -24,11 +24,7 @@ public partial class MainWindow
             _glass = new GlassBackdrop(this, Island);
             // Over a held blur the tint thins with it, frame by frame. Liquid glass draws its own tint: the island's surface
             // steps aside under it altogether (GlassBackdrop.SurfaceAside), whatever the blur's tint would be.
-            _glass.Held += held =>
-            {
-                _surface.Opacity = GlassBackdrop.SurfaceOpacity(_glass.SurfaceAside, held, _surface.Color.A / 255d);
-                LiquidEdge(_glass.SurfaceAside);
-            };
+            _glass.Held += held => ApplyHeld(_glass.SurfaceAside, held);
             // The panel opening takes the island out of a press at once: a squash or spring left on the open panel would hold
             // it off the screen's top edge.
             Island.SizeChanged += (_, _) => { if (_expanded) ResetJelly(); };
@@ -120,6 +116,13 @@ public partial class MainWindow
             if (from != 1)
                 jelly.BeginAnimation(property, new DoubleAnimation(from, 1, TimeSpan.FromMilliseconds(JellyBackMs)) { EasingFunction = JellySpring, FillBehavior = FillBehavior.Stop });
         }
+    }
+
+    // What the glass reported for a frame (GlassBackdrop.Held): the surface's opacity over it, and the painted rim and edge.
+    private void ApplyHeld(bool aside, double held)
+    {
+        _surface.Opacity = GlassBackdrop.SurfaceOpacity(aside, held, _surface.Color.A / 255d);
+        LiquidEdge(aside);
     }
 
     // Automatic liquid glass turning: the glass eases toward the new look ahead of the theme (GlassBackdrop.Lead).
