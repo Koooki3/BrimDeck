@@ -129,14 +129,19 @@ public static class CompactSpacing
 public struct HeldWidth
 {
     public const double Hold = 8;
-    private double _width, _since;
+    private double _width, _since, _asked;
     private bool _set;
     public readonly double Width => _width;
+    // When the room held for a wider figure may be given back (seconds, as Update's now): Hold after it was last taken, while the
+    // figure last asked for is narrower; infinity while nothing is held. The room shrinks only when Update is asked again then, so
+    // whoever keeps it must ask at that time even when nothing else changes (the last of a quick run of song changes).
+    public readonly double Release => _set && _asked < _width - 1e-9 ? _since + Hold : double.PositiveInfinity;
 
     // Returns the room to keep for a figure this wide at this time (seconds).
     public double Update(double width, double now)
     {
         width = double.IsFinite(width) && width > 0 ? width : 0;
+        _asked = width;
         if (!_set || width >= _width - 1e-9) { _width = width; _since = now; _set = true; }
         else if (now - _since >= Hold) { _width = width; _since = now; }
         return _width;

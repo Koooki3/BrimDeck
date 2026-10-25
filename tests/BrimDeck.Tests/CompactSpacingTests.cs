@@ -254,6 +254,18 @@ internal static class CompactSpacingTests
         double later = held.Update(13, 5 + HeldWidth.Hold - .1), after = held.Update(13, 5 + HeldWidth.Hold + .1);
         check("Compact readings: a narrower figure gives the room back once it has stayed narrower a while", later == 27 && after == 13);
         check("Compact readings: a wider figure takes its room at once", held.Update(40, 100) == 40 && held.Update(double.NaN, 101) == 40);
+
+        // Titles in a quick run of song changes: the room of the longest is held, and the time it may be given back is known, so
+        // the row can arrange itself again then even when nothing else changes (CompactRow).
+        var title = new HeldWidth();
+        title.Update(120, 0);
+        bool idle = double.IsPositiveInfinity(title.Release);
+        title.Update(300, 1); title.Update(90, 2); title.Update(150, 3);
+        double release = title.Release;
+        bool kept = title.Width == 300 && release == 1 + HeldWidth.Hold;
+        bool early = title.Update(150, release - .01) == 300, back = title.Update(150, release) == 150;
+        check("Compact titles: the longest title's room is held after a quick run of changes, with a time to give it back",
+            idle && kept && early && back && double.IsPositiveInfinity(title.Release));
         // Readings whose width holds still leave every neighbour where it was.
         var a = CompactSpacing.Arrange(Parts(20, 0, 44, 44, 41, 18, 33), 1, 400, 330, 8, 1, 1);
         var b = CompactSpacing.Arrange(Parts(20, 0, 44, 44, 41, 18, 33), 1, 400, 330, 8, 1, 1);

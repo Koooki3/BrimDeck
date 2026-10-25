@@ -198,7 +198,28 @@ internal sealed class CompactRow : Panel
         natural = _titleHeld.Update(Math.Ceiling(natural), now);
         if (!_titleKnown) { _title = new Eased(natural); _titleKnown = true; }
         else if (Math.Abs(_title.Target - natural) > .25) _title.Set(natural, Motion.Enabled, now);
+        HoldUntil(_titleHeld.Release, now);
         return _title.At(now);
+    }
+
+    // A shorter title held at a longer one's width gives the room back once HeldWidth.Hold has passed. That needs the row arranged
+    // again then, which nothing else may do: after a quick run of song changes, with no reading beside the title, the row stays
+    // still and the last title would keep the longest one's room until the next change. A timer arranges it at that time.
+    private PromptTimer? _release;
+    private double _releaseAt = double.PositiveInfinity;
+    private void HoldUntil(double at, double now)
+    {
+        if (at == _releaseAt) return;
+        _releaseAt = at;
+        if (!double.IsFinite(at)) { _release?.Stop(); return; }
+        _release ??= new PromptTimer(Dispatcher, () =>
+        {
+            _release?.Stop(); _releaseAt = double.PositiveInfinity;
+            // A row that was replaced has handed its title over; the new one keeps the time itself.
+            if (VisualTreeHelper.GetParent(this) is not null) InvalidateArrange();
+        });
+        _release.Interval = TimeSpan.FromSeconds(Math.Max(0, at - now) + .02);
+        _release.Start();
     }
 
     private static void Fade(Slot slot, double p, double zoom, double width, double height)
