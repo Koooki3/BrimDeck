@@ -40,6 +40,8 @@ internal static class Program
 
         // The date range picker's strips (DatePreview): --date <output folder>.
         if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
+        // The liquid glass sheets (LiquidPreview): --liquid <output folder>.
+        if (args.Length > 1 && args[0] == "--liquid") return LiquidPreview.Run(args[1]);
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
         if (args.Length > 1 && args[0] == "--sheet")
         {
