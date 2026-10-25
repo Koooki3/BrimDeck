@@ -1,6 +1,6 @@
 # Dynamic notices
 
-When a notification arrives, the notch, capsule or indicator grows out of its place and shows the application's icon, title and summary; hover for about a quarter of a second or click to see the details, and a few seconds later it returns to its shape. Windows' own banners and notification center stay as they are; BrimDeck shows its own copy alongside. Everything is processed on this PC, without any cloud service.
+When a notification arrives, the notch, capsule or indicator grows out of its place and shows the application's icon, title and summary; hover for about a quarter of a second or click to see the details, and a few seconds later it returns to its shape. By default Windows' own banners and notification center stay as they are and BrimDeck shows its own copy alongside; to see each notification only once, switch on "Turn off other apps' notification banners" (see below). Everything is processed on this PC, without any cloud service.
 
 ## Turning them on
 
@@ -24,6 +24,18 @@ As an ordinary desktop program BrimDeck gets no change events from Windows. Wind
 When that log is turned off (by group policy, say), cannot be subscribed to or keeps failing, BrimDeck **polls** instead: every 2.5 seconds it checks for a new notification (about 2.5 ms of CPU) and reads the whole list every 15 seconds; a new notice usually appears within 0.2–2.6 seconds, at an idle cost of about 0.36% of one core. The status line in the settings shows which mode is in use.
 
 If Windows has not yet decided whether BrimDeck may read notifications, the settings page shows "Allow access". A refusal can be changed in Windows Settings › Privacy & security › Notifications.
+
+### Windows: turning off other apps' notification banners
+
+Settings › Notices › Sources › Turn off other apps' notification banners (off by default). When it is on, BrimDeck turns off "Show notification banners" in Windows for other apps, so a notification shows once, on the island; it still goes to the notification center, where BrimDeck reads it.
+
+- **What changes**: only the DWORD value `ShowBanner` (set to 0) under `HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\<app id>` of the current user, the value Windows Settings › System › Notifications › an app › "Show notification banners" writes. No administrator rights are needed and nothing is restarted.
+- **Which apps**: the apps in the Start menu (`shell:AppsFolder`) and those already in Windows' notification settings; an app installed later is added at BrimDeck's next start or with its first notification.
+- **Which not**: BrimDeck itself; apps set to off or muted under "Apps" (their notifications show only in Windows; setting an app to off or muted gives its banner back); apps whose notifications are off in Windows; apps whose banner was already off. Sites in a browser share the browser's setting.
+- **How it is undone**: before changing anything, BrimDeck records the previous state (no value, 0 or 1) in `%LOCALAPPDATA%\BrimDeck\notice-banners.json`. Switching this off, switching off dynamic notices or "Windows app notifications", Windows no longer letting BrimDeck read notifications, quitting or uninstalling BrimDeck restores it: a value that was not there is deleted, one that was is written back, and only where BrimDeck's 0 is still there. Anything BrimDeck could not restore after an unexpected exit is restored at its next start.
+- **Your own changes**: if you turn an app's banner on again in Windows while this is on, BrimDeck keeps your choice and leaves that app alone; switching this off clears that list.
+- **Sound**: only the banner goes, not the sound. Measured on Windows 11 26300: with `ShowBanner` at 0 no banner appears and the notification sound still plays; turn off "Play a sound" for an app in Windows Settings to silence it.
+- **Note**: `ShowBanner` is not documented by Windows, and a later version may stop reading it. BrimDeck reads the value back after writing it and says so in the settings when Windows did not keep it; if banners still appear with this on, turn them off per app in Windows Settings › System › Notifications (the settings page has an "Open Windows notification settings" button).
 
 ### Windows: application names, icons and categories
 
