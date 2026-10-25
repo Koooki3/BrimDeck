@@ -164,6 +164,9 @@ public static class NoticeBanners
                 if (reading.BannerOff && record.Previous != 0) registry.Write(record.AppId, record.Previous);
                 if (record.CreatedKey && record.Previous is null) registry.DeleteKeyIfEmpty(record.AppId);
                 ledger.Records.Remove(record); changed = true;
+                // Turned on again outside BrimDeck before this restoration (quitting gives everything back at once): with the
+                // switch still on, that app stays the user's at the next start too.
+                if (holding && !reading.BannerOff && !reading.NotificationsOff && !ledger.IsReleased(record.AppId)) ledger.Released.Add(record.AppId);
                 states[record.AppId] = reading.NotificationsOff ? BannerState.NotificationsOff : BannerState.None;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { states[record.AppId] = BannerState.Failed; }

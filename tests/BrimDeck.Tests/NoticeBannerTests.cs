@@ -187,6 +187,24 @@ internal static class NoticeBannerTests
         settings.NoticeHideBanners = false;
         Apply(Wanted(), ledger, registry, holding: false);
         check("Banners: switching off forgets released apps", ledger.Released.Count == 0 && registry.Keys["Rewrites"]["ShowBanner"] == 1);
+
+        // Turned on again in Windows and then BrimDeck quit before it looked again: still the user's at the next start.
+        var quit = new FakeRegistry(); var quitLedger = new BannerLedger();
+        settings.NoticeHideBanners = true;
+        HashSet<string> Again() => NoticeBanners.Wanted(settings, true, ["Mine", "Other"], [], quitLedger);
+        Apply(Again(), quitLedger, quit, holding: true);
+        quit.Keys["Mine"]["ShowBanner"] = 1;
+        Apply([], quitLedger, quit, holding: true);
+        check("Banners: a banner turned on again before quitting is remembered", quitLedger.IsReleased("Mine") && !quitLedger.IsReleased("Other")
+            && quit.Keys["Mine"]["ShowBanner"] == 1 && !quit.Keys.ContainsKey("Other"));
+        Apply(Again(), quitLedger, quit, holding: true);
+        check("Banners: at the next start it is left alone and the others are turned off again", quit.Keys["Mine"]["ShowBanner"] == 1 && quit.Keys["Other"]["ShowBanner"] == 0);
+        // Switched off, a restoration that finds the user's own value remembers nothing.
+        var off = new FakeRegistry(); var offLedger = new BannerLedger();
+        Apply(["App"], offLedger, off, holding: true);
+        off.Keys["App"]["ShowBanner"] = 1;
+        Apply([], offLedger, off, holding: false);
+        check("Banners: switching off after the user's change keeps it and remembers nothing", offLedger.Released.Count == 0 && off.Keys["App"]["ShowBanner"] == 1);
     }
 
     private static void Ledger(string root, Action<string, bool> check)
