@@ -43,6 +43,8 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--glass-access") return GlassAccess.Run();
         // What the island's shadow costs while the panel opens and closes over liquid glass (ShadowCost): --shadow-cost [cycles].
         if (args.Length > 0 && args[0] == "--shadow-cost") return ShadowCost.Run(args.Length > 1 && int.TryParse(args[1], out int cycles) ? cycles : 6);
+        // What liquid glass costs against the blur, collapsed with music, open and animating (PerfCost): --perf [seconds] [rounds] [--hidden].
+        if (args.Length > 0 && args[0] == "--perf") return PerfCost.Run(args);
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         foreach (var key in new[] { "PanelKeyboardFocus", "PanelWideKeyboardFocus", "PanelOutsetKeyboardFocus" }) app.Resources[key] = new Style();
         app.Resources["AppTextFont"] = new FontFamily("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
