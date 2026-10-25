@@ -51,11 +51,11 @@ internal sealed class WindowsNoticeSource : IDisposable
     {
         public readonly CancellationTokenSource Stop = new();
         public UserNotificationListener? Listener;
-        // The log subscription, taken with the listener and let go with it. Broken is set from the log's thread; failed
-        // subscriptions are counted for the whole run (WindowsNoticeTriggers.MostFailures).
+        // The log subscription, taken with the listener and let go with it. Broken is set from the log's thread; failures are
+        // counted for the whole run, and after a few the log is tried again only now and then (WindowsNoticeLogRetry).
         public WindowsNoticeLog? Log;
         public volatile bool LogBroken;
-        public int LogFailures;
+        public readonly WindowsNoticeLogRetry LogRetry = new();
         public readonly WindowsNoticeCoalescer Coalescer = new();
         public WindowsNoticeTrigger Trigger => Log is not null ? WindowsNoticeTrigger.EventLog : WindowsNoticeTrigger.Polling;
         public DateTimeOffset LastFull = DateTimeOffset.MinValue;
@@ -178,12 +178,12 @@ internal sealed class WindowsNoticeSource : IDisposable
         Wake();
     }
 
-    private void StartLog(Run run)
+    private void StartLog(Run run, DateTimeOffset now)
     {
-        bool enabled = run.LogFailures < WindowsNoticeTriggers.MostFailures && WindowsNoticeLog.Enabled();
-        if (WindowsNoticeTriggers.Choose(enabled, run.LogFailures) != WindowsNoticeTrigger.EventLog) return;
+        bool mayTry = run.LogRetry.MayTry(now);
+        if (WindowsNoticeTriggers.Choose(mayTry && WindowsNoticeLog.Enabled(), mayTry) != WindowsNoticeTrigger.EventLog) return;
         run.Log = WindowsNoticeLog.Start(() => LogArrived(run), () => LogBroke(run));
-        if (run.Log is null) run.LogFailures++;
+        if (run.Log is null) run.LogRetry.Failed(now); else run.LogRetry.Started(now);
     }
 
     private static void CloseLog(Run run)
@@ -243,9 +243,9 @@ internal sealed class WindowsNoticeSource : IDisposable
             active = touched > _lastActivity ? touched : _lastActivity;
         }
         // A broken log subscription is taken again at once (LogBroke asked for a full reading); one that keeps breaking leaves
-        // the run polling (WindowsNoticeTriggers.Choose).
+        // the run polling, and is tried again now and then (WindowsNoticeLogRetry).
         bool retryLog = false;
-        if (run.LogBroken) { run.LogBroken = false; CloseLog(run); run.LogFailures++; retryLog = full = true; }
+        if (run.LogBroken) { run.LogBroken = false; CloseLog(run); run.LogRetry.Failed(now); retryLog = full = true; }
         var interval = WindowsNoticeTriggers.Interval(run.Trigger, quiet, QuietInterval, EventSafetyInterval,
             !confirmed ? WindowsNoticePace.Unconfirmed(now, active, unknownWait) : FullInterval);
         bool timed = false;
@@ -274,9 +274,11 @@ internal sealed class WindowsNoticeSource : IDisposable
         }
         if (run.Listener is null) { run.Listener = UserNotificationListener.Current; retryLog = true; }
         // Subscribed before the reading, so a toast arriving during it is not missed.
-        if (retryLog) StartLog(run);
+        if (retryLog) StartLog(run, now);
         // A log turned off since (by policy, say) keeps the subscription but delivers nothing: checked at each timed reading.
         else if (timed && run.Log is not null && !WindowsNoticeLog.Enabled()) CloseLog(run);
+        // Polling: a timed reading tries the log again once it may (turned on again, or its wait after failures is over).
+        else if (timed && run.Log is null) StartLog(run, now);
         SetState(run.Trigger == WindowsNoticeTrigger.EventLog ? NoticeSourceState.EventLog : NoticeSourceState.Polling, "", run);
         int covers;
         lock (_gate) { _dirty = false; covers = _refreshes; }

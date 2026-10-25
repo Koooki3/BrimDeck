@@ -56,11 +56,32 @@ internal static class NoticeEventLogTests
 
     private static void Choice(Action<string, bool> check)
     {
-        check("Event log: a log that is turned on is used", WindowsNoticeTriggers.Choose(logEnabled: true, logFailures: 0) == WindowsNoticeTrigger.EventLog);
-        check("Event log: a disabled log falls back to polling", WindowsNoticeTriggers.Choose(false, 0) == WindowsNoticeTrigger.Polling);
-        check("Event log: a log that keeps failing falls back to polling",
-            WindowsNoticeTriggers.Choose(true, WindowsNoticeTriggers.MostFailures - 1) == WindowsNoticeTrigger.EventLog
-            && WindowsNoticeTriggers.Choose(true, WindowsNoticeTriggers.MostFailures) == WindowsNoticeTrigger.Polling);
+        check("Event log: a log that is turned on is used", WindowsNoticeTriggers.Choose(logEnabled: true, mayTry: true) == WindowsNoticeTrigger.EventLog);
+        check("Event log: a disabled log falls back to polling", WindowsNoticeTriggers.Choose(false, true) == WindowsNoticeTrigger.Polling);
+        check("Event log: a log waiting after failures is not tried", WindowsNoticeTriggers.Choose(true, false) == WindowsNoticeTrigger.Polling);
+
+        // Failures injected one after another: the first few are tried again at once, then the wait doubles up to its limit.
+        var t = new DateTimeOffset(2026, 10, 26, 8, 0, 0, TimeSpan.Zero);
+        var retry = new WindowsNoticeLogRetry();
+        for (int i = 1; i < WindowsNoticeTriggers.MostFailures; i++) retry.Failed(t);
+        check("Event log: the first failures are tried again at once", retry.MayTry(t));
+        retry.Failed(t);
+        check("Event log: after a few failures the source polls and waits", !retry.MayTry(t) && !retry.MayTry(t.AddSeconds(59)) && retry.MayTry(t.AddMinutes(1)));
+        retry.Failed(t.AddMinutes(1));
+        check("Event log: each further failure waits twice as long", !retry.MayTry(t.AddMinutes(2.9)) && retry.MayTry(t.AddMinutes(3)));
+        for (int i = 0; i < 20; i++) retry.Failed(t);
+        check("Event log: the wait stops growing at its limit", WindowsNoticeLogRetry.RetryAfter(100) == WindowsNoticeLogRetry.MostWait && retry.MayTry(t + WindowsNoticeLogRetry.MostWait));
+        // A subscription that worked for a while starts the count over when it breaks.
+        var lasting = new WindowsNoticeLogRetry();
+        for (int i = 0; i < WindowsNoticeTriggers.MostFailures; i++) lasting.Failed(t);
+        lasting.Started(t.AddMinutes(1));
+        lasting.Failed(t.AddMinutes(1) + WindowsNoticeLogRetry.LastsFor);
+        check("Event log: a break after working a while is tried again at once", lasting.Failures == 1 && lasting.MayTry(t.AddMinutes(1) + WindowsNoticeLogRetry.LastsFor));
+        var brief = new WindowsNoticeLogRetry();
+        for (int i = 0; i < WindowsNoticeTriggers.MostFailures; i++) brief.Failed(t);
+        brief.Started(t.AddMinutes(1));
+        brief.Failed(t.AddMinutes(2));
+        check("Event log: a subscription that breaks again soon keeps waiting longer", brief.Failures == WindowsNoticeTriggers.MostFailures + 1 && !brief.MayTry(t.AddMinutes(3)));
     }
 
     private static void Pace(Action<string, bool> check)

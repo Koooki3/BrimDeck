@@ -12,6 +12,9 @@ internal sealed class WindowsNoticeLog : IDisposable
     private static readonly EventLogPropertySelector s_type = new(["Event/EventData/Data[@Name='NotificationType']"]);
     private readonly EventLogWatcher _watcher;
     private readonly Action _arrived, _broke;
+    // Whether the subscription has started, and an error the log service reported while it was being made; both under _gate,
+    // since that report comes on another thread and may race the end of Start.
+    private readonly object _gate = new();
     private Exception? _startError;
     private volatile bool _closed, _started;
 
@@ -41,7 +44,7 @@ internal sealed class WindowsNoticeLog : IDisposable
         {
             log = new WindowsNoticeLog(arrived, broke);
             log._watcher.Enabled = true;
-            if (log._startError is null) { log._started = true; return log; }
+            lock (log._gate) if (log._startError is null) { log._started = true; return log; }
         }
         catch (Exception ex) when (ex is EventLogException or UnauthorizedAccessException or PlatformNotSupportedException or InvalidOperationException or ArgumentException) { }
         log?.Dispose();
@@ -53,8 +56,8 @@ internal sealed class WindowsNoticeLog : IDisposable
         if (_closed) return;
         if (e.EventException is { } error)
         {
-            if (!_started) _startError = error;
-            else _broke();
+            lock (_gate) if (!_started) { _startError = error; return; }
+            _broke();
             return;
         }
         using var record = e.EventRecord;

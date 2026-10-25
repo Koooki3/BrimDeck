@@ -19,7 +19,7 @@ public static class WindowsNoticeTriggers
     public const int Delivered = 3052, Submitted = 3053, Cleared = 3055;
     // Entries come in batches (ten toasts shown at once give ten entries within a few ms): one reading covers them all.
     public static readonly TimeSpan Coalesce = TimeSpan.FromMilliseconds(100);
-    // A subscription whose entries keep failing is given up for the listener's lifetime; polling takes over.
+    // A subscription that keeps failing gives way to polling; it is tried again later (WindowsNoticeLogRetry).
     public const int MostFailures = 3;
 
     // The log query: toasts delivered to or cleared for this user only. Another signed-in user's toasts would only cause a
@@ -34,9 +34,9 @@ public static class WindowsNoticeTriggers
     public static bool Relevant(int eventId, string? notificationType)
         => eventId is Delivered or Cleared || eventId == Submitted && string.Equals(notificationType, "toast", StringComparison.OrdinalIgnoreCase);
 
-    // The log while it is turned on and has not kept failing; polling otherwise.
-    public static WindowsNoticeTrigger Choose(bool logEnabled, int logFailures)
-        => logEnabled && logFailures < MostFailures ? WindowsNoticeTrigger.EventLog : WindowsNoticeTrigger.Polling;
+    // The log while it is turned on and may be tried now (WindowsNoticeLogRetry.MayTry); polling otherwise.
+    public static WindowsNoticeTrigger Choose(bool logEnabled, bool mayTry)
+        => logEnabled && mayTry ? WindowsNoticeTrigger.EventLog : WindowsNoticeTrigger.Polling;
 
     // How long a full reading may wait while nothing arrives: a trigger that reports every change only needs the slow safety
     // reading, in case one was missed.
@@ -45,6 +45,33 @@ public static class WindowsNoticeTriggers
 
     private static bool IsSid(string sid)
         => sid.Length is > 4 and <= 184 && sid.StartsWith("S-1-", StringComparison.Ordinal) && sid.Skip(1).All(c => c == '-' || char.IsAsciiDigit(c));
+}
+
+// When the push notification log may be subscribed to again (WindowsNoticeSource). The first MostFailures failures in a row
+// are tried again at once; after that the source polls and tries the log again after a wait that doubles from a minute up to
+// MostWait, so a log that came back (turned on again, its service restarted) is used again. A subscription that lasted
+// LastsFor counts as working: its failure starts the count over. Used from the source's loop only.
+public sealed class WindowsNoticeLogRetry
+{
+    public static readonly TimeSpan LastsFor = TimeSpan.FromMinutes(10), MostWait = TimeSpan.FromMinutes(30);
+    private DateTimeOffset _started = DateTimeOffset.MaxValue;
+    public int Failures { get; private set; }
+    public DateTimeOffset NextTry { get; private set; } = DateTimeOffset.MinValue;
+
+    public bool MayTry(DateTimeOffset now) => Failures < WindowsNoticeTriggers.MostFailures || now >= NextTry;
+    public void Started(DateTimeOffset now) => _started = now;
+
+    public void Failed(DateTimeOffset now)
+    {
+        if (_started != DateTimeOffset.MaxValue && now - _started >= LastsFor) Failures = 0;
+        _started = DateTimeOffset.MaxValue;
+        Failures++;
+        NextTry = now + RetryAfter(Failures);
+    }
+
+    public static TimeSpan RetryAfter(int failures)
+        => failures < WindowsNoticeTriggers.MostFailures ? TimeSpan.Zero
+            : TimeSpan.FromMinutes(Math.Min(MostWait.TotalMinutes, Math.Pow(2, Math.Min(failures - WindowsNoticeTriggers.MostFailures, 10))));
 }
 
 // Turns a run of log entries into one reading: the first entry asks for a wake after WindowsNoticeTriggers.Coalesce, later
