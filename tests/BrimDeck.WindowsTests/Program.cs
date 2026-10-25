@@ -15,6 +15,7 @@ internal static class Program
             Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
             CheckWindowChrome();
             NoticeProtectionTests.Run(Check);
+            ShaderTests.Run(Check);
             DesktopSourceTests.Run(Check);
             GlanceTests.Run(Check);
             LiquidIdleTests.Run(Check);

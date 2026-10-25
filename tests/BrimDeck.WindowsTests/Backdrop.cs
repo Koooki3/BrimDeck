@@ -5,7 +5,7 @@ using BrimDeck.LiquidGlass;
 // known, whatever else is on the screen. Shown without activating (focus stays where it was) and topmost (an always-on-top
 // window elsewhere would otherwise cover it); once DesktopSource.ExcludeOurs runs in this process it would leave such a window
 // of ours out of the capture as it is shown, so the fixture puts itself back in it. Kept small and for as short as each test
-// needs, then destroyed.
+// needs (under a few seconds each), in the top-left corner of the screen, then destroyed.
 internal sealed class Backdrop : IDisposable
 {
     public nint Handle { get; }
@@ -24,7 +24,10 @@ internal sealed class Backdrop : IDisposable
             Instance = GetModuleHandle(null), Background = _brush, Name = name
         };
         RegisterClassEx(ref type);
-        Handle = CreateWindowEx(0, name, "BrimDeck test backdrop", 0x80000000, bounds.Left, bounds.Top, bounds.Width, bounds.Height, 0, 0, type.Instance, 0); // WS_POPUP
+        // A tool window that never activates and stays on top (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST): no taskbar button,
+        // no focus taken, not covered.
+        // A tool window that never activates and stays on top (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST).
+        Handle = CreateWindowEx(0x80 | 0x8000000 | 0x8, name, "BrimDeck test backdrop", 0x80000000, bounds.Left, bounds.Top, bounds.Width, bounds.Height, 0, 0, type.Instance, 0); // WS_POPUP
         if (Handle == 0) throw new InvalidOperationException("No backdrop window.");
         ShowWindow(Handle, 4); // SW_SHOWNOACTIVATE
         SetWindowPos(Handle, -1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10); // HWND_TOPMOST; NOSIZE | NOMOVE | NOACTIVATE
@@ -51,12 +54,9 @@ internal sealed class Backdrop : IDisposable
         finally { Marshal.FreeHGlobal(off); }
     }
 
-    // The middle of the primary monitor, width x height device pixels.
-    public static RECT Middle(int width, int height)
-    {
-        int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
-        return new RECT(sw / 2 - width / 2, sh / 2 - height / 2, sw / 2 - width / 2 + width, sh / 2 - height / 2 + height);
-    }
+    // The top-left corner of the primary monitor, width x height device pixels: kept small and out of the way, as the tests
+    // run on a screen someone may be using.
+    public static RECT Corner(int width, int height) => new(0, 0, width, height);
 
     // The fixture's messages (and the liquid glass's window hook's), handled.
     public static void Pump()

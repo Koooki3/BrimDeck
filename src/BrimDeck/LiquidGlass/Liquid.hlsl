@@ -1,32 +1,40 @@
 // Liquid glass (LiquidRenderer): one pass that draws the island as a pane of liquid glass over the desktop captured under it.
 //
-// Ported from xiaofangstudio/liquid-glass-web (showcase.html, MIT; its refraction engine is shuding/liquid-glass, MIT, (c) Shu
-// Ding): the CSS and SVG it builds the glass from, done here in one shader with the same math and constants.
-//   The displacement map: for every pixel of the element, uv in 0..1 across its box, ix = u - .5, iy = v - .5; the distance to
-//   an inner rounded rectangle d = roundedRectSDF(ix, iy, .3, .2, rad = .6); disp = smoothStep(.8, 0, d - .15 / edge / strength);
-//   s = smoothStep(0, 1, disp); the background is read from (ix * s + .5) * size, so the middle is flat and a ring at the edge
-//   pulls what lies inward out to the rim (a lens's magnifying edge). The map is written to an 8-bit image normalised by half
-//   the largest shift (MaxHalf here) and feDisplacementMap's scale is MaxHalf * ref: every shift is clamped to a quarter of the
-//   largest and stepped in 1/255ths, as the image holds it; both are reproduced.
-//   backdrop-filter: url(#map) blur(0.25px) contrast(1.2) brightness(1.05) saturate(1.1), in that order (the blur is under a
-//   device pixel and is left out).
-//   background: rgba(255, 255, 255, tint = .08).
-//   box-shadow: 0 4px 8px rgba(0,0,0,.22) (outside the glass, drawn by the host), 0 -8px 20px inset rgba(0,0,0,.14).
-//   Pressed: the inset glow 0 0 16px 3px rgba(255,255,255,.55) and inset 0 -8px 16px rgba(0,0,0,.18); while pressed the lens's
-//   strength is 1.2 (a thicker ring). The light other glass throws on it (.lit-glow): a radial gradient from the light's point,
-//   white .9 at 0, .25 at 40 %, nothing at 70 % of the farthest corner, soft-light blended; here it comes from the pointer.
+// Ported from xiaofangstudio/liquid-glass-web (showcase.html, commit 3094add; its README states the code is MIT; its refraction engine is
+// shuding/liquid-glass, MIT, (c) 2025 Shu Ding, commit a2d2e84), as the browser actually draws it:
+//   The displacement map: for every texel of the element (CSS pixels), uv across its box, ix = x / W - .5, iy = y / H - .5;
+//   d = roundedRectSDF(ix, iy, .3, .2, rad = .6); s = smoothStep(0, 1, smoothStep(.8, 0, d - .15 / edge / strength)); the shift
+//   is (ix * s + .5) * W - x, so the middle is flat and a ring at the edge pulls what lies inward out to the rim. The shifts go
+//   into an 8-bit canvas (Uint8ClampedArray, rounded), normalised by half the largest (MaxHalf), and feDisplacementMap's scale
+//   is MaxHalf * ref: every shift is clamped to a quarter of the largest and stepped in 1/255ths.
+//   The page sets the filter's interpolation space as "colorInterpolationFilters", which the browser ignores (SVG attributes
+//   are hyphenated), so the filter runs in linearRGB: the map's bytes are read as linear light (LinearMap) - a byte of 128, no
+//   shift, reads as .216, and every shift gains a constant -.284 * MaxHalf * ref - and the backdrop's colours are filtered in
+//   linear light too (LinearFilters). That is what the user saw and liked, and it is what is reproduced.
+//   feDisplacementMap reads the backdrop at whole pixels: the shift is rounded to whole device pixels and the pixel there taken
+//   as it is. At a scale above 100 % the map is drawn up to device pixels first, bilinearly between its bytes. The backdrop the
+//   filter sees is the element's box only, mirrored past its edges (a shift longer than the box, as in a low bar, folds back
+//   again). All of this was read off the browser itself (a backdrop whose pixels encode their own place, harness fid/).
+//   backdrop-filter then: blur(0.25px) (under a device pixel: left out) contrast(1.2) brightness(1.05) saturate(1.1).
+//   background: rgba(255, 255, 255, .08).
+//   box-shadow: 0 4px 8px rgba(0,0,0,.22) (outside the glass: drawn by the host), 0 -8px 20px inset rgba(0,0,0,.14).
+//   Pressed (a button): the inset glow 0 0 16px 3px rgba(255,255,255,.55) and inset 0 -8px 16px rgba(0,0,0,.18), at once.
+//   Shadows are Gaussian (deviation = blur / 2) over the rounded box, worked out as the browser does: the box's edge function
+//   along x (erf) integrated over y with the Gaussian.
 // Lengths in the source are CSS pixels: here device pixels over Scale.
 //
 // Adapted to the island (Faithful 0; 1 is the source exactly, for the proof sheets):
 //   The outline is IslandBorder.BuildOutline's, a signed distance in device pixels: a capsule or rounded rectangle, or a shape
 //   square at the top (the open panel, the notch) whose top edge is the screen's. A square top's box reaches TopExtra above the
-//   screen, so the ring and the inset shadow never show along it.
+//   screen, so the ring and the inset shadow never show along it; there the inset shadow's sides are narrowed (Narrow).
 //   The source's uv field stretches with the element (a wide pill gets a wide, shallow ring, its ends pulled from the far
-//   middle): here it is the source's field for a square of the shape's shorter side, its middle stretched along the longer one,
-//   and the shift points at the nearest point of that middle, so every edge bends as the lens's does.
-//   The inset shadows' offset and blur shrink with shapes lower than the source's buttons (InsetY, InsetBlur; the renderer).
-//   Legibility: the theme's band (Low, High): only what lies outside it is moved, each pixel just far enough (a soft maximum and
-//   minimum), toward white or the glass's dark tint. Over what already lies in the band the glass is the source's.
+//   middle): here it is the source's field for a square of the shape's shorter side, its middle stretched along the longer one.
+//   Low shapes take a smaller inset shadow (InsetY, InsetBlur, InsetAlpha from the renderer).
+//   Legibility (Low, High): the backdrop's brightness under the island (its 2nd and 98th percentiles, BandA..BandB,
+//   measured by the renderer) is moved affinely into the band the theme's text needs - light glass lifts it to at least Low,
+//   dark glass brings it down to at most High from its dark tint - scaled no more than it must be, so the detail behind keeps
+//   its relative contrast; only the few pixels past the percentiles (a word on a page, finer than the measure's grain) are
+//   held to the band one by one, with a soft knee.
 // The output is premultiplied; outside the outline it is transparent. Edge pixels take four subsamples.
 
 cbuffer Frame : register(b0)
@@ -41,7 +49,7 @@ cbuffer Frame : register(b0)
     float CornerTop;    // 0 for a square top
     float CornerBottom;
     float SideTop;      // y where the side begins: below the shoulder, the top corner, or far above for a square top
-    float4 Tint;        // straight rgb, alpha (the source's background)
+    float4 Tint;        // straight rgb, alpha (the source's background, or the dark look's)
     float Scale;        // device pixels per CSS pixel
     float Ref;          // the source's refraction (feDisplacementMap scale = MaxHalf * Ref)
     float Edge;         // the source's ring thickness
@@ -49,26 +57,26 @@ cbuffer Frame : register(b0)
     float MaxHalf;      // half the largest shift of the map, CSS pixels (computed by the renderer)
     float Faithful;     // 1: the source's uv field exactly; 0: the island's
     float TopExtra;     // device pixels the box reaches above the top, for a square top
-    float Strength;     // the source's strength (1, 1.2 pressed)
+    float Strength;     // the source's strength (1; a dragged lens 1.2)
     float Contrast;
     float Brightness;
     float Saturate;
-    float Low;          // the band of brightness the glass is held to (legibility)
+    float Low;          // the band the theme's text needs: at least Low (light), at most High (dark)
     float High;
     float InsetY;       // the inset shadow: offset (CSS pixels, negative: up), blur, opacity
     float InsetBlur;
     float InsetAlpha;
-    float2 Pointer;     // island pixels
-    float Lit;          // the pointer's light (.lit-glow's opacity)
-    float Press;        // 0..1, the pressed shadows
+    float BandA;        // the backdrop's brightness under the island: 5th and 95th percentiles (sRGB luma)
+    float BandB;
+    float Narrow;       // how far the inset shadow's sides are narrowed (0 none, 1 to nothing), for a square top
+    float Press;        // 0 or 1, the pressed shadows
     float Dark;
     float Band;         // how far from the shoulder its curves are worked out (device pixels)
-    float Spare0;
-    float Spare1;
+    float LinearMap;    // the map's bytes read as linear light (the source as the browser draws it)
+    float LinearFilters;// the backdrop filtered in linear light
 };
 
 Texture2D Background : register(t0);
-SamplerState Linear : register(s0);
 
 struct Vertex { float4 Position : SV_Position; };
 
@@ -98,14 +106,14 @@ float2 CubicTangent(float2 a, float2 b, float2 c, float2 d, float t)
 float NearestOnCubic(float2 q, float2 a, float2 b, float2 c, float2 d, out float2 at, out float2 tangent)
 {
     float best = 1e20, t = 0;
-    [unroll] for (int i = 0; i <= 6; i++)
+    [loop] for (int i = 0; i <= 6; i++)
     {
         float s = i / 6.0;
         float2 e = Cubic(a, b, c, d, s) - q;
         float l = dot(e, e);
         if (l < best) { best = l; t = s; }
     }
-    [unroll] for (int k = 0; k < 3; k++)
+    [loop] for (int k = 0; k < 3; k++)
     {
         float u = 1 - t;
         float2 e = Cubic(a, b, c, d, t) - q;
@@ -174,14 +182,12 @@ float Outline(float2 p, out float2 normal)
     return inside ? -dist : dist;
 }
 
-float3 Read(float2 at)
-{
-    return Background.SampleLevel(Linear, (at + Pad) * Inverse, 0).rgb;
-}
-
 float Luma(float3 c) { return dot(c, float3(.2126, .7152, .0722)); }
+float3 ToLinear(float3 c) { return c <= .04045 ? c / 12.92 : pow((c + .055) / 1.055, 2.4); }
+float3 ToSrgb(float3 c) { return c <= .0031308 ? c * 12.92 : 1.055 * pow(max(c, 0), 1 / 2.4) - .055; }
 float SoftMax(float a, float b, float k) { float h = max(k - abs(a - b), 0) / k; return max(a, b) + h * h * k * .25; }
 float SoftMin(float a, float b, float k) { float h = max(k - abs(a - b), 0) / k; return min(a, b) - h * h * k * .25; }
+float ToLinear1(float c) { return c <= .04045 ? c / 12.92 : pow((c + .055) / 1.055, 2.4); }
 
 // The source's roundedRectSDF.
 float RoundedRect(float x, float y, float w, float h, float r)
@@ -190,37 +196,49 @@ float RoundedRect(float x, float y, float w, float h, float r)
     return min(max(qx, qy), 0) + length(float2(max(qx, 0), max(qy, 0))) - r;
 }
 
-// The shift of the background at p (device pixels, island coordinates), in CSS pixels, before the map's clamp: the source's
-// field (Faithful) or the island's (see the head of the file). The box is the island's, reaching TopExtra above a square top.
-float2 Shift(float2 p)
+// The shift (CSS pixels) the map holds at a texel (x, y) of the box (CSS pixels, W x H): the source's field (Faithful) or the
+// island's (see the head of the file).
+float2 Shift(float2 texel, float2 box)
 {
-    float2 box = float2(Size.x, Size.y + TopExtra) / Scale;
-    // The map's texel this point falls in: the source's x and y are texel indices, their centres at +.5.
-    float2 at = float2(p.x, p.y + TopExtra) / Scale - .5;
     float edge = .15 / Edge / Strength;
     if (Faithful > .5)
     {
-        float ix = at.x / box.x - .5, iy = at.y / box.y - .5;
-        float d = RoundedRect(ix, iy, .3, .2, Rad);
-        float s = smoothstep(0, 1, smoothstep(.8, 0, d - edge));
+        float ix = texel.x / box.x - .5, iy = texel.y / box.y - .5;
+        float s = smoothstep(0, 1, smoothstep(.8, 0, RoundedRect(ix, iy, .3, .2, Rad) - edge));
         return float2(ix, iy) * (s - 1) * box;
     }
     float m = min(box.x, box.y);
     float2 extent = (box - m) * .5;
-    float2 q = at + .5 - box * .5;
+    float2 q = texel + .5 - box * .5;
     float2 spine = clamp(q, -extent, extent);
     float2 i = q / m;
-    float d = RoundedRect(i.x, i.y, .3 + extent.x / m, .2 + extent.y / m, Rad);
-    float s = smoothstep(0, 1, smoothstep(.8, 0, d - edge));
+    float s = smoothstep(0, 1, smoothstep(.8, 0, RoundedRect(i.x, i.y, .3 + extent.x / m, .2 + extent.y / m, Rad) - edge));
     return (q - spine) * (s - 1);
 }
 
-// The 8-bit map: a shift held as round((shift / MaxHalf + .5) * 255), clamped to a byte, and read back by feDisplacementMap as
-// scale * (byte / 255 - .5) with scale = MaxHalf * Ref.
-float2 Mapped(float2 shift)
+// The map's two bytes at a texel: round((shift / MaxHalf + .5) * 255), clamped (a Uint8ClampedArray).
+float2 Bytes(float2 texel, float2 box)
 {
-    float2 byte = round(saturate(shift / max(MaxHalf, 1e-4) + .5) * 255);
-    return MaxHalf * Ref * (byte / 255 - .5);
+    texel = clamp(texel, 0, box - 1);
+    return round(saturate(Shift(texel, box) / max(MaxHalf, 1e-4) + .5) * 255);
+}
+
+// The shift feDisplacementMap applies at a device pixel (island pixels from the box's corner), device pixels: the map drawn up
+// to device pixels (bilinear between texels, an 8-bit image), read in linear light where the filter runs there, and scaled.
+float2 Displacement(float2 pixel, float2 box)
+{
+    float2 at = (floor(pixel) + .5) / Scale - .5;
+    float2 byte;
+    if (Scale == 1) byte = Bytes(at, box);
+    else
+    {
+        float2 i = floor(at), f = at - i;
+        float2 b00 = Bytes(i, box), b10 = Bytes(i + float2(1, 0), box), b01 = Bytes(i + float2(0, 1), box), b11 = Bytes(i + 1, box);
+        byte = lerp(lerp(b00, b10, f.x), lerp(b01, b11, f.x), f.y);
+    }
+    float2 v = byte / 255;
+    if (LinearMap > .5) v = float2(ToLinear1(v.x), ToLinear1(v.y));
+    return MaxHalf * Ref * (v - .5) * Scale;
 }
 
 // CSS contrast, brightness and saturate, in that order, each clamped as the filter functions are.
@@ -236,60 +254,103 @@ float3 Filters(float3 c)
     return saturate(mul(m, c));
 }
 
-// A blurred shape's coverage at a signed distance, for a Gaussian of deviation sigma (a box-shadow's blur / 2).
-float Covered(float sd, float sigma) { return 1 / (1 + exp(1.702 * sd / max(sigma, 1e-3))); }
-
-// CSS soft-light of white over c, by a.
-float3 SoftLightWhite(float3 c, float a)
+float Gaussian(float x, float sigma) { return exp(-(x * x) / (2 * sigma * sigma)) / (2.5066283 * sigma); }
+float2 Erf(float2 x)
 {
-    float3 d = c <= .25 ? ((16 * c - 12) * c + 4) * c : sqrt(c);
-    return lerp(c, d, a);
+    float2 s = sign(x), a = abs(x);
+    x = 1 + (.278393 + (.230389 + .078108 * (a * a)) * a) * a;
+    x *= x;
+    return s - s / (x * x);
+}
+
+// How much of a rounded box (half size halfSize, corner r, centred at the origin), blurred by a Gaussian of deviation sigma,
+// covers the point p: along x the box's row at each height is a span whose blur is a difference of erfs, and those rows are
+// summed over the Gaussian in y (six steps across 3 deviations each side). Narrow widens the box along x by that many
+// deviations (the narrowed sides of a square-topped shape).
+float BoxCoverage(float2 p, float2 halfSize, float r, float sigma, float narrow)
+{
+    halfSize.x += narrow * sigma;
+    float low = p.y - halfSize.y, high = p.y + halfSize.y;
+    float start = clamp(-3 * sigma, low, high), end = clamp(3 * sigma, low, high);
+    float step = (end - start) / 6, y = start + step * .5, value = 0;
+    [loop] for (int i = 0; i < 6; i++)
+    {
+        float row = p.y - y;
+        float delta = min(halfSize.y - r - abs(row), 0);
+        float span = halfSize.x - r + sqrt(max(0, r * r - delta * delta));
+        float2 integral = .5 + .5 * Erf((p.x + float2(-span, span)) * (.70710678 / sigma));
+        value += (integral.y - integral.x) * Gaussian(y, sigma) * step;
+        y += step;
+    }
+    return value;
 }
 
 float3 Glass(float2 p, float sd)
 {
-    // The backdrop through the map, then the filters.
-    float2 shift = Mapped(Shift(p)) * Scale;
-    float3 color = Filters(Read(p + shift));
+    // The element's box (device pixels): the island, reaching TopExtra above a square top.
+    float2 boxCss = float2(Size.x, Size.y + TopExtra) / Scale;
+    float2 pixel = float2(p.x, p.y + TopExtra);
 
-    // Legibility: only what lies outside the theme's band is moved, just far enough.
-    float luma = Luma(color);
-    float held = luma;
-    if (Low > 0) held = SoftMax(held, Low, .14);
-    if (High < 1) held = SoftMin(held, High, .14);
-    if (held > luma) color += (1 - color) * saturate((held - luma) / max(1 - luma, 1e-3));
-    else if (held < luma)
+    // The backdrop through the map, at whole pixels, then the filters.
+    float2 raw = Displacement(pixel, boxCss);
+    float2 shift = floor(raw + .5);
+    // The backdrop the filter sees is the element's box, mirrored past its edges (the browser's backdrop-filter edge mode).
+    float2 at = floor(pixel) + shift, box = float2(Size.x, Size.y + TopExtra);
+    // Mirrored as a tiling: a shift longer than the box (a low bar's) folds back again.
+    float2 period = 2 * box, t = at - period * floor(at / period);
+    at = t < box ? t : period - t - 1;
+    int2 read = int2(at - float2(0, TopExtra) + Pad);
+    float3 color = Background.Load(int3(read, 0)).rgb;
+    if (LinearFilters > .5) color = ToSrgb(Filters(ToLinear(color)));
+    else color = Filters(color);
+
+    // Legibility: the backdrop's brightness moved affinely into the theme's band, scaled no more than it must be.
+    float a = BandA, b = max(BandB, BandA + 1e-3);
+    if (Low > 0 && a < Low)
     {
-        float deep = Luma(Tint.rgb);
-        if (luma > deep + .02 && held >= deep) color = lerp(Tint.rgb, color, saturate((held - deep) / (luma - deep)));
-        else color *= held / max(luma, 1e-3);
+        float k = min(1, (1 - Low) / (b - a));
+        color = Low + (color - a) * k;
+    }
+    if (High < 1 && b > High)
+    {
+        float k = min(1, High / (b - a));
+        color = High - (b - color) * k;
+    }
+    color = saturate(color);
+    // What the measure, at a few pixels' grain, could not see (a dark word on a light page, a bright one on a dark page) is
+    // still lifted, or brought down, just as far as the band asks, with a soft knee: only those pixels.
+    float luma = Luma(color);
+    if (Low > 0 && luma < Low + .1)
+    {
+        float held = SoftMax(luma, Low, .1);
+        color += (1 - color) * saturate((held - luma) / max(1 - luma, 1e-3));
+    }
+    if (High < 1 && luma > High - .1)
+    {
+        float held = SoftMin(luma, High, .1);
+        color *= held / max(luma, 1e-3);
     }
 
     // The element's background.
     color = lerp(color, Tint.rgb, Tint.a);
 
-    // The inset shadow (0 InsetY InsetBlur black InsetAlpha): dark where the shape moved by the offset, blurred, does not cover;
-    // pressed, the source's inner glow and its deeper bottom shadow (0 -8px 16px .18, scaled with InsetBlur as the rest).
-    float2 unused;
-    float k = InsetBlur / 20;
-    float shadow = InsetAlpha * (1 - Covered(Outline(p - float2(0, InsetY * Scale), unused), InsetBlur * .5 * Scale));
+    // The inset shadows: dark where the box moved by the offset, blurred, does not cover. Pressed, the source's inner glow
+    // (white where the box shrunk by its spread, blurred, does not cover) and its deeper bottom shadow, at once.
+    float2 halfSize = float2(Size.x, Size.y + TopExtra) * .5;
+    float2 centred = pixel - halfSize;
+    float r = (CornerTop > 0 ? CornerTop : CornerBottom);
+    float sigma = max(InsetBlur * .5 * Scale, .5);
+    float shadow = InsetAlpha * (1 - BoxCoverage(centred - float2(0, InsetY * Scale), halfSize, r, sigma, Narrow));
     if (Press > 0)
     {
-        float deep = Press * .18 * (1 - Covered(Outline(p + float2(0, 8 * k * Scale), unused), 8 * k * Scale));
-        shadow = 1 - (1 - shadow) * (1 - deep);
-        color = lerp(color, 1, Press * .55 * (1 - Covered(sd + 3 * k * Scale, 8 * k * Scale)));
+        float k = InsetBlur / 20;
+        float deep = .18 * (1 - BoxCoverage(centred - float2(0, -8 * k * Scale), halfSize, r, max(8 * k * Scale, .5), Narrow));
+        shadow = 1 - (1 - shadow) * (1 - Press * deep);
+        float spread = 3 * k * Scale;
+        float glow = .55 * (1 - BoxCoverage(centred, halfSize - spread, max(r - spread, 0), max(8 * k * Scale, .5), Narrow));
+        color = lerp(color, 1, Press * glow);
     }
-    color *= 1 - shadow;
-
-    // The pointer's light (.lit-glow): a radial gradient from it to the box's farthest corner, soft-light.
-    if (Lit > 0)
-    {
-        float2 corner = max(Pointer, Size - Pointer);
-        float r = length(p - Pointer) / max(length(corner), 1);
-        float a = r < .4 ? lerp(.9, .25, r / .4) : r < .7 ? lerp(.25, 0, (r - .4) / .3) : 0;
-        color = SoftLightWhite(color, a * Lit);
-    }
-    return saturate(color);
+    return saturate(color * (1 - shadow));
 }
 
 float4 PS(Vertex input) : SV_Target
@@ -303,10 +364,9 @@ float4 PS(Vertex input) : SV_Target
     float4 sum = 0;
     [unroll] for (int i = 0; i < 4; i++)
     {
-        float2 at = p + Offsets[i];
         float d = sd + dot(n, Offsets[i]);
         float cover = saturate(.5 - d * 2);
-        if (cover > 0) sum += float4(Glass(at, d) * cover, cover);
+        if (cover > 0) sum += float4(Glass(p, d) * cover, cover);
     }
     return sum * .25;
 }

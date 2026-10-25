@@ -48,6 +48,18 @@ internal static class Program
         if (args.Length > 2 && args[0] == "--liquid-port") return LiquidPreview.RunPort(args[1], args[2], !args.Contains("--island"));
         // Every state of the glass (shapes, opening frames, pressed, hovered, the pages' sizes): --liquid-states <backgrounds> <output folder>.
         if (args.Length > 2 && args[0] == "--liquid-states") return LiquidPreview.RunStates(args[1], args[2]);
+        // The liquid glass shaders compiled ahead into src/BrimDeck/LiquidGlass (Liquid.vs.cso, Liquid.ps.cso, Liquid.hlsl.sha256):
+        // --compile-liquid <the LiquidGlass folder>. Run it after every change to Liquid.hlsl; WindowsTests checks it was.
+        if (args.Length > 1 && args[0] == "--compile-liquid")
+        {
+            var source = File.ReadAllBytes(System.IO.Path.Combine(args[1], "Liquid.hlsl"));
+            var (vertex, pixel) = BrimDeck.LiquidGlass.LiquidRenderer.Compiled(source);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.vs.cso"), vertex);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.ps.cso"), pixel);
+            File.WriteAllText(System.IO.Path.Combine(args[1], "Liquid.hlsl.sha256"), BrimDeck.LiquidGlass.LiquidRenderer.SourceHash(source) + "\n");
+            Console.WriteLine($"Compiled Liquid.hlsl: vertex {vertex.Length} bytes, pixel {pixel.Length} bytes");
+            return 0;
+        }
         // Only the GPU timing of a liquid glass frame: --liquid-time.
         if (args.Length > 0 && args[0] == "--liquid-time") return LiquidPreview.TimeOnly();
         // Automatic liquid glass turning light and dark over a split background: --liquid-auto <output folder>.

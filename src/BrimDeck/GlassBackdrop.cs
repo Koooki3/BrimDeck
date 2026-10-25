@@ -415,27 +415,21 @@ internal sealed class GlassBackdrop : IDisposable
             _pad = (int)Math.Ceiling(48 * scale);
             var region = new LiquidGlass.RECT(window.X + x - _pad, window.Y + y - _pad, window.X + x + width + _pad, window.Y + y + height + _pad);
             _tryRegion = region;
-            // The glass's own preset: clear glass held to the theme's band only where the background lies outside it (the
-            // band is the one the theme's text was fitted to, never wider). The island's tint thickening as the panel opens
-            // says how open it is, which takes a little more frost; the tint itself is not drawn over the glass.
-            double alpha = tint(), whole = glass.Tint.A / 255d;
-            float open = whole < 1 ? (float)Math.Clamp((alpha - whole) / ((1 - whole) * .35), 0, 1) : 0;
+            // The glass's own preset (the ported glass, its band for the theme's text); the island's tint is not drawn over it.
             var c = shown.Corners;
-            // Between the looks while the theme turns between light and dark glass; the theme's band only once there.
+            // Between the looks while the theme turns between light and dark glass.
             double darkness = _dark < 0 ? (PanelTheme.Current.IsDark ? 1 : 0) : _dark;
             var preset = LiquidFrame.Blend(LiquidFrame.Preset(false, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale),
                 LiquidFrame.Preset(true, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale), (float)darkness);
-            bool settled = darkness is 0 or 1;
-            var pointer = _pointer;
+            // The band is the glass's own (LiquidFrame.TextLight, TextDark: the theme's text kept at 4.5:1 by an affine lift that
+            // keeps the backdrop's detail), not the held blur's narrower one, which the blur needs for its own sake.
             var next = preset with
             {
-                BandLow = glass.Held && settled ? MathF.Max(preset.BandLow, (float)glass.Low) : preset.BandLow,
-                BandHigh = glass.Held && settled ? MathF.Min(preset.BandHigh, (float)glass.High) : preset.BandHigh,
-                Open = open,
-                PointerX = pointer is { } p ? (float)(p.X * scale) : float.NaN, PointerY = pointer is { } q ? (float)(q.Y * scale) : float.NaN,
-                Hover = (float)_hover, Press = (float)_press, Morph = (float)_moving
+                // The source switches its pressed shadows at once, and has no hover light or morph of its own: only the press
+                // reaches the glass (the pointer's moves, a change of hover or of the shape's speed alone draw nothing new).
+                Press = _pointerDown && _pointer is not null ? 1 : 0
             };
-            // Drawn again only when the glass changed (its shape, place, look, the pointer's light) or what lies behind it did;
+            // Drawn again only when the glass changed (its shape, place, look, the press) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),
             // the desktop is looked at no oftener than the idle poll's PollMs.
             if (!_host.Frame(region, _pad, next, Environment.TickCount64)) return ShowLiquid(false);

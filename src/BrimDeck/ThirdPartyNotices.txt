@@ -625,12 +625,13 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-liquid-glass-web (liquid glass: displacement map, filter chain, shadows, light and press; ported to Liquid.hlsl, LiquidRenderer.cs, Soft.SpringEase, MainWindow.Jelly)
-https://github.com/xiaofangstudio/liquid-glass-web
+liquid-glass-web (liquid glass: displacement map, filter chain, shadows and press; ported to Liquid.hlsl, LiquidRenderer.cs, Soft.SpringEase, MainWindow.Jelly)
+https://github.com/xiaofangstudio/liquid-glass-web, commit 3094add905e60ee5aeb45e806751beb94425dd73
 
-MIT License (as the repository's README states)
-
-Copyright (c) xiaofangstudio
+The repository has no LICENSE file and gives no copyright line. Its README states, under "授权" (License):
+  "本仓库代码：MIT" (the code of this repository: MIT)
+  "折射引擎基于 [shuding/liquid-glass](https://github.com/shuding/liquid-glass)（MIT License, © Shu Ding）" (the refraction engine is based on shuding/liquid-glass)
+The MIT License text follows, as that statement grants it:
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -639,7 +640,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 liquid-glass (the refraction engine liquid-glass-web is built on)
-https://github.com/shuding/liquid-glass
+https://github.com/shuding/liquid-glass, commit a2d2e847f793430e3409a52927af815a23f4d372
 
 MIT License
 

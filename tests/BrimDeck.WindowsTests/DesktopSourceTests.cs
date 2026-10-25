@@ -137,8 +137,8 @@ internal static class DesktopSourceTests
     // prompt), are that color, never black (a frame nothing was presented for is not taken).
     private static void Known(Action<string, bool> check)
     {
-        using var backdrop = new Backdrop(Backdrop.Middle(400, 150), Light.R, Light.G, Light.B);
-        var region = Inside(backdrop.Bounds, 40);
+        using var backdrop = new Backdrop(Backdrop.Corner(220, 140), Light.R, Light.G, Light.B);
+        var region = Inside(backdrop.Bounds, 20);
         using var source = DesktopSource.TryCreate();
         if (source is null || !UpdateSoon(source, region, out _)) { Console.WriteLine("SKIP: desktop capture of a known backdrop (no capture)."); return; }
         check("desktop capture: the first frame of a new duplication is the desktop, not black", All(Read(source), source.Size, Light));
@@ -154,8 +154,8 @@ internal static class DesktopSourceTests
     // (here one already destroyed) keeps the glass off (DesktopSource.Open refuses, and GlassBackdrop shows the blur).
     private static void Exclusion(Action<string, bool> check)
     {
-        using var backdrop = new Backdrop(Backdrop.Middle(400, 150), Light.R, Light.G, Light.B);
-        using var cover = new Backdrop(Backdrop.Middle(200, 80), Blue.R, Blue.G, Blue.B);
+        using var backdrop = new Backdrop(Backdrop.Corner(220, 140), Light.R, Light.G, Light.B);
+        using var cover = new Backdrop(Backdrop.Corner(110, 60), Blue.R, Blue.G, Blue.B);
         using var source = DesktopSource.TryCreate();
         if (source is null) { Console.WriteLine("SKIP: exclusion (no capture)."); return; }
         var region = Inside(cover.Bounds, 10);
@@ -167,7 +167,7 @@ internal static class DesktopSourceTests
         for (int i = 0; i < 40 && !gone; i++) { Thread.Sleep(25); gone = source.Update(region, out _) && All(Read(source), source.Size, Light); }
         check("exclusion: the window left out is not in the capture: the desktop behind it is", gone);
 
-        var dead = new Backdrop(Backdrop.Middle(40, 40), 0, 0, 0);
+        var dead = new Backdrop(Backdrop.Corner(40, 40), 0, 0, 0);
         nint handle = dead.Handle;
         dead.Dispose();
         check("exclusion: a window that cannot be left out is refused", !DesktopSource.Exclude(handle) && !DesktopSource.Exclude(0));
@@ -182,17 +182,17 @@ internal static class DesktopSourceTests
     // frame or a tick that still holds it, and drawing goes on; DeviceChanged is raised as Update returns, not inside it.
     private static void DeviceLoss(Action<string, bool> check)
     {
-        using var backdrop = new Backdrop(Backdrop.Middle(400, 150), Light.R, Light.G, Light.B);
-        var region = Inside(backdrop.Bounds, 40);
+        using var backdrop = new Backdrop(Backdrop.Corner(220, 140), Light.R, Light.G, Light.B);
+        var region = Inside(backdrop.Bounds, 20);
         var source = DesktopSource.TryCreate();
         if (source is null) { Console.WriteLine("SKIP: device loss (no capture)."); return; }
         using var host = new LiquidHost(source);
         bool inside = false;
         int raised = 0;
         source.DeviceChanged += () => { raised++; inside |= new StackTrace().ToString().Contains("DesktopSource.Capture", StringComparison.Ordinal); };
-        var frame = LiquidFrame.Preset(false, region.Width - 96, region.Height - 96, 20, 20, 0, 1);
+        var frame = LiquidFrame.Preset(false, region.Width - 48, region.Height - 48, 20, 20, 0, 1);
         long now = 0;
-        bool Draw(bool tick) { for (int i = 0; i < 40; i++) { if (tick ? host.Tick(region, 48, frame, now += 100) : host.Frame(region, 48, frame with { Hover = i / 40f }, now += 16)) return true; Thread.Sleep(25); } return false; }
+        bool Draw(bool tick) { for (int i = 0; i < 40; i++) { if (tick ? host.Tick(region, 24, frame, now += 100) : host.Frame(region, 24, frame with { Hover = i / 40f }, now += 16)) return true; Thread.Sleep(25); } return false; }
         if (!Draw(false)) { Console.WriteLine("SKIP: device loss (no capture)."); return; }
         var lose = typeof(DesktopSource).GetMethod("Lose", BindingFlags.NonPublic | BindingFlags.Instance)!;
         int swaps = 20, drawn = 0, errors = 0;
@@ -215,26 +215,26 @@ internal static class DesktopSourceTests
     {
         var monitors = Monitors();
         var second = monitors.FirstOrDefault(m => !m.Contains(0, 0));
-        using var here = new Backdrop(Backdrop.Middle(400, 150), Light.R, Light.G, Light.B);
+        using var here = new Backdrop(Backdrop.Corner(220, 140), Light.R, Light.G, Light.B);
         var near = Inside(here.Bounds, 10);
         var one = DesktopSource.TryCreate();
         var two = DesktopSource.TryCreate();
         if (one is null || two is null) { one?.Dispose(); two?.Dispose(); Console.WriteLine("SKIP: two glasses (no capture)."); return; }
         using var first = new LiquidHost(one);
         using var other = new LiquidHost(two);
-        var frame = LiquidFrame.Preset(false, near.Width - 96, near.Height - 96, 15, 15, 0, 1);
+        var frame = LiquidFrame.Preset(false, near.Width - 48, near.Height - 48, 15, 15, 0, 1);
         bool Soon(LiquidHost host, RECT region, LiquidFrame f, long now)
         {
-            for (int t = 0; t < 40; t++) { if (host.Frame(region, 48, f, now)) return true; Backdrop.Pump(); Thread.Sleep(25); }
+            for (int t = 0; t < 40; t++) { if (host.Frame(region, 24, f, now)) return true; Backdrop.Pump(); Thread.Sleep(25); }
             return false;
         }
         if (!Soon(first, near, frame, 0)) { Console.WriteLine("SKIP: two glasses (no capture)."); return; }
         bool refused = true;
-        try { for (int t = 0; t < 4; t++) { refused &= !other.Frame(Inside(near, 20), 48, frame with { Width = frame.Width - 40, Height = frame.Height - 40 }, t * 16L); Thread.Sleep(25); } }
+        try { for (int t = 0; t < 4; t++) { refused &= !other.Frame(Inside(near, 20), 24, frame with { Width = frame.Width - 40, Height = frame.Height - 40 }, t * 16L); Thread.Sleep(25); } }
         catch (Exception) { refused = false; }
-        check("two glasses: a second glass over the same output gets no capture, quietly, and the first goes on", refused && first.Frame(near, 48, frame with { Hover = .5f }, 100));
+        check("two glasses: a second glass over the same output gets no capture, quietly, and the first goes on", refused && first.Frame(near, 24, frame with { Hover = .5f }, 100));
         if (second.IsEmpty) { Console.WriteLine("SKIP: two glasses on two monitors (one monitor)."); return; }
-        using var there = new Backdrop(new RECT(second.Left + second.Width / 2 - 200, second.Top + second.Height / 2 - 75, second.Left + second.Width / 2 + 200, second.Top + second.Height / 2 + 75), Light.R, Light.G, Light.B);
+        using var there = new Backdrop(new RECT(second.Left, second.Top, second.Left + 220, second.Top + 140), Light.R, Light.G, Light.B);
         var far = Inside(there.Bounds, 10);
         int ok = 0, frames = 30;
         for (int i = 0; i < frames; i++)
@@ -255,8 +255,8 @@ internal static class DesktopSourceTests
     // confirmed its look.
     private static void LiveLook(Action<string, bool> check)
     {
-        using var backdrop = new Backdrop(Backdrop.Middle(400, 150), Light.R, Light.G, Light.B);
-        const int pad = 48;
+        using var backdrop = new Backdrop(Backdrop.Corner(220, 140), Light.R, Light.G, Light.B);
+        const int pad = 24;
         var region = Inside(backdrop.Bounds, 10);
         int width = region.Width - 2 * pad, height = region.Height - 2 * pad;
         var source = DesktopSource.TryCreate();
@@ -300,17 +300,17 @@ internal static class DesktopSourceTests
     // own (no closure per frame); what is left is the renderer's.
     private static void Allocations(Action<string, bool> check)
     {
-        using var backdrop = new Backdrop(Backdrop.Middle(400, 150), Light.R, Light.G, Light.B);
+        using var backdrop = new Backdrop(Backdrop.Corner(220, 140), Light.R, Light.G, Light.B);
         var region = Inside(backdrop.Bounds, 10);
         var source = DesktopSource.TryCreate();
         if (source is null) { Console.WriteLine("SKIP: allocations (no capture)."); return; }
         using var host = new LiquidHost(source);
-        var frame = LiquidFrame.Preset(false, region.Width - 96, region.Height - 96, 20, 20, 0, 1);
-        for (int i = 0; i < 40 && !host.Frame(region, 48, frame, 0); i++) Thread.Sleep(25);
-        for (int i = 0; i < 20; i++) host.Frame(region, 48, frame with { Hover = i / 20f }, i * 16L);
+        var frame = LiquidFrame.Preset(false, region.Width - 48, region.Height - 48, 20, 20, 0, 1);
+        for (int i = 0; i < 40 && !host.Frame(region, 24, frame, 0); i++) Thread.Sleep(25);
+        for (int i = 0; i < 20; i++) host.Frame(region, 24, frame with { Hover = i / 20f }, i * 16L);
         long a0 = GC.GetAllocatedBytesForCurrentThread();
         const int n = 300;
-        for (int i = 0; i < n; i++) host.Frame(region, 48, frame with { Hover = i % 100 / 100f, Press = i % 50 / 50f }, 400 + i * 16L);
+        for (int i = 0; i < n; i++) host.Frame(region, 24, frame with { Hover = i % 100 / 100f, Press = i % 50 / 50f }, 400 + i * 16L);
         double bytes = (GC.GetAllocatedBytesForCurrentThread() - a0) / (double)n;
         check(FormattableString.Invariant($"allocations: a followed frame allocates little ({bytes:0} bytes)"), bytes <= 128);
     }

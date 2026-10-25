@@ -21,5 +21,8 @@
     <Compile Include="..\..\src\BrimDeck\Native\NoticeProtection.cs" Link="NoticeProtection.cs" />
     <Compile Include="..\..\src\BrimDeck\LiquidGlass\*.cs" LinkBase="LiquidGlass" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.hlsl" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.vs.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.vs.cso" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl.sha256" />
   </ItemGroup>
 </Project>

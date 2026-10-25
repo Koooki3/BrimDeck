@@ -1,4 +1,6 @@
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Vortice.D3DCompiler;
@@ -28,6 +30,8 @@ namespace BrimDeck.LiquidGlass;
 //   Contrast, Brightness, Saturate: the source's backdrop-filter (1.2, 1.05, 1.1).
 //   InsetY, InsetBlur, InsetAlpha: the source's inset shadow (0 -8px 20px rgba(0,0,0,.14)), shrunk for low shapes.
 //   Faithful: the source's own uv field (the proof sheets), not the island's.
+//   LinearMap, LinearFilters: the source as the browser draws it, its filter in linear light (see Liquid.hlsl); off, as the
+//     page meant it (sRGB).
 internal readonly record struct LiquidFrame(
     int Width, int Height,
     float CornerTop, float CornerBottom, float Shoulder,
@@ -39,22 +43,27 @@ internal readonly record struct LiquidFrame(
     float BandLow = 0, float BandHigh = 1, float Scale = 1, float Open = 0,
     float Ref = 1, float Edge = 1, float Rad = .6f,
     float Contrast = 1.2f, float Brightness = 1.05f, float Saturate = 1.1f,
-    float InsetY = -8, float InsetBlur = 20, float InsetAlpha = .14f, bool Faithful = false)
+    float InsetY = -8, float InsetBlur = 20, float InsetAlpha = .14f, bool Faithful = false,
+    bool LinearMap = true, bool LinearFilters = true)
 {
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
     private const float SourceHeight = 44, Thin = 28;
+    // The backdrop's brightness (sRGB luma) where the themes' body text keeps 4.5:1 with a little to spare: dark text
+    // (#101217) over at least TextLight, light text (#F6F7F9) over at most TextDark.
+    public const float TextLight = .52f, TextDark = .44f;
 
-    // The two looks, at a display scale, for a shape and size: the source's glass in both, white-tinted; the theme's band for its
-    // text (liquid-glass-light: .85..1 for dark text; liquid-glass-dark: 0...28 for light text).
+    // The two looks, at a display scale, for a shape and size: the source's glass in both. Light: its white background
+    // (rgba(255,255,255,.08)) and the backdrop lifted to at least TextLight; dark: a dark base (#121419 at .3) and the backdrop
+    // brought down to at most TextDark, so the theme's text keeps 4.5:1 (see Liquid.hlsl, Legibility).
     public static LiquidFrame Preset(bool dark, int width, int height, float cornerTop, float cornerBottom, float shoulder, float scale)
     {
         float css = height / MathF.Max(.5f, scale);
         float fit = MathF.Min(1, css / SourceHeight);
         float thin = MathF.Min(1, css / Thin);
-        return new(width, height, cornerTop, cornerBottom, shoulder, 1, 1, 1, .08f,
+        return new(width, height, cornerTop, cornerBottom, shoulder, dark ? 0x12 / 255f : 1, dark ? 0x14 / 255f : 1, dark ? 0x19 / 255f : 1, dark ? .3f : .08f,
             PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: dark ? 1 : 0,
-            BandLow: dark ? 0 : .85f, BandHigh: dark ? .28f : 1, Scale: scale,
+            BandLow: dark ? 0 : TextLight, BandHigh: dark ? TextDark : 1, Scale: scale,
             InsetY: -8 * fit, InsetBlur: 20 * fit, InsetAlpha: .14f * thin * thin);
     }
 
@@ -116,12 +125,12 @@ internal readonly record struct LiquidFrame(
     }
 
     // Half the largest shift over the map, as the source normalises it (maxScale * .5): over every texel of the box (CSS pixels)
-    // for the source exactly; for the island every step-th inside and every texel along the edges, where the largest lie, which
-    // costs little as the shape animates.
+    // for the source exactly; for the island about 3000 texels inside and every few along the edges, where the largest lie
+    // (about .05 ms, once per size: the opening panel changes size every frame).
     public static double MaxHalf(double w, double h, double edge, double strength, double rad, bool faithful)
     {
         int W = Math.Max(2, (int)Math.Round(w)), H = Math.Max(2, (int)Math.Round(h));
-        int step = faithful ? 1 : Math.Max(1, (int)Math.Sqrt(W * (double)H / 20000));
+        int step = faithful ? 1 : Math.Max(1, (int)Math.Sqrt(W * (double)H / 3000)), along = faithful ? 1 : Math.Max(1, step / 2);
         double max = 0;
         void At(int x, int y)
         {
@@ -130,8 +139,8 @@ internal readonly record struct LiquidFrame(
         }
         for (int y = 0; y < H; y += step)
             for (int x = 0; x < W; x += step) At(x, y);
-        for (int x = 0; x < W; x++) { At(x, 0); At(x, H - 1); }
-        for (int y = 0; y < H; y++) { At(0, y); At(W - 1, y); }
+        for (int x = 0; x < W; x += along) { At(x, 0); At(x, H - 1); }
+        for (int y = 0; y < H; y += along) { At(0, y); At(W - 1, y); }
         return max * .5;
     }
 }
@@ -153,7 +162,6 @@ internal sealed class LiquidRenderer : IDisposable
     private readonly ID3D11VertexShader _vertex;
     private readonly ID3D11PixelShader _pixel;
     private readonly ID3D11Buffer _constants;
-    private readonly ID3D11SamplerState _sampler;
     private IDXGISwapChain2? _swapChain;
     private ID3D11RenderTargetView? _target;
     // The frame's size, shown from the swap chain's buffers (SetSourceSize), and the buffers' size.
@@ -162,19 +170,16 @@ internal sealed class LiquidRenderer : IDisposable
     private ID3D11Texture2D? _mips;
     private ID3D11ShaderResourceView? _mipsView;
     private (int Width, int Height, Format Format) _mipsFor;
-    // The pointer last seen over the island, which the light keeps turning from while Hover eases out.
-    private float _pointerX = float.NaN, _pointerY = float.NaN;
     private bool _disposed;
 
     public LiquidRenderer(ID3D11Device device)
     {
         _device = device;
         _context = device.ImmediateContext;
-        var source = Source();
-        using (var code = Compile(source, "VS", "vs_5_0")) _vertex = device.CreateVertexShader(code.AsSpan());
-        using (var code = Compile(source, "PS", "ps_5_0")) _pixel = device.CreatePixelShader(code.AsSpan());
+        var (vertex, pixel) = Shaders.Value;
+        _vertex = device.CreateVertexShader(vertex);
+        _pixel = device.CreatePixelShader(pixel);
         _constants = device.CreateBuffer(new BufferDescription((uint)Unsafe.SizeOf<Constants>(), BindFlags.ConstantBuffer, ResourceUsage.Default, CpuAccessFlags.None));
-        _sampler = device.CreateSamplerState(new SamplerDescription(Filter.MinMagMipLinear, TextureAddressMode.Clamp, TextureAddressMode.Clamp, TextureAddressMode.Clamp));
     }
 
     // A Composition brush showing the rendered glass at its size from the brush's top-left (no stretch): the caller places the
@@ -219,7 +224,6 @@ internal sealed class LiquidRenderer : IDisposable
         context.PSSetShader(_pixel);
         context.PSSetConstantBuffer(0, _constants);
         context.PSSetShaderResource(0, view);
-        context.PSSetSampler(0, _sampler);
         context.Draw(3, 0);
         // The background is copied into the mips next frame: it must not stay bound as a shader input meanwhile.
         context.PSSetShaderResource(0, null!);
@@ -248,12 +252,17 @@ internal sealed class LiquidRenderer : IDisposable
     // The mean brightness of the background under the island, for automatic liquid glass (GlassAppearance): a small mip (at
     // most MeasureTexels across) is copied to a staging texture after the mips are made, and read on a later frame, never
     // waited for. One copy is out at a time.
-    private const int MeasureTexels = 64;
+    private const int MeasureTexels = 128;
     private ID3D11Texture2D? _measure;
     private (int Width, int Height, int Level) _measureFor;
     private bool _measuring;
     private (int Pad, int Width, int Height) _measuredRegion;
     private readonly byte[] _measureRow = new byte[MeasureTexels * 4 * 2];
+    private readonly float[] _lumas = new float[MeasureTexels * MeasureTexels * 4];
+    // The backdrop's brightness under the island, its 2nd and 98th percentiles (sRGB luma), from the last measure: the band
+    // the glass moves it into (legibility) is scaled from these. Before any, the widest.
+    private float _bandA, _bandB = 1;
+    public (float Low, float High) Band => (_bandA, _bandB);
 
     private void Sample(int pad, int width, int height)
     {
@@ -276,17 +285,21 @@ internal sealed class LiquidRenderer : IDisposable
     // is (the next frame's copy goes out once this one is read).
     // Whether a measure is out, to be read on a later frame.
     public bool Measuring => _measuring;
-    public bool TryBackdrop(out double luma)
+    public bool TryBackdrop(out double luma) => Read(wait: false, out luma);
+    // The same, waiting for the copy (the previews, which draw once).
+    internal bool MeasureNow(out double luma) => Read(wait: true, out luma);
+    private bool Read(bool wait, out double luma)
     {
         luma = 0;
         if (!_measuring || _measure is null) return false;
-        if (_context.Map(_measure, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.DoNotWait, out var mapped).Failure) return false;
+        if (_context.Map(_measure, 0, MapMode.Read, wait ? Vortice.Direct3D11.MapFlags.None : Vortice.Direct3D11.MapFlags.DoNotWait, out var mapped).Failure) return false;
         try
         {
             var (w, h, level) = _measureFor;
             double step = 1 << level, sum = 0;
             int count = 0;
             var (pad, width, height) = _measuredRegion;
+            int n = 0;
             for (int y = 0; y < h; y++)
             {
                 double cy = (y + .5) * step - pad;
@@ -297,12 +310,16 @@ internal sealed class LiquidRenderer : IDisposable
                     double cx = (x + .5) * step - pad;
                     if (cx < 0 || cx > width) continue;
                     int o = x * 4;
-                    sum += (.0722 * _measureRow[o] + .7152 * _measureRow[o + 1] + .2126 * _measureRow[o + 2]) / 255;
+                    double l = (.0722 * _measureRow[o] + .7152 * _measureRow[o + 1] + .2126 * _measureRow[o + 2]) / 255;
+                    sum += l;
                     count++;
+                    if (n < _lumas.Length) _lumas[n++] = (float)l;
                 }
             }
             if (count == 0) return false;
             luma = sum / count;
+            Array.Sort(_lumas, 0, n);
+            _bandA = _lumas[(int)(n * .02)]; _bandB = _lumas[Math.Min(n - 1, (int)(n * .98))];
             return true;
         }
         finally
@@ -326,15 +343,13 @@ internal sealed class LiquidRenderer : IDisposable
         // A square top (the panel, the notch) lies against the screen's edge: the source's box reaches above it, so its ring
         // and inset shadow show along the sides and the bottom only.
         float extra = top > 0 || f.Faithful ? 0 : h * .6f + 20 * scale;
-        float strength = 1 + .2f * Math.Clamp(f.Press, 0, 1) + .2f * Math.Clamp(f.Morph, 0, 1);
+        // The source's strength: 1 for a button, pressed or not (its dragged lenses' 1.2 does not apply to the island).
+        const float strength = 1;
         // The source's ring is a fifth of the glass's shorter side, fit for its buttons and lenses; on a larger island (the open
         // panel) it is kept to about RingCss CSS pixels.
         float edge = f.Faithful ? f.Edge : f.Edge * MathF.Max(1, MathF.Min(w, h + extra) / scale / RingCss);
-        var key = (w, h + extra, scale, edge, strength, f.Rad, f.Faithful);
+        var key = ((int)w, (int)(h + extra), scale, edge, f.Rad, f.Faithful);
         if (key != _maxFor) { _maxHalf = (float)LiquidFrame.MaxHalf(w / scale, (h + extra) / scale, edge, strength, f.Rad, f.Faithful); _maxFor = key; }
-
-        if (float.IsFinite(f.PointerX) && float.IsFinite(f.PointerY)) { _pointerX = f.PointerX; _pointerY = f.PointerY; }
-        bool known = float.IsFinite(_pointerX);
         var c = new Constants
         {
             Width = w, Height = h,
@@ -346,19 +361,18 @@ internal sealed class LiquidRenderer : IDisposable
             MaxHalf = _maxHalf, Faithful = f.Faithful ? 1 : 0, TopExtra = extra, Strength = strength,
             Contrast = f.Contrast, Brightness = f.Brightness, Saturate = f.Saturate, Low = Math.Clamp(f.BandLow, 0, 1),
             High = Math.Clamp(f.BandHigh, 0, 1), InsetY = f.InsetY, InsetBlur = MathF.Max(.1f, f.InsetBlur), InsetAlpha = Math.Clamp(f.InsetAlpha, 0, 1),
-            PointerX = known ? _pointerX : -1e4f, PointerY = known ? _pointerY : -1e4f,
-            Lit = known ? LitMax * Math.Clamp(f.Hover, 0, 1) : 0, Press = Math.Clamp(f.Press, 0, 1),
-            Dark = f.Dark, Band = 24 * scale
+            BandA = _bandA, BandB = _bandB,
+            // A square top's sides: the inset shadow there is a gray band down the whole panel; narrowed to about half.
+            Narrow = top > 0 || f.Faithful ? 0 : 1.2f,
+            Press = f.Press > .5f ? 1 : 0, Dark = f.Dark, Band = 24 * scale,
+            LinearMap = f.LinearMap ? 1 : 0, LinearFilters = f.LinearFilters ? 1 : 0
         };
         _context.UpdateSubresource(in c, _constants);
     }
 
-    // The pointer's light at full hover: the source lights a glass this much (.lit-glow at a press, 1) from a source of light
-    // touching it; the pointer over the island is a gentler one.
-    private const float LitMax = .35f;
     private const float RingCss = 90;
     private float _maxHalf;
-    private (float, float, float, float, float, float, bool) _maxFor;
+    private (int, int, float, float, float, bool) _maxFor;
 
     // The swap chain, its buffers at least the frame's size: they grow (in steps of 64 pixels, so an opening panel does not
     // reallocate every frame) and never shrink, and the source size shows only the frame's part of them, from the top-left.
@@ -416,20 +430,52 @@ internal sealed class LiquidRenderer : IDisposable
         finally { Marshal.Release(interop); }
     }
 
-    private static string Source()
+    // The shaders' bytecode, compiled ahead (Liquid.vs.cso, Liquid.ps.cso, made by `FxPreview --compile-liquid`; compiling the
+    // source at run time took about 4 s on the UI thread) and embedded with the hash of the source they were made from. Should
+    // that hash not be the embedded source's (the source edited, the bytecode not made again; a test catches it), the source
+    // is compiled here instead, once per run.
+    private static readonly Lazy<(byte[] Vertex, byte[] Pixel)> Shaders = new(() =>
     {
-        using var stream = typeof(LiquidRenderer).Assembly.GetManifestResourceStream("BrimDeck.LiquidGlass.Liquid.hlsl")
-            ?? throw new InvalidOperationException("Liquid.hlsl is not embedded.");
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
+        var source = Resource("BrimDeck.LiquidGlass.Liquid.hlsl") ?? throw new InvalidOperationException("Liquid.hlsl is not embedded.");
+        var vertex = Resource("BrimDeck.LiquidGlass.Liquid.vs.cso");
+        var pixel = Resource("BrimDeck.LiquidGlass.Liquid.ps.cso");
+        var made = Resource("BrimDeck.LiquidGlass.Liquid.hlsl.sha256");
+        if (vertex is not null && pixel is not null && made is not null && Encoding.ASCII.GetString(made).Trim() == SourceHash(source))
+            return (vertex, pixel);
+        return Compiled(source);
+    });
+
+    // The hash the bytecode is made for: SHA-256 of the source's bytes, its line ends taken as LF (a checkout may give it CRLF),
+    // lower-case hex.
+    internal static string SourceHash(byte[] source) => Convert.ToHexStringLower(SHA256.HashData(source.Where(b => b != 13).ToArray()));
+    internal static byte[] EmbeddedSource() => Resource("BrimDeck.LiquidGlass.Liquid.hlsl")!;
+    internal static string? EmbeddedHash() => Resource("BrimDeck.LiquidGlass.Liquid.hlsl.sha256") is { } made ? Encoding.ASCII.GetString(made).Trim() : null;
+
+    private static byte[]? Resource(string name)
+    {
+        using var stream = typeof(LiquidRenderer).Assembly.GetManifestResourceStream(name);
+        if (stream is null) return null;
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return copy.ToArray();
     }
 
-    private static Blob Compile(string source, string entry, string profile)
+    // Both shaders compiled from the source (bytes, ASCII only: the compiler is given them as they are).
+    internal static (byte[] Vertex, byte[] Pixel) Compiled(byte[] source)
+    {
+        string text = Encoding.UTF8.GetString(source);
+        return (Compile(text, "VS", "vs_5_0"), Compile(text, "PS", "ps_5_0"));
+    }
+
+    private static byte[] Compile(string source, string entry, string profile)
     {
         var result = Compiler.Compile(source, null!, null!, entry, "Liquid.hlsl", profile, ShaderFlags.OptimizationLevel3, EffectFlags.None, out var code, out var errors);
         using (errors)
+        using (code)
+        {
             if (result.Failure || code is null) throw new InvalidOperationException("Liquid.hlsl: " + (errors?.AsString() ?? result.ToString()));
-        return code;
+            return code.AsSpan().ToArray();
+        }
     }
 
     public void Dispose()
@@ -439,7 +485,7 @@ internal sealed class LiquidRenderer : IDisposable
         _target?.Dispose(); _swapChain?.Dispose();
         _mipsView?.Dispose(); _mips?.Dispose(); _measure?.Dispose();
         // The immediate context is not let go: Vortice keeps one wrapper for the device, which the capture side uses too.
-        _sampler.Dispose(); _constants.Dispose(); _pixel.Dispose(); _vertex.Dispose();
+        _constants.Dispose(); _pixel.Dispose(); _vertex.Dispose();
     }
 
     // The shader's constant buffer (Liquid.hlsl, Frame), in its order: 16 floats a row, nothing straddling a row.
@@ -454,7 +500,7 @@ internal sealed class LiquidRenderer : IDisposable
         public float MaxHalf, Faithful, TopExtra, Strength;
         public float Contrast, Brightness, Saturate, Low;
         public float High, InsetY, InsetBlur, InsetAlpha;
-        public float PointerX, PointerY, Lit, Press;
-        public float Dark, Band, Spare0, Spare1;
+        public float BandA, BandB, Narrow, Press;
+        public float Dark, Band, LinearMap, LinearFilters;
     }
 }

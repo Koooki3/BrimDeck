@@ -6,7 +6,7 @@ using Vortice.Direct3D11;
 using Vortice.DXGI;
 
 // What liquid glass costs while the island holds still and animates (a scrolling title, the equalizer), over a desktop that does
-// not change: a small opaque backdrop window of one color (Backdrop) in the middle of the primary monitor holds the desktop
+// not change: a small opaque backdrop window of one color (Backdrop) in a corner of the primary monitor holds the desktop
 // still under the region whatever else the screen shows, and the island's own redraws are faked by a small window over it, left
 // out of the capture as BrimDeck's windows are (DesktopSource.Exclude) and nearly invisible (1/255 opaque), redrawn 30 times a
 // second. The idle poll (LiquidIdle) runs as GlassBackdrop runs it, with the measure of the backdrop read on every tick
@@ -16,7 +16,8 @@ using Vortice.DXGI;
 // with the pointer resting on the island.
 internal static class LiquidIdleTests
 {
-    private const int Seconds = 4;
+    // Each phase counts for a second after a short settling, and shows its backdrop only for that long (under 2 s).
+    private const int Seconds = 1;
     // The poll's own work, in milliseconds of the thread per second (1.5 % of a core); the process's time beyond the test's own
     // loop (the graphics driver's threads submitting what the poll asks of the GPU included).
     private const double BudgetMs = 15, ProcessBudgetMs = 25;
@@ -39,10 +40,9 @@ internal static class LiquidIdleTests
 
         using var source = DesktopSource.TryCreate();
         if (source is null) { Console.WriteLine("SKIP: liquid idle cost (no desktop capture)."); return; }
-        const int width = 256, height = 40, pad = 48;
-        // In the middle of the primary monitor, over a backdrop of one color that holds the desktop there still.
-        var region = Backdrop.Middle(width + 2 * pad, height + 2 * pad);
-        using var backdrop = new Backdrop(Backdrop.Middle(400, 150), 90, 120, 150);
+        const int width = 120, height = 24, pad = 24;
+        // In the corner of the primary monitor, over a backdrop of one color (shown by each phase) that holds the desktop there still.
+        var region = new RECT(10, 10, 10 + width + 2 * pad, 10 + height + 2 * pad);
         // The fake island: a static control as a popup over the island's place, layered at 1/255, left out of the capture.
         var window = CreateWindowEx(0x80000 | 0x8 | 0x80 | 0x8000000 | 0x20, "Static", "a", 0x80000000, region.Left + pad, region.Top + pad, width, height, 0, 0, 0, 0);
         if (window == 0) { Console.WriteLine("SKIP: liquid idle cost (no window)."); return; }
@@ -57,7 +57,8 @@ internal static class LiquidIdleTests
             var frame = LiquidFrame.Preset(true, width, height, 20, 20, 0, 1);
             bool Render(ID3D11Texture2D background) { renderer.Draw(background, pad, frame, view); return true; }
             bool captured = false;
-            for (int i = 0; i < 40 && !captured; i++) { captured = source.Update(region, out _) && source.Texture is not null; if (!captured) Thread.Sleep(25); }
+            using (new Backdrop(Backdrop.Corner(200, 100), 90, 120, 150))
+                for (int i = 0; i < 40 && !captured; i++) { captured = source.Update(region, out _) && source.Texture is not null; if (!captured) Thread.Sleep(25); }
             if (!captured) { Console.WriteLine("SKIP: liquid idle cost (capture refused)."); return; }
 
             // The test's own loop, with nothing polled, without and with the redraws: what the process spends on it is not the poll's.
@@ -89,14 +90,15 @@ internal static class LiquidIdleTests
     // none: the loop and the redraws only, nothing captured or drawn.
     private static (double Ticks, double Renders, double WorkMs, double ProcessMs) Phase(DesktopSource source, LiquidRenderer renderer, RECT region, nint window, Func<ID3D11Texture2D, bool> render, bool old, bool follow = false, LiquidFrame frame = default, bool none = false)
     {
+        using var backdrop = new Backdrop(Backdrop.Corner(200, 100), 90, 120, 150);
         long drawn = 0;
         var idle = new LiquidIdle();
         var look = new BackdropLook();
         var clock = Stopwatch.StartNew();
         long start = (long)clock.Elapsed.TotalMilliseconds;
-        idle.Start(start);
-        // Settle the first seconds' fast polling (the island just stopped moving) before counting.
-        long countFrom = start + LiquidIdle.IdleAfterMs + 200, end = countFrom + Seconds * 1000;
+        // As if the island had held still for a while already (the idle pace), and a moment for the backdrop's arrival to settle.
+        idle.Start(start - LiquidIdle.IdleAfterMs);
+        long countFrom = start + 300, end = countFrom + Seconds * 1000;
         long nextTick = start, nextRedraw = start, ticks0 = 0, renders0 = 0;
         double work = 0;
         ulong cpu0 = 0;

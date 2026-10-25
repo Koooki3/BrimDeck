@@ -274,6 +274,10 @@ internal static class LiquidPreview
                 [new SubresourceData(handle.AddrOfPinnedObject(), (uint)bw * 4)]);
             using var target = device.CreateTexture2D(new Texture2DDescription(Vortice.DXGI.Format.B8G8R8A8_UNorm, (uint)at.Width, (uint)at.Height, 1, 1, BindFlags.RenderTarget));
             using var view = device.CreateRenderTargetView(target);
+            // The glass takes the backdrop's band of brightness from its own measure of it (a frame later on screen): measured
+            // here first, and drawn again with it.
+            renderer.Draw(background, pad, frame, view);
+            renderer.MeasureNow(out _);
             renderer.Draw(background, pad, frame, view);
             return Read(device, target, at.Width, at.Height);
         }
@@ -629,15 +633,22 @@ internal static class LiquidPreview
         ("card", 820, 40, 300, 200, 24), ("panel", 80, 290, 470, 250, 26), ("capsule", 620, 300, 470, 36, 18), ("bar", 620, 400, 500, 20, 10),
     ];
 
+    // A CSS edge at a fractional device pixel, as the browser snaps it: half way goes down and right (LIQUID_SNAP=even rounds
+    // half to even instead, for comparison).
+    private static int Snap(double device) => Environment.GetEnvironmentVariable("LIQUID_SNAP") == "even" ? (int)Math.Round(device) : (int)Math.Floor(device + .5);
+
     public static int RunPort(string backgrounds, string folder, bool faithful = true)
     {
         Directory.CreateDirectory(folder);
         using var device = CreateDevice();
         using var renderer = new LiquidRenderer(device);
-        foreach (var file in Directory.GetFiles(backgrounds, "*-100.png").Concat(Directory.GetFiles(backgrounds, "*-150.png")).Order())
+        // LIQUID_PORT_VARIANT: "srgbmap" and "srgbfilters" turn the source's linear-light reading off (as the page meant it), to
+        // show what each part of the browser's way contributes.
+        string variant = Environment.GetEnvironmentVariable("LIQUID_PORT_VARIANT") ?? "";
+        foreach (var file in Directory.GetFiles(backgrounds, "*.png").Where(f => int.TryParse(Path.GetFileNameWithoutExtension(f).Split('-')[^1], out _)).Order())
         {
             string stem = Path.GetFileNameWithoutExtension(file);
-            float scale = stem.EndsWith("-150", StringComparison.Ordinal) ? 1.5f : 1;
+            float scale = int.Parse(stem.Split('-')[^1], CultureInfo.InvariantCulture) / 100f;
             var decoded = new FormatConvertedBitmap(BitmapFrame.Create(new Uri(Path.GetFullPath(file)), BitmapCreateOptions.None, BitmapCacheOption.OnLoad), PixelFormats.Bgra32, null, 0);
             int dw = decoded.PixelWidth, dh = decoded.PixelHeight;
             var desktop = new byte[dw * dh * 4];
@@ -646,9 +657,10 @@ internal static class LiquidPreview
             var alpha = new byte[dw * dh];
             foreach (var g in PortGlass)
             {
-                int x = (int)Math.Round(g.X * scale), y = (int)Math.Round(g.Y * scale), w = (int)Math.Round(g.W * scale), h = (int)Math.Round(g.H * scale);
+                int x = Snap(g.X * scale), y = Snap(g.Y * scale), w = Snap((g.X + g.W) * scale) - Snap(g.X * scale), h = Snap((g.Y + g.H) * scale) - Snap(g.Y * scale);
                 float r = g.R * scale;
-                var frame = new LiquidFrame(w, h, r, r, 0, 1, 1, 1, .08f, float.NaN, float.NaN, 0, 0, 0, 0, Scale: scale, Faithful: faithful);
+                var frame = new LiquidFrame(w, h, r, r, 0, 1, 1, 1, .08f, float.NaN, float.NaN, 0, 0, 0, 0, Scale: scale, Faithful: faithful,
+                    LinearMap: !variant.Contains("srgbmap", StringComparison.Ordinal), LinearFilters: !variant.Contains("srgbfilters", StringComparison.Ordinal));
                 var glass = Render(device, renderer, desktop, dw, dh, (x, y, w, h), frame, (int)Math.Ceiling(48 * scale));
                 for (int j = 0; j < h; j++)
                     for (int i = 0; i < w; i++)
@@ -744,16 +756,18 @@ internal static class LiquidPreview
             var desktop = new byte[dw * dh * 4];
             decoded.CopyPixels(desktop, dw * 4, 0);
             foreach (var shape in TopShapes)
-                foreach (string look in new[] { "light", "dark", "lgw" })
+                foreach (string look in new[] { "light", "dark", "lgw", "plain" })
                     foreach (bool hover in new[] { false, true })
                     {
-                        if (hover && (shape.Name != "capsule" || look == "lgw")) continue;
+                        if (hover && (shape.Name != "capsule" || look is "lgw" or "plain")) continue;
                         bool dark = look == "dark";
                         int w = (int)Math.Round(shape.Width * scale), h = (int)Math.Round(shape.Height * scale);
                         var at = ((int)Math.Round((dw - w) / 2.0), (int)Math.Round(shape.Y * scale), w, h);
                         var frame = Frame(shape, dark, scale, at, hover ? (.2, .45) : null, 0);
                         // liquid-glass-web as it is (the proven port, its own uv field, no band): the reference column.
                         if (look == "lgw") frame = frame with { Faithful = true, BandLow = 0, BandHigh = 1 };
+                        // The island's glass with no band (what legibility starts from, for the detail it keeps).
+                        if (look == "plain") frame = frame with { BandLow = 0, BandHigh = 1 };
                         var glass = Render(device, renderer, desktop, dw, dh, at, frame, (int)Math.Ceiling(48 * scale));
                         var composed = (byte[])desktop.Clone();
                         var alpha = new byte[dw * dh];
