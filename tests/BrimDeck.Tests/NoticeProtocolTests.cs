@@ -68,6 +68,9 @@ internal static class NoticeProtocolTests
         check("A negative number is a body, not an option", NotifyCommandLine.Parse(["Temp", "-5"]).Message?.Body == "-5");
         check("Unknown options are refused", NotifyCommandLine.Parse(["x", "--nope", "1"]).Kind == NotifyCommandKind.Error);
         check("An option without its value is refused", NotifyCommandLine.Parse(["x", "--body"]).Kind == NotifyCommandKind.Error);
+        check("A forgotten value does not take the next option", NotifyCommandLine.Parse(["x", "-s", "-r", "build-1"]) is { Kind: NotifyCommandKind.Error, Error: { } why } && why.Contains("-s"));
+        check("A title or body may still start with -, and other values through =", NotifyCommandLine.Parse(["-t", "-x-", "-b", "--y"]) is { Kind: NotifyCommandKind.Send, Message: { Title: "-x-", Body: "--y" } }
+            && NotifyCommandLine.Parse(["x", "--source=-odd"]).Message?.AppName == "-odd");
         check("A third positional argument is refused", NotifyCommandLine.Parse(["a", "b", "c"]).Kind == NotifyCommandKind.Error);
         check("Progress outside 0..100 is refused", NotifyCommandLine.Parse(["a", "--progress", "101"]).Kind == NotifyCommandKind.Error);
         check("An unknown category is refused", NotifyCommandLine.Parse(["a", "-c", "spam"]).Kind == NotifyCommandKind.Error);

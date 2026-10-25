@@ -103,7 +103,7 @@ brim-notify event "Weekly" --at 15:00 --remind 10m --ends 16:00
 brim-notify "New mail" --kind mail
 ```
 
-- Times: `15:30` (the next 15:30) or `2026-10-24 15:30`, read in **Windows' time zone**; or ISO 8601 with an offset, such as `2026-10-24T15:30:00+08:00`. A time daylight saving skips moves to just after the change; one it repeats is the earlier.
+- Times: `15:30` (the next 15:30) or a date and time such as `YYYY-MM-DD 15:30`, read in **Windows' time zone**; or ISO 8601 with an offset, such as `YYYY-MM-DDT15:30:00+08:00`. A local time skipped by a daylight saving change moves to just after the change; a local time it repeats means the earlier of the two.
 - Durations: `90s`, `25m`, `1h30m`, `2d`; countdowns from 1 second to 31 days, reminders at most 7 days ahead of the start, times from 1 day ago to 1 year ahead. A duration counts from when BrimDeck receives it.
 - Without `-r` a key is made up and printed on standard output, for `brim-notify stop KEY`; sending again with the same `-r` starts it over.
 - Countdowns and events still running continue after a restart while "Keep recent notices" is on; an event not reminded yet is not removed by the retention.
