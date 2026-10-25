@@ -66,8 +66,11 @@ internal static class MotionReviewTests
         // F7: the picture beneath a pop-up waits for its entrance, and then follows changes after the theme's hover time.
         var popup = new PopupPicture();
         bool early = popup.Changed();
-        popup.Enter();
+        bool missed = popup.Enter();
         check("Motion review: a pop-up's picture is not taken before it has entered, and is after", !early && popup.Changed() && popup.Entered);
+        check("Motion review: a change while a pop-up entered is taken once more after its first picture, once", missed && !popup.Enter());
+        var still = new PopupPicture();
+        check("Motion review: a pop-up that did not change while it entered takes only its first picture", !still.Enter() && still.Changed());
         check("Motion review: a pop-up's picture is taken again once the theme's hover has settled",
             PopupPicture.SettleMilliseconds(MotionTiming.For(1, 0)) == 200 && PopupPicture.SettleMilliseconds(MotionTiming.For(1.2, 0)) == 232
             && PopupPicture.SettleMilliseconds(MotionTiming.For(.8, 3)) == MotionTiming.For(.8, 3).HoverIn + 40);

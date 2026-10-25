@@ -19,8 +19,9 @@ namespace BrimDeck;
 // when WPF takes the real one away: given its picture only on closing, it was drawn a frame late and the list blinked out
 // and back before it left. It is first taken once the list has entered, and then again only when the list can have changed
 // (motion-review F7, BrimDeck.Core.PopupPicture): the pointer moved onto another element, a button or key went down or up, or
-// the list scrolled; once right after (the change's own frame) and once more when a hover's fade has settled. Taken 20 times a
-// second while open, it kept the list rendering in software.
+// the list scrolled; once right after (the change's own frame) and once more when a hover's fade has settled. A change while it
+// entered is taken the same way right after the first picture. Taken 20 times a second while open, it kept the list rendering in
+// software.
 internal static class PopupMotion
 {
     private static readonly ConditionalWeakTable<object, Placed> Places = new();
@@ -80,15 +81,18 @@ internal static class PopupMotion
             var motion = PanelTheme.Current.Motion;
             var settled = TimeSpan.FromMilliseconds(PopupPicture.SettleMilliseconds(MotionTiming.For(motion.Pace, motion.Steps)));
             var refresh = placed.Refresh = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(Soft.Short + 80) };
+            bool queued = false;
+            object? over = null;
             refresh.Tick += (_, _) =>
             {
                 refresh.Stop();
-                schedule.Enter();
+                // The first picture; a change while the list entered (the pointer onto an option) may still be fading its hover
+                // in, so it is taken again right after and once that has settled, as for any change.
+                bool missed = schedule.Enter();
                 if (placed.Ghost == ghost && element.IsVisible) Take(element, picture);
+                if (missed) Changed();
             };
             refresh.Start();
-            bool queued = false;
-            object? over = null;
             void Changed()
             {
                 // Before it has entered, the first picture is still to come: taken now, it would lie opaque under the list
