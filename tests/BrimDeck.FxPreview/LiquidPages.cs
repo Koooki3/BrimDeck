@@ -43,9 +43,13 @@ internal static class LiquidPages
     private static readonly string[] Looks = [PanelThemes.GlassLight, PanelThemes.GlassDark];
 
     // One page drawn: the panel's layer (premultiplied BGRA, the root's size in device pixels) and the island's rectangle in it.
-    private sealed record Layer(byte[] Pixels, int Width, int Height, int X, int Y, int W, int H, double CornerTop, double CornerBottom, double Shoulder, bool ShadowShown, Color Text, bool HasText);
+    // Runs marks the pixels inside the theme's secondary (2) and tertiary (3) text runs (TextBlocks drawn in that brush).
+    private sealed record Layer(byte[] Pixels, int Width, int Height, int X, int Y, int W, int H, double CornerTop, double CornerBottom, double Shoulder, bool ShadowShown, Color Text, bool HasText,
+        byte[] Runs, Color Secondary, Color Tertiary);
 
-    public static int Run(string backgrounds, string folder)
+    // BrimDeck's own App (never run) and its MainWindow, whose stage lies in a source that is never shown, with the notices and
+    // no updates. Also used by ShadowCost (with animations on).
+    internal static (App App, MainWindow Deck, Grid Root, HwndSource Source) Offscreen(bool animations)
     {
         // BrimDeck's own App, made but never run. WPF raises its Startup on the first dispatcher pass whether it runs or not, so it
         // is marked offscreen (UseOffscreen) before anything here lets the dispatcher run: its OnStartup then starts nothing.
@@ -56,17 +60,11 @@ internal static class LiquidPages
         app.InitializeComponent();
         var settings = new DeckSettings
         {
-            Language = Loc.Chinese, Style = CompactStyle.Capsule, Animations = false, NoticesEnabled = true, NoticesPage = true,
+            Language = Loc.Chinese, Style = CompactStyle.Capsule, Animations = animations, NoticesEnabled = true, NoticesPage = true,
             UsagePage = true, MusicPage = true, MonitorPage = true, LyricsEnabled = true,
         };
         settings.Normalize();
         var deck = app.UseOffscreen(settings, Monitor, Work, Scale);
-        var files = Directory.GetFiles(backgrounds, "*-150.png").Order().ToList();
-        var wanted = new[] { "grayui-150.png", "chrome-dark-150.png", "video-150.png" };
-        if (files.Count > 3 && wanted.All(name => files.Any(file => Path.GetFileName(file) == name)))
-            files = wanted.Select(name => Path.Combine(backgrounds, name)).ToList();
-        if (files.Count == 0) { Console.WriteLine("FAIL: no *-150.png backgrounds in " + backgrounds); return 1; }
-        Directory.CreateDirectory(folder);
         if (!MotionEnvironment.Transparency) Console.WriteLine("NOTE: Windows transparency effects are off, so glass themes are not shown as glass; the pages are drawn opaque.");
 
         // No update to mark: the gear shows plain (the state folder is new and empty, so nothing is remembered).
@@ -81,9 +79,35 @@ internal static class LiquidPages
         var root = new Grid { Resources = resources, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Background = null };
         NameScope.SetNameScope(root, NameScope.GetNameScope(deck));
         root.Children.Add(stage);
-        using var source = new HwndSource(new HwndSourceParameters("BrimDeck.LiquidPages") { Width = 64, Height = 64, WindowStyle = unchecked((int)0x80000000) })
+        var source = new HwndSource(new HwndSourceParameters("BrimDeck.LiquidPages") { Width = 64, Height = 64, WindowStyle = unchecked((int)0x80000000) })
         { RootVisual = root, SizeToContent = SizeToContent.Manual };
         VisualTreeHelper.SetRootDpi(root, new DpiScale(Scale, Scale));
+        return (app, deck, root, source);
+    }
+
+    // Shows a theme on the offscreen stage.
+    internal static void UseLook(App app, MainWindow deck, Grid root, string look)
+    {
+        PanelTheme.Show(PanelThemes.Resolve(PanelThemes.BuiltIn(look)!));
+        // The app tells its windows' trees of the new theme's brushes (DynamicResource, PanelTheme.Publish); the stage no longer
+        // lies in the window, so the root carries the theme's published dictionary itself, and a new root dictionary makes every
+        // reference to its keys look again.
+        var again = new ResourceDictionary();
+        again.MergedDictionaries.Add(deck.Resources);
+        again.MergedDictionaries.Add(app.Resources.MergedDictionaries.First(dictionary => dictionary.Contains("PanelSurface")));
+        root.Resources = again;
+    }
+
+    public static int Run(string backgrounds, string folder)
+    {
+        var files = Directory.GetFiles(backgrounds, "*-150.png").Order().ToList();
+        var wanted = new[] { "grayui-150.png", "chrome-dark-150.png", "video-150.png" };
+        if (files.Count > 3 && wanted.All(name => files.Any(file => Path.GetFileName(file) == name)))
+            files = wanted.Select(name => Path.Combine(backgrounds, name)).ToList();
+        if (files.Count == 0) { Console.WriteLine("FAIL: no *-150.png backgrounds in " + backgrounds); return 1; }
+        Directory.CreateDirectory(folder);
+        var (app, deck, root, source) = Offscreen(animations: false);
+        using var _ = source;
 
         var cover = Cover();
         var track = Track();
@@ -95,14 +119,7 @@ internal static class LiquidPages
         var layers = new Dictionary<(Page, string), Layer>();
         foreach (var look in Looks)
         {
-            PanelTheme.Show(PanelThemes.Resolve(PanelThemes.BuiltIn(look)!));
-            // The app tells its windows' trees of the new theme's brushes (DynamicResource, PanelTheme.Publish); the stage no longer
-            // lies in the window, so the root carries the theme's published dictionary itself, and a new root dictionary makes every
-            // reference to its keys look again.
-            var again = new ResourceDictionary();
-            again.MergedDictionaries.Add(deck.Resources);
-            again.MergedDictionaries.Add(app.Resources.MergedDictionaries.First(dictionary => dictionary.Contains("PanelSurface")));
-            root.Resources = again;
+            UseLook(app, deck, root, look);
             if (!PanelTheme.GlassShown) Console.WriteLine($"NOTE: {look}: glass is not shown (transparency effects off or high contrast).");
             foreach (var (page, _) in Pages)
             {
@@ -153,6 +170,15 @@ internal static class LiquidPages
         // The XAML's theme brushes (DynamicResource) follow the theme on the stage as in the window: the toolbar's clock.
         var clock = (deck.ClockLabel.Foreground as SolidColorBrush)?.Color;
         Report(clock == PanelTheme.ColorOf("textTertiary"), $"{PanelTheme.Current.Id} {page}: the panel's XAML follows the theme (clock {clock}, theme's tertiary text {PanelTheme.ColorOf("textTertiary")})");
+        // The glass's own decision (GlassBackdrop through its stand-in host, as on screen): liquid glass shown, the island's surface
+        // aside and clear, the shadow's caster opaque. An island painted over the glass (the surface not stepping aside) fails here
+        // and in the pixel checks below.
+        if (PanelTheme.GlassShown)
+        {
+            var state = deck.OffscreenGlassState;
+            Report(state.Shown && state.Aside && state.Surface <= .01 && state.Caster,
+                $"{PanelTheme.Current.Id} {page}: GlassBackdrop's decision: liquid glass shown {state.Shown}, surface aside {state.Aside}, surface opacity {state.Surface:0.00}, shadow caster opaque {state.Caster}");
+        }
         var island = deck.Island;
         var at = island.TranslatePoint(new Point(), root);
         // As GlassBackdrop measures the island: its bounds in device pixels, the size and place rounded.
@@ -165,13 +191,37 @@ internal static class LiquidPages
         var pixels = new byte[width * height * 4];
         bitmap.CopyPixels(pixels, width * 4, 0);
         var c = island.CornerRadius;
+        Color secondary = PanelTheme.ColorOf("textSecondary"), tertiary = PanelTheme.ColorOf("textTertiary");
         return new Layer(pixels, width, height, x, y, w, h, c.TopLeft * Scale, c.BottomLeft * Scale, island.ShoulderRadius * Scale, deck.ShadowHost.Opacity > 0,
-            PanelTheme.ColorOf("textPrimary"), page != Page.Capsule);
+            PanelTheme.ColorOf("textPrimary"), page != Page.Capsule, Runs(root, deck.Stage, width, height, secondary, tertiary), secondary, tertiary);
+    }
+
+    // The secondary and tertiary text runs: every TextBlock shown whose brush (its own or inherited) is the theme's secondary
+    // or tertiary text color, its bounds marked in device pixels of the root.
+    private static byte[] Runs(Grid root, Visual stage, int width, int height, Color secondary, Color tertiary)
+    {
+        var runs = new byte[width * height];
+        void Walk(DependencyObject node)
+        {
+            if (node is UIElement { IsVisible: false }) return;
+            if (node is TextBlock text && text.Foreground is SolidColorBrush brush && (brush.Color == secondary || brush.Color == tertiary) && text.ActualWidth > 0)
+            {
+                byte kind = (byte)(brush.Color == secondary ? 2 : 3);
+                var bounds = text.TransformToAncestor(root).TransformBounds(new Rect(text.RenderSize));
+                int x0 = Math.Max(0, (int)Math.Floor(bounds.Left * Scale)), y0 = Math.Max(0, (int)Math.Floor(bounds.Top * Scale));
+                int x1 = Math.Min(width, (int)Math.Ceiling(bounds.Right * Scale)), y1 = Math.Min(height, (int)Math.Ceiling(bounds.Bottom * Scale));
+                for (int y = y0; y < y1; y++)
+                    for (int x = x0; x < x1; x++) runs[y * width + x] = kind;
+            }
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) Walk(VisualTreeHelper.GetChild(node, i));
+        }
+        Walk(stage);
+        return runs;
     }
 
     // Runs what the panel queued (page capsule placement, renders at background priority) and lays the stage out at the
     // window's size, carrying the window's inherited text settings over to the root the stage now lies in.
-    private static void Settle(Grid root, MainWindow deck)
+    internal static void Settle(Grid root, MainWindow deck)
     {
         foreach (var property in new DependencyProperty[] { TextElement.FontFamilyProperty, TextElement.FontSizeProperty, TextElement.ForegroundProperty,
             TextElement.FontWeightProperty, FrameworkElement.UseLayoutRoundingProperty, TextOptions.TextFormattingModeProperty,
@@ -233,6 +283,7 @@ internal static class LiquidPages
     {
         int area = 0, drawn = 0, through = 0, changed = 0;
         var ratios = new List<double>();
+        List<double> secondary = [], tertiary = [];
         for (int y = 0; y < layer.H; y++)
             for (int x = 0; x < layer.W; x++)
             {
@@ -257,6 +308,17 @@ internal static class LiquidPages
                         ratios.Add((Math.Max(ink, ground) + .05) / (Math.Min(ink, ground) + .05));
                     }
                 }
+                // Secondary and tertiary text: inside their runs, the glyphs' cores (drawn at the brush's own alpha, in its color).
+                if (layer.Runs[(layer.Y + y) * layer.Width + layer.X + x] is var kind and > 0 && alpha > 0)
+                {
+                    var color = kind == 2 ? layer.Secondary : layer.Tertiary;
+                    int lr = layer.Pixels[l + 2] * 255 / alpha, lg = layer.Pixels[l + 1] * 255 / alpha, lb = layer.Pixels[l] * 255 / alpha;
+                    if (Math.Abs(alpha - color.A) <= Math.Max(10, color.A / 12) && Math.Abs(lr - color.R) <= 24 && Math.Abs(lg - color.G) <= 24 && Math.Abs(lb - color.B) <= 24)
+                    {
+                        double ink = Luminance(composed[d + 2], composed[d + 1], composed[d]), ground = Luminance(under[d + 2], under[d + 1], under[d]);
+                        (kind == 2 ? secondary : tertiary).Add((Math.Max(ink, ground) + .05) / (Math.Min(ink, ground) + .05));
+                    }
+                }
             }
         double share = area == 0 ? 0 : drawn / (double)area, clear = area == 0 ? 0 : through / (double)area, moved = area == 0 ? 0 : changed / (double)area;
         Report(area > 0 && share >= .005 && moved >= .005, $"{name}: the page is drawn ({share:P1} of the island covered by content, {moved:P1} changed from the glass alone)");
@@ -269,6 +331,9 @@ internal static class LiquidPages
             double median = ratios[ratios.Count / 2], low = ratios[ratios.Count / 10];
             Report(median >= 4.5 && low >= 3, $"{name}: primary text against the glass under it: median {median:0.0}:1, 10th percentile {low:0.0}:1 over {ratios.Count} pixels (wanted 4.5:1 and 3:1)");
         }
+        // Secondary text wants 4.5:1 as the primary does; tertiary (the clock, captions, hints) 3:1, its 10th percentile 2:1.
+        Contrast(name, "secondary", secondary, 4.5, 3);
+        Contrast(name, "tertiary", tertiary, 3, 2);
         // The shadow: below the island's bottom edge, outside it, between the bottom corners, the composed image is darker than
         // the glass alone over the background (0 4px 12px black at .22 in both liquid themes).
         {
@@ -287,6 +352,14 @@ internal static class LiquidPages
             double wanted = Math.Min(3, (count == 0 ? 0 : lightness / count) * .22 * .3);
             Report(mean >= wanted && mean > 0, $"{name}: the shadow shows below the island (darkens by {mean:0.0} levels on average 2 to 7 DIPs under it, wanted {wanted:0.0}; shadow host shown: {layer.ShadowShown})");
         }
+    }
+
+    private static void Contrast(string name, string which, List<double> ratios, double wanted, double least)
+    {
+        if (ratios.Count < 20) { Console.WriteLine($"NOTE: {name}: {ratios.Count} pixels of {which} text found; its contrast is not checked"); return; }
+        ratios.Sort();
+        double median = ratios[ratios.Count / 2], low = ratios[ratios.Count / 10];
+        Report(median >= wanted && low >= least, $"{name}: {which} text against the glass under it: median {median:0.00}:1, 10th percentile {low:0.00}:1, lowest {ratios[0]:0.00}:1 over {ratios.Count} pixels (wanted {wanted}:1 and {least}:1)");
     }
 
     private static double Lightness(byte[] pixels, int at) => .2126 * pixels[at + 2] + .7152 * pixels[at + 1] + .0722 * pixels[at];
@@ -333,7 +406,7 @@ internal static class LiquidPages
 
     // ----- The data -----
 
-    private static MediaTrack Track()
+    internal static MediaTrack Track()
     {
         var now = DateTimeOffset.UtcNow;
         // Made-up lines (no song's real lyrics), timed around the position.
@@ -348,7 +421,7 @@ internal static class LiquidPages
     }
 
     // A made-up album cover: saturated color fields and a sun.
-    private static BitmapSource Cover()
+    internal static BitmapSource Cover()
     {
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
@@ -364,7 +437,7 @@ internal static class LiquidPages
         return bitmap;
     }
 
-    private static MonitorSnapshot Snapshot()
+    internal static MonitorSnapshot Snapshot()
     {
         var random = new Random(7);
         var cores = new List<CoreSample>();

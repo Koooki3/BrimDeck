@@ -202,13 +202,27 @@ internal sealed class GlassBackdrop : IDisposable
     // After anything that can change the island's shape, place or look; cheap when nothing changed.
     public void Update()
     {
-        if (_disposed || _following) return;
+        if (_disposed) return;
+        if (StandIn is not null) { StandInFrame(); return; }
+        if (_following) return;
         if (!Available || !_owner.IsVisible) { Hide(); return; }
         // An island not shown (hidden, collapsed to nothing) has nothing to follow: following it would stop on its first frame,
         // and every layout pass (a scrolling title redraws many a second) would start it again.
         if (Measure() is not { } now) { Hide(); return; }
         if (now == _last && Equals(_brushFor, PanelTheme.Current.Effects.Glass)) return;
         Follow(0);
+    }
+
+    // For the offscreen page sheets only (MainWindow.Offscreen.cs): a stand-in for the window, the capture and the renderer,
+    // which need a window on screen. Set, every update decides through it whether liquid glass is shown for this frame, and the
+    // rest goes as on screen (LiquidShown, SurfaceAside, Held). In the app it is always null.
+    internal Func<bool>? StandIn { get; set; }
+
+    private void StandInFrame()
+    {
+        if (!PanelTheme.GlassShown) { ShowLiquid(false); SurfaceAside = false; Report(0, always: false); return; }
+        bool liquid = ShowLiquid(LiquidTint is not null && !LiquidOff && PanelTheme.Current.Effects.Glass is not null && StandIn!());
+        Decided(liquid, Math.Clamp(_shape().Material, 0, 1));
     }
 
     // Follows the island frame by frame for at least the given milliseconds, and after that until it holds still: for motion
@@ -376,8 +390,7 @@ internal sealed class GlassBackdrop : IDisposable
         double outerLeft = left - shoulder - inset, outerRight = right + shoulder + inset, outerBottom = bottom + inset;
         bool liquid = Liquid(shown, outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
         _sprite!.Opacity = liquid ? 0 : (float)opacity;
-        SurfaceAside = liquid;
-        Report(frame.Material);
+        Decided(liquid, frame.Material);
         if (liquid) { left = outerLeft; right = outerRight; bottom = outerBottom; corner = radius; }
         // The window region: the clip's rectangle, rounded alike, so the window takes no clicks and shows nothing outside it.
         // A square top reaches above the window, as the clip does, so the region's rounded top corners fall outside it.
@@ -601,6 +614,13 @@ internal sealed class GlassBackdrop : IDisposable
         if (_host is not null) { _host.Rebuilt -= Rebuilt; _host.Dispose(); _host = null; }
         if (_liquid is not null) { _liquid.Brush?.Dispose(); _liquid.Clip?.Dispose(); _liquid.Dispose(); _liquid = null; }
         _liquidClip?.Dispose(); _liquidClip = null;
+    }
+
+    // A frame decided between liquid glass and the blur: the surface steps aside with liquid glass, and Held tells the island.
+    private void Decided(bool liquid, double material)
+    {
+        SurfaceAside = liquid;
+        Report(material);
     }
 
     // On every frame followed: the island's tint may be changing too (thickening as the panel opens). Always when the surface
