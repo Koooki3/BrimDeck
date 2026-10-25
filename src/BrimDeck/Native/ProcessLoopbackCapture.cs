@@ -20,11 +20,12 @@ internal sealed class ProcessLoopbackCapture : IDisposable
     private float[] _buffer = new float[4096];
     private short[] _pcm = new short[4096];
     private double _analysed = double.NegativeInfinity;
-    // Seconds between analyses and between drains, and the audio the stream's buffer holds; the buffer outlasts a drain that
-    // comes late several times over.
+    // Seconds between analyses, and the audio the stream's buffer holds; the buffer outlasts a drain that comes late several
+    // times over. The thread waits DrainWait between drains: Windows' default timer wakes it on 15.6 ms steps, so a wait of
+    // 33 ms came back after 47 and the bars moved at 21 Hz; 30 ms comes back after 31.25 (or on time with a finer timer), and an
+    // analysis is due a little before its interval for the same reason.
     public const double AnalysisInterval = 1 / 30d, BufferDuration = .2;
-    // Packets the engine marked as following a gap (a drain came too late); kept for the diagnostics.
-    public long Gaps { get; private set; }
+    public static readonly TimeSpan DrainWait = TimeSpan.FromMilliseconds(30);
     public AutoResetEvent Ready { get; } = new(false);
     public EqualizerSignal Signal { get; } = new(Format.SampleRate);
     public uint ProcessId { get; }
@@ -84,7 +85,6 @@ internal sealed class ProcessLoopbackCapture : IDisposable
                 IntPtr data = _capture.GetBuffer(out frames, out var flags);
                 int count = frames * Format.Channels;
                 if (_buffer.Length < count) { _buffer = new float[count]; _pcm = new short[count]; }
-                if ((flags & AudioClientBufferFlags.DataDiscontinuity) != 0) Gaps++;
                 if ((flags & AudioClientBufferFlags.Silent) != 0) Array.Clear(_buffer, 0, count);
                 else
                 {
@@ -96,7 +96,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
                 Signal.Push(_buffer.AsSpan(0, count), Format.Channels, now);
             }
             // The bars move 30 times a second (MainWindow.TickMusic) and read the analyses in between, so 30 analyses serve them.
-            if (now - _analysed >= AnalysisInterval - .002) { _analysed = now; Signal.Advance(now); }
+            if (now - _analysed >= AnalysisInterval - .005) { _analysed = now; Signal.Advance(now); }
             return true;
         }
         catch (COMException) { return false; }

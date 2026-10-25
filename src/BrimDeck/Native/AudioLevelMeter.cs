@@ -83,7 +83,7 @@ internal sealed class AudioLevelMeter : IDisposable
                 }
                 // With a capture, the packets wait in its buffer (ProcessLoopbackCapture.BufferDuration) and are drained once per
                 // analysis: woken for every 10 ms packet, the thread ran three times as often for the same bars.
-                if (capture is not null) _wake.WaitOne(TimeSpan.FromSeconds(ProcessLoopbackCapture.AnalysisInterval));
+                if (capture is not null) _wake.WaitOne(ProcessLoopbackCapture.DrainWait);
                 else if (_sessions.Count > 0) _wake.WaitOne(33);
                 else if (target is null) _wake.WaitOne();
                 else if (!_wake.WaitOne(searchDelay))
