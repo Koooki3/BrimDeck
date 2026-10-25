@@ -259,6 +259,8 @@ public partial class MainWindow
         _timelineHold.Observe(track, now); ScheduleTimelineHoldEnd(now);
         bool coverChanged = _mediaCover != cover;
         if (coverChanged) { _mediaCover = cover; _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent); }
+        // A new song scrolls its title again, even one of the same name.
+        if (changedSong) _compactTitleRested = null;
         if (changedSong)
         {
             _seeking = false; _seekTrack = null;
@@ -814,6 +816,8 @@ public partial class MainWindow
             _compactLyric = line.Current;
             if (_trackNoticeUntil <= DateTimeOffset.UtcNow)
             {
+                // A new line scrolls again, also a line that comes back later in the song.
+                _compactTitleRested = null;
                 if (_compactMarquee is not null) _compactMarquee.Text = line.Current.Length > 0 ? line.Current : track.Caption;
                 else RenderCompact();
             }
