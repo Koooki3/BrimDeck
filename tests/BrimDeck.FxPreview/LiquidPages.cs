@@ -29,7 +29,9 @@ using Path = System.IO.Path;
 // looked for by name. The display scale is 150 percent unless --scale (or BRIMDECK_PAGES_SCALE) gives another, in percent
 // (100, 125, 150, 175): the same backgrounds are used at every scale, and the sheets of another scale than 150 are named
 // pages-<background>-at<percent>.png.
-internal static class LiquidPages
+// With --focus, the keyboard focus pass runs instead (LiquidPages.Focus.cs): every Tab stop of every page focused, its focus
+// ring measured over the glass, the Tab order checked.
+internal static partial class LiquidPages
 {
     // Device pixels per DIP; set before the offscreen panel is made (Run), 1.5 for ShadowCost.
     private static double Scale { get; set; } = 1.5;
@@ -173,18 +175,40 @@ internal static class LiquidPages
 
     // ----- The panel -----
 
-    private static Layer Draw(MainWindow deck, Grid root, Page page, MediaTrack track, BitmapSource cover, MonitorSnapshot snapshot)
+    // Shows a page with its data on the offscreen stage, laid out, the glass's frame taken (Draw, and the focus pass).
+    private static void Show(MainWindow deck, Grid root, Page page, MediaTrack track, BitmapSource cover, MonitorSnapshot snapshot)
     {
         deck.OffscreenMedia(page == Page.MusicPlain ? track with { Id = "fx-plain" } : track, page == Page.MusicPlain ? null : cover);
         var shown = page switch { Page.Monitor => DeckPage.Monitor, Page.Notices => DeckPage.Notices, Page.Usage => DeckPage.Usage, _ => DeckPage.Music };
         deck.SelectPage(shown, remember: false);
         deck.Preview(true, expanded: page != Page.Capsule);
         deck.OffscreenMonitor(snapshot);
+        Rescale(root);
         deck.OffscreenLiquidFrame();
         Settle(root, deck);
         // A relayout after the data arrived; the next frame of the glass takes the surface aside again.
         deck.OffscreenLiquidFrame();
         Settle(root, deck);
+    }
+
+    // A visual added under the root after SetRootDpi (a page built when first shown, a template applied later) keeps the
+    // system's scale rather than the root's: the scale is set again, through another, so the whole tree takes it and draws again.
+    internal static void Rescale(Visual root)
+    {
+        VisualTreeHelper.SetRootDpi(root, new DpiScale(Scale == 1 ? 2 : 1, Scale == 1 ? 2 : 1));
+        VisualTreeHelper.SetRootDpi(root, new DpiScale(Scale, Scale));
+        // What was drawn at the old scale (a Border rounds its lines to device pixels when it draws) is drawn again.
+        static void Redraw(DependencyObject node)
+        {
+            if (node is UIElement element) element.InvalidateVisual();
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) Redraw(VisualTreeHelper.GetChild(node, i));
+        }
+        Redraw(root);
+    }
+
+    private static Layer Draw(MainWindow deck, Grid root, Page page, MediaTrack track, BitmapSource cover, MonitorSnapshot snapshot)
+    {
+        Show(deck, root, page, track, cover, snapshot);
 
         // The XAML's theme brushes (DynamicResource) follow the theme on the stage as in the window: the toolbar's clock.
         var clock = (deck.ClockLabel.Foreground as SolidColorBrush)?.Color;

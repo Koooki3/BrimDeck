@@ -46,16 +46,20 @@
     </Style>
     <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
     <!-- Keyboard focus on the panel and its pop-ups: the music controls' blue, drawn on the control's own edge
-         so the island's rounded clip never cuts it. WPF shows it only while moving focus with the keyboard. -->
+         so the island's rounded clip never cuts it. WPF shows it only while moving focus with the keyboard.
+         2 DIP of the accent with a 1 DIP line of the primary text color inside it. The accent alone can sit close to the tone
+         of the glass (the light look over a dark backdrop turns mid gray); the text color never does, as the glass keeps its
+         text readable, so the ring stands at least 3:1 against what lies around it on every backdrop (the focus pass of
+         FxPreview's page tool). -->
     <Style x:Key="PanelKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="{DynamicResource PanelR5}"/>
+      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="2" SnapsToDevicePixels="True" CornerRadius="{DynamicResource PanelR5}"><Border BorderBrush="{DynamicResource PanelPrimary}" BorderThickness="1" SnapsToDevicePixels="True" CornerRadius="{DynamicResource PanelR3}"/></Border>
     </ControlTemplate></Setter.Value></Setter></Style>
     <Style x:Key="PanelWideKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="{DynamicResource PanelR8}"/>
+      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="2" SnapsToDevicePixels="True" CornerRadius="{DynamicResource PanelR8}"><Border BorderBrush="{DynamicResource PanelPrimary}" BorderThickness="1" SnapsToDevicePixels="True" CornerRadius="{DynamicResource PanelR6}"/></Border>
     </ControlTemplate></Setter.Value></Setter></Style>
-    <!-- For a control whose own border already turns blue when selected: the outline stands 2 DIP outside it. -->
+    <!-- For a control whose own border already turns blue when selected: the outline stands 1 DIP clear of it. -->
     <Style x:Key="PanelOutsetKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="{DynamicResource PanelR10}" Margin="-2"/>
+      <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="2" SnapsToDevicePixels="True" CornerRadius="{DynamicResource PanelR10}" Margin="-3"><Border BorderBrush="{DynamicResource PanelPrimary}" BorderThickness="1" SnapsToDevicePixels="True" CornerRadius="{DynamicResource PanelR8}"/></Border>
     </ControlTemplate></Setter.Value></Setter></Style>
     <!-- One segment of a joined switch on the panel: the selected segment carries Tag="Selected". -->
     <Style x:Key="SegmentButton" TargetType="Button">

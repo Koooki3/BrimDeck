@@ -36,7 +36,8 @@ internal static class Program
         if (args.Length > 2 && args[0] == "--liquid-pages")
         {
             if (LiquidPages.ScaleFrom(args) is not { } pagesScale) { Console.WriteLine("FAIL: --scale (or BRIMDECK_PAGES_SCALE) wants a display scale such as 100, 125, 150 or 175"); return 1; }
-            return LiquidPages.Run(args[1], args[2], pagesScale);
+            // --focus: the keyboard focus pass instead of the page sheets (LiquidPages.Focus.cs).
+            return args.Contains("--focus") ? LiquidPages.RunFocus(args[1], args[2], pagesScale) : LiquidPages.Run(args[1], args[2], pagesScale);
         }
         // The glass's answers to the pointer and its accessibility (GlassAccess): hover and press, the content row, transparency
         // effects off and animations off, on the real panel offscreen: --glass-access.

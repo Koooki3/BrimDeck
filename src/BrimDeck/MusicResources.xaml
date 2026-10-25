@@ -1,5 +1,5 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck">
-  <Style x:Key="MusicKeyboardFocus" TargetType="Control"><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Control"><Ellipse Stroke="{DynamicResource PanelAccent}" StrokeThickness="1"/></ControlTemplate></Setter.Value></Setter></Style>
+  <Style x:Key="MusicKeyboardFocus" TargetType="Control"><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Control"><Grid><Ellipse Stroke="{DynamicResource PanelAccent}" StrokeThickness="2"/><Ellipse Stroke="{DynamicResource PanelPrimary}" StrokeThickness="1" Margin="2"/></Grid></ControlTemplate></Setter.Value></Setter></Style>
   <Style x:Key="MusicControl" TargetType="Button">
     <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/>
     <Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="VerticalAlignment" Value="Center"/>
@@ -23,7 +23,7 @@
   </Style>
   <!-- A pill around the whole 18 DIP seek target, whose bar runs edge to edge. -->
   <Style x:Key="MusicSeekKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="{DynamicResource PanelR9}" Margin="-6,0"/>
+    <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="2" SnapsToDevicePixels="True" CornerRadius="{DynamicResource PanelR9}" Margin="-6,0"><Border BorderBrush="{DynamicResource PanelPrimary}" BorderThickness="1" SnapsToDevicePixels="True" CornerRadius="{DynamicResource PanelR7}"/></Border>
   </ControlTemplate></Setter.Value></Setter></Style>
   <Style x:Key="MusicSeek" TargetType="{x:Type local:MusicSeekSlider}">
     <Setter Property="ToolTipService.IsEnabled" Value="False"/><Setter Property="FocusVisualStyle" Value="{StaticResource MusicSeekKeyboardFocus}"/>
