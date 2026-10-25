@@ -22,7 +22,11 @@ public partial class MainWindow
             _glass = new GlassBackdrop(this, Island);
             // Over a held blur the tint thins with it, frame by frame.
             // Liquid glass draws the tint itself, so the surface steps aside under it as the blur's tint thins.
-            _glass.Held += held => _surface.Opacity = _glass.LiquidShown ? 1 - held : 1 + held * (PanelTheme.HeldOpacity(_surface.Color.A / 255d) - 1);
+            _glass.Held += held =>
+            {
+                _surface.Opacity = _glass.LiquidShown ? 1 - held : 1 + held * (PanelTheme.HeldOpacity(_surface.Color.A / 255d) - 1);
+                LiquidEdge(_glass.LiquidShown);
+            };
             _glass.LiquidTint = () => _surface.Color.A / 255d;
             // Liquid glass lights its rim from the pointer and presses with it: where the pointer is over the island, and
             // whether the button is down (seen even when a button under it handles the click).
@@ -42,6 +46,26 @@ public partial class MainWindow
         _shadowCut = glass;
         if (glass) { Island.LayoutUpdated += CutShadow; CutShadow(null, EventArgs.Empty); }
         else { Island.LayoutUpdated -= CutShadow; ShadowHost.Clip = null; _shadowCutKey = null; }
+    }
+
+    // Liquid glass draws its own rim light and edge, following the pointer; the island's painted rim and edge light would lie
+    // over it as a stroke (a white ring on dark glass, a 3D button's edge), so they step aside while it is shown and come back
+    // with the blur. PanelTheme.Dress sets them again on a theme change, and the next frame takes them away again.
+    private bool _liquidEdge;
+    private void LiquidEdge(bool shown)
+    {
+        if (shown)
+        {
+            if (Island.RimWidth == 0 && Island.EdgeBrush is null) return;
+            Island.RimWidth = 0; Island.EdgeBrush = null; _liquidEdge = true;
+        }
+        else if (_liquidEdge)
+        {
+            _liquidEdge = false;
+            var palette = PanelTheme.Current;
+            Island.RimWidth = palette.Effects.RimWidth;
+            Island.EdgeBrush = PanelTheme.GlassShown ? PanelTheme.EdgeBrush(palette) : null;
+        }
     }
 
     // Glass: the shadow is drawn only outside the island. Layout runs on every frame the island changes size or place, and

@@ -333,20 +333,20 @@ internal sealed class GlassBackdrop : IDisposable
             _pad = (int)Math.Ceiling(48 * scale);
             var region = new LiquidGlass.RECT(window.X + x - _pad, window.Y + y - _pad, window.X + x + width + _pad, window.Y + y + height + _pad);
             if (!_source.Update(region, out _) || _source.Texture is not { } background) return ShowLiquid(false);
-            // The tint the island would draw (thickened as the panel opens), thinned as over the held blur: the glass keeps the
-            // contrast the theme was fitted to.
-            double alpha = tint();
-            double thin = glass.Held ? PanelTheme.HeldOpacity(alpha) * alpha : alpha;
+            // The glass's own preset: clear glass held to the theme's band only where the background lies outside it (the
+            // band is the one the theme's text was fitted to, never wider). The island's tint thickening as the panel opens
+            // says how open it is, which takes a little more frost; the tint itself is not drawn over the glass.
+            double alpha = tint(), whole = glass.Tint.A / 255d;
+            float open = whole < 1 ? (float)Math.Clamp((alpha - whole) / ((1 - whole) * .35), 0, 1) : 0;
             var c = shown.Corners;
             bool dark = PanelTheme.Current.IsDark;
             var preset = LiquidFrame.Preset(dark, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale);
             var pointer = _pointer;
             _liquidFrame = preset with
             {
-                Tint_R = glass.Tint.R / 255f, Tint_G = glass.Tint.G / 255f, Tint_B = glass.Tint.B / 255f, TintAlpha = (float)thin,
-                // The glass's own band, never wider than the theme's: the contrast rules were checked over the theme's band.
                 BandLow = glass.Held ? MathF.Max(preset.BandLow, (float)glass.Low) : preset.BandLow,
                 BandHigh = glass.Held ? MathF.Min(preset.BandHigh, (float)glass.High) : preset.BandHigh,
+                Open = open,
                 PointerX = pointer is { } p ? (float)(p.X * scale) : float.NaN, PointerY = pointer is { } q ? (float)(q.Y * scale) : float.NaN,
                 Hover = (float)_hover, Press = (float)_press, Morph = (float)_moving
             };

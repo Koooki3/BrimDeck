@@ -42,6 +42,10 @@ internal static class Program
         if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
         // The liquid glass sheets (LiquidPreview): --liquid <output folder>.
         if (args.Length > 1 && args[0] == "--liquid") return LiquidPreview.Run(args[1]);
+        // The same over top-of-screen backgrounds, for the comparison with the references: --liquid-bg <backgrounds> <output folder>.
+        // Only the GPU timing of a liquid glass frame: --liquid-time.
+        if (args.Length > 0 && args[0] == "--liquid-time") return LiquidPreview.TimeOnly();
+        if (args.Length > 2 && args[0] == "--liquid-bg") return LiquidPreview.RunBackgrounds(args[1], args[2]);
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
         if (args.Length > 1 && args[0] == "--sheet")
         {

@@ -1,20 +1,29 @@
-// Liquid glass (LiquidRenderer): one pass that draws the island as a slab of thick glass over the desktop captured under it.
+// Liquid glass (LiquidRenderer): one pass that draws the island as a slab of clear glass over the desktop captured under it.
 //
 // The slab's outline is IslandBorder.BuildOutline's, as a signed distance in device pixels (negative inside): a capsule or
 // rounded rectangle, or a shape square at the top (the open panel, the notch) whose top edge is the screen's and has no
 // bevel, with the notch's shoulders flaring out to the screen edge. Inside the outline the slab's surface rises over a bevel
-// Thickness wide, a superellipse profile, and is flat beyond it. A ray from the eye straight down is refracted by the surface
-// (Snell, IOR 1.5); on the bevel it leaves the vertical, and the background is read that far off along the outline's normal,
-// outward, so the desktop just outside the island is drawn compressed into its rim, as a thick lens's edge does. Red bends a
-// little less than blue (Dispersion). The flat middle shows the background unbent under a frost read from the background's
-// mips, so text over it reads as over the old blur. The theme's band of brightness (PanelGlass.Low/High/Saturation) holds the
-// middle as the held blur did, widened toward the rim, where no text sits; then the tint.
+// Thickness wide, a convex squircle (z = (1 - (1 - x)^4)^(1/4), as the kube.io article on liquid glass describes), and is
+// flat beyond it. A ray from the eye straight down is refracted by the surface (Snell, IOR 1.5); on the bevel it bends
+// inward, so the background is read from further in and what lies under the rim is drawn magnified out to the edge, as a
+// lens's rim does. Red bends a little less than blue (Dispersion). The flat middle shows the background almost as it is:
+// a light frost from the background's mips, made stronger where the background is busy, and its colors a little more
+// saturated.
 //
-// Light: a specular highlight of the bevel's surface toward a light that comes from top-left, or from the pointer while it is
-// over the island, with a fainter one from the opposite side (light reflected inside the slab), a thin rim line that is
-// brightest where it faces the light, and a soft glow near the pointer. A press makes the glass bend more and squashes the
-// highlight into a thinner, brighter arc. Edge pixels take four subsamples, each with its own coverage, refraction and light.
-// The output is premultiplied; outside the outline it is transparent.
+// Legibility: the theme's text is fitted to a band of brightness (PanelGlass.Low/High). The middle is held to it adaptively:
+// a background already inside the band passes unchanged (light glass over a light page is clear glass, not a white slab),
+// and only what lies outside it is lifted toward the glass's own white (Low) or smoked toward black (High), each pixel
+// exactly as far as it must go, with a soft knee. Toward the rim, where no text sits, the band relaxes a little (EdgeBand),
+// so the refraction there shows the background's own colors. Nothing is remapped wholesale, so over flat content the rim
+// and the middle are the same color: no ring.
+//
+// Light: a crisp line along the very rim, brightest where it faces the light (from the pointer while it is over the island,
+// else from the top left) and faint on the far side; a soft highlight inside the bevel on the lit side (Sheen); a narrow
+// specular glint on the bevel; and a soft glow near the pointer. Light is laid on by screen, so it never clips to a white
+// patch. Opposite the light the rim darkens a little in the background's own hue (Shade: light passing through more glass),
+// which is what shows the glass over flat white. A press bends more and squashes the glint into a thinner, brighter arc.
+// Edge pixels take four subsamples, each with its own coverage, refraction and light. The output is premultiplied;
+// outside the outline it is transparent.
 
 cbuffer Frame : register(b0)
 {
@@ -43,10 +52,14 @@ cbuffer Frame : register(b0)
     float Low;          // the band of brightness the middle is held to
     float High;
     float Saturation;
-    float EdgeBand;     // how far the band opens toward 0..1 at the rim
+    float EdgeBand;     // how far the band relaxes at the rim
     float Scale;        // display scale (device pixels per DIP)
     float Gain;         // overall strength of the light
     float Glow;         // pointer glow radius, device pixels
+    float Open;         // 0 collapsed .. 1 the open panel: a little more frost
+    float Shade;        // the rim's darkening opposite the light
+    float Sheen;        // the soft highlight inside the bevel on the lit side
+    float Spare;
 };
 
 Texture2D Background : register(t0);
@@ -167,83 +180,104 @@ float3 Read(float2 at, float level)
     return Background.SampleLevel(Linear, (at + Pad) * Inverse, level).rgb;
 }
 
-// The surface's slope over the bevel at x (0 at the rim, 1 where it is flat): a superellipse z = (1 - (1 - x)^3)^(1/3).
+float Luma(float3 c) { return dot(c, float3(.2126, .7152, .0722)); }
+
+// Polynomial smooth maximum and minimum with a knee k wide: never below max(a, b) (above min(a, b)).
+float SoftMax(float a, float b, float k) { float h = max(k - abs(a - b), 0) / k; return max(a, b) + h * h * k * .25; }
+float SoftMin(float a, float b, float k) { float h = max(k - abs(a - b), 0) / k; return min(a, b) - h * h * k * .25; }
+
+// The surface's slope over the bevel at x (0 at the rim, 1 where it is flat): the convex squircle z = (1 - (1 - x)^4)^(1/4).
 float Slope(float x)
 {
     float u = 1 - clamp(x, .004, 1);
-    float u3 = u * u * u;
-    return u * u * pow(max(1 - u3, 1e-4), -2.0 / 3.0);
+    float u4 = u * u * u * u;
+    return u * u * u * pow(max(1 - u4, 1e-4), -.75);
 }
 
-// The glass at one subsample: the background as refracted and frosted there, held to the band, tinted and lit.
+// The glass at one subsample: the background as refracted and frosted there, held to the band, shaded, tinted and lit.
 float3 Glass(float2 p, float sd, float2 n)
 {
     float depth = max(-sd, 0);
     float thickness = max(Thickness, 1);
     float x = saturate(depth / thickness);
+    float rim = 1 - x;
     float slope = Slope(x);
     float3 surface = normalize(float3(n * slope, 1));
-    // The ray from the eye refracted into the slab: how far it leaves the vertical, as a tangent.
+    // The ray from the eye refracted into the slab: how far it leaves the vertical, as a tangent (1.118 at a vertical wall).
     float3 ray = refract(float3(0, 0, -1), surface, 1 / 1.5);
     float bend = length(ray.xy) / max(-ray.z, 1e-3) / 1.118;
     float strength = Refraction * (1 + .7 * Press + .6 * Morph);
     float shift = strength * thickness * bend;
 
-    // A convex rim bends the ray inward, as a lens does: the background is read from further inside, so what lies under
-    // the rim is drawn magnified out to the edge. Red bends a little less than blue, only near the outer edge. Sharp at the
-    // rim, the reads soften toward the middle's light frost.
-    float spread = Dispersion * (1 + Morph) * .3 * (1 - x) * (1 - x);
-    float level = lerp(0, Frost, smoothstep(0, 1, x));
+    // The convex rim bends the ray inward: the background is read from further inside, magnified out to the edge. Red bends
+    // a little less than blue, only near the outer edge.
     float2 at = p - n * shift;
-    float3 color;
-    color.r = Read(at + n * shift * spread, level).r;
-    color.g = Read(at, level).g;
-    color.b = Read(at - n * shift * spread, level).b;
-    // The middle's frost: a few reads on a small golden-angle spiral, so the mips' blocks do not show.
-    float frost = smoothstep(.3, 1, x);
-    if (frost > 0)
+    float spread = Dispersion * (1 + Morph) * .3 * rim * rim;
+    // How busy the background is here: its brightness against its wide average. A busy background takes more frost behind
+    // text; a calm one stays clear.
+    // Only inside the rim's outer part, where the frost begins (the edge's subsamples never need it).
+    float busy = 0;
+    [branch] if (x > .15) busy = saturate(abs(Luma(Read(at, Frost)) - Luma(Read(at, Frost + 3))) * 5);
+    float frostLevel = Frost + .8 * Open + 1.2 * busy;
+    float level = frostLevel * smoothstep(.15, 1, x);
+    // The middle's frost: a few reads on a small golden-angle spiral, so the mips' blocks do not show. Where it covers
+    // wholly (the flat middle, most of the open panel) the sharp reads are not made.
+    float frost = smoothstep(.35, 1, x);
+    float3 color = 0;
+    [branch] if (frost < 1)
     {
-        float radius = exp2(Frost) * .9;
+        color.r = Read(at + n * shift * spread, level).r;
+        color.g = Read(at, level).g;
+        color.b = Read(at - n * shift * spread, level).b;
+    }
+    [branch] if (frost > 0)
+    {
+        float radius = exp2(frostLevel) * .9;
         float3 f = 0;
         [unroll] for (int i = 0; i < 6; i++)
         {
             float r = radius * sqrt((i + .5) / 6);
             float a = i * 2.39996323;
-            f += Read(at + r * float2(cos(a), sin(a)), Frost);
+            f += Read(at + r * float2(cos(a), sin(a)), frostLevel);
         }
         color = lerp(color, f / 6, frost);
     }
+    // Vibrancy: the colors behind a little more saturated, kept in range.
+    float luma = Luma(color);
+    color = saturate(luma + (color - luma) * Saturation);
 
-    // The band: the brightness (luma) mapped into Low..High, opened toward 0..1 at the rim, and the color laid back over
-    // it, saturated. Text contrast rests on the brightness, which the band holds; the hue is kept, so the glass shows the
-    // colors behind it, pastel on light glass and deep on dark, instead of a gray of the band's brightness.
-    float luma = dot(color, float3(.2126, .7152, .0722));
-    float open = EdgeBand * (1 - x) * (1 - x) * (3 - 2 * (1 - x));
-    float low = lerp(Low, 0, open), high = lerp(High, 1, open);
-    float held = low + (high - low) * luma;
-    float3 chroma = (color - luma) * Saturation;
-    // Room for the color within 0..1 around the held brightness, so it is scaled rather than clipped (which would shift
-    // its brightness out of the band).
-    float3 up = chroma > 0 ? (1 - held) / max(chroma, 1e-4) : (held) / max(-chroma, 1e-4);
-    float room = saturate(min(min(up.r, up.g), up.b));
-    color = held + chroma * room;
+    // The band, adaptively: only what lies outside it is moved, each pixel just far enough, with a soft knee. Light glass
+    // lifts toward white (a veil), dark glass smokes toward black, both keeping the hue. Relaxed toward the rim.
+    float relax = EdgeBand * rim * rim;
+    float low = Low * (1 - relax), high = lerp(High, 1, relax);
+    luma = Luma(color);
+    float held = luma;
+    if (low > 0) held = SoftMax(held, low, .14);
+    if (high < 1) held = SoftMin(held, high, .14);
+    if (held > luma) color += (1 - color) * saturate((held - luma) / max(1 - luma, 1e-3));
+    else color *= held / max(luma, 1e-3);
     color = lerp(color, Tint.rgb, Tint.a);
 
-    // Light: a crisp line along the very rim, bright on the side facing the light (the pointer, or top-left) and faint
-    // opposite, and a narrow glint on the bevel there. A press narrows and brightens it; hover lifts it a little.
-    float towards = saturate(dot(n, Light)), away = saturate(-dot(n, Light));
-    float line1 = exp(-depth / (.55 * Scale));
-    float rimLight = line1 * (.35 + .65 * pow(towards, 2) + .25 * pow(away, 3));
+    // Light from the pointer's side (or the top left). Opposite it the rim darkens a little in the background's own hue.
+    float facing = dot(n, Light);
+    float towards = saturate(facing), away = saturate(-facing);
+    float shade = Shade * pow(rim, 2.5) * (.3 + .7 * away);
+    color = lerp(color, color * lerp(1, color, .5) * .86, shade);
+
+    // A crisp line along the very rim, a soft highlight inside the lit bevel, a narrow glint; a press narrows and brightens
+    // them, hover lifts them a little, and the pointer's light gathers on the stretch of rim nearest it.
+    float line1 = exp(-depth / (1.1 * Scale));
+    float rimLight = line1 * (.15 + .85 * towards * towards + .3 * away * away);
+    float inner = Sheen * exp(-depth / (thickness * .5)) * (.8 * pow(towards, 1.5) + .2 * away);
     float3 light = normalize(float3(Light * .77, .64));
     float3 half1 = normalize(light + float3(0, 0, 1));
-    float bevel = (1 - x) * (1 - x);
-    float spec = pow(saturate(dot(surface, half1)), 80 * (1 + 1.5 * Press)) * bevel * pow(towards, 1.5);
-    // The pointer's light gathers on the stretch of rim nearest it.
+    float spec = pow(saturate(dot(surface, half1)), 70 * (1 + 1.5 * Press)) * rim * rim * pow(towards, 1.5);
     float2 toPointer = p - Pointer;
     float glow = Near * exp(-dot(toPointer, toPointer) / (Glow * Glow));
     float lift = (1 + .35 * Hover) * (1 + .4 * Press) * (1 + .8 * glow);
-    float amount = (rimLight * .55 + spec * .5) * lift;
-    color += amount * Gain * (Dark > .5 ? float3(.85, .9, 1) * .8 : float3(1, 1, 1));
+    float amount = saturate((rimLight * .85 + inner + spec * .15 + glow * .06) * lift * Gain);
+    float3 tone = Dark > .5 ? float3(.88, .93, 1) : float3(1, 1, 1);
+    color = 1 - (1 - color) * (1 - amount * tone);
     return saturate(color);
 }
 

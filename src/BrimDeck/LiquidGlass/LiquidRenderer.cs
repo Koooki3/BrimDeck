@@ -14,8 +14,8 @@ namespace BrimDeck.LiquidGlass;
 // One frame of liquid glass. Sizes are device pixels; the shape is the island's (IslandBorder.BuildOutline) at this size.
 //   Width, Height: the island; the swap chain is resized to it.
 //   CornerTop, CornerBottom, Shoulder: as the island draws them; CornerTop 0 is a square top (the open panel, the notch).
-//   Tint: the theme's glass tint, straight color and alpha (PanelGlass.BlurTint where the theme holds its blur to a band, so
-//     the renderer takes the place of the held blur and the WPF surface over it can stay transparent; see Open questions).
+//   Tint: a thin tint over the glass, straight color and alpha (the preset's: legibility comes from the band, not the tint, so
+//     the WPF surface over the glass stays transparent).
 //   Thickness: the bevel's width, how far in from the edge the glass bends the background.
 //   Refraction: how far the rim shifts the background, in bevel widths (about the displacement at the rim / Thickness).
 //   Dispersion: 0..1, red and blue spread apart at the rim.
@@ -24,12 +24,16 @@ namespace BrimDeck.LiquidGlass;
 //   Hover, Press, Morph: 0..1, eased by the caller; Morph pulses the refraction while the shape changes.
 //   Dark: 1 for a dark glass theme (a cooler, dimmer light).
 // Added:
-//   BandLow, BandHigh, Saturation: the band the theme holds its glass to (PanelGlass.Low/High/Saturation; 0, 1, 1 for none).
-//     The contrast rules (PanelGlass.Extremes) were fitted to text over the tint on that band, so the middle keeps it.
-//   EdgeBand: 0..1, how far that band opens toward full range at the rim, where the refraction shows and no text sits.
-//   Frost: the middle's frost as a mip level of the background (2 is a 4 px blur, 4 a 16 px one).
-//   Scale: the display scale (device pixels per DIP), which sizes the rim line and the frost's sharpness at the edge.
+//   BandLow, BandHigh: the band of brightness the theme's text was fitted to (PanelGlass.Low/High; 0, 1 for none). The middle
+//     is held to it adaptively: only a background outside it is moved, just far enough (see Liquid.hlsl).
+//   Saturation: the colors behind the glass, this much more saturated (vibrancy).
+//   EdgeBand: 0..1, how far that band relaxes at the rim, where the refraction shows and no text sits.
+//   Frost: the middle's frost as a mip level of the background (1 is a 2 px blur, 2 a 4 px one); a busy background and the
+//     open panel take a little more.
+//   Scale: the display scale (device pixels per DIP), which sizes the rim line.
 //   Light: overall strength of the highlights and rim.
+//   Open: 0 collapsed .. 1 the open panel.
+//   Shade: how much the rim darkens opposite the light, in the background's own hue. Sheen: the soft highlight inside the lit bevel.
 internal readonly record struct LiquidFrame(
     int Width, int Height,
     float CornerTop, float CornerBottom, float Shoulder,
@@ -42,18 +46,18 @@ internal readonly record struct LiquidFrame(
     float Morph,
     float Dark,
     float BandLow = 0, float BandHigh = 1, float Saturation = 1, float EdgeBand = 0,
-    float Frost = 3.5f, float Scale = 1, float Light = 1)
+    float Frost = 1.5f, float Scale = 1, float Light = 1, float Open = 0, float Shade = 0, float Sheen = 0)
 {
-    // The defaults for BrimDeck's two glass themes at a display scale, for a shape and size. Light glass: a milky band
-    // (liquid-glass-light: band .85..1, saturation 2, tint #F8FAFD at a fifth of E0); dark: smoked (liquid-glass-dark: band
-    // 0..28, saturation 1.5, tint #121419 at .15 of C8).
+    // The defaults for BrimDeck's two glass themes at a display scale, for a shape and size. Clear glass in both: the band is
+    // the theme's (liquid-glass-light: .85..1 for its dark text; liquid-glass-dark: 0...28 for its light text), held only where
+    // the background lies outside it; a thin tint, a light frost, a little vibrancy.
     public static LiquidFrame Preset(bool dark, int width, int height, float cornerTop, float cornerBottom, float shoulder, float scale) => dark
-        ? new(width, height, cornerTop, cornerBottom, shoulder, 0x12 / 255f, 0x14 / 255f, 0x19 / 255f, 30 / 255f,
-            Thickness: Bevel(height, scale), Refraction: 1.3f, Dispersion: .5f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 1,
-            BandLow: 0, BandHigh: .3f, Saturation: 2.2f, EdgeBand: .6f, Frost: 2f + MathF.Log2(scale), Scale: scale, Light: .8f)
-        : new(width, height, cornerTop, cornerBottom, shoulder, 0xF8 / 255f, 0xFA / 255f, 0xFD / 255f, 45 / 255f,
-            Thickness: Bevel(height, scale), Refraction: 1.3f, Dispersion: .5f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 0,
-            BandLow: .9f, BandHigh: 1, Saturation: 1.8f, EdgeBand: 0, Frost: 2f + MathF.Log2(scale), Scale: scale, Light: 1);
+        ? new(width, height, cornerTop, cornerBottom, shoulder, 0x12 / 255f, 0x14 / 255f, 0x19 / 255f, .08f,
+            Thickness: Bevel(height, scale), Refraction: 1.45f, Dispersion: .35f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 1,
+            BandLow: 0, BandHigh: .28f, Saturation: 1.35f, EdgeBand: .12f, Frost: 1.5f + MathF.Log2(scale), Scale: scale, Light: 1, Shade: .25f, Sheen: .3f)
+        : new(width, height, cornerTop, cornerBottom, shoulder, 1, 1, 1, .05f,
+            Thickness: Bevel(height, scale), Refraction: 1.45f, Dispersion: .35f, PointerX: float.NaN, PointerY: float.NaN, Hover: 0, Press: 0, Morph: 0, Dark: 0,
+            BandLow: .85f, BandHigh: 1, Saturation: 1.3f, EdgeBand: .25f, Frost: 1.5f + MathF.Log2(scale), Scale: scale, Light: 1, Shade: .4f, Sheen: .2f);
 
     // The bevel: 14 DIP on the open panel, and under half the height on the small collapsed island, so the rim stays a rim.
     private static float Bevel(int height, float scale) => MathF.Min(14 * scale, height * .4f);
@@ -208,7 +212,8 @@ internal sealed class LiquidRenderer : IDisposable
             LightX = MathF.Cos(angle), LightY = MathF.Sin(angle),
             Press = Math.Clamp(f.Press, 0, 1), Morph = Math.Clamp(f.Morph, 0, 1), Dark = f.Dark,
             Low = Math.Clamp(f.BandLow, 0, 1), High = Math.Clamp(f.BandHigh, 0, 1), Saturation = MathF.Max(0, f.Saturation), EdgeBand = Math.Clamp(f.EdgeBand, 0, 1),
-            Scale = MathF.Max(.5f, f.Scale), Gain = MathF.Max(0, f.Light), Glow = MathF.Max(12 * f.Scale, h * .9f)
+            Scale = MathF.Max(.5f, f.Scale), Gain = MathF.Max(0, f.Light), Glow = MathF.Max(12 * f.Scale, h * .9f),
+            Open = Math.Clamp(f.Open, 0, 1), Shade = Math.Clamp(f.Shade, 0, 1), Sheen = MathF.Max(0, f.Sheen)
         };
         _context.UpdateSubresource(in c, _constants);
     }
@@ -308,5 +313,6 @@ internal sealed class LiquidRenderer : IDisposable
         public float LightX, LightY, Press, Morph;
         public float Dark, Low, High, Saturation;
         public float EdgeBand, Scale, Gain, Glow;
+        public float Open, Shade, Sheen, Spare;
     }
 }

@@ -161,7 +161,7 @@ internal static class LiquidPreview
 
     private static LiquidFrame Frame(Shape shape, bool dark, double scale, (int X, int Y, int Width, int Height) at, (double X, double Y)? pointer, double press)
     {
-        var frame = LiquidFrame.Preset(dark, at.Width, at.Height, (float)(shape.Top * scale), (float)(shape.Bottom * scale), (float)(shape.Shoulder * scale), (float)scale);
+        var frame = LiquidFrame.Preset(dark, at.Width, at.Height, (float)(shape.Top * scale), (float)(shape.Bottom * scale), (float)(shape.Shoulder * scale), (float)scale) with { Open = shape.Name == "panel" ? 1 : 0 };
         return pointer is { } p
             ? frame with { PointerX = (float)(p.X * at.Width), PointerY = (float)(p.Y * at.Height), Hover = 1, Press = (float)press }
             : frame with { Press = (float)press };
@@ -340,7 +340,7 @@ internal static class LiquidPreview
             using var end = device.CreateQuery(new QueryDescription(QueryType.Timestamp));
             var frame = Frame(shape, false, scale, at, (.3, .5), .5);
             var times = new List<double>();
-            for (int i = 0; i < 120; i++)
+            for (int i = 0; i < 600; i++)
             {
                 context.Begin(disjoint);
                 context.End(start);
@@ -352,13 +352,81 @@ internal static class LiquidPreview
                 ulong a, b;
                 while (!context.GetData(start, out a)) Thread.Yield();
                 while (!context.GetData(end, out b)) Thread.Yield();
-                if (!data.Disjoint && i >= 20) times.Add((b - a) * 1000.0 / data.Frequency);
+                if (!data.Disjoint && i >= 300) times.Add((b - a) * 1000.0 / data.Frequency);
             }
             times.Sort();
             using var dxgi = device.QueryInterface<Vortice.DXGI.IDXGIDevice>();
             using var adapter = dxgi.GetAdapter();
             Console.WriteLine($"GPU time on {adapter.Description.Description}, {shape.Name} {at.Width}x{at.Height} at 150%: median {times[times.Count / 2]:0.000} ms, 90th {times[(int)(times.Count * .9)]:0.000} ms");
         }
+    }
+
+    // ----- Top-of-screen backgrounds -----
+
+    // The glass over still backgrounds of the top of a screen (a browser's tab strip, a wallpaper, a video, a page; made by the
+    // comparison harness, pr-plan/liquid-glass/round-5/harness), as the references are rendered over the same ones: for each
+    // background <name>-100.png / <name>-150.png in the folder (1200 x 300 DIP), each shape, theme and scale, the background with
+    // the glass laid over it (<bg>-<shape>-<theme>-<scale>.png) and the glass's coverage (...-alpha.png). The harness adds the
+    // island's shadow and text. Pointer away; for the capsule also with the pointer at its left, hovered (-hover).
+    //   dotnet run -c Release --project tests/BrimDeck.FxPreview -- --liquid-bg <backgrounds> <output folder>
+    private static readonly Shape[] TopShapes =
+    [
+        new("wide", 470, 36, 18, 18, 0, 8),
+        new("capsule", 228, 40, 20, 20, 0, 8),
+        new("notch", 210, 34, 0, 13, 8, 0),
+        new("panel", 470, 250, 0, 26, 0, 0),
+    ];
+
+    public static int TimeOnly()
+    {
+        using var device = CreateDevice();
+        using var renderer = new LiquidRenderer(device);
+        Time(device, renderer);
+        Time(device, renderer);
+        return 0;
+    }
+
+    public static int RunBackgrounds(string backgrounds, string folder)
+    {
+        Directory.CreateDirectory(folder);
+        using var device = CreateDevice();
+        using var renderer = new LiquidRenderer(device);
+        foreach (var file in Directory.GetFiles(backgrounds, "*-100.png").Concat(Directory.GetFiles(backgrounds, "*-150.png")).Order())
+        {
+            string stem = Path.GetFileNameWithoutExtension(file);
+            double scale = stem.EndsWith("-150", StringComparison.Ordinal) ? 1.5 : 1;
+            string bg = stem[..stem.LastIndexOf('-')];
+            var decoded = new FormatConvertedBitmap(BitmapFrame.Create(new Uri(Path.GetFullPath(file)), BitmapCreateOptions.None, BitmapCacheOption.OnLoad), PixelFormats.Bgra32, null, 0);
+            int dw = decoded.PixelWidth, dh = decoded.PixelHeight;
+            var desktop = new byte[dw * dh * 4];
+            decoded.CopyPixels(desktop, dw * 4, 0);
+            foreach (var shape in TopShapes)
+                foreach (bool dark in new[] { false, true })
+                    foreach (bool hover in new[] { false, true })
+                    {
+                        if (hover && shape.Name != "capsule") continue;
+                        int w = (int)Math.Round(shape.Width * scale), h = (int)Math.Round(shape.Height * scale);
+                        var at = ((int)Math.Round((dw - w) / 2.0), (int)Math.Round(shape.Y * scale), w, h);
+                        var frame = Frame(shape, dark, scale, at, hover ? (.2, .45) : null, 0);
+                        var glass = Render(device, renderer, desktop, dw, dh, at, frame, (int)Math.Ceiling(48 * scale));
+                        var composed = (byte[])desktop.Clone();
+                        var alpha = new byte[dw * dh];
+                        for (int y = 0; y < h; y++)
+                            for (int x = 0; x < w; x++)
+                            {
+                                int g = (y * w + x) * 4, d = ((at.Item2 + y) * dw + at.Item1 + x) * 4;
+                                double a = glass[g + 3] / 255d;
+                                for (int c = 0; c < 3; c++) composed[d + c] = (byte)Math.Clamp(Math.Round(glass[g + c] + (1 - a) * desktop[d + c]), 0, 255);
+                                alpha[(at.Item2 + y) * dw + at.Item1 + x] = glass[g + 3];
+                            }
+                        string name = $"{bg}-{shape.Name}-{(dark ? "dark" : "light")}-{scale * 100:0}{(hover ? "-hover" : "")}";
+                        Save(BitmapSource.Create(dw, dh, 96, 96, PixelFormats.Bgra32, null, composed, dw * 4), Path.Combine(folder, name + ".png"));
+                        Save(BitmapSource.Create(dw, dh, 96, 96, PixelFormats.Gray8, null, alpha, dw), Path.Combine(folder, name + "-alpha.png"));
+                    }
+            Console.WriteLine("Rendered over " + stem);
+        }
+        Time(device, renderer);
+        return 0;
     }
 
     // Each pixel as a block of factor x factor.
