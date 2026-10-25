@@ -34,6 +34,7 @@ public partial class MainWindow
             _glass.AutoLook = () => _app.AutoLookFrom(this);
             _glass.Look += (dark, instant) => _app.TurnGlass(this, dark, instant);
             _glass.Crossed += () => _app.GlassCrossed(this);
+            OffscreenGlass();
             // Liquid glass lights its rim from the pointer and presses with it: where the pointer is over the island, and
             // whether the button is down (seen even when a button under it handles the click).
             Island.MouseMove += (_, e) => _glass.Pointer(e.GetPosition(Island), e.LeftButton == MouseButtonState.Pressed);

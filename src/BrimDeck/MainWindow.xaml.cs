@@ -703,7 +703,11 @@ public partial class MainWindow : Window
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
         // Liquid glass keeps its shadow open too, as the glass it is ported from does: over a flat page it is what lifts it.
-        Animate(ShadowHost, OpacityProperty, (!expanded || LiquidGlassShown) && !line ? 1 : 0, duration, shadow, easeOut);
+        // While it opens or closes the shadow is out, as without liquid glass: it comes back once the open panel is at rest, or as
+        // the island lands (ShadowAtRest).
+        bool shadowShown = (!expanded || LiquidGlassShown) && !line;
+        if (shadowShown && turning && LiquidGlassShown && duration > 0) ShadowAtRest(expanded, duration, shadow, easeOut);
+        else Animate(ShadowHost, OpacityProperty, shadowShown ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
         var tone = indicator ? PanelTheme.ColorOf("indicator") : expanded ? PanelTheme.PanelSurfaceColor : PanelTheme.SurfaceColor;

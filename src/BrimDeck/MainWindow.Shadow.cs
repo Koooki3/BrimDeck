@@ -3,8 +3,10 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Threading;
+using Track = BrimDeck.Core.Notices.NoticeMotion.Track;
 
 namespace BrimDeck;
 
@@ -23,7 +25,7 @@ public partial class MainWindow
     private void InitializeShadow()
     {
         _shadowCache = ShadowHost.CacheMode as BitmapCache;
-        _shadowSettle = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
+        _shadowSettle = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(ShadowSettleMs) };
         _shadowSettle.Tick += (_, _) => { _shadowSettle.Stop(); if (ShadowHost.Opacity > 0) ShadowHost.CacheMode = _shadowCache; };
         // The host's size follows the island's margin as well (the island sinks into place as the panel closes).
         IslandShadow.SizeChanged += (_, _) => ShadowChanging(); ShadowHost.SizeChanged += (_, _) => ShadowChanging();
@@ -54,6 +56,34 @@ public partial class MainWindow
             foreach (var (property, element, handler) in listeners) property.RemoveValueChanged(element, handler);
             listeners.Clear();
         };
+    }
+
+    // Over liquid glass the shadow stays under the open panel (MainWindow.LiquidShadow), but its blur is drawn again on every
+    // frame the island changes size: kept through the opening and closing it added about half to the CPU time of an open and
+    // close (FxPreview --shadow-cost, drawn in software; about a tenth without liquid glass). So while the panel opens or closes it is out, as without liquid glass:
+    // opening, it leaves on its opening track, and comes back once the move has ended and the size has held still for
+    // ShadowSettleMs, so the fade only composes the picture kept at rest (the cache); closing, it leaves over the first
+    // ShadowLeaveShare of the move and comes back on its closing track, as without liquid glass.
+    private const double ShadowBackShare = .3, ShadowLeaveShare = .2;
+    private const int ShadowSettleMs = 250;
+    private void ShadowAtRest(bool opening, double duration, Track track, IEasingFunction easing)
+    {
+        static KeyTime At(double ms) => KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ms));
+        var fade = new DoubleAnimationUsingKeyFrames();
+        fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(ShadowHost.Opacity, At(0)));
+        if (opening)
+        {
+            fade.KeyFrames.Add(new EasingDoubleKeyFrame(0, At(duration * track.End), easing));
+            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(duration + ShadowSettleMs)));
+            fade.KeyFrames.Add(new EasingDoubleKeyFrame(1, At(duration * (1 + ShadowBackShare) + ShadowSettleMs), easing));
+        }
+        else
+        {
+            fade.KeyFrames.Add(new EasingDoubleKeyFrame(0, At(duration * Math.Min(ShadowLeaveShare, track.Start)), easing));
+            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(duration * track.Start)));
+            fade.KeyFrames.Add(new EasingDoubleKeyFrame(1, At(duration * track.End), easing));
+        }
+        ShadowHost.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
     }
 
     private void ShadowChanging()
