@@ -33,6 +33,10 @@ namespace BrimDeck.LiquidGlass;
 //   LinearFilters: the backdrop filtered in linear light, as the browser draws the source (see Liquid.hlsl); off, in sRGB.
 //   LinearMap: the map's bytes read as linear light, the browser's constant shift (only for the proof sheets: it makes the
 //     island's ring lopsided); off, the default, as the page meant it (sRGB bytes, no shift).
+//   CssWidth, CssHeight (Faithful, the proof sheets): the source's element in whole CSS pixels, its map's texels; an element
+//     between device pixels is drawn over its snapped pixels, which need not be that size times Scale. 0: Width / Scale.
+//   FilterWidth, FilterHeight (Faithful): where its backdrop-filter's region ends, device pixels from the box's corner (one
+//     short of the box where the corner snapped back; see Liquid.hlsl). 0: the whole box.
 internal readonly record struct LiquidFrame(
     int Width, int Height,
     float CornerTop, float CornerBottom, float Shoulder,
@@ -45,7 +49,8 @@ internal readonly record struct LiquidFrame(
     float Ref = 1, float Edge = 1, float Rad = .6f,
     float Contrast = 1.2f, float Brightness = 1.05f, float Saturate = 1.1f,
     float InsetY = -8, float InsetBlur = 20, float InsetAlpha = .14f, bool Faithful = false,
-    bool LinearMap = false, bool LinearFilters = true)
+    bool LinearMap = false, bool LinearFilters = true, float CssWidth = 0, float CssHeight = 0,
+    float FilterWidth = 0, float FilterHeight = 0)
 {
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
@@ -134,7 +139,8 @@ internal readonly record struct LiquidFrame(
     // (about .05 ms, once per size: the opening panel changes size every frame).
     public static double MaxHalf(double w, double h, double edge, double strength, double rad, bool faithful)
     {
-        int W = Math.Max(2, (int)Math.Round(w)), H = Math.Max(2, (int)Math.Round(h));
+        // Whole CSS pixels as the shader takes them (half way rounds up, as offsetWidth does).
+        int W = Math.Max(2, (int)Math.Floor(w + .5)), H = Math.Max(2, (int)Math.Floor(h + .5));
         int step = faithful ? 1 : Math.Max(1, (int)Math.Sqrt(W * (double)H / 3000)), along = faithful ? 1 : Math.Max(1, step / 2);
         double max = 0;
         void At(int x, int y)
@@ -353,8 +359,11 @@ internal sealed class LiquidRenderer : IDisposable
         // The source's ring is a fifth of the glass's shorter side, fit for its buttons and lenses; on a larger island (the open
         // panel) it is kept to about RingCss CSS pixels.
         float edge = f.Faithful ? f.Edge : f.Edge * MathF.Max(1, MathF.Min(w, h + extra) / scale / RingCss);
-        var key = ((int)w, (int)(h + extra), scale, edge, f.Rad, f.Faithful);
-        if (key != _maxFor) { _maxHalf = (float)LiquidFrame.MaxHalf(w / scale, (h + extra) / scale, edge, strength, f.Rad, f.Faithful); _maxFor = key; }
+        // The map's box in CSS pixels: the source's element (whole pixels) when given, else the island's own.
+        bool css = f.Faithful && f.CssWidth > 0 && f.CssHeight > 0;
+        float boxW = css ? f.CssWidth : w / scale, boxH = css ? f.CssHeight : (h + extra) / scale;
+        var key = (boxW, boxH, scale, edge, f.Rad, f.Faithful);
+        if (key != _maxFor) { _maxHalf = (float)LiquidFrame.MaxHalf(boxW, boxH, edge, strength, f.Rad, f.Faithful); _maxFor = key; }
         var c = new Constants
         {
             Width = w, Height = h,
@@ -370,14 +379,17 @@ internal sealed class LiquidRenderer : IDisposable
             // A square top's sides: the inset shadow there is a gray band down the whole panel; narrowed to about half.
             Narrow = top > 0 || f.Faithful ? 0 : 1.2f,
             Press = f.Press > .5f ? 1 : 0, Dark = f.Dark, Band = 24 * scale,
-            LinearMap = f.LinearMap ? 1 : 0, LinearFilters = f.LinearFilters ? 1 : 0
+            LinearMap = f.LinearMap ? 1 : 0, LinearFilters = f.LinearFilters ? 1 : 0,
+            BoxCssX = css ? boxW : 0, BoxCssY = css ? boxH : 0,
+            FilterEndX = f.Faithful && f.FilterWidth > 0 && f.FilterHeight > 0 ? Math.Min(f.FilterWidth, w) : 0,
+            FilterEndY = f.Faithful && f.FilterWidth > 0 && f.FilterHeight > 0 ? Math.Min(f.FilterHeight, h + extra) : 0
         };
         _context.UpdateSubresource(in c, _constants);
     }
 
     private const float RingCss = 90;
     private float _maxHalf;
-    private (int, int, float, float, float, bool) _maxFor;
+    private (float, float, float, float, float, bool) _maxFor;
 
     // The swap chain, its buffers at least the frame's size: they grow (in steps of 64 pixels, so an opening panel does not
     // reallocate every frame) and never shrink, and the source size shows only the frame's part of them, from the top-left.
@@ -507,5 +519,6 @@ internal sealed class LiquidRenderer : IDisposable
         public float High, InsetY, InsetBlur, InsetAlpha;
         public float BandA, BandB, Narrow, Press;
         public float Dark, Band, LinearMap, LinearFilters;
+        public float BoxCssX, BoxCssY, FilterEndX, FilterEndY;
     }
 }
