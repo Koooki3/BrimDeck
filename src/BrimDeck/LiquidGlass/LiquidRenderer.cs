@@ -165,41 +165,60 @@ internal readonly record struct LiquidFrame(
 // through a slab of thick glass by one pixel shader (Liquid.hlsl, compiled from the embedded source on first use) into a
 // swap chain for composition, which a Composition brush shows in place of the blur window's blur. Rendering happens only when
 // the caller asks (the background, the pointer, the shape or an animation changed); a frame copies the background into a
-// texture of its own with mips (the frost reads them), updates one constant buffer and draws one triangle. Nothing is
-// allocated per frame, and the whole pipeline state is set on every frame (the capture side clears the context's state). The
-// background is read only through that copy, so its texture needs no view of ours. All calls on one thread, the capture side's
-// (DesktopSource, on the UI thread): the device is used from no other, so it needs no multithread protection.
+// texture of its own, builds the frost's pyramid and the backdrop's statistics from it (Frost.hlsl: a few small passes over
+// the padded region only), updates the constant buffers and draws one triangle. Nothing is allocated per frame (the pyramid's
+// textures are remade only when the background's size or the display scale changes), and the whole pipeline state is set on
+// every frame (the capture side clears the context's state). The background is read only through that copy, so its texture
+// needs no view of ours. All calls on one thread, the capture side's (DesktopSource, on the UI thread): the device is used
+// from no other, so it needs no multithread protection.
 internal sealed class LiquidRenderer : IDisposable
 {
-    private const Format Pixels = Format.B8G8R8A8_UNorm;
+    private const Format Pixels = Format.B8G8R8A8_UNorm, Pyramid = Format.R16G16B16A16_Float;
 
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
     private readonly ID3D11VertexShader _vertex;
-    private readonly ID3D11PixelShader _pixel;
-    private readonly ID3D11Buffer _constants;
+    private readonly ID3D11PixelShader _pixel, _downPass, _upPass, _bandPass, _statsPass;
+    private readonly ID3D11Buffer _constants, _passConstants;
     private IDXGISwapChain2? _swapChain;
     private ID3D11RenderTargetView? _target;
     // The frame's size, shown from the swap chain's buffers (SetSourceSize), and the buffers' size.
     private (int Width, int Height) _size, _capacity;
-    // The background with mips, remade when the background's size or format changes.
-    private ID3D11Texture2D? _mips;
-    private ID3D11ShaderResourceView? _mipsView;
-    private (int Width, int Height, Format Format) _mipsFor;
+    // The background's copy, remade when the background's size or format changes.
+    private Surface? _copy;
+    private (int Width, int Height, Format Format) _copyFor;
     private bool _disposed;
 
     public LiquidRenderer(ID3D11Device device)
     {
         _device = device;
         _context = device.ImmediateContext;
-        var (vertex, pixel) = Shaders.Value;
-        _vertex = device.CreateVertexShader(vertex);
-        _pixel = device.CreatePixelShader(pixel);
+        var shaders = Shaders.Value;
+        _vertex = device.CreateVertexShader(shaders.Vertex);
+        _pixel = device.CreatePixelShader(shaders.Pixel);
+        _downPass = device.CreatePixelShader(shaders.Down);
+        _upPass = device.CreatePixelShader(shaders.Up);
+        _bandPass = device.CreatePixelShader(shaders.Band);
+        _statsPass = device.CreatePixelShader(shaders.Stats);
         _constants = device.CreateBuffer(new BufferDescription((uint)Unsafe.SizeOf<Constants>(), BindFlags.ConstantBuffer, ResourceUsage.Default, CpuAccessFlags.None));
-        // The frost reads the mips filtered (Liquid.hlsl, Frost); everything else is read texel by texel.
+        _passConstants = device.CreateBuffer(new BufferDescription((uint)Unsafe.SizeOf<PassConstants>(), BindFlags.ConstantBuffer, ResourceUsage.Default, CpuAccessFlags.None));
+        // The frost's passes and the frost itself read filtered (Frost.hlsl, Liquid.hlsl's Frost); everything else texel by texel.
         _smooth = device.CreateSamplerState(SamplerDescription.LinearClamp);
     }
     private readonly ID3D11SamplerState _smooth;
+
+    // A texture with the views a pass needs.
+    private sealed class Surface(ID3D11Device device, int width, int height, Format format) : IDisposable
+    {
+        public readonly int Width = width, Height = height;
+        public readonly ID3D11Texture2D Texture = device.CreateTexture2D(new Texture2DDescription(format, (uint)width, (uint)height, 1, 1,
+            BindFlags.ShaderResource | BindFlags.RenderTarget));
+        private ID3D11ShaderResourceView? _view;
+        private ID3D11RenderTargetView? _target;
+        public ID3D11ShaderResourceView View => _view ??= device.CreateShaderResourceView(Texture);
+        public ID3D11RenderTargetView Target => _target ??= device.CreateRenderTargetView(Texture);
+        public void Dispose() { _view?.Dispose(); _target?.Dispose(); Texture.Dispose(); }
+    }
 
     // A Composition brush showing the rendered glass at its size from the brush's top-left (no stretch): the caller places the
     // sprite, or the brush's offset, at the island's top-left.
@@ -228,55 +247,285 @@ internal sealed class LiquidRenderer : IDisposable
     // The frame drawn into any target of the frame's size (the swap chain's buffer, or an offscreen texture for the preview).
     internal void Draw(ID3D11Texture2D background, int pad, in LiquidFrame frame, ID3D11RenderTargetView target)
     {
-        var view = Mips(background);
-        // The open panel's band is fitted to its frosted backdrop: measured from a mip as coarse as the frost.
-        Sample(pad, frame.Width, frame.Height, frame.Open > .5f && !frame.Faithful ? (int)MathF.Log2(MathF.Max(1, FrostDip * MathF.Max(.5f, frame.Scale))) : 0);
-        Write(frame, background.Description, pad);
+        var description = background.Description;
+        var copy = Copy(background, description);
         var context = _context;
-        context.OMSetRenderTargets(target);
         context.OMSetBlendState(null);
         context.OMSetDepthStencilState(null);
         context.RSSetState(null);
-        context.RSSetViewport(new Viewport(frame.Width, frame.Height));
         context.IASetInputLayout(null);
         context.IASetPrimitiveTopology(PrimitiveTopology.TriangleList);
         context.VSSetShader(_vertex);
+        context.PSSetSampler(0, _smooth);
+        float scale = MathF.Max(.5f, frame.Scale);
+        // The frost behind the island's text this frame (the open panel's, growing with the opening; the content row's), as a
+        // deviation, and the stats' band below it: the pyramid is drawn only as deep as they reach.
+        float opened = frame.Faithful ? 0 : MathF.Sqrt(Math.Clamp(frame.Open, 0, 1));
+        bool row = !frame.Faithful && frame.ContentRight > frame.ContentLeft;
+        float frost = MathF.Max(FrostDip * scale * opened, row ? ContentFrostDip * scale : 0) * FrostDeviation, band = MathF.Max(BandDip * scale, LevelSigma[0]);
+        Build(copy, scale, MathF.Sqrt(frost * frost + 16 * band * band));
+        Statistics(copy, pad, frame, scale, frost, band);
+        // The open panel's band is fitted to its frosted backdrop: measured from a level as coarse as the frost.
+        Sample(pad, frame.Width, frame.Height, frame.Open > .5f && !frame.Faithful ? (int)MathF.Log2(MathF.Max(1, FrostDip * scale)) : 0);
+        Write(frame, description, pad);
+        context.OMSetRenderTargets(target);
+        context.RSSetViewport(new Viewport(frame.Width, frame.Height));
         context.PSSetShader(_pixel);
         context.PSSetConstantBuffer(0, _constants);
-        context.PSSetShaderResource(0, view);
-        context.PSSetSampler(0, _smooth);
+        Bind(copy.View, _atlas!.View, _stats[_statsAt]!.View);
         context.Draw(3, 0);
-        // The background is copied into the mips next frame: it must not stay bound as a shader input meanwhile.
-        context.PSSetShaderResource(0, null!);
+        // The background is copied again next frame and the pyramid redrawn: none may stay bound as a shader input meanwhile.
+        Unbind();
         context.OMSetRenderTargets((ID3D11RenderTargetView)null!);
     }
 
-    // The background copied into the mipped texture, and its mips made.
-    private ID3D11ShaderResourceView Mips(ID3D11Texture2D background)
+    // The inputs t0..t2 bound, from an array kept (nothing allocated per frame), and let go.
+    private readonly ID3D11ShaderResourceView[] _none = new ID3D11ShaderResourceView[3], _bound = new ID3D11ShaderResourceView[3];
+    private void Unbind() => _context.PSSetShaderResources(0, _none);
+    private void Bind(ID3D11ShaderResourceView a, ID3D11ShaderResourceView? b, ID3D11ShaderResourceView? c)
     {
-        var description = background.Description;
+        _bound[0] = a; _bound[1] = b!; _bound[2] = c!;
+        _context.PSSetShaderResources(0, _bound);
+        _bound[0] = _bound[1] = _bound[2] = null!;
+    }
+
+    // The background copied into a texture of ours (the pyramid's first source; the glass reads its pixels).
+    private Surface Copy(ID3D11Texture2D background, Texture2DDescription description)
+    {
         var key = ((int)description.Width, (int)description.Height, description.Format);
-        if (_mips is null || key != _mipsFor)
+        if (_copy is null || key != _copyFor)
         {
-            _mipsView?.Dispose(); _mips?.Dispose();
-            _mips = _device.CreateTexture2D(new Texture2DDescription(description.Format, description.Width, description.Height, 1, 0,
-                BindFlags.ShaderResource | BindFlags.RenderTarget, ResourceUsage.Default, CpuAccessFlags.None, 1, 0, ResourceOptionFlags.GenerateMips));
-            _mipsView = _device.CreateShaderResourceView(_mips);
-            _mipsFor = key;
+            _copy?.Dispose();
+            _copy = new Surface(_device, key.Item1, key.Item2, description.Format);
+            _copyFor = key;
         }
-        _context.CopySubresourceRegion(_mips, 0, 0, 0, 0, background, 0);
-        _context.GenerateMips(_mipsView!);
-        return _mipsView!;
+        _context.CopySubresourceRegion(_copy.Texture, 0, 0, 0, 0, background, 0);
+        return _copy;
+    }
+
+    // ----- The frost's pyramid (Frost.hlsl) -----
+    // Downsamples D_1 .. D_n, each half the last (D_0 the copy); level B_k is D_k drawn up UpSteps levels (or to full size), into
+    // one atlas: the level-0 ones stacked at the left, the smaller ones in a column at their right. The pyramid's full size
+    // (Extent) is the background's rounded up to whole texels of D_n; past the background the copy's edge is repeated (clamped).
+    private const int UpSteps = 1, MostLevels = 8;
+    // Each level's Gaussian deviation, device pixels, as measured (FxPreview --frost-calibrate: a step edge through B_k).
+    internal static readonly float[] LevelSigma = [1.73f, 3.63f, 7.34f, 14.72f, 29.48f, 58.95f, 117.91f, 235.8f];
+    private int _levels, _built;
+    private (int Width, int Height) _extent, _atlasSize;
+    private (int Width, int Height, int Levels) _pyramidFor;
+    private readonly Surface?[] _down = new Surface?[MostLevels + 1], _scratch = new Surface?[MostLevels + 1];
+    private Surface? _atlas, _band;
+    private readonly (int X, int Y)[] _region = new (int, int)[MostLevels];
+    private PassConstants _pass;
+
+    // Levels enough for the widest frost at this scale (the open panel's, and the stats' band below it).
+    private static int LevelsFor(float scale)
+    {
+        float widest = FrostDip * scale * FrostDeviation * 1.02f;
+        int n = 1;
+        while (n < MostLevels && LevelSigma[n - 1] < widest) n++;
+        return Math.Max(n, 4);
+    }
+
+    private void Build(Surface copy, float scale, float deepest)
+    {
+        int levels = LevelsFor(scale);
+        if (_atlas is null || _pyramidFor != (copy.Width, copy.Height, levels)) Allocate(copy.Width, copy.Height, levels);
+        // Levels up to the first as wide as the deepest frost asked for (the glass and the stats blend no further).
+        _built = 1;
+        while (_built < _levels && LevelSigma[_built - 1] < deepest) _built++;
+        _pass.LevelCount = _built;
+        for (int k = 1; k <= _built; k++)
+        {
+            var source = k == 1 ? copy : _down[k - 1]!;
+            Pass(_downPass, source, _down[k]!, 0, 0);
+        }
+        for (int k = 1; k <= _built; k++)
+        {
+            var source = _down[k]!;
+            int to = Math.Max(k - UpSteps, 0);
+            for (int l = k - 1; l >= to; l--)
+            {
+                if (l == to) Pass(_upPass, source, _atlas!, _region[k - 1].X, _region[k - 1].Y, _extent.Width >> l, _extent.Height >> l);
+                else { Pass(_upPass, source, _scratch[l]!, 0, 0); source = _scratch[l]!; }
+            }
+        }
+    }
+
+    // One pass of the pyramid or the stats: source to the target's region (its whole size unless given).
+    private void Pass(ID3D11PixelShader shader, Surface source, Surface target, int x, int y, int width = 0, int height = 0)
+    {
+        _pass.DstOriginX = x; _pass.DstOriginY = y;
+        _pass.SrcInverseX = 1f / source.Width; _pass.SrcInverseY = 1f / source.Height;
+        _context.UpdateSubresource(in _pass, _passConstants);
+        _context.OMSetRenderTargets(target.Target);
+        _context.RSSetViewport(new Viewport(x, y, width > 0 ? width : target.Width, height > 0 ? height : target.Height));
+        _context.PSSetShader(shader);
+        _context.PSSetConstantBuffer(0, _passConstants);
+        _context.PSSetShaderResource(0, source.View);
+        _context.Draw(3, 0);
+        Unbind();
+    }
+
+    private void Allocate(int width, int height, int levels)
+    {
+        DisposePyramid();
+        int unit = 1 << levels;
+        _levels = levels;
+        _extent = ((width + unit - 1) / unit * unit, (height + unit - 1) / unit * unit);
+        for (int k = 1; k <= levels; k++) _down[k] = new Surface(_device, _extent.Width >> k, _extent.Height >> k, Pyramid);
+        for (int l = 1; l < levels; l++)
+            if (Enumerable.Range(1, levels).Any(k => l > Math.Max(k - UpSteps, 0) && l < k))
+                _scratch[l] = new Surface(_device, _extent.Width >> l, _extent.Height >> l, Pyramid);
+        // The atlas: full-size levels down the left, the rest down a column at their right.
+        int left = 0, right = 0;
+        bool full = false;
+        for (int k = 1; k <= levels; k++)
+        {
+            int at = Math.Max(k - UpSteps, 0);
+            if (at == 0) { _region[k - 1] = (0, left); left += _extent.Height; full = true; }
+            else { _region[k - 1] = (-1, right); right += _extent.Height >> at; }
+        }
+        int column = full ? _extent.Width : 0;
+        for (int k = 1; k <= levels; k++) if (_region[k - 1].X < 0) _region[k - 1] = (column, _region[k - 1].Y);
+        _atlasSize = (column + (right > 0 ? _extent.Width >> 1 : 0), Math.Max(Math.Max(left, right), 1));
+        _atlas = new Surface(_device, Math.Max(1, _atlasSize.Width), _atlasSize.Height, Pyramid);
+        _band = new Surface(_device, _extent.Width >> 1, _extent.Height >> 1, Pyramid);
+        _pyramidFor = (width, height, levels);
+        _pass.ExtentX = _extent.Width; _pass.ExtentY = _extent.Height;
+        _pass.AtlasInverseX = 1f / _atlas.Width; _pass.AtlasInverseY = 1f / _atlas.Height;
+        for (int k = 0; k < MostLevels; k++)
+            Unsafe.Add(ref _pass.Level0, k) = k < levels
+                ? new System.Numerics.Vector4(_region[k].X, _region[k].Y, 1 << Math.Max(k + 1 - UpSteps, 0), LevelSigma[k])
+                : default;
+    }
+
+    private void DisposePyramid()
+    {
+        for (int k = 0; k <= MostLevels; k++) { _down[k]?.Dispose(); _down[k] = null; _scratch[k]?.Dispose(); _scratch[k] = null; }
+        _atlas?.Dispose(); _atlas = null; _band?.Dispose(); _band = null;
+    }
+
+    // ----- The backdrop's statistics (Frost.hlsl, Stats) -----
+    // Per tile of StatsDip, anchored at the island's top middle; the grid's capacity grows with the background and never
+    // shrinks, so a tile keeps its place on the screen (and its history) while the island opens. Two textures, last frame's and
+    // this one's. Smoothed in time against the clock between frames: a value rising at UpHalf (its weight half per 16.7 ms),
+    // falling with the time constant DownTau; the mean at UpHalf either way.
+    private const float StatsDip = 8, BandDip = 1, UpHalfMs = 1000 / 60f, DownTauMs = 300;
+    private readonly Surface?[] _stats = new Surface?[2];
+    private int _statsAt;
+    private (int Cols, int Rows, int Tile) _statsFor;
+    private long _lastFrame;
+    private int _stamp;
+    private float _statsOriginX, _statsOriginY;
+    // The previews draw unrelated backdrops one after another: each frame's stats its own, unsmoothed.
+    internal bool InstantStats { get; set; }
+    // Off: no dither and no grain (the frost's measures).
+    internal bool GrainOn { get; set; } = true;
+
+    private void Statistics(Surface copy, int pad, in LiquidFrame frame, float scale, float frost, float band)
+    {
+        int tile = Math.Max(4, (int)MathF.Round(StatsDip * scale));
+        int cols = (copy.Width + tile - 1) / tile + 2, rows = (copy.Height + tile - 1) / tile + 1;
+        cols = (cols + 15) / 16 * 16; rows = (rows + 7) / 8 * 8;
+        bool reset = InstantStats;
+        if (_stats[0] is null || tile != _statsFor.Tile || cols > _statsFor.Cols || rows > _statsFor.Rows)
+        {
+            _stats[0]?.Dispose(); _stats[1]?.Dispose();
+            cols = Math.Max(cols, tile == _statsFor.Tile ? _statsFor.Cols : 0); rows = Math.Max(rows, tile == _statsFor.Tile ? _statsFor.Rows : 0);
+            _stats[0] = new Surface(_device, cols, rows, Pyramid);
+            _stats[1] = new Surface(_device, cols, rows, Pyramid);
+            _statsFor = (cols, rows, tile);
+            reset = true;
+        }
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        float dt = _lastFrame == 0 ? 1000 : (float)Math.Min(1000, (now - _lastFrame) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
+        _lastFrame = now;
+        var last = _stats[_statsAt]!;
+        var next = _stats[_statsAt ^ 1]!;
+        // Each frame's tiles carry its stamp: a tile not drawn last frame (never, or the island was elsewhere) starts afresh.
+        _pass.StampLast = reset ? -1 : _stamp;
+        _stamp = _stamp % 1000 + 1;
+        _pass.StampNow = _stamp;
+        _statsOriginX = MathF.Floor(frame.Width / 2f) - _statsFor.Cols / 2 * tile;
+        _statsOriginY = 0;
+        _pass.StatsTile = tile;
+        _pass.SigmaFrost = frost;
+        _pass.SigmaBand = band;
+        _pass.StatsOriginX = _statsOriginX; _pass.StatsOriginY = _statsOriginY;
+        _pass.AlphaUp = 1 - MathF.Pow(.5f, dt / UpHalfMs);
+        _pass.AlphaDown = 1 - MathF.Exp(-dt / DownTauMs);
+        _pass.BackdropPad = pad;
+        // Only the tiles over the island, and one around it; the band image under them (half size, in its own pixels).
+        int x0 = Math.Clamp((int)MathF.Floor(-_statsOriginX / tile) - 1, 0, next.Width), x1 = Math.Clamp((int)MathF.Ceiling((frame.Width - _statsOriginX) / tile) + 1, x0, next.Width);
+        int y0 = Math.Clamp((int)MathF.Floor(-_statsOriginY / tile) - 1, 0, next.Height), y1 = Math.Clamp((int)MathF.Ceiling((frame.Height - _statsOriginY) / tile) + 1, y0, next.Height);
+        var image = _band!;
+        int bx0 = Math.Clamp((int)MathF.Floor((_statsOriginX + x0 * tile + pad) / 2) - 1, 0, image.Width), bx1 = Math.Clamp((int)MathF.Ceiling((_statsOriginX + x1 * tile + pad) / 2) + 1, bx0, image.Width);
+        int by0 = Math.Clamp((int)MathF.Floor((_statsOriginY + y0 * tile + pad) / 2) - 1, 0, image.Height), by1 = Math.Clamp((int)MathF.Ceiling((_statsOriginY + y1 * tile + pad) / 2) + 1, by0, image.Height);
+        _pass.DstOriginX = 0; _pass.DstOriginY = 0;
+        _pass.SrcInverseX = 1f / copy.Width; _pass.SrcInverseY = 1f / copy.Height;
+        _context.UpdateSubresource(in _pass, _passConstants);
+        _context.OMSetRenderTargets(image.Target);
+        _context.RSSetViewport(new Viewport(bx0, by0, Math.Max(1, bx1 - bx0), Math.Max(1, by1 - by0)));
+        _context.PSSetShader(_bandPass);
+        _context.PSSetConstantBuffer(0, _passConstants);
+        Bind(copy.View, _atlas!.View, null);
+        _context.Draw(3, 0);
+        Unbind();
+        _pass.SrcInverseX = 1f / image.Width; _pass.SrcInverseY = 1f / image.Height;
+        _context.UpdateSubresource(in _pass, _passConstants);
+        _context.OMSetRenderTargets(next.Target);
+        _context.RSSetViewport(new Viewport(x0, y0, Math.Max(1, x1 - x0), Math.Max(1, y1 - y0)));
+        _context.PSSetShader(_statsPass);
+        Bind(image.View, null, last.View);
+        _context.Draw(3, 0);
+        Unbind();
+        _statsAt ^= 1;
+    }
+
+    // The last frame's stats as drawn (RGBA, Cols x Rows: mean luma, frosted band RMS, unfrosted band RMS, a stamp), and where the
+    // tiles lie (island pixels of tile (0, 0)'s corner, a tile's side): for calibration (FxPreview --frost-stats).
+    internal (float[] Data, int Cols, int Rows, float OriginX, float OriginY, int Tile) ReadStats()
+    {
+        var surface = _stats[_statsAt] ?? throw new InvalidOperationException("Nothing drawn yet.");
+        return (ReadHalf(surface.Texture, 0, 0, surface.Width, surface.Height), surface.Width, surface.Height, _statsOriginX, _statsOriginY, _statsFor.Tile);
+    }
+
+    // Level B_k (1-based) of the last frame's pyramid (RGBA, at its own size), and its texel in device pixels.
+    internal (float[] Data, int Width, int Height, int Texel) ReadLevel(int k)
+    {
+        if (_atlas is null || k < 1 || k > _built) throw new ArgumentOutOfRangeException(nameof(k));
+        int at = Math.Max(k - UpSteps, 0);
+        int w = _extent.Width >> at, h = _extent.Height >> at;
+        return (ReadHalf(_atlas.Texture, _region[k - 1].X, _region[k - 1].Y, w, h), w, h, 1 << at);
+    }
+    internal int Levels => _built;
+
+    private float[] ReadHalf(ID3D11Texture2D texture, int x, int y, int width, int height)
+    {
+        using var staging = _device.CreateTexture2D(new Texture2DDescription(Pyramid, (uint)width, (uint)height, 1, 1, BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read));
+        _context.CopySubresourceRegion(staging, 0, 0, 0, 0, texture, 0, new Box(x, y, 0, x + width, y + height, 1));
+        var mapped = _context.Map(staging, 0, MapMode.Read);
+        var data = new float[width * height * 4];
+        var row = new byte[width * 8];
+        for (int j = 0; j < height; j++)
+        {
+            Marshal.Copy(mapped.DataPointer + (nint)(j * mapped.RowPitch), row, 0, row.Length);
+            for (int i = 0; i < width * 4; i++) data[j * width * 4 + i] = (float)BitConverter.ToHalf(row, i * 2);
+        }
+        _context.Unmap(staging, 0);
+        return data;
     }
 
     // ----- What lies behind -----
-    // The mean brightness of the background under the island, for automatic liquid glass (GlassAppearance): a small mip (at
-    // most MeasureTexels across: fine enough that a word on a page shows in the percentiles) is copied to a staging texture
-    // after the mips are made, and read on a later frame, never waited for. One copy is out at a time. The percentiles come
+    // The mean brightness of the background under the island, for automatic liquid glass (GlassAppearance): the copy or a
+    // downsample of it (at most MeasureTexels across: fine enough that a word on a page shows in the percentiles) is copied to
+    // a staging texture after the pyramid is made, and read on a later frame, never waited for. One copy is out at a time. The percentiles come
     // from a histogram (no sort: a measure of the open panel reads some 37,000 texels).
     private const int MeasureTexels = 512, Bins = 1024;
     private ID3D11Texture2D? _measure;
     private (int Width, int Height, int Level) _measureFor;
+    private Format _measureFormat;
     private bool _measuring;
     private (int Pad, int Width, int Height) _measuredRegion;
     private readonly byte[] _measureRow = new byte[MeasureTexels * 4 * 2];
@@ -288,17 +537,20 @@ internal sealed class LiquidRenderer : IDisposable
 
     private void Sample(int pad, int width, int height, int least)
     {
-        if (_measuring || _mips is null) return;
-        var d = _mips.Description;
-        int level = 0, w = (int)d.Width, h = (int)d.Height;
-        while ((w > MeasureTexels || level < least) && level + 1 < (int)d.MipLevels && w > 1 && h > 1) { w = Math.Max(1, w / 2); h = Math.Max(1, h / 2); level++; }
-        if (_measure is null || _measureFor != (w, h, level))
+        if (_measuring || _copy is null) return;
+        // The copy itself, or the first downsample (D_k, Frost.hlsl) at most MeasureTexels across and at least as coarse as asked.
+        int level = 0, w = _copy.Width, h = _copy.Height;
+        while ((w > MeasureTexels || level < least) && level < _built) { level++; w = _down[level]!.Width; h = _down[level]!.Height; }
+        var source = level == 0 ? _copy : _down[level]!;
+        var format = level == 0 ? _copyFor.Format : Pyramid;
+        if (_measure is null || _measureFor != (w, h, level) || _measureFormat != format)
         {
             _measure?.Dispose();
-            _measure = _device.CreateTexture2D(new Texture2DDescription(d.Format, (uint)w, (uint)h, 1, 1, BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read));
+            _measure = _device.CreateTexture2D(new Texture2DDescription(format, (uint)w, (uint)h, 1, 1, BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read));
             _measureFor = (w, h, level);
+            _measureFormat = format;
         }
-        _context.CopySubresourceRegion(_measure, 0, 0, 0, 0, _mips, (uint)level);
+        _context.CopySubresourceRegion(_measure, 0, 0, 0, 0, source.Texture, 0);
         _measuredRegion = (pad, width, height);
         _measuring = true;
     }
@@ -321,18 +573,30 @@ internal sealed class LiquidRenderer : IDisposable
             double step = 1 << level, sum = 0;
             int count = 0;
             var (pad, width, height) = _measuredRegion;
+            bool half = _measureFormat == Pyramid;
             Array.Clear(_histogram);
             for (int y = 0; y < h; y++)
             {
                 double cy = (y + .5) * step - pad;
                 if (cy < 0 || cy > height) continue;
-                Marshal.Copy(mapped.DataPointer + (nint)(y * mapped.RowPitch), _measureRow, 0, w * 4);
+                Marshal.Copy(mapped.DataPointer + (nint)(y * mapped.RowPitch), _measureRow, 0, w * (half ? 8 : 4));
                 for (int x = 0; x < w; x++)
                 {
                     double cx = (x + .5) * step - pad;
                     if (cx < 0 || cx > width) continue;
-                    int o = x * 4;
-                    double l = (.0722 * _measureRow[o] + .7152 * _measureRow[o + 1] + .2126 * _measureRow[o + 2]) / 255;
+                    double l;
+                    if (half)
+                    {
+                        // RGBA, half floats (sRGB values, filtered).
+                        int o = x * 8;
+                        l = Math.Clamp(.2126 * (double)BitConverter.ToHalf(_measureRow, o) + .7152 * (double)BitConverter.ToHalf(_measureRow, o + 2)
+                            + .0722 * (double)BitConverter.ToHalf(_measureRow, o + 4), 0, 1);
+                    }
+                    else
+                    {
+                        int o = x * 4;
+                        l = (.0722 * _measureRow[o] + .7152 * _measureRow[o + 1] + .2126 * _measureRow[o + 2]) / 255;
+                    }
                     sum += l;
                     count++;
                     _histogram[Math.Min(Bins - 1, (int)(l * Bins))]++;
@@ -414,15 +678,20 @@ internal sealed class LiquidRenderer : IDisposable
             ContentFrost = ContentFrostDip * scale, Feather = FeatherDip * scale,
             ContentLeft = f.Faithful ? 0 : f.ContentLeft, ContentTop = f.ContentTop, ContentRight = f.Faithful ? 0 : f.ContentRight, ContentBottom = f.ContentBottom,
             Hover = f.Faithful || !float.IsFinite(f.PointerX) || !float.IsFinite(f.PointerY) ? 0 : Math.Clamp(f.Hover, 0, 1),
-            PointerX = float.IsFinite(f.PointerX) ? f.PointerX : -1e4f, PointerY = float.IsFinite(f.PointerY) ? f.PointerY : -1e4f
+            PointerX = float.IsFinite(f.PointerX) ? f.PointerX : -1e4f, PointerY = float.IsFinite(f.PointerY) ? f.PointerY : -1e4f,
+            // The frost's pyramid and the stats (Frost.hlsl).
+            AtlasInverseX = _pass.AtlasInverseX, AtlasInverseY = _pass.AtlasInverseY, FrostLevels = _built, GrainOn = GrainOn ? 1 : 0,
+            FrostExtentX = _extent.Width, FrostExtentY = _extent.Height, StatsOriginX = _statsOriginX, StatsOriginY = _statsOriginY,
+            StatsInverseX = 1f / _statsFor.Cols, StatsInverseY = 1f / _statsFor.Rows, StatsTile = _statsFor.Tile
         };
+        for (int k = 0; k < MostLevels; k++) Unsafe.Add(ref c.Level0, k) = Unsafe.Add(ref _pass.Level0, k);
         _context.UpdateSubresource(in c, _constants);
     }
 
     private const float RingCss = 90;
-    // The open panel's frost, DIP (Liquid.hlsl, Frost: a Gaussian of about three quarters of it).
+    // The open panel's frost, DIP (Liquid.hlsl, Frost: a Gaussian of deviation FrostDeviation of it).
     // The frosts are Apple's regular material, about: 32 DIP on the open panel, 12 behind the collapsed content row.
-    private const float FrostDip = 32, ContentFrostDip = 12, FeatherDip = 6;
+    private const float FrostDip = 32, ContentFrostDip = 12, FeatherDip = 6, FrostDeviation = .75f;
     private float _maxHalf;
     private (float, float, float, float, float, bool) _maxFor;
 
@@ -482,19 +751,25 @@ internal sealed class LiquidRenderer : IDisposable
         finally { Marshal.Release(interop); }
     }
 
-    // The shaders' bytecode, compiled ahead (Liquid.vs.cso, Liquid.ps.cso, made by `FxPreview --compile-liquid`; compiling the
-    // source at run time took about 4 s on the UI thread) and embedded with the hash of the source they were made from. Should
-    // that hash not be the embedded source's (the source edited, the bytecode not made again; a test catches it), the source
-    // is compiled here instead, once per run.
-    private static readonly Lazy<(byte[] Vertex, byte[] Pixel)> Shaders = new(() =>
+    // The shaders' bytecode, compiled ahead (Liquid.vs.cso, Liquid.ps.cso; Frost.*.cso; made by
+    // `FxPreview --compile-liquid`: compiling the source at run time took about 4 s on the UI thread) and embedded with the hash
+    // of the source they were made from. Should a hash not be its embedded source's (the source edited, the bytecode not made
+    // again; a test catches it), that source is compiled here instead, once per run.
+    internal readonly record struct Bytecode(byte[] Vertex, byte[] Pixel, byte[] Down, byte[] Up, byte[] Band, byte[] Stats);
+    private static readonly Lazy<Bytecode> Shaders = new(() =>
     {
-        var source = Resource("BrimDeck.LiquidGlass.Liquid.hlsl") ?? throw new InvalidOperationException("Liquid.hlsl is not embedded.");
+        var liquid = Resource("BrimDeck.LiquidGlass.Liquid.hlsl") ?? throw new InvalidOperationException("Liquid.hlsl is not embedded.");
+        var frost = Resource("BrimDeck.LiquidGlass.Frost.hlsl") ?? throw new InvalidOperationException("Frost.hlsl is not embedded.");
         var vertex = Resource("BrimDeck.LiquidGlass.Liquid.vs.cso");
         var pixel = Resource("BrimDeck.LiquidGlass.Liquid.ps.cso");
-        var made = Resource("BrimDeck.LiquidGlass.Liquid.hlsl.sha256");
-        if (vertex is not null && pixel is not null && made is not null && Encoding.ASCII.GetString(made).Trim() == SourceHash(source))
-            return (vertex, pixel);
-        return Compiled(source);
+        var (v, p) = vertex is not null && pixel is not null && EmbeddedHash() == SourceHash(liquid) ? (vertex, pixel) : Compiled(liquid);
+        var down = Resource("BrimDeck.LiquidGlass.Frost.down.cso");
+        var up = Resource("BrimDeck.LiquidGlass.Frost.up.cso");
+        var band = Resource("BrimDeck.LiquidGlass.Frost.band.cso");
+        var stats = Resource("BrimDeck.LiquidGlass.Frost.stats.cso");
+        var (d, u, b, st) = down is not null && up is not null && band is not null && stats is not null && EmbeddedFrostHash() == SourceHash(frost)
+            ? (down, up, band, stats) : CompiledFrost(frost);
+        return new Bytecode(v, p, d, u, b, st);
     });
 
     // The hash the bytecode is made for: SHA-256 of the source's bytes, its line ends taken as LF (a checkout may give it CRLF),
@@ -502,6 +777,8 @@ internal sealed class LiquidRenderer : IDisposable
     internal static string SourceHash(byte[] source) => Convert.ToHexStringLower(SHA256.HashData(source.Where(b => b != 13).ToArray()));
     internal static byte[] EmbeddedSource() => Resource("BrimDeck.LiquidGlass.Liquid.hlsl")!;
     internal static string? EmbeddedHash() => Resource("BrimDeck.LiquidGlass.Liquid.hlsl.sha256") is { } made ? Encoding.ASCII.GetString(made).Trim() : null;
+    internal static byte[] EmbeddedFrostSource() => Resource("BrimDeck.LiquidGlass.Frost.hlsl")!;
+    internal static string? EmbeddedFrostHash() => Resource("BrimDeck.LiquidGlass.Frost.hlsl.sha256") is { } made ? Encoding.ASCII.GetString(made).Trim() : null;
 
     private static byte[]? Resource(string name)
     {
@@ -516,16 +793,24 @@ internal sealed class LiquidRenderer : IDisposable
     internal static (byte[] Vertex, byte[] Pixel) Compiled(byte[] source)
     {
         string text = Encoding.UTF8.GetString(source);
-        return (Compile(text, "VS", "vs_5_0"), Compile(text, "PS", "ps_5_0"));
+        return (Compile(text, "Liquid.hlsl", "VS", "vs_5_0"), Compile(text, "Liquid.hlsl", "PS", "ps_5_0"));
     }
 
-    private static byte[] Compile(string source, string entry, string profile)
+    // The frost's passes compiled from Frost.hlsl.
+    internal static (byte[] Down, byte[] Up, byte[] Band, byte[] Stats) CompiledFrost(byte[] source)
     {
-        var result = Compiler.Compile(source, null!, null!, entry, "Liquid.hlsl", profile, ShaderFlags.OptimizationLevel3, EffectFlags.None, out var code, out var errors);
+        string text = Encoding.UTF8.GetString(source);
+        return (Compile(text, "Frost.hlsl", "Down", "ps_5_0"), Compile(text, "Frost.hlsl", "Up", "ps_5_0"), Compile(text, "Frost.hlsl", "Band", "ps_5_0"),
+            Compile(text, "Frost.hlsl", "Stats", "ps_5_0"));
+    }
+
+    private static byte[] Compile(string source, string name, string entry, string profile)
+    {
+        var result = Compiler.Compile(source, null!, null!, entry, name, profile, ShaderFlags.OptimizationLevel3, EffectFlags.None, out var code, out var errors);
         using (errors)
         using (code)
         {
-            if (result.Failure || code is null) throw new InvalidOperationException("Liquid.hlsl: " + (errors?.AsString() ?? result.ToString()));
+            if (result.Failure || code is null) throw new InvalidOperationException(name + ": " + (errors?.AsString() ?? result.ToString()));
             return code.AsSpan().ToArray();
         }
     }
@@ -535,9 +820,10 @@ internal sealed class LiquidRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
         _target?.Dispose(); _swapChain?.Dispose();
-        _mipsView?.Dispose(); _mips?.Dispose(); _measure?.Dispose();
+        _copy?.Dispose(); DisposePyramid(); _stats[0]?.Dispose(); _stats[1]?.Dispose(); _measure?.Dispose();
         // The immediate context is not let go: Vortice keeps one wrapper for the device, which the capture side uses too.
-        _constants.Dispose(); _smooth.Dispose(); _pixel.Dispose(); _vertex.Dispose();
+        _constants.Dispose(); _passConstants.Dispose(); _smooth.Dispose();
+        _pixel.Dispose(); _downPass.Dispose(); _upPass.Dispose(); _bandPass.Dispose(); _statsPass.Dispose(); _vertex.Dispose();
     }
 
     // The shader's constant buffer (Liquid.hlsl, Frame), in its order: 16 floats a row, nothing straddling a row.
@@ -558,5 +844,21 @@ internal sealed class LiquidRenderer : IDisposable
         public float Open, FrostRadius, BandMean, ContentFrost;
         public float ContentLeft, ContentTop, ContentRight, ContentBottom;
         public float Hover, PointerX, PointerY, Feather;
+        public float AtlasInverseX, AtlasInverseY, FrostLevels, GrainOn;
+        public float FrostExtentX, FrostExtentY, StatsOriginX, StatsOriginY;
+        public float StatsInverseX, StatsInverseY, StatsTile, FrostSpare;
+        public System.Numerics.Vector4 Level0, Level1, Level2, Level3, Level4, Level5, Level6, Level7;
+    }
+
+    // The frost passes' constant buffer (Frost.hlsl, FrostPass), in its order.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PassConstants
+    {
+        public float DstOriginX, DstOriginY, SrcInverseX, SrcInverseY;
+        public float ExtentX, ExtentY, AtlasInverseX, AtlasInverseY;
+        public float LevelCount, StatsTile, SigmaFrost, SigmaBand;
+        public float StatsOriginX, StatsOriginY, AlphaUp, AlphaDown;
+        public float BackdropPad, StampLast, StampNow, Spare0;
+        public System.Numerics.Vector4 Level0, Level1, Level2, Level3, Level4, Level5, Level6, Level7;
     }
 }

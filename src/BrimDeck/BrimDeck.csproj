@@ -17,6 +17,12 @@
     <EmbeddedResource Include="LiquidGlass\Liquid.vs.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.vs.cso" />
     <EmbeddedResource Include="LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" />
     <EmbeddedResource Include="LiquidGlass\Liquid.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl.sha256" />
+    <EmbeddedResource Include="LiquidGlass\Frost.hlsl" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl" />
+    <EmbeddedResource Include="LiquidGlass\Frost.down.cso" LogicalName="BrimDeck.LiquidGlass.Frost.down.cso" />
+    <EmbeddedResource Include="LiquidGlass\Frost.up.cso" LogicalName="BrimDeck.LiquidGlass.Frost.up.cso" />
+    <EmbeddedResource Include="LiquidGlass\Frost.band.cso" LogicalName="BrimDeck.LiquidGlass.Frost.band.cso" />
+    <EmbeddedResource Include="LiquidGlass\Frost.stats.cso" LogicalName="BrimDeck.LiquidGlass.Frost.stats.cso" />
+    <EmbeddedResource Include="LiquidGlass\Frost.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl.sha256" />
     <Content Include="ThirdPartyNotices.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

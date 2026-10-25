@@ -276,7 +276,8 @@ internal static class LiquidPreview
             using var view = device.CreateRenderTargetView(target);
             // The glass takes the backdrop's band of brightness from its own measure of it (a frame later on screen): measured
             // here first, and drawn again with it. (A measure still out from the last render, of another backdrop, is read and
-            // dropped first, or the first draw would not send this one's.)
+            // dropped first, or the first draw would not send this one's.) Its stats its own, not smoothed with the last render's.
+            renderer.InstantStats = true;
             renderer.MeasureNow(out _);
             renderer.Draw(background, pad, frame, view);
             renderer.MeasureNow(out _);

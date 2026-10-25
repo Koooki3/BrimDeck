@@ -13,6 +13,10 @@ internal static class ShaderTests
         check("liquid glass: the shaders compiled ahead are of the embedded source (run FxPreview --compile-liquid after editing Liquid.hlsl)",
             LiquidRenderer.EmbeddedHash() == LiquidRenderer.SourceHash(source));
         check("liquid glass: the shader source is plain ASCII", source.All(b => b < 128));
+        var frost = LiquidRenderer.EmbeddedFrostSource();
+        check("liquid glass: the frost's shaders compiled ahead are of the embedded Frost.hlsl (run FxPreview --compile-liquid after editing it)",
+            LiquidRenderer.EmbeddedFrostHash() == LiquidRenderer.SourceHash(frost));
+        check("liquid glass: the frost's shader source is plain ASCII", frost.All(b => b < 128));
         // The liquid looks' text over the darkest (light) or brightest (dark) glass the legibility band lets through: the light
         // glass's floor without its white tint (the stricter case), the dark glass's ceiling under its thin dark base.
         byte Gray(float v) => (byte)Math.Round(v * 255);

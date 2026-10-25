@@ -47,7 +47,7 @@
 //   anchor itself is past the band does the whole range shift, and only as far as the band asks (its slope growing from 0 as
 //   the anchor goes past, so the map changes continuously with the backdrop). The few pixels
 //   past the percentiles (a word on a page, finer than the measure's grain) are held to the band with a soft knee.
-//   Open panel (Open, the island's own opening, eased as it opens): the backdrop is frosted (FrostRadius, from the mips) and
+//   Open panel (Open, the island's own opening, eased as it opens): the backdrop is frosted (FrostRadius, Frost.hlsl) and
 //   what lies behind the panel's text is held within Cap:1 of contrast about the backdrop's mean (BandMean), so a page behind
 //   cannot compete with the page on it.
 //   The capsule, the notch and the bar (Open 0) stay clear, the port's own glass.
@@ -100,9 +100,21 @@ cbuffer Frame : register(b0)
     float Hover;        // 0..1, eased: the pointer over the island
     float2 Pointer;     // the pointer, island pixels (far away while there is none)
     float Feather;      // device pixels the content row's calm fades in over
+    // The frost's pyramid and the backdrop's statistics (Frost.hlsl, LiquidRenderer).
+    float2 AtlasInverse;  // 1 / the frost atlas's size
+    float FrostLevels;    // its levels (B_1 .. B_n)
+    float GrainOn;        // 1: the output dithered, the frost grained (0 for measures; never on the source's own glass)
+    float2 FrostExtent;   // the pyramid's full size, device pixels
+    float2 StatsOrigin;   // the island pixel at the stats' tile (0, 0)'s top-left corner
+    float2 StatsInverse;  // 1 / the stats texture's size
+    float StatsTile;      // a tile's side, device pixels
+    float FrostSpare;
+    float4 FrostLevel[8]; // per level: its atlas region's top-left (pixels), its texel (device pixels), its Gaussian deviation
 };
 
 Texture2D Background : register(t0);
+Texture2D FrostAtlas : register(t1);   // the frost's levels (Frost.hlsl)
+Texture2D StatsTiles : register(t2);   // per tile: mean luma, frosted band RMS, unfrosted band RMS (Frost.hlsl, Stats)
 SamplerState Smooth : register(s0);
 
 // The most contrast left behind the open panel's text, and how far the band may move the glass's mean brightness from the
@@ -343,22 +355,58 @@ float BoxCoverage(float2 p, float2 halfSize, float r, float sigma, float narrow)
     return value;
 }
 
-// The open panel's frost: the backdrop around a point (background pixels) under a Gaussian of about FrostRadius * .75, from the
-// mips (5 x 5 taps, half the radius apart, each a filtered read of the mip a quarter of the radius wide).
+// The frost: the backdrop around a point (background pixels) under a Gaussian of deviation about .75 radius, from the dual
+// filtering pyramid (Frost.hlsl): the two levels whose deviations bracket it, blended by where it lies between them on a log
+// scale (below the first level, the backdrop itself and the first), so the frost grows evenly, without steps, as the radius does.
+static float FrostShown = 0;
+float3 FrostTap(int k, float2 read)
+{
+    float4 l = FrostLevel[k];
+    float2 q = clamp((read + .5) / l.z, .5, FrostExtent / l.z - .5);
+    return FrostAtlas.SampleLevel(Smooth, (l.xy + q) * AtlasInverse, 0).rgb;
+}
 float3 Frost(float2 read, float radius)
 {
-    float r = max(radius, 1);
-    float level = max(log2(r) - 1, 0);
-    float3 sum = 0;
-    float weight = 0;
-    [loop] for (int y = -2; y <= 2; y++)
-        [loop] for (int x = -2; x <= 2; x++)
-        {
-            float w = exp(-(x * x + y * y) / 4.5);
-            sum += w * Background.SampleLevel(Smooth, (read + .5 + float2(x, y) * r * .5) * Inverse, level).rgb;
-            weight += w;
-        }
-    return sum / weight;
+    // From the backdrop itself at .75 px (under it the glass does not frost), so the frost sets in without a step.
+    float s = max(radius - .75, 0) * .75, first = FrostLevel[0].w;
+    FrostShown = saturate((radius - .75) / (4 * Scale));
+    [branch] if (s <= first) return lerp(Background.Load(int3(int2(read), 0)).rgb, FrostTap(0, read), s / first);
+    int count = (int)FrostLevels;
+    [loop] for (int k = 0; k + 1 < count; k++)
+    {
+        float a = FrostLevel[k].w, b = FrostLevel[k + 1].w;
+        if (s < b) return lerp(FrostTap(k, read), FrostTap(k + 1, read), log2(s / a) / log2(b / a));
+    }
+    return FrostTap(count - 1, read);
+}
+
+// The backdrop's statistics around an island pixel, bilinear between tiles (Frost.hlsl, Stats): x the mean sRGB luma (0..1) of
+// the frosted backdrop, y the RMS of its band-pass at a glyph's scale in linear Y; smoothed in time (up fast, down slow).
+float2 Stats(float2 islandPixel)
+{
+    return StatsTiles.SampleLevel(Smooth, (islandPixel - StatsOrigin) / StatsTile * StatsInverse, 0).rg;
+}
+
+// A hash of three integers, three uniform values (PCG3D, Jarzynski and Olano 2020).
+float3 Hash3(uint3 v)
+{
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    return float3(v) * (1.0 / 4294967296.0);
+}
+
+// The output, dithered (triangular, +-1/255 a channel: no bands in a smooth frost) and the frost grained as Acrylic's is (a
+// gray noise at 2 %). Both fixed to the pixel's place on the screen (counted from the island's top middle, which stays put as
+// it grows): nothing shimmers.
+float3 Grain(float3 c, float2 p)
+{
+    if (GrainOn < .5 || Faithful > .5) return c;
+    uint2 at = uint2(int2(floor(p - float2(HalfWidth, 0))) + 65536);
+    float3 a = Hash3(uint3(at, 1u)), b = Hash3(uint3(at, 2u));
+    c += (Hash3(uint3(at, 3u)).x - .5) * .02 * FrostShown;
+    return saturate(c + (a + b - 1) / 255);
 }
 
 // The luma of a gray (sRGB) through the filters.
@@ -560,5 +608,5 @@ float4 PS(Vertex input) : SV_Target
         cover *= .25;
     }
     if (cover <= 0) return 0;
-    return float4(Glass(p, sd, n) * cover, cover);
+    return float4(Grain(Glass(p, sd, n), p) * cover, cover);
 }

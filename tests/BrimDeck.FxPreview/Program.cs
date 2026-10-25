@@ -74,10 +74,25 @@ internal static class Program
             File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.ps.cso"), pixel);
             File.WriteAllText(System.IO.Path.Combine(args[1], "Liquid.hlsl.sha256"), BrimDeck.LiquidGlass.LiquidRenderer.SourceHash(source) + "\n");
             Console.WriteLine($"Compiled Liquid.hlsl: vertex {vertex.Length} bytes, pixel {pixel.Length} bytes");
+            // The frost's pyramid and stats (Frost.hlsl), alike.
+            var frost = File.ReadAllBytes(System.IO.Path.Combine(args[1], "Frost.hlsl"));
+            var (down, up, band, stats) = BrimDeck.LiquidGlass.LiquidRenderer.CompiledFrost(frost);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.down.cso"), down);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.up.cso"), up);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.band.cso"), band);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.stats.cso"), stats);
+            File.WriteAllText(System.IO.Path.Combine(args[1], "Frost.hlsl.sha256"), BrimDeck.LiquidGlass.LiquidRenderer.SourceHash(frost) + "\n");
+            Console.WriteLine($"Compiled Frost.hlsl: down {down.Length} bytes, up {up.Length} bytes, band {band.Length} bytes, stats {stats.Length} bytes");
             return 0;
         }
         // Only the GPU timing of a liquid glass frame: --liquid-time.
         if (args.Length > 0 && args[0] == "--liquid-time") return LiquidPreview.TimeOnly();
+        // The frost's temporal stability over a moving page (FrostCheck): --frost-check <output folder>.
+        if (args.Length > 1 && args[0] == "--frost-check") return FrostCheck.Run(args[1]);
+        // The frost's levels' deviations (LiquidRenderer.LevelSigma): --frost-calibrate.
+        if (args.Length > 0 && args[0] == "--frost-calibrate") return FrostCheck.Calibrate();
+        // The backdrop's stats per tile, as images and tables: --frost-stats <backgrounds> <output folder>.
+        if (args.Length > 2 && args[0] == "--frost-stats") return FrostCheck.Stats(args[1], args[2]);
         // Automatic liquid glass turning light and dark over a split background: --liquid-auto <output folder>.
         if (args.Length > 1 && args[0] == "--liquid-auto") return LiquidPreview.RunAuto(args[1]);
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
