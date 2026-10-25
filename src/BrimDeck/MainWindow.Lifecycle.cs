@@ -202,11 +202,12 @@ public partial class MainWindow
         // The shoulders and the flat top go early, so the surface is round well before it is small. The line takes the
         // surface's color and material on the way, so it ends as the same dot as the other forms.
         Track compact = new(0, .35), surface = new(.1, 1), corners = new(.1, .55), shadow = new(0, .45), tone = new(0, .5);
-        Animate(Compact, OpacityProperty, 0, shrink, compact, Soft.InOut);
+        // The content leaves as every exit does (Soft.Out): it starts at once and slows into nothing.
+        Animate(Compact, OpacityProperty, 0, shrink, compact, Soft.Out);
         // The line's playback progress leaves with the content: kept, it showed as a grey bar inside the shrinking dot.
-        Animate(MusicIndicator, OpacityProperty, 0, shrink, compact, Soft.InOut);
-        Animate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk, shrink, compact, Soft.InOut);
-        Animate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk, shrink, compact, Soft.InOut);
+        Animate(MusicIndicator, OpacityProperty, 0, shrink, compact, Soft.Out);
+        Animate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk, shrink, compact, Soft.Out);
+        Animate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk, shrink, compact, Soft.Out);
         Animate(ShadowHost, OpacityProperty, 0, shrink, shadow, Soft.Out);
         Animate(Island, IslandBorder.MaterialOpacityProperty, 1, shrink, tone, Soft.Out);
         _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = PanelTheme.SurfaceColor, EasingFunction = Soft.InOut }, shrink, tone), HandoffBehavior.SnapshotAndReplace);
