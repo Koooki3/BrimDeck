@@ -69,8 +69,14 @@ public sealed class IslandBorder : Border
         if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
         if (RimWidth > 0)
         {
-            if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); _rim.Freeze(); }
-            drawingContext.DrawGeometry(null, _rim, outline);
+            // The pen is twice the rim and the layout clip takes its outer half. With the rectangle at rest (SettledClip) nothing
+            // takes it, so the rim is the inner half alone, as a ring.
+            if (_settledClip) drawingContext.DrawGeometry(RimBrush, null, Ring(outline));
+            else
+            {
+                if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); _rim.Freeze(); }
+                drawingContext.DrawGeometry(null, _rim, outline);
+            }
         }
         if (fading) drawingContext.Pop();
     }
@@ -85,6 +91,18 @@ public sealed class IslandBorder : Border
     {
         get => _settledClip;
         set { if (_settledClip == value) return; _settledClip = value; InvalidateArrange(); InvalidateVisual(); }
+    }
+    // The rim's inner half as a filled ring, for the outline it was made from; made only at rest, so never on an animation's frames.
+    private Geometry? _ring, _ringOutline;
+    private double _ringWidth;
+    private Geometry Ring(Geometry outline)
+    {
+        if (_ring is not null && ReferenceEquals(_ringOutline, outline) && _ringWidth == RimWidth) return _ring;
+        var widened = outline.GetWidenedPathGeometry(new Pen(Brushes.Black, RimWidth * 2));
+        var ring = Geometry.Combine(outline, widened, GeometryCombineMode.Intersect, null);
+        ring.Freeze();
+        _ring = ring; _ringOutline = outline; _ringWidth = RimWidth;
+        return ring;
     }
     private RectangleGeometry? _bounds;
     private Geometry Bounds()
