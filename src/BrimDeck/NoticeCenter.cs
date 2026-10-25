@@ -29,6 +29,7 @@ internal sealed class NoticeCenter : IDisposable
     private bool _resuming;
     private int _resumeReading;
     private readonly WindowsNoticeSource _windows = new();
+    private readonly WslNoticeBridge _wsl = new();
     private readonly NoticeQuiet _quiet;
     private NoticePipeServer? _pipe;
     private volatile NoticeHistory? _history;
@@ -57,7 +58,7 @@ internal sealed class NoticeCenter : IDisposable
     // Old files removed in the background (L6), one after another; a reading waits for them, so it never reads a file that
     // is about to go.
     private Task _deleting = Task.CompletedTask;
-    // Messages each link (the pipe) may deliver per window; more are refused until the window moves on.
+    // Messages each link (the pipe, each distribution) may deliver per window; more are refused until the window moves on.
     private const int IntakeLimit = 200;
     private static readonly TimeSpan IntakeWindow = TimeSpan.FromSeconds(10);
     private readonly Dictionary<string, Queue<DateTimeOffset>> _intake = new(StringComparer.Ordinal);
@@ -77,6 +78,7 @@ internal sealed class NoticeCenter : IDisposable
     public NoticeHistoryState HistoryState { get; private set; } = NoticeHistoryState.Empty;
     public NoticeSourceState WindowsState => _enabled && Settings.NoticeWindowsSource ? _windows.State : NoticeSourceState.Off;
     public string? PipeError => _pipe?.Error;
+    public IReadOnlyDictionary<string, (WslAgentState State, string Detail, bool Conflict)> WslStates => _wsl.States;
     public bool Enabled => _enabled;
     public bool Quiet { get; private set; }
     public bool FocusSupported => _quiet.FocusSupported;
@@ -95,7 +97,7 @@ internal sealed class NoticeCenter : IDisposable
             () => _windows.State is not (NoticeSourceState.NeedsAccess or NoticeSourceState.Denied), new NoticeBannerRegistry(),
             () => [.. NoticeBannerRegistry.StartMenu(), .. NoticeBannerRegistry.Configured()], [WindowsNoticeSource.OwnAppId], Log);
         Banners.Changed += () => Changed?.Invoke();
-        Icons = new NoticeIcons(_dispatcher, _windows.LogoAsync);
+        Icons = new NoticeIcons(_dispatcher, _windows.LogoAsync, distro => _wsl.States.TryGetValue(distro, out var state) && state.State is WslAgentState.Server or WslAgentState.Monitor or WslAgentState.MonitorDenied);
         _quiet = new NoticeQuiet(_dispatcher);
         _quiet.Changed += UpdateQuiet;
         _attentionTimer = new PromptTimer(_dispatcher, () => { _attentionTimer!.Stop(); _attentionAt = null; Apply(Attention.Tick(DateTimeOffset.UtcNow)); });
@@ -132,6 +134,8 @@ internal sealed class NoticeCenter : IDisposable
         _windows.StateChanged += () => _dispatcher.BeginInvoke(() => { if (!_disposed) Banners.Update(); Changed?.Invoke(); });
         // Raised after the notices of a reading were handed over, so they are queued on the dispatcher before this.
         _windows.Synced += covers => _dispatcher.BeginInvoke(() => FinishResume(covers));
+        _wsl.Received += (distro, message) => _dispatcher.BeginInvoke(() => FromAgent(distro, message));
+        _wsl.StateChanged += () => _dispatcher.BeginInvoke(() => Changed?.Invoke());
     }
 
     // Starts and stops sources to match the settings. Called at start-up and after every settings change.
@@ -145,7 +149,7 @@ internal sealed class NoticeCenter : IDisposable
         UseHistoryFolder(settings);
         if (!_enabled)
         {
-            _windows.Stop();
+            _windows.Stop(); _wsl.Apply([]);
             _pipe?.Dispose(); _pipe = null;
             _maintenance.Stop(); _quietCheck.Stop();
             ScheduleDue();
@@ -163,6 +167,7 @@ internal sealed class NoticeCenter : IDisposable
         AutoClear();
         if (_pipe is null) { _pipe = new NoticePipeServer(HandlePipeAsync) { Failed = Log }; _pipe.Start(); }
         if (settings.NoticeWindowsSource) _windows.Start(); else _windows.Stop();
+        _wsl.Apply(settings.NoticeWslDistros);
         _maintenance.Start();
         Hub.Prune(DateTimeOffset.UtcNow);
         UpdateQuiet();
@@ -289,7 +294,38 @@ internal sealed class NoticeCenter : IDisposable
         NoticeReceipt.Duplicate => NoticeResults.Duplicate, _ => NoticeResults.Filtered
     }, outcome.Reason, eventId);
 
-    private string StatusLine() => $"Windows: {WindowsState}" + (Quiet ? "; held back" : "");
+    private string StatusLine() => $"Windows: {WindowsState}; WSL: {string.Join(", ", WslStates.Select(pair => pair.Key + " " + pair.Value.State))}" + (Quiet ? "; held back" : "");
+
+    private void FromAgent(string distro, NoticeMessage message)
+    {
+        if (_disposed) return;
+        string? refusal = !_enabled ? "notices-off" : !Settings.NoticeWslDistros.Contains(distro, StringComparer.OrdinalIgnoreCase) ? "distro-off" : NoticeProtocol.Validate(message);
+        if (refusal is not null)
+        {
+            // brim-notify inside the distribution waits for a reply through the agent: it hears why at once (core-M2).
+            if (message.Type == NoticeTypes.Notify && message.Origin == "cli" && message.EventId is { } id) _wsl.Send(distro, NoticeProtocol.Reply(NoticeResults.Rejected, refusal, id));
+            return;
+        }
+        bool server = _wsl.States.TryGetValue(distro, out var state) && state.State == WslAgentState.Server;
+        switch (message.Type)
+        {
+            case NoticeTypes.Notify:
+            {
+                if (!Admit("wsl:" + distro))
+                {
+                    if (message.Origin == "cli" && message.EventId is { } refused) _wsl.Send(distro, NoticeProtocol.Reply(NoticeResults.Rejected, "rate-limited", refused));
+                    break;
+                }
+                var outcome = Receive(NoticeIntake.FromAgent(message, distro, server));
+                // brim-notify inside the distribution waits for this reply through the agent.
+                if (message.Origin == "cli" && message.EventId is { } id) _wsl.Send(distro, Reply(outcome, id));
+                break;
+            }
+            case NoticeTypes.Close when message.NativeId is { } native:
+                Hub.SourceRemoved($"wsl:{distro}:{message.Session ?? ""}:{native}");
+                break;
+        }
+    }
 
     private bool Admit(string link)
     {
@@ -378,9 +414,20 @@ internal sealed class NoticeCenter : IDisposable
     }
 
     // Closes what the panel shows (close button, Escape); the next waiting notice may follow. Only BrimDeck's own presentation
-    // closes; Windows' notification center keeps the notice. A source that can hear of it would be told when reportToSource
-    // is set (closing it by hand); none of the sources here can.
-    public void Dismiss(MainWindow deck, bool reportToSource) => Apply(Attention.Dismiss(deck.NoticeLane, DateTimeOffset.UtcNow));
+    // closes; Windows' notification center keeps the notice. Closing it by hand is the one explicit act that also closes it at
+    // a WSL source whose agent is the notification service (as closing a desktop notification bubble does).
+    public void Dismiss(MainWindow deck, bool reportToSource)
+    {
+        var current = Attention.Current(deck.NoticeLane);
+        Apply(Attention.Dismiss(deck.NoticeLane, DateTimeOffset.UtcNow));
+        if (reportToSource && current?.Payload is Notice notice) ReportDismissed(notice);
+    }
+
+    private void ReportDismissed(Notice notice)
+    {
+        if ((notice.Capabilities & NoticeCapabilities.ReportDismissal) == 0 || notice.Distro is not { } distro) return;
+        if (NoticeProtocol.ToAgent(NoticeTypes.Dismissed, notice.InstanceKey) is { } message) _wsl.Send(distro, message);
+    }
 
     public bool CanOpen(Notice notice) => notice.Origin == NoticeOrigin.Windows && (notice.Capabilities & NoticeCapabilities.OpenApp) != 0
         || notice.Actions.Any(action => action.Key == "default") && (notice.Capabilities & NoticeCapabilities.Actions) != 0;
@@ -394,9 +441,16 @@ internal sealed class NoticeCenter : IDisposable
         return false;
     }
 
-    // Passes a chosen action back to the application the notice came from. None of the sources here takes one back, and their
-    // notices carry no actions (NoticeCapabilities.Actions).
-    public bool Invoke(Notice notice, string key) => false;
+    // Passes a chosen action back to the WSL application (only offered while the agent is its notification service).
+    public bool Invoke(Notice notice, string key)
+    {
+        if ((notice.Capabilities & NoticeCapabilities.Actions) == 0 || notice.Distro is not { } distro
+            || NoticeProtocol.ToAgent(NoticeTypes.Action, notice.InstanceKey, key) is not { } message) return false;
+        _wsl.Send(distro, message);
+        Hub.SourceRemoved(notice.InstanceKey);
+        Withdraw(notice.Id);
+        return true;
+    }
 
     // The scheduled clearing (NoticeAutoClear): daily or weekly from the last time; choosing a schedule starts its count.
     private void AutoClear()
@@ -800,7 +854,7 @@ internal sealed class NoticeCenter : IDisposable
         if (_disposed) return;
         // The sources stop first, so nothing arrives after the last save (core-L3).
         _pipe?.Dispose(); _pipe = null;
-        _windows.Dispose();
+        _windows.Dispose(); _wsl.Dispose();
         // "Clear on exit": the list is emptied before the last save, so nothing of it is left on disk.
         if (_enabled && Settings.NoticeAutoClear == NoticeAutoClear.OnExit)
         {

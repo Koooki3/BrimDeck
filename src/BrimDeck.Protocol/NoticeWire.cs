@@ -60,7 +60,7 @@ public sealed class NoticeMessage
     public List<NoticeActionInfo>? Actions { get; set; }
     // Type "action": the chosen action's key.
     public string? ActionKey { get; set; }
-    // Type "status": the agent's state and a technical detail for diagnostics.
+    // Type "status": the agent's state (see AgentStates) and a technical detail for diagnostics.
     public string? State { get; set; }
     public string? Detail { get; set; }
     // Type "close": why the source closed the notice (the freedesktop reason codes).
@@ -88,9 +88,26 @@ public static class NoticeResults
     public const string Accepted = "accepted", Updated = "updated", Duplicate = "duplicate", Filtered = "filtered", Rejected = "rejected";
 }
 
+public static class AgentStates
+{
+    // Server: the agent is the session's notification service. Monitor: another service shows notices and the agent watches
+    // them. MonitorDenied: another service runs and the bus does not let the agent watch; brim-notify still works.
+    // NoBus: no session bus was found. Error: something else failed; Detail says what.
+    public const string Server = "server", Monitor = "monitor", MonitorDenied = "monitor-denied", NoBus = "no-bus", Error = "error";
+}
+
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(NoticeMessage))]
+[JsonSerializable(typeof(AgentBridgeConfig))]
 public sealed partial class NoticeJson : JsonSerializerContext;
+
+// Written by BrimDeck into a WSL distribution next to the agent, so that brim-notify can reach Windows through the
+// command-line sender while the agent is not running.
+public sealed class AgentBridgeConfig
+{
+    public string? Helper { get; set; }
+    public string? Version { get; set; }
+}
 
 public static class NoticeProtocol
 {
@@ -122,6 +139,17 @@ public static class NoticeProtocol
 
     public static NoticeMessage Reply(string result, string? reason = null, string? id = null)
         => new() { Type = NoticeTypes.Reply, Result = result, Detail = reason, EventId = id };
+
+    // BrimDeck's request to a WSL agent about one of its desktop notices (type Action or Dismissed), addressed by both the
+    // session and the id of the notice's "wsl:<distribution>:<session>:<id>" key. The agent acts only on its current run's
+    // session, so an earlier run's notice never acts on the new run's notice with the same id (C-L5). Null when the key names
+    // no notice id.
+    public static NoticeMessage? ToAgent(string type, string instanceKey, string? actionKey = null)
+    {
+        var parts = instanceKey.Split(':');
+        if (parts is not ["wsl", _, .., var session, var id] || !uint.TryParse(id, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _)) return null;
+        return new() { Type = type, Session = session.Length > 0 ? session : null, NativeId = id, ActionKey = actionKey };
+    }
 
     // Checks a message received from outside BrimDeck and trims its texts to the limits. Returns null when it can be used,
     // or the reason it is refused.

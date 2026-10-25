@@ -19,14 +19,15 @@ internal static class AuditCore2Tests
             PendingLimit(check);
             Removals(check);
             WakeReminders(check);
+            Links(check);
             UrgentPerSource(check);
             HistoryLinks(root, check);
         }
         finally { Loc.Use(language); }
     }
 
-    private static NoticeInput Watch(string name, string key) => NoticeIntake.FromPipe(
-        new NoticeMessage { AppName = name, ReplaceId = key, Title = key }, T0) with
+    private static NoticeInput Watch(string name, string key, NoticeMessage? message = null) => NoticeIntake.FromPipe(
+        message ?? new NoticeMessage { AppName = name, ReplaceId = key, Title = key }, T0) with
     { Timing = new NoticeTiming { Kind = NoticeTimeKind.Stopwatch, StartsAt = T0, Native = true } };
 
     private static void Cleaning(Action<string, bool> check)
@@ -50,6 +51,8 @@ internal static class AuditCore2Tests
         check("S3: titles and names given over the wire stay on one line", NoticeHub.Words(titled).Title == "Outlook 已付款" && titled.AppName == "pay me");
         var run = new NoticeInput { Origin = NoticeOrigin.Cli, AppKey = "cli:x", AppName = "x", InstanceKey = "r", ExitCode = 0, Command = "ma\u200Bke\u202E\nall" };
         check("C-L11: the run command is cleaned before it words the title", NoticeHub.Words(run).Title == "make all 已完成");
+        var actions = NoticeIntake.FromAgent(new NoticeMessage { Origin = "dbus", AppName = "app", NativeId = "1", Actions = [new() { Key = "ok", Label = "O\u202Ek\nyes" }, new() { Key = "go", Label = "\u200B" }] }, "Ubuntu", agentIsServer: true);
+        check("C-L11: WSL action labels are cleaned, and a label of nothing shows its key", actions.Actions.Select(a => a.Label).SequenceEqual(["Ok yes", "go"]));
     }
 
     private static void PendingLimit(Action<string, bool> check)
@@ -118,6 +121,34 @@ internal static class AuditCore2Tests
         var message = hub.Receive(Reminder("r6", now.AddMinutes(-1), null), now);
         check("C-L14: old reminders and other notices from the sleep are only recorded", old is { Present: false, Reason: "late" } && oldAlarm is { Present: false, Reason: "late" }
             && message is { Present: false, Reason: "late" });
+    }
+
+    private static void Links(Action<string, bool> check)
+    {
+        var hub = new NoticeHub();
+        var piped = hub.Receive(Watch("b", "t1", new NoticeMessage { AppName = "b", Distro = "Ubuntu", ReplaceId = "t1" }), T0).Notice!;
+        var agentStop = NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", ReplaceId = "t1", Stop = true }, "Ubuntu", false, T0);
+        check("S3: a pipe sender naming a distribution keeps its rules but marks its keys", piped.AppKey == "cli:Ubuntu:b" && NoticeIntake.ViaPipe(piped.InstanceKey)
+            && !NoticeIntake.ViaPipe(agentStop.InstanceKey));
+        // r3 M2: the other way round now: WSL's brim-notify started it over the pipe while the agent was down.
+        check("S3: the agent's stop reaches a timer the pipe started under its distribution (r3 M2)", hub.Receive(agentStop, T0.AddSeconds(1)).Receipt == NoticeReceipt.Updated && piped.Timing!.Stopped);
+        var real = hub.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", ReplaceId = "t2", Kind = "stopwatch" }, "Ubuntu", false, T0) with
+        { Timing = new NoticeTiming { Kind = NoticeTimeKind.Stopwatch, StartsAt = T0, Native = true } }, T0.AddSeconds(2)).Notice!;
+        var spoof = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", ReplaceId = "t2", Title = "伪造" }, T0), T0.AddSeconds(3));
+        var spoofStop = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", ReplaceId = "t2", Stop = true }, T0), T0.AddSeconds(4));
+        check("S3: and a pipe sender cannot replace or stop the distribution's own", spoof.Receipt == NoticeReceipt.Accepted && spoof.Notice != real && real.Title != "伪造"
+            && spoofStop.Reason == "no-timer" && !real.Timing!.Stopped);
+        var byAgent = hub.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", EventId = "job", Title = "a" }, "Ubuntu", false, T0), T0.AddSeconds(5));
+        var byPipe = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", EventId = "job", Title = "p" }, T0), T0.AddSeconds(6));
+        check("S3: an --id over the pipe does not mark the distribution's message a retry", byAgent.Receipt == NoticeReceipt.Accepted && byPipe.Receipt == NoticeReceipt.Accepted);
+        var windows = NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", EventId = "job" });
+        check("S3: a Windows sender without a distribution keeps the plain key", !NoticeIntake.ViaPipe(windows.InstanceKey) && windows.InstanceKey == "cli::b:job");
+
+        // A notice saved before the key took the sender's name (cli:{distro}:{id}).
+        var restarted = new NoticeHub();
+        restarted.Load([new Notice { Origin = NoticeOrigin.Cli, AppKey = "cli:Ubuntu:b", AppName = "b", Distro = "Ubuntu", InstanceKey = "cli:Ubuntu:build", EventId = "build", Title = "构建中", ReceivedAt = T0, UpdatedAt = T0 }], [], T0.AddMinutes(1));
+        var again = restarted.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", EventId = "build", Title = "构建中" }, "Ubuntu", false, T0), T0.AddMinutes(2));
+        check("C-L4: the same --id after the upgrade is still recognized, not a second notice", again.Receipt == NoticeReceipt.Duplicate && restarted.Notices.Count == 1);
     }
 
     private static void UrgentPerSource(Action<string, bool> check)

@@ -78,6 +78,9 @@ internal static class AuditCoreTests
         restarted.Load(wsl.Notices.Select(n => n.Copy()), [], T0.AddMinutes(3));
         var again = restarted.Receive(Wsl("Thunderbird", "1", "今天的邮件"), T0.AddMinutes(4));
         check("core-H2: after a restart the same number names a new notification", again.Receipt == NoticeReceipt.Accepted && restarted.Notices.Count(n => n.AppName == "Thunderbird") == 2);
+
+        var pipe = NoticeIntake.FromPipe(new NoticeMessage { Title = "x", Distro = @"..\server" });
+        check("sec-L4: a pipe sender's distribution label must be a WSL name", pipe.Distro is null && pipe.AppKey == "cli:brim-notify");
     }
 
     private static void LateAndMissed(Action<string, bool> check)

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The agent BrimDeck copies into a WSL distribution the user chose. BrimDeck starts it through wsl.exe and reads its
+       standard output; it receives the distribution's desktop notifications over the session bus and serves brim-notify.
+       Published for linux-x64, linux-arm64, linux-musl-x64 and linux-musl-arm64 as one trimmed, self-contained file each
+       (see scripts/Publish-Release.ps1 and WslPlatform):
+       dotnet publish src/BrimDeck.WslAgent -c Release -r linux-x64 -o <publish>\wsl\linux-x64
+       It is also brim-notify inside WSL, started once per notice, so it is built to start fast (W16). Native AOT would be
+       fastest, but the SDK cannot compile it for Linux on Windows ("Cross-OS native compilation is not supported"), where
+       releases are built. Instead: ReadyToRun, since trimming drops the framework's precompiled code and everything would
+       otherwise be compiled at each start, and no compression, which would unpack the bundle at each start. -->
+  <ItemGroup>
+    <ProjectReference Include="..\BrimDeck.Protocol\BrimDeck.Protocol.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>brimdeck-agent</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Native.OwnerByStatx calls statx(2) through a function pointer (W16). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <EventSourceSupport>false</EventSourceSupport>
+  </PropertyGroup>
+
+  <Import Project="..\BrimDeck\ReleaseVersion.targets" />
+
+</Project>

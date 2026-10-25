@@ -14,6 +14,7 @@ internal static class AuditR3Tests
     {
         Builtins(check);
         PendingLimit(check);
+        Links(check);
         Cleaning(check);
         Folder(root, check);
     }
@@ -57,6 +58,30 @@ internal static class AuditR3Tests
         for (int i = 0; i < 5; i++) small.Receive(Watch("loop", "s" + i), T0.AddSeconds(i));
         var plain = small.Receive(new NoticeInput { Origin = NoticeOrigin.Windows, AppKey = "windows:Mail", AppName = "Mail", InstanceKey = "m1", Title = "邮件" }, T0.AddMinutes(1));
         check("r3 M1: a notice accepted beyond the count limit is still there", plain.Receipt == NoticeReceipt.Accepted && small.Find(plain.Notice!.Id) is not null);
+    }
+
+    private static void Links(Action<string, bool> check)
+    {
+        var hub = new NoticeHub();
+        // The agent was down: WSL's brim-notify sent over the pipe. Back up, the agent's -r updates that notice.
+        var piped = hub.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", ReplaceId = "build", Title = "构建中" }, T0), T0).Notice!;
+        var update = hub.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", ReplaceId = "build", Title = "构建完成" }, "Ubuntu", false, T0), T0.AddSeconds(1));
+        check("r3 M2: the agent's -r reaches what the pipe delivered under its distribution", update.Receipt == NoticeReceipt.Updated && update.Notice == piped
+            && piped.Title == "构建完成" && hub.Notices.Count == 1);
+        var otherDistro = hub.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", ReplaceId = "build", Title = "x" }, "Debian", false, T0), T0.AddSeconds(2));
+        check("r3 M2: but not what came under another distribution's name", otherDistro.Receipt == NoticeReceipt.Accepted && hub.Notices.Count == 2);
+
+        // Both links have one: each reaches its own first.
+        var both = new NoticeHub();
+        var fromPipe = both.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", ReplaceId = "k", Title = "p" }, T0), T0).Notice!;
+        var fromAgent = both.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", ReplaceId = "k", Title = "a" }, "Ubuntu", false, T0), T0.AddSeconds(1));
+        // fromAgent took over the pipe's (no agent one existed yet), which is the agent's from then on; a pipe message after it
+        // makes a new one, and the agent's next -r reaches its own, not that.
+        var pipeAgain = both.Receive(NoticeIntake.FromPipe(new NoticeMessage { AppName = "b", Distro = "Ubuntu", ReplaceId = "k", Title = "p2" }, T0), T0.AddSeconds(2));
+        string afterPipe = fromPipe.Title;
+        var agentAgain = both.Receive(NoticeIntake.FromAgent(new NoticeMessage { Origin = "cli", AppName = "b", ReplaceId = "k", Title = "a2" }, "Ubuntu", false, T0), T0.AddSeconds(3));
+        check("r3 M2: S3 still holds: a pipe sender never reaches what the agent delivered", fromAgent.Notice == fromPipe && pipeAgain.Receipt == NoticeReceipt.Accepted
+            && pipeAgain.Notice != fromPipe && afterPipe == "a" && agentAgain.Notice == fromPipe && fromPipe.Title == "a2" && pipeAgain.Notice!.Title == "p2");
     }
 
     private static void Cleaning(Action<string, bool> check)

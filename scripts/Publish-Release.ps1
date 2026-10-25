@@ -22,6 +22,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'brim-notify publish failed.' }
     dotnet publish src/BrimDeck/BrimDeck.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -p:PublishSingleFile=false -o $publishPath
     if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
+    # The WSL agent: one trimmed Linux file per processor and C library, copied into a distribution only when the user switches
+    # it on for dynamic notices. BrimDeck picks wsl\<rid>\brimdeck-agent by what the distribution runs (WslPlatform.Rids).
+    foreach ($rid in 'linux-x64', 'linux-arm64', 'linux-musl-x64', 'linux-musl-arm64') {
+        $agentPath = Join-Path $publishPath "wsl\$rid"
+        dotnet publish src/BrimDeck.WslAgent/BrimDeck.WslAgent.csproj -c Release -r $rid -p:Version=$Version -o $agentPath
+        if ($LASTEXITCODE -ne 0) { throw "WSL agent publish failed ($rid)." }
+        # Only the agent itself is shipped; the protocol library's symbols are left out.
+        Get-ChildItem -LiteralPath $agentPath -File | Where-Object Name -ne 'brimdeck-agent' | Remove-Item
+    }
     $iscc = & (Join-Path $PSScriptRoot 'Get-InnoSetup.ps1')
     & $iscc -qp "-dAppVersion=$Version" "-dSourceDir=$publishPath" "-o$outputPath" installer/BrimDeck.iss
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
