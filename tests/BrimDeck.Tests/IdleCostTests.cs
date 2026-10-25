@@ -207,6 +207,27 @@ internal static class IdleCostTests
         check("Idle cost: readings with room are sampled", CompactMonitor.HasRoom(.5) && CompactMonitor.HasRoom(120));
         check("Idle cost: readings without room are not sampled", !CompactMonitor.HasRoom(0) && !CompactMonitor.HasRoom(-3) && !CompactMonitor.HasRoom(double.NaN) && !CompactMonitor.HasRoom(double.PositiveInfinity));
 
+        // A reading's width (ReadingWidth) starts frames only for a change that shows: a reading that does not show, or a change of
+        // less than a device pixel, takes its new width at once; one that shows eases to a wider figure.
+        var hidden = new ReadingWidth();
+        hidden.Update(30, 0, false, true, 1.5);
+        bool hiddenMoves = hidden.Update(41, 1, false, true, 1.5);
+        check("Idle cost: a reading that does not show takes a new width at once, with no frames", !hiddenMoves && hidden.At(1) == 41 && !hidden.Moving(1));
+        var visible = new ReadingWidth();
+        visible.Update(30, 0, true, true, 1.5);
+        bool subPixel = visible.Update(30.5, 1, true, true, 1.5), wider = visible.Update(41, 2, true, true, 1.5);
+        check("Idle cost: a change of less than a device pixel takes no frames", !subPixel && visible.At(1.01) == 30.5);
+        check("Idle cost: a shown reading eases to a wider figure", wider && visible.Moving(2.1) && visible.At(2.1) > 30.5 && visible.At(2.1) < 41 && visible.At(3) == 41);
+        check("Idle cost: without motion a shown reading takes its width at once", !visible.Update(50, 4, true, false, 1.5) && visible.At(4) == 50);
+        // Readings that keep their widths ask for no frames, and asking allocates nothing.
+        var steady = new ReadingWidth[6];
+        bool quiet = true;
+        for (int i = 0; i < steady.Length; i++) steady[i].Update(40 + i, 0, i % 2 == 0, true, 1.25);
+        long start = GC.GetAllocatedBytesForCurrentThread();
+        for (int t = 1; t <= 1000; t++) for (int i = 0; i < steady.Length; i++) quiet &= !steady[i].Update(40 + i, t, i % 2 == 0, true, 1.25);
+        long spent = GC.GetAllocatedBytesForCurrentThread() - start;
+        check($"Idle cost: readings whose figures keep their width take no frames and allocate nothing ({spent} B for 1000 readings)", quiet && spent == 0);
+
         // The figure kept for each whole percent is the one the format gives.
         check("Idle cost: every whole percent's figure is the formatted one", Enumerable.Range(0, 2001).Select(i => i / 2000d - .0001)
             .Append(double.NaN).Append(2).Append(-1).All(share => MonitorFormat.WholePercent(share).ToString(System.Globalization.CultureInfo.InvariantCulture) == MonitorFormat.Percent(share)));

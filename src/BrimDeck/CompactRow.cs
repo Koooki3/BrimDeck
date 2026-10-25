@@ -41,6 +41,12 @@ internal sealed class CompactRow : Panel
     private Eased _title;
     private HeldWidth _titleHeld;
     private bool _titleKnown;
+    // Made once and filled again on every arrange, which runs on every frame while anything in the row moves: the step handed to
+    // Motion (a method group passed each time would be allocated each time) and the lists the parts are placed through.
+    private readonly Func<double, bool> _step;
+    private readonly List<CompactSpacing.Part> _parts = [];
+    private readonly List<RowPart> _owners = [];
+    private readonly List<double> _offsets = [], _shares = [];
     // What the row shows; rows with the same key carry their parts over.
     public object Key { get; }
 
@@ -51,6 +57,7 @@ internal sealed class CompactRow : Panel
             .Concat([RowPart.Rings, RowPart.Text, RowPart.Monitor]).Distinct(), RowPart.Equalizer, RowPart.Clock];
         Key = key; _gap = Math.Max(0, gap); _dpi = dpi > 0 && double.IsFinite(dpi) ? dpi : 1; _scale = CompactMusicLayout.SafeScale(scale);
         VerticalAlignment = VerticalAlignment.Center; HorizontalAlignment = HorizontalAlignment.Left;
+        _step = Step;
     }
 
     // A part the layout shows, width DIPs wide when fully present (the title's and the readings' widths follow the row).
@@ -85,9 +92,14 @@ internal sealed class CompactRow : Panel
     // Starts the row's motion if anything is still coming or going.
     public void Begin()
     {
-        if (Moving(Eased.Now)) Motion.Start(this, Step);
+        if (Moving(Eased.Now)) Motion.Start(this, _step);
     }
-    private bool Moving(double now) => _slots.Values.Any(slot => slot.Presence.Moving(now)) || _strip?.Moving(now) == true || _titleKnown && _title.Moving(now);
+    private bool Moving(double now)
+    {
+        // Asked on every frame of a transition; the dictionary's own enumerator allocates nothing.
+        foreach (var slot in _slots.Values) if (slot.Presence.Moving(now)) return true;
+        return _strip?.Moving(now) == true || _titleKnown && _title.Moving(now);
+    }
     private bool Step(double now)
     {
         // A row that was replaced stops; the new one carries on.
@@ -109,8 +121,8 @@ internal sealed class CompactRow : Panel
     {
         double now = Eased.Now, width = finalSize.Width, height = finalSize.Height;
         // Every part of the row, the readings one by one, at its full width and how present it is (CompactSpacing).
-        var parts = new List<CompactSpacing.Part>(_order.Length + 6);
-        var owners = new List<RowPart>(_order.Length + 6);
+        var parts = _parts; var owners = _owners;
+        parts.Clear(); owners.Clear();
         int title = -1;
         double text = 0;
         foreach (var part in _order)
@@ -118,7 +130,8 @@ internal sealed class CompactRow : Panel
             if (!_slots.TryGetValue(part, out var slot)) continue;
             if (part == RowPart.Monitor && _strip is { } strip)
             {
-                foreach (var (w, p) in strip.Readings(now)) { parts.Add(new(w, p)); owners.Add(part); }
+                var readings = strip.Readings(now);
+                for (int i = 0; i < readings.Count; i++) { parts.Add(new(readings[i].Width, readings[i].Presence)); owners.Add(part); }
                 continue;
             }
             double presence = Math.Clamp(slot.Presence.At(now), 0, 1);
@@ -134,7 +147,8 @@ internal sealed class CompactRow : Panel
         }
         var placed = CompactSpacing.Arrange(parts, title, text, width, _gap, _scale, _dpi);
         double stripLeft = double.NaN, stripRight = 0;
-        var offsets = new List<double>(); var shares = new List<double>();
+        var offsets = _offsets; var shares = _shares;
+        offsets.Clear(); shares.Clear();
         for (int i = 0; i < parts.Count; i++)
         {
             var part = owners[i];
@@ -160,18 +174,19 @@ internal sealed class CompactRow : Panel
             // (CompactSpacing.Zoom); the title already fills just its room. The readings do so inside their strip.
             Fade(slot, p, fills ? .82 + .18 * p : CompactSpacing.Zoom(p), logical, childHeight);
         }
-        if (_strip is { } readings)
+        if (_strip is { } readingStrip)
         {
-            if (double.IsNaN(stripLeft)) readings.Arrange(new Rect(0, 0, 0, readings.DesiredSize.Height));
+            // None present: the strip draws none (an empty placing), not the last ones it was given.
+            readingStrip.Place(offsets, shares);
+            if (double.IsNaN(stripLeft)) readingStrip.Arrange(new Rect(0, 0, 0, readingStrip.DesiredSize.Height));
             else
             {
-                readings.Place([.. offsets], [.. shares]);
-                double h = readings.DesiredSize.Height;
-                readings.Arrange(new Rect(Snap(stripLeft), Snap((height - h) / 2), Math.Max(0, stripRight - stripLeft), Math.Max(0, h)));
+                double h = readingStrip.DesiredSize.Height;
+                readingStrip.Arrange(new Rect(Snap(stripLeft), Snap((height - h) / 2), Math.Max(0, stripRight - stripLeft), Math.Max(0, h)));
             }
         }
         // A reading that starts to come or go, or to change its width, during this arrange moves the row with it.
-        if (_strip?.Moving(now) == true || _titleKnown && _title.Moving(now)) Motion.Start(this, Step);
+        if (_strip?.Moving(now) == true || _titleKnown && _title.Moving(now)) Motion.Start(this, _step);
         return finalSize;
     }
 

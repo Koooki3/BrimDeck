@@ -142,3 +142,25 @@ public struct HeldWidth
         return _width;
     }
 }
+
+// The room one system reading of the collapsed row takes as its figure changes: held a while when it narrows (HeldWidth), and
+// eased to only while the reading shows and the change is at least a device pixel. A reading that does not show, or a change too
+// small to see, takes its new width at once, so it starts no frames: while nothing that shows moves, the row draws nothing.
+public struct ReadingWidth
+{
+    private HeldWidth _held;
+    private Eased _width;
+    public bool Known { readonly get; private set; }
+    public readonly double At(double now) => Math.Max(0, _width.At(now));
+    public readonly bool Moving(double now) => _width.Moving(now);
+
+    // The figure's width now; shown: whether the reading shows (or is fading); dpi: device pixels per DIP. Returns whether the
+    // width moves. The first width is taken at once.
+    public bool Update(double width, double now, bool shown, bool motion, double dpi)
+    {
+        double target = _held.Update(width, now);
+        if (!Known) { _width = new Eased(target, Eased.Seconds); Known = true; return false; }
+        double pixels = double.IsFinite(dpi) && dpi > 0 ? dpi : 1;
+        return _width.Set(target, motion && shown && Math.Abs(target - _width.At(now)) * pixels >= 1, now);
+    }
+}
