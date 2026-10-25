@@ -70,10 +70,14 @@ To remove it: switch the distribution off in settings, then delete `~/.local/sha
 ## brim-notify
 
 ```text
-brim-notify "Build finished" --body "Tests passed"   show a notice
-brim-notify run -- dotnet test                      run a command, then show its result (exit code and time)
-brim-notify "Deploying" -r deploy --progress 40       the same -r key updates the same notice (task progress)
-brim-notify status                                  check that BrimDeck receives notices
+# show a notice
+brim-notify "Build finished" --body "Tests passed"
+# run a command, then show its result (exit code and time)
+brim-notify run -- dotnet test
+# the same -r key updates the same notice (task progress)
+brim-notify "Deploying" -r deploy --progress 40
+# check that BrimDeck receives notices
+brim-notify status
 ```
 
 Options: `-b/--body`, `-s/--source` (the source's name), `-c/--category` (message, task, success, warning, error, info), `-p/--priority` (low, normal, high — a hint; only "High" chosen by you for the application raises it), `-i/--icon` (a local icon file; a relative path is from the current folder, and in WSL a name without `/` that is no file in the current folder is looked up as an icon name), `--id` (shown once however often it is retried). On Windows the program is `BrimDeck.Notify.exe` in BrimDeck's folder.
@@ -95,17 +99,23 @@ Alarms, timers, countdowns, mail and event reminders are recognized and shown by
 
 - Notices are sorted by the application's id (AUMID) and the notice's text, in memory on this PC; the original notification is not kept, and no mailbox or calendar is read. The sorting is heuristic: Outlook's and Teams' reminder wording varies by version and language, and what is not recognized shows as an ordinary notice.
 - Settings › Dynamic notices › Time notices lists which of these applications this PC has (only whether they are installed; nothing is read from them). They remind through Windows notifications, so "Windows app notifications" needs to be on.
-- Alarms, ended countdowns and event reminders are high priority and are not held back by the "at most 3 in 10 seconds" limit, but at most 3 ring per minute from one source (each Windows application on its own; brim-notify, and WSL applications, each share one); the rest wait their turn, so a script that sets many timers at once does not hold back another application's alarm. An application you set to muted or low priority stays quiet as usual. While locked, presenting or paused they only count toward the summary. An event entered more than 10 minutes after its start is recorded as an ordinary notice. Windows notifications that arrived while the PC slept are recorded, not shown, on waking, except reminders raised in the last 10 minutes or for an event starting within 10 minutes either way, which still alert. At most 200 timers, events still to remind and running stopwatches are kept; beyond that the oldest created go (and the log says so).
+- Alarms, ended countdowns and event reminders are high priority and are not held back by the "at most 3 in 10 seconds" limit, but at most 3 ring per minute from one source (each Windows application on its own; brim-notify, and WSL applications, each share one); the rest wait their turn, so a script that sets many timers at once does not hold back another application's alarm. An application you set to muted or low priority stays quiet as usual. While locked, presenting or paused they only count toward the summary. An event entered more than 10 minutes after its start is recorded as an ordinary notice. Windows notifications that arrived while the PC slept are recorded, not shown, on waking, except reminders raised in the last 10 minutes or for an event starting within 10 minutes either way, which still alert. At most 200 timers, events still to remind and running stopwatches are kept; beyond that, the one BrimDeck received first is dropped from the source holding the most (and the log says so), so other applications' reminders are not affected.
 - The live words follow one shared second tick, which runs only while a running timer shows on the island or on the recent notices page. Countdowns and events are worked out from the clock, again at once after waking or a change of the system time. A reminder missed by more than 10 minutes (asleep, BrimDeck not running) does not pop up; the list says "Ended at 15:30".
 - Limits: Windows does not share the Clock app's running timers, stopwatch or alarm list, nor the snooze and dismiss buttons of its notifications, so a Clock alarm shows only when it rings and cannot be snoozed from BrimDeck; for a timer on the island use `brim-notify timer`. Calendar sync (reading Outlook's or Windows' calendar directly) is not supported yet; the applications' own reminder notifications are used.
 
 ```text
-brim-notify timer 25m "Focus"                    count down 25 minutes, then remind (also 1h30m, 90s)
-brim-notify timer --at 15:30 "Meeting"           count down to 15:30
-brim-notify stopwatch "Build" -r build           a stopwatch showing the time elapsed
-brim-notify stop build                           stop the stopwatch, or cancel a countdown or event (same -s source as sent)
-brim-notify event "Weekly" --at 15:00 --remind 10m --ends 16:00   an event: reminds 10 minutes before and at its start
-brim-notify "New mail" --kind mail               mark a plain notice as mail (or alarm)
+# count down 25 minutes, then remind (also 1h30m, 90s)
+brim-notify timer 25m "Focus"
+# count down to 15:30
+brim-notify timer --at 15:30 "Meeting"
+# a stopwatch showing the time elapsed
+brim-notify stopwatch "Build" -r build
+# stop the stopwatch, or cancel a countdown or event (same -s source as sent)
+brim-notify stop build
+# an event: reminds 10 minutes before and at its start
+brim-notify event "Weekly" --at 15:00 --remind 10m --ends 16:00
+# mark a plain notice as mail (or alarm)
+brim-notify "New mail" --kind mail
 ```
 
 - Times: `15:30` (the next 15:30) or `2026-10-24 15:30`, read in **Windows' time zone** (also from a WSL distribution set to another zone); or ISO 8601 with an offset, such as `2026-10-24T15:30:00+08:00`. A time daylight saving skips moves to just after the change; one it repeats is the earlier.

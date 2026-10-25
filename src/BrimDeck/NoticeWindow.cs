@@ -911,6 +911,9 @@ internal sealed partial class NoticeWindow : Window
         _escape?.SetEnabled(false);
         var own = new WindowInteropHelper(this).Handle;
         if (NoticeNative.Foreground() is var previous && previous != own) _previousForeground = previous;
+        // While this notice holds the foreground, the user's application has not changed (WindowsHost.Detect): the island
+        // keeps its context, as it does for a panel that takes the keyboard (MainWindow.Hotkeys.cs).
+        BrimDeck.Native.WindowsHost.KeyboardPanel = own;
         NoticeNative.SetActivatable(own, true);
         Activate();
         Dispatcher.BeginInvoke(() => (_actions?.Children.OfType<Button>().LastOrDefault() ?? FirstButton(_detail))?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
@@ -924,6 +927,7 @@ internal sealed partial class NoticeWindow : Window
         // At once, not after the notice's way out: keys typed meanwhile go to where the user was (review 7a).
         NoticeNative.ReturnForeground(own, _previousForeground);
         _previousForeground = IntPtr.Zero;
+        if (BrimDeck.Native.WindowsHost.KeyboardPanel == own) BrimDeck.Native.WindowsHost.KeyboardPanel = IntPtr.Zero;
         if (_item is not null && !_surface.IsMouseOver) { LeaveDetail(); Center.Hold(_deck, false); }
     }
 
