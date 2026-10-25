@@ -444,7 +444,9 @@ internal static class PerfCost
         private void Tick()
         {
             if (!Enabled || _following) { _poll.Stop(); return; }
-            Timed(() => _host.Tick(_region, _pad, _frame, Environment.TickCount64));
+            // As GlassBackdrop's poll: a settle tick only reads the last drawing's measure.
+            if (_host.Idle.Settling) _host.Idle.Settled();
+            else Timed(() => _host.Tick(_region, _pad, _frame, Environment.TickCount64));
             Backdrop();
             var interval = TimeSpan.FromMilliseconds(_host.Idle.Interval(false, _host.Renderer is { Measuring: true }, Environment.TickCount64));
             if (_poll.Interval != interval) _poll.Interval = interval;

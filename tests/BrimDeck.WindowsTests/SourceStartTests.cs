@@ -54,6 +54,21 @@ internal static class SourceStartTests
         soon.SetResult(new(true, .25, 1));
         Pump(300);
         check("first look: a measure back in time is reported once, with its brightness", calls.Count == 1 && calls[0]?.Luma == .25);
+
+        // Taking the look throws: what must follow it (the island waiting for the first look shown, App.StartGlance) still runs,
+        // once, and the exception still reaches the dispatcher.
+        var throws = new TaskCompletionSource<SourceStart.Prepared>();
+        int ended = 0, thrown = 0;
+        void Caught(object sender, DispatcherUnhandledExceptionEventArgs e) { if (e.Exception is InvalidOperationException { Message: "look" }) { thrown++; e.Handled = true; } }
+        Dispatcher.CurrentDispatcher.UnhandledException += Caught;
+        try
+        {
+            SourceStart.Within(throws.Task, 120, _ => throw new InvalidOperationException("look"), () => ended++);
+            throws.SetResult(new(true, .25, 1));
+            Pump(300);
+        }
+        finally { Dispatcher.CurrentDispatcher.UnhandledException -= Caught; }
+        check($"first look: what follows the look runs even when taking it throws (ended {ended}, thrown {thrown})", ended == 1 && thrown == 1);
     }
 
     private static void Late(Action<string, bool> check)

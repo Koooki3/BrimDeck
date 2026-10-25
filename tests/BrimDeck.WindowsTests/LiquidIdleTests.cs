@@ -36,8 +36,11 @@ internal static class LiquidIdleTests
         var pace = new LiquidIdle();
         pace.Start(0);
         long late = LiquidIdle.IdleAfterMs + 500;
-        check("liquid idle: a pointer moving over the island polls at PollMs", pace.Interval(LiquidIdle.PointerActive(true, late - 100, late), false, late) == LiquidIdle.PollMs);
-        check("liquid idle: a pointer resting on the island polls at the idle pace", pace.Interval(LiquidIdle.PointerActive(true, late - LiquidIdle.PointerRestMs - 1, late), false, late) == LiquidIdle.IdlePollMs);
+        check("liquid idle: a pointer moving over the island polls at PollMs", pace.Interval(LiquidIdle.PointerActive(true, false, late - 100, late), false, late) == LiquidIdle.PollMs);
+        check("liquid idle: a pointer pressing on the island polls at PollMs, however long it rests", pace.Interval(LiquidIdle.PointerActive(true, true, late - LiquidIdle.PointerRestMs - 1, late), false, late) == LiquidIdle.PollMs);
+        check("liquid idle: a pointer resting on the island polls at the idle pace", pace.Interval(LiquidIdle.PointerActive(true, false, late - LiquidIdle.PointerRestMs - 1, late), false, late) == LiquidIdle.IdlePollMs);
+        check("liquid idle: the pointer away, a desktop that changed lately (a video) is looked at 15 times a second", pace.Interval(LiquidIdle.PointerActive(false, false, 0, 100), false, 100) == LiquidIdle.StillPollMs);
+        check("liquid idle: no settle tick without a drawing to measure", pace.Interval(false, true, 100) == LiquidIdle.StillPollMs && !pace.Settling);
 
         using var source = DesktopSource.TryCreate();
         if (source is null) { Console.WriteLine("SKIP: liquid idle cost (no desktop capture)."); return; }
@@ -56,6 +59,22 @@ internal static class LiquidIdleTests
             using (new Backdrop(Backdrop.Corner(200, 100), 90, 120, 150))
                 for (int i = 0; i < 40 && !captured; i++) { captured = source.Update(region, out _) && source.Texture is not null; if (!captured) Thread.Sleep(25); }
             if (!captured) { Console.WriteLine("SKIP: liquid idle cost (capture refused)."); return; }
+            // A tick that draws the glass is followed by one SettleMs later that only reads its measure, and the look after keeps
+            // the pace from the last look: no second capture right after a drawing.
+            using (new Backdrop(Backdrop.Corner(200, 100), 90, 120, 150))
+            {
+                var settle = new LiquidIdle();
+                settle.Start(0);
+                bool drew = settle.Tick(source, region, Render, 1000) && settle.Renders == 1;
+                int first = settle.Interval(false, renderer.Measuring, 1000);
+                bool settling = settle.Settling;
+                long ticks = settle.Ticks;
+                settle.Settled();
+                int next = settle.Interval(false, renderer.Measuring, 1000 + LiquidIdle.SettleMs);
+                check(FormattableString.Invariant($"liquid idle: after a drawing one settle tick reads the measure without a capture, and the next look keeps the pace (drew {drew}, waits {first} then {next} ms)"),
+                    drew && first == LiquidIdle.SettleMs && settling && settle.Ticks == ticks && settle.Settles == 1 && !settle.Settling
+                    && next == LiquidIdle.StillPollMs - LiquidIdle.SettleMs && settle.Interval(false, true, 4000) == LiquidIdle.IdlePollMs);
+            }
 
             // The test's own loop, with nothing polled, without and with the redraws: what the process spends on it is not the poll's.
             var quiet = Phase(source, renderer, region, false, Render, old: false, none: true);
@@ -152,7 +171,8 @@ internal static class LiquidIdleTests
             else if (now >= nextTick)
             {
                 long t0 = Stopwatch.GetTimestamp();
-                if (!follow) idle.Tick(source, region, render, now);
+                if (!follow && !old && idle.Settling) idle.Settled();
+                else if (!follow) idle.Tick(source, region, render, now);
                 // Following frames as GlassBackdrop.Step does, the glass unchanged: before, each frame captured and drew.
                 else if (old) { source.Update(region, out _); render(source.Texture!); drawn++; }
                 else idle.Frame(source, region, frame, render, now);
