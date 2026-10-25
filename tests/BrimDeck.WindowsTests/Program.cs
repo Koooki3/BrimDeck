@@ -15,6 +15,9 @@ internal static class Program
             Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
             CheckWindowChrome();
             NoticeProtectionTests.Run(Check);
+            var bannerRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-WindowsTests-" + Guid.NewGuid().ToString("N"));
+            try { NoticeBannerRegistryTests.Run(bannerRoot, Check); }
+            finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
             BrimDeck.MainWindow.CheckShadowLifetime();
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();
             Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0

@@ -44,6 +44,43 @@ public sealed partial class SettingsWindow
         Target.Children.Add(watcher);
     }
 
+    // "Turn off other apps' notification banners" (NoticeBanners): off by default; what it changes and how it is undone are
+    // spelled out, since the setting is Windows' own and undocumented.
+    private void NoticeBannerRow(NoticeCenter center)
+    {
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NoticeHideBanners, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        string title = Loc.T("统一关闭其他应用的通知横幅", "Turn off other apps' notification banners");
+        AutomationProperties.SetName(toggle, title);
+        toggle.Checked += (_, _) => Change(s => s.NoticeHideBanners = true);
+        toggle.Unchecked += (_, _) => Change(s => s.NoticeHideBanners = false);
+        var windows = ActionButton(Loc.T("打开 Windows 通知设置", "Open Windows notification settings"), () => UI.OpenUrl("ms-settings:notifications"));
+        var controls = new StackPanel { Orientation = Orientation.Horizontal };
+        controls.Children.Add(windows); controls.Children.Add(toggle);
+        var status = StatusLine(() => BannerStatus(center));
+        Group(Row(title, controls, status,
+            () => Loc.T("BrimDeck 已在岛上显示 Windows 通知时，Windows 自己的横幅会把同一条通知再弹一次。打开后，BrimDeck 关掉其他应用在 Windows 中的“显示通知横幅”：开始菜单里的应用和 Windows 通知设置里已有的应用都会处理，新装的应用在 BrimDeck 下次启动或它的第一条通知到达时补上。通知照常进入通知中心，BrimDeck 照常读取。BrimDeck 自己、以及在下方“应用”里设为关闭或静音的应用不动，它们的通知只在 Windows 中显示。\n\n改动前，BrimDeck 先把每个应用原来的设置（包括原来没有这一项）记在数据文件夹的 notice-banners.json 里；关闭开关、退出或卸载 BrimDeck 时按记录恢复：原来没有的删掉，原来有的写回。你在 Windows 里重新打开了某个应用的横幅，BrimDeck 保留你的选择，开关打开期间不再改它。意外退出来不及恢复的，下次启动时按记录收尾。\n\n这项设置（注册表 HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\<应用>\\ShowBanner）不在 Windows 的公开文档里，以后的 Windows 版本可能不再生效。打开后如果仍看到横幅，请在 Windows 设置 › 系统 › 通知 中逐个关闭。",
+                "While BrimDeck shows Windows notifications on the island, Windows' own banner shows each one a second time. When this is on, BrimDeck turns off \"Show notification banners\" in Windows for other apps: the apps in the Start menu and those already in Windows' notification settings; an app installed later is added at BrimDeck's next start or with its first notification. Notifications still go to the notification center, where BrimDeck reads them. BrimDeck itself, and apps set to off or muted under \"Apps\" below, are left alone: their notifications show only in Windows.\n\nBefore it changes anything, BrimDeck records each app's previous setting (including that there was none) in notice-banners.json in its data folder, and restores it when you switch this off, quit or uninstall BrimDeck: a value that was not there is deleted, one that was is written back. If you turn an app's banner on again in Windows, BrimDeck keeps your choice and leaves that app alone while this stays on. Anything it could not restore after an unexpected exit is restored at the next start.\n\nThe setting (HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\<app>\\ShowBanner) is not documented by Windows and may stop working in a later version. If banners still appear with this on, turn them off per app in Windows Settings › System › Notifications.")));
+    }
+
+    private (string Text, bool Problem) BannerStatus(NoticeCenter center)
+    {
+        var banners = center.Banners;
+        if (banners.LedgerUnreadable)
+            return (Loc.T("无法读取 notice-banners.json，横幅保持原样，没有做任何改动。", "notice-banners.json cannot be read, so the banners were left as they are."), true);
+        if (!S.NoticeHideBanners) return ("", false);
+        if (!banners.Holding)
+            return (Loc.T("灵动提示或 Windows 应用通知未在接收，Windows 横幅保持原样。", "Dynamic notices or Windows app notifications are not being received, so Windows' banners are left as they are."), false);
+        if (banners.Listing) return (Loc.T("正在读取应用列表…", "Reading the app list…"), false);
+        int off = banners.States.Values.Count(state => state == BannerState.TurnedOff);
+        int failed = banners.States.Values.Count(state => state == BannerState.Failed);
+        string text = Loc.T($"已关闭 {off} 个应用的 Windows 横幅。", $"Windows banners are off for {off} apps.");
+        if (banners.Released > 0)
+            text += Loc.T($" {banners.Released} 个应用你在 Windows 中重新打开了横幅，保持不动。", $" {banners.Released} apps whose banner you turned on again in Windows are left alone.");
+        if (failed > 0)
+            return (text + Loc.T($" {failed} 个应用的设置没能写入或 Windows 没有保留，请在 Windows 设置 › 系统 › 通知 中手动关闭。", $" For {failed} apps the setting could not be written or Windows did not keep it; turn their banners off in Windows Settings › System › Notifications."), true);
+        return (text, false);
+    }
+
     private TextBlock StatusLine(Func<(string Text, bool Problem)> read)
     {
         var line = TextLine("", 11.5, TextSecondary);
@@ -86,6 +123,8 @@ public sealed partial class SettingsWindow
         Group(Row(Loc.T("Windows 应用通知", "Windows app notifications"), windowsControls, windowsStatus,
             () => Loc.T("读取 Windows 通知中心里当前用户的应用通知（来源、图标、时间和文字），不读取应用内部消息，也不会清除或修改通知中心。BrimDeck 作为普通桌面程序运行时，Windows 不提供变化事件，因此在 Windows 的推送通知事件日志每记录一条通知时读取（事件日志模式），日志被关闭或不可用时改为轮询。",
                 "Reads the current user's app notifications in Windows' notification center (source, icon, time and text). It does not read messages inside apps, and never clears or changes the notification center. As an ordinary desktop program BrimDeck gets no change events from Windows, so it reads whenever Windows' push notification event log records a notification (event log mode), and polls when that log is turned off or unavailable.")));
+
+        NoticeBannerRow(center);
 
         // WSL: one switch per distribution; none on by default.
         var distributions = WslLocations.Distributions();

@@ -72,6 +72,8 @@ internal sealed class NoticeCenter : IDisposable
 
     public NoticeHub Hub { get; }
     public AttentionCoordinator Attention { get; } = new();
+    // Other applications' Windows banners while the switch is on (NoticeBanners).
+    public NoticeBannerKeeper Banners { get; }
     public NoticeIcons Icons { get; }
     public NoticeHistoryState HistoryState { get; private set; } = NoticeHistoryState.Empty;
     public NoticeSourceState WindowsState => _enabled && Settings.NoticeWindowsSource ? _windows.State : NoticeSourceState.Off;
@@ -90,6 +92,10 @@ internal sealed class NoticeCenter : IDisposable
     {
         _app = app; _dispatcher = app.Dispatcher;
         Hub = new NoticeHub(key => _app.Settings.NoticeRule(key));
+        // Windows refusing access gives the banners back; the ledger lives in the data folder, next to settings.json.
+        Banners = new NoticeBannerKeeper(() => _app.Settings, _dispatcher, app.Store.DirectoryPath,
+            () => _windows.State is not (NoticeSourceState.NeedsAccess or NoticeSourceState.Denied));
+        Banners.Changed += () => Changed?.Invoke();
         Icons = new NoticeIcons(_dispatcher, _windows.LogoAsync, distro => _wsl.States.TryGetValue(distro, out var state) && state.State is WslAgentState.Server or WslAgentState.Monitor or WslAgentState.MonitorDenied);
         _quiet = new NoticeQuiet(_dispatcher);
         _quiet.Changed += UpdateQuiet;
@@ -116,10 +122,15 @@ internal sealed class NoticeCenter : IDisposable
         Hub.PendingDropped += count => { _droppedPending += count; if (DateTimeOffset.UtcNow - _droppedLogged >= TimeSpan.FromMinutes(1)) LogDropped(); };
         // A reading still under way when notices or the source were switched off arrives late; it is dropped.
         // Notifications of Windows' Clock, Outlook, the calendars and Teams are sorted into time kinds here (NoticeTimeSources).
-        _windows.Received += input => _dispatcher.BeginInvoke(() => { if (_enabled && !_disposed && Settings.NoticeWindowsSource) Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local)); });
+        _windows.Received += input => _dispatcher.BeginInvoke(() =>
+        {
+            if (!_enabled || _disposed || !Settings.NoticeWindowsSource) return;
+            Receive(NoticeTimeSources.Classify(input, TimeZoneInfo.Local));
+            if (input.AppId is { } appId) Banners.Arrived(appId);
+        });
         _windows.Missed += input => _dispatcher.BeginInvoke(() => OnMissed(input));
         _windows.Removed += key => _dispatcher.BeginInvoke(() => { if (!_disposed) Hub.SourceRemoved(key); });
-        _windows.StateChanged += () => _dispatcher.BeginInvoke(() => Changed?.Invoke());
+        _windows.StateChanged += () => _dispatcher.BeginInvoke(() => { if (!_disposed) Banners.Update(); Changed?.Invoke(); });
         // Raised after the notices of a reading were handed over, so they are queued on the dispatcher before this.
         _windows.Synced += covers => _dispatcher.BeginInvoke(() => FinishResume(covers));
         _wsl.Received += (distro, message) => _dispatcher.BeginInvoke(() => FromAgent(distro, message));
@@ -147,6 +158,7 @@ internal sealed class NoticeCenter : IDisposable
             if (Attention.Suppressed) Apply(Attention.SetSuppressed(false, DateTimeOffset.UtcNow, out _));
             Apply(Attention.Remove(item => item.IsNotice, DateTimeOffset.UtcNow));
             Quiet = false;
+            Banners.Update();
             Changed?.Invoke();
             return;
         }
@@ -159,6 +171,7 @@ internal sealed class NoticeCenter : IDisposable
         Hub.Prune(DateTimeOffset.UtcNow);
         UpdateQuiet();
         ScheduleDue();
+        Banners.Update();
         Changed?.Invoke();
     }
 
@@ -855,5 +868,7 @@ internal sealed class NoticeCenter : IDisposable
         Microsoft.Win32.SystemEvents.TimeChanged -= ClockMoved;
         Microsoft.Win32.SystemEvents.PowerModeChanged -= PowerChanged;
         _quiet.Dispose();
+        // Windows shows its own banners again while BrimDeck is not running.
+        Banners.ReleaseAll();
     }
 }

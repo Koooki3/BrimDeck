@@ -546,11 +546,25 @@ begin
     RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', '{#RunValue}');
 end;
 
+// Dynamic notices can turn off other applications' Windows banners (NoticeBanners). BrimDeck gives them back when it exits;
+// this gives back any it could not (a crash, a killed process), from its ledger in the data folder, before the program files
+// go. The uninstaller runs as the user (or, for an all-users install, elevated as the same user), whose HKCU holds them. After
+// an over-the-shoulder elevation by another account it finds that account's (empty) data folder and does nothing.
+procedure RestoreNoticeBanners;
+var
+  ResultCode: Integer;
+begin
+  if FileExists(ExpandConstant('{app}\{#MainExe}')) then
+    Exec(ExpandConstant('{app}\{#MainExe}'), '--restore-banners "' + ExpandConstant('{#DataDir}') + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if (CurUninstallStep = usUninstall) and not HasParam('/UPGRADE') then
   begin
     RemoveStartupEntry;
+    RestoreNoticeBanners;
   end
   else if (CurUninstallStep = usPostUninstall) and DeleteUserData and not HasParam('/UPGRADE') then
   begin

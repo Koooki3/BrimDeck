@@ -27,6 +27,7 @@ try
     AuditFollowupTests.Run(Check);
     AuditWin2Tests.Run(Check);
     NoticeEventLogTests.Run(Check);
+    NoticeBannerTests.Run(root, Check);
     NoticeOpsTests.Run(Check);
     NoticeGlyphTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
