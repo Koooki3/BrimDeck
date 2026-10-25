@@ -35,7 +35,7 @@
 //   dark glass brings it down to at most High from its dark tint - scaled no more than it must be, so the detail behind keeps
 //   its relative contrast; only the few pixels past the percentiles (a word on a page, finer than the measure's grain) are
 //   held to the band one by one, with a soft knee.
-// The output is premultiplied; outside the outline it is transparent. Edge pixels take four subsamples.
+// The output is premultiplied; outside the outline it is transparent. Edge pixels take their coverage from four subsamples.
 
 cbuffer Frame : register(b0)
 {
@@ -359,14 +359,17 @@ float4 PS(Vertex input) : SV_Target
     float2 n;
     float sd = Outline(p, n);
     if (sd > 1.5) return 0;
-    if (sd < -1.5) return float4(Glass(p, sd), 1);
+    // The edge: how much of the pixel the outline covers, from four subsamples (the outline's curves are far wider than a
+    // pixel, so each takes the centre's distance carried along the normal). The glass itself is the same for the whole pixel:
+    // the browser reads the backdrop at whole pixels.
     static const float2 Offsets[4] = { float2(-.25, -.25), float2(.25, -.25), float2(-.25, .25), float2(.25, .25) };
-    float4 sum = 0;
-    [unroll] for (int i = 0; i < 4; i++)
+    float cover = 1;
+    if (sd > -1.5)
     {
-        float d = sd + dot(n, Offsets[i]);
-        float cover = saturate(.5 - d * 2);
-        if (cover > 0) sum += float4(Glass(p, d) * cover, cover);
+        cover = 0;
+        [unroll] for (int i = 0; i < 4; i++) cover += saturate(.5 - (sd + dot(n, Offsets[i])) * 2);
+        cover *= .25;
     }
-    return sum * .25;
+    if (cover <= 0) return 0;
+    return float4(Glass(p, sd) * cover, cover);
 }

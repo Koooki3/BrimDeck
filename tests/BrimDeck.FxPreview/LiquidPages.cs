@@ -269,17 +269,20 @@ internal static class LiquidPages
         // The shadow: below the island's bottom edge, outside it, between the bottom corners, the composed image is darker than
         // the glass alone over the background (0 4px 12px black at .22 in both liquid themes).
         {
-            double darker = 0; int count = 0;
+            double darker = 0, lightness = 0; int count = 0;
             int y0 = gy + layer.H + (int)Math.Round(2 * Scale), y1 = gy + layer.H + (int)Math.Round(7 * Scale);
             for (int y = y0; y < y1; y++)
                 for (int x = gx + layer.W / 4; x < gx + layer.W * 3 / 4; x++)
                 {
                     int d = (y * dw + x) * 4;
                     if (d + 2 >= composed.Length) continue;
-                    darker += (Lightness(under, d) - Lightness(composed, d)); count++;
+                    darker += (Lightness(under, d) - Lightness(composed, d)); lightness += Lightness(under, d); count++;
                 }
             double mean = count == 0 ? 0 : darker / count;
-            Report(mean >= 3, $"{name}: the shadow shows below the island (darkens by {mean:0.0} levels on average 2 to 7 DIPs under it; shadow host shown: {layer.ShadowShown})");
+            // A black shadow darkens by a share of what is there: over a near-black page there is little to darken. Wanted: a
+            // share of the background's own lightness there: .22 black at about a third of full cover 2 to 7 DIPs out, and at most 3.
+            double wanted = Math.Min(3, (count == 0 ? 0 : lightness / count) * .22 * .3);
+            Report(mean >= wanted && mean > 0, $"{name}: the shadow shows below the island (darkens by {mean:0.0} levels on average 2 to 7 DIPs under it, wanted {wanted:0.0}; shadow host shown: {layer.ShadowShown})");
         }
     }
 

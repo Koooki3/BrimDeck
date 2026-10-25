@@ -94,6 +94,10 @@ internal readonly record struct LiquidFrame(
         double t = Math.Clamp(dark, 0, 1);
         double low = light.BandLow + (deep.BandLow - light.BandLow) * t, high = light.BandHigh + (deep.BandHigh - light.BandHigh) * t;
         double shown = Math.Clamp(luma, low, Math.Max(low, high));
+        // Then the glass's own background over it (light: white at .08; dark: its dark base at .3).
+        double tintLuma = (light.Tint_R + (deep.Tint_R - light.Tint_R) * t) * .2126 + (light.Tint_G + (deep.Tint_G - light.Tint_G) * t) * .7152 + (light.Tint_B + (deep.Tint_B - light.Tint_B) * t) * .0722;
+        double tintAlpha = light.TintAlpha + (deep.TintAlpha - light.TintAlpha) * t;
+        shown += (tintLuma - shown) * tintAlpha;
         return toDark ? shown <= TextTurn : shown >= TextTurn;
     }
 

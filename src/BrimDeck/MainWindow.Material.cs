@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using static BrimDeck.Tracks;
@@ -136,6 +137,7 @@ public partial class MainWindow
     private bool _liquidEdge;
     private void LiquidEdge(bool shown)
     {
+        LiquidShadow(shown);
         if (shown)
         {
             if (Island.RimWidth == 0 && Island.EdgeBrush is null) return;
@@ -149,6 +151,27 @@ public partial class MainWindow
             Island.RimWidth = palette.Effects.RimWidth;
             Island.EdgeBrush = PanelTheme.GlassShown ? PanelTheme.EdgeBrush(palette) : null;
             _ambient?.Update();
+        }
+    }
+
+    // The shadow's caster (the copy of the island under it) takes the island's surface brush, which liquid glass clears (its
+    // opacity 0: the glass draws the island): the shadow would be cast by nothing. While liquid glass is shown the caster is
+    // opaque; its colour does not matter (the effect's colour is the shadow's), only that it casts the whole shape.
+    private BindingBase? _casterBrush;
+    private void LiquidShadow(bool shown)
+    {
+        if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is not { } caster) return;
+        if (shown)
+        {
+            if (ReferenceEquals(caster.Background, Brushes.Black)) return;
+            _casterBrush ??= BindingOperations.GetBindingBase(caster, Border.BackgroundProperty);
+            caster.Background = Brushes.Black;
+            ShadowChanging();
+        }
+        else if (_casterBrush is not null && ReferenceEquals(caster.Background, Brushes.Black))
+        {
+            caster.SetBinding(Border.BackgroundProperty, _casterBrush);
+            ShadowChanging();
         }
     }
 
