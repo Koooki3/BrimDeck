@@ -66,7 +66,9 @@ public partial class MainWindow
                 if (!CanShowNotices) { _app.Notices.Dismiss(this, reportToSource: false); return; }
                 // ui-2: one that arrives while the panel boots (the summary of what came in while BrimDeck was quiet) waits for
                 // the boot to play; covering the island then would hide the boot, and the island would show in the wrong shape.
-                if (BootHoldsPointer) { ShowAfterBoot(item); return; }
+                // Likewise while the panel is still closing: the notice would take the island's final shape in one frame and the
+                // half-closed panel would vanish under it (N50-4).
+                if (HoldsNotices) { ShowAfterBoot(item); return; }
                 (_noticeWindow ??= new NoticeWindow(this, _app)).Present(item);
                 break;
             case AttentionKind.Quota when item.Payload is CompactAlertInfo alert:
@@ -110,8 +112,13 @@ public partial class MainWindow
     // session) holds it no longer than BootNoticeLimit; the notice then shows over whatever the island is.
     private long _bootNoticeSince;
     private const int BootNoticeLimit = 10_000;
+    // When the panel's closing ends (SetExpanded); 0 when it is not closing.
+    private long _collapseEnds;
+    // A notice waits for the boot to play and for the panel to finish closing.
+    private bool HoldsNotices => BootHoldsPointer || Environment.TickCount64 < _collapseEnds;
 
-    // Shows the item once the boot has played; ended or updated meanwhile (AttentionEnded, AttentionUpdated), the latest wins.
+    // Shows the item once the boot has played and the panel has closed; ended or updated meanwhile (AttentionEnded,
+    // AttentionUpdated), the latest wins.
     private void ShowAfterBoot(AttentionItem item)
     {
         _noticeAfterBoot = item;
@@ -121,9 +128,9 @@ public partial class MainWindow
             _bootNotice.Tick += (_, _) =>
             {
                 long now = Environment.TickCount64;
-                if (BootHoldsPointer && _noticeAfterBoot is not null && now - _bootNoticeSince < BootNoticeLimit)
+                if (HoldsNotices && _noticeAfterBoot is not null && now - _bootNoticeSince < BootNoticeLimit)
                 {
-                    // Once the boot has started its end is known: the next look is then, not every 100 ms.
+                    // Once the boot has started (or the closing) its end is known: the next look is then, not every 100 ms.
                     _bootNotice.Interval = BootNoticeWait(now);
                     return;
                 }
@@ -139,10 +146,12 @@ public partial class MainWindow
         _bootNotice.Start();
     }
 
-    // Until the boot's end, or a short look while it still waits for an idle dispatcher (Boot), never past the limit.
+    // Until the boot's or the closing's end, or a short look while the boot still waits for an idle dispatcher (Boot), never
+    // past the limit.
     private TimeSpan BootNoticeWait(long now)
     {
-        long wait = _bootWaiting || _bootEnds <= now ? 100 : _bootEnds - now + 1;
+        long ends = Math.Max(_bootEnds, _collapseEnds);
+        long wait = _bootWaiting || ends <= now ? 100 : ends - now + 1;
         return TimeSpan.FromMilliseconds(Math.Clamp(wait, 1, Math.Max(1, _bootNoticeSince + BootNoticeLimit - now)));
     }
 

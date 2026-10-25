@@ -663,6 +663,9 @@ public partial class MainWindow : Window
         _booting = false; _morphingShape = false;
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
+        // How long the panel's closing runs: a notice that arrives meanwhile waits for it (MainWindow.Notices.cs).
+        if (expanded) _collapseEnds = 0;
+        else if (wasExpanded) _collapseEnds = duration > 0 ? now + duration : 0;
         if (!expanded) SettleClip(duration);
         if (turning) _turn.Started(now, duration, expanded, width, height);
         // The opening and closing tracks are NoticeMotion's Panel* (a notice moves on the same ones); the boot's, the style
