@@ -56,19 +56,17 @@ internal static class NoticeEventLogTests
 
     private static void Choice(Action<string, bool> check)
     {
-        check("Event log: identity's change event wins", WindowsNoticeTriggers.Choose(identityEvents: true, logEnabled: true, logFailures: 0) == WindowsNoticeTrigger.Events);
-        check("Event log: without identity the log is used", WindowsNoticeTriggers.Choose(false, true, 0) == WindowsNoticeTrigger.EventLog);
-        check("Event log: a disabled log falls back to polling", WindowsNoticeTriggers.Choose(false, false, 0) == WindowsNoticeTrigger.Polling);
+        check("Event log: a log that is turned on is used", WindowsNoticeTriggers.Choose(logEnabled: true, logFailures: 0) == WindowsNoticeTrigger.EventLog);
+        check("Event log: a disabled log falls back to polling", WindowsNoticeTriggers.Choose(false, 0) == WindowsNoticeTrigger.Polling);
         check("Event log: a log that keeps failing falls back to polling",
-            WindowsNoticeTriggers.Choose(false, true, WindowsNoticeTriggers.MostFailures - 1) == WindowsNoticeTrigger.EventLog
-            && WindowsNoticeTriggers.Choose(false, true, WindowsNoticeTriggers.MostFailures) == WindowsNoticeTrigger.Polling);
+            WindowsNoticeTriggers.Choose(true, WindowsNoticeTriggers.MostFailures - 1) == WindowsNoticeTrigger.EventLog
+            && WindowsNoticeTriggers.Choose(true, WindowsNoticeTriggers.MostFailures) == WindowsNoticeTrigger.Polling);
     }
 
     private static void Pace(Action<string, bool> check)
     {
         TimeSpan quiet = TimeSpan.FromSeconds(30), safety = TimeSpan.FromSeconds(60), polling = TimeSpan.FromSeconds(3);
         check("Event log: with the log only the safety reading runs on a timer", WindowsNoticeTriggers.Interval(WindowsNoticeTrigger.EventLog, false, quiet, safety, polling) == safety);
-        check("Event log: the change event uses the same safety reading", WindowsNoticeTriggers.Interval(WindowsNoticeTrigger.Events, false, quiet, safety, polling) == safety);
         check("Event log: polling keeps its own pace", WindowsNoticeTriggers.Interval(WindowsNoticeTrigger.Polling, false, quiet, safety, polling) == polling);
         check("Event log: quiet wins for every trigger", WindowsNoticeTriggers.Interval(WindowsNoticeTrigger.EventLog, true, quiet, safety, polling) == quiet
             && WindowsNoticeTriggers.Interval(WindowsNoticeTrigger.Polling, true, quiet, safety, polling) == quiet);

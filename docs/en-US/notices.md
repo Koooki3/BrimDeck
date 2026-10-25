@@ -17,15 +17,11 @@ Settings › Notices › Dynamic notices › Turn on dynamic notices (off by def
 | brim-notify | `BrimDeck.Notify.exe` on Windows and `brim-notify` in WSL send notices directly. | On |
 | WSL desktop notifications | Standard desktop notifications (freedesktop D-Bus, such as `notify-send`) in the chosen distributions. | Off, per distribution |
 
-### Windows: polling and event mode
+### Windows: event log mode and polling
 
-As an ordinary desktop program BrimDeck gets no change events from Windows, so it **polls**: every 2.5 seconds it checks for a new notification (about 2.5 ms of CPU) and reads the whole list every 15 seconds; a new notice usually appears within 0.2–2.6 seconds. Measured idle cost: about 0.36% of one core.
+As an ordinary desktop program BrimDeck gets no change events from Windows. Windows' push notification platform writes an entry to its log (Applications and Services Logs › Microsoft › Windows › PushNotification-Platform › Operational) for every notification delivered to the current user, and any user may subscribe to that log, so BrimDeck uses **event log mode** by default: about 0.1 s after each entry it reads the notification list; otherwise it reads it only every 60 seconds, with practically no idle cost. A new notice usually appears within 0.03–1 second (the log service hands entries over in batches about once a second).
 
-With the **identity package** registered it switches to **event mode**, with practically no idle cost. `identity\Register-NoticeIdentity.ps1` in BrimDeck's folder registers, for the current user, a package that holds only a manifest and uses the install folder as its external location: nothing is copied or moved and no administrator rights are needed. Windows registers such an unsigned package only in Developer Mode; without it, keep polling — everything works the same. Note that Developer Mode is a system-wide setting: while it is on, any unsigned app package can be installed on this PC, not only BrimDeck's identity package; unless the small saving of event mode matters to you, leave it off. Uninstalling BrimDeck removes the registration of the user who uninstalls it; upgrading keeps it. Other Windows users of the same PC who registered it run `Register-NoticeIdentity.ps1 -Remove` themselves (Windows does not let an ordinary account remove another user's package).
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "<BrimDeck folder>\identity\Register-NoticeIdentity.ps1"
-```
+When that log is turned off (by group policy, say), cannot be subscribed to or keeps failing, BrimDeck **polls** instead: every 2.5 seconds it checks for a new notification (about 2.5 ms of CPU) and reads the whole list every 15 seconds; a new notice usually appears within 0.2–2.6 seconds, at an idle cost of about 0.36% of one core. The status line in the settings shows which mode is in use.
 
 If Windows has not yet decided whether BrimDeck may read notifications, the settings page shows "Allow access". A refusal can be changed in Windows Settings › Privacy & security › Notifications.
 
@@ -150,7 +146,7 @@ brim-notify "New mail" --kind mail
 
 | Case | Result |
 |---|---|
-| Windows 11 (26300) without the identity package | Snapshot readable; change events unavailable, so polling; end to end 0.2–2.3 s |
+| Windows 11 (26300) | Snapshot readable; change events unavailable, so event log mode, end to end 0.03–1 s; polling while the log is off, end to end 0.2–2.3 s |
 | Icons of Windows notifications | Packaged apps give their icon; otherwise the application's initial |
 | Opening the source application | Packaged apps through the app list; desktop apps by the id registered with their Start menu shortcut; otherwise the details say so |
 | WSL Ubuntu 26.04 (systemd session bus, no notification service) | The agent serves; gdbus/notify-send notices show; buttons send `ActionInvoked` and `NotificationClosed` back |
@@ -158,4 +154,4 @@ brim-notify "New mail" --kind mail
 | Several monitors (negative coordinates, 125% secondary) | Shows on the foreground window's monitor, placed and scaled correctly |
 | 8 built-in themes × notch, capsule, indicator | Each checked by eye |
 
-Cases not tested here (actual behavior on the lock screen, event mode with the identity package registered) follow the design and may need confirming on your system.
+Cases not tested here (actual behavior on the lock screen) follow the design and may need confirming on your system.

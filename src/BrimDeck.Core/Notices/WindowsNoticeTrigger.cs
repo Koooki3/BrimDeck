@@ -1,16 +1,16 @@
 namespace BrimDeck.Core.Notices;
 
-// What tells WindowsNoticeSource to read Windows' list. With package identity Windows raises its change event (Events).
-// Without it, Windows' push notification platform still writes an entry to its Operational event log for every toast it
-// delivers to the current user (3052, with the toast's id as TrackingId; 3053 on older builds) and when toasts are cleared
-// (3055). Any user may subscribe to that log, so BrimDeck reads the list after each entry (EventLog), and only reads it on a
-// timer (Polling) when the log is disabled, cannot be read, or the subscription fails. The log service hands entries over in
+// What tells WindowsNoticeSource to read Windows' list. Windows raises its change event only for a process with package
+// identity, which BrimDeck, a plain desktop program, does not have. Windows' push notification platform still writes an entry
+// to its Operational event log for every toast it delivers to the current user (3052, with the toast's id as TrackingId; 3053
+// on older builds) and when toasts are cleared (3055). Any user may subscribe to that log, so BrimDeck reads the list after
+// each entry (EventLog), and only reads it on a timer (Polling) when the log is disabled, cannot be read, or the subscription
+// fails. The log service hands entries over in
 // batches about once a second, so a toast is seen 30 ms to 1 s after it was shown (measured on Windows 11 26300).
 public enum WindowsNoticeTrigger
 {
     Polling,
-    EventLog,
-    Events
+    EventLog
 }
 
 public static class WindowsNoticeTriggers
@@ -34,11 +34,9 @@ public static class WindowsNoticeTriggers
     public static bool Relevant(int eventId, string? notificationType)
         => eventId is Delivered or Cleared || eventId == Submitted && string.Equals(notificationType, "toast", StringComparison.OrdinalIgnoreCase);
 
-    // Windows' own change event is exact and immediate, so it wins when BrimDeck has package identity; the log comes next.
-    public static WindowsNoticeTrigger Choose(bool identityEvents, bool logEnabled, int logFailures)
-        => identityEvents ? WindowsNoticeTrigger.Events
-            : logEnabled && logFailures < MostFailures ? WindowsNoticeTrigger.EventLog
-            : WindowsNoticeTrigger.Polling;
+    // The log while it is turned on and has not kept failing; polling otherwise.
+    public static WindowsNoticeTrigger Choose(bool logEnabled, int logFailures)
+        => logEnabled && logFailures < MostFailures ? WindowsNoticeTrigger.EventLog : WindowsNoticeTrigger.Polling;
 
     // How long a full reading may wait while nothing arrives: a trigger that reports every change only needs the slow safety
     // reading, in case one was missed.

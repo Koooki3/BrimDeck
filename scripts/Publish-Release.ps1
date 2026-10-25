@@ -31,8 +31,6 @@ try {
         # Only the agent itself is shipped; the protocol library's symbols are left out.
         Get-ChildItem -LiteralPath $agentPath -File | Where-Object Name -ne 'brimdeck-agent' | Remove-Item
     }
-    # The optional identity package for dynamic notices' event mode, registered by the user with the script beside it.
-    Copy-Item -Recurse -Force installer/identity (Join-Path $publishPath 'identity')
     $iscc = & (Join-Path $PSScriptRoot 'Get-InnoSetup.ps1')
     & $iscc -qp "-dAppVersion=$Version" "-dSourceDir=$publishPath" "-o$outputPath" installer/BrimDeck.iss
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }

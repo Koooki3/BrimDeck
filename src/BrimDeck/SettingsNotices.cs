@@ -59,7 +59,7 @@ public sealed partial class SettingsWindow
     private void NoticeSources(NoticeCenter center)
     {
         SectionTitle(Loc.T("通知来源", "Sources"));
-        // Windows: access, then events (with package identity) or the timed reading.
+        // Windows: access, then the event log or the timed reading.
         var access = ActionButton(Loc.T("允许访问", "Allow access"), async () => { await center.RequestWindowsAccessAsync(); });
         var privacy = ActionButton(Loc.T("打开系统设置", "Open Windows settings"), () => UI.OpenUrl("ms-settings:privacy-notifications"));
         var windowsToggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NoticeWindowsSource, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
@@ -78,15 +78,14 @@ public sealed partial class SettingsWindow
                 NoticeSourceState.Off => (Loc.T("已关闭", "Off"), false),
                 NoticeSourceState.NeedsAccess => (Loc.T("需要授权：点击“允许访问”，Windows 会询问是否允许 BrimDeck 读取通知。", "Needs access: click \"Allow access\" and Windows asks whether BrimDeck may read notifications."), true),
                 NoticeSourceState.Denied => (Loc.T("Windows 拒绝了访问。可在“设置 › 隐私和安全性 › 通知”中允许应用访问通知。", "Windows denies access. Allow apps to access notifications in Settings › Privacy & security › Notifications."), true),
-                NoticeSourceState.Events => (Loc.T("正在接收（事件模式）", "Receiving (event mode)"), false),
                 NoticeSourceState.EventLog => (Loc.T("正在接收（事件日志模式：Windows 记录通知后立即读取）", "Receiving (event log mode: reads as soon as Windows logs a notification)"), false),
                 NoticeSourceState.Polling => (Loc.T("正在接收（轮询模式：每 2.5 秒检查新通知，每 15 秒完整读取一次）", "Receiving (polling mode: checks for new notices every 2.5 s and reads the whole list every 15 s)"), false),
                 _ => (Loc.T("读取失败，稍后重试。", "Reading failed; trying again shortly."), true)
             };
         });
         Group(Row(Loc.T("Windows 应用通知", "Windows app notifications"), windowsControls, windowsStatus,
-            () => Loc.T("读取 Windows 通知中心里当前用户的应用通知（来源、图标、时间和文字），不读取应用内部消息，也不会清除或修改通知中心。BrimDeck 作为普通桌面程序运行时，Windows 不提供变化事件，因此在 Windows 的推送通知事件日志每记录一条通知时读取（事件日志模式），日志不可用时改为轮询；注册通知身份包后（见 docs/zh-CN/notices.md）自动改用事件模式。",
-                "Reads the current user's app notifications in Windows' notification center (source, icon, time and text). It does not read messages inside apps, and never clears or changes the notification center. As an ordinary desktop program BrimDeck gets no change events from Windows, so it reads whenever Windows' push notification event log records a notification (event log mode), and polls when that log is unavailable; once the notice identity package is registered (see docs/en-US/notices.md) it switches to event mode.")));
+            () => Loc.T("读取 Windows 通知中心里当前用户的应用通知（来源、图标、时间和文字），不读取应用内部消息，也不会清除或修改通知中心。BrimDeck 作为普通桌面程序运行时，Windows 不提供变化事件，因此在 Windows 的推送通知事件日志每记录一条通知时读取（事件日志模式），日志被关闭或不可用时改为轮询。",
+                "Reads the current user's app notifications in Windows' notification center (source, icon, time and text). It does not read messages inside apps, and never clears or changes the notification center. As an ordinary desktop program BrimDeck gets no change events from Windows, so it reads whenever Windows' push notification event log records a notification (event log mode), and polls when that log is turned off or unavailable.")));
 
         // WSL: one switch per distribution; none on by default.
         var distributions = WslLocations.Distributions();
