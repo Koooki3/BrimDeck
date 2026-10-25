@@ -93,7 +93,8 @@ internal sealed class GlassBackdrop : IDisposable
     }
 
     // The pointer over the island (DIP, the island's own coordinates; null when away) and whether its button is down: liquid
-    // glass lights its rim from it and presses with it. The light eases toward it on the frames that follow.
+    // glass brightens and moves its rim light toward it, and lights up inside as it presses; hover and press ease on the frames
+    // that follow (GlassFeedback).
     private Point? _pointer;
     private bool _pointerDown;
     // When the pointer last moved over the island: resting there, it changes nothing, and the poll slows down (LiquidIdle).
@@ -154,9 +155,8 @@ internal sealed class GlassBackdrop : IDisposable
     private LiquidGlass.RECT _tryRegion;
     // Counted for the debug log: tries again, failures.
     private long _retries, _failed;
-    // Hover and press, eased toward the pointer's state; the time they were last eased.
-    private double _hover, _press;
-    private long _easedAt;
+    // Hover and press, eased toward the pointer's state on the monitor's hover and BrimDeck's press times (GlassFeedback).
+    private readonly GlassFeedback _feedback = new(Soft.Hover, Soft.Press, Soft.Quick);
     // How dark the glass's look is now (0 light .. 1 dark): when the theme turns between them (automatic liquid glass), the
     // glass eases across over the theme's own fade (MainWindow.ThemeFadeMs, Soft.InOut) while the old text fades out over it.
     private double _dark = -1, _darkFrom, _darkTo;
@@ -193,7 +193,6 @@ internal sealed class GlassBackdrop : IDisposable
     private EventHandler? _tick;
     // Frames followed and times following started, for the debug log.
     private long _steps, _followStarts;
-    private const double HoverInMs = 120, HoverOutMs = 260, PressDownMs = 60, PressUpMs = 220;
 
     // Windows can draw the blur now: the glass theme is shown (transparency effects on, no high contrast), battery saver is off,
     // the session is local, and composition started.
@@ -235,6 +234,8 @@ internal sealed class GlassBackdrop : IDisposable
     public void Follow(double milliseconds)
     {
         if (_disposed) return;
+        // Offscreen there is no window to follow: the stand-in decides, as on every update.
+        if (StandIn is not null) { StandInFrame(); return; }
         _followUntil = Math.Max(_followUntil, Environment.TickCount64 + (long)Math.Max(0, milliseconds));
         _still = 0;
         if (_following) return;
@@ -277,13 +278,11 @@ internal sealed class GlassBackdrop : IDisposable
         }
     }
 
-    // Hover and press move toward the pointer's state, quickly in and more slowly out, on time not frames. True while moving.
+    // Hover and press move toward the pointer's state on time, not frames (GlassFeedback); the theme's turn between the looks
+    // likewise. True while anything moves.
     private bool EaseLiquid()
     {
         long now = Environment.TickCount64;
-        double dt = _easedAt == 0 ? 16 : Math.Clamp(now - _easedAt, 0, 100);
-        _easedAt = now;
-        double hover = _pointer is null ? 0 : 1, press = _pointerDown ? 1 : 0;
         if (_lead == PanelTheme.Current.IsDark) _lead = null;
         double dark = (_lead ?? PanelTheme.Current.IsDark) ? 1 : 0;
         if (_dark < 0 || !Soft.Enabled) _dark = _darkFrom = _darkTo = dark;
@@ -300,12 +299,18 @@ internal sealed class GlassBackdrop : IDisposable
             _crossed = true;
             Crossed?.Invoke();
         }
-        if (!Soft.Enabled) { _hover = hover; _press = press; return false; }
-        _hover += (hover - _hover) * (1 - Math.Exp(-dt / (hover > _hover ? HoverInMs : HoverOutMs) * 3));
-        _press += (press - _press) * (1 - Math.Exp(-dt / (press > _press ? PressDownMs : PressUpMs) * 3));
-        if (Math.Abs(_hover - hover) < .003) _hover = hover;
-        if (Math.Abs(_press - press) < .003) _press = press;
-        return _hover != hover || _press != press || turning;
+        bool feedback = _feedback.Step(_pointer is not null, _pointerDown, _pointer?.X ?? double.NaN, _pointer?.Y ?? double.NaN, Soft.Enabled, Eased.Now);
+        return feedback || turning;
+    }
+
+    // The pointer's answer for a glass of this size (device pixels): hover and press, calmed on the open panel
+    // (GlassFeedback.Calm), and the light's place in device pixels from the glass's corner (NaN with no light).
+    private (float Hover, float Press, float X, float Y) Answer(double width, double height, double open)
+    {
+        double hover = GlassFeedback.Calm(_feedback.Hover, open), press = GlassFeedback.Calm(_feedback.Press, open);
+        double w = _island.ActualWidth, h = _island.ActualHeight;
+        if (hover <= 0 && press <= 0 || !double.IsFinite(_feedback.LightX) || !(w > 0) || !(h > 0)) return ((float)hover, (float)press, float.NaN, float.NaN);
+        return ((float)hover, (float)press, (float)(_feedback.LightX / w * width), (float)(_feedback.LightY / h * height));
     }
 
     private Frame? Measure()
@@ -444,21 +449,7 @@ internal sealed class GlassBackdrop : IDisposable
                 LiquidFrame.Preset(true, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale), (float)darkness);
             // The band is the glass's own (LiquidFrame.TextLight, TextDark: the theme's text kept at 4.5:1 by an affine lift that
             // keeps the backdrop's detail), not the held blur's narrower one, which the blur needs for its own sake.
-            var next = preset with
-            {
-                // The source switches its pressed shadows at once, and has no hover light or morph of its own: only the press
-                // reaches the glass (the pointer's moves, a change of hover or of the shape's speed alone draw nothing new).
-                Press = _pointerDown && _pointer is not null ? 1 : 0,
-                // How far the panel is open (its frost and the calmer backdrop behind its text, Liquid.hlsl), with its opening.
-                Open = (float)Math.Clamp(Openness?.Invoke() ?? 0, 0, 1)
-            };
-            // The collapsed island's content row (island DIPs, from ContentArea), in device pixels from the glass's corner.
-            if (ContentArea?.Invoke() is { IsEmpty: false } row)
-                next = next with
-                {
-                    ContentLeft = (float)(row.Left * scale), ContentTop = (float)(row.Top * scale),
-                    ContentRight = (float)(row.Right * scale), ContentBottom = (float)(row.Bottom * scale)
-                };
+            var next = Pointered(preset, width, height, scale);
             // Drawn again only when the glass changed (its shape, place, look, the press) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),
             // the desktop is looked at no oftener than the idle poll's PollMs.
@@ -479,6 +470,40 @@ internal sealed class GlassBackdrop : IDisposable
             return ShowLiquid(false);
         }
     }
+
+    // The pointer's answer, the opening and the content row over a preset: hover brightens the glass and moves its rim light
+    // toward the pointer, a press lights it from inside (both eased, GlassFeedback; only on the collapsed island). The morph
+    // stays 0: no pulse while the shape changes. A pointer resting on the glass changes nothing, so nothing is drawn again.
+    private LiquidFrame Pointered(in LiquidFrame preset, int width, int height, double scale)
+    {
+        // How far the panel is open (its frost and the calmer backdrop behind its text, Liquid.hlsl), with its opening.
+        double open = Math.Clamp(Openness?.Invoke() ?? 0, 0, 1);
+        var (hover, press, x, y) = Answer(width, height, open);
+        var next = preset with { Hover = hover, Press = press, PointerX = x, PointerY = y, Open = (float)open };
+        // The collapsed island's content row (island DIPs, from ContentArea), in device pixels from the glass's corner.
+        if (ContentArea?.Invoke() is { IsEmpty: false } row)
+            next = next with
+            {
+                ContentLeft = (float)(row.Left * scale), ContentTop = (float)(row.Top * scale),
+                ContentRight = (float)(row.Right * scale), ContentBottom = (float)(row.Bottom * scale)
+            };
+        return next;
+    }
+
+    // For the offscreen checks only (tests/BrimDeck.FxPreview --glass-access): the frame the glass would draw for the island as
+    // laid out now (its preset at its size, the pointer's answer eased to now, the opening, the content row), and whether this
+    // glass holds a window or a capture of its own (neither while glass is not shown: transparency effects off).
+    internal LiquidFrame PreviewFrame()
+    {
+        EaseLiquid();
+        double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
+        int width = Math.Max(1, (int)Math.Round(_island.ActualWidth * scale)), height = Math.Max(1, (int)Math.Round(_island.ActualHeight * scale));
+        var shape = _shape();
+        var c = shape.Corners;
+        return Pointered(LiquidFrame.Preset(PanelTheme.Current.IsDark, width, height, (float)(c.TopLeft * scale), (float)(c.BottomLeft * scale), (float)(shape.Shoulder * scale), (float)scale),
+            width, height, scale);
+    }
+    internal bool HoldsWindowOrCapture => _window is not null || _host is not null;
 
     // The capture being made off the UI thread is done: liquid glass is tried again at once.
     private Action? _sourceDone;

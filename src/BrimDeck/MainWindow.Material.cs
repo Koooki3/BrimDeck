@@ -27,6 +27,46 @@ public partial class MainWindow
         return Math.Clamp((now - closed) / (open - closed), 0, 1);
     }
 
+    // The collapsed island's content row for the glass (GlassBackdrop.ContentArea), which calms the backdrop behind it: the
+    // parts of the compact row shown now (the cover, the title, the clock, the readings, the rings, an alert's text), in DIPs
+    // from the island's top-left as drawn (the compact content's own scale included), inside the island. None while the panel
+    // is open or opening, for the line (it shows no content), or while nothing is shown.
+    internal Rect? GlassContentArea()
+    {
+        if (_expanded || Compact.Visibility != Visibility.Visible || Compact.Opacity < .01 || !Island.IsVisible) return null;
+        var row = CompactAlert.Visibility == Visibility.Visible ? CompactAlert : CompactRings;
+        if (row.Visibility != Visibility.Visible) return null;
+        var area = Rect.Empty;
+        try
+        {
+            // The row's parts (CompactRow and the alert's row are panels of them); anything else as a whole.
+            foreach (var child in row.Children.OfType<FrameworkElement>())
+            {
+                if (!child.IsVisible) continue;
+                if (child is Panel { Children.Count: > 0 } parts)
+                    foreach (var part in parts.Children.OfType<FrameworkElement>()) Add(part);
+                else Add(child);
+            }
+        }
+        catch (InvalidOperationException) { return null; }
+        area.Intersect(new Rect(Island.RenderSize));
+        return area.IsEmpty || area.Width < 1 || area.Height < 1 ? null : area;
+
+        void Add(FrameworkElement part)
+        {
+            if (!part.IsVisible || part.Opacity < .01 || part.ActualWidth <= 0 || part.ActualHeight <= 0) return;
+            area.Union(part.TransformToAncestor(Island).TransformBounds(new Rect(part.RenderSize)));
+        }
+    }
+
+    // The pointer over the island (DIP, island coordinates; null when it left) and whether its button is down: the glass's
+    // hover and press (GlassBackdrop.Pointer) and the press's jelly.
+    private void GlassPress(Point? at, bool down)
+    {
+        _glass?.Pointer(at, down);
+        Jelly(down);
+    }
+
     private void ApplyMaterial()
     {
         if (_glass is null)
@@ -44,13 +84,14 @@ public partial class MainWindow
             _glass.Look += (dark, instant) => _app.TurnGlass(this, dark, instant);
             _glass.Crossed += () => _app.GlassCrossed(this);
             _glass.Openness = GlassOpenness;
+            _glass.ContentArea = GlassContentArea;
             OffscreenGlass();
-            // Liquid glass lights its rim from the pointer and presses with it: where the pointer is over the island, and
-            // whether the button is down (seen even when a button under it handles the click).
+            // Liquid glass brightens and lights its rim from the pointer and presses with it: where the pointer is over the
+            // island, and whether the button is down (seen even when a button under it handles the click).
             Island.MouseMove += (_, e) => _glass.Pointer(e.GetPosition(Island), e.LeftButton == MouseButtonState.Pressed);
-            Island.MouseLeave += (_, _) => { _glass.Pointer(null, false); Jelly(false); };
-            Island.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler((_, e) => { _glass.Pointer(e.GetPosition(Island), true); Jelly(true); }), true);
-            Island.AddHandler(PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler((_, e) => { _glass.Pointer(e.GetPosition(Island), false); Jelly(false); }), true);
+            Island.MouseLeave += (_, _) => GlassPress(null, false);
+            Island.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler((_, e) => GlassPress(e.GetPosition(Island), true)), true);
+            Island.AddHandler(PreviewMouseLeftButtonUpEvent, new MouseButtonEventHandler((_, e) => GlassPress(e.GetPosition(Island), false)), true);
         }
         _glass.Update();
         bool glass = PanelTheme.GlassShown;

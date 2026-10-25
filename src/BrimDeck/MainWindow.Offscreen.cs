@@ -52,6 +52,14 @@ public partial class MainWindow
         (_glass?.LiquidShown == true, _glass?.SurfaceAside == true, _surface.Opacity,
             IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster && ReferenceEquals(caster.Background, System.Windows.Media.Brushes.Black));
 
+    // The pointer over the island (DIP, island coordinates; null: it left) and its button, as the island's mouse handlers pass
+    // them on (GlassPress): the glass's hover and press and the jelly. The scale the jelly is going to (its animations only
+    // cover the way), 1 and 1 at rest.
+    internal void OffscreenPointer(Point? at, bool down) => GlassPress(at, down);
+    internal (double X, double Y) OffscreenJelly => _jelly is null ? (1, 1)
+        : ((double)_jelly.GetAnimationBaseValue(System.Windows.Media.ScaleTransform.ScaleXProperty), (double)_jelly.GetAnimationBaseValue(System.Windows.Media.ScaleTransform.ScaleYProperty));
+    internal GlassBackdrop? OffscreenGlassBackdrop => _glass;
+
     // A frame of the glass, decided by GlassBackdrop through the stand-in: after every theme change or relayout, as the next
     // frame would in the app.
     internal void OffscreenLiquidFrame()

@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Threading;
+using BrimDeck.Core;
 using Track = BrimDeck.Core.Notices.NoticeMotion.Track;
 
 namespace BrimDeck;
@@ -43,10 +44,24 @@ public partial class MainWindow
         Listen(Border.CornerRadiusProperty, typeof(IslandBorder), Island, (_, _) => ShadowChanging());
         Listen(IslandBorder.ShoulderRadiusProperty, typeof(IslandBorder), Island, (_, _) => ShadowChanging());
         // Hidden (the open panel, the line), the picture is let go; shown again, it is kept at once unless a change is under way.
+        // Coming back at rest after the panel opened over liquid glass (ShadowAtRest), the island has stopped changing: the picture
+        // is kept from the fade's first frame instead of after the settle wait. The island's last change of size may come in the
+        // same frame (a frame late, dropped frames), so the picture is kept once that frame is laid out, whatever it changed.
         Listen(OpacityProperty, typeof(Grid), ShadowHost, (_, _) =>
         {
-            if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
-            else if (ShadowHost.CacheMode is null && !_shadowSettle.IsEnabled) ShadowHost.CacheMode = _shadowCache;
+            if (ShadowHost.Opacity <= 0) { ShadowHost.CacheMode = null; return; }
+            if (_shadowRestAt is { } rest && Eased.Now >= rest)
+            {
+                _shadowRestAt = null;
+                // Long past it (another move took over), it no longer says anything.
+                if (Eased.Now < rest + (ShadowSettleMs + Soft.Quick) / 1000d)
+                    Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+                    {
+                        _shadowSettle.Stop();
+                        if (ShadowHost.Opacity > 0) ShadowHost.CacheMode = _shadowCache;
+                    });
+            }
+            if (ShadowHost.CacheMode is null && !_shadowSettle.IsEnabled) ShadowHost.CacheMode = _shadowCache;
         });
         if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
         SourceInitialized += (_, _) => FitShadowCache(VisualTreeHelper.GetDpi(this).DpiScaleX);
@@ -61,21 +76,26 @@ public partial class MainWindow
     // Over liquid glass the shadow stays under the open panel (MainWindow.LiquidShadow), but its blur is drawn again on every
     // frame the island changes size: kept through the opening and closing it added about half to the CPU time of an open and
     // close (FxPreview --shadow-cost, drawn in software; about a tenth without liquid glass). So while the panel opens or closes it is out, as without liquid glass:
-    // opening, it leaves on its opening track, and comes back once the move has ended and the size has held still for
-    // ShadowSettleMs, so the fade only composes the picture kept at rest (the cache); closing, it leaves over the first
-    // ShadowLeaveShare of the move and comes back on its closing track, as without liquid glass.
-    private const double ShadowBackShare = .3, ShadowLeaveShare = .2;
+    // opening, it leaves on its opening track, and fades back in over Soft.Quick as soon as the move has ended (R3 NEW-8: it
+    // waited ShadowSettleMs and then a third of the move, which read as late), at most a frame (ShadowRestFrameMs) after it,
+    // with the picture kept from the fade's first frame (the cache: the island no longer changes), so the fade only composes
+    // it; closing, it leaves over the first ShadowLeaveShare of the move and comes back on its closing track, as without
+    // liquid glass.
+    private const double ShadowLeaveShare = .2, ShadowRestFrameMs = 1000 / 60d;
     private const int ShadowSettleMs = 250;
+    // When the panel that opened over liquid glass comes to rest (Eased.Now, seconds); null when no such fade is under way.
+    private double? _shadowRestAt;
     private void ShadowAtRest(bool opening, double duration, Track track, IEasingFunction easing)
     {
         static KeyTime At(double ms) => KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ms));
         var fade = new DoubleAnimationUsingKeyFrames();
         fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(ShadowHost.Opacity, At(0)));
+        _shadowRestAt = opening ? Eased.Now + duration / 1000 : null;
         if (opening)
         {
             fade.KeyFrames.Add(new EasingDoubleKeyFrame(0, At(duration * track.End), easing));
-            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(duration + ShadowSettleMs)));
-            fade.KeyFrames.Add(new EasingDoubleKeyFrame(1, At(duration * (1 + ShadowBackShare) + ShadowSettleMs), easing));
+            fade.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, At(duration + ShadowRestFrameMs)));
+            fade.KeyFrames.Add(new EasingDoubleKeyFrame(1, At(duration + ShadowRestFrameMs + Soft.Quick), Soft.Out));
         }
         else
         {
