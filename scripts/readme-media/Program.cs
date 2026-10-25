@@ -19,7 +19,7 @@ namespace ReadmeMedia;
 // replaced by a handler that always fails, and media detection is never started. The panel window stays transparent
 // and off screen; each image is taken from its visual tree with RenderTargetBitmap.
 //
-// Usage: ReadmeMedia <output folder> [zh-CN|en-US] [stills,hero,settings]  (settings only when named)
+// Usage: ReadmeMedia <output folder> [zh-CN|en-US] [stills,themes,monitor,hero,settings]  (settings only when named)
 internal static class Program
 {
     internal const BindingFlags Any = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
@@ -83,6 +83,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
     private BitmapSource _cover = null!;
     private MediaTrack _track = null!, _other = null!;
     private readonly List<Frame> _frames = [];
+    // Called with the clip's time before each frame of a recording is taken.
+    private Action<double>? _onFrame;
     private readonly Dictionary<string, object> _marks = [];
     private double _clock;
     private bool _english;
@@ -129,6 +131,8 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Settle();
 
         if (Wants("stills")) await Stills();
+        if (Wants("themes")) await Themes();
+        if (Wants("monitor")) await Monitor();
         if (Wants("hero")) await Hero();
         // The "配额与统计" page: one row per application with its sources, name and colours.
         // Not used by the README at present; rendered only when asked for by name.
@@ -381,7 +385,7 @@ internal sealed class Renderer(App app, string output, string language, string[]
         await Settle();
     }
 
-    // Compact → usage page → music page → compact, with the configured animations. The panel's own animations run
+    // Compact → usage page → music page → system monitor page → compact, with the configured animations. The panel's own animations run
     // slower while they are captured; frame times are recorded on the normal time scale.
     private async Task Hero()
     {
@@ -405,12 +409,33 @@ internal sealed class Renderer(App app, string output, string language, string[]
         _marks["musicPanel"] = Bounds();
         await Record(2.8, 1, scale);
 
+        // As in Monitor(): App.Exiting keeps the real sampler from starting. The page gets the invented reading as soon as it
+        // is built and draws it without easing, as a page that opens on the latest reading does.
+        Program.SetProperty(app, "Exiting", true);
+        _settings.MonitorWidth = MonitorSizes.Default.Width; _settings.MonitorHeight = MonitorSizes.Default.Height;
+        _marks["monitorButton"] = Point(_deck.FindName("MonitorPageButton"));
+        _marks["monitorSwitch"] = _clock;
+        SelectPage(DeckPage.Monitor);
+        Program.Call(Program.Field(_deck, "_monitorView")!, "Update", [typeof(MonitorSnapshot), typeof(bool)], MonitorSample(), false);
+        // A new reading every second of the clip, handed over as the sampler would, so the page eases to it and the list reorders.
+        double opened = _clock; int fed = 0;
+        _onFrame = time =>
+        {
+            int tick = (int)Math.Floor(time - opened);
+            if (tick > fed) { fed = tick; Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], MonitorSample(tick)); }
+        };
+        await Record(.5, slow, scale);
+        _marks["monitorPanel"] = Bounds();
+        await Record(2.8, 1, scale);
+        _onFrame = null;
+
         _marks["collapse"] = _clock;
         _deck.SetExpanded(false);
         await Record(.6, slow, scale);
         await Record(1.2, 1, scale);
         _marks["end"] = _clock;
         SelectPage(DeckPage.Usage);
+        Program.SetProperty(app, "Exiting", false);
 
         var folder = Path.Combine(output, "hero");
         if (Directory.Exists(folder)) Directory.Delete(folder, true);
@@ -463,6 +488,170 @@ internal sealed class Renderer(App app, string output, string language, string[]
         _settings.NotchClock = false; _settings.NotchMusic = true; _settings.NotchSummary = true;
         _settings.ClockStyle = default; _settings.ClockColor = ClockColor.White; Refresh();
         await Settle();
+    }
+
+    // The usage page in built-in panel themes that look clearly different, and in an invented custom theme. compose.py
+    // arranges them in a labelled grid as themes.png. The theme folder is never read: PanelTheme is marked as loaded and its
+    // custom themes are the one below, written to a folder of this run.
+    private const string CustomTheme = """
+        {
+          "id": "warm-paper",
+          "name": "暖纸",
+          "nameEn": "Warm paper",
+          "base": "light",
+          "colors": { "surface": "#F3EBDC", "accent": "#B4532A", "clock": "#8A4B2A" }
+        }
+        """;
+
+    private async Task Themes()
+    {
+        const double scale = 2;
+        var folder = Path.Combine(Path.GetTempPath(), "BrimDeck.ReadmeThemes." + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "warm-paper.json"), CustomTheme);
+        string[] ids = [PanelThemes.Dark, PanelThemes.Light, "night-owl", "dracula", PanelThemes.Demo, "warm-paper"];
+        var theme = Type.GetType("BrimDeck.PanelTheme, BrimDeck")!;
+        theme.GetField("_loaded", Program.Any)!.SetValue(null, true);
+        theme.GetProperty("UserThemes", Program.Any)!.SetValue(null, PanelThemes.LoadFolder(folder));
+        var use = theme.GetMethod("Use", Program.Any)!;
+        _settings.Width = 620; _settings.Height = 200;
+        SelectPage(DeckPage.Usage);
+        _deck.SetExpanded(true, true);
+        var list = new List<object>();
+        for (int i = 0; i < ids.Length; i++)
+        {
+            _settings.PanelTheme = ids[i];
+            use.Invoke(null, [_settings, false, false]); Refresh();
+            await Settle(); SetSyncRing(.4);
+            var name = $"theme-{i}";
+            await Save(name, scale);
+            string title = PanelThemes.BuiltIn(ids[i])?.DisplayName ?? Loc.T("自定义主题示例：暖纸", "Custom theme example: Warm paper");
+            list.Add(new { file = name + ".png", title });
+        }
+        File.WriteAllText(Path.Combine(output, "themes.json"), JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true }));
+        Directory.Delete(folder, true);
+        _settings.PanelTheme = PanelThemes.Dark;
+        use.Invoke(null, [_settings, false, false]);
+        _settings.Width = 760; _settings.Height = 240;
+        _deck.SetExpanded(false, true); Refresh();
+        await Settle();
+    }
+
+    // The system monitor page and the readings in the notch, from one invented reading. App.Exiting keeps PresentMonitor from
+    // starting the real sampler; the reading is handed to the panel as the sampler would.
+    private async Task Monitor()
+    {
+        const double scale = 2;
+        Program.SetProperty(app, "Exiting", true);
+        // The page eases new readings in; without animations the first reading is drawn as it is.
+        _settings.Animations = false;
+        var snapshot = MonitorSample();
+        void Feed() => Program.Call(_deck, "MonitorUpdated", [typeof(MonitorSnapshot)], snapshot);
+
+        // The usage page's size, so the two images show at the same scale in the README.
+        _settings.MonitorWidth = 760; _settings.MonitorHeight = 240;
+        SelectPage(DeckPage.Monitor);
+        _deck.SetExpanded(true, true);
+        await Settle(); Feed();
+        await Save("monitor", scale);
+        SelectPage(DeckPage.Usage);
+
+        _settings.NotchMonitor = true; _settings.NotchMusic = false;
+        _deck.SetExpanded(false, true); Refresh();
+        await Settle(); Feed();
+        await Save("compact-monitor", scale);
+        _settings.NotchMonitor = false; _settings.NotchMusic = true; Refresh();
+        Program.SetProperty(app, "Exiting", false);
+        _settings.Animations = true;
+        await Settle();
+    }
+
+    // A 14-core processor (6 performance cores with two threads each, 8 efficiency cores), 32 GB of memory and a graphics card,
+    // read once a second: tick counts the seconds, and tick 0 is the reading of the still image. Every figure moves around its
+    // value at tick 0 from one second to the next, and the minute of history is the same figures for the 59 seconds before, so
+    // the lines scroll on as the readings come in.
+    private static MonitorSnapshot MonitorSample(int tick = 0)
+    {
+        // A slow wander between -2 and 2 and a jump between -1 and 1 that changes every second; both are 0 at tick 0.
+        static double Drift(double t, int k)
+        {
+            static double Wave(double t, int k) => Math.Sin(t * (.4 + k % 7 * .09) + k * 1.7) * .6 + Math.Sin(t * (1.1 + k % 5 * .13) + k * .9) * .4;
+            return Wave(t, k) - Wave(0, k);
+        }
+        static double Jump(int t, int k) => t == 0 ? 0 : new Random(t * 7919 + k * 104729).NextDouble() * 2 - 1;
+        double[] performance = [.62, .48, .71, .35, .54, .27, .44, .19, .58, .31, .23, .12];
+        double[] efficiency = [.22, .09, .15, .31, .06, .12, .18, .04];
+        int count = performance.Length + efficiency.Length;
+        double Core(int i, int t) => Math.Clamp((i < performance.Length ? performance[i] : efficiency[i - performance.Length]) + .05 * Drift(t, i) + .1 * Jump(t, i) + .06 * Drift(t, 98) + .1 * Jump(t, 99), .02, 1);
+        double Cpu(int t) => Enumerable.Range(0, count).Average(i => Core(i, t));
+        double Gpu(int t) => Math.Clamp(.36 + .05 * Drift(t, 40) + .08 * Jump(t, 40), .02, 1);
+        double Down(int t) => Math.Max(60_000, 3_400_000 * (1 + .2 * Drift(t, 50) + .35 * Jump(t, 50)));
+        double Up(int t) => Math.Max(20_000, 420_000 * (1 + .2 * Drift(t, 51) + .35 * Jump(t, 51)));
+
+        var cores = new List<CoreSample>();
+        for (int i = 0; i < count; i++)
+        {
+            bool fast = i < performance.Length;
+            double usage = Core(i, tick);
+            cores.Add(new CoreSample(i, fast ? 0 : 1, fast ? CoreTier.Performance : CoreTier.Efficiency, fast ? i + 1 : i - performance.Length + 1, usage,
+                fast ? 3600 + usage * 1700 : 2800 + usage * 1500, fast ? 5400 : 4200));
+        }
+        var cpu = new CpuSample(cores, 4300);
+        const ulong GB = 1UL << 30, MB = 1UL << 20;
+        var memory = new MemorySample(32 * GB, (ulong)((18.4 + .1 * Jump(tick, 60)) * GB), (ulong)(24.6 * GB), (ulong)(37.8 * GB), (ulong)(8.9 * GB));
+        var network = new NetworkSample(Down(tick), Up(tick));
+        double gpuUsage = Gpu(tick);
+        var gpu = new GpuSample(gpuUsage, (ulong)(5.2 * GB))
+        {
+            Name = "NVIDIA GeForce RTX 4070", DedicatedTotal = 12 * GB, SharedBytes = (ulong)(0.4 * GB),
+            Engines = [new("3D", gpuUsage), new("Copy", Math.Max(0, .07 + .04 * Jump(tick, 41))), new("VideoDecode", Math.Max(0, .21 + .08 * Jump(tick, 42))),
+                new("VideoEncode", 0), new("Compute", Math.Max(0, .03 + .02 * Jump(tick, 43)))]
+        };
+        // The icons are the only thing taken from this computer: each app's icon is read from its executable where it is
+        // installed, as BrimDeck does. An app that is not installed shows its initial instead.
+        var prepare = Type.GetType("BrimDeck.ProcessIcons, BrimDeck")!.GetMethod("Prepare", Program.Any)!;
+        // Each app's processor use over five seconds, repeated. The figures change every second, and once in the clip (at tick 2)
+        // Chrome overtakes Visual Studio Code, so the list reorders once. Tick 0 is the still image.
+        ProcessSample App(int pid, string name, string exe, double[] cpuPercents, double memoryMb, int members = 1, params string[] places)
+        {
+            var path = Installed(exe, places);
+            if (path is not null) prepare.Invoke(null, [path]);
+            double cpuPercent = cpuPercents[tick % cpuPercents.Length];
+            return new(pid, name, cpuPercent, (ulong)(memoryMb * MB), name.ToLowerInvariant(), path) { Members = Folded(name, cpuPercent, memoryMb, members) };
+        }
+        IReadOnlyList<ProcessMember> Folded(string name, double cpuPercent, double memoryMb, int members) =>
+            members > 1 ? [.. Enumerable.Range(0, members).Select(i => new ProcessMember(name, cpuPercent / members, (ulong)(memoryMb / members * MB)))] : [];
+        string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows), system = Environment.SystemDirectory;
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        List<ProcessSample> apps =
+        [
+            App(4120, "Visual Studio Code", "Code.exe", [182, 170, 120, 115, 118], 1460, 9, Path.Combine(local, @"Programs\Microsoft VS Code\Code.exe")),
+            App(6388, "Google Chrome", "chrome.exe", [126, 135, 168, 172, 165], 2380, 14),
+            App(9012, "Cursor", "Cursor.exe", [74, 78, 80, 76, 79], 890, 6, Path.Combine(local, @"Programs\cursor\Cursor.exe")),
+            App(1876, Loc.T("桌面窗口管理器", "Desktop Window Manager"), "dwm.exe", [41, 44, 39, 42, 40], 210, 1, Path.Combine(system, "dwm.exe")),
+            App(7740, Loc.T("Windows 资源管理器", "Windows Explorer"), "explorer.exe", [18, 16, 19, 17, 18], 330, 1, Path.Combine(windows, "explorer.exe")),
+            App(5320, Loc.T("网易云音乐", "NetEase Cloud Music"), "cloudmusic.exe", [12, 13, 12, 14, 13], 410, 4),
+            App(3304, "Windows PowerShell", "powershell.exe", [9, 8, 9, 8, 9], 160, 2, Path.Combine(system, @"WindowsPowerShell\v1.0\powershell.exe")),
+            App(2210, "Microsoft Edge", "msedge.exe", [6, 7, 6, 7, 6], 720, 5)
+        ];
+        var processes = new ProcessList(ProcessSample.Folded(apps, ProcessSort.Cpu), ProcessSample.Folded(apps, ProcessSort.Memory));
+        double[] History(Func<int, double> reading) => [.. Enumerable.Range(tick - 59, 60).Select(reading)];
+        return new MonitorSnapshot(DateTimeOffset.Now, count, cpu, memory, network, gpu, processes)
+        {
+            CpuHistory = History(Cpu), GpuHistory = History(Gpu), DownHistory = History(Down), UpHistory = History(Up)
+        };
+    }
+
+    // Where an executable is installed: the places given, then the App Paths that installers register.
+    private static string? Installed(string exe, string[] places)
+    {
+        foreach (var place in places) if (File.Exists(place)) return place;
+        foreach (var hive in new[] { Microsoft.Win32.Registry.CurrentUser, Microsoft.Win32.Registry.LocalMachine })
+        {
+            using var key = hive.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\App Paths\" + exe);
+            if (key?.GetValue(null) is string path && File.Exists(path.Trim('"'))) return path.Trim('"');
+        }
+        return null;
     }
 
     private async Task MusicSizes()
@@ -545,6 +734,7 @@ internal sealed class Renderer(App app, string output, string language, string[]
             if (time - last >= 1 / fps / 3)
             {
                 Equalizer(start + time);
+                _onFrame?.Invoke(start + time);
                 _frames.Add(new Frame(Capture(scale), start + time)); last = time;
             }
             await Task.Delay(8);
