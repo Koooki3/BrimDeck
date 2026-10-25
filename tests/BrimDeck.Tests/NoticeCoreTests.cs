@@ -220,6 +220,30 @@ internal static class NoticeCoreTests
         busy.Withdraw("q1", T0.AddSeconds(5));
         check("A withdrawn item ends", busy.Current("b") is null);
 
+        // N50-4: a notice that arrives once the pointer has left the open panel shows from the island after it has closed.
+        var leaving = new AttentionCoordinator();
+        leaving.SetLeaving("l", true);
+        leaving.SetBusy("l", true, T0);
+        leaving.Submit(Item("l", AttentionKind.Notice, "open", "A"), T0.AddSeconds(1));
+        check("Leaving a closed panel changes nothing; an open one keeps its notices to its page", leaving.Queued("l").Count == 0);
+        leaving.SetLeaving("l", true);
+        leaving.Submit(Item("l", AttentionKind.Notice, "left", "B"), T0.AddSeconds(2));
+        check("A notice that arrives once the pointer has left the open panel waits for it to close", leaving.Queued("l").Single().Key == "left");
+        var closed = leaving.SetBusy("l", false, T0.AddSeconds(2.3));
+        check("Once the panel has closed, that notice shows from the island", closed.Single().Started?.Key == "left");
+        leaving.SetBusy("l", true, T0.AddSeconds(20));
+        leaving.SetLeaving("l", true);
+        leaving.Submit(Item("l", AttentionKind.Notice, "back", "C"), T0.AddSeconds(21));
+        leaving.Submit(Item("l", AttentionKind.Quota, "quota", seconds: 5), T0.AddSeconds(21));
+        leaving.SetLeaving("l", false);
+        check("Coming back to the panel, the waiting notices are on its page and no longer wait; a quota alert still does",
+            leaving.Queued("l").Single().Key == "quota");
+        leaving.SetLeaving("l", true);
+        leaving.SetBusy("l", false, T0.AddSeconds(22));
+        leaving.SetBusy("l", true, T0.AddSeconds(23));
+        leaving.Submit(Item("l", AttentionKind.Notice, "late", "D"), T0.AddSeconds(24));
+        check("A panel opened anew keeps its notices to its page until the pointer leaves it again", leaving.Queued("l").Single().Key == "quota");
+
         var quiet = new AttentionCoordinator();
         quiet.Submit(Item("m", AttentionKind.Notice, "a", "A"), T0);
         quiet.Submit(Item("m", AttentionKind.Notice, "b", "B"), T0);
