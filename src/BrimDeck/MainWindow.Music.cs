@@ -71,7 +71,9 @@ public partial class MainWindow
     // The collapsed row's bar heights and the place of its scrolling line. The row is built again on every change of its width
     // (a resize drag does that every frame), so like the readings' StripPresence they belong to the panel and outlive each row.
     private readonly EqualizerBars _compactBars = new();
-    private readonly MarqueeScroll _compactScroll = new();
+    // The collapsed title scrolls its laps once per line (MarqueeScroll.Limited); a row built again for the same line keeps it
+    // resting, until the line changes or the pointer comes over the island (ReplayCompactTitle).
+    private readonly MarqueeScroll _compactScroll = new() { Limited = true };
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
     private TimeSpan _quotaElapsed;
@@ -843,6 +845,9 @@ public partial class MainWindow
             }
         }
         MusicIndicator.Visibility = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && track.State != MediaState.Stopped && track.HasTimeline ? Visibility.Visible : Visibility.Collapsed;
+        // Hidden, the bar keeps its last length: setting it four times a second laid the island out again for nothing. It takes
+        // its length on the first update after it shows again.
+        if (MusicIndicator.Visibility != Visibility.Visible) return;
         // The progress runs along the indicator's own length, whatever length is set.
         double length = double.IsFinite(Collapsed.Surface.Width) ? Math.Max(0, Collapsed.Surface.Width) : 0;
         double progress = track.HasTimeline && track.Duration > TimeSpan.Zero ? Math.Clamp(position.TotalSeconds / track.Duration.TotalSeconds, 0, 1) : 0;
@@ -939,6 +944,7 @@ public partial class MainWindow
             // (MarqueeScroll).
             _compactMarquee = new MusicMarquee { Text = text, Scroll = _compactScroll, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
                 ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+            _compactMarquee.Gliding += _ => UpdateMusicTimer();
             grid.Show(RowPart.Text, _compactMarquee, layout.TextWidth, previous, motion);
         }
         grid.Carry(previous, motion);
@@ -969,10 +975,42 @@ public partial class MainWindow
         UpdateQuotaCarousel();
         bool needed = IsVisible && !IsSuppressed && !MotionEnvironment.DisplayOff && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
-        _musicTick.Interval = TimeSpan.FromMilliseconds(animations && MusicAudioActive && musicVisible ? 33 : 250);
-        if (needed) { if (!_musicTick.IsEnabled) { _lastMusicTick = DateTimeOffset.UtcNow; _musicTick.Start(); } }
-        else _musicTick.Stop();
+        bool bars = animations && MusicAudioActive && musicVisible;
+        _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? 33 : 250);
+        // While the collapsed title glides, WPF draws a frame every refresh for it; the bars move on those frames (MusicFrame), so
+        // the timer's own frames, which fell between them, are not drawn as well. In its rests, and when it does not scroll, the
+        // timer runs as before.
+        if (needed && bars && TitleGliding)
+        {
+            _musicTick.Stop();
+            if (!_barsOnFrames) { _barsOnFrames = true; Motion.Start(_barsClock, MusicFrame); }
+        }
+        else
+        {
+            _barsOnFrames = false;
+            if (needed) { if (!_musicTick.IsEnabled) { _lastMusicTick = DateTimeOffset.UtcNow; _musicTick.Start(); } }
+            else _musicTick.Stop();
+        }
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
+    }
+    // The pointer came over the island: a collapsed title that has rested scrolls its laps again.
+    private void ReplayCompactTitle() { if (_compactMarquee is not null) _compactMarquee.Replay(); else _compactScroll.Replay(); }
+    private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
+    // The bars on the display's frames (Motion), keyed by an element of their own so a row built again never adds a second step.
+    // _musicFrameAt is the frame time (Motion.FrameTime) the bars last moved at.
+    private readonly UIElement _barsClock = new();
+    private bool _barsOnFrames;
+    private double _musicFrameAt = double.NegativeInfinity;
+    // A display frame while the collapsed title glides: the bars move once at least a timer's interval has passed (a few
+    // milliseconds early, so a 144 Hz frame that comes just short of it does not wait for the next). Once the title lets go of
+    // the clock, or the row is built again, the timer takes over again.
+    private bool MusicFrame(double now)
+    {
+        if (!_barsOnFrames) return false;
+        if (!TitleGliding) { _barsOnFrames = false; UpdateMusicTimer(); return _barsOnFrames; }
+        double time = Motion.FrameTime;
+        if (time - _musicFrameAt >= .033 - .004 || time < _musicFrameAt) { _musicFrameAt = time; TickMusic(); }
+        return _barsOnFrames;
     }
     private void UpdateLyricScrolling() => _lyricCurrent?.SetScrolling(MusicMotion && MusicAudioActive && IsVisible && !IsSuppressed && _expanded && IsMusicPage);
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
@@ -999,5 +1037,5 @@ public partial class MainWindow
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.PresentMedia(this, false); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _barsOnFrames = false; _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.PresentMedia(this, false); }
 }

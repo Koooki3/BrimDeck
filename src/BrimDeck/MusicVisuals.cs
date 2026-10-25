@@ -96,26 +96,40 @@ internal sealed class MusicEqualizer : FrameworkElement
     // The heights. The panel hands the collapsed row's bars to each row it builds again, so a new row starts where the old one
     // was; built afresh, the bars would drop to rest for a frame on every step of a resize and their dynamics would start over.
     public EqualizerBars Levels { get; init; } = new();
-    private readonly double[] _drawn = new double[EqualizerBars.Count];
     private readonly DrawingGroup _drawing = new();
     private Size _drawnSize;
     public void Tick(float peak, bool playing, double seconds = 1d / 30) { Levels.Tick(peak, playing, seconds); Redraw(); }
     // Bar values already computed from captured audio, leftmost first.
     public void Show(ReadOnlySpan<double> levels, bool playing) { Levels.Show(levels, playing); Redraw(); }
     protected override void OnRender(DrawingContext dc) { Redraw(force: true); dc.DrawDrawing(_drawing); }
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi) { base.OnDpiChanged(oldDpi, newDpi); _bars = null; InvalidateVisual(); }
+    // The bars stand on half device pixels (EqualizerLayout): a level that moves none of them draws nothing new, and one that
+    // does only moves its own rectangle in the retained drawing. The drawing is built again only for a new size, color or scale.
+    private RectangleGeometry[]? _bars;
+    private Brush? _barsColor;
     private void Redraw(bool force = false)
     {
         var size = RenderSize;
         var levels = Levels.Levels;
-        // Paused bars stay at rest, so an unchanged frame is not drawn again.
-        if (!force && size == _drawnSize && levels.SequenceEqual(_drawn)) return;
-        levels.CopyTo(_drawn); _drawnSize = size;
-        using var dc = _drawing.Open();
-        for (int i = 0; i < Math.Min(Bars, levels.Length); i++)
+        int count = Math.Min(Bars, levels.Length);
+        double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip, radius = BarWidth / 2;
+        if (force || _bars is null || _bars.Length != count || size != _drawnSize || !ReferenceEquals(_barsColor, Color))
         {
-            double bar = BarWidth;
-            double height = Math.Clamp(bar + levels[i] * Math.Max(0, size.Height - bar), bar, Math.Max(bar, size.Height));
-            dc.DrawRoundedRectangle(Color, null, new Rect(i * Math.Max(0, size.Width - bar) / Math.Max(1, Bars - 1), (size.Height - height) / 2, bar, height), bar / 2, bar / 2);
+            _bars = new RectangleGeometry[count]; _barsColor = Color; _drawnSize = size;
+            using var dc = _drawing.Open();
+            for (int i = 0; i < count; i++)
+            {
+                var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, levels[i], size.Width, size.Height, BarWidth, dpi);
+                _bars[i] = new RectangleGeometry(new Rect(x, y, w, h), radius, radius);
+                dc.DrawGeometry(Color, null, _bars[i]);
+            }
+            return;
+        }
+        for (int i = 0; i < count; i++)
+        {
+            var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, levels[i], size.Width, size.Height, BarWidth, dpi);
+            var rect = new Rect(x, y, w, h);
+            if (_bars[i].Rect != rect) _bars[i].Rect = rect;
         }
     }
 }
@@ -230,9 +244,21 @@ internal sealed class MusicMarquee : FrameworkElement
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     { base.OnDpiChanged(oldDpi, newDpi); ResetText(); }
     private double EdgeStop => _fadeWidth > 0 ? Math.Min(.5, EdgeWidth / _fadeWidth) : 0;
+    // Scrolls the laps again from the start once a Limited line has rested (MarqueeScroll.Replay).
+    public void Replay() { if (_scroll.Replay()) { _applied = (double.NaN, 0, 0, 0); Apply(); UpdateAnimation(); } }
+    // Whether the line is on the display's clock (Motion): while it is, WPF draws a frame every refresh anyway. Gliding is raised
+    // when that changes, so the window can move the bars on those frames.
+    public bool IsGliding => _hooked;
+    public event Action<bool>? Gliding;
+    private void SetHooked(bool hooked)
+    {
+        if (_hooked == hooked) return;
+        _hooked = hooked; Gliding?.Invoke(hooked);
+    }
     private void UpdateAnimation()
     {
-        bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && _overflow > 0 && _formatted is not null;
+        // A Limited line that has scrolled its laps rests at its start with no clock and no timer (MarqueeScroll.Rested).
+        bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && !_scroll.Rested && _overflow > 0 && _formatted is not null;
         if (running != _running)
         {
             _running = running;
@@ -248,7 +274,7 @@ internal sealed class MusicMarquee : FrameworkElement
         // Scrolling text takes the animated quality, which follows fractional offsets smoothly; otherwise WPF chooses, so resting
         // text gets the static quality and the island's scaling still counts as motion. The mode is a composition flag and does not
         // draw the text again. A row built in place of a scrolling one takes it from its first frame, before it has loaded.
-        bool moving = _running || !IsLoaded && _scrolling && ScrollAllowed && !_hovered && _overflow > 0;
+        bool moving = _running || !IsLoaded && _scrolling && ScrollAllowed && !_hovered && !_scroll.Rested && _overflow > 0;
         TextOptions.SetTextHintingMode(Painter, moving ? TextHintingMode.Animated : TextHintingMode.Auto);
     }
     // The line glides with the display's frames on the panel's clock (Motion), timed by each frame's own time (Motion.FrameTime):
@@ -261,20 +287,23 @@ internal sealed class MusicMarquee : FrameworkElement
     {
         _rest?.Stop();
         if (_hooked) return;
-        _hooked = true;
         Motion.Start(this, Frame);
+        SetHooked(true);
     }
-    private void Unhook() { _hooked = false; _rest?.Stop(); }
+    private void Unhook() { _rest?.Stop(); SetHooked(false); }
     private bool Frame(double now)
     {
         if (!_hooked) return false;
         _scroll.Advance(Motion.FrameTime, _overflow, Speed);
         Apply();
+        // Its laps done, the line lets go of the clock for good (UpdateAnimation no longer runs it) until it is replayed or changes.
+        if (_scroll.Rested) { UpdateAnimation(); return false; }
         double rest = _scroll.RestLeft;
         if (rest <= RestWake + .15) return true;
-        _hooked = false; _scroll.Wait();
+        _scroll.Wait();
         _rest ??= new PromptTimer(Dispatcher, () => { _rest!.Stop(); if (_running) Hook(); });
         _rest.Interval = TimeSpan.FromSeconds(rest - RestWake); _rest.Start();
+        SetHooked(false);
         return false;
     }
     // Places the text and the fades where the scroll stands; the frames of a rest set nothing.
