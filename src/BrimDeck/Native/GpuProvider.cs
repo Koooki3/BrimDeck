@@ -87,7 +87,7 @@ internal static class GpuAdapters
                 finally { Method<Release>(adapter, 2)(adapter); }
             }
         }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or COMException or AccessViolationException) { Debug.WriteLine(ex); }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or COMException) { Debug.WriteLine(ex); }
         finally
         {
             if (factory != IntPtr.Zero) Method<Release>(factory, 2)(factory);

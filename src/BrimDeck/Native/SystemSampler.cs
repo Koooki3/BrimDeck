@@ -114,8 +114,14 @@ internal sealed class SystemSampler : IDisposable
                 var snapshot = Collect(listProcesses: first);
                 first = false;
                 if (_disposed) break;
-                // A reading taken just as the sampler paused would bring back figures that then grow old.
-                _dispatcher.BeginInvoke(DispatcherPriority.Background, () => { if (_disposed || !_wanted) return; Latest = snapshot; Updated?.Invoke(snapshot); });
+                // A reading taken just as the sampler paused would bring back figures that then grow old. The adapter shown is
+                // resolved again here: a reading taken before the user chose another adapter would otherwise bring the old one back.
+                _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+                {
+                    if (_disposed || !_wanted) return;
+                    Latest = WithGpu(snapshot, Volatile.Read(ref _autoGpu), out _);
+                    Updated?.Invoke(Latest);
+                });
                 _wake.WaitOne(_intervalMilliseconds);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
