@@ -876,7 +876,8 @@ public partial class MainWindow
         // The readings in a region of the given width; wider than it, they scroll in a carousel whose left fade lies over the gap before it.
         FrameworkElement Readings(MonitorStrip readings, double span)
         {
-            _compactStrip = readings;
+            // A region squeezed to nothing (the readings' gap took all of it) shows none of them, which then need no sampling.
+            _compactStrip = CompactMonitor.HasRoom(span) ? readings : null;
             if (readings.PreferredWidth > span + .001)
                 return _stripCarousel = new ReadingsCarousel(readings, span, Snap(layout.TextEdge, dpi), _stripElapsed, Settings.Animations && SystemParameters.ClientAreaAnimation);
             readings.Width = span; readings.Margin = new Thickness(0); return readings;

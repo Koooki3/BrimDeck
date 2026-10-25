@@ -13,7 +13,9 @@ public static class MonitorFormat
     }
 
     // Whole percent of a 0..1 share: "37".
-    public static string Percent(double fraction) => ((int)Math.Round(Math.Clamp(double.IsFinite(fraction) ? fraction : 0, 0, 1) * 100)).ToString(CultureInfo.InvariantCulture);
+    public static string Percent(double fraction) => WholePercent(fraction).ToString(CultureInfo.InvariantCulture);
+    // The same as a number from 0 to 100, for a figure kept ready for each value (MonitorStrip).
+    public static int WholePercent(double fraction) => (int)Math.Round(Math.Clamp(double.IsFinite(fraction) ? fraction : 0, 0, 1) * 100);
 
     // A process's processor use as a share of the whole machine: percentOfOneCore (250 is two and a half cores) over the
     // logical processors. One decimal below 10, so a small busy process does not read "0"; whole from there, at most "100".

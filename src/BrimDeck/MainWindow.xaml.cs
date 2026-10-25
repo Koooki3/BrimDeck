@@ -80,7 +80,19 @@ public partial class MainWindow : Window
     public MainWindow(App app, MainWindow? lead = null)
     {
         _app = app; _lead = lead;
-        _host = new WindowsHost(() => MonitorHandle);
+        _host = new WindowsHost(() => MonitorHandle, () => new WindowInteropHelper(this).Handle, IslandStrip);
+        Rect? IslandStrip()
+        {
+            // The island border is what is drawn, in every style and whether the panel is collapsed or open — its size
+            // and place are the layout's, so PointToScreen carries the window offset, the shape's own offset, the DPI
+            // and the open panel's own extent all at once.
+            if (!IsVisible || PresentationSource.FromVisual(this) is null || PresentationSource.FromVisual(Island) is null) return null;
+            if (!(Island.ActualWidth > 0) || !(Island.ActualHeight > 0)) return null;
+            double scale = VisualTreeHelper.GetDpi(Island).DpiScaleX;
+            if (!(scale > 0) || !double.IsFinite(scale)) scale = 1;
+            var origin = Island.PointToScreen(new Point(0, 0));
+            return new Rect(origin.X, origin.Y, Island.ActualWidth * scale, Island.ActualHeight * scale);
+        }
         UpdateCollapsedGeometry();
         _hover = new(Dispatcher, () =>
         {
@@ -106,6 +118,7 @@ public partial class MainWindow : Window
         InitializeMusic();
         InitializeMonitor();
         InitializeResize();
+        InitializeShadow();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
@@ -376,10 +389,11 @@ public partial class MainWindow : Window
         _themeGeneration = PanelTheme.Generation; _themeDpi = dpi;
         // The resize hints take the theme's colors when they are drawn.
         _grips?.InvalidateVisual();
-        if (sameTheme) { Island.Pattern = PanelTheme.Scanlines(dpiScale: dpi); return; }
+        if (sameTheme) { Island.Pattern = PanelTheme.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
         Foreground = UI.Brush(UI.Primary);
         PanelTheme.Dress(Island, dpiScale: dpi);
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
+        FitShadowCache(dpi);
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
         SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf(!_expanded && Collapsed.Style == CompactStyle.Line ? "indicator" : "surface"));
         _musicAccent = MusicVisuals.Accent(_mediaCover, out _coverAccent);
@@ -654,7 +668,7 @@ public partial class MainWindow : Window
         Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? .85 : 1, duration, compact, compactGone ? easeInOut : easeOut);
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
-        Animate(IslandShadow, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
+        Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
         var tone = PanelTheme.ColorOf(indicator ? "indicator" : "surface");
