@@ -24,13 +24,24 @@ using Vortice.Direct3D11;
 // decides "no liquid glass" (its stand-in host), so the island keeps its own surface, painted rim and ambient drift; DWM's
 // blur is drawn in dwm.exe and is not in these numbers. The part both share (GlassBackdrop's Measure and its window's clip
 // and region while following) is in neither, so the difference is liquid glass's own.
-//   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --perf [seconds] [rounds] [--hidden] [--only liquid|blur]
+// --video puts a changing desktop behind the island (a video): a 64 px window at the same corner, under the fake island, that is
+// in the capture and painted a new grey 30 times a second, made anew every 1.2 s like the fake island.
+// The open/close scenario also logs how the glass follows the island frame by frame (liquid only): for every frame WPF laid out
+// while the island moved, the island's shape then (its layout after the frame's animations, what WPF draws for that frame)
+// against the shape the glass last drew, in device pixels, how many frames back the glass's shape is, and the frames the island
+// moved in without the glass drawing anew.
+//   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --perf [seconds] [rounds] [--hidden] [--only liquid|blur] [--corner N] [--video]
 // Each round measures both ways in turn; medians over the rounds.
 internal static class PerfCost
 {
     private const int StillFrames = 12, Fake = 64;
     private static readonly int[] Order = [0, 1, 2];
     private static readonly string[] Names = ["collapsed idle, music", "open idle (music page)", "open/close animation"];
+
+    internal readonly record struct Follow(int Moved, int Skipped, double MeanPx, double P95Px, double MaxPx, double MeanBehind)
+    {
+        public override string ToString() => FormattableString.Invariant($"island moved in {Moved} frames, glass not drawn anew for {Skipped}; glass vs the frame's layout mean {MeanPx:0.00} px, p95 {P95Px:0.00} px, max {MaxPx:0.00} px; {MeanBehind:0.00} frames behind on average");
+    }
 
     private sealed record Sample(double CpuPct, double UiPct, double GpuMsPerS, double WpfFps, double Renders, double Ticks, double Captures, int Follows, double Seconds, double ProcessGpu);
 
@@ -39,6 +50,7 @@ internal static class PerfCost
         var numbers = args.Skip(1).Where(a => int.TryParse(a, out _)).Select(int.Parse).ToList();
         int seconds = numbers.Count > 0 ? numbers[0] : 6, rounds = numbers.Count > 1 ? numbers[1] : 3;
         bool hidden = args.Contains("--hidden");
+        Video = args.Contains("--video");
         int only = Array.IndexOf(args, "--only") is int at and >= 0 && at + 1 < args.Length ? args[at + 1] == "liquid" ? 1 : 0 : -1;
         SetThreadDpiAwarenessContext(-4);
         var (app, deck, root, offscreen) = LiquidPages.Offscreen(animations: true);
@@ -113,8 +125,10 @@ internal static class PerfCost
         Console.WriteLine($"Glass: liquid shown {state.Shown}, surface aside {state.Aside}; animations {Soft.Enabled}; island {deck.Island.ActualWidth:0}x{deck.Island.ActualHeight:0} DIP collapsed");
         if (!state.Shown || !Soft.Enabled) { Console.WriteLine("FAIL: liquid glass or animations not on"); return 1; }
 
+        if (Video) Console.WriteLine("A changing desktop behind the island (--video): a 64 px window at the corner, a new grey 30 times a second.");
         var results = new Dictionary<(int Mode, int Scenario), List<Sample>>();
         var modes = only >= 0 ? new[] { only } : new[] { 1, 0 };
+        var aligns = new List<Follow>();
         // Warm-up: each scenario once each way (JIT, the open page's first layout, the capture's first frames).
         foreach (int mode in modes) foreach (int scenario in Order) Measure(deck, pipe, mode == 1, scenario, 2, v => liquidOn = v);
         for (int round = 0; round < rounds; round++)
@@ -123,6 +137,7 @@ internal static class PerfCost
                 {
                     var sample = Measure(deck, pipe, mode == 1, scenario, seconds, v => liquidOn = v);
                     (results.TryGetValue((mode, scenario), out var list) ? list : results[(mode, scenario)] = []).Add(sample);
+                    if (mode == 1 && scenario == 2) { aligns.Add(pipe.Alignment); Console.WriteLine("    follow: " + pipe.Alignment); }
                     Console.WriteLine(Inv($"  round {round + 1} {(mode == 1 ? "liquid" : "blur  ")} {Names[scenario],-24} cpu {sample.CpuPct,5:0.00} %  ui {sample.UiPct,5:0.00} %  gpu {sample.GpuMsPerS,6:0.00} ms/s (process, all engines {sample.ProcessGpu,6:0.0} ms/s)  wpf {sample.WpfFps,5:0.0} fps  glass renders {sample.Renders,5:0.0}/s  ticks {sample.Ticks,5:0.0}/s  captures {sample.Captures,5:0.0}/s  follows {sample.Follows}  host calls {pipe.CallMs / sample.Seconds:0.00} ms/s, backdrop reads {pipe.BackdropMs / sample.Seconds:0.00} ms/s  gpu max call {pipe.MaxCallMs:0.00} ms, disjoint {pipe.Disjoints}"));
                 }
         music.Stop();
@@ -139,7 +154,9 @@ internal static class PerfCost
         if (modes.Length == 2)
             foreach (int scenario in Order)
                 Console.WriteLine(Inv($"liquid - blur, {Names[scenario]}: {Median(results[(1, scenario)].Select(x => x.CpuPct)) - Median(results[(0, scenario)].Select(x => x.CpuPct)):+0.00;-0.00} points of process CPU"));
-        Console.WriteLine($"Fake island windows: longest life {FakeIsland.LongestMs} ms");
+        if (aligns.Count > 0)
+            Console.WriteLine(Inv($"Following, open/close, liquid, medians over rounds: frames the island moved {Median(aligns.Select(a => (double)a.Moved)):0}, of them without a new glass drawing {Median(aligns.Select(a => (double)a.Skipped)):0}; glass vs the island's layout of the frame: mean {Median(aligns.Select(a => a.MeanPx)):0.00} px, p95 {Median(aligns.Select(a => a.P95Px)):0.00} px, max {Median(aligns.Select(a => a.MaxPx)):0.00} px; frames behind {Median(aligns.Select(a => a.MeanBehind)):0.00} on average"));
+        Console.WriteLine($"Fake island windows: longest life {FakeIsland.LongestMs} ms{(Video ? $", video windows {FakeVideo.LongestMs} ms" : "")}");
         glassWindow?.Dispose();
         shown?.Dispose();
         offscreen.Dispose();
@@ -186,6 +203,7 @@ internal static class PerfCost
     }
 
     internal static int Corner;
+    internal static bool Video;
     internal static RECT Monitor;
     // The island collapsed and open, device pixels in the stage.
     internal static Rect Collapsed, Open;
@@ -245,6 +263,7 @@ internal static class PerfCost
         deck.SetExpanded(scenario == 1);
         var fake = new FakeIsland(pipe.Source);
         Wait(scenario == 2 ? 300 : 1500, fake);
+        pipe.Aligning = liquid && scenario == 2;
         double gpu0 = GpuCounter.Ms();
         QueryProcessCycleTime(GetCurrentProcess(), out ulong cpu0);
         QueryThreadCycleTime(GetCurrentThread(), out ulong ui0);
@@ -263,6 +282,7 @@ internal static class PerfCost
         }
         else Wait(seconds * 1000, fake);
         wall.Stop();
+        pipe.Aligning = false;
         // Gone before the counters are read (reading the GPU counter can hold the thread for a while).
         fake.Dispose();
         QueryProcessCycleTime(GetCurrentProcess(), out ulong cpu1);
@@ -306,6 +326,52 @@ internal static class PerfCost
             _poll = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(LiquidIdle.IdlePollMs) };
             _poll.Tick += (_, _) => Tick();
             CompositionTarget.Rendering += (_, _) => Frame();
+            deck.Island.LayoutUpdated += (_, _) => _laid = IslandNow();
+        }
+
+        // ----- Following, frame by frame (open/close, liquid) -----
+        // The island as WPF laid it out last (after the frame's animations: what it draws for that frame), the shape the glass
+        // last drew and whether it drew for the frame being judged; the island's last laid-out shapes, newest first.
+        public bool Aligning
+        {
+            get => _aligning;
+            set { if (value && !_aligning) { _errors.Clear(); _behind.Clear(); _moved = 0; _skipped = 0; _history.Clear(); } _aligning = value; }
+        }
+        private bool _aligning;
+        private Rect _laid = Rect.Empty, _glassAt = Rect.Empty;
+        private bool _drew;
+        private readonly List<Rect> _history = [];
+        private readonly List<double> _errors = [], _behind = [];
+        private int _moved, _skipped;
+        private Rect IslandNow()
+        {
+            var b = _deck.Island.TransformToAncestor(_root).TransformBounds(new Rect(_deck.Island.RenderSize));
+            return new Rect(b.X * 1.5, b.Y * 1.5, b.Width * 1.5, b.Height * 1.5);
+        }
+        // The frame WPF laid out last (judged at the next frame's start, or as the glass draws after layout): how far the shape
+        // the glass drew for it lies from it.
+        private void Judge()
+        {
+            bool drew = _drew;
+            _drew = false;
+            if (!_aligning || _laid.IsEmpty) return;
+            bool moved = _history.Count > 0 && _history[0] != _laid;
+            if (moved || _history.Count == 0) { _history.Insert(0, _laid); if (_history.Count > 6) _history.RemoveAt(6); }
+            if (!moved || _glassAt.IsEmpty) return;
+            _moved++;
+            if (!drew) _skipped++;
+            _errors.Add(Off(_glassAt, _laid));
+            int back = _history.FindIndex(r => Off(r, _glassAt) < .5);
+            _behind.Add(back < 0 ? _history.Count : back);
+        }
+        private static double Off(Rect a, Rect b) => Math.Max(Math.Max(Math.Abs(a.Left - b.Left), Math.Abs(a.Top - b.Top)), Math.Max(Math.Abs(a.Right - b.Right), Math.Abs(a.Bottom - b.Bottom)));
+        public Follow Alignment
+        {
+            get
+            {
+                var e = _errors.Order().ToList();
+                return new Follow(_moved, _skipped, e.Count == 0 ? 0 : e.Average(), e.Count == 0 ? 0 : e[Math.Min(e.Count - 1, (int)(e.Count * .95))], e.Count == 0 ? 0 : e[^1], _behind.Count == 0 ? 0 : _behind.Average());
+            }
         }
 
         public (long Frames, long Renders, long Ticks, long Captures) Counts() => (_frames, _host.Idle.Renders + _host.Idle.FrameRenders, _host.Idle.Ticks, _captures);
@@ -325,6 +391,7 @@ internal static class PerfCost
         private void Frame()
         {
             _frames++;
+            Judge();
             var bounds = _deck.Island.TransformToAncestor(_root).TransformBounds(new Rect(_deck.Island.RenderSize));
             double opacity = 1;
             for (DependencyObject? node = _deck.Island; node is not null && !ReferenceEquals(node, _root); node = VisualTreeHelper.GetParent(node))
@@ -352,7 +419,9 @@ internal static class PerfCost
             _glass?.Show(now.Item1, now.Item2);
             if (!Enabled) return;
             _frame = _deck.OffscreenGlassBackdrop!.PreviewFrame();
+            long drawn = _host.Idle.FrameRenders;
             Timed(() => _host.Frame(_region, _pad, _frame, Environment.TickCount64));
+            if (_host.Idle.FrameRenders != drawn) { _glassAt = now.Item1; _drew = true; }
             Backdrop();
         }
 
@@ -533,7 +602,8 @@ internal static class PerfCost
         private int _redraw;
         private long _next;
         public static long LongestMs;
-        public FakeIsland(DesktopSource? source) { _on = source is not null; Make(); }
+        private readonly FakeVideo? _video;
+        public FakeIsland(DesktopSource? source) { _on = source is not null; if (_on && Video) _video = new FakeVideo(); Make(); }
         private void Make()
         {
             if (!_on) return;
@@ -547,12 +617,53 @@ internal static class PerfCost
         }
         public void Step(long now)
         {
+            _video?.Step(now);
             if (_window == 0 || now < _next) return;
             _next = now + 33;
             if (_life.ElapsedMilliseconds >= 1200) { Destroy(); Make(); if (_window == 0) return; }
             SetLayeredWindowAttributes(_window, 0, (byte)(1 + (++_redraw & 1)), 2);
             SetWindowText(_window, (_redraw & 1) == 0 ? "a" : "b");
             InvalidateRect(_window, 0, true);
+        }
+        private void Destroy()
+        {
+            if (_window == 0) return;
+            LongestMs = Math.Max(LongestMs, _life.ElapsedMilliseconds);
+            DestroyWindow(_window); _window = 0;
+        }
+        public void Dispose() { Destroy(); _video?.Dispose(); }
+    }
+
+    // A video behind the island (--video): a 64 px tool window at the same corner, under the fake island and in the capture,
+    // painted a new grey 30 times a second and made anew every 1.2 s (no window lives 2 s).
+    private sealed class FakeVideo : IDisposable
+    {
+        private nint _window;
+        private readonly Stopwatch _life = new();
+        private long _next;
+        private int _frame;
+        public static long LongestMs;
+        public FakeVideo() => Make();
+        private void Make()
+        {
+            int x = (Corner & 1) != 0 ? Monitor.Right - Fake : Monitor.Left, y = (Corner & 2) != 0 ? Monitor.Bottom - Fake : Monitor.Top;
+            _window = CreateWindowEx(0x8 | 0x80 | 0x8000000, "Static", "", 0x80000000, x, y, Fake, Fake, 0, 0, 0, 0);
+            if (_window == 0) return;
+            ShowWindow(_window, 4);
+            _life.Restart();
+        }
+        public void Step(long now)
+        {
+            if (_window == 0 || now < _next) return;
+            _next = now + 33;
+            if (_life.ElapsedMilliseconds >= 1200) { Destroy(); Make(); if (_window == 0) return; }
+            int grey = 96 + ++_frame * 23 % 64;
+            var dc = GetDC(_window);
+            var brush = CreateSolidBrush((uint)(grey | grey << 8 | grey << 16));
+            var rect = new WinRect { Right = Fake, Bottom = Fake };
+            FillRect(dc, ref rect, brush);
+            DeleteObject(brush);
+            ReleaseDC(_window, dc);
         }
         private void Destroy()
         {
@@ -605,4 +716,9 @@ internal static class PerfCost
     [DllImport("user32", CharSet = CharSet.Unicode)] private static extern bool SetWindowText(nint window, string text);
     [DllImport("user32")] private static extern bool InvalidateRect(nint window, nint rect, bool erase);
     [DllImport("user32")] private static extern nint SetThreadDpiAwarenessContext(nint context);
+    [DllImport("user32")] private static extern nint GetDC(nint window);
+    [DllImport("user32")] private static extern int ReleaseDC(nint window, nint dc);
+    [DllImport("user32")] private static extern int FillRect(nint dc, ref WinRect rect, nint brush);
+    [DllImport("gdi32")] private static extern nint CreateSolidBrush(uint color);
+    [DllImport("gdi32")] private static extern bool DeleteObject(nint handle);
 }
