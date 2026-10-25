@@ -581,7 +581,4 @@ internal sealed partial class FxSurface : FrameworkElement
         for (var node = element; node is not null; node = Up(node)) if (ReferenceEquals(node, _scope)) return true;
         return false;
     }
-
-    // The physical button behind the primary (left) one, read now: Mouse.LeftButton follows this thread's messages, which an
-    // up over another window never reaches.
 }
