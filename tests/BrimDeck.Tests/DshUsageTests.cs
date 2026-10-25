@@ -199,6 +199,27 @@ static class DshUsageTests
         halfReader.Read(snapshot, halfHome, start, start.AddDays(1));
         check("A long line written in two parts is dropped once, when its end arrives", waiting && !snapshot.UsageComplete
             && snapshot.Entries.Select(e => e.Key).SequenceEqual(["dsh:d"]));
+        // The "usage" of a dropped line lies across the limit, half in each dropped piece.
+        var splitHome = Path.Combine(root, "dsh-split-usage");
+        var splitSession = Path.Combine(DshSessions.Folder(splitHome), "--C-work--", "session-f");
+        Directory.CreateDirectory(splitSession);
+        string splitHead = "{\"type\":\"assistant/message\",\"data\":\"";
+        string split = splitHead + new string('z', 1024 - 3 - splitHead.Length - 2) + "\",\"usage\":{\"totalTokens\":1}}";
+        File.WriteAllText(Path.Combine(splitSession, "session.v4.jsonl"), split + "\n" + Message("e", At(5), 5, 5) + "\n");
+        snapshot = new ProviderSnapshot(ProviderId.Dsh);
+        new DshSessions(maxLine: 1024).Read(snapshot, splitHome, start, start.AddDays(1));
+        check("A dropped line whose usage lies across the limit still marks the statistics incomplete",
+            split.IndexOf("\"usage\"", StringComparison.Ordinal) == 1021 && !snapshot.UsageComplete && snapshot.Entries.Select(e => e.Key).SequenceEqual(["dsh:e"]));
+        // Two batches in a row whose first line is over the limit: the search for the first batch does not pass over either.
+        var firstHome = Path.Combine(root, "dsh-long-first");
+        var firstSession = Path.Combine(DshSessions.Folder(firstHome), "--C-work--", "session-g");
+        Directory.CreateDirectory(firstSession);
+        File.WriteAllBytes(Path.Combine(firstSession, "session.v4.jsonl.zstd"),
+            [.. Frame(header), .. Frame(Message("before", Day(-1), 2, 2)), .. Frame(tool, Message("x1", At(1), 1, 1)), .. Frame(tool, Message("x2", At(2), 1, 1))]);
+        snapshot = new ProviderSnapshot(ProviderId.Dsh);
+        new DshSessions(maxLine: 1024).Read(snapshot, firstHome, start, start.AddDays(1));
+        check("Batches whose first line is over the limit are not skipped on a first read",
+            snapshot.UsageComplete && snapshot.Entries.Select(e => e.Key).SequenceEqual(["dsh:x1", "dsh:x2"]));
 
         snapshot = new ProviderSnapshot(ProviderId.Dsh);
         new DshSessions().Read(snapshot, Path.Combine(root, "dsh-missing"), start, start.AddDays(1));
