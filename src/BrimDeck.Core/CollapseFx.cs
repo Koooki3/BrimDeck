@@ -200,6 +200,8 @@ public sealed class FoamCollapse
     // windows-animations' Perlin Dissolve: every block starts dissolving at 0.9 times three octaves of value noise and is gone
     // a LifeSpan of the progress later.
     public const double LifeSpan = .15, StartScale = .9;
+    // How far into its life a block starts to fade, and from where everything left fades together.
+    public const double Crisp = .85, EndFade = .88;
     private readonly uint[] _source;
     private readonly float[] _start;
     private readonly byte[] _gone, _near;
@@ -267,7 +269,27 @@ public sealed class FoamCollapse
             }
             amplitude *= .5;
         }
-        for (int i = 0; i < _start.Length; i++) _start[i] *= (float)StartScale;
+        // The original scales the noise by 0.9 and lets whatever it gives decide when the last block goes, so the slowest corner
+        // of a snapshot could linger after the rest had gone (live check IS-01), and three octaves bunch most blocks in the
+        // middle of the run, where they went all at once. The field keeps its shapes but is spread evenly over the whole run by
+        // rank (a histogram of 1024 steps): its lowest block starts at once, its highest is gone exactly at the end, and about
+        // the same share dissolves at every moment.
+        float low = float.MaxValue, high = float.MinValue;
+        foreach (var v in _start) { low = Math.Min(low, v); high = Math.Max(high, v); }
+        const int bins = 1024;
+        var below = new int[bins + 1];
+        float span = Math.Max(1e-6f, high - low), room = (float)(1 - LifeSpan);
+        int Bin(float v) => Math.Min(bins - 1, (int)((v - low) / span * bins));
+        foreach (var v in _start) below[Bin(v) + 1]++;
+        for (int i = 1; i <= bins; i++) below[i] += below[i - 1];
+        double total = Math.Max(1, _start.Length - 1);
+        for (int i = 0; i < _start.Length; i++)
+        {
+            // Within its bin a block keeps its place by its own value, so the shapes stay smooth.
+            int bin = Bin(_start[i]);
+            double within = (_start[i] - low) / span * bins - bin, rank = below[bin] + within * (below[bin + 1] - below[bin] - 1);
+            _start[i] = (float)(Math.Clamp(rank / total, 0, 1) * room);
+        }
     }
 
     // windows-animations' pseudo_hash, to the bit.
@@ -285,7 +307,9 @@ public sealed class FoamCollapse
         // the dissolve reaches them, so its outline does not foam from the first frame.
         for (int i = 0; i < _start.Length; i++) _gone[i] = (byte)((p - _start[i]) / LifeSpan >= 1 ? 1 : 0);
         Dilate();
-        double foamFade = 1 - CollapseFx.SmoothStep(.9, 1, p);
+        // Everything still there, foam and all, fades together over the last eighth, so no block is left on its own at the end.
+        double tail = 1 - CollapseFx.SmoothStep(EndFade, 1, p);
+        double foamFade = tail;
         uint foamAlpha = (uint)Math.Round((_foam >> 24) * foamFade);
         uint foam = foamAlpha == 0 ? 0 : Premultiply(_foam & 0xFFFFFF | foamAlpha << 24);
         int w = Width;
@@ -298,8 +322,11 @@ public sealed class FoamCollapse
                 uint c = _source[i];
                 if (_gone[b] != 0 || c >> 24 == 0) { canvas[i] = 0; continue; }
                 if (_near[b] != 0 && foam != 0) { canvas[i] = foam; continue; }
+                // A block keeps its colour until just before it goes: the original fades it over its whole life, which over a dark
+                // desktop left a wide band of half-faded, darkened blocks ahead of the foam (live check IS-02).
                 double local = (p - _start[b]) / LifeSpan;
-                canvas[i] = local <= 0 ? c : GlitchCollapse.Scale(c, (uint)Math.Round((1 - local) * 256));
+                double alpha = (1 - CollapseFx.SmoothStep(Crisp, 1, local)) * tail;
+                canvas[i] = alpha >= .999 ? c : GlitchCollapse.Scale(c, (uint)Math.Round(alpha * 256));
             }
         }
         if (aberration >= .5)

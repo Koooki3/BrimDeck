@@ -110,7 +110,7 @@ internal static class CollapsePreview
         s.Notice.Visibility = Visibility.Hidden;
         s.Stage.UpdateLayout();
         double length = CollapseFx.Length(style, _motion.Pace, _motion.CollapseMs);
-        s.Layer.Play(style, snapshot, from, Bounds(s, s.Island), length, Colors.White, aberration, ended);
+        s.Layer.Play(style, snapshot, from, Bounds(s, s.Island), length, CollapseLayer.FoamColor(_motion), aberration, ended);
         return length;
     }
 

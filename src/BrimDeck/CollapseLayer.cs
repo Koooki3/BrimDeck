@@ -84,13 +84,8 @@ internal sealed class CollapseLayer : FrameworkElement
         return true;
     }
 
-    // White foam on a dark surface; on a light one, where white would not show, the theme's highlight.
-    private static Color FoamColor(ThemeMotion motion)
-    {
-        var palette = PanelTheme.Current;
-        var color = palette.IsDark ? Colors.White : PanelTheme.ToColor(ThemeMotion.ResolveColor(palette, motion.Highlight));
-        return Color.FromArgb(0xE6, color.R, color.G, color.B);
-    }
+    // Sea foam is white on every surface: the highlight a light theme gave it read as a dark red outline (live check IS-02).
+    internal static Color FoamColor(ThemeMotion motion) => Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF);
 
     // Plays `style` on the snapshot lying at `source` (layer DIP) into the island at `island`. foam: the foam's color.
     // aberration: the theme's red and blue split in DIP (0: none). ended runs once the picture is over, never after Stop.

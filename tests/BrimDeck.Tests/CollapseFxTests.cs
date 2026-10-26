@@ -177,8 +177,12 @@ internal static class CollapseFxTests
         var source = Picture(w, h);
         var foam = new FoamCollapse(source, w, h, 2);
         bool starts = true;
-        for (int y = 0; y < h; y += 3) for (int x = 0; x < w; x += 3) starts &= foam.StartOf(x, y) is >= 0 and <= .9f * .875f + 1e-4f;
-        check("Foam: every pixel starts within 0.9 of three octaves of value noise, gone 0.15 later", starts && foam.Edge == 2);
+        for (int y = 0; y < h; y += 3) for (int x = 0; x < w; x += 3) starts &= foam.StartOf(x, y) is >= 0 and <= (float)(1 - FoamCollapse.LifeSpan) + 1e-5f;
+        check("Foam: every block starts within the run so the last is gone exactly at the end (0.15 after its start)", starts && foam.Edge == 2);
+        // IS-01: the field covers the whole run, from a block that starts at once to one gone exactly at the end.
+        float first = float.MaxValue, last2 = 0;
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) { first = Math.Min(first, foam.StartOf(x, y)); last2 = Math.Max(last2, foam.StartOf(x, y)); }
+        check("Foam: no corner lingers — the field runs from 0 to 1 - LifeSpan", first == 0 && Math.Abs(last2 - (1 - FoamCollapse.LifeSpan)) < 1e-5);
         var canvas = new uint[w * h];
         foam.Render(0, canvas);
         check("Foam: the first frame is the picture itself", canvas.SequenceEqual(source));
@@ -208,6 +212,10 @@ internal static class CollapseFxTests
         foam.Render(1, canvas);
         check("Foam: it dissolves steadily, leaving a line of foam along the dissolving edge and nothing at the end",
             shrinking && foamed && foamNearGone && canvas.All(c => c == 0));
+        // IS-02: mid-way, what is left is mostly whole, not a wide band of half-faded blocks that darken over a dark desktop.
+        foam.Render(.5, canvas);
+        int shown = canvas.Count(c => c >> 24 != 0), half = canvas.Count(c => c >> 24 is > 12 and < 243 && c != white);
+        check($"Foam: mid-way few blocks are half faded, besides the foam ({half} of {shown})", shown > 0 && half < shown * .05);
     }
 
     private static void Genie(Action<string, bool> check)
