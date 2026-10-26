@@ -139,6 +139,10 @@
     <Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/><Setter Property="Background" Value="{DynamicResource SettingsInput}"/>
     <Setter Property="BorderBrush" Value="{DynamicResource SettingsBorder}"/><Setter Property="Padding" Value="14,6"/>
   </Style>
+  <!-- An action that deletes or resets (SW-09): outlined in the error color, and asked about first (Confirm). -->
+  <Style x:Key="SettingsDangerOutlineButton" TargetType="Button" BasedOn="{StaticResource SettingsOutlineButton}">
+    <Setter Property="Foreground" Value="{DynamicResource SettingsError}"/><Setter Property="BorderBrush" Value="{DynamicResource SettingsError}"/>
+  </Style>
   <!-- Drawn only while moving focus with the keyboard, never after a mouse click. -->
   <Style x:Key="SettingsGlyphFocus">
     <Setter Property="Control.Template"><Setter.Value><ControlTemplate>

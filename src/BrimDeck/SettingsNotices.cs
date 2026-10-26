@@ -353,7 +353,16 @@ public sealed partial class SettingsWindow
             var reset = ActionButton(Loc.T("默认位置", "Default"), () => { Change(s => s.NoticeHistoryFolder = ""); ShowPage(NoticesSettingsPage); });
             reset.Margin = new Thickness(8, 0, 0, 0); folderButtons.Children.Add(reset);
         }
-        var clear = ActionButton(Loc.T("清空通知历史", "Clear notice history"), () => { center.Clear(); ShowPage(NoticesSettingsPage); });
+        // Deletes the history, so it is red and asks first (SW-09).
+        var clear = ActionButton(Loc.T("清空通知历史", "Clear notice history"), () =>
+        {
+            int count = center.Hub.Notices.Count;
+            if (count > 0 && !Confirm(Loc.T("清空通知历史", "Clear notice history"),
+                Loc.T($"将删除 BrimDeck 中的 {count} 条通知记录，无法恢复。Windows 通知中心不受影响。", $"This deletes the {count} notices BrimDeck keeps, which cannot be undone. Windows' notification center is not affected."),
+                Loc.T("清空", "Clear"))) return;
+            center.Clear(); ShowPage(NoticesSettingsPage);
+        });
+        clear.Style = (Style)FindResource("SettingsDangerOutlineButton");
         var rows = new List<FrameworkElement>
         {
             Toggle(Loc.T("在本机保存通知历史", "Keep notice history on this PC"), S.NoticeHistory, value => { Change(s => s.NoticeHistory = value); ShowPage(NoticesSettingsPage); },
