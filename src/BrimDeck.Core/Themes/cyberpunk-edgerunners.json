@@ -5,7 +5,8 @@
   //   Night City at night: an indigo-black sky over the haze of the street, teal toward the bottom, as a rainy city glows
   //   from below. The quiet lines are the pale blue of that haze; text is cool white and pale blue.
   //   Neon only where it is thin: cyan and magenta for the rim, the focus and the tracks, the two colors of Lucy's hair and
-  //   the signs; the signature yellow for the indicator and warnings. The clock is the pale cyan of a lit window.
+  //   the signs; the signature yellow for the indicator and warnings. The clock is the pale cyan of a lit window, in Tektur,
+  //   the squared HUD face of the taskbar clock.
   //   HUD cuts across two corners with hexagonal ticks, CRT scan lines and a magenta glow under the collapsed notch.
   "formatVersion": 1,
   "id": "cyberpunk-edgerunners",
@@ -61,7 +62,7 @@
     "dsh": "#6FA8FF", "grokBot": "#C4D2EE", "kimi": "#1EC8FF", "manual": "#D07DFF", "other": "#C4D2EE", "warning": "#FCEE0A", "critical": "#FF3B5C"
   },
   "clock": {
-    "style": "segment", "color": "default",
+    "style": "tektur", "color": "default",
     "palette": { "amber": "#FCEE0A", "cyan": "#00F0FF", "pink": "#FF2A6D", "lime": "#B6FF3B" },
     "gradients": [
       { "name": "日落", "nameEn": "Sunset", "stops": ["#FCEE0A", "#FF9E3D", "#FF2A6D"] },

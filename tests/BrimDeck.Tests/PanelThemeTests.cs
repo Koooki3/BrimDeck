@@ -339,7 +339,7 @@ internal static class PanelThemeTests
             PanelThemes.BuiltIns.All(theme => PanelThemes.Resolve(theme).Clock?.Color != "gradient"));
         var demoClock = new DeckSettings { ClockGradient = ["#111111", "#222222", "#333333"] };
         PanelThemes.ApplyClock(demo, demoClock);
-        check("The demo uses the seven-segment clock in the theme's color and leaves the gradient alone", demoClock.ClockStyle == ClockStyle.Segment
+        check("The demo uses the Tektur clock in the theme's color and leaves the gradient alone", demoClock.ClockStyle == ClockStyle.Tektur
             && demoClock.ClockColor == ClockColor.White && demoClock.ClockGradient.SequenceEqual(["#111111", "#222222", "#333333"]));
         var placeholder = new DeckSettings { ClockCustomColor = "#123456", ClockGradient = ["#111111", "#222222", "#333333"] };
         PanelThemes.ApplyClock(PanelThemes.Build("p", template), placeholder);
@@ -354,7 +354,7 @@ internal static class PanelThemeTests
         var matched = new DeckSettings(); matched.Apps[0].ThemeColor = "#123456"; matched.Apps[0].WarningColor = "#654321"; matched.Apps[1].CriticalColor = "#ABCDEF";
         PanelThemes.ApplyMatching(BuiltIn("cyberpunk-edgerunners"), matched);
         check("Choosing a theme makes the app colors follow it and switches the clock", matched.Apps.All(app => app.ThemeColor == "" && app.WarningColor == "" && app.CriticalColor == "")
-            && matched.ClockStyle == ClockStyle.Segment);
+            && matched.ClockStyle == ClockStyle.Tektur);
         var dracula = BuiltIn("dracula"); var githubDark = BuiltIn("github-dark");
         var carried = new DeckSettings { ClockGradient = [.. dracula.ClockGradients[2].Stops] };
         PanelThemes.ApplyMatching(githubDark, carried, dracula);

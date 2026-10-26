@@ -185,15 +185,17 @@ An unofficial fan palette. It uses colors only, no artwork, logos or fonts from 
 
 | Source | Color | Panel role |
 | --- | --- | --- |
-| Night City's violet sky | `#0A0613` → `#1C0B30` | Surface and its top-to-bottom gradient |
-| Moonlight | `#F4F0FF` / `#C9BEEB` / `#8F84BD` | Three text levels (pale lavender) |
-| Cyan neon, Lucy's hair | `#00F0FF` | Accent, focus, the tint of switches and tracks |
+| Night City's indigo sky over the street's teal haze | `#0C0C22` → `#101030` → `#0A1F33` | Surface and its top-to-bottom gradient; menus and tooltips `#10102A` |
+| The haze lit by the city | `#EEF4FF` / `#BCCEEC` / `#8698C2` | Three text levels (cool white, pale blue); dividers, fills and hovers in that pale blue at low opacity |
+| A lit window | `#CFF4F6` | Clock, in Tektur (the squared HUD face of the taskbar clock) |
+| Cyan neon, Lucy's hair | `#00F0FF` | Accent, focus, tracks: neon only where it is thin |
 | Magenta neon | `#FF2A6D` | Collapsed glow, liked song, Indicator progress |
-| Cyberpunk yellow | `#FCEE0A` | Clock (seven-segment, like a HUD readout), Indicator, warning |
+| Cyberpunk yellow | `#FCEE0A` | Indicator, warning, the clock's amber preset |
 | Rebecca's mint | `#3DFFB0` | The Codex column |
-| Neon gradient | cyan → violet → magenta | Rim |
-| CRT screens | 4% scan lines | Surface texture |
+| Neon gradient | cyan → violet → the signs' pale pink halo → magenta | Rim |
+| HUD frames | dim cyan 45° cuts with hexagonal ticks | `decor.hud`, two corners |
+| CRT screens | 3.5% scan lines | Surface texture |
 
-**Check.** Primary text is above 15:1 on both gradient stops and tertiary text above 5:1; the yellow clock and warning are about 15:1 on the violet-black; the magenta progress is about 3:1 on the yellow Indicator. Every rule passes the first time, with no adjustment.
+**Check.** Primary text is above 15:1 on every gradient stop and tertiary text above 5.5:1; the pale clock is about 14:1 and the yellow warning about 13.8:1; the magenta progress is about 3:1 on the yellow Indicator. Every rule passes the first time, with no adjustment.
 
 The full file is [`cyberpunk-edgerunners.json`](../../src/BrimDeck.Core/Themes/cyberpunk-edgerunners.json). To start your own theme from it, choose it in settings and press "New from current theme".
