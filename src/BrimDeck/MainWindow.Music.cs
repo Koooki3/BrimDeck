@@ -84,6 +84,7 @@ public partial class MainWindow
         _musicTick = new(Dispatcher, TickMusic) { Interval = TimeSpan.FromMilliseconds(33) };
         IsVisibleChanged += (_, _) => UpdateMusicTimer();
         _app.MediaChanged += MediaChanged;
+        DisplayPower.Changed += DisplayPowerChanged;
     }
     private void StartMusic()
     {
@@ -975,11 +976,12 @@ public partial class MainWindow
         _app.PresentMedia(this, musicVisible);
         bool progressVisible = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && _mediaTrack is { HasTimeline: true, State: not MediaState.Stopped };
         bool animations = Settings.Animations && SystemParameters.ClientAreaAnimation;
-        // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours.
-        _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
+        // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours. So does a
+        // display that is off: the line rests until it is back.
+        _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
         UpdateLyricScrolling();
         UpdateQuotaCarousel();
-        bool needed = IsVisible && !IsSuppressed && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
+        bool needed = IsVisible && !IsSuppressed && !DisplayPower.Off && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
         _musicTick.Interval = TimeSpan.FromMilliseconds(animations && MusicAudioActive && musicVisible ? 33 : 250);
         if (needed) { if (!_musicTick.IsEnabled) { _lastMusicTick = DateTimeOffset.UtcNow; _musicTick.Start(); } }
@@ -987,16 +989,25 @@ public partial class MainWindow
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }
     private void UpdateLyricScrolling() => _lyricCurrent?.SetScrolling(Settings.Animations && SystemParameters.ClientAreaAnimation
-        && MusicAudioActive && IsVisible && !IsSuppressed && _expanded && IsMusicPage);
+        && MusicAudioActive && IsVisible && !IsSuppressed && !DisplayPower.Off && _expanded && IsMusicPage);
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
     private void UpdateQuotaCarousel()
     {
-        bool running = IsVisible && !IsSuppressed && !_expanded && _alert is null;
+        bool running = IsVisible && !IsSuppressed && !DisplayPower.Off && !_expanded && _alert is null;
         _quotaCarousel?.SetRunning(running, _pointerInside);
         _stripCarousel?.SetRunning(running, _pointerInside);
     }
-    private bool MusicPresentationVisible => IsVisible && !IsSuppressed && _mediaTrack is { State: not MediaState.Stopped }
+    // With the display off (and the session unlocked), nothing of the music is seen: the bars stop and the audio levels are not read.
+    private bool MusicPresentationVisible => IsVisible && !IsSuppressed && !DisplayPower.Off && _mediaTrack is { State: not MediaState.Stopped }
         && (_expanded ? IsMusicPage : Settings.ShowsMusic(EffectiveStyle) && _alert is null);
+    // The display went off or came back on (DisplayPower): what runs only to be seen stops or starts again.
+    // A track notice that ran out while the display was off (the music tick that ends it was stopped) is cleared first, so the
+    // display comes back to the row as it is now.
+    private void DisplayPowerChanged()
+    {
+        if (!DisplayPower.Off && _trackNoticeUntil != default && DateTimeOffset.UtcNow >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
+        UpdateMusicTimer(); UpdateMonitorDemand();
+    }
     private bool MusicAudioActive => _mediaTrack is { State: MediaState.Playing };
     private void TickMusic()
     {
@@ -1013,5 +1024,5 @@ public partial class MainWindow
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.PresentMedia(this, false); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false); }
 }
