@@ -19,7 +19,7 @@
     "surface": "#2C2C2C",
     "textPrimary": "#F6F7F9",
     "textSecondary": "#E8EDEFF5",
-    "textTertiary": "#99EDEFF5",
+    "textTertiary": "#B5B6B9",
     "accent": "#7DC1FF",
     "onAccent": "#03111F",
     "danger": "#FFA9AF",
@@ -40,7 +40,7 @@
     "rangeFill": "#407DC1FF",
     "coverPlaceholder": "#14FFFFFF",
     "coverOutline": "#1FFFFFFF",
-    "scrollThumb": "#5A5F6B",
+    "scrollThumb": "#6F7684",
     "rim": "#66FFFFFF",
     "shadow": "#000000",
     "indicator": "#8E9099",
@@ -57,7 +57,7 @@
   },
   "apps": {
     "claude": "#EDAE90", "codex": "#9DDFB4", "antigravity": "#A3BEFF", "cursor": "#D6D8E0", "zcode": "#A5B4EC",
-    "dsh": "#9AB3F2", "grokBot": "#D6D8E0", "kimi": "#7AD3EE", "manual": "#D4A9F2", "other": "#D6D8E0", "warning": "#EDCF94", "critical": "#F2969A"
+    "dsh": "#9AB3F2", "grokBot": "#D6D8E0", "kimi": "#7AD3EE", "manual": "#D4A9F2", "other": "#D6D8E0", "warning": "#EDCF94", "critical": "#F3A0A3"
   },
   "clock": {
     "style": "minimal", "color": "default",

@@ -24,7 +24,7 @@
     "surface": "#FFF7EA",
     "textPrimary": "#0B2E3A",
     "textSecondary": "#1D3B47",
-    "textTertiary": "#3F5F6A",
+    "textTertiary": "#395661",
     "accent": "#00676E",
     "onAccent": "#FFFFFF",
     "danger": "#922A1F",
@@ -45,7 +45,7 @@
     "rangeFill": "#3300676E",
     "coverPlaceholder": "#140B2E3A",
     "coverOutline": "#1F0B2E3A",
-    "scrollThumb": "#B7C6C2",
+    "scrollThumb": "#728F88",
     "rim": "#1FC8C3",
     "shadow": "#0B5560",
     "indicator": "#FFA41B",
@@ -62,7 +62,7 @@
   },
   "apps": {
     "claude": "#AB4E2B", "codex": "#1A7A4B", "antigravity": "#2D60C2", "cursor": "#5A646C", "zcode": "#334E88",
-    "dsh": "#385BB9", "grokBot": "#5A646C", "kimi": "#07728D", "manual": "#8744B2", "other": "#5A646C", "warning": "#916100", "critical": "#922A1F"
+    "dsh": "#385BB9", "grokBot": "#5A646C", "kimi": "#07728D", "manual": "#8744B2", "other": "#5A646C", "warning": "#6F4B00", "critical": "#922A1F"
   },
   "clock": {
     "style": "rounded", "color": "default",
@@ -119,7 +119,7 @@
       "surface": "#001E3C",
       "textPrimary": "#EEF7F8",
       "textSecondary": "#DCE8EA",
-      "textTertiary": "#9AB2B9",
+      "textTertiary": "#A0B7BE",
       "accent": "#45D5C8",
       "onAccent": "#05222A",
       "danger": "#FFA095",
@@ -140,7 +140,7 @@
       "rangeFill": "#4045D5C8",
       "coverPlaceholder": "#14B1E0E6",
       "coverOutline": "#26B1E0E6",
-      "scrollThumb": "#3E5A70",
+      "scrollThumb": "#527895",
       "rim": "#45D5C8",
       "shadow": "#2FC9BE",
       "indicator": "#5C7590",
@@ -157,7 +157,7 @@
     },
     "apps": {
       "claude": "#F0AC8C", "codex": "#8EE3B1", "antigravity": "#9EBBFF", "cursor": "#D3DCE2", "zcode": "#9AACEB",
-      "dsh": "#8FAEF2", "grokBot": "#D3DCE2", "kimi": "#6FD8F2", "manual": "#D2A6F2", "other": "#D3DCE2", "warning": "#FFD27A", "critical": "#FF8E8E"
+      "dsh": "#8FAEF2", "grokBot": "#D3DCE2", "kimi": "#6FD8F2", "manual": "#D2A6F2", "other": "#D3DCE2", "warning": "#FFD27A", "critical": "#FF9696"
     },
     "clock": {
       "palette": { "amber": "#FFC06B", "cyan": "#6FE8E0", "pink": "#FF9EC4", "lime": "#D9FF86" },
