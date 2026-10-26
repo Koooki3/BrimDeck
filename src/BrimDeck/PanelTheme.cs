@@ -16,7 +16,13 @@ internal static class PanelTheme
     // The theme on screen. While the chosen theme file has an error, this is still its last good version (see Use).
     public static PanelThemeInfo ShownTheme { get; private set; } = PanelThemes.BuiltIn(PanelThemes.Dark)!;
     public static bool KeptLastGood { get; private set; }
+    // Whether the theme on screen shows its night look (PanelThemeFile.Night).
+    public static bool Night { get; private set; }
+    // When the theme on screen changes between its day and night looks next, or null for a theme without a night look.
+    public static DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
     public static int Generation { get; private set; }
+    // Raised just before another palette becomes current; true when a theme trades its day and night looks.
+    public static event Action<bool>? Changing;
     // The themes found in the folder at the last reload.
     public static IReadOnlyList<PanelThemeInfo> UserThemes { get; private set; } = [];
 
@@ -54,7 +60,8 @@ internal static class PanelTheme
     public static bool Use(DeckSettings settings, bool reload = false, bool systemChanged = false)
     {
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
-        if (!reload && !systemChanged && _loaded && chosen == _chosen) return false;
+        // The hour reaching the other look, or new hours for it, counts as a change too.
+        if (!reload && !systemChanged && _loaded && chosen == _chosen && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night) return false;
         if (reload || !_loaded) Reload();
         _chosen = chosen;
         var theme = Find(chosen);
@@ -64,12 +71,16 @@ internal static class PanelTheme
             && UserThemes.Any(t => !t.Usable && string.Equals(t.Path, ShownTheme.Path, StringComparison.OrdinalIgnoreCase));
         KeptLastGood = keepLastGood;
         if (keepLastGood) return false;
-        // The same theme as now (the common case for "system") needs no new palette.
-        if (!reload && ReferenceEquals(theme, ShownTheme) && _signature.Length > 0) return false;
-        ShownTheme = theme;
-        var palette = PanelThemes.Resolve(theme);
+        // A theme with a night look shows it by the local clock (PanelThemes.IsNight).
+        bool night = PanelThemes.IsNight(theme.File, DateTime.Now, settings.ThemeDaylight);
+        // The same theme and look as now (the common case for "system") needs no new palette.
+        if (!reload && ReferenceEquals(theme, ShownTheme) && night == Night && _signature.Length > 0) return false;
+        ShownTheme = theme; Night = night;
+        var palette = PanelThemes.Resolve(theme, night);
         var signature = Signature(theme, palette);
         if (signature == _signature) return false;
+        // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade).
+        Changing?.Invoke(Current.Id == palette.Id && Current.IsNight != palette.IsNight);
         _signature = signature; Current = palette; Generation++;
         _hex = Hexes(palette); _appColors.Clear(); _warningColor = _criticalColor = null;
         _readable.Clear(); _readableColors.Clear();
@@ -82,7 +93,7 @@ internal static class PanelTheme
     {
         var e = palette.Effects;
         var clock = palette.Clock;
-        return string.Join("|", theme.Id, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
+        return string.Join("|", theme.Id, palette.IsNight, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
             string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}"),
             $"{clock?.Style}/{clock?.Color}/{clock?.Custom}/{string.Join(",", clock?.Gradient ?? [])}",
             string.Join(",", ClockColors.Swatches.Select(palette.ClockPreset)), string.Join(";", palette.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops))),

@@ -5,7 +5,7 @@ The Notch, Capsule and Indicator, the quota notice, the expanded panel and its p
 | Kind | Themes |
 | --- | --- |
 | Basics | System, Dark (the default: the original pure black look), Light |
-| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
+| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
 | Custom | The theme files in the themes folder, which can be created, edited and deleted in settings |
 
 Each theme remembers the theme, warning and critical colors of the app columns and the clock's style and color you change while using it: they are saved when you switch to another theme and come back when you return. A theme chosen for the first time uses its own colors and suggested clock. Restoring defaults in "Quotas and usage" or "Collapsed view" restores the current theme's defaults.
@@ -102,6 +102,20 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels), the panel's rounded corners become square and its text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right | 0, or 1–4 |
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain. Its lightest and darkest squares are checked for contrast like gradient stops; without `pixel` it has no effect | 0–0.12 |
 
+### Day and night looks (night, daylight)
+
+A theme can carry a night look: `night` holds the `colors`, `apps`, `effects` and `clock` that change at night, laid over the day look by the local clock; whatever it leaves out stays as by day. `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default; the day may run past midnight, as 20:00 to 08:00 does). The user can move them in half hours in Settings › Current theme › Daytime; choosing the theme's own hours again saves no setting. At the hour the island's old material fades out over 1.6 seconds, like dusk; with animations off it switches at once. Both looks are held to the readability rules below.
+
+```jsonc
+"daylight": { "day": "06:30", "night": "18:30" },
+"night": {
+  "colors": { "surface": "#0A1A2C", "textPrimary": "#EEF7F8" },
+  "effects": { "shadowDepth": 0 }
+}
+```
+
+A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night`. "New from current theme", and saving an edit as a new theme, start the new file from the day look and carry the source theme's `night` and `daylight` along.
+
 ## Readability
 
 A theme decides how the panel looks, never whether it can be read:
@@ -122,6 +136,10 @@ The demo theme was made in these five steps.
 3. **Surface and text first**: the surface sets every contrast; space the text levels at 7 : 4.5 : 3.
 4. **Then accents and app colors**: app colors must be told apart and reach 3:1 on the surface; warning and critical should read as yellow and red.
 5. **Check**: look at the collapsed and expanded panel, the notice and the pop-ups, and make sure "Readability" is empty or acceptable; otherwise go back to step 3.
+
+## The newer themes
+
+**Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock, a shoreline rim (turquoise, sky, sand) and a faintly sea-green shadow. By night, a moonlit sea from navy into teal, a lantern-gold clock, a moonlit shoreline along the rim and, instead of a shadow, a soft teal glow under the island. Neither look needs any readability adjustment.
 
 ## Pixel Blocks
 

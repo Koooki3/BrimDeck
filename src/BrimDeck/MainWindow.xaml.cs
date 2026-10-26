@@ -121,6 +121,7 @@ public partial class MainWindow : Window
         InitializeMonitor();
         InitializeResize();
         InitializeShadow();
+        InitializeThemeFade();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };

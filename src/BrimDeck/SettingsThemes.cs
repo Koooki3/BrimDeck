@@ -132,6 +132,7 @@ public sealed partial class SettingsWindow
         rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
+        if (theme.File.Night is not null) rows.Add(DaylightRow(theme.File));
         // A file that carries the chosen id (or is named after it) but cannot be used is there, with its error listed below.
         bool broken = missing && users.Any(t => !t.Usable && (PanelThemes.NormalizeId(t.File.Id) == chosen || t.Path is { } file && PanelThemes.NormalizeId(PanelThemes.FileName(file)) == chosen));
         if (missing)
@@ -159,6 +160,68 @@ public sealed partial class SettingsWindow
         Group([.. rows]);
         // A theme shown in place of a missing or broken one is not the one chosen, so it is not offered for editing.
         if (!missing && !kept) ThemeEditor(theme);
+    }
+
+    // A theme with a night look: when its day begins and ends, in half hours. The theme's own hours are saved as no setting,
+    // so a later change to the theme's hours still reaches those who never moved them. A time between the half hours (a theme
+    // file's 06:45) is listed as it is, so moving the other box does not round it.
+    private FrameworkElement DaylightRow(PanelThemeFile file)
+    {
+        var (day, night) = PanelThemes.DaylightHours(file, S.ThemeDaylight);
+        var steps = Enumerable.Range(0, 48).Select(i => TimeSpan.FromMinutes(30 * i)).ToList();
+        (ComboBox Box, List<TimeSpan> Times) Pick(TimeSpan value, string name)
+        {
+            var times = steps.Contains(value) ? steps : [.. steps.Append(value).Order()];
+            // The time stands in the middle of its box and of the list; the list opens on the chosen time, a few rows down.
+            var box = new ComboBox { Width = 84, Style = (Style)FindResource("SettingsCombo"), ItemsSource = times.Select(PanelThemes.FormatTimeOfDay).ToList(),
+                SelectedIndex = times.IndexOf(value) is var at and >= 0 ? at : 0, HorizontalContentAlignment = HorizontalAlignment.Center };
+            box.DropDownOpened += (_, _) => box.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => ShowChosen(box));
+            AutomationProperties.SetName(box, name); PopupMotion.Attach(box);
+            return (box, times);
+        }
+        var (from, fromTimes) = Pick(day, Loc.T("白天开始", "Day begins"));
+        var (to, toTimes) = Pick(night, Loc.T("夜晚开始", "Night begins"));
+        // A day of no length would never end, so it is no choice: the box just changed goes back to what it showed, and the row
+        // never shows unsaved hours. Going back changes the selection again, which saves nothing.
+        int shownFrom = from.SelectedIndex, shownTo = to.SelectedIndex;
+        bool reverting = false;
+        void Save(ComboBox changed)
+        {
+            if (reverting) return;
+            var (d, n) = (fromTimes[Math.Max(0, from.SelectedIndex)], toTimes[Math.Max(0, to.SelectedIndex)]);
+            if (d == n)
+            {
+                reverting = true;
+                changed.SelectedIndex = ReferenceEquals(changed, from) ? shownFrom : shownTo;
+                reverting = false;
+                return;
+            }
+            shownFrom = from.SelectedIndex; shownTo = to.SelectedIndex;
+            Change(s => s.ThemeDaylight = (d, n) == PanelThemes.DaylightHours(file) ? "" : PanelThemes.FormatDaylight(d, n));
+        }
+        from.SelectionChanged += (_, _) => Save(from); to.SelectionChanged += (_, _) => Save(to);
+        var dash = TextLine("–", 12, TextSecondary);
+        dash.Margin = new Thickness(8, 0, 8, 0); dash.VerticalAlignment = VerticalAlignment.Center;
+        var pair = new StackPanel { Orientation = Orientation.Horizontal };
+        pair.Children.Add(from); pair.Children.Add(dash); pair.Children.Add(to);
+        return Row(Loc.T("白天时段", "Daytime"), pair, help: () => Loc.T("在这段时间内使用白天外观，其余时间使用夜间外观；到点时自动渐变切换。",
+            "The day look is shown between these times and the night look the rest of the day; it changes over by itself, with a slow fade."));
+    }
+
+    // Scrolls an open list so its chosen item stands about a third of the way down, with the times before it in view.
+    private static void ShowChosen(ComboBox box)
+    {
+        if (box.ItemContainerGenerator.ContainerFromIndex(box.SelectedIndex) is not FrameworkElement item
+            || FindParent<ScrollViewer>(item) is not { } scroll) return;
+        double top = item.TransformToAncestor(scroll).Transform(new Point()).Y + scroll.VerticalOffset;
+        scroll.ScrollToVerticalOffset(Math.Max(0, top - (scroll.ViewportHeight - item.ActualHeight) / 3));
+    }
+
+    private static T? FindParent<T>(DependencyObject child) where T : DependencyObject
+    {
+        for (var node = System.Windows.Media.VisualTreeHelper.GetParent(child); node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+            if (node is T found) return found;
+        return null;
     }
 
     private TextBlock Wrapped(string text, bool error)
@@ -222,7 +285,8 @@ public sealed partial class SettingsWindow
             {
                 // The theme on screen, which is the last good version while the chosen file has an error.
                 var current = PanelTheme.ShownTheme;
-                var path = PanelThemes.CreateFromTemplate(PanelTheme.Folder, PanelTheme.Current, current.BuiltIn ? current.Id : null);
+                // A theme with a night look starts from its day look and carries its night look along, whichever is on screen.
+                var path = PanelThemes.CreateFromTemplate(PanelTheme.Folder, current.File.Night is null ? PanelTheme.Current : PanelThemes.Resolve(current), current.BuiltIn ? current.Id : null, current.File);
                 PanelTheme.Reload();
                 // The new theme copies the current one, so it starts with what was changed under the current one.
                 ChooseOwnTheme(path);
