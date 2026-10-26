@@ -29,7 +29,7 @@ public sealed partial class SettingsWindow : Window
     private readonly TextBlock _status = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
     private ScrollViewer _scroll = null!;
     private static string[] _pages => [Loc.T("常规", "General"), Loc.T("收起外观", "Collapsed view"), Loc.T("展开外观", "Expanded view"),
-        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("灵动提示", "Dynamic notices"), Loc.T("设备", "Devices")];
+        Loc.T("配额与统计", "Quotas and usage"), Loc.T("模型价格", "Model prices"), Loc.T("样式", "Style"), Loc.T("播放器", "Players"), Loc.T("关于 BrimDeck", "About BrimDeck"), Loc.T("面板主题", "Panel theme"), Loc.T("显示与读数", "Display and readings"), Loc.T("灵动提示", "Live notices"), Loc.T("设备", "Devices")];
     // The order of the pages in the navigation; the theme page (ThemePage) is listed with the appearance pages, and the system
     // monitor's page (MonitorSettingsPage) and the notices page (NoticesSettingsPage) have their own groups after music, before About.
     private static readonly int[] PageOrder = [0, 1, 2, ThemePage, 3, 4, 5, 6, MonitorSettingsPage, DevicesSettingsPage, NoticesSettingsPage, 7];
@@ -331,7 +331,7 @@ public sealed partial class SettingsWindow : Window
         {
             if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage or DevicesSettingsPage or NoticesSettingsPage)
             {
-                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), DevicesSettingsPage => Loc.T("设备", "Devices"), NoticesSettingsPage => Loc.T("通知", "Notices"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
+                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), DevicesSettingsPage => Loc.T("设备", "Devices"), NoticesSettingsPage => Loc.T("灵动提示", "Live notices"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
                 group.Margin = new Thickness(12, i == 0 ? 0 : 24, 0, 8); _navigation.Children.Add(group);
             }
             int target=i; bool selected=page==i;
@@ -496,7 +496,7 @@ public sealed partial class SettingsWindow : Window
             if (S.MusicPage) starts.Add((DefaultDeckPage.Music, Loc.T("音乐", "Music")));
             if (S.MonitorPage) starts.Add((DefaultDeckPage.Monitor, Loc.T("系统监控", "System monitor")));
             if (S.DevicesPage) starts.Add((DefaultDeckPage.Devices, Loc.T("设备", "Devices")));
-            if (DeckPages.Shown(S, DeckPage.Notices)) starts.Add((DefaultDeckPage.Notices, Loc.T("最近通知", "Recent notices")));
+            if (DeckPages.Shown(S, DeckPage.Notices)) starts.Add((DefaultDeckPage.Notices, Loc.T("通知历史", "Notice history")));
             filling = true;
             start.ItemsSource = starts.Select(option => option.Label).ToList();
             start.SelectedIndex = Math.Max(0, starts.FindIndex(option => option.Value == S.DefaultPage));
@@ -512,7 +512,7 @@ public sealed partial class SettingsWindow : Window
             SizeRow(Loc.T("显示设备", "Show devices"), Loc.T("设备", "devices"), DeckPage.Devices, S.DevicesPage, value => { Change(s => s.DevicesPage = value); FillStarts(); }, Collect(DeviceSizeControls)));
         // The recent notices page exists while dynamic notices are on.
         if (S.NoticesEnabled)
-            Group(SizeRow(Loc.T("显示最近通知", "Show recent notices"), Loc.T("最近通知", "recent notices"), DeckPage.Notices, S.NoticesPage, value => { Change(s => s.NoticesPage = value); FillStarts(); }, Collect(NoticeSizeControls)));
+            Group(SizeRow(Loc.T("显示通知历史", "Show notice history"), Loc.T("通知历史", "notice history"), DeckPage.Notices, S.NoticesPage, value => { Change(s => s.NoticesPage = value); FillStarts(); }, Collect(NoticeSizeControls)));
         // Settings that apply across the expanded pages rather than to one of them.
         SectionTitle(Loc.T("通用", "General"));
         Group(Row(Loc.T("每次打开时显示", "Page shown on opening"), start),
@@ -635,7 +635,7 @@ public sealed partial class SettingsWindow : Window
         // feedback keep their own pace (C5).
         var duration = SliderRow(Loc.T("展开与收起动画时长", "Expand and collapse duration"), S.AnimationDuration, AnimationLength.Min, AnimationLength.Max, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value),
             Loc.T("面板展开、收起和灵动提示出现、收回的动画时长。时间越短，动画越快；收起比展开略快。悬停、按压等反馈有各自固定的节奏，不受此项影响。",
-                "How long the panel takes to expand and collapse, and dynamic notices to appear and go back. The shorter the time, the faster the animation; collapsing is a little quicker than expanding. Hover and press feedback keep their own pace and are not affected."));
+                "How long the panel takes to expand and collapse, and live notices to appear and go back. The shorter the time, the faster the animation; collapsing is a little quicker than expanding. Hover and press feedback keep their own pace and are not affected."));
         void EnableDuration(bool enabled)
         {
             foreach (var control in duration.Children.OfType<FrameworkElement>().Where(control => Grid.GetColumn(control) > 0)) control.IsEnabled = enabled;
@@ -649,7 +649,7 @@ public sealed partial class SettingsWindow : Window
                     "How long after the pointer leaves BrimDeck's expanded panel it starts to collapse. 0 ms collapses immediately.")),
             Toggle(Loc.T("启用动画", "Animations"), S.Animations, value => { Change(s => s.Animations = value); EnableDuration(value); },
                 help: Loc.T("开启后，BrimDeck 的展开与收起、灵动提示、换页、悬停与按压反馈和主题动效都有过渡动画；关闭后一切直接切换。Windows 关闭了动画效果或处于高对比度时，同样不播放动画。",
-                    "When on, BrimDeck animates expanding and collapsing, dynamic notices, page switches, hover and press feedback and the theme's motion; when off, everything changes at once. Nothing is animated either while Windows' animation effects are off or in high contrast.")), duration);
+                    "When on, BrimDeck animates expanding and collapsing, live notices, page switches, hover and press feedback and the theme's motion; when off, everything changes at once. Nothing is animated either while Windows' animation effects are off or in high contrast.")), duration);
     }
 
     private void WindowRules()

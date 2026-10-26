@@ -340,7 +340,7 @@ public partial class MainWindow
         int count = _app.Notices.Hub.UnviewedCount;
         NoticesBadge.Visibility = count > 0 && Settings.NoticesEnabled ? Visibility.Visible : Visibility.Collapsed;
         NoticesBadge.Background = UI.Brush(PanelTheme.Hex("danger"));
-        AutomationProperties.SetName(NoticesPageButton, Loc.T("最近通知", "Recent notices") + (count > 0 ? " · " + NoticeText.Count(count) : ""));
+        AutomationProperties.SetName(NoticesPageButton, Loc.T("通知历史", "Notice history") + (count > 0 ? " · " + NoticeText.Count(count) : ""));
     }
 
     // ----- The recent notices page -----
@@ -454,7 +454,7 @@ public partial class MainWindow
 
     private static string Status(NoticeCenter center, int count)
     {
-        string text = count == 0 ? Loc.T("最近通知", "Recent notices") : Loc.T($"最近通知 · {count} 条", $"Recent notices · {count}");
+        string text = count == 0 ? Loc.T("通知历史", "Notice history") : Loc.T($"通知历史 · {count} 条", $"Notice history · {count}");
         if (center.Paused && center.Settings.NoticesPausedUntil is { } until) text += Loc.T($" · 暂停至 {until.ToLocalTime():HH:mm}", $" · paused until {until.ToLocalTime():HH:mm}");
         else if (center.Quiet) text += Loc.T(" · 安静中", " · quiet");
         return text;
@@ -470,7 +470,7 @@ public partial class MainWindow
         empty.Children.Add(UI.Fixed(Loc.T("暂无通知", "No notices"), 14, 22, UI.Secondary));
         string hint = center.WindowsState switch
         {
-            NoticeSourceState.NeedsAccess => Loc.T("在设置的“灵动提示”中允许读取 Windows 通知。", "Allow access to Windows notifications under Dynamic notices in the settings."),
+            NoticeSourceState.NeedsAccess => Loc.T("在设置的“灵动提示”中允许读取 Windows 通知。", "Allow access to Windows notifications under Live notices in the settings."),
             NoticeSourceState.Denied => Loc.T("Windows 已拒绝通知访问，可在系统隐私设置中开启。", "Windows denies access to notifications; it can be allowed in Windows' privacy settings."),
             _ => Loc.T("应用的新通知会出现在这里，保留 " + Settings.NoticeHistoryHours + " 小时。", "New notices from your apps appear here and are kept for " + Settings.NoticeHistoryHours + " h.")
         };

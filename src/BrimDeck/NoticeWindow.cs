@@ -84,7 +84,7 @@ internal sealed partial class NoticeWindow : Window
         _blur.LiquidTint = () => PanelTheme.SurfaceColor.A / 255d;
         _blur.ContentArea = () => _surface.IsVisible && _surface.ActualWidth > 1 && _surface.ActualHeight > 1 ? new Rect(_surface.RenderSize) : null;
         _blur.Held += held => _surface.FillOpacity = GlassBackdrop.SurfaceOpacity(_blur.SurfaceAside, held, PanelTheme.SurfaceColor.A / 255d);
-        AutomationProperties.SetName(_surface, Loc.T("灵动提示", "Dynamic notice"));
+        AutomationProperties.SetName(_surface, Loc.T("灵动提示", "Live notice"));
         _toast.HorizontalAlignment = HorizontalAlignment.Center; _toast.VerticalAlignment = VerticalAlignment.Center;
         _detail.HorizontalAlignment = HorizontalAlignment.Center; _detail.VerticalAlignment = VerticalAlignment.Top;
         _hoverOpen = new(Dispatcher, () => { _hoverOpen!.Stop(); if (_item is not null && _surface.IsMouseOver && !_showingDetail) OpenDetail(); }) { Interval = TimeSpan.FromMilliseconds(HoverOpenMs) };
@@ -731,7 +731,7 @@ internal sealed partial class NoticeWindow : Window
         header.Children.Add(Plate(notice, 40));
         var who = new StackPanel { Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         who.Children.Add(Line(notice?.AppName ?? "BrimDeck", 12.5, _look.Primary, FontWeights.SemiBold));
-        string meta = notice is null ? Loc.T("最近通知", "Recent notices")
+        string meta = notice is null ? Loc.T("通知历史", "Notice history")
             : NoticeText.OriginName(notice.Origin, notice.Distro) + " · " + NoticeText.Relative(notice.ReceivedAt, DateTimeOffset.UtcNow) + (notice.Category is not NoticeCategory.Message ? " · " + NoticeText.CategoryName(notice.Category) : "");
         who.Children.Add(Line(meta, 11, _look.Tertiary, FontWeights.Normal));
         Grid.SetColumn(who, 1); header.Children.Add(who);
@@ -741,7 +741,7 @@ internal sealed partial class NoticeWindow : Window
         if (_item is { Kind: AttentionKind.Summary, Payload: int count })
         {
             stack.Children.Add(Wrapped(NoticeText.Count(count), 14, _look.Primary, FontWeights.SemiBold, new Thickness(0, 12, 0, 0)));
-            stack.Children.Add(Wrapped(Loc.T("BrimDeck 暂停或安静期间收到的通知都在最近通知中。", "Notices that arrived while BrimDeck was paused or quiet are in the recent notices."), 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0, 4, 0, 0)));
+            stack.Children.Add(Wrapped(Loc.T("BrimDeck 暂停或安静期间收到的通知都在通知历史中。", "Notices that arrived while BrimDeck was paused or quiet are in the notice history."), 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0, 4, 0, 0)));
         }
         else if (notice is not null)
         {

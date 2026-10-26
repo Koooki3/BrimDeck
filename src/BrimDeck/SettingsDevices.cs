@@ -33,11 +33,11 @@ public partial class SettingsWindow
             SelectedIndex = Math.Max(0, Devices.LowChoices.ToList().IndexOf(S.DeviceLowPercent)) };
         AutomationProperties.SetName(threshold, Loc.T("低电量阈值", "Low battery threshold")); PopupMotion.Attach(threshold);
         threshold.SelectionChanged += (_, _) => { if (threshold.SelectedIndex >= 0) Change(s => s.DeviceLowPercent = Devices.LowChoices[threshold.SelectedIndex]); };
-        var off = TextLine(Loc.T("灵动提示未开启，提醒不会显示。", "Dynamic notices are off, so the notice will not show."), 11.5, TextSecondary);
+        var off = TextLine(Loc.T("灵动提示未开启，提醒不会显示。", "Live notices are off, so the notice will not show."), 11.5, TextSecondary);
         off.TextWrapping = TextWrapping.Wrap; off.Visibility = S.NoticesEnabled ? Visibility.Collapsed : Visibility.Visible;
         Group(Toggle(Loc.T("电量低时提醒", "Notify when a battery is low"), S.DeviceLowNotice, value => Change(s => s.DeviceLowNotice = value), enabled: S.NoticesEnabled,
                 help: Loc.T("设备电量降到阈值时，在岛上显示一次提醒；充电后或电量回升后才会再次提醒。提醒通过灵动提示显示，需先在“灵动提示”中开启。设备页没打开时，蓝牙设备随 Windows 的电量变化提醒，2.4G 接收器每 15 分钟读一次；Xbox 无线适配器上的手柄、AirPods，以及只能通过蓝牙电池服务读取电量的低功耗蓝牙设备，只在设备页打开时读取，不会在后台提醒。",
-                    "When a device's battery falls to the threshold, the island shows a notice once; it notices again only after the device charges or its level climbs back. The notice goes through dynamic notices, which must be on. While the devices page is closed, Bluetooth devices notice as Windows' level changes and 2.4 GHz receivers are read every 15 minutes; controllers on the Xbox Wireless adapter, AirPods, and Bluetooth LE devices whose level only their battery service gives are read only while the page is open, so they do not notice in the background.")),
+                    "When a device's battery falls to the threshold, the island shows a notice once; it notices again only after the device charges or its level climbs back. The notice goes through live notices, which must be on. While the devices page is closed, Bluetooth devices notice as Windows' level changes and 2.4 GHz receivers are read every 15 minutes; controllers on the Xbox Wireless adapter, AirPods, and Bluetooth LE devices whose level only their battery service gives are read only while the page is open, so they do not notice in the background.")),
             Row(Loc.T("电量阈值", "Threshold"), threshold, off,
                 () => Loc.T("电量不高于此值时显示为低电量，高出 10 个百分点以内显示为偏低，分别使用读数的严重与警告颜色。设备页、收起行的“设备最低电量”和低电量提醒都按它判断。",
                     "At or under this level a battery shows as low; within 10 points above it, as getting low, in the readings' critical and warning colors. The devices page, the collapsed \"Lowest device battery\" reading and the low battery notice all go by it.")));
