@@ -143,6 +143,8 @@ public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
     public ulong? DedicatedTotal { get; init; }
     public ulong Luid { get; init; }
     public string Key { get; init; } = "";
+    // The key saved before adapters had a location (GpuAdapter.LegacyKey), to find a choice saved then.
+    public string LegacyKey { get; init; } = "";
     public GpuKind Kind { get; init; }
     public IReadOnlyList<double> History { get; init; } = [];
     public double? DedicatedFraction => DedicatedBytes.TryGet(out var used) && DedicatedTotal is { } total && total > 0 ? Math.Clamp((double)used / total, 0, 1) : null;
