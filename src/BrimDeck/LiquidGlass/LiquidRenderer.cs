@@ -247,9 +247,6 @@ internal sealed class LiquidRenderer : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (frame.Width < 1 || frame.Height < 1) return;
         var swapChain = EnsureSwapChain(frame.Width, frame.Height);
-        // E17: a waitable swap chain at one frame of latency - the wait comes before the drawing (bounded: never longer than a
-        // frame on the UI thread), so a frame is drawn from the newest capture rather than queued behind one still on screen.
-        if (_latency != IntPtr.Zero) WaitForSingleObjectEx(_latency, LatencyWaitMs, true);
         Draw(background, pad, frame, _target!);
         swapChain.Present(0, PresentFlags.None);
     }
@@ -815,12 +812,9 @@ internal sealed class LiquidRenderer : IDisposable
 
     // The swap chain, its buffers at least the frame's size: they grow (in steps of 64 pixels, so an opening panel does not
     // reallocate every frame) and never shrink, and the source size shows only the frame's part of them, from the top-left.
-    // E17: made with a frame latency waitable object (Render waits on it, at most LatencyWaitMs).
-    private const SwapChainFlags SwapFlags = SwapChainFlags.FrameLatencyWaitableObject;
-    private const uint LatencyWaitMs = 17;
-    private IntPtr _latency;
-    [DllImport("kernel32.dll", SetLastError = true)] private static extern uint WaitForSingleObjectEx(IntPtr handle, uint milliseconds, bool alertable);
-    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);
+    // E17 (round 15): a frame latency waitable swap chain (latency 1, a bounded wait before drawing) was tried and left out: the
+    // glass followed the island no closer (1.00 frames behind either way, PerfCost) and the process's GPU engine time while
+    // opening and closing doubled (4.6 to 8.8 ms/s).
     private IDXGISwapChain2 EnsureSwapChain(int width, int height)
     {
         if (_swapChain is null)
@@ -830,17 +824,15 @@ internal sealed class LiquidRenderer : IDisposable
             using var adapter = dxgi.GetAdapter();
             using var factory = adapter.GetParent<IDXGIFactory2>();
             var description = new SwapChainDescription1((uint)_capacity.Width, (uint)_capacity.Height, Pixels, false, Usage.RenderTargetOutput, 2, Scaling.Stretch,
-                SwapEffect.FlipSequential, AlphaMode.Premultiplied, SwapFlags);
+                SwapEffect.FlipSequential, AlphaMode.Premultiplied);
             using var created = factory.CreateSwapChainForComposition(_device, description);
             _swapChain = created.QueryInterface<IDXGISwapChain2>();
-            _swapChain.MaximumFrameLatency = 1;
-            _latency = _swapChain.FrameLatencyWaitableObject;
         }
         else if (width > _capacity.Width || height > _capacity.Height)
         {
             _target?.Dispose(); _target = null;
             _capacity = (Math.Max(_capacity.Width, Step(width)), Math.Max(_capacity.Height, Step(height)));
-            _swapChain.ResizeBuffers(2, (uint)_capacity.Width, (uint)_capacity.Height, Pixels, SwapFlags).CheckError();
+            _swapChain.ResizeBuffers(2, (uint)_capacity.Width, (uint)_capacity.Height, Pixels, SwapChainFlags.None).CheckError();
             _size = default;
         }
         if (_size != (width, height))
@@ -947,7 +939,6 @@ internal sealed class LiquidRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
         _target?.Dispose(); _swapChain?.Dispose();
-        if (_latency != IntPtr.Zero) { CloseHandle(_latency); _latency = IntPtr.Zero; }
         _copy?.Dispose(); DisposePyramid(); _stats[0]?.Dispose(); _stats[1]?.Dispose();
         foreach (var measure in _measures) measure?.Dispose();
         // The immediate context is not let go: Vortice keeps one wrapper for the device, which the capture side uses too.
