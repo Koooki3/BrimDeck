@@ -625,6 +625,14 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+Lens design system (the glass slab's model: bevel, slope, Snell refraction at 1/1.45 through a slab, dispersion, key light and its opposite, Fresnel, role tints; used in Liquid.hlsl, Slab)
+https://github.com/ruiqichenbiec/design-systems (lens/internal/renderer.js)
+MIT License, Copyright (c) 2026 DayDreamInAReverie, as its repository states. Its formulas and constants were taken as documented, not its code.
+
+liquid-glass-studio (the rim's grazing Fresnel and the highlight coloured by the refracted backdrop; used in Liquid.hlsl, Slab)
+https://github.com/iyinchao/liquid-glass-studio (src/shaders/fragment-main.glsl)
+MIT License, as its repository states. Its formulas were taken as documented, not its code.
+
 microsoft-ui-xaml (Acrylic's recipe and constants: saturation 1.25, the luminosity blend and its opacities .96 dark and .85 light, the tints #2C2C2C and #FCFCFC, tint opacity .15 dark, noise .02; used in Liquid.hlsl, Material)
 https://github.com/microsoft/microsoft-ui-xaml (controls/dev/Materials/Acrylic: AcrylicBrush.h, AcrylicBrush.cpp, AcrylicBrush_themeresources.xaml)
 
