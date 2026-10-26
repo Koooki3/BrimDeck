@@ -30,16 +30,20 @@ internal enum Handover
 // A rebuild during a hand-over that is still under way keeps that hand-over going and drops only its own old elements, so a
 // panel dragged across a size step does not cut its hand-over short 25 times a second. The page switch hands over a picture
 // of the page it leaves (Capture, Send): the pages keep their own elements, and the monitor page keeps its view across switches.
+// Each hand-over leaves on its own layer (a batch in the leaving layer), so a switch to another page while the last one is
+// still leaving lets that one finish leaving instead of cutting it off (motion-review F17); the page that was still arriving
+// leaves from where it was.
 internal sealed class PageHandover
 {
     private const double Travel = 16, Faint = .3;
     private readonly Grid _layer;
-    private readonly TranslateTransform _layerShift = new();
     private readonly List<UIElement> _held = [];
     private Thickness _margin;
     private int _version;
+    // The batch waiting for its page to be laid out before it starts to leave.
+    private Grid? _waiting;
 
-    public PageHandover(Grid layer) { _layer = layer; _layer.RenderTransform = _layerShift; _layer.IsHitTestVisible = false; }
+    public PageHandover(Grid layer) { _layer = layer; _layer.IsHitTestVisible = false; }
 
     // Where a page's content lies in the layer, which spans the page's rows: its margins, with the top counted from the top of
     // the first row. Taken before the rebuild or switch lays the rows out again.
@@ -67,7 +71,9 @@ internal sealed class PageHandover
         if (_held.Count == 0 || motion == Handover.None || !Soft.Enabled) { _held.Clear(); return; }
         var leaving = _held.ToList();
         _held.Clear();
-        Begin(leaving, _margin, content, motion);
+        // A rebuild while the page was still arriving (the usage page's own panel is what arrives): its elements leave from the
+        // opacity and shift the page had, not from fully in place.
+        Begin(leaving, _margin, content, motion, content.Opacity, (content.RenderTransform as TranslateTransform)?.X ?? 0);
     }
 
     // A picture of a page as it is on screen, to leave in its place; null for a page that is not laid out.
@@ -75,13 +81,22 @@ internal sealed class PageHandover
     {
         double width = page.ActualWidth, height = page.ActualHeight;
         if (!page.IsVisible || width < 1 || height < 1 || PresentationSource.FromVisual(page) is null) return null;
-        var dpi = VisualTreeHelper.GetDpi(page);
+        // A page still arriving is pictured as it is drawn now: the brush takes the page's own opacity and shift with it
+        // (checked: a page at half opacity and moved 10 DIP comes out so), so the picture leaves from where the page was.
+        return new Image { Source = Snapshot(page, width, height, VisualTreeHelper.GetDpi(page)), Width = width, Height = height, Stretch = Stretch.None,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
+    }
+
+    // A frozen picture of an element's own area at the given scale, drawn one to one (Exactly), so its offset in its parent is
+    // not part of it. Its own opacity and render transform are: the brush draws the element as it is drawn.
+    public static BitmapSource Snapshot(Visual element, double width, double height, DpiScale dpi)
+    {
         var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
         var drawing = new DrawingVisual();
-        using (var context = drawing.RenderOpen()) context.DrawRectangle(Exactly(page, width, height), null, new Rect(0, 0, width, height));
+        using (var context = drawing.RenderOpen()) context.DrawRectangle(Exactly(element, width, height), null, new Rect(0, 0, width, height));
         picture.Render(drawing);
         picture.Freeze();
-        return new Image { Source = picture, Width = width, Height = height, Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
+        return picture;
     }
 
     // A brush that draws an element's own area one to one, for pictures of it. The view box is the element's area, not the
@@ -109,60 +124,78 @@ internal sealed class PageHandover
     // The hand-over starts once the rebuilt page has been laid out and drawn: building it takes a frame or two, and a move
     // started at once lost its first part to them and jumped. Until then the old content stays as it was and the new one out
     // of sight. Timing and curve are the system monitor's (Soft.Follow): what leaves goes in about a fifth of a second, what
-    // arrives takes the monitor's move.
-    private void Begin(List<UIElement> leaving, Thickness margin, FrameworkElement content, Handover motion)
+    // arrives takes the short swap (motion-review C8; it took the monitor's move, 420 ms).
+    private void Begin(List<UIElement> leaving, Thickness margin, FrameworkElement content, Handover motion, double opacity = 1, double x = 0)
     {
-        Drop();
-        int version = _version;
-        _layer.Margin = margin;
-        foreach (var child in leaving) _layer.Children.Add(child);
+        // A page switch lets what is still leaving finish; anything else starts afresh (a rebuild while dragging would pile up).
+        if (motion is Handover.Forward or Handover.Back) Settle(); else Drop();
+        int version = ++_version;
         var shift = content.RenderTransform as TranslateTransform;
         if (shift is null || shift.IsFrozen) content.RenderTransform = shift = new TranslateTransform();
-        bool arrives = motion != Handover.Dissolve;
         if (motion == Handover.Dissolve)
         {
             // Nothing leaves; the rebuilt content brightens from faint once it has been laid out.
-            _layer.Children.Clear();
             _holding = content; content.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(Faint, Faint, TimeSpan.Zero));
         }
-        else if (arrives) { _holding = content; content.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 0, TimeSpan.Zero)); }
+        else
+        {
+            var batch = new Grid { Margin = margin, IsHitTestVisible = false, Opacity = opacity, RenderTransform = new TranslateTransform(x, 0) };
+            foreach (var child in leaving) batch.Children.Add(child);
+            _layer.Children.Add(batch);
+            _waiting = batch;
+            _holding = content; content.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 0, TimeSpan.Zero));
+        }
         content.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
             if (_version != version) return;
             _holding = null;
-            int leave = motion == Handover.Morph ? Soft.Hover : 200;
-            int arrive = motion == Handover.Morph ? Soft.Short : Soft.Move;
             if (motion == Handover.Dissolve) { content.BeginAnimation(UIElement.OpacityProperty, Arrival(Faint, 1, Soft.Short)); return; }
-            var away = Soft.Fade(1, 0, leave, Soft.Follow);
-            away.Completed += (_, _) => { if (_version == version) EndLeave(); };
-            _layer.BeginAnimation(UIElement.OpacityProperty, away);
-            if (!arrives) return;
-            content.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, arrive));
+            if (_waiting is not { } batch) return;
+            _waiting = null;
+            int leave = motion == Handover.Morph ? Soft.Hover : 200;
+            var away = Soft.Fade(opacity, 0, leave, Soft.Follow);
+            away.Completed += (_, _) => Remove(batch);
+            batch.BeginAnimation(UIElement.OpacityProperty, away);
+            content.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, Soft.Short));
             if (motion == Handover.Morph) return;
             double direction = motion == Handover.Back ? -1 : 1;
-            _layerShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(0, -direction * Travel, leave, Soft.Follow));
-            shift.BeginAnimation(TranslateTransform.XProperty, Arrival(direction * Travel, 0, arrive));
+            batch.RenderTransform.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(x, x - direction * Travel, leave, Soft.Follow));
+            shift.BeginAnimation(TranslateTransform.XProperty, Arrival(direction * Travel, 0, Soft.Short));
         });
     }
 
     // Ends a hand-over at once: the old elements go and the page is in place, also when its arrival had not started yet.
     public void Drop()
     {
+        Settle();
+        EndLeave();
+    }
+
+    // A hand-over that has not started yet is given up: its page shows as it is and its old elements go; what has started
+    // to leave carries on.
+    private void Settle()
+    {
         if (_holding is { } held)
         {
             held.BeginAnimation(UIElement.OpacityProperty, null);
             _holding = null;
         }
-        EndLeave();
+        if (_waiting is { } waiting) { Remove(waiting); _waiting = null; }
+    }
+
+    // A batch that has gone lets go of its elements too, as the layer did, so none is left with a parent.
+    private void Remove(Grid batch)
+    {
+        batch.Children.Clear();
+        _layer.Children.Remove(batch);
     }
 
     // The old elements have gone; an arrival under way carries on.
     private void EndLeave()
     {
         _version++;
-        _layer.BeginAnimation(UIElement.OpacityProperty, null); _layer.Opacity = 1;
-        _layerShift.BeginAnimation(TranslateTransform.XProperty, null); _layerShift.BeginAnimation(TranslateTransform.YProperty, null);
-        _layerShift.X = _layerShift.Y = 0;
+        _waiting = null;
+        foreach (var batch in _layer.Children.OfType<Grid>().ToList()) batch.Children.Clear();
         _layer.Children.Clear();
     }
 

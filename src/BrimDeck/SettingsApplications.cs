@@ -95,7 +95,8 @@ public sealed partial class SettingsWindow
         // direction change can briefly expose the destination position.
         SetRowOffset(row, start);
         long version = _appRowMotionVersions[row];
-        var motion = new DoubleAnimation(start, target, TimeSpan.FromMilliseconds(S.AnimationDuration))
+        // The monitor's glide between choices, whatever the panel's animation length (motion-review C5).
+        var motion = new DoubleAnimation(start, target, TimeSpan.FromMilliseconds(Soft.Choose))
         {
             EasingFunction = Soft.Out
         };

@@ -42,13 +42,14 @@ internal static class PanelThemeTests
 
         // Built-in themes.
         check("Built-in themes are listed in order and Monokai Pro is not among them",
-            PanelThemes.BuiltIns.Select(theme => theme.Id).SequenceEqual(["dark", "light", "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", "cyberpunk-edgerunners"]));
+            PanelThemes.BuiltIns.Select(theme => theme.Id).SequenceEqual(["dark", "light", "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", "island-holiday", "pixel-blocks", "cyberpunk-edgerunners"]));
         check("A built-in theme's id is its file name", PanelThemes.BuiltIns.All(theme => PanelThemes.NormalizeId(theme.File.Id) == theme.Id));
         check("Every built-in theme names an open license", PanelThemes.BuiltIns.All(theme => theme.File.License is "MIT" or "Apache-2.0"));
         bool allValid = true; var adjusted = new List<string>();
-        foreach (var theme in PanelThemes.BuiltIns)
+        // A theme with a night look is held to the same rules in both looks.
+        foreach (var (theme, palette) in PanelThemes.BuiltIns.SelectMany(theme => theme.File.Night is null
+            ? new[] { (theme, PanelThemes.Resolve(theme)) } : [(theme, PanelThemes.Resolve(theme)), (theme, PanelThemes.Resolve(theme, true))]))
         {
-            var palette = PanelThemes.Resolve(theme);
             allValid &= palette.Colors.Count == PanelThemes.Tokens.Count;
             var popup = palette["popup"].Over(palette.Surface);
             foreach (var token in PanelThemes.Tokens.Where(token => token.Against is PanelThemeBackdrop.Surface or PanelThemeBackdrop.SurfaceAndPopup))
@@ -60,7 +61,7 @@ internal static class PanelThemeTests
             allValid &= palette["textSecondary"].MinimumContrast([palette["fill"].Over(palette.Surface), palette["hover"].Over(palette.Surface)]) >= PanelThemes.TextContrast - .001;
             foreach (var color in palette.Apps.Values) allValid &= color.IsOpaque && color.MinimumContrast(palette.SurfaceStops) >= PanelThemes.GraphicContrast - .001;
             // The built-in themes are designed to pass as written; an adjustment would mean a mistake in the file.
-            adjusted.AddRange(palette.Adjustments.Select(a => $"{theme.Id}.{a.Key} {a.Before}->{a.After} {a.Ratio:0.00}/{a.Minimum}"));
+            adjusted.AddRange(palette.Adjustments.Select(a => $"{theme.Id}{(palette.IsNight ? " (night)" : "")}.{a.Key} {a.Before}->{a.After} {a.Ratio:0.00}/{a.Minimum}"));
         }
         check("Every built-in theme meets every contrast rule", allValid);
         check("Built-in themes pass without any adjustment " + string.Join("; ", adjusted), adjusted.Count == 0);
@@ -235,6 +236,22 @@ internal static class PanelThemeTests
                 && original.HasOwnSwatches == copy.HasOwnSwatches && original.Swatches.SequenceEqual(copy.Swatches);
         }
         check("A theme made from another starts out identical: colors, effects, apps, clock and swatches", reproduced);
+        // A theme with a night look keeps it, with its hours: the copy's night look is the original's, and its day look too.
+        var holidayTheme = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
+        var holidayCopyText = PanelThemes.FillTemplate("copy", PanelThemes.Resolve(holidayTheme), PanelThemes.IslandHoliday, holidayTheme.File);
+        var holidayCopy = PanelThemes.Parse(holidayCopyText);
+        var holidayCopyNight = PanelThemes.Build("copy", holidayCopy, night: true);
+        var holidayNight = PanelThemes.Resolve(holidayTheme, true);
+        check("A theme made from one with a night look keeps the night look and its hours",
+            holidayCopy.Night is not null && holidayCopy.Daylight is { Day: "06:30", Night: "18:30" } && holidayCopyNight.IsNight && holidayCopyNight.Adjustments.Count == 0
+            && holidayNight.Colors.All(pair => holidayCopyNight[pair.Key] == pair.Value) && holidayNight.Apps.All(pair => holidayCopyNight.Apps[pair.Key] == pair.Value)
+            && holidayNight.Effects.SurfaceGradient.SequenceEqual(holidayCopyNight.Effects.SurfaceGradient) && holidayNight.Effects.RimGradient.SequenceEqual(holidayCopyNight.Effects.RimGradient)
+            && holidayNight.Effects.ShadowDepth == holidayCopyNight.Effects.ShadowDepth && holidayNight.ClockGradients.SelectMany(g => g.Stops).SequenceEqual(holidayCopyNight.ClockGradients.SelectMany(g => g.Stops))
+            && PanelThemes.Build("copy", holidayCopy).Colors.All(pair => PanelThemes.Resolve(holidayTheme)[pair.Key] == pair.Value));
+        check("The copied night look writes only what it sets", holidayCopy.Night is { Id: "", Name: "", Base: "", Swatches: null, Night: null, Daylight: null } && holidayCopy.Night.Clock is { Style: "", Color: "" }
+            && !holidayCopyText.Contains("displayName", StringComparison.OrdinalIgnoreCase) && PanelThemes.LoadFolder(Folder("holiday-copy", ("copy.json", holidayCopyText))).Single().Usable);
+        check("A theme without a night look gets none from the template",
+            PanelThemes.Parse(PanelThemes.FillTemplate("plain", BuiltIn("dracula"), "dracula", PanelThemes.BuiltIn("dracula")!.File)) is { Night: null, Daylight: null });
         var nightOwl = BuiltIn("night-owl");
         // No built-in theme suggests a gradient clock, so a theme of its own carries one.
         var glow = PanelThemes.Build("glow", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "neon", Color = "gradient", Gradient = ["#C792EA", "#82AAFF", "#7FDBCA"] } });
@@ -299,6 +316,51 @@ internal static class PanelThemeTests
         var settings = new DeckSettings { PanelTheme = "  GitHub-Dark " }; settings.Normalize();
         var empty = new DeckSettings { PanelTheme = "" }; empty.Normalize();
         check("The panel theme setting is normalized", settings.PanelTheme == "github-dark" && empty.PanelTheme == "dark" && new DeckSettings().PanelTheme == "dark");
+
+        // Day and night looks (island holiday): which look the local time calls for, and when it changes next.
+        {
+            var holiday = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
+            var holidayFile = holiday.File;
+            DateTime At(int hour, int minute) => new(2026, 7, 1, hour, minute, 0);
+            var holidayDay = PanelThemes.Resolve(holiday); var holidayDark = PanelThemes.Resolve(holiday, true);
+            check("Island holiday is an extension theme, light by day and dark by night",
+                holiday.Kind == PanelThemeKind.Extension && !holidayDay.IsNight && !holidayDay.IsDark && holidayDark.IsNight && holidayDark.IsDark
+                && holidayDark.Surface != holidayDay.Surface && holidayDark.Effects.ShadowDepth == 0 && holidayDay.Effects.ShadowDepth > 0);
+            check("A night look is resolved once and kept", ReferenceEquals(holidayDark, PanelThemes.Resolve(holiday, true)) && ReferenceEquals(holidayDay, PanelThemes.Resolve(holiday)));
+            check("A theme without a night look has one look", ReferenceEquals(PanelThemes.Resolve(PanelThemes.BuiltIn("dracula")!, true), BuiltIn("dracula"))
+                && !PanelThemes.IsNight(PanelThemes.BuiltIn("dracula")!.File, At(23, 0)) && PanelThemes.NextDaylightChange(PanelThemes.BuiltIn("dracula")!.File, At(23, 0)) is null);
+            check("The day look runs from 06:30 to 18:30 by default", !PanelThemes.IsNight(holidayFile, At(6, 30)) && !PanelThemes.IsNight(holidayFile, At(18, 29))
+                && PanelThemes.IsNight(holidayFile, At(18, 30)) && PanelThemes.IsNight(holidayFile, At(6, 29)) && PanelThemes.IsNight(holidayFile, At(0, 0)));
+            check("The next change is the next of the two hours", PanelThemes.NextDaylightChange(holidayFile, At(12, 0)) == At(18, 30)
+                && PanelThemes.NextDaylightChange(holidayFile, At(18, 30)) == At(6, 30).AddDays(1) && PanelThemes.NextDaylightChange(holidayFile, At(3, 0)) == At(6, 30));
+            // A night shift's day runs past midnight.
+            const string shift = "20:00-08:00";
+            check("A day may run past midnight", !PanelThemes.IsNight(holidayFile, At(23, 0), shift) && !PanelThemes.IsNight(holidayFile, At(7, 59), shift)
+                && PanelThemes.IsNight(holidayFile, At(12, 0), shift) && PanelThemes.NextDaylightChange(holidayFile, At(23, 0), shift) == At(8, 0).AddDays(1)
+                && PanelThemes.NextDaylightChange(holidayFile, At(12, 0), shift) == At(20, 0));
+            check("Hours that cannot be used fall back to the theme's", new[] { "", "nonsense", "25:00-07:00", "07:00-07:00", "07:00", "7:00-19:61" }
+                .All(bad => PanelThemes.DaylightHours(holidayFile, bad) == (new TimeSpan(6, 30, 0), new TimeSpan(18, 30, 0))));
+            check("Valid hours from the settings win", PanelThemes.DaylightHours(holidayFile, "7:00-19:30") == (new TimeSpan(7, 0, 0), new TimeSpan(19, 30, 0)));
+            var holidayOwnHours = new PanelThemeFile { Night = new PanelThemeFile(), Daylight = new PanelThemeDaylight { Day = "05:00", Night = "05:00" } };
+            check("A theme's own day of no length falls back to 06:30 to 18:30", PanelThemes.DaylightHours(holidayOwnHours) == (PanelThemes.DefaultDay, PanelThemes.DefaultNight));
+            var hours = new DeckSettings { ThemeDaylight = " 7:00-19:30" }; hours.Normalize();
+            var badHours = new DeckSettings { ThemeDaylight = "07:00-07:00" }; badHours.Normalize();
+            var nullHours = new DeckSettings { ThemeDaylight = null! }; nullHours.Normalize();
+            check("The day hours setting is normalized", hours.ThemeDaylight == "07:00-19:30" && badHours.ThemeDaylight == "" && nullHours.ThemeDaylight == "" && new DeckSettings().ThemeDaylight == "");
+            // The night look is checked like the theme itself, and so are the hours.
+            var nightFolder = Folder("night-themes",
+                ("bad-night.json", """{ "id": "bad-night", "night": { "colors": { "nope": "#000000" } } }"""),
+                ("bad-hours.json", """{ "id": "bad-hours", "night": { }, "daylight": { "day": "6.30", "night": "18:30" } }"""),
+                ("null-night.json", """{ "id": "null-night", "night": { "apps": { "claude": null } } }"""),
+                ("good-night.json", """{ "id": "good-night", "base": "light", "night": { "colors": { "surface": "#101010", "textPrimary": "#FFFFFF" } }, "daylight": { "day": "07:00", "night": "21:00" } }"""));
+            var nightThemes = PanelThemes.LoadFolder(nightFolder);
+            check("A night look with an unknown color is reported as the night look's", ByFile(nightThemes, "bad-night.json") is { Usable: false, Error: { } nightError } && nightError.Contains("nope"));
+            check("Hours that are not HH:mm are reported", ByFile(nightThemes, "bad-hours.json") is { Usable: false, Error: { } hoursError } && hoursError.Contains("6.30"));
+            check("A null color in the night look is reported", !ByFile(nightThemes, "null-night.json").Usable);
+            var goodNight = ByFile(nightThemes, "good-night.json");
+            check("A theme file of the user's can have a night look", goodNight.Usable && PanelThemes.Resolve(goodNight, true).Surface == ThemeColor.Parse("#101010")
+                && PanelThemes.Resolve(goodNight).Surface == BuiltIn("light").Surface && PanelThemes.IsNight(goodNight.File, At(22, 0)) && !PanelThemes.IsNight(goodNight.File, At(20, 0)));
+        }
 
         // XAML: App.xaml carries the dark theme's colors as the first values of the brushes PanelTheme replaces.
         var source = new DirectoryInfo(AppContext.BaseDirectory);

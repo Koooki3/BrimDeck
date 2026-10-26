@@ -1,0 +1,148 @@
+{
+  // Island holiday: a seaside theme that is light by day and dark by night, changing by the local clock (06:30 and 18:30
+  // unless the settings move them).
+  //   Day: warm sand at the top fading into sea foam, deep-sea text, a lagoon turquoise for focus and tracks and a coral clock.
+  //   The rim is the shoreline: turquoise, sky and sand, and the shadow is a soft sea-green.
+  //   Night: a moonlit sea, deep navy into teal, a lantern-gold clock and a soft bioluminescent glow under the island instead
+  //   of a shadow.
+  "formatVersion": 1,
+  "id": "island-holiday",
+  "name": "海岛假日",
+  "nameEn": "Island Holiday",
+  "description": "白天是暖沙与泻湖的浅色，夜晚是月光海面的深色，按本地时间自动渐变切换；夜里岛下泛起柔和的海光。",
+  "descriptionEn": "Warm sand and lagoon by day, a moonlit sea by night, fading over by the local clock; at night a soft sea glow lies under the island.",
+  "author": "BrimDeck",
+  "license": "Apache-2.0",
+  "base": "light",
+  "daylight": { "day": "06:30", "night": "18:30" },
+  "colors": {
+    "surface": "#FFF6E8",
+    "textPrimary": "#0D323D",
+    "textSecondary": "#375660",
+    "textTertiary": "#5B7880",
+    "accent": "#007784",
+    "onAccent": "#FFFFFF",
+    "danger": "#B73527",
+    "liked": "#D23F55",
+    "clock": "#B0412A",
+    "equalizer": "#0A7E8B",
+    "hairline": "#1A0D323D",
+    "track": "#1F0D323D",
+    "ringTrack": "#2B0D323D",
+    "fill": "#120D323D",
+    "fillSelected": "#240D323D",
+    "hover": "#170D323D",
+    "pressed": "#2B0D323D",
+    "outline": "#330D323D",
+    "popup": "#FFFBF4",
+    "popupBorder": "#2E0D323D",
+    "input": "#F7EFE2",
+    "rangeFill": "#33007784",
+    "coverPlaceholder": "#140D323D",
+    "coverOutline": "#1F0D323D",
+    "scrollThumb": "#B7C6C2",
+    "rim": "#7FCFCB",
+    "shadow": "#0B5560",
+    "indicator": "#86CFCB",
+    "indicatorProgress": "#0D323D",
+    "switchFill": "#0F0D323D",
+    "seekRail": "#290D323D",
+    "rowDivider": "#120D323D",
+    "rowHover": "#0D0D323D",
+    "menuDetail": "#5B7880",
+    "tooltip": "#FFFBF4",
+    "tooltipBorder": "#330D323D",
+    "bubble": "#FFFBF4",
+    "bubbleBorder": "#290D323D"
+  },
+  "apps": {
+    "claude": "#B0512D", "codex": "#1A7A4B", "antigravity": "#2D60C2", "cursor": "#5A646C", "zcode": "#334E88",
+    "dsh": "#385BB9", "grokBot": "#5A646C", "kimi": "#077893", "opencode": "#34322F", "manual": "#8744B2", "other": "#5A646C", "warning": "#946300", "critical": "#B73527"
+  },
+  "clock": {
+    "style": "serif", "color": "default",
+    "palette": { "amber": "#955800", "cyan": "#08717A", "pink": "#A83565", "lime": "#4A7100" },
+    "gradients": [
+      { "name": "日落", "nameEn": "Sunset", "stops": ["#A9480E", "#A83565", "#6544C2"] },
+      { "name": "海洋", "nameEn": "Ocean", "stops": ["#08717A", "#1D5DBA", "#5444C2"] },
+      { "name": "极光", "nameEn": "Aurora", "stops": ["#2B732F", "#08717A", "#1D5DBA"] },
+      { "name": "火焰", "nameEn": "Ember", "stops": ["#955800", "#A9480E", "#B73527"] },
+      { "name": "霓虹", "nameEn": "Neon", "stops": ["#A12A91", "#6544C2", "#08717A"] }
+    ]
+  },
+  "effects": {
+    // Sand at the top, sea foam below; the shoreline along the rim.
+    "surfaceGradient": ["#00FFF6E8", "#E0E4F6F1"],
+    "rimGradient": ["#6CCBC6", "#8CCBEA", "#F0CF94", "#6CCBC6"],
+    "rimWidth": 1.25,
+    "shadowBlur": 16,
+    "shadowDepth": 3,
+    "shadowOpacity": 0.22
+  },
+  // Laid over everything above from 18:30 to 06:30 (or the hours chosen in the settings).
+  "night": {
+    "colors": {
+      "surface": "#0A1A2C",
+      "textPrimary": "#EEF7F8",
+      "textSecondary": "#C2D4D8",
+      "textTertiary": "#839EA6",
+      "accent": "#45D5C8",
+      "onAccent": "#05222A",
+      "danger": "#FF9286",
+      "liked": "#FF7397",
+      "clock": "#FFD27A",
+      "equalizer": "#45D5C8",
+      "hairline": "#1FB1E0E6",
+      "track": "#26B1E0E6",
+      "ringTrack": "#33B1E0E6",
+      "fill": "#14B1E0E6",
+      "fillSelected": "#2EB1E0E6",
+      "hover": "#1FB1E0E6",
+      "pressed": "#33B1E0E6",
+      "outline": "#3DB1E0E6",
+      "popup": "#10243A",
+      "popupBorder": "#4045D5C8",
+      "input": "#081626",
+      "rangeFill": "#4045D5C8",
+      "coverPlaceholder": "#14B1E0E6",
+      "coverOutline": "#26B1E0E6",
+      "scrollThumb": "#3E5A70",
+      "rim": "#45D5C8",
+      "shadow": "#2FC9BE",
+      "indicator": "#5C7590",
+      "indicatorProgress": "#071320",
+      "switchFill": "#12B1E0E6",
+      "seekRail": "#38B1E0E6",
+      "rowDivider": "#14B1E0E6",
+      "rowHover": "#0FB1E0E6",
+      "menuDetail": "#C2D4D8",
+      "tooltip": "#10243A",
+      "tooltipBorder": "#4D45D5C8",
+      "bubble": "#142C45",
+      "bubbleBorder": "#2E45D5C8"
+    },
+    "apps": {
+      "claude": "#F0AC8C", "codex": "#8EE3B1", "antigravity": "#9EBBFF", "cursor": "#D3DCE2", "zcode": "#9AACEB",
+      "dsh": "#8FAEF2", "grokBot": "#D3DCE2", "kimi": "#6FD8F2", "opencode": "#8D969E", "manual": "#D2A6F2", "other": "#D3DCE2", "warning": "#FFD27A", "critical": "#FF8E8E"
+    },
+    "clock": {
+      "palette": { "amber": "#FFC06B", "cyan": "#6FE8E0", "pink": "#FF9EC4", "lime": "#D9FF86" },
+      "gradients": [
+        { "name": "日落", "nameEn": "Sunset", "stops": ["#FFD27A", "#FF9E8C", "#FF8FC0"] },
+        { "name": "海洋", "nameEn": "Ocean", "stops": ["#7CF2E8", "#6FC6FF", "#A9A8FF"] },
+        { "name": "极光", "nameEn": "Aurora", "stops": ["#93FFB8", "#6FE8E0", "#A9A8FF"] },
+        { "name": "火焰", "nameEn": "Ember", "stops": ["#FFE18A", "#FFC06B", "#FF9286"] },
+        { "name": "霓虹", "nameEn": "Neon", "stops": ["#FF93EE", "#B9A0FF", "#6FE8E0"] }
+      ]
+    },
+    "effects": {
+      // Navy at the top, the sea deepening into teal below; a moonlit shoreline along the rim; a soft glow, no shadow.
+      "surfaceGradient": ["#000A1A2C", "#E6113650"],
+      "rimGradient": ["#45D5C8", "#5D7FD8", "#FFD27A", "#45D5C8"],
+      "rimWidth": 1.25,
+      "shadowBlur": 16,
+      "shadowDepth": 0,
+      "shadowOpacity": 0.34
+    }
+  }
+}
