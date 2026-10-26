@@ -30,6 +30,11 @@ internal sealed class SystemSampler : IDisposable
     private PdhQuery? _pdh;
     private CpuProvider? _cpu;
     private GpuProvider? _gpu;
+    private ThermalZones? _zones;
+    private readonly GpuTemperatures _gpuTemperatures = new();
+    private readonly StorageReader _storage = new();
+    // Whether the processor's and the graphics adapter's temperatures are read, the drives, and the drives' temperatures (SetExtras).
+    private volatile bool _temperatures, _storageWanted, _driveTemperatures;
     private readonly NetworkProvider _network = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
@@ -80,6 +85,23 @@ internal sealed class SystemSampler : IDisposable
         else _wake.Set();
     }
 
+    // Called on the UI thread with what the panels show: temperatures, the processor's and the graphics adapter's (the expanded page
+    // with temperatures on, or the collapsed row's temperature); storage, the drives (the page with storage on, or the collapsed
+    // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
+    // page knows early how many lines it needs for them.
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures)
+    {
+        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures;
+        if (storage && (_storage.Drives == SensorState.Unknown || _driveTemperatures && _storage.Temperatures == SensorState.Unknown)) _storage.Start(_driveTemperatures);
+    }
+    // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
+    // how many (-1 until read); the page keeps room for what has turned up or has not been asked yet.
+    public SensorState CpuSensor => _zones?.State ?? SensorState.Unknown;
+    public SensorState GpuSensor => _gpuTemperatures.State;
+    public SensorState DriveSensor => _storage.Temperatures;
+    public SensorState StorageState => _storage.Drives;
+    public int StorageCount => _storage.Count;
+
     private void Run()
     {
         // Without performance counters (the library is missing or broken) the processor falls back to the kernel's times
@@ -88,12 +110,13 @@ internal sealed class SystemSampler : IDisposable
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { Debug.WriteLine(ex); }
         _cpu = new CpuProvider(_pdh);
         _gpu = new GpuProvider(_pdh);
+        _zones = new ThermalZones(_pdh);
         bool primed = false, first = false;
         while (!_disposed)
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _wake.WaitOne(); continue; }
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _storage.Rest(); _wake.WaitOne(); continue; }
                 if (!primed || _primeProcesses)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
@@ -138,12 +161,16 @@ internal sealed class SystemSampler : IDisposable
             if (_history.Count == HistoryLength) _history.Dequeue();
             _history.Enqueue((rates.DownBytesPerSecond, rates.UpBytesPerSecond));
         }
-        var cpu = _cpu!.Sample(pdh); var gpu = _gpu!.Sample(pdh);
+        bool temperatures = _temperatures;
+        var cpu = _cpu!.Sample(pdh); var gpu = _gpu!.Sample(pdh, temperatures ? _gpuTemperatures : null, now);
+        // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted.
+        if (_zones!.Sample(pdh, temperatures, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
+        IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage); Remember(_gpuHistory, gpu.OrDefault?.Usage);
         return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network, gpu, _lastProcesses)
         {
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
-            CpuHistory = _cpuHistory.ToArray(), GpuHistory = _gpuHistory.ToArray()
+            CpuHistory = _cpuHistory.ToArray(), GpuHistory = _gpuHistory.ToArray(), Storage = storage
         };
     }
     private static void Remember(Queue<double> history, double? usage)
@@ -159,7 +186,7 @@ internal sealed class SystemSampler : IDisposable
         _disposed = true; _wanted = false; _linger.Stop();
         _wake.Set();
         // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
-        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _processes.Dispose(); _network.Dispose(); _wake.Dispose(); }
+        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures.Dispose(); _wake.Dispose(); }
     }
 }
 
@@ -459,7 +486,8 @@ internal sealed class GpuProvider
         _shared = pdh?.Add(SharedPath) == true;
     }
 
-    public Reading<GpuSample> Sample(bool collected)
+    // temperatures: read a temperature too, the shown adapter's where it has one (GpuTemperatures.ReadFor).
+    public Reading<GpuSample> Sample(bool collected, GpuTemperatures? temperatures = null, double now = 0)
     {
         if (!_engines) return Reading<GpuSample>.Unavailable(_pdh?.IsOpen == true ? Why.NoGpu : Why.NoCounters);
         if (!collected) return Reading<GpuSample>.Unavailable(Why.NoCounters);
@@ -480,10 +508,16 @@ internal sealed class GpuProvider
         var kinds = GpuEngines.Order(sums.Where(pair => pair.Key.Adapter == busiest.Adapter && pair.Key.Type.Length > 0)
             .Select(pair => new GpuEngine(pair.Key.Type, pair.Value / 100)));
         var info = _adapters.TryGetValue(busiest.Adapter, out var known) ? known : default;
+        // Only adapters in use are asked for another's sake (GpuTemperatures.ReadFor).
+        var heat = temperatures?.ReadFor(busiest.Adapter, sums.Where(pair => pair.Value > 0).Select(pair => pair.Key.Adapter).Distinct().Order(StringComparer.OrdinalIgnoreCase).ToList(), now);
+        // Another adapter's temperature is named, and marked with that adapter's kind, as the page shows it beside this adapter's usage.
+        (string Name, ulong Dedicated)? from = heat is { } h && h.Adapter != busiest.Adapter && _adapters.TryGetValue(h.Adapter, out var found) ? found : null;
         return new GpuSample(Math.Clamp(busiest.Usage / 100, 0, 1), AdapterMemory(_memory ? MemoryPath : null, busiest.Adapter))
         {
             Engines = kinds, SharedBytes = AdapterMemory(_shared ? SharedPath : null, busiest.Adapter),
-            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null
+            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null, Temperature = heat?.Celsius,
+            TemperatureFrom = heat is { } other && other.Adapter != busiest.Adapter ? (from?.Name is { Length: > 0 } name ? name : "GPU") : null,
+            TemperatureKind = heat is { } kind && kind.Adapter != busiest.Adapter ? Temperatures.AdapterKind(from?.Dedicated ?? 0) : null
         };
     }
 

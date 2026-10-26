@@ -46,7 +46,7 @@ public static class CompactParts
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
 }
-public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed }
+public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel }
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
 // and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
 public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom }
@@ -297,6 +297,10 @@ public sealed class DeckSettings
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
+    // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it.
+    public bool MonitorTemperatures { get; set; } = true;
+    // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
+    public bool MonitorStorage { get; set; } = true;
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }

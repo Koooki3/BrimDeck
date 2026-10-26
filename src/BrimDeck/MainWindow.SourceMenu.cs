@@ -81,7 +81,7 @@ public partial class MainWindow
             CheckSourceMenuPointer(WindowsHost.Cursor(), pressed: true)), true);
         menu.PreviewKeyDown += (_, e) =>
         {
-            if (e.Key == Key.Escape) { CloseSourceMenu(); SetExpanded(false); e.Handled = true; }
+            if (e.Key == Key.Escape) { CloseSourceMenu(); SetExpanded(false, keyboard: true); e.Handled = true; }
         };
         menu.Closed += (_, _) =>
         {

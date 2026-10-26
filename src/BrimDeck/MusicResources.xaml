@@ -18,12 +18,12 @@
   <Style x:Key="MusicTrackButton" TargetType="RepeatButton">
     <Setter Property="Focusable" Value="False"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RepeatButton">
-      <Border Background="{TemplateBinding Background}" Height="{Binding BarHeight, RelativeSource={RelativeSource AncestorType={x:Type local:MusicSeekSlider}}}" CornerRadius="4"/>
+      <Border Background="{TemplateBinding Background}" Height="{Binding BarHeight, RelativeSource={RelativeSource AncestorType={x:Type local:MusicSeekSlider}}}" CornerRadius="{DynamicResource PanelR4}"/>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <!-- A pill around the whole 18 DIP seek target, whose bar runs edge to edge. -->
   <Style x:Key="MusicSeekKeyboardFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="9" Margin="-6,0"/>
+    <Border BorderBrush="{DynamicResource PanelAccent}" BorderThickness="1" CornerRadius="{DynamicResource PanelR9}" Margin="-6,0"/>
   </ControlTemplate></Setter.Value></Setter></Style>
   <Style x:Key="MusicSeek" TargetType="{x:Type local:MusicSeekSlider}">
     <Setter Property="ToolTipService.IsEnabled" Value="False"/><Setter Property="FocusVisualStyle" Value="{StaticResource MusicSeekKeyboardFocus}"/>
@@ -31,14 +31,14 @@
     <Setter Property="SmallChange" Value=".02"/><Setter Property="LargeChange" Value=".1"/><Setter Property="IsMoveToPointEnabled" Value="True"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="{x:Type local:MusicSeekSlider}">
       <Grid Background="Transparent">
-        <Border x:Name="Rail" Background="{DynamicResource PanelSeekRail}" Height="{TemplateBinding BarHeight}" CornerRadius="4"/>
+        <Border x:Name="Rail" Background="{DynamicResource PanelSeekRail}" Height="{TemplateBinding BarHeight}" CornerRadius="{DynamicResource PanelR4}"/>
         <Track x:Name="PART_Track" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}">
           <Track.DecreaseRepeatButton><RepeatButton Style="{StaticResource MusicTrackButton}" Command="Slider.DecreaseLarge" Background="{TemplateBinding Foreground}"/></Track.DecreaseRepeatButton>
           <Track.Thumb><Thumb x:Name="SeekThumb" Width="0" Height="0"><Thumb.Template><ControlTemplate TargetType="Thumb"><Grid/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
           <Track.IncreaseRepeatButton><RepeatButton Style="{StaticResource MusicTrackButton}" Command="Slider.IncreaseLarge" Background="Transparent"/></Track.IncreaseRepeatButton>
         </Track>
         <Canvas IsHitTestVisible="False">
-          <Border x:Name="TimeBubble" Canvas.Left="{TemplateBinding BubbleX}" Canvas.Top="-27" Width="52" Height="24" Background="{DynamicResource PanelBubble}" BorderBrush="{DynamicResource PanelBubbleBorder}" BorderThickness="1" CornerRadius="5" Visibility="{TemplateBinding BubbleVisible}">
+          <Border x:Name="TimeBubble" Canvas.Left="{TemplateBinding BubbleX}" Canvas.Top="-27" Width="52" Height="24" Background="{DynamicResource PanelBubble}" BorderBrush="{DynamicResource PanelBubbleBorder}" BorderThickness="1" CornerRadius="{DynamicResource PanelR5}" Visibility="{TemplateBinding BubbleVisible}">
             <TextBlock Text="{TemplateBinding BubbleText}" Foreground="{DynamicResource PanelPrimary}" FontFamily="Segoe UI" FontSize="11.5" Typography.NumeralAlignment="Tabular" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
         </Canvas>

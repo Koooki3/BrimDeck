@@ -7,10 +7,26 @@
     <Setter Property="local:Feedback.Fade" Value="True"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
       <Grid>
-        <Border x:Name="HoverLayer" Background="{DynamicResource PanelFill}" CornerRadius="5" Opacity="0"/>
-        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+        <Border x:Name="HoverLayer" Background="{DynamicResource PanelFill}" CornerRadius="{DynamicResource PanelR5}" Opacity="0"/>
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
           <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
         </Border>
+      </Grid>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- The date range picker's buttons (ModelDatePicker): hover and press fade as the monitor's do (Feedback) over the face, and
+       nothing switches in one frame; the picker eases a disabled button's opacity itself. -->
+  <Style x:Key="DatePickerButton" TargetType="Button">
+    <Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="Padding" Value="0"/><Setter Property="Cursor" Value="Hand"/><Setter Property="HorizontalContentAlignment" Value="Center"/>
+    <Setter Property="FocusVisualStyle" Value="{StaticResource PanelKeyboardFocus}"/>
+    <Setter Property="local:Feedback.Fade" Value="True"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+      <Grid>
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"/>
+        <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="8" Opacity="0"/>
+        <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="8" Opacity="0"/>
+        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
       </Grid>
     </ControlTemplate></Setter.Value></Setter>
   </Style>

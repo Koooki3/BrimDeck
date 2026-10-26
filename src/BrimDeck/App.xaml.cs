@@ -53,9 +53,22 @@ public partial class App : Application
         System.Windows.Controls.ToolTipService.ShowDurationProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(20000));
     }
 
+    // The element whose tooltip opens next (OnStartup).
+    private WeakReference<DependencyObject>? _toolTipOwner;
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Menus and tooltips take the text rendering of what they open from as they open (PanelTheme.Text). A tooltip opened by
+        // the service has no placement target, so its owner is noted as the service raises ToolTipOpening on it.
+        EventManager.RegisterClassHandler(typeof(FrameworkElement), FrameworkElement.ToolTipOpeningEvent,
+            new System.Windows.Controls.ToolTipEventHandler((_, args) => _toolTipOwner = new WeakReference<DependencyObject>((DependencyObject)args.OriginalSource)), true);
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ToolTip), System.Windows.Controls.ToolTip.OpenedEvent, new RoutedEventHandler((sender, _) =>
+        {
+            var tip = (System.Windows.Controls.ToolTip)sender;
+            PanelTheme.Text(tip, tip.PlacementTarget ?? (_toolTipOwner?.TryGetTarget(out var owner) == true ? owner : null));
+        }));
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ContextMenu), System.Windows.Controls.ContextMenu.OpenedEvent,
+            new RoutedEventHandler((sender, _) => PanelTheme.Text((System.Windows.Controls.ContextMenu)sender, ((System.Windows.Controls.ContextMenu)sender).PlacementTarget)));
         Resources[SystemParameters.VerticalScrollBarWidthKey] = 7.0;
         var suffix = Environment.UserName;
         var eventName = "Local\\BrimDeck.Settings." + suffix;
@@ -94,6 +107,7 @@ public partial class App : Application
         Deck.Show();
         InitializeHotkeys();
         StartBackgroundUpdates();
+        DisplayPower.Install(Dispatcher);
         _save.Tick += (_, _) => FlushSettings();
         _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden);
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
@@ -169,6 +183,8 @@ public partial class App : Application
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
         ApplyHotkeys();
+        // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
+        UpdateMonitorExtras();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
@@ -258,6 +274,16 @@ public partial class App : Application
         if (Exiting || Monitor is null && !wanted) return;
         if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
         Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
+        UpdateMonitorExtras();
+    }
+    // Temperatures and drives are read for an open page with them on, the drives' temperatures only there; the processor's and the
+    // graphics adapter's temperatures, and the drives, also for a collapsed row showing those readings.
+    private void UpdateMonitorExtras()
+    {
+        bool page = _presentingMonitor.Count > 0;
+        var shown = _stripMonitor.Count > 0 ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
+        Monitor?.SetExtras(page && Settings.MonitorTemperatures || (shown & CompactMonitorItems.Temperature) != 0,
+            page && Settings.MonitorStorage || (shown & CompactMonitorItems.Storage) != 0, page && Settings.MonitorStorage && Settings.MonitorTemperatures);
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
@@ -304,7 +330,7 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         Media?.Dispose(); Monitor?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);

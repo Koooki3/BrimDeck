@@ -21,6 +21,7 @@ try
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
+    PixelBlocksTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
@@ -29,9 +30,17 @@ try
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
+    TemperatureTests.Run(Check);
+    StorageTests.Run(Check);
+    StripAdmissionTests.Run(Check);
+    ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
+    MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
+    MusicCostTests.Run(Check);
+    DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
+    DatePickerMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
