@@ -62,6 +62,16 @@ internal static class MusicCostTests
         widened.Advance(2 * period + .1, 0, Speed);
         check("a region that briefly fits the title keeps the laps it has scrolled", widened.LapsDone == 2 && !widened.Rested);
 
+        // The cycle's own count of laps (MarqueeCycle.Done, Played): done after three whole cycles, resting at its start.
+        var cycle = new MarqueeCycle(48, 24, 6, .05);
+        double cyclePeriod = cycle.Period;
+        check("the marquee cycle counts three laps", MarqueeCycle.Laps == 3 && MarqueeScroll.Laps == MarqueeCycle.Laps);
+        check("the cycle is still scrolling during its last lap", !cycle.Done(3 * cyclePeriod - .01) && Near(cycle.Played(3 * cyclePeriod - .01), cycle.Wrap(3 * cyclePeriod - .01)));
+        check("the cycle is done after three whole cycles", cycle.Done(3 * cyclePeriod) && cycle.Done(10 * cyclePeriod));
+        check("a cycle that is done rests at the start of its first rest", Near(cycle.Played(3 * cyclePeriod), 0) && Near(cycle.Shift(cycle.Played(3 * cyclePeriod)), 0)
+            && Near(cycle.Left(cycle.Played(3 * cyclePeriod)), 0) && Near(cycle.Right(cycle.Played(3 * cyclePeriod)), 1 - .05));
+        check("the last lap ends in the end rest, and the next stretch is the start", !cycle.StretchAt(cycle.Wrap(3 * cyclePeriod - .01)).Moving);
+
         // The bars stand on half device pixels, so a level that moves them by less draws the same.
         foreach (double dpi in new[] { 1, 1.25, 1.5, 2 })
         {

@@ -45,6 +45,8 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
         _demand = demand;
         if (!running)
         {
+            // The watchers' first listing, and each GATT reader's first read, count as a reading for Refresh.
+            _readAt = Environment.TickCount64;
             int generation = ++_generation;
             Watch(BluetoothDevice.GetDeviceSelectorFromPairingState(true), EndpointProperties, DeviceInformationKind.AssociationEndpoint, generation, lowEnergy: false);
             Watch(BluetoothLEDevice.GetDeviceSelectorFromPairingState(true), EndpointProperties, DeviceInformationKind.AssociationEndpoint, generation, lowEnergy: true);
@@ -74,11 +76,22 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
         report(DeviceSource.Bluetooth, []); report(DeviceSource.Gatt, []);
     }
 
-    // The GATT levels, and Windows' own levels for the connected devices: whether the node watcher reports a level that changes
-    // is not documented, so the page reads them again too (a property read, about half a millisecond each).
+    // The page opened: read again, unless the last reading is under a minute old (each GATT read wakes the device over the
+    // air). The minute's poll then counts from this reading.
     public void Refresh()
     {
+        if (_demand != DeviceDemand.Watch || Environment.TickCount64 - _readAt < (long)DevicePolling.Interval.TotalMilliseconds) return;
+        ReadAll();
+        if (_poll is { IsEnabled: true }) { _poll.Stop(); _poll.Start(); }
+    }
+    private long _readAt;
+
+    // The GATT levels, and Windows' own levels for the connected devices: whether the node watcher reports a level that changes
+    // is not documented, so they are read again too (a property read, about half a millisecond each).
+    private void ReadAll()
+    {
         if (_demand != DeviceDemand.Watch) return;
+        _readAt = Environment.TickCount64;
         foreach (var gatt in _gatt.Values) gatt.Read();
         var connected = _endpoints.Values.Where(endpoint => endpoint.Connected).Select(endpoint => Devices.AddressIn(endpoint.Id)).ToHashSet();
         int generation = _generation;
@@ -91,7 +104,7 @@ internal sealed class BluetoothBatteries(Dispatcher dispatcher, Action<DeviceSou
         catch { }
         await dispatcher.InvokeAsync(() => { if (properties is not null && generation == _generation && _nodes.ContainsKey(id)) Node(id, properties, update: true); });
     }
-    private void PollTick(object? sender, EventArgs e) => Refresh();
+    private void PollTick(object? sender, EventArgs e) => ReadAll();
 
     private void Watch(string aqs, string[] properties, DeviceInformationKind kind, int generation, bool? lowEnergy)
     {

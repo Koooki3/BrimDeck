@@ -50,7 +50,6 @@ internal sealed class DevicesView : FrameworkElement
         SizeChanged += (_, _) => Place(motion: false);
     }
 
-    public DevicesLayout Layout => _layout;
     private IEnumerable<Card> Shown => _cards.Where(card => !card.Leaving);
 
     // The devices to show (the roster without hidden ones); settled: the sources have listed what is connected, so an empty list
@@ -134,15 +133,18 @@ internal sealed class DevicesView : FrameworkElement
         return false;
     }
 
+    // The card drawn under the pointer, where it is drawn now (cards glide for a moment after a device comes or goes); the last
+    // drawn is on top.
     private void Hover(Point at)
     {
-        double w = ActualWidth, h = ActualHeight;
+        var (cw, ch) = _layout.CardSize(ActualWidth, ActualHeight);
+        double now = Eased.Now;
         string? found = null;
-        var shown = Shown.ToList();
-        for (int i = 0; i < shown.Count; i++)
+        for (int i = _cards.Count - 1; i >= 0; i--)
         {
-            var (x, y, cw, ch) = _layout.Card(i, w, h, shown.Count);
-            if (new Rect(x, y, cw, ch).Contains(at)) { found = shown[i].Key; break; }
+            var card = _cards[i];
+            if (card.Leaving || !card.Placed) continue;
+            if (new Rect(card.X.At(now), card.Y.At(now), cw, ch).Contains(at)) { found = card.Key; break; }
         }
         if (found == _hovered) return;
         _hovered = found;
@@ -152,7 +154,7 @@ internal sealed class DevicesView : FrameworkElement
     private void RefreshToolTip()
     {
         var card = _cards.FirstOrDefault(card => card.Key == _hovered && !card.Leaving);
-        string? text = card is null ? null : card.Device is { } device ? Devices.Describe(device) : string.Join("\n", card.More.Select(Devices.Describe));
+        string? text = card is null ? null : card.Device is { } device ? Devices.Describe(device) : string.Join("\n\n", card.More.Select(Devices.Describe));
         if (text is null) { ToolTip = null; return; }
         if (!Equals(_tip.Content, text)) _tip.Content = text;
         if (!ReferenceEquals(ToolTip, _tip)) ToolTip = _tip;
@@ -213,16 +215,18 @@ internal sealed class DevicesView : FrameworkElement
         drawing.DrawRoundedRectangle(high ? null : UI.Brush(UI.Fill), high ? DeviceGlyphs.Stroke(UI.Outline, 1) : null, r, radius, radius);
         double pad = Math.Round(Math.Clamp(r.Height * .22, 8, 14)), icon = Math.Round(Math.Clamp(r.Height * .4, 16, 22)), middle = r.Y + r.Height / 2;
         double figureSize = _layout.Figure, right = r.Right - pad, baseline = Math.Round(middle + figureSize * .36);
-        double widest = MonitorDraw.Text("100%", figureSize, UI.Primary, ppd, strong: true).WidthIncludingTrailingWhitespace;
+        // Figures as the monitor page sets them (FigureGauge): the number in the display face, the unit small after it.
+        var unit = MonitorDraw.Text("%", _layout.Caption, UI.Secondary, ppd);
+        double widest = MonitorDraw.Text("100", figureSize, UI.Primary, ppd, display: true).WidthIncludingTrailingWhitespace + 2 + unit.WidthIncludingTrailingWhitespace;
         double textX = r.X + pad + icon + Math.Round(pad * .8);
 
         if (card.Device is not { } device)
         {
-            // The "+N" card: the count where a figure stands, and what it is.
-            DeviceGlyphs.Draw(drawing, DeviceKind.Other, new Rect(r.X + pad, Math.Round(middle - icon / 2), icon, icon), UI.Secondary);
-            var count = MonitorDraw.Text("+" + card.More.Count, figureSize, UI.Primary, ppd, strong: true);
+            // The "+N" card: an ellipsis, what it is, and the count where a figure stands.
+            DeviceGlyphs.More(drawing, new Rect(r.X + pad, Math.Round(middle - icon / 2), icon, icon), UI.Secondary);
+            var count = MonitorDraw.Text("+" + card.More.Count, figureSize, UI.Primary, ppd, display: true);
             MonitorDraw.Baseline(drawing, count, right - count.WidthIncludingTrailingWhitespace, baseline);
-            var (label, _) = Texts(card, Loc.T($"另有 {card.More.Count} 台设备", $"{card.More.Count} more devices"), null, Math.Max(10, right - widest - 8 - textX), UI.Secondary, UI.Tertiary, ppd);
+            var (label, _) = Texts(card, Loc.T("更多设备", "More devices"), null, Math.Max(10, right - widest - 8 - textX), UI.Secondary, UI.Tertiary, ppd);
             drawing.DrawText(label, new Point(textX, Math.Round(middle - label.Height / 2)));
             return;
         }
@@ -234,8 +238,19 @@ internal sealed class DevicesView : FrameworkElement
         DeviceGlyphs.Draw(drawing, device.Kind, new Rect(r.X + pad, Math.Round(middle - icon / 2), icon, icon), UI.Secondary);
 
         // The figure at the right, in a column as wide as "100%" so names line up from card to card, the battery before it.
-        var figure = MonitorDraw.Text(Devices.Figure(device.Lowest), figureSize, level == MemoryLevel.Normal ? (device.Lowest is null ? UI.Tertiary : UI.Primary) : accent, ppd, strong: true);
-        MonitorDraw.Baseline(drawing, figure, right - figure.WidthIncludingTrailingWhitespace, baseline);
+        if (device.Lowest is { } percent)
+        {
+            var number = MonitorDraw.Text(Devices.Clamp(percent).ToString(System.Globalization.CultureInfo.InvariantCulture), figureSize,
+                level == MemoryLevel.Normal ? UI.Primary : accent, ppd, display: true);
+            double unitX = right - unit.WidthIncludingTrailingWhitespace;
+            MonitorDraw.Baseline(drawing, unit, unitX, baseline);
+            MonitorDraw.Baseline(drawing, number, unitX - 2 - number.WidthIncludingTrailingWhitespace, baseline);
+        }
+        else
+        {
+            var dash = MonitorDraw.Text("—", figureSize, UI.Tertiary, ppd, display: true);
+            MonitorDraw.Baseline(drawing, dash, right - dash.WidthIncludingTrailingWhitespace, baseline);
+        }
         double batteryHeight = Math.Round(Math.Clamp(figureSize * .68, 11, 14)), batteryWidth = Math.Round(batteryHeight * 1.9);
         double batteryX = Math.Round(right - widest - 6 - batteryWidth);
         Battery(drawing, new Rect(batteryX, Math.Round(middle - batteryHeight / 2), batteryWidth, batteryHeight), device.Lowest is null ? null : Math.Clamp(card.Fill.At(now), 0, 1),
@@ -300,43 +315,43 @@ internal sealed class DevicesView : FrameworkElement
         return string.Join(" · ", parts);
     }
 
-    // A battery on its side, on whole device pixels: the outline, its tip, the charge as a fill from the left, and a bolt when
-    // charging or an exclamation mark when low. share null: no reading, the outline alone in the faint text color. In high
-    // contrast the fill takes the system's highlight and the marks its text color.
+    // A battery on its side, on whole device pixels: the outline, its tip, the charge as a fill from the left, and an
+    // exclamation mark when low. Charging, a bolt as tall as the battery takes the tip's place (its body that much shorter), as
+    // in the collapsed row: over the fill a bolt this small does not read on every theme's colors. share null: no reading, the
+    // outline alone in the faint text color. In high contrast the fill takes the system's highlight and the marks its text color.
     private static void Battery(DrawingContext drawing, Rect r, double? share, string color, bool charging, bool low, double ppd)
     {
         bool high = SystemParameters.HighContrast;
         double Snap(double value) => Math.Round(value * ppd) / ppd;
         double stroke = Math.Max(1, Math.Round(1.2 * ppd)) / ppd, half = stroke / 2;
-        double tip = Snap(Math.Max(1.5, r.Height * .18)), radius = PanelTheme.Corner(Math.Max(1.5, r.Height * .22));
+        double tip = charging ? Snap(r.Height * 15 / 23) : Snap(Math.Max(1.5, r.Height * .18)), radius = PanelTheme.Corner(Math.Max(1.5, r.Height * .22));
         var body = new Rect(Snap(r.X) + half, Snap(r.Y) + half, Snap(r.Width - tip - 1) - stroke, Snap(r.Height) - stroke);
-        string ink = share is null ? UI.Tertiary : UI.Secondary;
+        string ink = share is null ? UI.Tertiary : UI.Secondary, mark = high ? SystemColors.WindowTextColor.ToString() : UI.Primary;
         drawing.DrawRoundedRectangle(null, DeviceGlyphs.Stroke(ink, stroke), body, radius, radius);
-        drawing.DrawRectangle(UI.Brush(ink), null, new Rect(Snap(body.Right + half + 1 / ppd), Snap(r.Y + r.Height * .3), tip, Snap(r.Height * .4)));
+        double tipX = Snap(body.Right + half + 1 / ppd);
+        if (charging) DeviceGlyphs.Bolt(drawing, new Rect(tipX, Snap(r.Y), tip, Snap(r.Height)), share is null ? ink : mark);
+        else drawing.DrawRectangle(UI.Brush(ink), null, new Rect(tipX, Snap(r.Y + r.Height * .3), tip, Snap(r.Height * .4)));
         if (share is not { } s) return;
         var inner = new Rect(body.X + half + 1 / ppd, body.Y + half + 1 / ppd, Math.Max(0, body.Width - stroke - 2 / ppd), Math.Max(0, body.Height - stroke - 2 / ppd));
         double width = Snap(inner.Width * s);
         if (width > 0) drawing.DrawRoundedRectangle(high ? SystemColors.HighlightBrush : UI.Brush(color), null, new Rect(inner.X, inner.Y, Math.Max(inner.Height * .5, width), inner.Height), radius * .5, radius * .5);
-        if (charging) DeviceGlyphs.Bolt(drawing, body, high ? SystemColors.WindowTextColor.ToString() : UI.Primary, high ? SystemColors.WindowColor.ToString() : null);
-        else if (low) DeviceGlyphs.Exclamation(drawing, body, high ? SystemColors.WindowTextColor.ToString() : UI.Primary, high ? SystemColors.WindowColor.ToString() : null);
+        if (charging || !low) return;
+        // The mark sits inside the outline, set off from the fill by a pixel of the card's own fill (the window's in high contrast,
+        // where cards have none), so it never cuts the outline.
+        var inside = new Rect(body.X + half, body.Y + half, Math.Max(0, body.Width - stroke), Math.Max(0, body.Height - stroke));
+        drawing.PushClip(new RectangleGeometry(inside));
+        DeviceGlyphs.Exclamation(drawing, inside, mark, high ? SystemColors.WindowColor.ToString() : UI.Fill, ppd);
+        drawing.Pop();
     }
 }
 
-// The devices' icons on a 24 unit grid, stroked as the page switch's icons are, and the marks drawn inside the battery.
+// The devices' icons (DeviceIcons, shared with the device notices), stroked as the page switch's icons are, and the marks
+// drawn inside the battery.
 internal static class DeviceGlyphs
 {
-    private static readonly Dictionary<DeviceKind, Geometry> Icons = new()
-    {
-        [DeviceKind.Mouse] = Frozen("M12,3 C8.1,3 6,5.6 6,9.5 V14.5 C6,18.4 8.6,21 12,21 C15.4,21 18,18.4 18,14.5 V9.5 C18,5.6 15.9,3 12,3 Z M12,3 V10 M6,10 H18"),
-        [DeviceKind.Keyboard] = Frozen("M3.5,6.5 H20.5 A1.5,1.5 0 0 1 22,8 V16 A1.5,1.5 0 0 1 20.5,17.5 H3.5 A1.5,1.5 0 0 1 2,16 V8 A1.5,1.5 0 0 1 3.5,6.5 Z M6,10 H6.01 M9.3,10 H9.31 M12.6,10 H12.61 M15.9,10 H15.91 M18.2,10 H18.21 M7.5,14 H16.5"),
-        [DeviceKind.Headphones] = Frozen("M4,15 V12 A8,8 0 0 1 20,12 V15 M4,14.5 H6.5 A1,1 0 0 1 7.5,15.5 V19 A1,1 0 0 1 6.5,20 H5 A1,1 0 0 1 4,19 Z M20,14.5 H17.5 A1,1 0 0 0 16.5,15.5 V19 A1,1 0 0 0 17.5,20 H19 A1,1 0 0 0 20,19 Z"),
-        [DeviceKind.Earbuds] = Frozen("M7.5,4.5 A3,3 0 1 1 7.5,10.5 A3,3 0 1 1 7.5,4.5 Z M9.2,9.9 L10,19.5 M16.5,4.5 A3,3 0 1 0 16.5,10.5 A3,3 0 1 0 16.5,4.5 Z M14.8,9.9 L14,19.5"),
-        [DeviceKind.Controller] = Frozen("M7.5,7 H16.5 C19.5,7 21.5,9.5 21.8,13 L22.2,16.5 C22.4,18.5 20,19.6 18.6,18 L16.5,15.6 H7.5 L5.4,18 C4,19.6 1.6,18.5 1.8,16.5 L2.2,13 C2.5,9.5 4.5,7 7.5,7 Z M7,10 V13 M5.5,11.5 H8.5 M16,10.6 H16.01 M17.6,12.4 H17.61"),
-        [DeviceKind.Pen] = Frozen("M16.5,3.5 L20.5,7.5 L8.5,19.5 L3.5,20.5 L4.5,15.5 Z M14.5,5.5 L18.5,9.5"),
-        [DeviceKind.Speaker] = Frozen("M7,3 H17 A1.5,1.5 0 0 1 18.5,4.5 V19.5 A1.5,1.5 0 0 1 17,21 H7 A1.5,1.5 0 0 1 5.5,19.5 V4.5 A1.5,1.5 0 0 1 7,3 Z M12,10.5 A3.5,3.5 0 1 1 12,17.5 A3.5,3.5 0 1 1 12,10.5 Z M12,6.5 H12.01"),
-        [DeviceKind.Other] = Frozen("M12,3 L20,7.5 V16.5 L12,21 L4,16.5 V7.5 Z M12,12 L20,7.5 M12,12 L4,7.5 M12,12 V21"),
-    };
+    private static readonly Dictionary<DeviceKind, Geometry> Icons = Enum.GetValues<DeviceKind>().ToDictionary(kind => kind, kind => Frozen(DeviceIcons.PathData(kind)));
     private static readonly Geometry BoltShape = Frozen("M13.5,0.5 L4.5,13.5 H11 L10,23.5 L19.5,9.5 H13 Z");
+    private static readonly Geometry MoreShape = Frozen("M5.5,12 H5.51 M12,12 H12.01 M18.5,12 H18.51");
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
 
     // Round-capped pens by color and thickness, made once: a card redraws on every frame of a move.
@@ -365,31 +380,48 @@ internal static class DeviceGlyphs
 
     public static void Draw(DrawingContext drawing, DeviceKind kind, Rect at, string color)
     {
-        drawing.PushTransform(Placed(at.Width / 24, at.X, at.Y));
+        drawing.PushTransform(Placed(at.Width / DeviceIcons.Grid, at.X, at.Y));
         drawing.DrawGeometry(null, Stroke(color, 1.65), Icon(kind));
         drawing.Pop();
     }
 
-    // A bolt a little taller than the battery, outlined in the surface color so it reads over the fill at small sizes.
-    // outline: the color around it, the panel's surface unless given.
-    public static void Bolt(DrawingContext drawing, Rect body, string color, string? outline = null)
+    // The "+N" card's mark: three dots where a device's icon stands.
+    public static void More(DrawingContext drawing, Rect at, string color)
     {
-        double size = body.Height * 1.25, scale = size / 24;
-        drawing.PushTransform(Placed(scale, body.X + (body.Width - size) / 2, body.Y + (body.Height - size) / 2));
-        drawing.DrawGeometry(UI.Brush(color), Stroke(outline ?? PanelTheme.SurfaceColor.ToString(), 3), BoltShape);
+        drawing.PushTransform(Placed(at.Width / DeviceIcons.Grid, at.X, at.Y));
+        // Thicker than the icons' strokes, so three dots carry the weight of an outlined icon.
+        drawing.DrawGeometry(null, Stroke(color, 4), MoreShape);
         drawing.Pop();
     }
 
-    // An exclamation mark: a bar and a round dot, outlined in the surface color as the bolt is.
-    public static void Exclamation(DrawingContext drawing, Rect body, string color, string? around = null)
+    // A bolt as tall as the area, centred in it.
+    public static void Bolt(DrawingContext drawing, Rect area, string color)
     {
-        double x = body.X + body.Width / 2, top = body.Y + body.Height * .14, bottom = body.Y + body.Height * .58, thickness = Math.Max(1.6, body.Height * .2);
-        var outline = Stroke(around ?? PanelTheme.SurfaceColor.ToString(), thickness + 1.6);
-        var dot = new Point(x, body.Y + body.Height * .82);
-        drawing.DrawLine(outline, new Point(x, top), new Point(x, bottom));
-        drawing.DrawEllipse(null, outline, dot, thickness / 2, thickness / 2);
-        var pen = Stroke(color, thickness);
-        drawing.DrawLine(pen, new Point(x, top), new Point(x, bottom));
-        drawing.DrawEllipse(UI.Brush(color), null, dot, thickness / 2, thickness / 2);
+        double scale = area.Height / 23;
+        if (scale <= 0) return;
+        drawing.PushTransform(Placed(scale, area.X + (area.Width - 15 * scale) / 2 - 4.5 * scale, area.Y - .5 * scale));
+        drawing.DrawGeometry(UI.Brush(color), null, BoltShape);
+        drawing.Pop();
+    }
+
+    // An exclamation mark centred in the area: a bar and a square dot of the same thickness, at least 1.5 DIP, all on whole
+    // device pixels so the dot is as dark as the bar. halo: a device pixel of this color around them, setting them off the fill.
+    public static void Exclamation(DrawingContext drawing, Rect area, string color, string? halo, double ppd)
+    {
+        double Snap(double value) => Math.Round(value * ppd) / ppd;
+        double h = area.Height, thickness = Math.Max(Math.Ceiling(1.5 * ppd), Math.Round(h * .2 * ppd)) / ppd;
+        double left = Snap(area.X + area.Width / 2 - thickness / 2), dotBottom = Snap(area.Y + h * .85), dotTop = dotBottom - thickness;
+        double barBottom = dotTop - Math.Max(1 / ppd, Snap(h * .1)), barTop = Math.Min(Snap(area.Y + h * .15), barBottom - thickness);
+        var bar = new Rect(left, barTop, thickness, barBottom - barTop);
+        var dot = new Rect(left, dotTop, thickness, thickness);
+        if (halo is not null)
+        {
+            var around = UI.Brush(halo);
+            drawing.DrawRectangle(around, null, Rect.Inflate(bar, 1 / ppd, 1 / ppd));
+            drawing.DrawRectangle(around, null, Rect.Inflate(dot, 1 / ppd, 1 / ppd));
+        }
+        var ink = UI.Brush(color);
+        drawing.DrawRectangle(ink, null, bar);
+        drawing.DrawRectangle(ink, null, dot);
     }
 }

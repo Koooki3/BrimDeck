@@ -34,8 +34,9 @@ public partial class MainWindow
         // being read, and takes the current readings when the display is back.
         bool shown = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
         bool page = shown && !ScreenOff;
-        // A row whose only chosen reading is the battery reads the devices (UpdateDevicesDemand), not the system.
-        bool strip = !_expanded && _compactStrip?.Showing(Eased.Now) == true && _compactStrip.NeedsSystem && IsVisible && !IsSuppressed && !ScreenOff && _alert is null && EffectiveStyle != CompactStyle.Line;
+        // A row whose only chosen reading is the battery reads the devices (UpdateDevicesDemand), not the system. A row whose
+        // chosen readings all wait for their first figures shows nothing, yet must be read for them (StripAwaits).
+        bool strip = !_expanded && (_compactStrip?.Showing(Eased.Now) == true && _compactStrip.NeedsSystem || StripAwaits()) && IsVisible && !IsSuppressed && !ScreenOff && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -55,6 +56,14 @@ public partial class MainWindow
     // The collapsed readings the row was last built without (StripAdmission.Hidden): the temperature and the system drive until
     // their first figures, and for good on a machine without the sensor.
     private CompactMonitorItems _stripUnavailable;
+    // Whether this surface shows the system readings and waits for the first figures of one it does not show yet.
+    private bool StripAwaits()
+    {
+        if (!Settings.ShowsMonitor(EffectiveStyle)) return false;
+        var monitor = _app.Monitor;
+        return _stripAdmission.Awaits(CompactMonitor.Shown(Settings.CompactReadings), monitor?.CpuSensor ?? SensorState.Unknown, monitor?.GpuSensor ?? SensorState.Unknown,
+            monitor?.StorageState ?? SensorState.Unknown);
+    }
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
     private static bool MonitorMotion => Soft.Enabled;
@@ -87,13 +96,18 @@ public partial class MainWindow
     // or leaves. Asked on every system reading and every change of the devices.
     private bool AdmitStrip(MonitorSnapshot? snapshot)
     {
-        var monitor = _app.Monitor;
-        var (hidden, arriving) = _stripAdmission.Update(snapshot, monitor?.CpuSensor ?? SensorState.Unknown, monitor?.GpuSensor ?? SensorState.Unknown,
-            monitor?.StorageState ?? SensorState.Unknown, BatteryState());
+        var (hidden, arriving) = UpdateStripAdmission(snapshot);
         // Open, the row is not on screen; it is built with the new readings when the panel collapses.
-        if (_expanded || _compactStrip is null || hidden == _stripUnavailable) return false;
+        // A row not built yet (its chosen readings all waiting) is built once one of them joins.
+        if (_expanded || _compactStrip is null && !Settings.ShowsMonitor(EffectiveStyle) || hidden == _stripUnavailable) return false;
         _stripPresence.Arrive(arriving); RenderCompact();
         return true;
+    }
+    private (CompactMonitorItems Hidden, CompactMonitorItems Arriving) UpdateStripAdmission(MonitorSnapshot? snapshot)
+    {
+        var monitor = _app.Monitor;
+        return _stripAdmission.Update(snapshot, monitor?.CpuSensor ?? SensorState.Unknown, monitor?.GpuSensor ?? SensorState.Unknown,
+            monitor?.StorageState ?? SensorState.Unknown, BatteryState());
     }
     // The battery reading's state: Found while a shown device reports a charge, None once the devices are listed and none
     // does, Unknown before (or while nothing reads them).

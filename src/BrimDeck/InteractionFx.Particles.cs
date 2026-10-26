@@ -106,6 +106,12 @@ internal sealed partial class FxSurface
     // Rain falls this far across for each DIP down: mostly straight down, leaning with the wind.
     private const double RainSlant = .26;
 
+    private static double SmoothStep(double e0, double e1, double x)
+    {
+        double t = Math.Clamp((x - e0) / (e1 - e0), 0, 1);
+        return t * t * (3 - 2 * t);
+    }
+
     // A style's own typical life in seconds, which a theme's particleMs replaces.
     private static double Life(ParticleFx style) => style switch
     {
@@ -175,7 +181,7 @@ internal sealed partial class FxSurface
                     // its fall and only then fading, so it can be followed.
                     double fall = t * (.6 + .4 * t);
                     double hx = m.X + m.Vx * fall, hy = m.Y + m.Vy * fall, length = m.Size / Math.Sqrt(1 + RainSlant * RainSlant);
-                    double a = Math.Min(.25, strength) * Math.Min(1, t / .12) * (1 - CollapseFx.SmoothStep(.55, 1, t));
+                    double a = Math.Min(.25, strength) * Math.Min(1, t / .12) * (1 - SmoothStep(.55, 1, t));
                     if (a > .001) { dc.PushOpacity(a); dc.DrawLine(_highLine, new Point(hx - RainSlant * length, hy - length), new Point(hx, hy)); dc.Pop(); }
                     break;
                 }

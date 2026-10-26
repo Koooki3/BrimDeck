@@ -15,8 +15,9 @@ namespace BrimDeck;
 // active field's outline glides between the fields; a changed date comes up from faint; a month change slides the grid and its
 // header the way of travel, the old month leaving before the new one arrives; the validation message opens and closes on the
 // shared curve, and the apply and month buttons ease between available and not. Every value is driven from one step on the
-// panel's shared frame clock (Motion) that runs only while something moves, with durations from the animation length in
-// settings; with animations off (BrimDeck's or Windows') everything is set at once.
+// panel's shared frame clock (Motion) that runs only while something moves, at the panel's feedback pace (DatePickerTiming.Fixed);
+// with animations off (BrimDeck's or Windows') everything is set at once. Hover and press on its buttons fade as the monitor's
+// do (Feedback).
 internal sealed class ModelDatePicker : Border
 {
     private const double Inner = 228, FieldGap = 6, CellHeight = 24, Radius = 8, MessageGap = 5, MessageRise = 4, Faint = .3, Unavailable = .4;
@@ -100,7 +101,8 @@ internal sealed class ModelDatePicker : Border
 
         System.Windows.Documents.TextElement.SetFontFamily(this, UI.PanelFont);
         Child = _body; Background = Brush("popup"); BorderBrush = Brush("popupBorder"); BorderThickness = new Thickness(1);
-        CornerRadius = new CornerRadius(PanelTheme.Corner(10)); Padding = new Thickness(8);
+        CornerRadius = new CornerRadius(Corner(10)); Padding = new Thickness(8);
+        if (_palette.Effects.Pixel > 0) TextOptions.SetTextRenderingMode(this, TextRenderingMode.Aliased);
 
         // The fields, with the active one's outline lying over both and gliding between them.
         var fields = new Grid { Margin = new Thickness(0, 0, 0, 5) };
@@ -120,7 +122,7 @@ internal sealed class ModelDatePicker : Border
             Grid.SetColumn(field, end ? 2 : 0); fields.Children.Add(field);
             _fields[end ? 1 : 0] = field; _fieldValues[end ? 1 : 0] = value;
         }
-        _fieldMark = new Border { BorderBrush = Brush("accent"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius)), IsHitTestVisible = false,
+        _fieldMark = new Border { BorderBrush = Brush("accent"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(Corner(Radius)), IsHitTestVisible = false,
             HorizontalAlignment = HorizontalAlignment.Left, Width = (Inner - FieldGap) / 2, RenderTransform = _fieldShift };
         Grid.SetColumnSpan(_fieldMark, 3); fields.Children.Add(_fieldMark);
         _body.Children.Add(fields);
@@ -142,14 +144,14 @@ internal sealed class ModelDatePicker : Border
         { var label = UI.Centered(day, 10, Hex("textTertiary")); label.TextAlignment = TextAlignment.Center; weekdays.Children.Add(label); }
         _body.Children.Add(weekdays);
 
-        // The grid: the band and the markers' faces under the day buttons, the markers' figures above them; the picture of the
-        // month leaving lies beside the page in the clipped calendar.
+        // The grid: the band under the day buttons, the markers' faces over them and the markers' figures over the faces, so a
+        // theme's opaque hover (github-light) never covers a selected day; the picture of the month leaving lies beside the page
+        // in the clipped calendar.
         var band = new Canvas { IsHitTestVisible = false };
         var bandFill = BandFill();
         for (int i = 0; i < _band.Length; i++) { _band[i] = new Rectangle { Fill = bandFill, Opacity = 0 }; band.Children.Add(_band[i]); }
         _page.Children.Add(band);
         var faces = new Canvas { IsHitTestVisible = false };
-        _page.Children.Add(faces);
         var cells = new UniformGrid { Columns = DatePickerMotion.Columns, Rows = DatePickerMotion.Rows };
         for (int i = 0; i < DatePickerMotion.Cells; i++)
         {
@@ -161,9 +163,10 @@ internal sealed class ModelDatePicker : Border
             cells.Children.Add(button);
         }
         _page.Children.Add(cells);
+        _page.Children.Add(faces);
         for (int m = 0; m < 2; m++)
         {
-            var face = new Border { Background = Brush("accent"), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius)), Height = CellHeight, Opacity = 0, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+            var face = new Border { Background = Brush("accent"), CornerRadius = new CornerRadius(Corner(Radius)), Height = CellHeight, Opacity = 0, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
             var ink = new Grid { IsHitTestVisible = false, Opacity = 0 };
             var marker = new Marker { Face = face, Ink = ink, Column = new(0, timing.Glide / 1000.0), Row = new(0, timing.Glide / 1000.0), Presence = new(0, timing.Glide / 1000.0) };
             face.RenderTransform = marker.Shift; ink.Clip = marker.Clip;
@@ -205,11 +208,13 @@ internal sealed class ModelDatePicker : Border
         Unloaded += (_, _) => Sleep();
     }
 
-    // Its own pace, whatever the panel's animation length (motion-review C5).
+    // Its own pace, whatever the panel's animation length, as the panel's hover and press feedback (DatePickerTiming.Fixed).
     private static DatePickerTiming Timing => DatePickerTiming.Fixed;
     private bool Moves => Preview?.Moves?.Invoke() ?? Soft.Enabled;
     private double Clock() => Preview?.Clock() ?? Eased.Now;
     private string Hex(string token) => _palette[token].ToString();
+    // Square in a pixel theme, as the panel's other corners (PanelTheme.Corner), for the picker's own palette.
+    private double Corner(double radius) => _palette.Effects.Pixel > 0 ? 0 : radius;
     private Brush Brush(string token) => UI.Brush(Hex(token));
 
     // The band's color laid over the pop-up's: the half cells overlap by a hair to leave no seam at fractional widths, and a
@@ -297,13 +302,18 @@ internal sealed class ModelDatePicker : Border
         month = new DateTime(month.Year, month.Month, 1);
         if (month == _month || month < DateTime.MinValue.AddMonths(1)) return false;
         int direction = DatePickerMotion.Direction(_month, month);
+        // The picture is taken before a month change still under way is ended, as the panel's page switch does (motion-review
+        // F17): of the calendar as it is drawn now, the month arriving and the one still leaving where and as faint as they are,
+        // so a quick second click leaves from what was on screen rather than from the grid snapped into place for a frame. The
+        // header's leaving name is the one that shows more.
+        var image = animate && Moves ? PageHandover.Capture(_calendar) : null;
+        string leavingName = _monthLeaving.Opacity > _monthText.Opacity ? _monthLeaving.Text : _monthText.Text;
         EndSlide();
-        var image = animate && Moves ? PageHandover.Capture(_page) : null;
         bool slide = image is not null;
         if (image is not null)
         {
             _leaving.Source = image.Source; _leaving.Width = image.Width; _leaving.Height = image.Height;
-            _monthLeaving.Text = _monthText.Text;
+            _monthLeaving.Text = leavingName;
         }
         _month = month;
         FillMonth();
@@ -406,6 +416,17 @@ internal sealed class ModelDatePicker : Border
 
     private double CellWidth => _calendar.ActualWidth > 0 ? _calendar.ActualWidth / DatePickerMotion.Columns : Inner / DatePickerMotion.Columns;
 
+    // The day buttons are laid out on whole device pixels (the window's layout rounding): each at its column's offset rounded,
+    // all of them the width rounded. A marker at rest takes exactly its button's place and size, so it neither sits a fraction
+    // of a pixel off the button's hover nor gets soft edges at 125 or 150 %; on its way between two cells it moves evenly
+    // between their places (at: the eased column or row; step: a cell's size; scale: device pixels per DIP).
+    private static double OnPixels(double dips, double scale) => scale > 0 && double.IsFinite(scale) ? Math.Round(dips * scale) / scale : dips;
+    private static double Along(double at, double step, double scale)
+    {
+        double low = Math.Floor(at), from = OnPixels(low * step, scale);
+        return at <= low ? from : from + (at - low) * (OnPixels((low + 1) * step, scale) - from);
+    }
+
     // The band's half cells take their places once the grid has a size.
     private void LayOut()
     {
@@ -421,7 +442,8 @@ internal sealed class ModelDatePicker : Border
                 Canvas.SetLeft(rect, x + side * half - side * .5); Canvas.SetTop(rect, y);
             }
         }
-        foreach (var marker in _markers) marker.Face.Width = width;
+        double faceWidth = OnPixels(width, VisualTreeHelper.GetDpi(this).DpiScaleX);
+        foreach (var marker in _markers) marker.Face.Width = faceWidth;
         _fieldMark.Width = Math.Max(0, (_body.ActualWidth > 0 ? _body.ActualWidth : Inner) - FieldGap) / 2;
         Apply(Clock());
     }
@@ -457,11 +479,13 @@ internal sealed class ModelDatePicker : Border
         for (int f = 0; f < 2; f++) { _fieldValues[f].Opacity = _fieldFade[f].At(now); moving |= _fieldFade[f].Moving(now); }
         for (int i = 0; i < _band.Length; i++) { _band[i].Opacity = _bandFade[i].At(now); moving |= _bandFade[i].Moving(now); }
         double width = CellWidth;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        double faceWidth = OnPixels(width, dpi.DpiScaleX), faceHeight = OnPixels(CellHeight, dpi.DpiScaleY);
         foreach (var marker in _markers)
         {
-            double x = marker.Column.At(now) * width, y = marker.Row.At(now) * CellHeight, presence = marker.Presence.At(now);
+            double x = Along(marker.Column.At(now), width, dpi.DpiScaleX), y = Along(marker.Row.At(now), CellHeight, dpi.DpiScaleY), presence = marker.Presence.At(now);
             marker.Shift.X = x; marker.Shift.Y = y;
-            marker.Clip.Rect = new Rect(x, y, width, CellHeight);
+            marker.Clip.Rect = new Rect(x, y, faceWidth, faceHeight);
             marker.Face.Opacity = marker.Ink.Opacity = presence;
             moving |= marker.Column.Moving(now) || marker.Row.Moving(now) || marker.Presence.Moving(now);
         }

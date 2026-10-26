@@ -25,8 +25,9 @@ public static class HotkeyGesture
         => IsMainKey(key) && (modifiers & ~(ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift | ModifierKeys.Windows)) == 0
            && HotkeyText.IsAllowed(FromWpf(modifiers), Name(key));
 
-    // RegisterHotKey's modifier flags (with MOD_NOREPEAT, so holding the keys acts once) and virtual-key code.
-    public static bool ToNative(ModifierKeys modifiers, Key key, out uint fsModifiers, out uint vk)
+    // RegisterHotKey's modifier flags (with MOD_NOREPEAT, so holding the keys acts once, unless repeat asks for every repeat of a
+    // held key, as resizing does) and virtual-key code.
+    public static bool ToNative(ModifierKeys modifiers, Key key, out uint fsModifiers, out uint vk, bool repeat = false)
     {
         fsModifiers = 0; vk = 0;
         if (!IsAllowed(modifiers, key)) return false;
@@ -34,7 +35,7 @@ public static class HotkeyGesture
         if (modifiers.HasFlag(ModifierKeys.Control)) fsModifiers |= 0x0002;
         if (modifiers.HasFlag(ModifierKeys.Shift)) fsModifiers |= 0x0004;
         if (modifiers.HasFlag(ModifierKeys.Windows)) fsModifiers |= 0x0008;
-        fsModifiers |= 0x4000; // MOD_NOREPEAT
+        if (!repeat) fsModifiers |= 0x4000; // MOD_NOREPEAT
         vk = (uint)KeyInterop.VirtualKeyFromKey(key);
         return vk != 0;
     }

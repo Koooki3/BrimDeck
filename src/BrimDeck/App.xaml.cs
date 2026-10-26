@@ -58,6 +58,8 @@ public partial class App : Application
         System.Windows.Controls.ToolTipService.ShowDurationProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(20000));
     }
 
+    // The element whose tooltip opens next (OnStartup).
+    private WeakReference<DependencyObject>? _toolTipOwner;
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -65,9 +67,17 @@ public partial class App : Application
         // page sheets (UseOffscreen) starts nothing (no instance check, no signal to a running BrimDeck, no window), nor does an
         // App in a test harness (AppInstance.ForTest), whose instance names are its own in any case.
         if (_offscreen || AppInstance.IsTest) return;
-        // Menus and tooltips on the panel take the theme's text rendering as they open (PanelTheme.Text).
-        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ContextMenu), System.Windows.Controls.ContextMenu.OpenedEvent, new RoutedEventHandler((sender, _) => PanelTheme.Text((FrameworkElement)sender)));
-        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ToolTip), System.Windows.Controls.ToolTip.OpenedEvent, new RoutedEventHandler((sender, _) => PanelTheme.Text((FrameworkElement)sender)));
+        // Menus and tooltips take the text rendering of what they open from as they open (PanelTheme.Text). A tooltip opened by
+        // the service has no placement target, so its owner is noted as the service raises ToolTipOpening on it.
+        EventManager.RegisterClassHandler(typeof(FrameworkElement), FrameworkElement.ToolTipOpeningEvent,
+            new System.Windows.Controls.ToolTipEventHandler((_, args) => _toolTipOwner = new WeakReference<DependencyObject>((DependencyObject)args.OriginalSource)), true);
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ToolTip), System.Windows.Controls.ToolTip.OpenedEvent, new RoutedEventHandler((sender, _) =>
+        {
+            var tip = (System.Windows.Controls.ToolTip)sender;
+            PanelTheme.Text(tip, tip.PlacementTarget ?? (_toolTipOwner?.TryGetTarget(out var owner) == true ? owner : null));
+        }));
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ContextMenu), System.Windows.Controls.ContextMenu.OpenedEvent,
+            new RoutedEventHandler((sender, _) => PanelTheme.Text((System.Windows.Controls.ContextMenu)sender, ((System.Windows.Controls.ContextMenu)sender).PlacementTarget)));
         Resources[SystemParameters.VerticalScrollBarWidthKey] = 7.0;
         var eventName = AppInstance.Settings;
         _mutex = new Mutex(true, AppInstance.Mutex, out var first);
@@ -119,6 +129,7 @@ public partial class App : Application
         InitializeHotkeys();
         StartBackgroundUpdates();
         DisplayPower.Install(Dispatcher);
+        DisplayPower.Changed += UpdateDeviceDemand;
         _save.Tick += (_, _) => FlushSettings();
         _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden)
         {
@@ -129,6 +140,8 @@ public partial class App : Application
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(OpenSettings), null, Timeout.Infinite, false);
         if (e.Args.Contains("--settings")) OpenSettings();
+        // The start reads and builds a lot; what it leaves behind is returned once the panel has been left alone (App.Memory).
+        RequestTrim();
     }
     // A resident app must not vanish without a trace. Unhandled errors are appended to crash.log in the data folder;
     // errors on the UI thread are logged and the app keeps running, and unobserved task errors are only logged.
@@ -446,7 +459,9 @@ public partial class App : Application
     }
     private void UpdateDeviceDemand()
     {
-        var demand = _devicePages.Count + _deviceStrips.Count > 0 || _deviceSettings ? DeviceDemand.Watch
+        // The settings page is not read for with the display off, as a panel is not (its own demand drops then); the notice
+        // still listens.
+        var demand = _devicePages.Count + _deviceStrips.Count > 0 || _deviceSettings && !DisplayPower.Off ? DeviceDemand.Watch
             : Settings.DeviceLowNotice && Settings.NoticesEnabled ? DeviceDemand.Listen : DeviceDemand.None;
         if (Exiting || Devices is null && demand == DeviceDemand.None) return;
         if (Devices is null) { Devices = new DeviceBatteries(Dispatcher); Devices.Changed += DeviceBatteriesChanged; }

@@ -82,10 +82,11 @@ internal static class NoticeBadges
         return element;
     }
 
-    // The application-type glyph for an application without an icon, or null when its type is unknown (the initial is shown).
+    // The glyph for a notice without an icon: BrimDeck's own (a device's), else the application's type; null when neither is
+    // known (the initial is shown).
     public static FrameworkElement? AppGlyph(Notice notice, double plateSize, Color appColor)
     {
-        if (NoticeGlyphs.App(notice.AppKey, notice.AppName, notice.Origin) is not { } glyph) return null;
+        if (NoticeGlyphs.Plate(notice) is not { } glyph) return null;
         var color = PanelTheme.ToColor(Colors.OnPlate(Theme(appColor)));
         var element = Glyph(glyph, Math.Round(plateSize * .66), color);
         element.HorizontalAlignment = HorizontalAlignment.Center; element.VerticalAlignment = VerticalAlignment.Center;
@@ -99,6 +100,8 @@ internal static class NoticeBadges
         // A time notice (alarm, stopwatch, countdown, mail, event) shows its kind; the glyph names match NoticeTimeKind's.
         if (kind is null && notice.TimeKind != NoticeTimeKind.None) kind = notice.TimeKind.ToString();
         if (kind is null && notice.Call) kind = "call";
+        // A device's warning is its low battery (NoticeCenter.SendDeviceLow).
+        if (kind is null && notice.Category == NoticeCategory.Warning && NoticeGlyphs.Own(notice.Origin, notice.IconRef) is { } own && NoticeGlyphs.IsDevice(own)) kind = "battery-low";
         if (notice.Category == NoticeCategory.Task && kind is null) return null;
         if (NoticeGlyphs.Status(notice.Category, kind) is not { } glyph) return null;
         var colors = Colors;

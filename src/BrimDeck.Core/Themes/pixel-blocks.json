@@ -1,8 +1,8 @@
 {
-  // Pixel blocks: an unofficial pixel-art theme inspired by block-building sandbox games such as Minecraft. It uses no
-  // artwork, fonts, textures or logos from any game: everything is drawn from colors and squares.
-  //   Material: a deep slate block with stepped corners (2 DIP steps), a bevel rim lit at the top left and shaded at the bottom
-  //   right, and a hard shadow with no blur. Text is drawn unsmoothed, as on a pixel screen.
+  // Pixel blocks: an unofficial pixel-art theme inspired by block-building sandbox games. It uses no artwork, fonts, textures
+  // or logos from any game: everything is drawn from colors and squares.
+  //   Material: a deep slate block with stepped corners (2 DIP steps) and a faint block grain, a bevel rim lit at the top left
+  //   and shaded at the bottom right, and a hard shadow with no blur. Text is drawn unsmoothed, as on a pixel screen.
   //   Colors: the bright chat-style palette, white text, a yellow block clock, a green experience bar for the indicator;
   //   menus and tooltips in a deep violet with a violet frame.
   //   Motion: everything moves in four hard steps; hover lights the slot, a press pushes the block in and leaves square pixels.
@@ -10,8 +10,8 @@
   "id": "pixel-blocks",
   "name": "像素方块",
   "nameEn": "Pixel Blocks",
-  "description": "非官方像素风，灵感来自《我的世界》等方块沙盒游戏：阶梯圆角、斜面描边、硬阴影、像素时钟与方块粒子，动效逐格跳动。",
-  "descriptionEn": "An unofficial pixel-art look inspired by block sandbox games like Minecraft: stepped corners, bevel rim, hard shadow, a block clock and square particles, all moving in steps.",
+  "description": "非官方像素风，灵感来自方块沙盒游戏：阶梯圆角、方块纹理、斜面描边、硬阴影、像素时钟与方块粒子，动效逐格跳动。",
+  "descriptionEn": "An unofficial pixel-art look inspired by block sandbox games: stepped corners, block grain, a bevel rim, a hard shadow, a block clock and square particles, all moving in steps.",
   "author": "BrimDeck",
   "license": "Apache-2.0",
   "base": "dark",

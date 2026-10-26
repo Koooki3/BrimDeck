@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using BrimDeck.Core;
 
 namespace BrimDeck;
 
@@ -16,8 +17,8 @@ public sealed class IslandBorder : Border
         nameof(MaterialOpacity), typeof(double), typeof(IslandBorder),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender));
 
-    // The theme's layers over the base color: a gradient and a pattern (scan lines). Like the rim they fade with MaterialOpacity,
-    // so the indicator, which has neither, keeps its plain color.
+    // The theme's layers over the base color: a gradient and a pattern (scan lines, or a pixel theme's texture). Like the rim
+    // they fade with MaterialOpacity, so the indicator, which has neither, keeps its plain color.
     public static readonly DependencyProperty GradientProperty = DependencyProperty.Register(
         nameof(Gradient), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty PatternProperty = DependencyProperty.Register(
@@ -186,14 +187,13 @@ public sealed class IslandBorder : Border
 
     private Geometry Outline()
     {
-        double step = PixelStep(Pixel, this);
+        double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip, step = PixelStairs.Step(Pixel, dpi);
         var key = (RenderSize, ShoulderRadius, CornerRadius, Inset, step, RimWidth);
         if (_outlineKey == key) return _outline;
         _outlineKey = key;
-        double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         // Stepped, the inset (the shadow caster's) is whole device pixels too, so its steps stay on them at 125 % or 175 %.
-        double inset = step > 0 ? Math.Round(Inset * scale, MidpointRounding.AwayFromZero) / scale : Inset;
-        (_outline, _bevel) = Shape(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, inset, step, RimWidth, scale);
+        double inset = step > 0 ? Math.Round(Inset * dpi, MidpointRounding.AwayFromZero) / dpi : Inset;
+        (_outline, _bevel) = Shape(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, inset, step, RimWidth, dpi);
         return _outline;
     }
 
@@ -203,7 +203,7 @@ public sealed class IslandBorder : Border
     {
         if (step <= 0) return (BuildOutline(w, h, shoulder, corners, inset), null);
         var stairs = BuildStairs(w, h, shoulder, corners, inset, step);
-        return (Polygon(stairs), rimWidth > 0 ? Bevel(stairs, Math.Max(1, Math.Round(rimWidth * dpi, MidpointRounding.AwayFromZero)) / dpi) : null);
+        return (Polygon(stairs), rimWidth > 0 && stairs.Count >= 3 ? Bevel(stairs, PixelStairs.Step(rimWidth, dpi)) : null);
     }
 
     // The glass's edge light (EdgeBrush): pens twice each band's width, as the rim's, since the clip removes the outer half; each
@@ -216,79 +216,37 @@ public sealed class IslandBorder : Border
         dc.Pop();
     }
 
-    // A pixel size in DIP as whole device pixels (at least one) on the visual's display, or 0 for none.
-    internal static double PixelStep(double pixel, Visual visual)
-    {
-        if (!(pixel > 0) || !double.IsFinite(pixel)) return 0;
-        double dpi = VisualTreeHelper.GetDpi(visual).PixelsPerDip;
-        return Math.Max(1, Math.Round(pixel * dpi, MidpointRounding.AwayFromZero)) / dpi;
-    }
+    // A pixel size in DIP as whole device pixels (at least one) on the visual's display, or 0 for none (PixelStairs.Step).
+    internal static double PixelStep(double pixel, Visual visual) => PixelStairs.Step(pixel, VisualTreeHelper.GetDpi(visual).PixelsPerDip);
 
     // The outline as the island draws it: stepped for a pixel theme (BuildStairs), smooth otherwise. Notices draw the same.
     internal static Geometry BuildOutline(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy, double step)
         => step > 0 ? Polygon(BuildStairs(w, h, shoulderRadius, corners, insetBy, step)) : BuildOutline(w, h, shoulderRadius, corners, insetBy);
 
-    // The outline with its curves turned into steps of `step` DIP: every column of that width keeps the rows whose centres lie
-    // inside the smooth outline. The island's outline meets every vertical line in one run (the shoulders flare out at the
-    // top, the corners round off the bottom), so a column is a top and a bottom. Columns are counted inward from both sides and
-    // rows from the top and from the bottom, so the left and right corners, and the top and bottom ones, mirror each other
-    // whatever the size. Returns the corners of the stepped outline, clockwise from the top left; every edge is axis-aligned.
+    // The smooth outline flattened into straight edges, turned into steps (PixelStairs.Build).
     internal static IReadOnlyList<Point> BuildStairs(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy, double step)
     {
         var smooth = BuildOutline(w, h, shoulderRadius, corners, insetBy);
         if (smooth.IsEmpty() || !(step > 0)) return [];
-        // Blocks, not a fine staircase: a corner takes about four steps whatever its radius, each a whole number of pixels.
-        double curve = Math.Max(Math.Max(Math.Max(corners.TopLeft, corners.TopRight), Math.Max(corners.BottomLeft, corners.BottomRight)), shoulderRadius);
-        step *= Math.Max(1, Math.Round(curve / (4 * step)));
-        // The flattened copy keeps the inset as its own transform (or has it applied already, leaving none).
+        // The flattened copy keeps the inset as its own transform (or has it applied already, leaving none): only that transform
+        // is applied, as applying the smooth outline's as well would move the shadow's copy in twice.
         var flat = smooth.GetFlattenedPathGeometry(.02, ToleranceType.Absolute);
         var matrix = flat.Transform?.Value ?? Matrix.Identity;
-        var edges = new List<(Point A, Point B)>();
+        var edges = new List<((double X, double Y) A, (double X, double Y) B)>();
         foreach (var figure in flat.Figures)
         {
             var points = new List<Point> { figure.StartPoint };
             foreach (var segment in figure.Segments)
                 if (segment is PolyLineSegment poly) points.AddRange(poly.Points); else if (segment is LineSegment line) points.Add(line.Point);
-            for (int i = 0; i < points.Count; i++) edges.Add((matrix.Transform(points[i]), matrix.Transform(points[(i + 1) % points.Count])));
+            for (int i = 0; i < points.Count; i++)
+            {
+                Point a = matrix.Transform(points[i]), b = matrix.Transform(points[(i + 1) % points.Count]);
+                edges.Add(((a.X, a.Y), (b.X, b.Y)));
+            }
         }
         var bounds = smooth.Bounds;
-        double left = bounds.Left, right = bounds.Right, top = bounds.Top, bottom = bounds.Bottom, middle = (left + right) / 2;
-        // Column edges: inward from the left and from the right; whatever is left in the middle is one column.
-        var cuts = new SortedSet<double> { left, right };
-        for (double x = left + step; x < middle; x += step) cuts.Add(x);
-        for (double x = right - step; x > middle; x -= step) cuts.Add(x);
-        var columns = cuts.ToList();
-        var tops = new double[columns.Count - 1]; var bottoms = new double[columns.Count - 1];
-        for (int i = 0; i + 1 < columns.Count; i++)
-        {
-            double xc = (columns[i] + columns[i + 1]) / 2, lo = double.PositiveInfinity, hi = double.NegativeInfinity;
-            foreach (var (a, b) in edges)
-            {
-                if (a.X <= xc == b.X <= xc) continue;
-                double y = a.Y + (b.Y - a.Y) * (xc - a.X) / (b.X - a.X);
-                lo = Math.Min(lo, y); hi = Math.Max(hi, y);
-            }
-            if (double.IsInfinity(lo)) { lo = top; hi = bottom; }
-            tops[i] = lo <= top + 1e-6 ? top : Math.Min(bottom, top + step * Math.Ceiling((lo - top) / step - .5));
-            bottoms[i] = hi >= bottom - 1e-6 ? bottom : Math.Max(top, bottom - step * Math.Ceiling((bottom - hi) / step - .5));
-        }
-        // A notch's shoulders flare thinner than a block at the screen edge: columns left empty at either end are dropped, so
-        // the pixel notch meets the edge square.
-        int first = 0, last = tops.Length - 1;
-        while (first < last && bottoms[first] - tops[first] < 1e-6) first++;
-        while (last > first && bottoms[last] - tops[last] < 1e-6) last--;
-        var outline = new List<Point>();
-        void Add(Point p)
-        {
-            if (outline.Count > 0 && (outline[^1] - p).LengthSquared < 1e-12) return;
-            // Three points on one line: the middle one goes.
-            if (outline.Count > 1 && (Math.Abs(outline[^2].X - outline[^1].X) < 1e-9 && Math.Abs(outline[^1].X - p.X) < 1e-9
-                || Math.Abs(outline[^2].Y - outline[^1].Y) < 1e-9 && Math.Abs(outline[^1].Y - p.Y) < 1e-9)) outline[^1] = p;
-            else outline.Add(p);
-        }
-        for (int i = first; i <= last; i++) { Add(new Point(columns[i], tops[i])); Add(new Point(columns[i + 1], tops[i])); }
-        for (int i = last; i >= first; i--) { Add(new Point(columns[i + 1], bottoms[i])); Add(new Point(columns[i], bottoms[i])); }
-        return outline;
+        double curve = Math.Max(Math.Max(Math.Max(corners.TopLeft, corners.TopRight), Math.Max(corners.BottomLeft, corners.BottomRight)), shoulderRadius);
+        return [.. PixelStairs.Build(edges, bounds.Left, bounds.Top, bounds.Right, bounds.Bottom, curve, step).Select(p => new Point(p.X, p.Y))];
     }
 
     private static Geometry Polygon(IReadOnlyList<Point> points)

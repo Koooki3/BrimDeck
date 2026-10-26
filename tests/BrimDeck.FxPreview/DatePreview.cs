@@ -78,7 +78,7 @@ internal static class DatePreview
         int failures = 0;
         void Check(string name, bool ok) { if (!ok) failures++; Console.WriteLine((ok ? "PASS: " : "FAIL: ") + id + " · " + name); }
         var scene = Build(palette);
-        var t = DatePickerTiming.From(360);
+        var t = DatePickerTiming.Fixed;
         double glide = t.Glide / 1000.0, month = t.MonthLength / 1000.0, leave = t.Leave / 1000.0, delay = t.ArriveDelay / 1000.0, message = t.Message / 1000.0;
         var rows = new List<List<Shot>>();
 

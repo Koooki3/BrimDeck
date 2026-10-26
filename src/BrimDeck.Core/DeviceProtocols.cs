@@ -13,6 +13,8 @@ namespace BrimDeck.Core;
 // - SteelSeries, HyperX and MCHOSE headsets, MCHOSE mice, VGN keyboards, Endgame Gear, VAXEE, Nordic receivers and the
 //   PlayStation controllers: written from the documented bytes alone (HeadsetControl, the Linux drivers and the vendors' own
 //   web drivers are look-only).
+// - AirPods and Beats: the proximity pairing advertisement's layout as OpenPods and AirPodsDesktop read it (GPL; look-only,
+//   facts only).
 
 // One battery reading from a protocol: the percentage (null: the device answered without one), whether it charges, and whether
 // the level is coarse (a voltage, or a few steps).
@@ -85,11 +87,15 @@ public static class Hidpp
     // 0x1001 function 0: millivolts big endian, and bit 7 of the flags for external power.
     public static BatteryRead Voltage(byte[] reply) => new(VoltageToPercent((reply[0] << 8) | reply[1]), (reply[2] & 0x80) != 0, Coarse: true);
 
-    // 0x1F20 (the G headsets) function 0: millivolts big endian, flags 0x03 charging and 0x07 full.
-    public static BatteryRead Adc(byte[] reply)
+    // 0x1F20 (the G headsets) function 0: millivolts big endian and flags, as Solaar reads them: bit 0x01 the measurement is
+    // valid (without it the headset is off, which is no reading, not an empty battery), 0x02 charging, 0x07 full. The level
+    // goes through the Lightspeed mice' curve above, not one for the headset's own cell (HeadsetControl calibrates each
+    // headset), so it is coarse.
+    public static BatteryRead? Adc(byte[] reply)
     {
         int millivolts = (reply[0] << 8) | reply[1], flags = reply[2];
-        return new(flags == 0x07 ? 100 : VoltageToPercent(millivolts), flags is 0x03 or 0x07, Coarse: true);
+        if ((flags & 0x01) == 0) return null;
+        return new(flags == 0x07 ? 100 : VoltageToPercent(millivolts), (flags & 0x02) != 0, Coarse: true);
     }
 
     // HID++ 1.0 register 0x0D (battery mileage): the percentage, and the top two bits of byte 2, 1 charging and 2 full.
@@ -204,9 +210,10 @@ public static class Dongles
     }
     public static bool? BitMouseCharging(byte[] reply) => reply.Length >= 8 && reply[0] == 0x08 && reply[1] == 0x72 && reply[5] == 0x0F && reply[2] == 0 ? reply[7] == 1 : null;
 
-    // Compx receivers (VXE R1, VGN F1, ATK A9 Ultra; VID 0x3554 or 0x373B, usage page 0xFF02 or 0xFF04, report 0x08, 17 bytes):
-    // [0x08, command, status, address high, address low, length, data × 10, checksum], the checksum making the sum of all
-    // seventeen bytes 0x55. Battery is command 0x04.
+    // Compx receivers, report 0x08, 17 bytes: [0x08, command, status, address high, address low, length, data × 10, checksum],
+    // the checksum making the sum of all seventeen bytes 0x55. Battery is command 0x04. atkctl documents the ATK A9 Ultra
+    // (373B:1119 and 111A, usage page 0xFF04, the request sent as feature report 8); the other vendor and page (0x3554, 0xFF02:
+    // VXE R1, VGN F1) are not from atkctl and are unverified on those receivers.
     public const int CompxVendor = 0x3554;
     public static byte[] CompxRequest(byte command)
     {
@@ -216,9 +223,9 @@ public static class Dongles
         frame[16] = (byte)(0x55 - sum);
         return frame;
     }
-    // The reply: [0x08, 0x04, ..., percent at 6, charging at 7, millivolts big endian at 8].
+    // The reply (atkctl): [0x08, 0x04, ..., percent at 6, 1 at 7 while charging].
     public static BatteryRead? CompxBattery(byte[] reply)
-        => reply.Length >= 8 && reply[0] == 0x08 && reply[1] == 0x04 && reply[6] <= 100 ? new(reply[6], reply[7] != 0) : null;
+        => reply.Length >= 8 && reply[0] == 0x08 && reply[1] == 0x04 && reply[6] <= 100 ? new(reply[6], reply[7] == 1) : null;
 
     // VGN 2.4 GHz keyboards (320F:5088, usage page 0xFF1C, report 0x04, 64 bytes): command 0x1A; the reply echoes it at byte 3,
     // the percentage at 8 and charging at 9.
@@ -241,10 +248,18 @@ public static class Dongles
     public static byte[] NordicRequest(int length) { var frame = new byte[Math.Max(5, length)]; frame[0] = 0x05; frame[1] = 0x15; frame[4] = 0x01; return frame; }
     public static BatteryRead? NordicBattery(byte[] reply) => reply.Length >= 10 && reply[0] == 0x05 && reply[9] <= 100 ? new(reply[9]) : null;
 
-    // Inphic IN9 (248A:5B2E cable, 5B2F receiver; feature 0x0C, 33 bytes): [0x0C, 0x01, command, 0, sequence]; 0xF0 the
-    // handshake, 0x20 the battery. The reply echoes 0x20 at 2, is valid with byte 6 set, the percentage at 0x12, 2 at 0x13 charging.
-    public const int InphicVendor = 0x248A;
-    public static byte[] InphicRequest(byte command, byte sequence) { var frame = new byte[33]; frame[0] = 0x0C; frame[1] = 0x01; frame[2] = command; frame[4] = sequence; return frame; }
+    // Inphic IN9 (248A:5B2E cable, 5B2F receiver; on 2.4 GHz vendor 0x249A, whose product is not fixed; feature 0x0C, 33
+    // bytes): [0x0C, 0x01, command, 0, sequence, payload...]; 0xF0 the handshake (payload 01 01 FF), 0x20 the battery, the two
+    // with one sequence number. The reply echoes 0x20 at 2, is valid with byte 6 set, the percentage at 0x12, 2 at 0x13 charging.
+    public const int InphicVendor = 0x248A, InphicWireless = 0x249A;
+    public static readonly byte[] InphicHandshake = [0x01, 0x01, 0xFF];
+    public static byte[] InphicRequest(byte command, byte sequence, params byte[] payload)
+    {
+        var frame = new byte[33];
+        frame[0] = 0x0C; frame[1] = 0x01; frame[2] = command; frame[4] = sequence;
+        Array.Copy(payload, 0, frame, 5, Math.Min(payload.Length, frame.Length - 5));
+        return frame;
+    }
     public static BatteryRead? InphicBattery(byte[] reply) => reply.Length >= 0x14 && reply[0] == 0x0C && reply[2] == 0x20 && reply[6] != 0 && reply[0x12] <= 100 ? new(reply[0x12], reply[0x13] == 2) : null;
 
     // MCHOSE mice (VID 0x3837, or Realtek's 0x0BDA:0x4762; usage page 0xFF01 or 0xFF0B; output report 0x4D, 64 bytes):
@@ -315,6 +330,15 @@ public static class Headsets
         Kind.MchoseX9 => Padded([0x55, 0x65, 0x01], 64),
         _ => []
     };
+    // A request asking whether the headset is connected to its dongle at all, where the level alone would not tell (a dongle
+    // whose headset is off may still answer with a level).
+    public static byte[]? ConnectionRequest(Kind kind) => kind switch { Kind.CloudAlpha => Padded([0x21, 0xBB, 0x03], 31), _ => null };
+    // The answer: false when the headset is not connected (Cloud Alpha: 0x01 at 3); null for another report.
+    public static bool? Connected(Kind kind, byte[] r) => kind switch
+    {
+        Kind.CloudAlpha when r.Length >= 4 && r[0] == 0x21 && r[1] == 0xBB && r[2] == 0x03 => r[3] != 0x01,
+        _ => null
+    };
     // A second request for the charging state, where it comes apart from the level.
     public static byte[]? ChargingRequest(Kind kind) => kind switch
     {
@@ -340,8 +364,9 @@ public static class Headsets
         // Millivolts; above 4107 the headset is on its cable. The level is a line between 3648 and 3975 mV.
         Kind.CloudFlight when r.Length >= 5 && r[0] == 0x21 && r[1] == 0xFF && r[2] == 0x05 && ((r[3] << 8) | r[4]) is var mv && mv > 3000
             => new(mv > 4107 ? null : Devices.Clamp((int)Math.Round((mv - 3648) * 100.0 / (3975 - 3648))), mv > 4107, Coarse: true),
-        // The status: 2 discharging, 3 charging, 4 full, 26 asleep.
-        Kind.MchoseX9 when r.Length >= 4 && r[0] == 0x55 && r[1] == 0x65 && r[3] is 2 or 3 or 4 && r[2] <= 100 => new(r[3] == 4 ? 100 : r[2], r[3] is 3 or 4),
+        // 55 65 VV FF: a value and the field it belongs to. Only field 0x02 is the battery; the others (a heartbeat, other
+        // telemetry) are passed over. No field is documented to say charging.
+        Kind.MchoseX9 when r.Length >= 4 && r[0] == 0x55 && r[1] == 0x65 && r[3] == 0x02 && r[2] <= 100 => new(r[2]),
         _ => null
     };
     public static bool? Charging(Kind kind, byte[] r) => kind switch
@@ -383,7 +408,8 @@ public static class PlayStation
             int level = r[at] & 0x0F, state = r[at] >> 4;
             return state switch
             {
-                0x0 => new(Math.Min(level * 10 + 5, 100)), 0x1 => new(Math.Min(level * 10 + 5, 100), true), 0x2 => new(100, true), _ => null
+                // 0x2 is full (hid-playstation): on its cable, no longer charging.
+                0x0 => new(Math.Min(level * 10 + 5, 100)), 0x1 => new(Math.Min(level * 10 + 5, 100), true), 0x2 => new(100), _ => null
             };
         }
         if (IsDualShock(product))
@@ -391,7 +417,8 @@ public static class PlayStation
             int at = !bluetooth && r.Length >= 64 && r[0] == 0x01 ? 30 : bluetooth && r.Length >= 78 && r[0] == 0x11 ? 32 : -1;
             if (at < 0) return null;
             int level = r[at] & 0x0F; bool cable = (r[at] & 0x10) != 0;
-            if (cable) return level <= 9 ? new(level * 10 + 5, true) : level == 10 ? new(100, true) : level == 11 ? new(100, true) : null;
+            // On its cable: 0 to 10 charging, 11 full (hid-playstation), no longer charging.
+            if (cable) return level <= 9 ? new(level * 10 + 5, true) : level == 10 ? new(100, true) : level == 11 ? new(100) : null;
             return level <= 10 ? new(Math.Min(level * 10 + 5, 100)) : null;
         }
         return null;
@@ -415,8 +442,10 @@ public static class HidBattery
 }
 
 // AirPods and Beats: their charge rides in Apple's proximity pairing advertisement (manufacturer data of company 0x004C, type
-// 0x07, length 0x19), in steps of ten; written from the documented layout. Byte 5's bit 0x20 tells which bud the first nibble
-// is; 15 is no reading.
+// 0x07, length 0x19), in steps of ten; written from the layout OpenPods and AirPodsDesktop read (facts only). Byte 6 holds the
+// buds' levels, byte 7 the charging bits (high nibble) and the case (low); 15 is no reading. With byte 5's bit 0x20 set the
+// left bud is byte 6's low nibble; clear (flipped), its high one. Single-unit models (AirPods Max, the one-piece Beats) carry
+// their one level in byte 6's low nibble.
 public static class AppleAdvert
 {
     public const ushort Company = 0x004C;
@@ -427,15 +456,25 @@ public static class AppleAdvert
         0x0320 => "Powerbeats", _ => null
     } : null;
 
-    // The parts' levels: left, right and the case; null when this is not a proximity pairing advertisement.
+    private static bool IsProximity(byte[] data) => data.Length >= 8 && data[0] == 0x07 && data[1] == 0x19;
+    private static int? Level(int nibble) => nibble <= 10 ? nibble * 10 : null;
+    // One piece, without buds or a case of its own: AirPods Max, Beats Solo, Studio and Flex, BeatsX, Powerbeats 3.
+    public static bool IsSingle(byte[] data) => data.Length >= 5 && ((data[3] << 8) | data[4]) is 0x0A20 or 0x0620 or 0x0920 or 0x0520 or 0x1020 or 0x0320;
+
+    // A single-unit model's one level, and charging (bit 0x01); null for earbuds, another advertisement, or no reading.
+    public static BatteryRead? Single(byte[] data)
+        => IsProximity(data) && IsSingle(data) && Level(data[6] & 0x0F) is { } level ? new(level, (data[7] & 0x10) != 0, Coarse: true) : null;
+
+    // The parts' levels: left, right and the case; empty for a single-unit model (Single), null when this is not a proximity
+    // pairing advertisement.
     public static IReadOnlyList<PartBattery>? Parts(byte[] data)
     {
-        if (data.Length < 8 || data[0] != 0x07 || data[1] != 0x19) return null;
+        if (!IsProximity(data)) return null;
+        if (IsSingle(data)) return [];
         bool flipped = (data[5] & 0x20) == 0;
-        int first = data[6] >> 4, second = data[6] & 0x0F, caseLevel = data[7] & 0x0F, charging = data[7] >> 4;
-        int left = flipped ? second : first, right = flipped ? first : second;
+        int high = data[6] >> 4, low = data[6] & 0x0F, caseLevel = data[7] & 0x0F, charging = data[7] >> 4;
+        int left = flipped ? high : low, right = flipped ? low : high;
         bool leftCharging = (charging & (flipped ? 0x02 : 0x01)) != 0, rightCharging = (charging & (flipped ? 0x01 : 0x02)) != 0, caseCharging = (charging & 0x04) != 0;
-        int? Level(int nibble) => nibble <= 10 ? nibble * 10 : null;
         var parts = new List<PartBattery>();
         if (Level(left) is not null || Level(right) is not null)
         {

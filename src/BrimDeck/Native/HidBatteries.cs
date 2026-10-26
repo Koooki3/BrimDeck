@@ -11,13 +11,16 @@ namespace BrimDeck.Native;
 // themselves are in Core (DeviceProtocols.cs); this sends them. Every request only reads: nothing is set on any device.
 // One worker thread at below normal priority does the I/O, so a slow device never holds the panel: once a minute while the
 // page or the collapsed reading shows (DeviceDemand.Watch), once every fifteen minutes while only the low battery notice
-// listens, and not at all otherwise, when it also lets every handle go. A device plugged in while the page shows is read
-// within a moment (a watcher over the HID collections).
+// listens, and not at all otherwise, when it lets every handle go and ends (the next start makes a new one). A device plugged
+// in while the page shows is read within a moment (a watcher over the HID collections). On Bluetooth, only the collections a
+// reader here speaks to are opened (Spoken).
 internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, IReadOnlyList<DeviceBattery>> report) : IDeviceSource
 {
     private static readonly TimeSpan ListenInterval = TimeSpan.FromMinutes(15);
     private static readonly DeviceSource[] Sources = [DeviceSource.Logitech, DeviceSource.Razer, DeviceSource.SteelSeries, DeviceSource.HyperX, DeviceSource.Sony, DeviceSource.Hid];
     private readonly AutoResetEvent _wake = new(false);
+    // Guards _thread between Start and the worker ending itself.
+    private readonly object _gate = new();
     private Thread? _thread;
     private volatile DeviceDemand _demand;
     private volatile bool _disposed;
@@ -36,11 +39,14 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     public void Start(DeviceDemand demand)
     {
         var was = _demand;
-        _demand = demand;
-        if (_thread is null)
+        lock (_gate)
         {
-            _thread = new Thread(Run) { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "BrimDeck HID batteries" };
-            _thread.Start();
+            _demand = demand;
+            if (_thread is null)
+            {
+                _thread = new Thread(Run) { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "BrimDeck HID batteries" };
+                _thread.Start();
+            }
         }
         if (demand == DeviceDemand.Watch) WatchArrivals(); else StopArrivals();
         // Any change wakes the worker, which reads only what its own intervals allow (a minute between full passes).
@@ -84,15 +90,16 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private void WatchArrivals()
     {
         if (_arrivals is not null) return;
-        int generation = ++_generation;
+        int generation = Interlocked.Increment(ref _generation);
         try
         {
             var watcher = DeviceInformation.CreateWatcher("System.Devices.InterfaceClassGuid:=\"{4D1E55B2-F16F-11CF-88CB-001111000030}\" AND System.Devices.InterfaceEnabled:=System.StructuredQueryType.Boolean#True",
                 [], DeviceInformationKind.DeviceInterface);
             bool listed = false;
-            watcher.EnumerationCompleted += (_, _) => listed = true;
-            watcher.Added += (_, _) => { if (listed && generation == _generation) { _arrived = true; Wake(); } };
-            watcher.Removed += (_, _) => { if (listed && generation == _generation) { _arrived = true; Wake(); } };
+            // Set and read on the watcher's threads.
+            watcher.EnumerationCompleted += (_, _) => Volatile.Write(ref listed, true);
+            watcher.Added += (_, _) => { if (Volatile.Read(ref listed) && generation == Volatile.Read(ref _generation)) { _arrived = true; Wake(); } };
+            watcher.Removed += (_, _) => { if (Volatile.Read(ref listed) && generation == Volatile.Read(ref _generation)) { _arrived = true; Wake(); } };
             // A watcher that does not handle updates stops reporting arrivals after its first listing.
             watcher.Updated += (_, _) => { };
             watcher.Start();
@@ -102,7 +109,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     }
     private void StopArrivals()
     {
-        _generation++;
+        Interlocked.Increment(ref _generation);
         try { if (_arrivals?.Status is DeviceWatcherStatus.Started or DeviceWatcherStatus.EnumerationCompleted) _arrivals.Stop(); } catch { }
         _arrivals = null;
     }
@@ -111,13 +118,13 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     {
         while (!_disposed)
         {
-            try { Pass(); }
+            try { if (!Pass()) return; }
             catch { _wake.WaitOne(DevicePolling.Interval); }
         }
     }
 
-    // One round of the worker: a pass if one is due, then the wait for the next.
-    private void Pass()
+    // One round of the worker: a pass if one is due, then the wait for the next. False once nothing is wanted: the thread ends.
+    private bool Pass()
     {
         var demand = _demand;
         if (_restart) { _restart = false; _scanned = false; }
@@ -146,14 +153,21 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                     });
             }
         }
-        else { _infos.Clear(); _logitech.Clear(); _lastRead.Clear(); _previous.Clear(); _slow.Clear(); _listed = false; _scanned = false; Interlocked.Exchange(ref _lastScan, Never); }
-        var left = _demand switch
+        else
         {
-            DeviceDemand.None => Timeout.InfiniteTimeSpan,
-            var running => TimeSpan.FromMilliseconds(Math.Clamp((running == DeviceDemand.Watch ? DevicePolling.Interval : ListenInterval).TotalMilliseconds
-                - Math.Min(SinceScan, int.MaxValue), 1000, ListenInterval.TotalMilliseconds))
-        };
-        _wake.WaitOne(left);
+            _infos.Clear(); _logitech.Clear(); _lastRead.Clear(); _previous.Clear(); _slow.Clear(); _listed = false; _scanned = false; Interlocked.Exchange(ref _lastScan, Never);
+            // Nothing is wanted: the thread ends rather than wait, and the next Start makes a new one. Started again meanwhile,
+            // it goes round at once.
+            lock (_gate)
+            {
+                if (_demand != DeviceDemand.None) return true;
+                _thread = null;
+                return false;
+            }
+        }
+        var wait = demand == DeviceDemand.Watch ? DevicePolling.Interval : ListenInterval;
+        _wake.WaitOne(TimeSpan.FromMilliseconds(Math.Clamp(wait.TotalMilliseconds - Math.Min(SinceScan, int.MaxValue), 1000, wait.TotalMilliseconds)));
+        return true;
     }
 
     // ----- One pass over the collections -----
@@ -179,8 +193,13 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             bool known = _infos.TryGetValue(path, out var info);
             if (!known)
             {
+                // A Bluetooth collection no reader here speaks to is not opened at all (its level comes from Windows). One that
+                // is has its name and serial read as on USB: the serial keeps two pads of one model apart (a classic Bluetooth
+                // path carries no address).
+                bool bluetooth = Hid.IsBluetooth(path);
+                if (bluetooth && !Spoken(Hid.Ids(path))) continue;
                 // A collection that could not be opened (its driver still starting) is tried again next time.
-                info = Hid.Query(path, batteries: true);
+                info = Hid.Query(path, batteries: !bluetooth);
                 if (info is not null) _infos[path] = info;
             }
             if (info is not null && (!onlyNew || !known)) infos.Add(info);
@@ -211,8 +230,10 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         }
         // The standard battery usages, on whatever no vendor protocol read. Bluetooth collections are left out (their level comes
         // from Windows, and a feature report over the air can wait on a sleeping device), and so is one that timed out lately.
+        // So are power devices (a UPS on the Power Device or Battery System page, 0x84 and 0x85), which are not wireless
+        // devices and often count their charge in capacity units rather than percent.
         long now = Environment.TickCount64;
-        foreach (var info in infos.Where(info => info.FeatureBatteries.Count > 0 && !claimed.Contains(info.Path) && !info.Bluetooth
+        foreach (var info in infos.Where(info => info.FeatureBatteries.Count > 0 && !claimed.Contains(info.Path) && !info.Bluetooth && info.UsagePage is not (0x84 or 0x85)
             && (!_slow.TryGetValue(info.Path, out var until) || now >= until)))
         {
             try { foreach (var device in ReadUsage(info)) Add(device); }
@@ -242,16 +263,22 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         ? _logitech.Receiver(key) is { } group && _infos.Keys.Any(path => GroupKey(path) == group)
         : _infos.Values.Any(info => KeyOwner(info, key));
 
+    // Whether a reader here speaks to a vendor and product over Bluetooth (from the path, before it is opened): PlayStation
+    // controllers, the headsets and Razer's models. Logitech's Bluetooth collections carry HID++ on a page the receiver reader
+    // does not use, and the 2.4 GHz brands are read on their dongles only, so neither is opened over the air.
+    internal static bool Spoken((int Vendor, int Product) ids) => ids.Vendor == PlayStation.Vendor
+        || ids.Vendor == Razer.Vendor && Razer.Find(ids.Product) is not null || Headsets.Find(ids.Vendor, ids.Product) is not null;
+
     // Headsets.Channel: an interface, a usage page, or (VendorPages) any vendor-defined page.
     private static bool Matches(HidInfo info, (int Interface, int UsagePage) channel)
         => (channel.Interface < 0 || info.Interface == channel.Interface)
         && (channel.UsagePage == Headsets.VendorPages ? info.UsagePage >= 0xFF00 : channel.UsagePage < 0 || info.UsagePage == channel.UsagePage);
 
-    // A stable key for a device on a collection: its vendor and product, and its serial where it has one. Not the path, which
-    // names the USB port: a receiver moved to another port is the same device, still switched off or already noticed. The
-    // price: two receivers of one model without serials are listed as one device.
+    // A stable key for a device on a collection: its vendor and product, and its serial where it has one, else its Bluetooth
+    // address where the path carries one (LE). Not the path, which names the USB port: a receiver moved to another port is the same
+    // device, still switched off or already noticed. The price: two receivers of one model without serials are listed as one device.
     private static string Key(string prefix, HidInfo info)
-        => $"{prefix}:{info.Vendor:X4}:{info.Product:X4}" + (info.Serial.Length > 0 ? ":" + info.Serial : "");
+        => $"{prefix}:{info.Vendor:X4}:{info.Product:X4}" + (info.Serial.Length > 0 ? ":" + info.Serial : AddressOf(info) is { } address ? ":" + address : "");
     internal static string GroupKey(string path)
     {
         var p = System.Text.RegularExpressions.Regex.Replace(path.ToLowerInvariant(), "&col[0-9a-f]+", "");
@@ -308,6 +335,9 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private static IEnumerable<DeviceBattery> ReadHeadset(Headsets.Kind kind, HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info) { StripZero = true };
+        // A dongle whose headset is off is not read: its answer to the level could be a stale one.
+        if (Headsets.ConnectionRequest(kind) is { } ask
+            && Hid.Transact<object>([device], () => device.Write(ask), r => Headsets.Connected(kind, r) is { } connected ? connected : null, 600) is false) return [];
         var reading = Hid.Transact<object>([device], () => device.Write(Headsets.Request(kind)), r => Headsets.Battery(kind, r) is { } read ? read : null, 600);
         if (reading is not BatteryRead battery) return [];
         bool charging = battery.Charging;
@@ -340,7 +370,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
 
     // ----- The 2.4 GHz brands -----
 
-    private static Func<HidInfo, HashSet<string>, IEnumerable<DeviceBattery>>? Dongle(HidInfo info) => (info.Vendor, info.UsagePage) switch
+    // On their dongles only: a request is never sent to a Bluetooth collection that happens to share a vendor and page.
+    private static Func<HidInfo, HashSet<string>, IEnumerable<DeviceBattery>>? Dongle(HidInfo info) => info.Bluetooth ? null : (info.Vendor, info.UsagePage) switch
     {
         (Dongles.AtkVendor, 0xFF05) => BitMouse,
         (Dongles.CompxVendor or Dongles.AtkVendor, 0xFF02 or 0xFF04) => Compx,
@@ -349,6 +380,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
         (Dongles.VaxeeVendor, 0xFF05) => Vaxee,
         (Dongles.NordicVendor, 0xFFA0) => Nordic,
         (Dongles.InphicVendor, _) when info.Product is 0x5B2E or 0x5B2F && info.FeatureLength >= 33 => Inphic,
+        // The 2.4 GHz receiver's product is not fixed: only its vendor collection.
+        (Dongles.InphicWireless, >= 0xFF00) when info.FeatureLength >= 33 => Inphic,
         // MCHOSE's mouse protocol only on its mice: Realtek's 0x4762 dongle, and MCHOSE devices that call themselves a mouse (its
         // keyboards, headsets and the MagDock speak other protocols).
         (0x0BDA, 0xFF01 or 0xFF0B) when info.Product == 0x4762 => Mchose,
@@ -410,13 +443,13 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private static IEnumerable<DeviceBattery> Vaxee(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "vaxee", "VAXEE", Dongles.VaxeeRequest(info.FeatureLength), 120, Dongles.VaxeeBattery);
     private static IEnumerable<DeviceBattery> Nordic(HidInfo info, HashSet<string> claimed) => Feature(info, claimed, "nordic", "2.4G", Dongles.NordicRequest(info.FeatureLength), 90, Dongles.NordicBattery);
 
-    // Inphic IN9: the handshake, then the battery (InphicBatteryTray's order).
+    // Inphic IN9: the handshake, then the battery, with one sequence number (InphicBatteryTray's order).
     private static IEnumerable<DeviceBattery> Inphic(HidInfo info, HashSet<string> claimed)
     {
         using var device = new HidDevice(info);
-        device.SetFeature(Dongles.InphicRequest(0xF0, 1));
+        device.SetFeature(Dongles.InphicRequest(0xF0, 1, Dongles.InphicHandshake));
         Thread.Sleep(10);
-        if (!device.SetFeature(Dongles.InphicRequest(0x20, 2))) return [];
+        if (!device.SetFeature(Dongles.InphicRequest(0x20, 1))) return [];
         Thread.Sleep(10);
         if (device.GetFeature(0x0C, 33) is not { } reply || Dongles.InphicBattery(reply) is not { } battery) return [];
         claimed.Add(info.Path);
@@ -463,7 +496,8 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
     private sealed class LogitechReader
     {
         private const int TimeoutMs = 400, PingTimeoutMs = 1500;
-        private sealed class Slot { public string Key = "", Name = ""; public DeviceKind Kind = DeviceKind.Other; public readonly Dictionary<int, byte> Features = []; public byte[]? Capabilities; public DeviceBattery? Last; public long LastAt; }
+        // Legacy: a HID++ 1.0 device, read through its registers.
+        private sealed class Slot { public string Key = "", Name = ""; public bool Legacy; public DeviceKind Kind = DeviceKind.Other; public readonly Dictionary<int, byte> Features = []; public byte[]? Capabilities; public DeviceBattery? Last; public long LastAt; }
         // A device that sleeps between readings (a mouse left alone) keeps its last reading this long.
         private const long Asleep = 10 * 60_000;
         private static DeviceBattery? Remembered(Slot? slot) => slot?.Last is { } last && Environment.TickCount64 - slot.LastAt < Asleep ? last : null;
@@ -511,10 +545,15 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
             }
             catch (HidppError error) when (error.Code == Hidpp.InvalidSubId)
             {
-                // HID++ 1.0: the battery registers.
-                return Registers(channel, index, info);
+                // HID++ 1.0: the battery registers. Its slot is kept as a 2.0 device's is, so it counts as present and keeps
+                // its last reading through a missed one.
+                if (Registers(channel, index, info) is not { } read) return Remembered(slot is { Legacy: true } ? slot : null);
+                _known[slotKey] = new Slot { Key = read.Key, Name = read.Name, Legacy = true, Last = read, LastAt = Environment.TickCount64 };
+                return read;
             }
             catch (Exception error) when (error is TimeoutException or HidppError) { return Remembered(slot); }
+            // A slot a HID++ 1.0 device held is found afresh.
+            if (slot is { Legacy: true }) slot = null;
             var device = new Device(channel, index, slot ?? new Slot());
             try
             {
@@ -593,7 +632,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 {
                     if (report.Length < 6 || report[1] != index) return null;
                     if (report[2] == 0x81 && report[3] == register) return report[4..];
-                    if (report[2] == 0x8F && report[3] == 0x81) return new HidppError(report[5]);
+                    if (report[2] == 0x8F && report[3] == 0x81 && report[4] == register) return new HidppError(report[5]);
                     return null;
                 }, TimeoutMs);
                 return result switch { byte[] reply => reply, HidppError error => throw error, _ => throw new TimeoutException() };
@@ -636,6 +675,7 @@ internal sealed class HidBatteries(Dispatcher dispatcher, Action<DeviceSource, I
                 if (Call(Hidpp.UnifiedBattery, 1) is { } status) return Hidpp.Unified(status, Slot.Capabilities ??= Call(Hidpp.UnifiedBattery, 0));
                 if (Call(Hidpp.BatteryStatus, 0) is { } level) return Hidpp.Status(level);
                 if (Call(Hidpp.BatteryVoltage, 0) is { } voltage) return Hidpp.Voltage(voltage);
+                // A headset that is off answers without a valid measurement: no reading.
                 if (Call(Hidpp.AdcMeasurement, 0) is { } adc) return Hidpp.Adc(adc);
                 return null;
             }

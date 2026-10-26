@@ -862,23 +862,6 @@ https://github.com/shuding/liquid-glass, commit a2d2e847f793430e3409a52927af815a
 MIT License
 
 Copyright (c) 2025 Shu Ding
-
-Window Animations (Windhawk mod "windows-animations", ZenDesktop 1.5.2): the Cyber Glitch, the Perlin Dissolve and the macOS
-genie's lamp curve, ported to the island's collapse pictures (BrimDeck.Core/CollapseFx.cs)
-https://github.com/redrag2105 (Window Animations by ReDrag); https://windhawk.net/mods/macos-minimize-animation (macOS Minimize
-Animation by Abdullah Masood); https://github.com/Potassiumuncher/MacOS-Animation-for-windows (the Direct2D genie engine by
-Potassiumuncher)
-
-MIT License
-
-Copyright (c) ReDrag, Abdullah Masood, Potassiumuncher, Lanbo (the authors named in the mod; the copyright of each part
-remains with its author)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 device-battery-viewer
 https://github.com/CharlesGool/device-battery-viewer
 

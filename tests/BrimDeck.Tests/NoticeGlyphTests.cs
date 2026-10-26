@@ -14,11 +14,27 @@ internal static class NoticeGlyphTests
         // Kinds named by sources, the time kinds included, map to glyphs; unknown names have none.
         string[] kinds = ["message", "mail", "alarm", "timer", "stopwatch", "countdown", "calendar", "event", "meeting", "call", "task", "progress",
             "success", "done", "warning", "error", "failed", "info", "download", "upload", "update", "security", "shield", "system", "windows",
-            "battery", "power", "network", "media", "terminal", "wsl", "phone", "browser", "assistant", "build", "ci", "game", "music", "video", "cloud", "code", "chat"];
+            "battery", "power", "network", "media", "terminal", "wsl", "phone", "browser", "assistant", "build", "ci", "game", "music", "video", "cloud", "code", "chat",
+            "mouse", "keyboard", "headphones", "headset", "earbuds", "controller", "gamepad", "pen", "stylus", "speaker", "device", "battery-low", "low-battery"];
         check("Notice kinds map to glyphs", kinds.All(kind => NoticeGlyphs.Kind(kind) is not null) && NoticeGlyphs.Kind("TIMER") == NoticeGlyph.Timer
             && NoticeGlyphs.Kind("event") == NoticeGlyph.Calendar && NoticeGlyphs.Kind("countdown") == NoticeGlyph.Countdown);
         check("Unknown notice kinds have no glyph", NoticeGlyphs.Kind("frobnicate") is null && NoticeGlyphs.Kind("") is null && NoticeGlyphs.Kind(null) is null);
         check("Every glyph is reachable by some kind name", NoticeGlyphs.All.All(glyph => NoticeGlyphs.Kinds.Values.Contains(glyph)));
+
+        // Device notices: each kind's glyph is the devices page's icon on this grid, named by the notice's own icon reference,
+        // which only BrimDeck's own notices may use; a low one carries the low battery state.
+        check("Device glyphs are the devices page's icons", Enum.GetValues<DeviceKind>().All(kind => NoticeGlyphs.PathData(NoticeGlyphs.Device(kind)) == DeviceIcons.Scaled(kind, .8, .4))
+            && Enum.GetValues<DeviceKind>().Select(NoticeGlyphs.Device).Distinct().Count() == Enum.GetValues<DeviceKind>().Length
+            && DeviceIcons.Scaled(DeviceKind.Pen, .8, .4).StartsWith("M 13.6,3.2 L 16.8,6.4", StringComparison.Ordinal)
+            && DeviceIcons.Scaled(DeviceKind.Headphones, .8, .4).Contains("A 6.4,6.4,0,0,1,16.4,10", StringComparison.Ordinal));
+        var mouseNotice = new Notice { Origin = NoticeOrigin.BrimDeck, AppKey = "brimdeck:devices", AppName = "设备", IconRef = NoticeGlyphs.GlyphRef(NoticeGlyph.Mouse), Category = NoticeCategory.Warning };
+        check("A device notice shows its device's glyph, others cannot borrow it", NoticeGlyphs.Plate(mouseNotice) == NoticeGlyph.Mouse
+            && NoticeGlyphs.Own(NoticeOrigin.Windows, NoticeGlyphs.GlyphRef(NoticeGlyph.Mouse)) is null && NoticeGlyphs.Own(NoticeOrigin.Cli, "glyph:Pen") is null
+            && NoticeGlyphs.Own(NoticeOrigin.BrimDeck, "glyph:3") is null && NoticeGlyphs.Own(NoticeOrigin.BrimDeck, "glyph:Nonsense") is null
+            && NoticeGlyphs.Own(NoticeOrigin.BrimDeck, "file:C:\\icon.png") is null && NoticeGlyphs.Plate(new Notice { Origin = NoticeOrigin.BrimDeck, AppName = "设备", AppKey = "brimdeck:devices" }) is null
+            && NoticeIntake.IconRef("glyph:Mouse", NoticeOrigin.Cli, null) is null);
+        check("A low battery is a warning state", NoticeGlyphs.Status(NoticeCategory.Warning, "battery-low") == NoticeGlyph.BatteryLow
+            && NoticeGlyphs.Tone(NoticeGlyph.BatteryLow) == NoticeGlyphTone.Warning && NoticeGlyphs.IsDevice(NoticeGlyph.Pen) && !NoticeGlyphs.IsDevice(NoticeGlyph.BatteryLow));
         check("Notice categories map to state glyphs; a plain message has none",
             NoticeGlyphs.Status(NoticeCategory.Success) == NoticeGlyph.Success && NoticeGlyphs.Status(NoticeCategory.Error) == NoticeGlyph.Error
             && NoticeGlyphs.Status(NoticeCategory.Warning) == NoticeGlyph.Warning && NoticeGlyphs.Status(NoticeCategory.Info) == NoticeGlyph.Info

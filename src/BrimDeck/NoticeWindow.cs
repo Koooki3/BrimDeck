@@ -31,8 +31,6 @@ internal sealed partial class NoticeWindow : Window
     private readonly Canvas _stage = new() { Background = null };
     private readonly NoticeSurface _glow = new() { IsHitTestVisible = false };
     private readonly NoticeSurface _surface = new() { Cursor = Cursors.Hand, Focusable = false };
-    // The theme's collapse picture, over the surface (CollapseLayer).
-    private readonly CollapseLayer _collapse = new();
     private readonly Grid _content = new();
     private readonly Grid _toast = new() { Opacity = 0 }, _detail = new() { Opacity = 0, Visibility = Visibility.Collapsed };
     private readonly PromptTimer _hoverOpen, _leaveClose;
@@ -70,7 +68,7 @@ internal sealed partial class NoticeWindow : Window
         Topmost = true; ShowActivated = false; ShowInTaskbar = false; Title = "BrimDeck notices"; UseLayoutRounding = true;
         TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
         Content = _stage;
-        _stage.Children.Add(_glow); _stage.Children.Add(_surface); _stage.Children.Add(_collapse);
+        _stage.Children.Add(_glow); _stage.Children.Add(_surface);
         _surface.Child = _content;
         _content.Children.Add(_toast); _content.Children.Add(_detail);
         // The text sits on the theme's opaque surface, as the island's does, so ClearType stays on for it; over glass WPF chooses
@@ -99,7 +97,7 @@ internal sealed partial class NoticeWindow : Window
         PreviewKeyDown += KeyPressed;
         Deactivated += (_, _) => { if (_keyboard) EndKeyboard(); };
         _app.Notices.Icons.Loaded += IconLoaded;
-        Closed += (_, _) => { if (_hiding) { CompositionTarget.Rendering -= BlankFrame; _hiding = false; } _collapse.Stop(); _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _announceLater?.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
+        Closed += (_, _) => { if (_hiding) { CompositionTarget.Rendering -= BlankFrame; _hiding = false; } _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _announceLater?.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
         // ui-3: moved to a monitor with another scale while it shows, the material is made again for that scale.
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
@@ -115,10 +113,8 @@ internal sealed partial class NoticeWindow : Window
 
     public void Present(AttentionItem item)
     {
-        // Still on screen only to draw its empty frame before it hides (Finish), or only for the last one's collapse picture,
-        // which ends at once (the island under it is already in its final state): this notice starts afresh, from the island.
-        bool collapsing = StopCollapse();
-        bool continuing = IsVisible && !_hiding && !collapsing;
+        // Still on screen only to draw its empty frame before it hides (Finish): this notice starts afresh, from the island.
+        bool continuing = IsVisible && !_hiding;
         StopHiding();
         _item = item; _leaving = false; _openFailed = false;
         int generation = ++_generation;
@@ -215,20 +211,6 @@ internal sealed partial class NoticeWindow : Window
         // for Escape (C4); content that leaves eases out (F13).
         double duration = NoticeMotion.ReturnLength(Duration(), _keyMove);
         _keyMove = false;
-        // The theme's collapse picture (CollapseLayer): the notice is photographed as it shows, the island under it comes back
-        // at once in its final state, and the picture leaves on top of it; the window hides when it is over. Without one (the
-        // default, animations off, the second's flashes spent) the notice shrinks back into the island.
-        if (duration > 0 && _collapse.Prepare(_surface) is { } snapshot
-            && _collapse.Begin(snapshot, _surface.TransformToAncestor(_stage).TransformBounds(new Rect(_surface.RenderSize)),
-                new Rect(_collapsed.Rect.X - _stageRect.X, _collapsed.Rect.Y - _stageRect.Y, _collapsed.Rect.Width, _collapsed.Rect.Height),
-                () => { if (generation == _generation && _item is null) Finish(reveal: true); }))
-        {
-            SetFrame(_collapsed, 0, NoticeMotion.Surface);
-            _surface.Visibility = Visibility.Hidden; _glow.Visibility = Visibility.Hidden;
-            _blur.Update();
-            _deck.SetIslandCovered(false, reveal: true);
-            return;
-        }
         bool redirect = Turn(opening: false, _collapsed, ref duration);
         Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
@@ -298,7 +280,6 @@ internal sealed partial class NoticeWindow : Window
 
     private void Finish(bool reveal = false)
     {
-        StopCollapse();
         _leaving = false; _showingDetail = false; _detailFor = null;
         // The notice ended in the island's outline and material: the island shows again in the same frame as the window hides,
         // and its own content lands as it does when the panel closes.
@@ -308,16 +289,6 @@ internal sealed partial class NoticeWindow : Window
         foreach (var property in new[] { Canvas.LeftProperty, Canvas.TopProperty, WidthProperty, HeightProperty })
         { _surface.BeginAnimation(property, null); _glow.BeginAnimation(property, null); }
         _toast.Children.Clear(); _detail.Children.Clear(); _toastShape = null;
-    }
-
-    // Ends a collapse picture at once and shows the surface again (hidden while the picture played); whether one was playing.
-    private bool StopCollapse()
-    {
-        if (!_collapse.Playing && _surface.Visibility == Visibility.Visible) return false;
-        bool playing = _collapse.Playing;
-        _collapse.Stop();
-        _surface.Visibility = Visibility.Visible; _glow.Visibility = Visibility.Visible;
-        return playing;
     }
 
     // The icon of the shown notice arrived after it was drawn: the content is drawn again in place, the frame stays.
@@ -671,12 +642,12 @@ internal sealed partial class NoticeWindow : Window
         }
         else plate.Children.Add(Fallback(notice, size));
         // The state and source badges on the plate's corners (NoticeBadges).
-        if (notice is not null) NoticeBadges.Decorate(plate, notice, size, _look.Glow, image is null ? NoticeGlyphs.App(notice.AppKey, notice.AppName, notice.Origin) : null);
+        if (notice is not null) NoticeBadges.Decorate(plate, notice, size, _look.Glow, image is null ? NoticeGlyphs.Plate(notice) : null);
         AutomationProperties.SetName(plate, notice?.AppName ?? "BrimDeck");
         return plate;
     }
 
-    // Without an icon: a glyph for the kind of application when it can be told, else its first letter in its color; a bell
+    // Without an icon: BrimDeck's own glyph (a device's) or a glyph for the kind of application when it can be told, else its first letter in its color; a bell
     // for a summary.
     private FrameworkElement Fallback(Notice? notice, double size)
     {

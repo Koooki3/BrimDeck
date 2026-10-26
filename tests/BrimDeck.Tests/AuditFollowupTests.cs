@@ -25,9 +25,8 @@ internal static class AuditFollowupTests
         bool low = settings.AnimationDuration == 100;
         settings.AnimationDuration = 50_000; settings.Normalize();
         check("followup: settings keep the animation length to 100-1000 ms", low && settings.AnimationDuration == 1000);
-        check("followup: notices and the date picker keep to the same range", NoticeMotion.Length(5, true) == 100 && NoticeMotion.Length(5000, true) == 1000
-            && NoticeMotion.Length(360, false) == 0 && DatePickerTiming.From(5) == DatePickerTiming.From(100) && DatePickerTiming.From(9000) == DatePickerTiming.From(1000)
-            && DatePickerTiming.From(360).Glide == 315);
+        check("followup: notices keep to the same range, the date picker to its fixed pace", NoticeMotion.Length(5, true) == 100 && NoticeMotion.Length(5000, true) == 1000
+            && NoticeMotion.Length(360, false) == 0 && DatePickerTiming.Fixed.Glide == 315);
     }
 
     private static void ClipCleans(Action<string, bool> check)

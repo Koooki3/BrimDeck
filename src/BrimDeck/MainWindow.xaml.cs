@@ -178,7 +178,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _clipSettle?.Stop(); _hotkeyRehide?.Stop(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _clipSettle?.Stop(); StopFill(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseWheel += PanelWheel;
@@ -417,7 +417,7 @@ public partial class MainWindow : Window
         // The stage's scale is the window's; drawn offscreen, the stage lies in a source of its own (MainWindow.Offscreen.cs).
         double dpi = PresentationSource.FromVisual(Stage) is null ? 1 : VisualTreeHelper.GetDpi(Stage).DpiScaleX;
         if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi && _glassShown == PanelTheme.GlassShown) return;
-        // A new scale alone only redraws the scan lines, which are laid out in device pixels.
+        // A new scale alone only redraws the scan lines or texture, which are laid out in device pixels.
         bool sameTheme = _themeGeneration == PanelTheme.Generation && _glassShown == PanelTheme.GlassShown;
         _themeGeneration = PanelTheme.Generation; _themeDpi = dpi; _glassShown = PanelTheme.GlassShown;
         // The resize hints take the theme's colors when they are drawn.
@@ -426,6 +426,9 @@ public partial class MainWindow : Window
         Foreground = UI.Brush(UI.Primary);
         PanelTheme.Dress(Island, dpiScale: dpi);
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
+        // Pixel art draws the island's text unsmoothed, as on a pixel screen, and casts a stepped shadow.
+        PanelTheme.Text(Island);
+        if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) caster.Pixel = PanelTheme.Current.Effects.Pixel;
         FitShadowCache(dpi);
         ApplyThemeMotion();
         // A theme whose scan line crosses the whole surface keeps the rounded clip (SettleClip).
@@ -572,16 +575,8 @@ public partial class MainWindow : Window
     public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
-        // The theme's collapse picture (CollapseLayer) photographs the open panel before anything about it changes, without
-        // the pointer's marks and particles, which end with it (one thing moves at a time, ux #7); opening again ends a
-        // picture still playing at once.
-        bool closing = _expanded && !expanded;
-        if (closing) _fx?.EndParticles();
-        bool picture = closing && !instant && !_preview && CollapseLayer.CanPlay;
-        if (picture) _fx?.Reset();
-        var collapseShot = picture ? _collapse?.Capture(Island) : null;
-        var collapseFrom = collapseShot is null ? Rect.Empty : Island.TransformToAncestor(Stage).TransformBounds(new Rect(Island.RenderSize));
-        if (expanded) StopCollapse();
+        // What the presses left ends as the panel closes, rather than flying on over the closing (one thing moves at a time, ux #7).
+        if (_expanded && !expanded) _fx?.EndParticles();
         // Whatever this changes, the surface moves under its rounded clip; a collapse settles again below (SettleClip).
         Island.SettledClip = false; _clipSettle?.Stop();
         if (expanded && !_expanded) EndBoot();
@@ -652,12 +647,14 @@ public partial class MainWindow : Window
             // Marking the list seen raises Changed; the page is drawn here once, not again at background priority mid-opening.
             bool queued = _noticesRenderQueued;
             _noticesRenderQueued = true;
-            try { NoticesPageShown(); RenderNotices(); }
+            try { NoticesPageShown(); RenderNotices(fresh: true); }
             finally { _noticesRenderQueued = queued; }
         }
-        // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it.
+        // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it. The
+        // open panel changing size in place (a page switch) keeps its own length whatever the setting (PanelMotion.Reshape).
         bool turning = wasExpanded != expanded;
-        int duration = !instant && Soft.Enabled ? NoticeMotion.PanelLength(Settings.AnimationDuration, closing: turning && !expanded, keyboard: keyboard && turning) : 0;
+        int duration = !instant && Soft.Enabled
+            ? expanded && !turning ? PanelMotion.Reshape : PanelMotion.Length(Settings.AnimationDuration, closing: turning && !expanded, keyboard: keyboard && turning) : 0;
         if (fromNotice is { } notice && duration > 0) StartFromNotice(notice);
         // motion-review F1, F2: turned back while the last move is still under way (the pointer left an opening panel, or came
         // back to a closing one), the surface starts back from where it is at once, in the share of the move it has to undo.
@@ -669,9 +666,6 @@ public partial class MainWindow : Window
         // on, on the same drawer curve, rather than holding for the closing's delay and starting a whole new move.
         int carried = !turning && !expanded ? _turn.Carried(now, false, duration) : 0;
         if (carried > 0) duration = carried;
-        // A collapse picture plays over the island, which takes its closed shape at once underneath.
-        if (collapseShot is not null && turning && duration > 0 && !redirect
-            && _collapse!.Begin(collapseShot, collapseFrom, new Rect(left, gap, width, height), null)) duration = 0;
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
@@ -688,7 +682,8 @@ public partial class MainWindow : Window
         HoverExtension.IsHitTestVisible = expanded;
         HoverExtension.Visibility = expanded ? Visibility.Visible : Visibility.Hidden;
         double boxTop = double.IsFinite(box.Top) ? box.Top : 0;
-        // Collapsing runs in three stages: the content leaves first, the surface follows on the drawer's curve, the compact content lands last.
+        // Collapsing runs in three stages: the content leaves first, the surface follows a moment later on the drawer's curve
+        // (leaving at once, landing softly), the compact content lands last.
         // Expanding must feel immediate: the surface grows from the first frame on the opening spring, the compact content vanishes
         // quickly, and the content fades in once the surface is about two thirds open.
         // Open already (a page switch, a new page size), the surface reshapes over the whole of the move, easing in and out, so
@@ -731,6 +726,7 @@ public partial class MainWindow : Window
         // bounce (a radius would pass zero). A panel that has no room in the window for that give opens on the plain curve.
         // Booting does not use that give: Bounce on Margin and Height would bob the whole capsule or line after the round
         // dot has already finished its jumps (the notch sits at the top edge, so the same overshoot is barely seen).
+        // A move the keyboard asked for lands without the give (motion-review C4).
         bool bounce = !booting && expanded && !reshaping && !keyboard && duration > 0 && HasRoomToBounce(width, height, left, gap);
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Drawer;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;

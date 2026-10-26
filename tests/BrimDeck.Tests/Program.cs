@@ -30,6 +30,7 @@ try
     EqualizerSignalTests.Run(Check);
     CompactMotionTests.Run(Check);
     AuditPerfTests.Run(Check);
+    MemoryFootprintTests.Run(Check);
     ColorMathTests.Run(Check);
     AuditUiTests.Run(Check);
     AuditFollowupTests.Run(Check);
@@ -41,15 +42,17 @@ try
     ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");
     ThemeMotionTests.Run(Check);
     MotionUpgradeTests.Run(Check);
-    CollapseFxTests.Run(Check);
+    MotionEffectsTests.Run(Check);
     DatePickerMotionTests.Run(Check);
     InteractionFxTests.Run(Check);
     MotionReviewTests.Run(Check);
     PanelThemeEditorTests.Run(root, Check);
+    PixelBlocksTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
     HotkeyTests.Run(Check);
+    KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
@@ -66,6 +69,7 @@ try
     MusicCostTests.Run(Check);
     DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
+    DatePickerMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     GpuAdapterTests.Run(root, Check);
     GpuIdentityTests.Run(Check);
