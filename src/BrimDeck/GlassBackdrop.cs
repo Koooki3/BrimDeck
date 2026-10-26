@@ -160,6 +160,7 @@ internal sealed class GlassBackdrop : IDisposable
     // liquid glass's look takes the same reading through GlassAppearance (its prior, hysteresis, dwell and video hold).
     private double _luminosity = GlassEffect.LuminosityCapsule, _luminosityShown = GlassEffect.LuminosityBase;
     private long _lowerSince = -1;
+    private bool _riseSeen;
     private DispatcherTimer? _probe;
     private GlassAppearance? _probeLook;
     private const int ProbeMs = 500, ProbeDwellMs = 2500;
@@ -943,14 +944,19 @@ internal sealed class GlassBackdrop : IDisposable
         if (LiquidGlass.AcrylicProbe.Read(island, (int)(24 * scale), (int)(40 * scale)) is not { } reading) return;
         long now = Environment.TickCount64;
         bool dark = PanelTheme.Current.IsDark;
-        double wanted = GlassEffect.LuminosityFor(dark, reading.Bright, reading.Dark);
-        if (wanted > _luminosity) { _luminosity = wanted; _lowerSince = -1; Redress(); }
+        double openness = Openness?.Invoke() ?? 0;
+        double wanted = GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness));
+        // Up after two readings in a row ask for it (a second: one flash of a video or a window passing never lifts it), down
+        // after the backdrop stayed calmer for ProbeDwellMs.
+        if (wanted > _luminosity && _riseSeen) { _luminosity = wanted; _lowerSince = -1; _riseSeen = false; Redress(); }
+        else if (wanted > _luminosity) _riseSeen = true;
         else if (wanted < _luminosity)
         {
+            _riseSeen = false;
             if (_lowerSince < 0) _lowerSince = now;
             else if (now - _lowerSince >= ProbeDwellMs) { _luminosity = Math.Max(wanted, _luminosity - .05); _lowerSince = now; Redress(); }
         }
-        else _lowerSince = -1;
+        else { _lowerSince = -1; _riseSeen = false; }
         // Automatic liquid glass: its look from the same reading, held while the panel is open or pressed.
         if (AutoLook?.Invoke() == true)
         {

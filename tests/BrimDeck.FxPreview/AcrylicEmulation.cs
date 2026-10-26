@@ -33,7 +33,8 @@ internal static class AcrylicEmulation
         Ring(gx - gap - band, gy + h + gap, gx + w + gap + band, gy + h + gap + band);
         ring.Sort();
         double bright = ring.Count > 0 ? ring[(int)(ring.Count * .9)] : .5, darkest = ring.Count > 0 ? ring[(int)(ring.Count * .1)] : .5;
-        Luminosity = GlassEffect.Shown(GlassEffect.LuminosityFor(dark, bright, darkest), openness);
+        var reading = new BrimDeck.LiquidGlass.AcrylicProbe.Reading(.5, bright, darkest, 0, ring.Count > 0 ? ring[ring.Count / 2] : .5);
+        Luminosity = GlassEffect.Shown(GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness)), openness);
         var look = (dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = Luminosity };
         var m = GlassEffect.AcrylicMatrix(look);
         // The blurred desktop over the island and a margin as wide as the blur reaches.
