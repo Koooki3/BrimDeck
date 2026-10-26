@@ -80,7 +80,7 @@ internal sealed class CollapseLayer : FrameworkElement
         var motion = PanelTheme.Motion;
         var style = CollapseFx.Choose(motion.Collapse, MotionEnvironment.Conditions(), FlashBudget.Shared, Eased.Now);
         if (style == CollapseStyle.Fade) return false;
-        Play(style, snapshot, source, island, motion.Pace, FoamColor(motion), 0, ended);
+        Play(style, snapshot, source, island, motion.Pace, FoamColor(motion), motion.Aberration, ended);
         return true;
     }
 

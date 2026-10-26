@@ -21,14 +21,17 @@ public enum HoverFx { None, Reveal, Lift, Underline, Caret, Brackets, Sheen, Glo
 // release; sparkle: the tint deepens and a few stars twinkle on the corners on release; ember: a warm glow swells from the
 // middle and fireflies rise from the top on release; bevel: the block's bevel turns over, shaded on top and lit below, as a
 // pixel-art button pressed in; jelly: the light on the shape squashes wider and lower as a drop of glass pressed, shaded only
-// along its bottom so the top keeps its highlight, and springs back past its shape once on release (liquid glass).
-public enum PressFx { None, Shade, Sink, Indicator, Select, Lock, Sparkle, Ember, Bevel, Jelly }
+// along its bottom so the top keeps its highlight, and springs back past its shape once on release (liquid glass); splash: a
+// ring of water spreads out from the shape's own edge as it goes down, and a second, fainter one as a completed press lets
+// go (island holiday).
+public enum PressFx { None, Shade, Sink, Indicator, Select, Lock, Sparkle, Ember, Bevel, Jelly, Splash }
 // A short accent where keyboard focus lands, over the focus outline the control keeps: a ring, a soft glow, brackets or a caret.
 public enum FocusFx { None, Ring, Glow, Brackets, Caret }
 // What a completed press leaves for a moment, from the control's own edges (never where the pointer is): dust (soft motes),
 // pixel (small squares, as a contribution graph), spark (short dashes), star (four-point twinkles on the corners), firefly
-// (warm lights rising slowly from the top edge), neon (round motes in two neon colors).
-public enum ParticleFx { None, Dust, Pixel, Spark, Star, Firefly, Neon }
+// (warm lights rising slowly from the top edge), neon (round motes in two neon colors), rain (a few fine slanted streaks
+// falling from the bottom edge, as the night city's rain), bubble (three to five small bubbles rising from the bottom edge).
+public enum ParticleFx { None, Dust, Pixel, Spark, Star, Firefly, Neon, Rain, Bubble }
 
 // Style names in theme files, with the names of earlier versions read as the closest new style.
 public static class MotionStyles
@@ -117,9 +120,11 @@ public readonly record struct AmbientFrame(double Rim, double Drift, double Swee
 // Pace scales every interaction duration. Steps quantizes the motion into that many hard steps (0: smooth), for a mechanical
 // theme. Spring is how much the theme's springs give (SpringTier), always at the monitor page's frequency. Collapse is how a
 // notice or the open panel goes back into the island (CollapseFx); fade, the panel's own closing, unless the theme asks.
+// Aberration is a short chromatic pulse in DIP (0: none, otherwise 1 to 1.5): red and blue pulled apart at a completed press's
+// edges and through the first moments of a pixel collapse picture, for at most CollapseFx.AberrationLength.
 public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double HoverStrength, PressFx Press, double PressStrength,
     double ParticleStrength, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent",
-    SpringTier Spring = SpringTier.Default, CollapseStyle Collapse = CollapseStyle.Fade)
+    SpringTier Spring = SpringTier.Default, CollapseStyle Collapse = CollapseStyle.Fade, double Aberration = 0)
 {
     public const string SystemAccent = "system";
     // Without a motion section anywhere in the base chain, nothing is drawn over the controls: they keep their own hover and
@@ -136,7 +141,7 @@ public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double Ho
         Hover = Hover switch { HoverFx.None => HoverFx.None, HoverFx.Lift => HoverFx.Lift, _ => HoverFx.Reveal },
         Press = Press switch { PressFx.None => PressFx.None, PressFx.Sink => PressFx.Sink, _ => PressFx.Shade },
         ParticleStrength = 0, Particles = ParticleFx.None, Steps = 0, Focus = Focus == FocusFx.None ? FocusFx.None : FocusFx.Ring, Spring = SpringTier.Default,
-        Collapse = CollapseStyle.Fade, Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
+        Collapse = CollapseStyle.Fade, Aberration = 0, Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
     };
 
     // A motion color as the palette draws it: a key of the palette, a color, or the Windows accent (systemAccent; the palette's
@@ -163,6 +168,10 @@ public static class MotionSafety
     // Stepped motion: 0 is smooth, otherwise 2 to 8 steps. A step moves a mark; brightness changes that read as a flash (a glitch
     // slice, a scan line) are rationed by FlashBudget to PressFlashes in any second, however fast the clicks come.
     public const int StepsMin = 2, StepsMax = 8, PressFlashes = 2;
+
+    // The chromatic pulse: 0 (or less) turns it off; anything else lies within CollapseFx's 1 to 1.5 DIP.
+    public static double Aberration(double? value, double fallback)
+        => value is not { } v || !double.IsFinite(v) ? fallback : v <= 0 ? 0 : Math.Clamp(v, CollapseFx.AberrationMin, CollapseFx.AberrationMax);
 
     public static int Steps(int? value, int fallback) => value is not { } v ? fallback : v < StepsMin ? 0 : Math.Min(v, StepsMax);
 
@@ -397,12 +406,12 @@ public sealed class PanelThemeMotion
     // none, reveal, lift, underline, caret, brackets, sheen, glow, lens, wave, slot (HoverFx); earlier names: spot, edge, neon
     public string? Hover { get; set; }
     public double? HoverStrength { get; set; }
-    // none, shade, sink, indicator, select, lock, sparkle, ember, bevel, jelly (PressFx); earlier names: pulse, ripple, ring
+    // none, shade, sink, indicator, select, lock, sparkle, ember, bevel, jelly, splash (PressFx); earlier names: pulse, ripple, ring
     public string? Press { get; set; }
     public double? PressStrength { get; set; }
     // 0 to 0.6: how strongly the particles a completed press leaves show (0: none)
     public double? Trail { get; set; }
-    // none, dust, pixel, spark, star, firefly, neon
+    // none, dust, pixel, spark, star, firefly, neon, rain, bubble
     public string? Particles { get; set; }
     // none, ring, glow, brackets, caret (FocusFx); earlier name: neon
     public string? Focus { get; set; }
@@ -416,6 +425,8 @@ public sealed class PanelThemeMotion
     public string? Spring { get; set; }
     // fade, glitch, foam, genie (CollapseStyle): how a notice or the open panel goes back into the island
     public string? Collapse { get; set; }
+    // 0 (none) or 1 to 1.5 DIP: a short chromatic pulse on a completed press and a pixel collapse picture
+    public double? Aberration { get; set; }
 }
 
 public sealed class PanelThemeAmbient
@@ -463,7 +474,8 @@ public static partial class PanelThemes
                 Secondary = motion.Secondary is { Length: > 0 } secondary ? secondary.Trim() : m.Secondary,
                 Highlight = motion.Highlight is { Length: > 0 } highlight ? highlight.Trim() : m.Highlight,
                 Spring = MotionStyles.Spring(motion.Spring, m.Spring),
-                Collapse = MotionStyles.Collapse(motion.Collapse, m.Collapse)
+                Collapse = MotionStyles.Collapse(motion.Collapse, m.Collapse),
+                Aberration = MotionSafety.Aberration(motion.Aberration, m.Aberration)
             };
         }
         return m with { Ambient = a };

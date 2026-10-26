@@ -415,7 +415,7 @@ internal sealed partial class FxSurface : FrameworkElement
         // A quick second press on the same control goes down from where the first one is, never from nothing.
         double from = ReferenceEquals(mark, _pressed) ? _press.At(now, _timing, _motion.Steps).Held : 0;
         Unwatch();
-        _pressed = mark;
+        _pressed = mark; _pulseAt = double.NaN;
         mark.Serial = ++_serial;
         bool glitch = _motion.Press == PressFx.Lock && Flashes.TryTake(now);
         _press.Press(now, from, glitch);
@@ -438,6 +438,8 @@ internal sealed partial class FxSurface : FrameworkElement
         bool scan = inside && _motion.Press == PressFx.Lock && Flashes.TryTake(now);
         _press.Release(now, inside, scan, _timing, _motion.Steps);
         if (_press.Committed && !byKey && _motion.Particles != ParticleFx.None && _motion.ParticleStrength > 0 && _pressed.Valid) Burst(_pressed, now);
+        // The chromatic pulse of a completed press, rationed as the other flashes are.
+        if (_press.Committed && _motion.Aberration > 0 && _pressed.Valid && Flashes.TryTake(now)) _pulseAt = now;
         Wake();
     }
 
@@ -511,7 +513,7 @@ internal sealed partial class FxSurface : FrameworkElement
         if (_hover is { Valid: false }) { if (!_hover.Control.IsVisible || PresentationSource.FromVisual(_hover.Control) is null) _hover = null; else HoverOn(null); }
         for (int i = 0; i < _leaving.Length; i++)
             if (_leaving[i] is { } mark && (!mark.Valid || LeavingPresence(mark, now) <= 0)) _leaving[i] = null;
-        if (_pressed is not null && (!_pressed.Valid || !_press.Alive(now, _timing))) { if (_press.Down) Unwatch(); _press.Clear(); _pressed = null; _slice.Visual = null; }
+        if (_pressed is not null && (!_pressed.Valid || !_press.Alive(now, _timing) && !Lingering(now))) { if (_press.Down) Unwatch(); _press.Clear(); _pressed = null; _slice.Visual = null; }
         if (_focus is not null && (!_focus.Valid || now - _focusAt > _timing.Focus / 1000.0)) _focus = null;
         bool particles = StepParticles(now);
 
@@ -549,7 +551,7 @@ internal sealed partial class FxSurface : FrameworkElement
         Unwatch();
         _hover = _pressed = _focus = null;
         Array.Clear(_leaving);
-        _press.Clear(); _flashes.Clear(); _previewFlashes.Clear(); _focusGate.Clear(); _slice.Visual = null; _keyPress = false;
+        _press.Clear(); _flashes.Clear(); _previewFlashes.Clear(); _pulseAt = double.NaN; _focusGate.Clear(); _slice.Visual = null; _keyPress = false;
         _lastSource = null; _lastTarget = null;
         ClearParticles();
         Sleep(); WatchLayout(false);

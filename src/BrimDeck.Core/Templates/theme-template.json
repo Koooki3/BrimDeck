@@ -132,10 +132,12 @@
     "press": "none",                // none, shade (the shape shades and its edge firms), sink (the shadow collapses, pushed in),
                                     // indicator (the bottom bar takes the highlight), select (a selection sweeps from the caret),
                                     // lock (brackets clamp on, a chromatic ghost, a glitch slice; a scan line on release),
-                                    // sparkle (the tint deepens; stars on release), ember (a warm glow swells; fireflies on release)
+                                    // sparkle (the tint deepens; stars on release), ember (a warm glow swells; fireflies on release),
+                                    // bevel, jelly, splash (a ring spreads from the edge on press, a fainter one on release)
     "pressStrength": 0.18,          // 0 to 0.35
     "trail": 0,                     // 0 to 0.6: how strongly the particles a completed press leaves show (0: none)
-    "particles": "none",            // none, dust, pixel, spark, star, firefly, neon: from the control's edges, above the content
+    "particles": "none",            // none, dust, pixel, spark, star, firefly, neon, rain (fine slanted streaks falling from
+                                    // the bottom edge), bubble (3 to 5 small bubbles rising from the bottom edge)
     "focus": "none",                // none, ring, glow, brackets, caret: a short accent where keyboard focus lands
     "pace": 1,                      // 0.6 to 1.6: scales the pace of hover, press and focus feedback
     "steps": 0,                     // 0 (smooth) or 2 to 8: moves in that many hard steps, for a mechanical feel
@@ -143,6 +145,8 @@
     "collapse": "fade",             // fade, glitch, foam, genie: how a notice or the open panel goes back into the island
                                     // (glitch: torn bands in three steps, ~270 ms; foam: a noise dissolve with a 1 px foam
                                     // edge, ~330 ms; genie: drawn into the island along the lamp curve, ~450 ms)
+    "aberration": 0,                // 0 (none) or 1 to 1.5: red and blue pulled apart by this many DIP at the edges for at most
+                                    // 120 ms, on a completed press and a glitch or foam collapse
     "color": "accent",              // The main mark: a color key above, a "#RRGGBB" color, or "system" (the Windows accent color)
     "secondary": "accent",          // Its second tone: a gradient's end, a shadow, a ghost or a neutral bar
     "highlight": "accent"           // The color of the moment of a press: an indicator, a selection, a scan line, sparkles

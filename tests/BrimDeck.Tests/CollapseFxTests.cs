@@ -14,6 +14,33 @@ internal static class CollapseFxTests
         Genie(check);
         Playback(check);
         Budget(check);
+        Effects(check, Palette, Custom);
+    }
+
+    // The new answers to the pointer: splash, rain, bubbles and the chromatic pulse, all chosen by a theme file only.
+    private static void Effects(Action<string, bool> check, Func<string, PanelPalette> palette, Func<string, PanelPalette> custom)
+    {
+        check("Splash, rain, bubble and the pulse: no built-in theme opts in",
+            PanelThemes.BuiltIns.All(theme => palette(theme.Id).Motion is { Aberration: 0 } m && m.Press != PressFx.Splash && m.Particles is not (ParticleFx.Rain or ParticleFx.Bubble)));
+        var island = custom("""{ "base": "island-holiday", "motion": { "press": "splash", "particles": "bubble", "trail": 0.4 } }""");
+        var night = custom("""{ "base": "cyberpunk-edgerunners", "motion": { "particles": "RAIN", "aberration": 1.25 } }""");
+        check("They are read by name from motion.press, motion.particles and motion.aberration",
+            island.Motion is { Press: PressFx.Splash, Particles: ParticleFx.Bubble } && night.Motion is { Particles: ParticleFx.Rain, Aberration: 1.25 }
+            && custom("""{ "base": "dark", "motion": { "press": "ripple" } }""").Motion.Press == PressFx.Shade);
+        static double Pulse(Func<string, PanelPalette> custom, string value) => custom($$"""{ "base": "dark", "motion": { "aberration": {{value}} } }""").Motion.Aberration;
+        check("The pulse is 0 or 1 to 1.5 DIP whatever the file says",
+            Pulse(custom, "0") == 0 && Pulse(custom, "-2") == 0 && Pulse(custom, "0.4") == 1 && Pulse(custom, "1.2") == 1.2 && Pulse(custom, "9") == 1.5
+            && custom("""{ "base": "dark" }""").Motion.Aberration == 0);
+        check("System has no pulse", night.Motion.ForSystem().Aberration == 0);
+        check("The theme template writes the pulse out", PanelThemes.FillTemplate("t", night).Contains("\"aberration\": 1.25"));
+        check("The pulse lasts at most 120 ms and peaks at its amount",
+            CollapseFx.AberrationAt(.06, 1.5, 2) is > 2.99 and <= 3 && CollapseFx.AberrationAt(.12, 1.5, 2) == 0 && CollapseFx.AberrationAt(-.01, 1.5, 2) == 0
+            && CollapseFx.AberrationAt(.05, 0, 2) == 0);
+        // Red pulled right and blue left, nothing at the centre: a white bar's ends turn red on the right, blue on the left.
+        var row = new uint[21]; for (int x = 5; x <= 15; x++) row[x] = 0xFFFFFFFF;
+        CollapseFx.Aberrate(row, new uint[21], 3);
+        check("Aberration: red moves right and blue left at the edges, the centre stays",
+            row[10] == 0xFFFFFFFF && (row[16] & 0xFF0000) != 0 && (row[16] & 0xFF) == 0 && (row[4] & 0xFF) != 0 && (row[4] & 0xFF0000) == 0 && (row[16] & 0xFF00) == 0);
     }
 
     private static void Keys(Action<string, bool> check, Func<string, PanelPalette> palette, Func<string, PanelPalette> custom)
