@@ -10,8 +10,8 @@ namespace BrimDeck;
 // the collapsed row admits the readings that fit whole (Admit, CompactMusicLayout); on its own it shows what fits the width it
 // gets (CompactMonitor.Fit). Either way it never cuts through a figure.
 // Each reading takes the room its figure needs, with every digit as wide as the widest one, so figures of one length take one
-// width; a wider figure widens it at once and a narrower one gives the room back only after a while (HeldWidth), easing either
-// way, so a busy rate does not push its neighbours about every second. In the row, the readings stand the row's own gap apart
+// width; a wider figure widens it at once and a narrower one gives the room back only after a while (HeldWidth), so a busy
+// rate does not push its neighbours about every second; the change is taken at once, not eased (StripPresence.Resize). In the row, the readings stand the row's own gap apart
 // (CompactSpacing places them as parts of the row, Place). It draws itself once per reading; the collapsed row stays still
 // between readings. When the row narrows or widens (a drag on its end, the lyric beside it changing), a reading that no longer
 // fits fades and shrinks out of its place while the others slide together, and one that fits again comes back the same way.
@@ -189,14 +189,14 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         if (_battery == battery) return;
         _battery = battery; InvalidateVisual();
-        if (battery is not null && _presence.Measure((_values, _scale), Shown, item => FigureWidth(item, Figure(item, _snapshot)), true, Motion.Enabled)) { Motion.Start(this, Step); Relayout(); }
+        if (battery is not null && _presence.Resize(Shown, item => FigureWidth(item, Figure(item, _snapshot)))) Relayout();
     }
 
     public void Update(MonitorSnapshot? snapshot)
     {
         _snapshot = snapshot; InvalidateVisual();
-        // A figure of a new width eases its reading to it, and the row with it.
-        if (snapshot is not null && _presence.Measure((_values, _scale), Shown, item => FigureWidth(item, Figure(item, snapshot)), true, Motion.Enabled)) { Motion.Start(this, Step); Relayout(); }
+        // A figure of a new width takes it at once, and the row places its readings again (StripPresence.Resize).
+        if (snapshot is not null && _presence.Resize(Shown, item => FigureWidth(item, Figure(item, snapshot)))) Relayout();
     }
     private void Relayout() => (VisualTreeHelper.GetParent(this) as UIElement)?.InvalidateArrange();
 
