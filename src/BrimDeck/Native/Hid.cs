@@ -26,13 +26,13 @@ internal sealed class HidInfo
     public int Interface => System.Text.RegularExpressions.Regex.Match(Path, "mi_([0-9a-f]{2})", System.Text.RegularExpressions.RegexOptions.IgnoreCase) is { Success: true } m
         ? Convert.ToInt32(m.Groups[1].Value, 16) : -1;
     // Reached through Bluetooth (classic or LE) rather than USB.
-    public bool Bluetooth => Path.Contains("{00001124-", StringComparison.OrdinalIgnoreCase) || Path.Contains("{00001812-", StringComparison.OrdinalIgnoreCase)
-        || Path.Contains("bthledevice", StringComparison.OrdinalIgnoreCase);
+    public bool Bluetooth => Hid.IsBluetooth(Path);
 }
 
 internal static class Hid
 {
-    // Every present HID collection's path. The paths carry vid_xxxx&pid_xxxx, so callers filter on them before opening anything.
+    // Every present HID collection's path. The paths carry the vendor and product (Ids) and the link (IsBluetooth), so callers
+    // filter on them before opening anything.
     public static List<string> Paths()
     {
         var paths = new List<string>();
@@ -68,7 +68,13 @@ internal static class Hid
         return match.Success ? (Convert.ToInt32(match.Groups[1].Value, 16), Convert.ToInt32(match.Groups[2].Value, 16)) : (0, 0);
     }
 
+    // Whether a path is a collection reached through Bluetooth (classic or LE) rather than USB.
+    public static bool IsBluetooth(string path) => path.Contains("{00001124-", StringComparison.OrdinalIgnoreCase) || path.Contains("{00001812-", StringComparison.OrdinalIgnoreCase)
+        || path.Contains("bthledevice", StringComparison.OrdinalIgnoreCase);
+
     // A collection's attributes, opened with no access; null when it cannot be opened. batteries: read the battery usages too.
+    // The product name and serial go to the device itself, with no timeout (a Bluetooth device asleep can hold them), which is
+    // why callers open only the Bluetooth collections they need (HidBatteries.Spoken).
     public static HidInfo? Query(string path, bool batteries = false)
     {
         IntPtr handle = CreateFile(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
@@ -173,19 +179,18 @@ internal static class Hid
     [StructLayout(LayoutKind.Sequential)] private struct SP_DEVICE_INTERFACE_DATA { public int cbSize; public Guid InterfaceClassGuid; public int Flags; public IntPtr Reserved; }
     [StructLayout(LayoutKind.Sequential)] private struct HIDD_ATTRIBUTES { public int Size; public ushort VendorID; public ushort ProductID; public ushort VersionNumber; }
 
+    // hid.dll's HidD_ functions return BOOLEAN, one byte: read as such, not as a four-byte BOOL.
     [DllImport("hid.dll")] private static extern void HidD_GetHidGuid(out Guid guid);
-    [DllImport("hid.dll")] private static extern bool HidD_GetAttributes(IntPtr handle, ref HIDD_ATTRIBUTES attributes);
-    [DllImport("hid.dll")] internal static extern bool HidD_GetPreparsedData(IntPtr handle, out IntPtr data);
-    [DllImport("hid.dll")] internal static extern bool HidD_FreePreparsedData(IntPtr data);
+    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetAttributes(IntPtr handle, ref HIDD_ATTRIBUTES attributes);
+    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] internal static extern bool HidD_GetPreparsedData(IntPtr handle, out IntPtr data);
+    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] internal static extern bool HidD_FreePreparsedData(IntPtr data);
     [DllImport("hid.dll")] private static extern int HidP_GetCaps(IntPtr data, [Out] ushort[] caps);
     [DllImport("hid.dll")] private static extern int HidP_GetValueCaps(int reportType, [Out] byte[] caps, ref ushort length, IntPtr data);
     [DllImport("hid.dll")] private static extern int HidP_GetUsageValue(int reportType, ushort page, ushort link, ushort usage, out uint value, IntPtr data, byte[] report, uint length);
-    [DllImport("hid.dll")] internal static extern bool HidD_FlushQueue(IntPtr handle);
-    [DllImport("hid.dll")] internal static extern bool HidD_GetFeature(IntPtr handle, byte[] buffer, int length);
-    [DllImport("hid.dll")] internal static extern bool HidD_SetFeature(IntPtr handle, byte[] buffer, int length);
-    [DllImport("hid.dll")] internal static extern bool HidD_SetOutputReport(IntPtr handle, byte[] buffer, int length);
-    [DllImport("hid.dll")] private static extern bool HidD_GetProductString(IntPtr handle, byte[] buffer, int length);
-    [DllImport("hid.dll")] private static extern bool HidD_GetSerialNumberString(IntPtr handle, byte[] buffer, int length);
+    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] internal static extern bool HidD_FlushQueue(IntPtr handle);
+    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] internal static extern bool HidD_SetOutputReport(IntPtr handle, byte[] buffer, int length);
+    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetProductString(IntPtr handle, byte[] buffer, int length);
+    [DllImport("hid.dll")] [return: MarshalAs(UnmanagedType.U1)] private static extern bool HidD_GetSerialNumberString(IntPtr handle, byte[] buffer, int length);
 
     [DllImport("setupapi.dll", SetLastError = true)] private static extern IntPtr SetupDiGetClassDevs(ref Guid cls, IntPtr enumerator, IntPtr window, int flags);
     [DllImport("setupapi.dll", SetLastError = true)] private static extern bool SetupDiEnumDeviceInterfaces(IntPtr set, IntPtr info, ref Guid cls, int index, ref SP_DEVICE_INTERFACE_DATA data);
@@ -274,14 +279,15 @@ internal sealed class HidDevice : IDisposable
                 if (error != Hid.ERROR_IO_PENDING) throw new Win32Exception(error);
                 if (Hid.WaitForSingleObject(Hid.OverlappedEvent(overlapped), (uint)timeoutMs) != 0)
                 {
+                    // As Control: cancelled, waited for a second at most, and left to a driver that ignores the cancel.
                     Hid.CancelIoEx(_handle, overlapped);
-                    Hid.GetOverlappedResult(_handle, overlapped, out _, true);
+                    if (Hid.WaitForSingleObject(Hid.OverlappedEvent(overlapped), 1000) != 0) { memory = IntPtr.Zero; overlapped = IntPtr.Zero; }
                     throw new TimeoutException();
                 }
             }
             if (!Hid.GetOverlappedResult(_handle, overlapped, out _, true)) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
-        finally { Marshal.FreeHGlobal(memory); Hid.FreeOverlapped(overlapped); }
+        finally { if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory); if (overlapped != IntPtr.Zero) Hid.FreeOverlapped(overlapped); }
     }
 
     // Reads one input report, or null after the timeout.

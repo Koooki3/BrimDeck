@@ -41,7 +41,7 @@ public sealed class MarqueeScroll
     public void Restart() { Home(); _laps = 0; }
     private void Home() { _phase = Phase.Start; _offset = 0; _rested = 0; _last = double.NaN; _waiting = false; }
 
-    // Lets a line that has rested scroll its laps again from its start (the pointer came over the island). Returns whether it was
+    // Lets a line that has rested scroll its laps again from its start (the panel closed and the row shows again). Returns whether it was
     // resting.
     public bool Replay()
     {

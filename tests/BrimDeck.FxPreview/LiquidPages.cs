@@ -325,7 +325,7 @@ internal static partial class LiquidPages
         // outline the renderer covered.
         if (!GlassBackdrop.Refraction)
         {
-            glass = AcrylicEmulation.Draw(desktop, dw, dh, gx, gy, layer.W, layer.H, glass, dark, Scale);
+            glass = AcrylicEmulation.Draw(desktop, dw, dh, gx, gy, layer.W, layer.H, glass, dark, Scale, layer.Open);
             Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: acrylic luminosity {AcrylicEmulation.Luminosity:0.00}"));
         }
         var under = (byte[])desktop.Clone();

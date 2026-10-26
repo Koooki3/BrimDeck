@@ -343,23 +343,29 @@ internal sealed class MonitorStrip : FrameworkElement
     }
 
     // A small battery on its side, as tall as the drive glyph beside it and outlined in the reading's color as the drive is, filled
-    // to the lowest charge, with a bolt while that device charges; then the figure: "15%". On whole device pixels.
+    // to the lowest charge (none at 0%, as on the page); then the figure: "15%". On whole device pixels. Too small to carry a mark
+    // over its fill, the battery takes a bolt in place of its tip while that device charges (its body that much shorter), and
+    // an exclamation mark in its empty part when low, so color is not the only sign, as on the page.
     private double BatteryWidth => Math.Round(17 * _scale);
     private void Battery(DrawingContext drawing, double x, double center, BatteryReading? battery, string color, MemoryLevel level, double ppd)
     {
         double Snap(double value) => Math.Round(value * ppd) / ppd;
-        double width = BatteryWidth, height = Snap(9 * _scale), tip = Snap(Math.Max(1, 1.5 * _scale)), stroke = Math.Max(1, Math.Round(1.2 * _scale * ppd)) / ppd;
+        bool charging = battery is { Charging: true };
+        double width = BatteryWidth, height = Snap(9 * _scale), stroke = Math.Max(1, Math.Round(1.2 * _scale * ppd)) / ppd;
+        double tip = charging ? Snap(height * 15 / 23) : Snap(Math.Max(1, 1.5 * _scale));
         var body = new Rect(Snap(x) + stroke / 2, Snap(center - height / 2) + stroke / 2, Snap(width - tip - 1) - stroke, height - stroke);
         string ink = battery is null ? UI.Tertiary : color;
-        double radius = PanelTheme.Corner(1.5 * _scale);
+        double radius = PanelTheme.Corner(1.5 * _scale), tipX = Snap(body.Right + stroke / 2 + 1 / ppd);
         drawing.DrawRoundedRectangle(null, ArcPen(ink, stroke), body, radius, radius);
-        drawing.DrawRectangle(UI.Brush(ink), null, new Rect(Snap(body.Right + stroke / 2 + 1 / ppd), Snap(center - height * .2), tip, Snap(height * .4)));
+        if (charging) DeviceGlyphs.Bolt(drawing, new Rect(tipX, Snap(center - height / 2), tip, height), ink);
+        else drawing.DrawRectangle(UI.Brush(ink), null, new Rect(tipX, Snap(center - height * .2), tip, Snap(height * .4)));
         if (battery is { } b)
         {
-            double inset = stroke + 1 / ppd, room = Math.Max(0, body.Width - 2 * inset + stroke);
-            double fill = Snap(Math.Max(Math.Min(room, 1.5 * _scale), room * Math.Clamp(b.Percent / 100.0, 0, 1)));
-            drawing.DrawRectangle(UI.Brush(color), null, new Rect(body.X - stroke / 2 + inset, body.Y - stroke / 2 + inset, fill, Math.Max(1, body.Height + stroke - 2 * inset)));
-            if (b.Charging) DeviceGlyphs.Bolt(drawing, body, UI.Primary);
+            double inset = stroke + 1 / ppd, room = Math.Max(0, body.Width - 2 * inset + stroke), left = body.X - stroke / 2 + inset;
+            double fill = b.Percent <= 0 ? 0 : Snap(Math.Max(Math.Min(room, 1.5 * _scale), room * Math.Clamp(b.Percent / 100.0, 0, 1)));
+            if (fill > 0) drawing.DrawRectangle(UI.Brush(color), null, new Rect(left, body.Y - stroke / 2 + inset, fill, Math.Max(1, body.Height + stroke - 2 * inset)));
+            if (!b.Charging && b.Level != MemoryLevel.Normal)
+                DeviceGlyphs.Exclamation(drawing, new Rect(left + fill, body.Y + stroke / 2, Math.Max(0, room - fill), Math.Max(0, body.Height - stroke)), color, null, ppd);
         }
         var text = MonitorDraw.Text(Devices.Figure(battery?.Percent), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + width + Math.Round(3 * _scale), Math.Round(center + _font * .36));

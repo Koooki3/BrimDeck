@@ -47,13 +47,15 @@ internal sealed class DeviceBatteries : IDisposable
         _sources.Add(_apple);
     }
 
-    // A source's whole list, on the UI thread. The AirPods scan follows what is connected (AppleBatteries.Consider).
+    // A source's whole list, on the UI thread. The AirPods scan follows what is connected (AppleBatteries.Consider), on every
+    // Bluetooth list whether or not the merged one changed: AirPods that disconnect leave it unchanged while the Apple source
+    // still holds their entry.
     private void Report(DeviceSource source, IReadOnlyList<DeviceBattery> devices)
     {
         if (_disposed || _running == DeviceDemand.None) return;
-        if (!_roster.Set(source, devices)) return;
+        bool changed = _roster.Set(source, devices);
         if (source == DeviceSource.Bluetooth) _apple.Consider(_roster.Of(DeviceSource.Bluetooth));
-        Changed?.Invoke();
+        if (changed) Changed?.Invoke();
     }
 
     // Every device read now, hidden ones included; empty while nothing runs.

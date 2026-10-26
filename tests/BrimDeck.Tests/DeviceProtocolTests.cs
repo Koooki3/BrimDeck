@@ -41,7 +41,9 @@ static class DeviceProtocolTests
             && Hidpp.Status([0, 0, 0]).Percent is null);
         check("HID++: 0x1001 millivolts big endian on the curve", Hidpp.Voltage([0x0F, 0x50, 0x00]) is { Percent: 70, Charging: false, Coarse: true } && Hidpp.Voltage([0x10, 0x5A, 0x80]) is { Percent: 100, Charging: true });
         check("HID++: the voltage curve's ends and a point between", Hidpp.VoltageToPercent(4300) == 100 && Hidpp.VoltageToPercent(3400) == 0 && Hidpp.VoltageToPercent(3811) == 50);
-        check("HID++: 0x1F20 headsets, full and charging", Hidpp.Adc([0x0F, 0xA0, 0x07]) is { Percent: 100, Charging: true } && Hidpp.Adc([0x0F, 0xA0, 0x01]) is { Charging: false, Coarse: true });
+        check("HID++: 0x1F20 headsets, full and charging by bit", Hidpp.Adc([0x0F, 0xA0, 0x07]) is { Percent: 100, Charging: true } && Hidpp.Adc([0x0F, 0xA0, 0x01]) is { Charging: false, Coarse: true }
+            && Hidpp.Adc([0x0F, 0x50, 0x03]) is { Percent: 70, Charging: true });
+        check("HID++: 0x1F20 without a valid measurement (the headset off) is no reading, not 0 %", Hidpp.Adc([0, 0, 0]) is null && Hidpp.Adc([0x0F, 0xA0, 0x02]) is null);
         check("HID++ 1.0: register 0x0D and 0x07", Hidpp.Mileage([80, 0, 0x40]) == new BatteryRead(80, true) && Hidpp.Level([5, 0x00]) is { Percent: 50, Coarse: true } && Hidpp.Level([3, 0x22]).Percent == 100
             && Hidpp.RegisterRequest(2, 0x0D).SequenceEqual(new byte[] { 0x10, 2, 0x81, 0x0D, 0, 0, 0 }));
         check("HID++: device types", Hidpp.Kind(0) == DeviceKind.Keyboard && Hidpp.Kind(3) == DeviceKind.Mouse && Hidpp.Kind(5) == DeviceKind.Mouse && Hidpp.Kind(8) == DeviceKind.Headphones && Hidpp.Kind(7) == DeviceKind.Other);
@@ -71,7 +73,8 @@ static class DeviceProtocolTests
             && Dongles.BitMouseCharging([0x08, 0x72, 0x00, 0x00, 0x01, 0x0F, 0x01, 1]) == true);
         var compx = Dongles.CompxRequest(0x04);
         check("Compx: the battery request, its checksum 0x49", compx.Length == 17 && compx[0] == 0x08 && compx[1] == 0x04 && compx[16] == 0x49 && compx.Sum(b => b) % 256 == 0x55);
-        check("Compx: a reply", Dongles.CompxBattery([0x08, 0x04, 0, 0, 0, 1, 63, 1, 0x0F, 0xA0, 0, 0, 0, 0, 0, 0, 0]) == new BatteryRead(63, true) && Dongles.CompxBattery([0x08, 0x03, 0, 0, 0, 0, 63, 0]) is null);
+        check("Compx: a reply; charging only at 1", Dongles.CompxBattery([0x08, 0x04, 0, 0, 0, 1, 63, 1, 0x0F, 0xA0, 0, 0, 0, 0, 0, 0, 0]) == new BatteryRead(63, true)
+            && Dongles.CompxBattery([0x08, 0x04, 0, 0, 0, 1, 63, 2]) == new BatteryRead(63) && Dongles.CompxBattery([0x08, 0x03, 0, 0, 0, 0, 63, 0]) is null);
         var vgn = new byte[64]; vgn[0] = 0x04; vgn[3] = 0x1A; vgn[8] = 41; vgn[9] = 0;
         check("VGN keyboards: the request and a reply", Dongles.VgnRequest().Take(5).SequenceEqual(new byte[] { 0x04, 0, 0, 0x1A, 0x06 }) && Dongles.VgnBattery(vgn) == new BatteryRead(41));
         var endgame = new byte[32]; endgame[0] = 0xA1; endgame[1] = 0x01; endgame[16] = 77;
@@ -81,7 +84,9 @@ static class DeviceProtocolTests
         var nordic = new byte[16]; nordic[0] = 0x05; nordic[9] = 52;
         check("Nordic receivers", Dongles.NordicRequest(16)[..5].SequenceEqual(new byte[] { 0x05, 0x15, 0, 0, 0x01 }) && Dongles.NordicBattery(nordic) == new BatteryRead(52));
         var inphic = new byte[33]; inphic[0] = 0x0C; inphic[2] = 0x20; inphic[6] = 1; inphic[0x12] = 66; inphic[0x13] = 2;
-        check("Inphic IN9", Dongles.InphicRequest(0x20, 3)[..5].SequenceEqual(new byte[] { 0x0C, 0x01, 0x20, 0x00, 0x03 }) && Dongles.InphicBattery(inphic) == new BatteryRead(66, true));
+        check("Inphic IN9: the handshake with its payload, the query, a reply", Dongles.InphicRequest(0xF0, 3, Dongles.InphicHandshake)[..9].SequenceEqual(new byte[] { 0x0C, 0x01, 0xF0, 0x00, 0x03, 0x01, 0x01, 0xFF, 0 })
+            && Dongles.InphicRequest(0x20, 3)[..6].SequenceEqual(new byte[] { 0x0C, 0x01, 0x20, 0x00, 0x03, 0 }) && Dongles.InphicRequest(0x20, 3).Length == 33
+            && Dongles.InphicBattery(inphic) == new BatteryRead(66, true));
         check("MCHOSE: the device info request with its checksum", Dongles.MchoseRequest()[..9].SequenceEqual(new byte[] { 0x4D, 0x01, 0x01, 0x00, 0x00, 0x09, 0x00, 0x00, 0x08 }));
         var mchose = new byte[64]; mchose[0] = 0x4D; mchose[5] = 0x09; mchose[8 + 10] = 1; mchose[8 + 11] = 0; mchose[8 + 12] = 91;
         var off = (byte[])mchose.Clone(); off[8 + 12] = 0;
@@ -108,10 +113,14 @@ static class DeviceProtocolTests
         check("Headsets: Nova Pro in eighths", Headsets.Battery(Headsets.Kind.NovaPro, pro) == new BatteryRead(50, true, true));
         check("Headsets: HyperX Cloud Alpha level and charging", Headsets.Battery(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x0B, 58]) == new BatteryRead(58)
             && Headsets.Charging(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x0C, 1]) == true && Headsets.Battery(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x0C, 1]) is null);
+        check("Headsets: HyperX Cloud Alpha asked whether its headset is connected first", Headsets.ConnectionRequest(Headsets.Kind.CloudAlpha) is [0x21, 0xBB, 0x03, ..] and { Length: 31 }
+            && Headsets.Connected(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x03, 0x01]) == false && Headsets.Connected(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x03, 0x02]) == true
+            && Headsets.Connected(Headsets.Kind.CloudAlpha, [0x21, 0xBB, 0x0B, 0x01]) is null && Headsets.ConnectionRequest(Headsets.Kind.CloudII) is null);
         check("Headsets: HyperX Cloud II", Headsets.Battery(Headsets.Kind.CloudII, [0x06, 0xFF, 0xBB, 0x02, 0, 0x0F, 0xA0, 81]) == new BatteryRead(81));
         check("Headsets: HyperX Cloud Flight by voltage, on its cable", Headsets.Battery(Headsets.Kind.CloudFlight, [0x21, 0xFF, 0x05, 0x0E, 0xA0]) is { Coarse: true, Percent: 29 }
             && Headsets.Battery(Headsets.Kind.CloudFlight, [0x21, 0xFF, 0x05, 0x10, 0x40]) is { Charging: true, Percent: null });
-        check("Headsets: MCHOSE X9; asleep is none", Headsets.Battery(Headsets.Kind.MchoseX9, [0x55, 0x65, 40, 3]) == new BatteryRead(40, true)
+        check("Headsets: MCHOSE X9, the battery field only; other fields are none", Headsets.Battery(Headsets.Kind.MchoseX9, [0x55, 0x65, 40, 0x02]) == new BatteryRead(40)
+            && Headsets.Battery(Headsets.Kind.MchoseX9, [0x55, 0x65, 40, 0x03]) is null && Headsets.Battery(Headsets.Kind.MchoseX9, [0x55, 0x65, 40, 0x04]) is null
             && Headsets.Battery(Headsets.Kind.MchoseX9, [0x55, 0x65, 40, 26]) is null);
     }
 
@@ -121,16 +130,18 @@ static class DeviceProtocolTests
         var bt = new byte[78]; bt[0] = 0x31; bt[54] = 0x15;
         var full = new byte[64]; full[0] = 0x01; full[53] = 0x2A;
         check("DualSense: USB and Bluetooth reports", PlayStation.Battery(0x0CE6, usb, bluetooth: false) == new BatteryRead(75) && PlayStation.Battery(0x0CE6, bt, bluetooth: true) == new BatteryRead(55, true)
-            && PlayStation.Battery(0x0CE6, full, bluetooth: false) == new BatteryRead(100, true));
+            && PlayStation.Battery(0x0CE6, full, bluetooth: false) == new BatteryRead(100));
         // Windows pads every report to the collection's longest: a short Bluetooth 0x01 report comes 78 bytes long, all zeros after it.
         var padded = new byte[78]; padded[0] = 0x01;
         check("DualSense: a short Bluetooth report, padded, carries none", PlayStation.Battery(0x0CE6, padded, bluetooth: true) is null
             && PlayStation.Battery(0x0CE6, new byte[10] { 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, bluetooth: true) is null);
         var ds4 = new byte[64]; ds4[0] = 0x01; ds4[30] = 0x08;
         var ds4Cable = new byte[78]; ds4Cable[0] = 0x11; ds4Cable[32] = 0x1B;
+        var ds4Charging = (byte[])ds4Cable.Clone(); ds4Charging[32] = 0x15;
         var ds4Short = new byte[547]; ds4Short[0] = 0x01;
-        check("DualShock 4: on battery and on its cable; a padded short Bluetooth report carries none", PlayStation.Battery(0x09CC, ds4, bluetooth: false) == new BatteryRead(85)
-            && PlayStation.Battery(0x09CC, ds4Cable, bluetooth: true) == new BatteryRead(100, true) && PlayStation.Battery(0x09CC, ds4Short, bluetooth: true) is null);
+        check("DualShock 4: on battery, charging and full on its cable; a padded short Bluetooth report carries none", PlayStation.Battery(0x09CC, ds4, bluetooth: false) == new BatteryRead(85)
+            && PlayStation.Battery(0x09CC, ds4Cable, bluetooth: true) == new BatteryRead(100) && PlayStation.Battery(0x09CC, ds4Charging, bluetooth: true) == new BatteryRead(55, true)
+            && PlayStation.Battery(0x09CC, ds4Short, bluetooth: true) is null);
     }
 
     private static void Usages(Action<string, bool> check)
@@ -142,14 +153,21 @@ static class DeviceProtocolTests
 
     private static void Apple(Action<string, bool> check)
     {
-        // AirPods Pro: left 8 (80 %), right 6 (60 %), case 3 (30 %) charging; byte 5 with 0x20 set: not flipped.
+        // AirPods Pro: byte 6 0x86 with byte 5's 0x20 set (not flipped): left the low nibble 6 (60 %), right the high 8 (80 %);
+        // case 3 (30 %) charging, as OpenPods and AirPodsDesktop read it.
         byte[] advert = [0x07, 0x19, 0x01, 0x0E, 0x20, 0x2B, 0x86, 0x43, 0, 0];
         var parts = AppleAdvert.Parts(advert)!;
-        check("AirPods: the model and each part's level", AppleAdvert.Model(advert) == "AirPods Pro" && parts.Count == 3 && parts[0] == new PartBattery(BatteryPart.Left, 80, false)
-            && parts[1] == new PartBattery(BatteryPart.Right, 60, false) && parts[2] == new PartBattery(BatteryPart.Case, 30, true));
-        byte[] flipped = [0x07, 0x19, 0x01, 0x0E, 0x20, 0x0B, 0x86, 0x0F, 0, 0];
+        check("AirPods: the model and each part's level", AppleAdvert.Model(advert) == "AirPods Pro" && parts.Count == 3 && parts[0] == new PartBattery(BatteryPart.Left, 60, false)
+            && parts[1] == new PartBattery(BatteryPart.Right, 80, false) && parts[2] == new PartBattery(BatteryPart.Case, 30, true) && AppleAdvert.Single(advert) is null);
+        // Flipped (0x20 clear): the left is the high nibble, and its charging bit is 0x02; the right charges here.
+        byte[] flipped = [0x07, 0x19, 0x01, 0x0E, 0x20, 0x0B, 0x86, 0x1F, 0, 0];
         var swapped = AppleAdvert.Parts(flipped)!;
-        check("AirPods: flipped buds swap, a missing case is left out", swapped.Count == 2 && swapped[0].Percent == 60 && swapped[1].Percent == 80);
+        check("AirPods: flipped buds swap with their charging, a missing case is left out", swapped.Count == 2 && swapped[0] == new PartBattery(BatteryPart.Left, 80, false)
+            && swapped[1] == new PartBattery(BatteryPart.Right, 60, true));
+        // AirPods Max: one level (byte 6's low nibble, 7 = 70 %), charging, no parts.
+        byte[] max = [0x07, 0x19, 0x01, 0x0A, 0x20, 0x2B, 0x07, 0x1F, 0, 0];
+        check("AirPods Max and the one-piece Beats: one level, no left and right", AppleAdvert.Model(max) == "AirPods Max" && AppleAdvert.Parts(max) is { Count: 0 }
+            && AppleAdvert.Single(max) == new BatteryRead(70, true, true) && AppleAdvert.Single([0x07, 0x19, 0x01, 0x10, 0x20, 0x2B, 0x0F, 0x0F]) is null);
         check("AirPods: another advertisement is none", AppleAdvert.Parts([0x10, 0x05, 0, 0, 0, 0, 0, 0]) is null && AppleAdvert.Model([0x07, 0x19, 0x01, 0x99, 0x99]) is null);
     }
 }

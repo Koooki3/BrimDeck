@@ -72,7 +72,7 @@ public partial class MainWindow
     // (a resize drag does that every frame), so like the readings' StripPresence they belong to the panel and outlive each row.
     private readonly EqualizerBars _compactBars = new();
     // The collapsed title scrolls its laps once per line (MarqueeScroll.Limited); a row built again for the same line keeps it
-    // resting, until the line changes or the pointer comes over the island (ReplayCompactTitle).
+    // resting, until the line changes or the panel closes (ReplayCompactTitle).
     private readonly MarqueeScroll _compactScroll = new() { Limited = true };
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
@@ -917,9 +917,12 @@ public partial class MainWindow
         // The system readings offer each chosen reading, in the order of the settings' table and in the scheme's colors; the row
         // admits those that fit whole (CompactMusicLayout).
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        // A device switched on or off in the settings changes whether the battery reading shows, with no change of the devices to
+        // say so: its admission is taken again as the row is built.
+        if (StripChoosesBattery) _stripPresence.Arrive(UpdateStripAdmission(_app.Monitor?.Latest).Arriving);
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
             !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden) : null;
-        strip?.SetBattery(LowestBattery());
+        if (StripChoosesBattery) strip?.SetBattery(StripBattery());
         double rowWidth = SnapDown(contentWidth, dpi);
         var layout = CompactMusicLayout.Calculate(rowWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.Candidates ?? [], strip?.Gap ?? 0);
         CurrentCompactLayout = layout;
@@ -1026,7 +1029,8 @@ public partial class MainWindow
         }
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }
-    // The pointer came over the island: a collapsed title that has rested scrolls its laps again.
+    // The panel closed: a collapsed title that has rested scrolls its laps again, as the row comes back into view. (Reaching
+    // the island opens the panel, so the collapsed title is not seen while the pointer is on it.)
     private void ReplayCompactTitle() { if (_compactMarquee is not null) _compactMarquee.Replay(); else _compactScroll.Replay(); }
     // How often the bars move: 30 times a second on the music page; 20 on the collapsed row, where each move redraws the whole
     // layered island and the bars are a few device pixels tall (measured: the row's bars and title cost about 50 ms of CPU a

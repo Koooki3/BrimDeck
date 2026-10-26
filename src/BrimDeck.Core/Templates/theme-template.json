@@ -15,7 +15,7 @@
   "license": "",
   "homepage": "",
   "base": "dark",                   // Any built-in theme: dark, light, liquid-glass-light, liquid-glass-dark, one-dark-pro, github-dark,
-                                    // github-light, dracula, night-owl, island-holiday, pixel-blocks, cyberpunk-edgerunners
+                                    // github-light, dracula, night-owl, island-holiday, island-holiday-2, pixel-blocks, cyberpunk-edgerunners
   // A theme can change its look through the day: add "daylight", a "night" look and, if you like, a "dusk" look after "motion"
   // at the end of the file ("New from current theme" writes them for a theme that has them). night and dusk take "colors",
   // "apps", "effects", "motion" and "clock", laid over everything above. For example:

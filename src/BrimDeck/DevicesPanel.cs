@@ -20,9 +20,24 @@ public partial class MainWindow
         Closed += (_, _) => { _app.DevicesChanged -= DevicesChanged; _app.PresentDevices(this, false, false); };
     }
 
-    // The devices shown: every device read, without those switched off in the settings.
-    internal IReadOnlyList<DeviceBattery> ShownDevices => _app.Devices is { } devices
-        ? [.. devices.All.Where(device => !Settings.Hides(device.Key))] : [];
+    // The devices shown: every device read, without those switched off in the settings. Made once per roster and per list of
+    // hidden devices (each change of either is a new list), as it is asked several times for each change.
+    internal IReadOnlyList<DeviceBattery> ShownDevices
+    {
+        get
+        {
+            var all = _app.Devices?.All ?? [];
+            var hidden = Settings.HiddenDevices;
+            if (!ReferenceEquals(all, _shownFrom.All) || !ReferenceEquals(hidden, _shownFrom.Hidden))
+            {
+                _shown = hidden.Count == 0 ? all : [.. all.Where(device => !Settings.Hides(device.Key))];
+                _shownFrom = (all, hidden);
+            }
+            return _shown;
+        }
+    }
+    private IReadOnlyList<DeviceBattery> _shown = [];
+    private (IReadOnlyList<DeviceBattery>? All, List<HiddenDevice>? Hidden) _shownFrom;
     private bool DevicesSettled => _app.Devices?.Settled == true;
 
     // Asked with the monitor's demand (UpdateMonitorDemand): whenever the panel opens, closes, changes page or is hidden, and
@@ -41,12 +56,18 @@ public partial class MainWindow
 
     private void DevicesChanged()
     {
-        if (_compactStrip?.ChoosesBattery == true && AdmitStrip(_app.Monitor?.Latest)) return;
-        if (!_expanded) { _compactStrip?.SetBattery(LowestBattery()); return; }
+        if (!_expanded)
+        {
+            if (StripChoosesBattery && !AdmitStrip(_app.Monitor?.Latest)) _compactStrip?.SetBattery(StripBattery());
+            return;
+        }
         if (CurrentPage != DeckPage.Devices || _devicesView is null) return;
         if (DevicesKey() != _devicesKey) { RenderDevices(); return; }
         _devicesView.Update(ShownDevices, DevicesSettled, Soft.Enabled);
     }
+
+    // Whether this surface's collapsed row chooses the battery reading (the system readings are on and the table shows it).
+    private bool StripChoosesBattery => Settings.ShowsMonitor(EffectiveStyle) && (CompactMonitor.Shown(Settings.CompactReadings) & CompactMonitorItems.Battery) != 0;
 
     // The collapsed reading: the device with the lowest charge among those shown, null while none reports one.
     internal BatteryReading? LowestBattery()
@@ -54,6 +75,15 @@ public partial class MainWindow
         var lowest = ShownDevices.Where(device => device.Lowest is not null).OrderBy(device => device.Lowest).FirstOrDefault();
         return lowest is null ? null : new BatteryReading(lowest.Lowest!.Value, lowest.Charging, Devices.Level(lowest.Lowest, lowest.Charging, Settings.DeviceLowPercent), lowest.Name);
     }
+    // What the collapsed row shows: the lowest battery, kept while the devices are being listed again (the display came back
+    // on, a suppression ended), so the reading does not drop to a dash for the moment the sources take to report.
+    private BatteryReading? StripBattery()
+    {
+        var lowest = LowestBattery();
+        if (lowest is not null || DevicesSettled) _stripBattery = lowest;
+        return _stripBattery;
+    }
+    private BatteryReading? _stripBattery;
 
     private DevicesLayout CurrentDevicesLayout()
     {

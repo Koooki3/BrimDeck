@@ -617,8 +617,8 @@ public sealed partial class SettingsWindow : Window
                 case NoticesSettingsPage:s.NoticeDuration=defaults.NoticeDuration;s.NoticeHighDuration=defaults.NoticeHighDuration;s.NoticeHoverDetails=defaults.NoticeHoverDetails;s.NoticeScreen=defaults.NoticeScreen;
                     s.NoticePrivacy=defaults.NoticePrivacy;s.NoticeRespectFocus=defaults.NoticeRespectFocus;s.NoticesPausedUntil=null;s.NoticeHistory=defaults.NoticeHistory;s.NoticeHistoryHours=defaults.NoticeHistoryHours;
                     s.NoticeHotkey=defaults.NoticeHotkey;s.NoticesPage=defaults.NoticesPage;s.NoticesWidth=defaults.NoticesWidth;s.NoticesHeight=defaults.NoticesHeight;break;
-                // The devices switched off stay off.
-                case DevicesSettingsPage:s.DevicesPage=defaults.DevicesPage;s.DevicesWidth=defaults.DevicesWidth;s.DevicesHeight=defaults.DevicesHeight;s.DeviceLowNotice=defaults.DeviceLowNotice;s.DeviceLowPercent=defaults.DeviceLowPercent;break;
+                // The devices switched off stay off; the page and its size are Expanded view's (case 2).
+                case DevicesSettingsPage:s.DeviceLowNotice=defaults.DeviceLowNotice;s.DeviceLowPercent=defaults.DeviceLowPercent;break;
             }
         });
         if(_page==0)RebuildTheme();else ShowPage(_page);

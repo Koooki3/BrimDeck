@@ -886,7 +886,7 @@ internal sealed class LiquidRenderer : IDisposable
     // ICompositorInterop.CreateCompositionSurfaceForSwapChain, the second method after IUnknown's, called through its vtable.
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int CreateSurfaceForSwapChain(IntPtr self, IntPtr swapChain, out IntPtr surface);
-    private static ICompositionSurface CreateSurface(Compositor compositor, IntPtr swapChain)
+    internal static ICompositionSurface CreateSurface(Compositor compositor, IntPtr swapChain)
     {
         var unknown = ((IWinRTObject)compositor).NativeObject.ThisPtr;
         var iid = new Guid("25297D5C-3AD4-4C9C-B5CF-E36A38512330");

@@ -33,7 +33,7 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 public static partial class PanelThemes
 {
     public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
-    public const string GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", IslandHoliday = "island-holiday", PixelBlocks = "pixel-blocks";
+    public const string GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2", PixelBlocks = "pixel-blocks";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2;
 
     public static readonly IReadOnlyList<PanelThemeToken> Tokens =
@@ -112,7 +112,7 @@ public static partial class PanelThemes
     private const string ThemeResources = ".Themes.";
     // Dark and light first, then the ported editor themes, then the custom demo.
     // The base glass themes come right after dark and light: like them they are materials rather than palettes.
-    private static readonly string[] BuiltInOrder = [Dark, Light, GlassLight, GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, PixelBlocks, Demo];
+    private static readonly string[] BuiltInOrder = [Dark, Light, GlassLight, GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, IslandHoliday2, PixelBlocks, Demo];
     private static (string Id, string Resource)[]? _builtInIndex;
     private static (string Id, string Resource)[] BuiltInIndex => _builtInIndex ??= [.. typeof(PanelThemes).Assembly.GetManifestResourceNames()
         .Where(name => name.Contains(ThemeResources, StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))

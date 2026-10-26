@@ -50,6 +50,12 @@ internal static class GlassEffect
     // (LuminosityFor, from what lies around the island, AcrylicProbe).
     public readonly record struct AcrylicLook(double Saturation, double LuminosityOpacity, double Luminosity, double TintR, double TintG, double TintB, double TintOpacity);
     public const double LuminosityBase = .55, LuminosityMost = .95;
+    // Size makes thickness (step 4 of round 16): the collapsed island, the control layer, thinner and clearer (.45); the open
+    // panel, the content layer, its full base (.55) - in between with the opening.
+    public const double LuminosityCapsule = .45;
+    public static double Thickness(double openness) => LuminosityCapsule + (LuminosityBase - LuminosityCapsule) * Math.Clamp(openness, 0, 1);
+    // The luminosity opacity shown: what the text needs (LuminosityFor) and never under the thickness for the opening; in steps.
+    public static double Shown(double needed, double openness) => Math.Ceiling(Math.Max(needed, Thickness(openness)) * 20 - 1e-9) / 20;
     public static readonly AcrylicLook AcrylicDark = new(1.3, LuminosityBase, .1373, .1373, .1373, .1373, .23);
     public static readonly AcrylicLook AcrylicLight = new(1.3, LuminosityBase, .953, .953, .953, .953, .25);
     // The lightness the body may reach for the looks' text: the dark look's light text over at most DarkMost, the light look's
@@ -58,7 +64,7 @@ internal static class GlassEffect
 
     // The luminosity opacity the text needs over a backdrop whose brightest tenth reaches bright (the dark look) or whose
     // darkest tenth reaches dark (the light look), from the recipe's lightness ((1 - L) b + L t)(1 - k) + k t: never under
-    // LuminosityBase, at most LuminosityMost. In steps of .05, so a brush is made again only for a real change.
+    // LuminosityCapsule, at most LuminosityMost. In steps of .05, so a brush is made again only for a real change.
     public static double LuminosityFor(bool darkLook, double bright, double dark)
     {
         var look = darkLook ? AcrylicDark : AcrylicLight;
@@ -66,7 +72,7 @@ internal static class GlassEffect
         double need = darkLook
             ? (b - target) * (1 - t) <= 1e-4 ? 0 : ((1 - t) * b + t * target - DarkMost) / ((1 - t) * (b - target))
             : (target - b) * (1 - t) <= 1e-4 ? 0 : (LightLeast - (1 - t) * b - t * target) / ((1 - t) * (target - b));
-        return Math.Ceiling(Math.Clamp(need, LuminosityBase, LuminosityMost) * 20 - 1e-9) / 20;
+        return Math.Ceiling(Math.Clamp(need, LuminosityCapsule, LuminosityMost) * 20 - 1e-9) / 20;
     }
     private static readonly Dictionary<AcrylicLook, CompositionEffectFactory> AcrylicFactories = [];
 

@@ -642,12 +642,12 @@ internal sealed partial class NoticeWindow : Window
         }
         else plate.Children.Add(Fallback(notice, size));
         // The state and source badges on the plate's corners (NoticeBadges).
-        if (notice is not null) NoticeBadges.Decorate(plate, notice, size, _look.Glow, image is null ? NoticeGlyphs.App(notice.AppKey, notice.AppName, notice.Origin) : null);
+        if (notice is not null) NoticeBadges.Decorate(plate, notice, size, _look.Glow, image is null ? NoticeGlyphs.Plate(notice) : null);
         AutomationProperties.SetName(plate, notice?.AppName ?? "BrimDeck");
         return plate;
     }
 
-    // Without an icon: a glyph for the kind of application when it can be told, else its first letter in its color; a bell
+    // Without an icon: BrimDeck's own glyph (a device's) or a glyph for the kind of application when it can be told, else its first letter in its color; a bell
     // for a summary.
     private FrameworkElement Fallback(Notice? notice, double size)
     {

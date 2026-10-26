@@ -16,10 +16,10 @@ internal static class MotionEffectsTests
 
     private static void Effects(Action<string, bool> check, Func<string, PanelPalette> palette, Func<string, PanelPalette> custom)
     {
-        check("Splash, rain and bubble: only the cyberpunk demo (rain) and the island (splash and bubbles) opt in",
-            PanelThemes.BuiltIns.Where(theme => theme.Id is not (PanelThemes.Demo or PanelThemes.IslandHoliday))
+        check("Splash, rain and bubble: only the cyberpunk demo (rain) and island holiday 2 (splash and bubbles) opt in",
+            PanelThemes.BuiltIns.Where(theme => theme.Id is not (PanelThemes.Demo or PanelThemes.IslandHoliday2))
                 .All(theme => palette(theme.Id).Motion is { } m && m.Press != PressFx.Splash && m.Particles is not (ParticleFx.Rain or ParticleFx.Bubble))
-            && palette(PanelThemes.Demo).Motion is { Particles: ParticleFx.Rain } && palette(PanelThemes.IslandHoliday).Motion is { Press: PressFx.Splash, Particles: ParticleFx.Bubble });
+            && palette(PanelThemes.Demo).Motion is { Particles: ParticleFx.Rain } && palette(PanelThemes.IslandHoliday2).Motion is { Press: PressFx.Splash, Particles: ParticleFx.Bubble });
         var island = custom("""{ "base": "island-holiday", "motion": { "press": "splash", "particles": "bubble", "trail": 0.4 } }""");
         var night = custom("""{ "base": "cyberpunk-edgerunners", "motion": { "particles": "RAIN" } }""");
         check("They are read by name from motion.press and motion.particles; ripple stays shade",

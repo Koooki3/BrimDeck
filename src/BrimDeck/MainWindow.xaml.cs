@@ -178,7 +178,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _clipSettle?.Stop(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _clipSettle?.Stop(); StopFill(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseWheel += PanelWheel;
@@ -597,7 +597,7 @@ public partial class MainWindow : Window
         if (wasExpanded != expanded && !_preview) Dispatcher.BeginInvoke(() => _app.Notices?.DeckExpanded(this, _expanded));
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
-        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); _app.RequestTrim(); }
+        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); }
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;
@@ -647,7 +647,7 @@ public partial class MainWindow : Window
             // Marking the list seen raises Changed; the page is drawn here once, not again at background priority mid-opening.
             bool queued = _noticesRenderQueued;
             _noticesRenderQueued = true;
-            try { NoticesPageShown(); RenderNotices(); }
+            try { NoticesPageShown(); RenderNotices(fresh: true); }
             finally { _noticesRenderQueued = queued; }
         }
         // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it. The
@@ -852,7 +852,7 @@ public partial class MainWindow : Window
         if (inside && !_pointerInside) { MotionEnvironment.InputSeen(); BrimDeck.Native.WindowsNoticeSource.Interacted(); }
         if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
-        if (inside) { ReleaseHotkeyPin(); ReplayCompactTitle(); }
+        if (inside) ReleaseHotkeyPin();
         if (inside)
         {
             _popupReturnArea = null;

@@ -13,7 +13,7 @@ internal static class AcrylicEmulation
     // The luminosity opacity of the last drawing (for the page notes).
     internal static double Luminosity { get; private set; }
 
-    internal static byte[] Draw(byte[] desktop, int dw, int dh, int gx, int gy, int w, int h, byte[] coverage, bool dark, double scale)
+    internal static byte[] Draw(byte[] desktop, int dw, int dh, int gx, int gy, int w, int h, byte[] coverage, bool dark, double scale, double openness)
     {
         // The luminosity layer as the app's probe sets it (AcrylicProbe): from the ring left, right and below the island, 24 to
         // 64 DIPs outside it.
@@ -33,7 +33,7 @@ internal static class AcrylicEmulation
         Ring(gx - gap - band, gy + h + gap, gx + w + gap + band, gy + h + gap + band);
         ring.Sort();
         double bright = ring.Count > 0 ? ring[(int)(ring.Count * .9)] : .5, darkest = ring.Count > 0 ? ring[(int)(ring.Count * .1)] : .5;
-        Luminosity = GlassEffect.LuminosityFor(dark, bright, darkest);
+        Luminosity = GlassEffect.Shown(GlassEffect.LuminosityFor(dark, bright, darkest), openness);
         var look = (dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = Luminosity };
         var m = GlassEffect.AcrylicMatrix(look);
         // The blurred desktop over the island and a margin as wide as the blur reaches.
@@ -57,6 +57,10 @@ internal static class AcrylicEmulation
         var inside = Distance(coverage, w, h);
         float hair = (float)Math.Max(1, .75 * scale), light = (float)(1.25 * scale);
         var output = new byte[w * h * 4];
+        // The noise as the app lays it over (AcrylicNoise: one tile repeated from the window's corner).
+        var noise = BrimDeck.LiquidGlass.AcrylicNoise.Pixels();
+        int tile = BrimDeck.LiquidGlass.AcrylicNoise.Tile;
+        double noiseAlpha = noise[3] / 255.0;
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
@@ -77,6 +81,9 @@ internal static class AcrylicEmulation
                     double fade = Math.Clamp(1 - y / (h * .5), 0, 1), k = (dark ? 64 : 150) / 255.0 * fade;
                     or += (1 - or) * k; og += (1 - og) * k; ob += (1 - ob) * k;
                 }
+                int n = (((gy + y) % tile) * tile + (gx + x) % tile) * 4;
+                double grain = noise[n] / 255.0;
+                or = or * (1 - noiseAlpha) + grain; og = og * (1 - noiseAlpha) + grain; ob = ob * (1 - noiseAlpha) + grain;
                 output[i * 4 + 2] = (byte)Math.Clamp(Math.Round(Math.Clamp(or, 0, 1) * 255 * a), 0, 255);
                 output[i * 4 + 1] = (byte)Math.Clamp(Math.Round(Math.Clamp(og, 0, 1) * 255 * a), 0, 255);
                 output[i * 4] = (byte)Math.Clamp(Math.Round(Math.Clamp(ob, 0, 1) * 255 * a), 0, 255);

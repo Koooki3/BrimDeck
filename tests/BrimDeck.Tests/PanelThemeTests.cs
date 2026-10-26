@@ -43,7 +43,7 @@ internal static class PanelThemeTests
         // Built-in themes.
         check("Built-in themes are listed in order and Monokai Pro is not among them",
             PanelThemes.BuiltIns.Select(theme => theme.Id).SequenceEqual(["dark", "light", "liquid-glass-light", "liquid-glass-dark", "one-dark-pro", "github-dark", "github-light", "dracula",
-                "night-owl", "island-holiday", "pixel-blocks", "cyberpunk-edgerunners"]));
+                "night-owl", "island-holiday", "island-holiday-2", "pixel-blocks", "cyberpunk-edgerunners"]));
         check("A built-in theme's id is its file name", PanelThemes.BuiltIns.All(theme => PanelThemes.NormalizeId(theme.File.Id) == theme.Id));
         check("Every built-in theme names an open license", PanelThemes.BuiltIns.All(theme => theme.File.License is "MIT" or "Apache-2.0"));
         bool allValid = true; var adjusted = new List<string>();
@@ -342,8 +342,8 @@ internal static class PanelThemeTests
         var decorCopy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", fitted, "light")));
         check("A theme made from one with motifs keeps them", decorCopy.Effects.Decor == fitted.Effects.Decor && decorCopy.Adjustments.Count == 0);
         // A theme with a night look keeps it, with its hours: the copy's night look is the original's.
-        var island = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
-        var islandCopy = PanelThemes.Parse(PanelThemes.FillTemplate("copy", PanelThemes.Resolve(island), PanelThemes.IslandHoliday, island.File));
+        var island = PanelThemes.BuiltIn(PanelThemes.IslandHoliday2)!;
+        var islandCopy = PanelThemes.Parse(PanelThemes.FillTemplate("copy", PanelThemes.Resolve(island), PanelThemes.IslandHoliday2, island.File));
         var nightCopy = PanelThemes.Build("copy", islandCopy, night: true);
         var nightOriginal = PanelThemes.Resolve(island, true);
         check("A theme made from one with a night look keeps the night look and its hours",
@@ -356,6 +356,11 @@ internal static class PanelThemeTests
                 && PanelThemes.Build("copy", islandCopy, look).Effects.Decor == decor)
             && PanelThemes.Resolve(island, DaylightLook.Dusk).Effects.Decor != PanelThemes.Resolve(island).Effects.Decor
             && PanelThemes.Resolve(island, true).Effects.Decor != PanelThemes.Resolve(island).Effects.Decor);
+        // The first island holiday draws no motifs and keeps its serif clock; its look is the one upstream ships.
+        var firstIsland = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
+        check("The first island holiday is left as it was: no motifs, its serif clock, no dusk",
+            PanelThemes.Resolve(firstIsland).Effects.Decor is null && PanelThemes.Resolve(firstIsland, true).Effects.Decor is null
+            && PanelThemes.Resolve(firstIsland).Clock?.Style == "serif" && firstIsland.File.Dusk is null);
         var nightOwl = BuiltIn("night-owl");
         // No built-in theme suggests a gradient clock, so a theme of its own carries one.
         var glow = PanelThemes.Build("glow", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "neon", Color = "gradient", Gradient = ["#C792EA", "#82AAFF", "#7FDBCA"] } });
