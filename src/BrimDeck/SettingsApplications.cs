@@ -21,7 +21,7 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetHelpText(input, help);
         var field = new Border { Child = input, Height = 34, CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 0, 10, 0),
             Margin = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center, Background = UI.Brush(_palette.Input),
-            BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1) };
+            BorderBrush = UI.Brush(_palette.InputBorder), BorderThickness = new Thickness(1) };
         bool showingDefault = false;
         void Refresh()
         {
@@ -40,7 +40,7 @@ public sealed partial class SettingsWindow
             }
             Refresh();
         }
-        FieldFocus(field, input, () => UI.Brush(_palette.Border));
+        FieldFocus(field, input, () => UI.Brush(_palette.InputBorder));
         input.GotKeyboardFocus += (_, _) => Refresh();
         input.LostKeyboardFocus += (_, _) => Commit();
         input.KeyDown += (_, e) =>

@@ -104,6 +104,8 @@ public sealed partial class SettingsWindow
         var highlight = new Border { CornerRadius = new CornerRadius(6), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
             IsHitTestVisible = false, RenderTransform = move, Visibility = Visibility.Hidden };
         highlight.SetResourceReference(Border.BackgroundProperty, "SettingsFillSelected");
+        // The chosen option is outlined as well: its fill alone stands too close to the control's own (SW-07).
+        highlight.BorderThickness = new Thickness(1); highlight.SetResourceReference(Border.BorderBrushProperty, "SettingsInputBorder");
         var host = new Grid(); host.Children.Add(highlight); host.Children.Add(content);
         void Slide(double from, double to)
         {
@@ -152,8 +154,8 @@ public sealed partial class SettingsWindow
         var plus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="+" };
         AutomationProperties.SetName(minus,Loc.T("减少"+title, "Decrease "+title));AutomationProperties.SetName(plus,Loc.T("增加"+title, "Increase "+title));
         line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(2,5,3,5)});line.Children.Add(minus);line.Children.Add(plus);
-        var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.Border),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
-        FieldFocus(chip, input, () => UI.Brush(_palette.Border));
+        var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.InputBorder),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
+        FieldFocus(chip, input, () => UI.Brush(_palette.InputBorder));
         void Set(double number)
         {
             var next=Math.Clamp(Math.Round(number),min,max);

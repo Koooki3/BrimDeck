@@ -804,7 +804,7 @@ public sealed partial class SettingsWindow : Window
         select.ToolTip = quota ? ProviderCatalog.QuotaTip(selected) : ProviderCatalog.UsageTip(selected);
         select.HorizontalContentAlignment = HorizontalAlignment.Stretch; select.VerticalAlignment = VerticalAlignment.Center;
         select.Padding = new Thickness(9, 0, 9, 0); select.Margin = new Thickness(6, 0, 6, 0);
-        select.Background = UI.Brush(_palette.Input); select.BorderBrush = UI.Brush(_palette.Border);
+        select.Background = UI.Brush(_palette.Input); select.BorderBrush = UI.Brush(_palette.InputBorder);
         AutomationProperties.SetName(select, role + " " + entry.Name);
         AutomationProperties.SetAutomationId(select, (quota ? "quota-" : "usage-") + entry.InstanceId.ToString("N"));
         // The application menu is a styled popup list: dark surface, rounded corners, no icon column.

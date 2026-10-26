@@ -161,8 +161,8 @@ public sealed partial class SettingsWindow
             content.Children.Add(hint); content.Children.Add(input);
             if (trailing is not null) { Grid.SetColumn(trailing, 1); content.Children.Add(trailing); }
             var field = new Border { Child = content, Height = 34, CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 0, 4, 0),
-                Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1) };
-            FieldFocus(field, field, () => UI.Brush(_palette.Border));
+                Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.InputBorder), BorderThickness = new Thickness(1) };
+            FieldFocus(field, field, () => UI.Brush(_palette.InputBorder));
             return field;
         }
         TextBox Plain(string id, string name)

@@ -208,10 +208,10 @@ public sealed partial class SettingsWindow
         line.Children.Add(new Border { Width = 1, Background = UI.Brush(Divider), Margin = new Thickness(2, 5, 3, 5) }); line.Children.Add(minus); line.Children.Add(plus);
         var chip = KeepPreview(new Border
         {
-            Child = line, Height = 30, CornerRadius = new CornerRadius(6), Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.Border),
+            Child = line, Height = 30, CornerRadius = new CornerRadius(6), Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.InputBorder),
             BorderThickness = new Thickness(1), Padding = new Thickness(7, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center
         });
-        FieldFocus(chip, input, () => UI.Brush(_palette.Border));
+        FieldFocus(chip, input, () => UI.Brush(_palette.InputBorder));
 
         var row = new Grid { MinHeight = 44 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(174) }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
