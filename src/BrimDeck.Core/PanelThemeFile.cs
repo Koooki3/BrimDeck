@@ -28,14 +28,23 @@ public sealed class PanelThemeFile
     // A theme with a day and a night look: Night is laid over the theme from Daylight's evening to its morning. Only its colors,
     // apps, effects, motion and clock are read; it has no base or name of its own.
     public PanelThemeFile? Night { get; set; }
+    // A dusk look, read like Night and laid over the day look for Daylight.DuskMinutes before the night begins. By the clock
+    // only, and only beside a night look.
+    public PanelThemeFile? Dusk { get; set; }
     public PanelThemeDaylight? Daylight { get; set; }
 }
 
-// When the day look of a theme with a night look begins and ends, as "HH:mm" local time. The settings can move both.
+// What chooses between the looks of a theme with a night look (PanelThemes.LookAt). The settings can move the hours and
+// choose the mode.
 public sealed class PanelThemeDaylight
 {
+    // "clock" (or empty): by Day and Night below. "system": the night look while Windows apps use dark mode.
+    public string Mode { get; set; } = "";
+    // When the day and the night begin, as "HH:mm" local time.
     public string Day { get; set; } = "";
     public string Night { get; set; } = "";
+    // How long the dusk look shows before the night, 15 to 180 minutes; 60 when not given.
+    public int? DuskMinutes { get; set; }
 }
 
 public sealed class PanelThemeClock

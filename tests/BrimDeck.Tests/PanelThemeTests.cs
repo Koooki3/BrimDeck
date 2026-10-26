@@ -47,9 +47,10 @@ internal static class PanelThemeTests
         check("A built-in theme's id is its file name", PanelThemes.BuiltIns.All(theme => PanelThemes.NormalizeId(theme.File.Id) == theme.Id));
         check("Every built-in theme names an open license", PanelThemes.BuiltIns.All(theme => theme.File.License is "MIT" or "Apache-2.0"));
         bool allValid = true; var adjusted = new List<string>();
-        // A theme with a night look is held to the same rules in both looks.
-        foreach (var (theme, palette) in PanelThemes.BuiltIns.SelectMany(theme => theme.File.Night is null
-            ? new[] { (theme, PanelThemes.Resolve(theme)) } : [(theme, PanelThemes.Resolve(theme)), (theme, PanelThemes.Resolve(theme, true))]))
+        // A theme with a night or dusk look is held to the same rules in every look.
+        foreach (var (theme, palette) in PanelThemes.BuiltIns.SelectMany(theme => new[] { DaylightLook.Day, DaylightLook.Dusk, DaylightLook.Night }
+            .Where(look => look == DaylightLook.Day || look == DaylightLook.Night && theme.File.Night is not null || look == DaylightLook.Dusk && theme.File.Dusk is not null)
+            .Select(look => (theme, PanelThemes.Resolve(theme, look)))))
         {
             allValid &= palette.Colors.Count == PanelThemes.Tokens.Count;
             var popup = palette["popup"].Over(palette.Surface);
@@ -62,7 +63,7 @@ internal static class PanelThemeTests
             allValid &= palette["textSecondary"].MinimumContrast([palette["fill"].Over(palette.Surface), palette["hover"].Over(palette.Surface)]) >= PanelThemes.TextContrast - .001;
             foreach (var color in palette.Apps.Values) allValid &= color.IsOpaque && color.MinimumContrast(palette.SurfaceStops) >= PanelThemes.GraphicContrast - .001;
             // The built-in themes are designed to pass as written; an adjustment would mean a mistake in the file.
-            adjusted.AddRange(palette.Adjustments.Select(a => $"{theme.Id}{(palette.IsNight ? " (night)" : "")}.{a.Key} {a.Before}->{a.After} {a.Ratio:0.00}/{a.Minimum}"));
+            adjusted.AddRange(palette.Adjustments.Select(a => $"{theme.Id}{(palette.Look == DaylightLook.Day ? "" : $" ({palette.Look.ToString().ToLowerInvariant()})")}.{a.Key} {a.Before}->{a.After} {a.Ratio:0.00}/{a.Minimum}"));
         }
         check("Every built-in theme meets every contrast rule", allValid);
         check("Built-in themes pass without any adjustment " + string.Join("; ", adjusted), adjusted.Count == 0);

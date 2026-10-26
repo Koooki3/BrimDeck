@@ -7,30 +7,41 @@ namespace BrimDeck.Core;
 public static partial class PanelThemes
 {
     // Built-in palettes never change. A user file is resolved once per reading: an edited file is read again into a new entry.
-    // A theme with a night look resolves to two palettes, kept side by side.
-    private static readonly Dictionary<(string, bool), PanelPalette> ResolvedBuiltIns = [];
-    private static readonly ConditionalWeakTable<PanelThemeInfo, PanelPalette> ResolvedFiles = new(), ResolvedNights = new();
-    public static PanelPalette Resolve(PanelThemeInfo theme) => Resolve(theme, false);
-    public static PanelPalette Resolve(PanelThemeInfo theme, bool night)
+    // A theme with a night look resolves to two palettes, or three with a dusk look, kept side by side.
+    private static readonly Dictionary<(string, DaylightLook), PanelPalette> ResolvedBuiltIns = [];
+    private static readonly ConditionalWeakTable<PanelThemeInfo, PanelPalette> ResolvedFiles = new(), ResolvedDusks = new(), ResolvedNights = new();
+    public static PanelPalette Resolve(PanelThemeInfo theme) => Resolve(theme, DaylightLook.Day);
+    public static PanelPalette Resolve(PanelThemeInfo theme, bool night) => Resolve(theme, night ? DaylightLook.Night : DaylightLook.Day);
+    public static PanelPalette Resolve(PanelThemeInfo theme, DaylightLook look)
     {
-        night &= theme.File.Night is not null;
-        var files = night ? ResolvedNights : ResolvedFiles;
-        if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue((theme.Id, night), out var cached) : files.TryGetValue(theme, out cached)) return cached;
-        var palette = Build(theme.Id, theme.File, night);
-        if (theme.BuiltIn) ResolvedBuiltIns[(theme.Id, night)] = palette; else files.AddOrUpdate(theme, palette);
+        look = Available(theme.File, look);
+        var files = look switch { DaylightLook.Night => ResolvedNights, DaylightLook.Dusk => ResolvedDusks, _ => ResolvedFiles };
+        if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue((theme.Id, look), out var cached) : files.TryGetValue(theme, out cached)) return cached;
+        var palette = Build(theme.Id, theme.File, look);
+        if (theme.BuiltIn) ResolvedBuiltIns[(theme.Id, look)] = palette; else files.AddOrUpdate(theme, palette);
         return palette;
     }
+    // A look the file does not write is its day look.
+    private static DaylightLook Available(PanelThemeFile file, DaylightLook look) => look switch
+    {
+        DaylightLook.Night when file.Night is not null => DaylightLook.Night,
+        DaylightLook.Dusk when file.Dusk is not null && file.Night is not null => DaylightLook.Dusk,
+        _ => DaylightLook.Day
+    };
 
     // night lays the file's night look over it, when it has one.
-    public static PanelPalette Build(string id, PanelThemeFile file, bool night = false)
+    public static PanelPalette Build(string id, PanelThemeFile file, bool night = false) => Build(id, file, night ? DaylightLook.Night : DaylightLook.Day);
+    // The night or dusk look is laid over the day look, when the file has it.
+    public static PanelPalette Build(string id, PanelThemeFile file, DaylightLook look)
     {
         var colors = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var apps = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var effects = new PanelThemeEffects();
         PanelThemeClock? clock = null;
         var chain = BaseChain(file);
-        night &= file.Night is not null;
-        if (night) chain.Add(file.Night!);
+        look = Available(file, look);
+        if (look == DaylightLook.Night) chain.Add(file.Night!);
+        else if (look == DaylightLook.Dusk) chain.Add(file.Dusk!);
         foreach (var layer in chain)
         {
             foreach (var (key, value) in layer.Colors ?? [])
@@ -89,7 +100,7 @@ public static partial class PanelThemes
         // A theme's own picker colors are offered as the panel draws them, like the ones derived from its palette.
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
             .OfType<ThemeColor>().Take(12).ToList();
-        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps) { Motion = MotionValues(chain), IsNight = night };
+        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps) { Motion = MotionValues(chain), Look = look };
     }
 
     // A texture's lightest and darkest squares (PanelTheme.Texture), which text must read on as on the surface.

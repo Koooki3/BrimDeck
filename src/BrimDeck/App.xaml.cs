@@ -201,7 +201,8 @@ public partial class App : Application
         Dispatcher.BeginInvoke(() =>
         {
             if (Exiting) return;
-            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId) ApplyPanelTheme(systemChanged: true);
+            // A theme whose day and night looks follow Windows' mode changes over like the dusk does (PanelThemes.LookAt).
+            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId || PanelTheme.FollowsWindowsMode(Settings)) ApplyPanelTheme(systemChanged: true);
             // The theme page's "System" card shows the Windows mode whichever theme is chosen.
             else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
         });
@@ -218,7 +219,7 @@ public partial class App : Application
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         if (!reload) _settingsWindow?.PanelThemeChanged();
     }
-    // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
+    // A theme with a night look changes look at its hours (PanelThemes.LookAt): the timer is set for the next change, and at
     // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch
     // carries a preset clock gradient over, as Windows switching "system" between dark and light does.
     private System.Windows.Threading.DispatcherTimer? _daylight;

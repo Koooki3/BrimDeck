@@ -98,8 +98,9 @@ public sealed class PanelPalette
     // A glass surface shows the desktop through it, so like a gradient it has no single color to fade text into.
     public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Glass is not null || Effects.Texture > 0;
     public bool IsGlass => Effects.Glass is not null;
-    // Whether this is a theme's night look (PanelThemes.Resolve).
-    public bool IsNight { get; init; }
+    // Which of a theme's looks this is (PanelThemes.Resolve); the day look for a theme with only one.
+    public DaylightLook Look { get; init; }
+    public bool IsNight => Look == DaylightLook.Night;
     public IReadOnlyList<PanelThemeAdjustment> Adjustments { get; }
 
     // The theme's default color for an application column. The dark theme names every source, and every theme builds on it.

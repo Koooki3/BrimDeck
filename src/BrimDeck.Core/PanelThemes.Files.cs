@@ -92,8 +92,15 @@ public static partial class PanelThemes
         bool pixel = file.Effects?.Pixel is { } pixelSize ? Math.Round(Math.Clamp(double.IsFinite(pixelSize) ? pixelSize : 0, 0, 4), MidpointRounding.AwayFromZero) > 0 : baseEffects?.Pixel > 0;
         if (glass && pixel) return Loc.T("像素（pixel）不能与玻璃（glass）同时使用", "Pixel art (pixel) cannot be combined with glass");
         if (file.Night is { } night && LayerProblem(night) is { } nightProblem) return Loc.T("夜间外观：", "Night look: ") + nightProblem;
+        if (file.Dusk is { } dusk && LayerProblem(dusk) is { } duskProblem) return Loc.T("黄昏外观：", "Dusk look: ") + duskProblem;
+        // Dusk leads into the night, so it has nothing to lead into without one.
+        if (file.Dusk is not null && file.Night is null) return Loc.T("黄昏外观（dusk）需要同时写出夜间外观（night）", "A dusk look (dusk) needs a night look (night)");
         foreach (var time in new[] { file.Daylight?.Day, file.Daylight?.Night })
             if (time is { Length: > 0 } && ParseTimeOfDay(time) is null) return Loc.T($"时间“{time}”不是 HH:mm", $"The time \"{time}\" is not HH:mm");
+        if (file.Daylight?.Mode is { } mode && ParseDaylightMode(mode) is null)
+            return Loc.T($"未知的日夜模式“{mode}”（可用 clock 或 system）", $"Unknown daylight mode \"{mode}\" (clock or system)");
+        if (file.Daylight?.DuskMinutes is { } minutes && minutes is < MinDuskMinutes or > MaxDuskMinutes)
+            return Loc.T($"duskMinutes 必须在 {MinDuskMinutes} 到 {MaxDuskMinutes} 之间", $"duskMinutes must be from {MinDuskMinutes} to {MaxDuskMinutes}");
         return null;
     }
 

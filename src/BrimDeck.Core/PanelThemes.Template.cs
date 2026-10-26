@@ -66,30 +66,44 @@ public static partial class PanelThemes
         if (effects.Decor is { } decor)
             text = new Regex(@"(""texture"": [0-9.]+)(,?)").Replace(text, match => match.Groups[1].Value + ", \"decor\": " + DecorJson(decor) + match.Groups[2].Value, 1);
         text = FillMotion(text, start.Motion);
-        // A theme with a night look keeps it, and its hours, after everything the template lists (start is its day look).
-        return source?.Night is { } night ? AppendNight(text, night, source.Daylight) : text;
+        // A theme with a night look keeps it, its dusk look and its hours, after everything the template lists (start is its day look).
+        return source?.Night is { } night ? AppendNight(text, night, source.Dusk, source.Daylight) : text;
     }
 
-    // The night look as the theme file writes it: only what it sets, as "daylight" and "night" members at the end of the file.
-    private static string AppendNight(string text, PanelThemeFile night, PanelThemeDaylight? daylight)
+    // The night and dusk looks as the theme file writes them: only what they set, as "daylight", "night" and "dusk" members at the
+    // end of the file. The daylight member keeps a mode and a dusk length only when the source names them.
+    private static string AppendNight(string text, PanelThemeFile night, PanelThemeFile? dusk, PanelThemeDaylight? daylight)
     {
-        var layer = new PanelThemeFile { Colors = night.Colors, Apps = night.Apps, Effects = night.Effects, Motion = night.Motion, Clock = night.Clock };
-        if (JsonSerializer.SerializeToNode(layer, Json) is not System.Text.Json.Nodes.JsonObject json) return text;
-        // Only what the layer sets: no format, empty strings (an id, a name, an unset clock style) or names made for display.
-        json.Remove("formatVersion");
-        static void Trim(System.Text.Json.Nodes.JsonNode? node)
+        string? Layer(PanelThemeFile look)
         {
-            if (node is System.Text.Json.Nodes.JsonArray array) { foreach (var item in array) Trim(item); return; }
-            if (node is not System.Text.Json.Nodes.JsonObject members) return;
-            foreach (var key in members.Where(pair => pair.Key == "displayName" || pair.Value is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var text) && text.Length == 0)
-                .Select(pair => pair.Key).ToList()) members.Remove(key);
-            foreach (var (_, value) in members) Trim(value);
+            var layer = new PanelThemeFile { Colors = look.Colors, Apps = look.Apps, Effects = look.Effects, Motion = look.Motion, Clock = look.Clock };
+            if (JsonSerializer.SerializeToNode(layer, Json) is not System.Text.Json.Nodes.JsonObject json) return null;
+            // Only what the layer sets: no format, empty strings (an id, a name, an unset clock style) or names made for display.
+            json.Remove("formatVersion");
+            static void Trim(System.Text.Json.Nodes.JsonNode? node)
+            {
+                if (node is System.Text.Json.Nodes.JsonArray array) { foreach (var item in array) Trim(item); return; }
+                if (node is not System.Text.Json.Nodes.JsonObject members) return;
+                foreach (var key in members.Where(pair => pair.Key == "displayName" || pair.Value is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var text) && text.Length == 0)
+                    .Select(pair => pair.Key).ToList()) members.Remove(key);
+                foreach (var (_, value) in members) Trim(value);
+            }
+            Trim(json);
+            return json.ToJsonString(Json).ReplaceLineEndings("\n  ");
         }
-        Trim(json);
-        string Indent(string member) => member.ReplaceLineEndings("\n  ");
+        if (Layer(night) is not { } nightJson) return text;
         var members = new List<string>();
-        if (daylight is { } hours) members.Add($"\"daylight\": {{ \"day\": {Quote(hours.Day)}, \"night\": {Quote(hours.Night)} }}");
-        members.Add("\"night\": " + Indent(json.ToJsonString(Json)));
+        if (daylight is { } hours)
+        {
+            var fields = new List<string>();
+            if (hours.Mode.Length > 0) fields.Add($"\"mode\": {Quote(hours.Mode)}");
+            fields.Add($"\"day\": {Quote(hours.Day)}");
+            fields.Add($"\"night\": {Quote(hours.Night)}");
+            if (hours.DuskMinutes is { } minutes) fields.Add($"\"duskMinutes\": {minutes.ToString(CultureInfo.InvariantCulture)}");
+            members.Add($"\"daylight\": {{ {string.Join(", ", fields)} }}");
+        }
+        members.Add("\"night\": " + nightJson);
+        if (dusk is not null && Layer(dusk) is { } duskJson) members.Add("\"dusk\": " + duskJson);
         int end = text.LastIndexOf('}');
         return end < 0 ? text : text[..end].TrimEnd() + ",\n  " + string.Join(",\n  ", members) + "\n}\n";
     }

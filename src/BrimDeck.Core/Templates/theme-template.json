@@ -16,6 +16,15 @@
   "homepage": "",
   "base": "dark",                   // Any built-in theme: dark, light, liquid-glass-light, liquid-glass-dark, one-dark-pro, github-dark,
                                     // github-light, dracula, night-owl, island-holiday, pixel-blocks, cyberpunk-edgerunners
+  // A theme can change its look through the day: add "daylight", a "night" look and, if you like, a "dusk" look after "motion"
+  // at the end of the file ("New from current theme" writes them for a theme that has them). night and dusk take "colors",
+  // "apps", "effects", "motion" and "clock", laid over everything above. For example:
+  //   "daylight": { "mode": "clock", "day": "06:30", "night": "18:30", "duskMinutes": 60 },
+  //   "night": { "colors": { ... }, "effects": { ... } },
+  //   "dusk": { "colors": { ... } }
+  // mode: clock (the default: the day look from "day" to "night", the night look the rest of the time) or system (the night
+  // look while Windows apps use dark mode, the day look in light mode; no dusk). duskMinutes: 15 to 180, how long the dusk look
+  // shows before the night begins (60 when left out); clock mode only.
 
   "colors": {
     "surface": "#000000",           // The notch, capsule and panel. Always drawn opaque.
