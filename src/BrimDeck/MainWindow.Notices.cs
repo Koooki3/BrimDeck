@@ -296,11 +296,14 @@ public partial class MainWindow
     {
         var center = _app.Notices;
         var notices = center.Hub.Notices;
-        if (_pageKey != NoticePageKey(center) || Math.Min(notices.Count, _noticeRows) != _pageRows.Count) return false;
+        // While the rows are still being added (FillRows), the page lists the notices it set out to add, built or not.
+        var listed = _fill?.Notices;
+        int count = listed?.Count ?? _pageRows.Count;
+        if (_pageKey != NoticePageKey(center) || Math.Min(notices.Count, _noticeRows) != count) return false;
         // The empty page holds no rows; the key above covers all it shows.
         if (_pageList is not { } list) return notices.Count == 0 && NoticesContent.Children.Count > 0;
-        for (int i = 0; i < _pageRows.Count; i++)
-            if (!ReferenceEquals(notices[i], _pageRows[i].Notice)) return false;
+        for (int i = 0; i < count; i++)
+            if (!ReferenceEquals(notices[i], i < _pageRows.Count ? _pageRows[i].Notice : listed![i])) return false;
         var now = DateTimeOffset.UtcNow;
         for (int i = 0; i < _pageRows.Count; i++)
         {
@@ -341,14 +344,18 @@ public partial class MainWindow
 
     // ----- The recent notices page -----
 
-    private void RenderNotices()
+    // fresh: the page comes into view (the panel opens on it, or another page gives way to it). It starts at the top, with its
+    // first rows only; the others follow a few at a time (FillRows).
+    private void RenderNotices(bool fresh = false)
     {
+        fresh |= NoticesContent.Visibility != Visibility.Visible;
+        StopFill();
         SubscribeNotices();
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         ApplyHeader(Settings.UsagePage ? UsageHeader(_usageWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
-        double offset = NoticesContent.Children.OfType<DockPanel>().FirstOrDefault()?.Children.OfType<ScrollViewer>().FirstOrDefault()?.VerticalOffset ?? 0;
+        double offset = fresh ? 0 : NoticesContent.Children.OfType<DockPanel>().FirstOrDefault()?.Children.OfType<ScrollViewer>().FirstOrDefault()?.VerticalOffset ?? 0;
         // Worked from the keyboard, the page keeps the focus on the same notice when it is built again (an Enter, a new notice).
         string? refocus = NoticesContent.IsKeyboardFocusWithin ? _focusedNotice : null;
         NoticesContent.Children.Clear();
@@ -374,24 +381,73 @@ public partial class MainWindow
         // Up and Down move between the rows and their buttons; Tab goes through them in order.
         KeyboardNavigation.SetDirectionalNavigation(list, KeyboardNavigationMode.Contained);
         var now = DateTimeOffset.UtcNow;
-        foreach (var notice in notices.Take(_noticeRows))
-        {
-            var row = Row(notice, now);
-            list.Children.Add(row);
-            _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row));
-        }
+        var listed = notices.Take(_noticeRows).ToList();
+        // A page built again in place that keeps its scroll position or the keyboard's notice is built whole, as the place needs
+        // the rows above it.
+        int first = offset > 0 || refocus is not null ? listed.Count : Math.Min(listed.Count, FirstRows);
+        for (int i = 0; i < first; i++) AddRow(list, listed[i], now);
         _pageList = list;
         if (refocus is not null && _pageRows.FirstOrDefault(r => r.Notice.Id == refocus).Row is { } focused)
             Dispatcher.BeginInvoke(() => focused.Focus(), System.Windows.Threading.DispatcherPriority.Input);
-        if (notices.Count > _noticeRows)
-        {
-            var more = PageButton(Loc.T("显示更早的通知", "Show earlier notices"), () => { _noticeRows += NoticePageStep; RenderNotices(); });
-            more.HorizontalAlignment = HorizontalAlignment.Center; more.Margin = new Thickness(0, 6, 0, 2);
-            list.Children.Add(more);
-        }
+        bool earlier = notices.Count > _noticeRows;
+        if (first < listed.Count) StartFill(listed, first, earlier);
+        else if (earlier) AddEarlierButton(list);
         var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, PanningMode = PanningMode.VerticalOnly };
         page.Children.Add(scroll);
         if (offset > 0) { scroll.UpdateLayout(); scroll.ScrollToVerticalOffset(offset); }
+        WatchPageLive();
+    }
+
+    private void AddRow(StackPanel list, Notice notice, DateTimeOffset now)
+    {
+        var row = Row(notice, now);
+        list.Children.Add(row);
+        _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row));
+    }
+
+    private void AddEarlierButton(StackPanel list)
+    {
+        var more = PageButton(Loc.T("显示更早的通知", "Show earlier notices"), () => { _noticeRows += NoticePageStep; RenderNotices(); });
+        more.HorizontalAlignment = HorizontalAlignment.Center; more.Margin = new Thickness(0, 6, 0, 2);
+        list.Children.Add(more);
+    }
+
+    // The page's rows after its first ones, RowsPerFrame of them each frame until all are there. Built and laid out at once, the
+    // forty rows a page lists took over 100 ms on the first frame of the opening (each new row lays its texts out the first
+    // time), a stall the panel showed at the very start of its move; a few rows a frame stay within one.
+    private const int FirstRows = 3, RowsPerFrame = 2;
+    private (List<Notice> Notices, int Next, bool Earlier)? _fill;
+    private TimeSpan _fillFrame;
+    private bool _filling;
+
+    private void StartFill(List<Notice> listed, int next, bool earlier)
+    {
+        _fill = (listed, next, earlier);
+        if (_filling) return;
+        _filling = true; _fillFrame = TimeSpan.Zero;
+        CompositionTarget.Rendering += FillRows;
+    }
+
+    private void StopFill()
+    {
+        _fill = null;
+        if (!_filling) return;
+        _filling = false;
+        CompositionTarget.Rendering -= FillRows;
+    }
+
+    private void FillRows(object? sender, EventArgs e)
+    {
+        // WPF may raise Rendering more than once for one frame.
+        if (e is RenderingEventArgs args) { if (args.RenderingTime == _fillFrame) return; _fillFrame = args.RenderingTime; }
+        // The page closed or was left: what is missing is built when it shows again (the rows no longer match the list).
+        if (_fill is not { } fill || _pageList is not { } list || !_expanded || CurrentPage != DeckPage.Notices) { StopFill(); return; }
+        var now = DateTimeOffset.UtcNow;
+        int end = Math.Min(fill.Notices.Count, fill.Next + RowsPerFrame);
+        for (int i = fill.Next; i < end; i++) AddRow(list, fill.Notices[i], now);
+        if (end < fill.Notices.Count) { _fill = fill with { Next = end }; return; }
+        StopFill();
+        if (fill.Earlier) AddEarlierButton(list);
         WatchPageLive();
     }
 
