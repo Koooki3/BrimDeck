@@ -232,6 +232,8 @@ public sealed class DeckSettings
     public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
     public string HideHotkey { get; set; } = "";
     public string ExpandHotkey { get; set; } = "";
+    // The resize shortcut: modifiers with the arrow keys ("Ctrl+Alt+Arrows", HotkeyText.Arrows); unset by default.
+    public string ResizeHotkey { get; set; } = "";
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
@@ -553,6 +555,7 @@ public sealed class DeckSettings
         LineOffsetX = Offset(LineOffsetX);
         HideHotkey ??= "";
         ExpandHotkey ??= "";
+        ResizeHotkey ??= "";
         if (QuickSize is { } quick && !Enum.IsDefined(quick)) QuickSize = null;
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
