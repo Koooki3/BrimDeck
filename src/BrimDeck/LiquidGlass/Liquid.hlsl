@@ -128,14 +128,14 @@ SamplerState Smooth : register(s0);
 static const float GrainAmount = .006;
 // Round 12b: the masked contrast reached behind text (a share of the opaque theme's), the busy-ness reference (unfrosted band
 // RMS, linear Y), and the body's depth: its fall toward the edges and its top light.
-// Round 13b: the light look reaches .93 of the opaque theme's masked contrast (its text carries a halo and a target of 75 %).
-static const float ReachLight = .93;
-static const float BodyCover = .35, DensityGain = 3, GlyphHelp = .35;
+// Round 13b: the light look reaches .95 of the opaque theme's masked contrast (its text carries a halo and a target of 75 %).
+static const float ReachLight = .95;
+static const float BodyCover = .1, DensityGain = 2, GlyphHelp = .35;
 static const float Reach = .96, BusyRef = .03, EdgeFall = .05, Sheen = .06, SheenDip = 36;
 // Round 13's slab: its tint (Lens' roles: small .12, panel .14), absorption per unit thickness (light: barely, cool; dark:
 // deeper), the frost of its body with no text over it (DIP, collapsed; the open panel's is half its text frost), the light's
 // strength at rest, and the light look's least cover behind text.
-static const float SlabTintSmall = .12, SlabTintPanel = .14, BodyFrostDip = 2.5, RestLight = .55, SlabCoverLight = .55;
+static const float SlabTintSmall = .12, SlabTintPanel = .14, BodyFrostDip = 2.5, RestLight = .55, SlabCoverLight = .35;
 static const float3 AbsorbLight = float3(.035, .025, .015), AbsorbDark = float3(.22, .19, .15);
 static const float Cap = 1.5, Calm = .6, BusyCalm = .3, Vibrancy = 1.2, ChromaFloor = .55, RimDip = 10, RimLeast = 6, RowReach = 8;
 
@@ -726,7 +726,11 @@ float3 Slab(float2 p, float sd, float2 outward)
         float3 target = lerp(AcrylicLight, AcrylicDark, turned);
         // Between text the light look's body carries a little of it too (BodyCover), so the cover reads as the glass growing
         // denser, not as a plate laid on it.
-        c = lerp(c, SetLum(c, Lum(target)), max(a * text, BodyCover * opened * thickness));
+        // Where the backdrop behind the text asks for more (much darker than the light look), the density
+        // over the text rises too; over a calm backdrop it stays low and the glass translucent (round 14b).
+        float dim = saturate((.5 - Stats(p).x) / .3);   // a backdrop much darker than the light look
+        float dense = saturate(text * (1 + 1.2 * dim));
+        c = lerp(c, SetLum(c, Lum(target)), max(a * dense, BodyCover * opened * thickness));
         c = lerp(c, target, AcrylicTintDark * turned * text);
     }
     // Colour no more than the backdrop's own (D14).
@@ -763,7 +767,10 @@ float3 Slab(float2 p, float sd, float2 outward)
     // A very soft caustic where the rim's refraction converges, inside the bevel.
     c = lerp(c, 1, edge * (1 - edge) * 4 * .03 * (1 - .5 * dark) * thin * (1 - .6 * text));
     // A 0.75 pt dark hairline just inside the edge (iOS 27's contour).
-    c *= 1 - exp(-pow((d - .9 * Scale) / (.45 * Scale), 2)) * lerp(.14, .28, dark) * thin;
+    // Round 14b: about a third as strong, in the backdrop's own colour (darkened), and fading where the backdrop is already
+    // darker than the glass (there the edge reads by itself): the glass's own edge, not an outline.
+    float hair = exp(-pow((d - .9 * Scale) / (.45 * Scale), 2)) * lerp(.05, .09, dark) * thin * saturate((Lum(backdrop) - Lum(c)) * 3 + .6);
+    c = lerp(c, saturate(backdrop) * .55, hair);
     float sheen = .045 * saturate(dot(-pc, key) * .5 + .5);
     c = lerp(c, 1, sheen * (1 - text * .7) * (1 - .5 * dark));
     c *= 1 - pow(edge, 8) * .085 * saturate(dot(outward, -key) * .5 + .5);
