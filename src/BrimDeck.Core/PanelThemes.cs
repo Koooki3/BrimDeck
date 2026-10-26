@@ -20,6 +20,7 @@ public sealed record PanelThemeInfo(string Id, PanelThemeKind Kind, PanelThemeFi
 }
 
 [JsonSerializable(typeof(PanelThemeFile))]
+[JsonSerializable(typeof(PanelThemeDecor))]
 [JsonSerializable(typeof(string))]
 internal sealed partial class PanelThemeJson : JsonSerializerContext;
 
@@ -101,7 +102,7 @@ public static partial class PanelThemes
         static bool AnyNull(PanelThemeFile file) => HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
             || HasNull(file.Effects?.SurfaceGradient) || HasNull(file.Effects?.RimGradient)
             || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true;
-        if (AnyNull(file) || file.Night is { } night && AnyNull(night))
+        if (AnyNull(file) || file.Night is { } night && AnyNull(night) || file.Dusk is { } dusk && AnyNull(dusk))
             throw new JsonException(Loc.T("颜色值不能为 null", "A color cannot be null"));
         return file;
     }

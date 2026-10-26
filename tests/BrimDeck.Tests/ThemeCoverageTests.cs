@@ -109,8 +109,9 @@ internal static class ThemeCoverageTests
         foreach (var theme in PanelThemes.BuiltIns)
         {
             yield return (theme.Id, PanelThemes.Resolve(theme));
-            // A theme's night look is drawn by the same pairs.
+            // A theme's night and dusk looks are drawn by the same pairs.
             if (theme.File.Night is not null) yield return (theme.Id + "-night", PanelThemes.Resolve(theme, true));
+            if (theme.File.Dusk is not null) yield return (theme.Id + "-dusk", PanelThemes.Resolve(theme, DaylightLook.Dusk));
         }
         // "system" resolves to one of these; both of its sides are covered above, but it is named so a change to Find shows here.
         yield return ("system-dark", PanelThemes.Resolve(PanelThemes.Find(PanelThemes.SystemId, true, [])));

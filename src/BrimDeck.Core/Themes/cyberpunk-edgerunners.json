@@ -2,66 +2,68 @@
   // The custom-theme demo: an unofficial fan palette inspired by the look of Cyberpunk: Edgerunners
   // (Studio Trigger, CD PROJEKT RED). It uses colors only, no artwork, logos or fonts from the series.
   // The design notes are in docs/zh-CN/themes.md.
-  //   Night City at night: a violet-black surface that glows deeper violet toward the bottom, like a sky lit from the street.
-  //   Neon: cyan and magenta for the rim, the focus and the tracks, the two colors of Lucy's hair and the signs.
-  //   The signature yellow of Cyberpunk for the clock, the indicator and warnings; text in the pale lavender of the moon.
-  //   CRT scan lines and a magenta glow under the collapsed notch, as on the show's screens and HUDs.
+  //   Night City at night: an indigo-black sky over the haze of the street, teal toward the bottom, as a rainy city glows
+  //   from below. The quiet lines are the pale blue of that haze; text is cool white and pale blue.
+  //   Neon only where it is thin: cyan and magenta for the rim, the focus and the tracks, the two colors of Lucy's hair and
+  //   the signs; the signature yellow for the indicator and warnings. The clock is the pale cyan of a lit window, in Tektur,
+  //   the squared HUD face of the taskbar clock.
+  //   HUD cuts across two corners with a hexagonal tick beside each, CRT scan lines and a magenta glow under the collapsed notch.
   "formatVersion": 1,
   "id": "cyberpunk-edgerunners",
   "name": "赛博朋克：边缘行者",
   "nameEn": "Cyberpunk: Edgerunners",
-  "description": "非官方同人配色：夜之城的紫黑夜空、青与品红霓虹、标志性的赛博黄，配扫描线与辉光。",
-  "descriptionEn": "An unofficial fan palette: the violet night of Night City, cyan and magenta neon, the signature yellow, scan lines and glow.",
+  "description": "非官方同人配色：夜之城的靛青夜色与街道雾霭、细处的青与品红霓虹、标志性的赛博黄，配 HUD 切角、扫描线与辉光。",
+  "descriptionEn": "An unofficial fan palette: the indigo night and street haze of Night City, thin cyan and magenta neon, the signature yellow, HUD cuts, scan lines and glow.",
   "author": "BrimDeck",
   "license": "Apache-2.0",
   "base": "dark",
   "colors": {
-    "surface": "#0A0613",
-    "textPrimary": "#F4F0FF",
-    "textSecondary": "#C9BEEB",
-    "textTertiary": "#8F84BD",
+    "surface": "#0C0C22",
+    "textPrimary": "#EEF4FF",
+    "textSecondary": "#BCCEEC",
+    "textTertiary": "#8698C2",
     "accent": "#00F0FF",
-    "onAccent": "#0A0613",
-    "danger": "#FF4D6A",
+    "onAccent": "#0C0C22",
+    "danger": "#FF5C7A",
     "liked": "#FF2A6D",
-    "clock": "#FCEE0A",
+    "clock": "#CFF4F6",
     "equalizer": "#00F0FF",
-    "hairline": "#3300F0FF",
+    "hairline": "#2EB0D0F0",
     "track": "#2400F0FF",
     "ringTrack": "#3800F0FF",
-    "fill": "#1400F0FF",
-    "fillSelected": "#3300F0FF",
-    "hover": "#1F00F0FF",
-    "pressed": "#3D00F0FF",
+    "fill": "#14B0D0F0",
+    "fillSelected": "#2EB0D0F0",
+    "hover": "#1FB0D0F0",
+    "pressed": "#38B0D0F0",
     "outline": "#5200F0FF",
-    "popup": "#120A20",
+    "popup": "#10102A",
     "popupBorder": "#8000F0FF",
-    "input": "#07040D",
-    "rangeFill": "#40FCEE0A",
-    "coverPlaceholder": "#1AFF2A6D",
+    "input": "#08081A",
+    "rangeFill": "#2EF090F0",
+    "coverPlaceholder": "#1AF0D0F0",
     "coverOutline": "#6600F0FF",
-    "scrollThumb": "#5A3D8C",
+    "scrollThumb": "#3A4C78",
     "rim": "#00F0FF",
     "shadow": "#FF2A6D",
     "indicator": "#FCEE0A",
     "indicatorProgress": "#FF2A6D",
-    "switchFill": "#1400F0FF",
+    "switchFill": "#14B0D0F0",
     "seekRail": "#3800F0FF",
-    "rowDivider": "#3300F0FF",
-    "rowHover": "#1400F0FF",
-    "menuDetail": "#C9BEEB",
-    "tooltip": "#120A20",
+    "rowDivider": "#26B0D0F0",
+    "rowHover": "#14B0D0F0",
+    "menuDetail": "#BCCEEC",
+    "tooltip": "#10102A",
     "tooltipBorder": "#8000F0FF",
-    "bubble": "#120A20",
+    "bubble": "#10102A",
     "bubbleBorder": "#8000F0FF"
   },
   "apps": {
-    "claude": "#FF9E3D", "codex": "#3DFFB0", "antigravity": "#00E5FF", "cursor": "#C9C3F2", "zcode": "#7B8CFF",
-    "dsh": "#6FA8FF", "grokBot": "#C9C3F2", "kimi": "#1EC8FF", "manual": "#D07DFF", "other": "#C9C3F2", "warning": "#FCEE0A", "critical": "#FF3B5C"
+    "claude": "#FF9E3D", "codex": "#3DFFB0", "antigravity": "#00E5FF", "cursor": "#C4D2EE", "zcode": "#7B8CFF",
+    "dsh": "#6FA8FF", "grokBot": "#C4D2EE", "kimi": "#1EC8FF", "manual": "#D07DFF", "other": "#C4D2EE", "warning": "#FCEE0A", "critical": "#FF3B5C"
   },
   "clock": {
-    "style": "segment", "color": "default",
-    "palette": { "amber": "#FF9E3D", "cyan": "#00F0FF", "pink": "#FF2A6D", "lime": "#B6FF3B" },
+    "style": "tektur", "color": "default",
+    "palette": { "amber": "#FCEE0A", "cyan": "#00F0FF", "pink": "#FF2A6D", "lime": "#B6FF3B" },
     "gradients": [
       { "name": "日落", "nameEn": "Sunset", "stops": ["#FCEE0A", "#FF9E3D", "#FF2A6D"] },
       { "name": "海洋", "nameEn": "Ocean", "stops": ["#00F0FF", "#6FA8FF", "#C25BFF"] },
@@ -71,21 +73,28 @@
     ]
   },
   "effects": {
-    "surfaceGradient": ["#0A0613", "#1C0B30"],
-    "rimGradient": ["#00F0FF", "#B026FF", "#FF2A6D"],
+    // Indigo sky into the teal haze of the street; the rim runs from cyan through violet and the pale pink of the signs' halo
+    // into magenta.
+    "surfaceGradient": ["#0C0C22", "#101030", "#0A1F33"],
+    "rimGradient": ["#00F0FF", "#7A5CFF", "#F090F0", "#FF2A6D"],
     "rimWidth": 1.25,
     "shadowBlur": 18,
     "shadowDepth": 0,
-    "shadowOpacity": 0.6,
-    "scanlines": 0.04
+    "shadowOpacity": 0.5,
+    "scanlines": 0.035,
+    // HUD cuts across the bottom corners (the top-right on a floating island) with a hexagonal tick beside each, in a half-lit
+    // cyan so they frame without glowing.
+    "decor": { "hud": { "color": "#8000F0FF", "chamfer": 10 } }
   },
   // Living neon: the rim breathes over 6.5 s, the rim's cyan and magenta drift along it, a faint scan line
   // passes every 16 s and the tube sags softly about once in 41 s; never faster than one change a second. The pointer is
   // answered as cyberware: cyan HUD brackets snap onto the hovered control in three hard steps; a press clamps them on with
-  // a magenta ghost and a short glitch slice, and on release a yellow scan line ticks down the control. No soft blooms.
+  // a magenta ghost and a short glitch slice, and on release a yellow scan line ticks down the control and a few streaks of
+  // rain fall from it. The springs are firm; the panel goes back into the island as a
+  // glitch, torn into bands. No soft blooms.
   "motion": {
     "ambient": { "breathe": 6.5, "breatheDepth": 0.22, "drift": 11, "sweep": 16, "sweepOpacity": 0.07, "flicker": 41, "flickerDepth": 0.1 },
-    "hover": "brackets", "hoverStrength": 0.24, "press": "lock", "pressStrength": 0.3, "trail": 0, "particles": "none", "focus": "brackets", "pace": 0.8, "steps": 3,
+    "hover": "brackets", "hoverStrength": 0.24, "press": "lock", "pressStrength": 0.3, "trail": 0, "particles": "rain", "spring": "firm", "collapse": "glitch", "focus": "brackets", "pace": 0.8, "steps": 3,
     "color": "accent", "secondary": "shadow", "highlight": "clock"
   }
 }

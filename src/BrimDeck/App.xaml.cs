@@ -239,7 +239,8 @@ public partial class App : Application
             if (Exiting) return;
             // Automatic liquid glass's prior follows the Windows app mode (GlassAppearance.Prior: it may turn at once).
             LiquidTheme.ReadAppMode();
-            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId) ApplyPanelTheme(systemChanged: true);
+            // A theme whose day and night looks follow Windows' mode changes over like the dusk does (PanelThemes.LookAt).
+            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId || PanelTheme.FollowsWindowsMode(Settings)) ApplyPanelTheme(systemChanged: true);
             // Automatic liquid glass with nothing to measure follows the Windows app theme too. Otherwise the theme page's
             // "System" card shows the Windows mode whichever theme is chosen.
             else if (!FollowWindowsGlass()) _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
@@ -348,7 +349,7 @@ public partial class App : Application
         var region = LiquidGlass.BackdropLook.Region(display.Bounds, display.Handle);
         return region.IsEmpty ? null : region;
     }
-    // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
+    // A theme with a night look changes look at its hours (PanelThemes.LookAt): the timer is set for the next change, and at
     // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch
     // carries a preset clock gradient over, as Windows switching "system" between dark and light does.
     private System.Windows.Threading.DispatcherTimer? _daylight;

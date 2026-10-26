@@ -62,33 +62,62 @@ public static partial class PanelThemes
                 .Replace("\"texture\": 0 ", "\"texture\": 0,", StringComparison.Ordinal);
         foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines), ("pixel", effects.Pixel), ("texture", effects.Texture) })
             text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {value.ToString("0.###", CultureInfo.InvariantCulture)}");
+        // The motifs follow the last numeric effect, before the glass when there is one.
+        if (effects.Decor is { } decor)
+            text = new Regex(@"(""texture"": [0-9.]+)(,?)").Replace(text, match => match.Groups[1].Value + ", \"decor\": " + DecorJson(decor) + match.Groups[2].Value, 1);
         text = FillMotion(text, start.Motion);
-        // A theme with a night look keeps it, and its hours, after everything the template lists (start is its day look).
-        return source?.Night is { } night ? AppendNight(text, night, source.Daylight) : text;
+        // A theme with a night look keeps it, its dusk look and its hours, after everything the template lists (start is its day look).
+        return source?.Night is { } night ? AppendNight(text, night, source.Dusk, source.Daylight) : text;
     }
 
-    // The night look as the theme file writes it: only what it sets, as "daylight" and "night" members at the end of the file.
-    private static string AppendNight(string text, PanelThemeFile night, PanelThemeDaylight? daylight)
+    // The night and dusk looks as the theme file writes them: only what they set, as "daylight", "night" and "dusk" members at the
+    // end of the file. The daylight member keeps a mode and a dusk length only when the source names them.
+    private static string AppendNight(string text, PanelThemeFile night, PanelThemeFile? dusk, PanelThemeDaylight? daylight)
     {
-        var layer = new PanelThemeFile { Colors = night.Colors, Apps = night.Apps, Effects = night.Effects, Motion = night.Motion, Clock = night.Clock };
-        if (JsonSerializer.SerializeToNode(layer, Json) is not System.Text.Json.Nodes.JsonObject json) return text;
-        // Only what the layer sets: no format, empty strings (an id, a name, an unset clock style) or names made for display.
-        json.Remove("formatVersion");
-        static void Trim(System.Text.Json.Nodes.JsonNode? node)
+        string? Layer(PanelThemeFile look)
         {
-            if (node is System.Text.Json.Nodes.JsonArray array) { foreach (var item in array) Trim(item); return; }
-            if (node is not System.Text.Json.Nodes.JsonObject members) return;
-            foreach (var key in members.Where(pair => pair.Key == "displayName" || pair.Value is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var text) && text.Length == 0)
-                .Select(pair => pair.Key).ToList()) members.Remove(key);
-            foreach (var (_, value) in members) Trim(value);
+            var layer = new PanelThemeFile { Colors = look.Colors, Apps = look.Apps, Effects = look.Effects, Motion = look.Motion, Clock = look.Clock };
+            if (JsonSerializer.SerializeToNode(layer, Json) is not System.Text.Json.Nodes.JsonObject json) return null;
+            // Only what the layer sets: no format, empty strings (an id, a name, an unset clock style) or names made for display.
+            json.Remove("formatVersion");
+            static void Trim(System.Text.Json.Nodes.JsonNode? node)
+            {
+                if (node is System.Text.Json.Nodes.JsonArray array) { foreach (var item in array) Trim(item); return; }
+                if (node is not System.Text.Json.Nodes.JsonObject members) return;
+                foreach (var key in members.Where(pair => pair.Key == "displayName" || pair.Value is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var text) && text.Length == 0)
+                    .Select(pair => pair.Key).ToList()) members.Remove(key);
+                foreach (var (_, value) in members) Trim(value);
+            }
+            Trim(json);
+            return json.ToJsonString(Json).ReplaceLineEndings("\n  ");
         }
-        Trim(json);
-        string Indent(string member) => member.ReplaceLineEndings("\n  ");
+        if (Layer(night) is not { } nightJson) return text;
         var members = new List<string>();
-        if (daylight is { } hours) members.Add($"\"daylight\": {{ \"day\": {Quote(hours.Day)}, \"night\": {Quote(hours.Night)} }}");
-        members.Add("\"night\": " + Indent(json.ToJsonString(Json)));
+        if (daylight is { } hours)
+        {
+            var fields = new List<string>();
+            if (hours.Mode.Length > 0) fields.Add($"\"mode\": {Quote(hours.Mode)}");
+            fields.Add($"\"day\": {Quote(hours.Day)}");
+            fields.Add($"\"night\": {Quote(hours.Night)}");
+            if (hours.DuskMinutes is { } minutes) fields.Add($"\"duskMinutes\": {minutes.ToString(CultureInfo.InvariantCulture)}");
+            members.Add($"\"daylight\": {{ {string.Join(", ", fields)} }}");
+        }
+        members.Add("\"night\": " + nightJson);
+        if (dusk is not null && Layer(dusk) is { } duskJson) members.Add("\"dusk\": " + duskJson);
         int end = text.LastIndexOf('}');
         return end < 0 ? text : text[..end].TrimEnd() + ",\n  " + string.Join(",\n  ", members) + "\n}\n";
+    }
+
+    private static string DecorJson(PanelDecor decor)
+    {
+        var file = new PanelThemeDecor
+        {
+            Horizon = decor.Horizon is { } h ? new PanelThemeHorizon { At = h.At, Sea = h.Sea.ToString(), Line = h.Line?.ToString() } : null,
+            Caustics = decor.Caustics is { } caustics ? new PanelThemeMotif { Color = caustics.ToString() } : null,
+            Palm = decor.Palm is { } palm ? new PanelThemeMotif { Color = palm.ToString() } : null,
+            Hud = decor.Hud is { } hud ? new PanelThemeHud { Color = hud.Color.ToString(), Chamfer = hud.Chamfer } : null
+        };
+        return JsonSerializer.Serialize(file, Json);
     }
 
     private static string GlassJson(PanelGlass glass)
@@ -128,9 +157,9 @@ public static partial class PanelThemes
         var a = motion.Ambient;
         static string Number(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
         foreach (var (key, value) in new[] { ("breathe", a.Breathe), ("breatheDepth", a.BreatheDepth), ("drift", a.Drift), ("sweep", a.Sweep), ("sweepOpacity", a.SweepOpacity),
-            ("flicker", a.Flicker), ("flickerDepth", a.FlickerDepth), ("hoverStrength", motion.HoverStrength), ("pressStrength", motion.PressStrength), ("trail", motion.ParticleStrength), ("pace", motion.Pace), ("steps", (double)motion.Steps) })
+            ("flicker", a.Flicker), ("flickerDepth", a.FlickerDepth), ("hoverStrength", motion.HoverStrength), ("pressStrength", motion.PressStrength), ("trail", motion.ParticleStrength), ("pace", motion.Pace), ("steps", (double)motion.Steps), ("aberration", motion.Aberration) })
             tail = Regex.Replace(tail, $"\"{key}\": [0-9.]+", $"\"{key}\": {Number(value)}");
-        foreach (var (key, value) in new[] { ("hover", motion.Hover.ToString()), ("press", motion.Press.ToString()), ("focus", motion.Focus.ToString()), ("particles", motion.Particles.ToString()) })
+        foreach (var (key, value) in new[] { ("hover", motion.Hover.ToString()), ("press", motion.Press.ToString()), ("focus", motion.Focus.ToString()), ("particles", motion.Particles.ToString()), ("spring", motion.Spring.ToString()), ("collapse", motion.Collapse.ToString()) })
             tail = Regex.Replace(tail, $"\"{key}\": \"\\w+\"", $"\"{key}\": \"{value.ToLowerInvariant()}\"");
         foreach (var (key, value) in new[] { ("color", motion.Color), ("secondary", motion.Secondary), ("highlight", motion.Highlight) })
             tail = Regex.Replace(tail, $"\"{key}\": \"[^\"]*\"", $"\"{key}\": {Quote(value).Replace("$", "$$", StringComparison.Ordinal)}");

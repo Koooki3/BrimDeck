@@ -84,7 +84,7 @@ The clock style and color that suit the theme. Choosing the theme in settings sw
 "clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
 ```
 
-`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`, `pixel`; `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
+`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`, `pixel`, `tektur`, `rounded`; `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
 
 ### Picker swatches (swatches)
 
@@ -102,6 +102,7 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `glass` | Glass: `tint` is a translucent color laid over the desktop (its opacity strictly between 0 and 1), `edge` the light gathered along the inner edge (0–1), `highlight` its color. See "Glass" below | |
 | `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels) and the island's text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right. Not with `glass`, also from the base theme: such a file is refused | 0, or 1–4 |
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain | 0–0.12 |
+| `decor` | Quiet pictures drawn into the surface under the content, each value inherited on its own (a night look that names only `sea` keeps the day's `at` and `line`): `horizon` a sea (`sea`) below `at` of the height with a line of light (`line`) along it; `caustics` a net of soft light lines below the horizon (over the whole surface without one); `palm` a palm frond's shadow in the open panel's top-right corner, above the horizon; `hud` 45-degree cuts across the bottom-left and the top-right corner (the bottom-right on an island hanging from the screen's edge, `chamfer`) with a hexagonal tick beside each. A fully transparent color turns a part off, e.g. in a night look. Text is held to its minimums over the sea (at the horizon and at its deepest), the line and the motifs | `at` 0.3–0.9, caustics alpha ≤ 0.2, palm alpha ≤ 0.12, `chamfer` 0–10 |
 
 #### Glass
 
@@ -113,7 +114,7 @@ Where Windows can, the desktop under the glass is blurred: BrimDeck puts a windo
 
 ### Motion (motion)
 
-How the theme moves on BrimDeck's own windows: slow ambient light on the island, and how the pointer and the keyboard are answered. Like the effects, the section is merged key by key along the base chain, so a theme only writes what it changes. Every value is held to the range below (a value outside it is moved to its nearest end), so no theme file can make anything flash: brightness never changes more than three times a second. Nothing moves while animations are off in BrimDeck's settings or in Windows, or in high contrast; the ambient light also stops while the island is hidden or powering off, the session is locked, or battery saver is on. The settings window keeps its own hover and focus styles.
+How the theme moves on BrimDeck's own windows: slow ambient light on the island, and how the pointer and the keyboard are answered. Like the effects, the section is merged key by key along the base chain, so a theme only writes what it changes. Every value is held to the range below (a value outside it is moved to its nearest end), so no theme file can make anything flash: brightness never changes more than three times a second. Nothing moves while animations are off in BrimDeck's settings or in Windows, or in high contrast; the ambient light also stops while the island is hidden or powering off, the session is locked, battery saver is on, or a maximized or full-screen window is in front on the island's monitor (as a live wallpaper pauses); the particles a press left go at once when the panel closes. The settings window keeps its own hover and focus styles.
 
 `ambient`: periods are seconds, and 0 turns an effect off.
 
@@ -130,22 +131,40 @@ The answers to the pointer are drawn on the control's own visible shape, never a
 | --- | --- | --- |
 | `hover` | The mark on a hovered control (also `lens`: light pooled at the top of a glass bead and a bright top rim; `wave`: a faint tint and a small wave that rolls in along the bottom and settles; `slot`: a square highlight with a solid inner frame, as an inventory slot): `none`, `reveal` (faint fill, edge lit from the top), `lift` (soft shadow outside, light top edge), `underline` (subtle fill, 2 px bar along the bottom), `caret` (line highlight, caret bar at the left), `brackets` (HUD corner brackets), `sheen` (two-color tint and edge), `glow` (warm inner glow and a glint) | earlier names: `spot` = reveal, `edge` = underline, `neon` = brackets |
 | `hoverStrength` | How strongly the mark shows | 0–0.3 |
-| `press` | The press (also `bevel`: the bevel turns over, shaded at the top left and lit at the bottom right, as a pixel-art button pushed in; `jelly`: the light on the glass squashes wider and lower, shaded along the bottom only, and springs back once past its shape on release): `none`, `shade` (the shape shades, its edge firms), `sink` (the shadow collapses, pushed in), `indicator` (the bottom bar takes the highlight), `select` (a selection sweeps from the caret), `lock` (brackets clamp on with a chromatic ghost and a glitch slice; a scan line on release), `sparkle` (the tint deepens; stars on release), `ember` (a warm glow swells; fireflies on release) | earlier names: `pulse` and `ripple` = shade, `ring` = lock |
+| `press` | The press (also `bevel`: the bevel turns over, shaded at the top left and lit at the bottom right, as a pixel-art button pushed in; `jelly`: the light on the glass squashes wider and lower, shaded along the bottom only, and springs back once past its shape on release; `splash`: a ring of water spreads out from the control's own edge as it goes down and a second, fainter one as a completed press lets go, 320–400 ms each, easing out): `none`, `shade` (the shape shades, its edge firms), `sink` (the shadow collapses, pushed in), `indicator` (the bottom bar takes the highlight), `select` (a selection sweeps from the caret), `lock` (brackets clamp on with a chromatic ghost and a glitch slice; a scan line on release), `sparkle` (the tint deepens; stars on release), `ember` (a warm glow swells; fireflies on release) | earlier names: `pulse` and `ripple` = shade, `ring` = lock |
 | `pressStrength` | How strongly the press shows | 0–0.35 |
-| `particles` | What a completed press leaves for a moment, from the control's edges: `none`, `dust`, `pixel`, `spark`, `star`, `firefly`, `neon` | |
+| `particles` | What a completed press leaves for a moment, from the control's edges: `none`, `dust`, `pixel`, `spark`, `star`, `firefly`, `neon`, `rain` (three or four fine 1 × 6 DIP slanted streaks falling from the bottom edge, at most 0.25 opaque, 0.5 s), `bubble` (three to five bubbles 2–4 DIP in radius rising 18–28 DIP from the bottom edge over 0.8–1.2 s, their outline at most 0.5 opaque) | |
 | `trail` | How strongly those particles show; 0 shows none | 0–0.6 |
 | `focus` | A short accent where keyboard focus lands (Tab after Tab plays it only on the first move after a pause; the others show the static focus frame): `none`, `ring`, `glow`, `brackets`, `caret` | earlier name: `neon` = brackets |
 | `pace` | Scales the pace of the theme's answers to the pointer and the keyboard (hover, press, focus, particles); independent of the expand and collapse duration in settings | 0.6–1.6 |
 | `steps` | 0 moves smoothly; 2 to 8 moves in that many hard steps, for a mechanical feel. Glitch slices and scan lines are rationed to two a second however fast the clicks come | 0, 2–8 |
 | `color` | The main mark (hover and focus) | a color key, `#RRGGBB`, or `system` (the Windows accent) |
 | `secondary` | Its second tone: a gradient's end, a shadow, a ghost or a neutral bar | as `color` |
-| `highlight` | The color of the moment of a press: an indicator, a selection, a scan line, sparkles, fireflies | as `color` |
+| `highlight` | The color of the moment of a press: an indicator, a selection, a scan line, sparkles, fireflies, rain, bubbles | as `color` |
+| `spring` | How much the springs give (a resize drag, `jelly` springing back), always at the monitor page's 16 rad/s: `firm` (damping 0.85, barely passes its shape), `default` (0.70), `jelly` (0.50, springs back twice) | |
+| `collapse` | How a notice or the open panel goes back into the island: `fade` (the default, the closing it always had), `glitch` (a snapshot torn into bands that jump in three steps and break up pixel by pixel, about 270 ms), `foam` (a snapshot dissolving along a noise field with 1 DIP of foam at the dissolving edge, about 330 ms), `genie` (a snapshot drawn into the island along the lamp curve, about 450 ms). The island itself is closed at once and the picture plays on the snapshot; a new notice or opening the panel again stops it at once. Each counts as one flash, sharing the two a second with glitch slices and scan lines; with those spent, or animations off, it is `fade` | |
+| `aberration` | A chromatic pulse: a completed press pulls its edge apart, the main color this many DIP to the left and the second to the right, and a `glitch` or `foam` collapse starts with red and blue as far apart (none at the centre, all of it at the edges); at most 120 ms each, counted as a flash; 0 turns it off | 0, 1–1.5 |
 
 Motion colors are kept readable on the surface like any other color chosen outside the theme. The default dark and light themes (and any theme with no `motion` section anywhere in its base chain) draw nothing over the controls, which keep their own hover and press looks. The "system" theme uses Windows' accent color; over a base with answers it gives the quiet Fluent ones (`reveal` and `shade`, keeping a base's `lift` and `sink`), and over the default dark and light it draws nothing either; no ambient light, particles or steps, and its base theme's strengths and pace stay. `Templates/theme-template.json` lists every key with its default.
 
-### Day and night looks (night, daylight)
+### Day, dusk and night looks (night, dusk, daylight)
 
-A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look by the local clock. A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night` ("New from current theme" copies it). `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default); the user can move them in Settings › Current theme › Daytime. At the hour the island's old look fades out over 1.6 seconds, like dusk; with animations off it switches at once. Both looks are held to the readability rules below.
+A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look. A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night` ("New from current theme" copies it, with its `dusk` and `daylight`).
+
+```jsonc
+"daylight": { "mode": "clock", "day": "06:30", "night": "18:30", "duskMinutes": 60 },
+"night": { "colors": { "surface": "#0B1622" } },
+"dusk": { "colors": { "surface": "#2A1A2E" } }
+```
+
+| Key | What it does | Values |
+|---|---|---|
+| `daylight.mode` | What switches the looks. `clock`: the day look from `day` to `night` and the night look the rest of the time. `system`: the night look while Windows apps use dark mode and the day look in light mode, with no dusk | `clock` (default), `system` |
+| `daylight.day`, `daylight.night` | When the day and the night begin, by the clock; a day may run past midnight | `HH:mm`, 06:30 and 18:30 by default |
+| `daylight.duskMinutes` | How long the dusk look shows before the night begins (clock mode only) | 15–180, 60 by default |
+| `dusk` | An optional dusk look, written like `night` and laid over the day look; it needs a `night` look beside it | |
+
+An unknown `mode`, a `duskMinutes` outside 15–180, a dusk look without a night look, or a bad color in either look makes the file unusable. The user can choose "Follow Windows" or move the hours in Settings › Current theme; the hours cannot be changed while the theme follows Windows. At each change (day to dusk, dusk to night, night to day, or Windows switching between light and dark) the island's old look fades out over 1.6 seconds; with animations off it switches at once. Every look is held to the readability rules below.
 
 ## Readability
 
@@ -172,7 +191,7 @@ The demo theme was made in these five steps.
 
 **Liquid Glass (light / dark)**: after Apple's Liquid Glass, liquid-glass-react and the "transparent island" concept, and the clear mode leaked for Xiaomi HyperOS 4. The desktop under the island is blurred (see "Glass" above). The light glass is a milky tint (`#C2F7F9FC`), the dark one graphite (`#C8121419`), just dense enough for body text to keep 7:1 over a black or a white desktop. The specular rim is brightest at the top left and catches again at the bottom right, and travels around the edge in about half a minute (`drift`); the inner edge light makes the edge read as thick glass. Hover is `lens`, press `jelly` (after the jelly press of xiaofangstudio/liquid-glass-web: squashed 1.05 x 0.93, shaded only at the bottom, springing back); no particles.
 
-**Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock and a shoreline rim (turquoise, sky, sand). By night, a moonlit sea from navy into teal, a lantern-gold clock and a soft glow under the island. The rim breathes like a swell and its colors flow like water; a glint of sun crosses now and then by day, a rarer moonlight by night. A small wave rolls in along a hovered control; a press leaves sun glints by day (`sparkle` + `star`) and lets glowing plankton rise at night (`ember` + `firefly`).
+**Island Holiday**: a postcard of an island. By day, a clear sky (`#A8E1F8`) fading into the warm haze of the horizon, and below a horizon about two thirds down a turquoise lagoon (`decor.horizon`) with a line of sunlight along it, the soft net of light a sunlit sea throws (`decor.caustics`) and a palm frond's shade in the open panel's corner (`decor.palm`); deep-sea text, a lagoon accent, a sunburnt coral clock in the rounded Fredoka face (the `rounded` style), a mango Indicator, hibiscus for liked songs and a shore rim (lagoon, sky, sand, coral). At dusk, the hour before night, the sky turns peach over a sea warmed by the low sun, with a gold horizon and a sunset rim. By night, a deep ocean navy (`#001E3C`) over a dark teal sea under a horizon lit in moon gold, moonlight playing faintly on the water, a lantern-gold clock and a soft glow under the island. The small collapsed island keeps the plain sky, so the horizon never crosses the clock. The rim breathes like a swell and its colors flow like water; a glint of sun crosses now and then by day, a rarer moonlight by night. A small wave rolls in along a hovered control; a press spreads a ring of water from the control (`splash`), and a completed one lets bubbles rise by day (`bubble`) and glowing plankton at night (`firefly`); the open panel goes back into the island as dissolving foam (`collapse: foam`).
 
 **Pixel Blocks**: an unofficial pixel-art look inspired by block sandbox games, using no artwork, fonts, textures or logos from any game. A deep slate surface with a 5% block grain, 2 DIP stepped corners, a bevel rim lit at the top left and shaded at the bottom right, and a hard shadow with no blur. Chat-style colors: white text, a yellow block clock (the `pixel` clock style), a green accent and a green experience-bar indicator; violet menus with a violet frame. Everything moves in four hard steps: `slot` on hover, `bevel` on press, square particles after; no ambient light, so it costs nothing while idle.
 
@@ -184,15 +203,18 @@ An unofficial fan palette. It uses colors only, no artwork, logos or fonts from 
 
 | Source | Color | Panel role |
 | --- | --- | --- |
-| Night City's violet sky | `#0A0613` → `#1C0B30` | Surface and its top-to-bottom gradient |
-| Moonlight | `#F4F0FF` / `#C9BEEB` / `#8F84BD` | Three text levels (pale lavender) |
-| Cyan neon, Lucy's hair | `#00F0FF` | Accent, focus, the tint of switches and tracks |
+| Night City's indigo sky over the street's teal haze | `#0C0C22` → `#101030` → `#0A1F33` | Surface and its top-to-bottom gradient; menus and tooltips `#10102A` |
+| The haze lit by the city | `#EEF4FF` / `#BCCEEC` / `#8698C2` | Three text levels (cool white, pale blue); dividers, fills and hovers in that pale blue at low opacity |
+| A lit window | `#CFF4F6` | Clock, in Tektur (the squared HUD face of the taskbar clock) |
+| Cyan neon, Lucy's hair | `#00F0FF` | Accent, focus, tracks: neon only where it is thin |
 | Magenta neon | `#FF2A6D` | Collapsed glow, liked song, Indicator progress |
-| Cyberpunk yellow | `#FCEE0A` | Clock (seven-segment, like a HUD readout), Indicator, warning |
+| Cyberpunk yellow | `#FCEE0A` | Indicator, warning, the clock's amber preset |
 | Rebecca's mint | `#3DFFB0` | The Codex column |
-| Neon gradient | cyan → violet → magenta | Rim |
-| CRT screens | 4% scan lines | Surface texture |
+| Neon gradient | cyan → violet → the signs' pale pink halo → magenta | Rim |
+| The signs' pale pink halo | `#F090F0` | A faint tint on chosen date ranges |
+| HUD frames | half-lit cyan 45° cuts with a hexagonal tick | `decor.hud`, two corners |
+| CRT screens | 3.5% scan lines | Surface texture |
 
-**Check.** Primary text is above 15:1 on both gradient stops and tertiary text above 5:1; the yellow clock and warning are about 15:1 on the violet-black; the magenta progress is about 3:1 on the yellow Indicator. Every rule passes the first time, with no adjustment.
+**Check.** Primary text is above 15:1 on every gradient stop and tertiary text above 5.5:1; the pale clock is about 14:1 and the yellow warning about 13.8:1; the magenta progress is about 3:1 on the yellow Indicator. Every rule passes the first time, with no adjustment.
 
 The full file is [`cyberpunk-edgerunners.json`](../../src/BrimDeck.Core/Themes/cyberpunk-edgerunners.json). To start your own theme from it, choose it in settings and press "New from current theme".

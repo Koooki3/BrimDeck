@@ -7,8 +7,8 @@ namespace BrimDeck;
 
 // A change of theme while the island is on screen dissolves from the old look into the new one instead of snapping. Two
 // pictures of the island as it was lie over it while the new colors are already drawn underneath:
-//   the material alone (surface, gradient, rim), under the content, fading over MaterialFade: slowly for a theme's day and night
-//   looks (DaylightFadeMs), as dusk does, and in about a hover's time for any other change;
+//   the material alone (surface, gradient, rim), under the content, fading over MaterialFade: slowly for a theme's day, dusk and night
+//   looks (DaylightFadeMs), by the clock or with Windows' mode, as dusk does, and in about a hover's time for any other change;
 //   the whole island, content too, over everything, fading over ThemeFadeMs whatever the change. Readings and titles go on
 //   changing under it, and two different figures must never stand over each other for long (the monitor's rule), so the old
 //   content leaves quickly even while the old surface lingers.

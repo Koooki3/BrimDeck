@@ -30,6 +30,7 @@ internal static class ThemeSheet
         {
             Draw(PanelThemes.Resolve(theme), Path.Combine(folder, theme.Id + suffix + "-sheet.png"), theme.DisplayName);
             if (theme.File.Night is not null) Draw(PanelThemes.Resolve(theme, true), Path.Combine(folder, theme.Id + suffix + "-night-sheet.png"), theme.DisplayName + " · 夜间");
+            if (theme.File.Dusk is not null) Draw(PanelThemes.Resolve(theme, DaylightLook.Dusk), Path.Combine(folder, theme.Id + suffix + "-dusk-sheet.png"), theme.DisplayName + " · 黄昏");
         }
         Console.WriteLine("Wrote theme sheets to " + Path.GetFullPath(folder));
         return 0;

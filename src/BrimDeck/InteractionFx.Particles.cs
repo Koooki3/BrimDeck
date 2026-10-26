@@ -6,7 +6,8 @@ namespace BrimDeck;
 
 // The few particles a completed press leaves (ThemeMotion.Particles), from the control's own edges, never from the pointer:
 // stars that twinkle once on its corners (Dracula), fireflies that rise slowly from its top edge and glow (Night Owl), and for
-// custom themes dust, pixels, sparks or neon motes. They lie on the layer above the content, small and faint, and live under
+// custom themes dust, pixels, sparks, neon motes, rain (fine slanted streaks falling from the bottom edge) or bubbles rising
+// from it. They lie on the layer above the content, small and faint, and live under
 // about a second and a half. Their paths are worked out from their age, not stepped frame by frame, so they look the same at
 // any frame rate and in a preview; a fixed set is reused and nothing is allocated per frame.
 internal sealed partial class FxSurface
@@ -75,6 +76,17 @@ internal sealed partial class FxSurface
                 Spawn(r.Left, r.Top, -10, -10, .5, 4, false); Spawn(r.Right, r.Top, 10, -10, .5, 4, true);
                 Spawn(r.Left, r.Bottom, -10, 10, .5, 4, true); Spawn(r.Right, r.Bottom, 10, 10, .5, 4, false);
                 break;
+            case ParticleFx.Rain:
+                // Three or four streaks 1 x 6 DIP from just below the bottom edge, falling a little aslant (the wallpaper's
+                // wind, mostly its downward part) for half a second. Vx and Vy are how far each falls across and down.
+                for (int i = 0, n = 3 + (int)(Next() * 2); i < n; i++)
+                    Spawn(r.Left + r.Width * ((i + .5 + .5 * (Next() - .5)) / n), r.Bottom + 2 + 2 * Next(), RainSlant * 16, 14 + 4 * Next(), .5, 6, false);
+                break;
+            case ParticleFx.Bubble:
+                // Three to five bubbles 2 to 4 DIP across from the bottom edge, rising 18 to 28 DIP over 0.8 to 1.2 s and swaying.
+                for (int i = 0, n = 3 + (int)(Next() * 3); i < n; i++)
+                    Spawn(r.Left + r.Width * (.15 + .7 * (i + Next()) / n), r.Bottom - 2, 0, -(18 + 10 * Next()), .8 + .4 * Next(), 2 + 2 * Next(), i % 2 == 1);
+                break;
         }
 
         void Spawn(double x, double y, double vx, double vy, double life, double size, bool second)
@@ -84,6 +96,9 @@ internal sealed partial class FxSurface
             m = new Mote { Alive = true, X = x, Y = y, Vx = vx, Vy = vy, Born = now, Life = life * scale, Size = size, Second = second, Seed = Next(), Angle = 40 * (Next() - .5) };
         }
     }
+
+    // Rain falls this far across for each DIP down: mostly straight down, leaning with the wind.
+    private const double RainSlant = .26;
 
     // Whether any particle is still alive.
     private bool StepParticles(double now)
@@ -141,6 +156,24 @@ internal sealed partial class FxSurface
                     y += 10 * age * age;
                     if (alpha > .001) { dc.PushOpacity(Math.Min(1, alpha * 1.4)); dc.DrawRectangle(first ? _moteFirst : _moteSecond, null, new Rect(Px(x - m.Size / 2), Px(y - m.Size / 2), Px(m.Size), Px(m.Size))); dc.Pop(); }
                     break;
+                case ParticleFx.Rain:
+                {
+                    // Falling faster as it goes, a streak along its own way down; at most a quarter opaque.
+                    double fall = t * (.6 + .4 * t);
+                    double hx = m.X + m.Vx * fall, hy = m.Y + m.Vy * fall, length = m.Size / Math.Sqrt(1 + RainSlant * RainSlant);
+                    double a = Math.Min(.25, strength) * Math.Min(1, t / .12) * (1 - t);
+                    if (a > .001) { dc.PushOpacity(a); dc.DrawLine(_highLine, new Point(hx - RainSlant * length, hy - length), new Point(hx, hy)); dc.Pop(); }
+                    break;
+                }
+                case ParticleFx.Bubble:
+                {
+                    // Rising and slowing as it nears the surface, swaying a little; an outline at most half opaque.
+                    double rise = 1 - (1 - t) * (1 - t);
+                    double bx = m.X + Math.Sin(age * 5 + m.Seed * 6.28) * 1.5, by = m.Y + m.Vy * rise;
+                    double a = Math.Min(.5, 2 * strength) * Math.Min(1, t / .15) * (1 - t * t);
+                    if (a > .001) { dc.PushOpacity(a); dc.DrawEllipse(null, first ? _highLine : _secondLine, new Point(bx, by), m.Size, m.Size); dc.Pop(); }
+                    break;
+                }
                 case ParticleFx.Spark:
                 {
                     double length = m.Size * (1 - .6 * t), dir = Math.Sign(m.Vx);

@@ -16,6 +16,15 @@
   "homepage": "",
   "base": "dark",                   // Any built-in theme: dark, light, liquid-glass-light, liquid-glass-dark, one-dark-pro, github-dark,
                                     // github-light, dracula, night-owl, island-holiday, pixel-blocks, cyberpunk-edgerunners
+  // A theme can change its look through the day: add "daylight", a "night" look and, if you like, a "dusk" look after "motion"
+  // at the end of the file ("New from current theme" writes them for a theme that has them). night and dusk take "colors",
+  // "apps", "effects", "motion" and "clock", laid over everything above. For example:
+  //   "daylight": { "mode": "clock", "day": "06:30", "night": "18:30", "duskMinutes": 60 },
+  //   "night": { "colors": { ... }, "effects": { ... } },
+  //   "dusk": { "colors": { ... } }
+  // mode: clock (the default: the day look from "day" to "night", the night look the rest of the time) or system (the night
+  // look while Windows apps use dark mode, the day look in light mode; no dusk). duskMinutes: 15 to 180, how long the dusk look
+  // shows before the night begins (60 when left out); clock mode only.
 
   "colors": {
     "surface": "#000000",           // The notch, capsule and panel. Always drawn opaque.
@@ -66,7 +75,7 @@
   },
 
   // The clock that suits the theme. Choosing the theme in settings switches the clock to it; the clock can still be changed after.
-  // style: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel
+  // style: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel, tektur, rounded
   // color: default (the "clock" color above), amber, cyan, pink, lime, custom, gradient, cover (the playing song's cover)
   // custom is used when color is "custom"; gradient, exactly three colors, when color is "gradient".
   // palette: the colors of the amber, cyan, pink and lime swatches in this theme. At least 4.5:1 against the surface.
@@ -99,6 +108,11 @@
                                     // and with a rimGradient the rim is a bevel: its first color lights the edges facing up and
                                     // left, its last shades the others. Not with glass: a theme with both is refused
     "texture": 0                    // 0 to 0.12, with pixel art: squares a little lighter or darker than the surface, a block's grain
+    // Motifs: remove the "//" to draw quiet pictures into the surface, under the content. horizon: a sea below "at" (0.3 to 0.9
+    // of the height) and a line of light along it; caustics: a net of soft light lines; palm: a palm frond's shadow in the open
+    // panel's top-right corner (both at most 0.12 alpha); hud: 45-degree cuts across two corners ("chamfer", 0 to 10 DIP) with
+    // hexagonal ticks. Text is held to its minimums over the sea and the motifs too.
+    // , "decor": { "horizon": { "at": 0.62, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#1AFFFFFF" } }
     // Glass: remove the "//" to make the surface a tint over the desktop instead of a solid color. Text is held to its minimums
     // over the tint on both a black and a white desktop, so a light tint needs to be fairly dense (about 75 %). "surface" above
     // is drawn instead where Windows' transparency effects are off. edge: 0 to 1, the light along the inner edge.
@@ -132,13 +146,21 @@
     "press": "none",                // none, shade (the shape shades and its edge firms), sink (the shadow collapses, pushed in),
                                     // indicator (the bottom bar takes the highlight), select (a selection sweeps from the caret),
                                     // lock (brackets clamp on, a chromatic ghost, a glitch slice; a scan line on release),
-                                    // sparkle (the tint deepens; stars on release), ember (a warm glow swells; fireflies on release)
+                                    // sparkle (the tint deepens; stars on release), ember (a warm glow swells; fireflies on release),
+                                    // bevel, jelly, splash (a ring spreads from the edge on press, a fainter one on release)
     "pressStrength": 0.18,          // 0 to 0.35
     "trail": 0,                     // 0 to 0.6: how strongly the particles a completed press leaves show (0: none)
-    "particles": "none",            // none, dust, pixel, spark, star, firefly, neon: from the control's edges, above the content
+    "particles": "none",            // none, dust, pixel, spark, star, firefly, neon, rain (fine slanted streaks falling from
+                                    // the bottom edge), bubble (3 to 5 small bubbles rising from the bottom edge)
     "focus": "none",                // none, ring, glow, brackets, caret: a short accent where keyboard focus lands
     "pace": 1,                      // 0.6 to 1.6: scales the pace of hover, press and focus feedback
     "steps": 0,                     // 0 (smooth) or 2 to 8: moves in that many hard steps, for a mechanical feel
+    "spring": "default",            // firm, default, jelly: how much the springs give (damping 0.85, 0.70, 0.50), always at 16 rad/s
+    "collapse": "fade",             // fade, glitch, foam, genie: how a notice or the open panel goes back into the island
+                                    // (glitch: torn bands in three steps, ~270 ms; foam: a noise dissolve with a 1 px foam
+                                    // edge, ~330 ms; genie: drawn into the island along the lamp curve, ~450 ms)
+    "aberration": 0,                // 0 (none) or 1 to 1.5: red and blue pulled apart by this many DIP at the edges for at most
+                                    // 120 ms, on a completed press and a glitch or foam collapse
     "color": "accent",              // The main mark: a color key above, a "#RRGGBB" color, or "system" (the Windows accent color)
     "secondary": "accent",          // Its second tone: a gradient's end, a shadow, a ghost or a neutral bar
     "highlight": "accent"           // The color of the moment of a press: an indicator, a selection, a scan line, sparkles
