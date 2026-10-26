@@ -19,7 +19,8 @@ internal static class AcrylicNoise
     private static IDXGISwapChain1? _swapChain;
     private static bool _failed;
 
-    // The tile's premultiplied BGRA pixels: a grey of uniform random lightness at Opacity.
+    // The tile's premultiplied BGRA pixels: a grey of random lightness at Opacity, from the middle half of the range (the
+    // whole range at 200 % weighed on the page checks' reading comfort as detail behind the text, 1.10 to 1.12).
     public static byte[] Pixels()
     {
         var random = new Random(1983);
@@ -27,7 +28,7 @@ internal static class AcrylicNoise
         byte alpha = (byte)Math.Round(Opacity * 255);
         for (int i = 0; i < Tile * Tile; i++)
         {
-            byte v = (byte)Math.Round(random.Next(256) * Opacity);
+            byte v = (byte)Math.Round((64 + random.Next(129)) * Opacity);
             pixels[i * 4] = pixels[i * 4 + 1] = pixels[i * 4 + 2] = v;
             pixels[i * 4 + 3] = alpha;
         }
