@@ -28,7 +28,6 @@ public sealed partial class SettingsWindow
             showingDefault = !input.IsKeyboardFocused && string.IsNullOrWhiteSpace(current?.DisplayName);
             input.Text = input.IsKeyboardFocused ? current?.DisplayName ?? "" : current?.Name ?? "";
             input.Foreground = UI.Brush(showingDefault ? TextTertiary : TextPrimary);
-            field.BorderBrush = UI.Brush(input.IsKeyboardFocused ? _palette.Accent : _palette.Border);
             AutomationProperties.SetName(input, Loc.T("显示名称 ", "Display name ") + (current?.Name ?? Loc.T("未配置应用", "unconfigured app")));
         }
         void Commit()
@@ -40,6 +39,7 @@ public sealed partial class SettingsWindow
             }
             Refresh();
         }
+        FieldFocus(field, input, () => UI.Brush(_palette.Border));
         input.GotKeyboardFocus += (_, _) => Refresh();
         input.LostKeyboardFocus += (_, _) => Commit();
         input.KeyDown += (_, e) =>

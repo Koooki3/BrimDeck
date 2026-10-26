@@ -726,7 +726,7 @@ public sealed partial class SettingsWindow : Window
                 // centred mark otherwise sits higher than the Chinese label beside it. The box leaves half a unit around the
                 // circle's stroke: a box exactly the circle's size clips the outer edge of the stroke on all four sides.
                 var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
-                var info = new Border { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(2.5, 0, 0, 0),
+                var info = new HelpMark { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(2.5, 0, 0, 0),
                     VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
                     FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
                 AttachSettingHelp(info, title, () => help);
@@ -958,7 +958,7 @@ public sealed partial class SettingsWindow : Window
         var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), Width = 60, TextAlignment = TextAlignment.Left, VerticalAlignment = VerticalAlignment.Center, MaxLength = 6 };
         AutomationProperties.SetName(input, Loc.T("颜色值", "Color value")); field.Children.Add(input);
         var chip = new Border { Child = field, Height = 28, CornerRadius = new CornerRadius(6), Background = UI.Brush(Inset), BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(1), Padding = new Thickness(9, 0, 9, 0) };
-        input.GotKeyboardFocus += (_, _) => chip.BorderBrush = (Brush)FindResource("SettingsAccent"); input.LostKeyboardFocus += (_, _) => chip.BorderBrush = Brushes.Transparent;
+        FieldFocus(chip, input, () => Brushes.Transparent);
         entry.Children.Add(chip); panel.Children.Add(entry);
 
         var rings = new List<(Ellipse Ring, string Color)>();
