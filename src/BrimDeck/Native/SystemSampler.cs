@@ -32,9 +32,9 @@ internal sealed class SystemSampler : IDisposable
     private GpuProvider? _gpu;
     private ThermalZones? _zones;
     private readonly GpuTemperatures _gpuTemperatures = new();
-    private readonly DiskTemperatures _disks = new();
-    // Whether the processor's and the graphics adapter's temperatures are read, and the drives' (SetTemperatures).
-    private volatile bool _temperatures, _driveTemperatures;
+    private readonly StorageReader _storage = new();
+    // Whether the processor's and the graphics adapter's temperatures are read, the drives, and the drives' temperatures (SetExtras).
+    private volatile bool _temperatures, _storageWanted, _driveTemperatures;
     private readonly NetworkProvider _network = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
@@ -85,19 +85,22 @@ internal sealed class SystemSampler : IDisposable
         else _wake.Set();
     }
 
-    // Called on the UI thread with what the panels show: readings, the processor's and the graphics adapter's temperatures (the
-    // expanded page with temperatures on, or the collapsed row's temperature); drives, the drives' too (the expanded page only).
-    // The drives are first read at once, so the page knows early whether it needs their line.
-    public void SetTemperatures(bool readings, bool drives)
+    // Called on the UI thread with what the panels show: temperatures, the processor's and the graphics adapter's (the expanded page
+    // with temperatures on, or the collapsed row's temperature); storage, the drives (the page with storage on, or the collapsed
+    // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
+    // page knows early how many lines it needs for them.
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures)
     {
-        _temperatures = readings || drives; _driveTemperatures = drives;
-        if (drives && _disks.State == SensorState.Unknown) _disks.Start();
+        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures;
+        if (storage && (_storage.Drives == SensorState.Unknown || _driveTemperatures && _storage.Temperatures == SensorState.Unknown)) _storage.Start(_driveTemperatures);
     }
-    // Whether the processor's zones, the graphics adapters and the drives have given temperatures (SensorState); the page keeps
-    // room for a kind that has, or that has not been asked yet.
+    // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
+    // how many (-1 until read); the page keeps room for what has turned up or has not been asked yet.
     public SensorState CpuSensor => _zones?.State ?? SensorState.Unknown;
     public SensorState GpuSensor => _gpuTemperatures.State;
-    public SensorState DriveSensor => _disks.State;
+    public SensorState DriveSensor => _storage.Temperatures;
+    public SensorState StorageState => _storage.Drives;
+    public int StorageCount => _storage.Count;
 
     private void Run()
     {
@@ -113,7 +116,7 @@ internal sealed class SystemSampler : IDisposable
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _disks.Rest(); _wake.WaitOne(); continue; }
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _storage.Rest(); _wake.WaitOne(); continue; }
                 if (!primed || _primeProcesses)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
@@ -162,12 +165,12 @@ internal sealed class SystemSampler : IDisposable
         var cpu = _cpu!.Sample(pdh); var gpu = _gpu!.Sample(pdh, temperatures ? _gpuTemperatures : null, now);
         // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted.
         if (_zones!.Sample(pdh, temperatures, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
-        IReadOnlyList<DiskTemperature> disks = _driveTemperatures ? _disks.Sample(now) : [];
+        IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage); Remember(_gpuHistory, gpu.OrDefault?.Usage);
         return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network, gpu, _lastProcesses)
         {
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
-            CpuHistory = _cpuHistory.ToArray(), GpuHistory = _gpuHistory.ToArray(), Disks = disks
+            CpuHistory = _cpuHistory.ToArray(), GpuHistory = _gpuHistory.ToArray(), Storage = storage
         };
     }
     private static void Remember(Queue<double> history, double? usage)

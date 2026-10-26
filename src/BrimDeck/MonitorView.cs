@@ -51,8 +51,11 @@ internal sealed class MonitorView : Grid
     private readonly BlockGauge? _gpuBlock;
     private readonly MemoryBlock _memory;
     private readonly NetworkBlock _network;
-    private readonly DriveTemperatureLine? _drives;
+    private readonly StorageBlock? _storage;
     private readonly bool _temperatures;
+    private readonly Grid _readings = new();
+    // How far the readings stop above the page's foot, so their last line ends level with the list's last row (AlignFoot).
+    private Eased _foot;
     private readonly ProcessListView? _list;
     private readonly Canvas _overlay = new() { IsHitTestVisible = false };
     private ProcessCard? _card;
@@ -60,16 +63,15 @@ internal sealed class MonitorView : Grid
     private int _cores = Environment.ProcessorCount;
     private bool _motion;
 
-    // temperatures: the gauges carry the processor's and the graphics adapter's temperatures after their figures; drives: the drives'
-    // temperatures take a line under network, where the page has room for one (not when memory and network share a line);
-    // smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
+    // temperatures: the gauges carry the processor's and the graphics adapter's temperatures after their figures, and the drives'
+    // lines theirs (the layout's StorageLines are the lines kept for the drives under memory and network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
     public MonitorView(MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
-        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, bool temperatures = false, bool drives = false, bool smallTemperature = false)
+        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, bool temperatures = false, bool smallTemperature = false)
     {
         _layout = layout; _colors = colors; _main = main; _temperatures = temperatures;
         bool cpuMain = main == MonitorMain.Cpu;
         string swapToGpu = Loc.T("切换为以 GPU 为主", "Show the GPU large"), swapToCpu = Loc.T("切换为以 CPU 为主", "Show the CPU large");
-        var readings = new Grid();
+        var readings = _readings;
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -125,11 +127,13 @@ internal sealed class MonitorView : Grid
         {
             _network.Margin = new Thickness(0, layout.Metrics == MetricsMode.Blocks ? 10 : 6, 0, 0);
             SetRow(_memory, 2); SetRow(_network, 3); readings.Children.Add(_memory); readings.Children.Add(_network);
-            if (temperatures && drives)
-            {
-                _drives = new DriveTemperatureLine(colors, layout.Body, layout.Caption) { Margin = new Thickness(0, 6, 0, 0) };
-                SetRow(_drives, 4); readings.Children.Add(_drives);
-            }
+        }
+        if (layout.StorageLines > 0)
+        {
+            // Under the line memory and network share, or under network; its lines are list rows' height.
+            _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.RowHeight, layout.StorageLines, layout.StorageLines, temperatures)
+            { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
+            SetRow(_storage, layout.Metrics == MetricsMode.Line ? 3 : 4); readings.Children.Add(_storage);
         }
 
         if (layout.List == ListPlacement.None) Children.Add(readings);
@@ -144,6 +148,8 @@ internal sealed class MonitorView : Grid
                 ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(MonitorLayout.ListShare / (1 - MonitorLayout.ListShare), GridUnitType.Star),
                     MinWidth = MonitorLayout.ListMinimum, MaxWidth = MonitorLayout.ListMaximum });
                 SetColumn(_list, 2);
+                // The readings end where the list's last row ends, so both columns share their foot.
+                SizeChanged += (_, _) => AlignFoot();
             }
             else
             {
@@ -162,6 +168,22 @@ internal sealed class MonitorView : Grid
     }
 
     public bool CardOpen => _card is not null;
+
+    // The list beside the readings fills whole rows from its top, so its last row usually ends above the page's foot; the readings
+    // stop there too, their graph giving up the difference. When a resize adds or takes a row the readings' foot eases to the
+    // list's new one, as the page's values ease.
+    private void AlignFoot()
+    {
+        if (_list is null || ActualHeight <= 0) return;
+        var (rows, _) = MonitorLayout.ListGrid(_list.ActualWidth, ActualHeight, _layout.RowHeight);
+        double foot = rows > 0 ? Math.Max(0, ActualHeight - MonitorLayout.ListHead - rows * _layout.RowHeight) : 0;
+        // The first size the page gets is taken at once.
+        bool animate = _motion && _aligned; _aligned = true;
+        if (_foot.Set(foot, animate)) Motion.Start(this, now => { PlaceFoot(now); return _foot.Moving(now); });
+        else PlaceFoot(Eased.Now);
+    }
+    private bool _aligned;
+    private void PlaceFoot(double now) => _readings.Margin = new Thickness(0, 0, 0, Math.Round(Math.Max(0, _foot.At(now))));
 
     public void Update(MonitorSnapshot snapshot, bool motion)
     {
@@ -211,7 +233,7 @@ internal sealed class MonitorView : Grid
         (cpuMain ? _cpuGauge : _gpuGauge).Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
         _memory.Set(snapshot.Memory, motion);
         _network.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
-        _drives?.Set(snapshot.Disks, motion);
+        _storage?.Set(snapshot.Storage, motion);
         _list?.Set(snapshot.Processes, _cores, motion);
         _processes = snapshot.Processes.OrDefault;
         // An open card follows its app's readings; it closes when the app has left the list.

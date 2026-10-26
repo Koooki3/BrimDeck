@@ -166,7 +166,7 @@ public partial class App : Application
         settings.Normalize(); Settings = settings;
         ApplyHotkeys();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
-        UpdateMonitorTemperatures();
+        UpdateMonitorExtras();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
@@ -256,15 +256,16 @@ public partial class App : Application
         if (Exiting || Monitor is null && !wanted) return;
         if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
         Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
-        UpdateMonitorTemperatures();
+        UpdateMonitorExtras();
     }
-    // Temperatures are read for an open page with them on, the drives' only there; the processor's and the graphics adapter's
-    // also for a collapsed row showing the temperature reading.
-    private void UpdateMonitorTemperatures()
+    // Temperatures and drives are read for an open page with them on, the drives' temperatures only there; the processor's and the
+    // graphics adapter's temperatures, and the drives, also for a collapsed row showing those readings.
+    private void UpdateMonitorExtras()
     {
-        bool page = _presentingMonitor.Count > 0 && Settings.MonitorTemperatures;
-        bool strip = _stripMonitor.Count > 0 && (Core.CompactMonitor.Shown(Settings.CompactReadings) & CompactMonitorItems.Temperature) != 0;
-        Monitor?.SetTemperatures(page || strip, page);
+        bool page = _presentingMonitor.Count > 0;
+        var shown = _stripMonitor.Count > 0 ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
+        Monitor?.SetExtras(page && Settings.MonitorTemperatures || (shown & CompactMonitorItems.Temperature) != 0,
+            page && Settings.MonitorStorage || (shown & CompactMonitorItems.Storage) != 0, page && Settings.MonitorStorage && Settings.MonitorTemperatures);
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }

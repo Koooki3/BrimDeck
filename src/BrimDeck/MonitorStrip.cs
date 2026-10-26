@@ -6,7 +6,7 @@ namespace BrimDeck;
 
 // The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, CPU,
 // memory and GPU each as a dial with its letter inside, with its figure after it or alone (narrower), download and upload, and,
-// when chosen, the temperature with a thermometer, in
+// when chosen, the system drive's space with a drive and the temperature with a thermometer, in
 // the order and the colors set in the settings' table (CompactReading); the rings alone sit closer together. It asks for
 // the width of everything chosen (PreferredWidth); when its region is narrower, the row draws it at that width and scrolls it
 // through the region (ReadingsCarousel). It draws itself once per reading; the collapsed row stays still between readings.
@@ -31,13 +31,15 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly List<(CompactMonitorItems Item, double X, double Width, double Presence)> _arranged = [];
     private double _now;
 
-    public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi)
+    // unavailable: readings this machine has none of (SystemSampler's sensor states), left out rather than shown as a dash.
+    public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi,
+        CompactMonitorItems unavailable = CompactMonitorItems.None)
     {
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered;
         _order = [.. readings.Select(reading => reading.Item)];
         _orderOnce = [.. _order.Distinct()];
         _itemWidth = ItemWidth; _presenceNow = item => _presence.At(item, _now);
-        _shown = CompactMonitor.Shown(readings); _values = CompactMonitor.Values(readings);
+        _shown = CompactMonitor.Shown(readings) & ~unavailable; _values = CompactMonitor.Values(readings);
         _scale = CompactMusicLayout.SafeScale(scale);
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
         // Each ring is a dial carrying its letter, with its figure after it or alone.
@@ -54,7 +56,8 @@ internal sealed class MonitorStrip : FrameworkElement
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, Math.Round(4 * _scale) + Math.Ceiling(text("100%")), _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))),
-            Math.Round(11 * _scale) + Math.Round(2 * _scale) + Math.Ceiling(text("125°")));
+            Math.Round(11 * _scale) + Math.Round(2 * _scale) + Math.Ceiling(text("125°")),
+            Math.Round(11 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(text("100%")));
     }
 
     private double ItemWidth(CompactMonitorItems item) => _tight && _actual.TryGetValue(item, out var actual) ? actual : _width(item);
@@ -101,6 +104,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 CompactMonitorItems.Download => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.DownBytesPerSecond)),
                 CompactMonitorItems.Upload => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.UpBytesPerSecond)),
                 CompactMonitorItems.Temperature => Math.Round(11 * _scale) + Math.Round(2 * _scale) + FigureWidth(TemperatureFigure(Temperatures.Hottest(s)?.Celsius)),
+                CompactMonitorItems.Storage => Math.Round(11 * _scale) + Math.Round(3 * _scale) + FigureWidth(GaugeFigure(SystemDrive(s)?.UsedFraction)),
                 _ => _width(item)
             };
         }
@@ -166,6 +170,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Temperature: Temperature(drawing, left, center, Temperatures.Hottest(s)?.Celsius, color, level, ppd); break;
+                case CompactMonitorItems.Storage: Drive(drawing, left, center, SystemDrive(s)?.UsedFraction, color, level, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
         }
@@ -216,6 +221,18 @@ internal sealed class MonitorStrip : FrameworkElement
         double size = Math.Round(9 * _scale);
         MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.4 * _scale), glyph, color);
         var text = MonitorDraw.Text(RateFigure(rate), _font, FigureColor(level, color), ppd);
+        MonitorDraw.Baseline(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
+    }
+
+    // The drive holding Windows (Storage.System), whose space the collapsed row shows.
+    private static StorageDrive? SystemDrive(MonitorSnapshot? snapshot) => snapshot is null ? null : Storage.System(snapshot.Storage, Storage.WindowsLetter);
+
+    // A drive and the share of its space in use: "45%".
+    private void Drive(DrawingContext drawing, double x, double center, double? share, string color, MemoryLevel level, double ppd)
+    {
+        double size = Math.Round(11 * _scale);
+        MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Drive, share is null ? UI.Tertiary : color);
+        var text = MonitorDraw.Text(GaugeFigure(share), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 

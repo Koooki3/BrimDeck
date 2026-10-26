@@ -17,10 +17,10 @@ public enum CompactMonitorMode { Full, Brief, Custom }
 public enum CompactMonitorItems
 {
     None = 0, Columns = 1, Cpu = 2, Memory = 4, Gpu = 8, Download = 16, Upload = 32,
-    // The usage and rate readings, as the Full preset shows them. Temperature came later and is not among them: it is shown
-    // only when chosen in the table (CompactMonitor.Every is every reading).
+    // The usage and rate readings, as the Full preset shows them. Temperature and Storage came later and are not among them: each
+    // shows only when chosen in the table (CompactMonitor.Every is every reading).
     All = Columns | Cpu | Memory | Gpu | Download | Upload,
-    Temperature = 64
+    Temperature = 64, Storage = 128
 }
 
 // One reading of the collapsed strip as set in the settings' table; its place there is its place in the strip, left to right.
@@ -58,11 +58,11 @@ public static class CompactMonitor
     // Left to right by default; the settings' table can reorder them.
     public static readonly IReadOnlyList<CompactMonitorItems> Order =
         [CompactMonitorItems.Columns, CompactMonitorItems.Cpu, CompactMonitorItems.Memory, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Upload,
-            CompactMonitorItems.Temperature];
-    public const CompactMonitorItems Every = CompactMonitorItems.All | CompactMonitorItems.Temperature;
+            CompactMonitorItems.Storage, CompactMonitorItems.Temperature];
+    public const CompactMonitorItems Every = CompactMonitorItems.All | CompactMonitorItems.Storage | CompactMonitorItems.Temperature;
     // When the row is too short, readings leave in this order.
     public static readonly IReadOnlyList<CompactMonitorItems> LeaveOrder =
-        [CompactMonitorItems.Temperature, CompactMonitorItems.Upload, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Columns, CompactMonitorItems.Memory, CompactMonitorItems.Cpu];
+        [CompactMonitorItems.Temperature, CompactMonitorItems.Storage, CompactMonitorItems.Upload, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Columns, CompactMonitorItems.Memory, CompactMonitorItems.Cpu];
 
     // The readings with a figure that can be hidden.
     public const CompactMonitorItems Rings = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu;
@@ -76,8 +76,9 @@ public static class CompactMonitor
         [CompactMonitorItems.Columns] = [MonitorRole.Cpu, MonitorRole.Efficiency], [CompactMonitorItems.Cpu] = [MonitorRole.Cpu],
         [CompactMonitorItems.Memory] = [MonitorRole.Memory], [CompactMonitorItems.Gpu] = [MonitorRole.Gpu],
         [CompactMonitorItems.Download] = [MonitorRole.Download], [CompactMonitorItems.Upload] = [MonitorRole.Upload],
-        // The scheme has no color of its own for temperature; the thermometer takes the CPU color, as the first reading.
-        [CompactMonitorItems.Temperature] = [MonitorRole.Cpu]
+        // The scheme has no color of its own for temperature or storage: the thermometer takes the CPU color, as the first
+        // reading, and storage the memory color, as the page draws its bars.
+        [CompactMonitorItems.Temperature] = [MonitorRole.Cpu], [CompactMonitorItems.Storage] = [MonitorRole.Memory]
     };
     public static MonitorRole Role(CompactMonitorItems item, int channel = 0) =>
         Roles.TryGetValue(item, out var roles) ? roles[Math.Clamp(channel, 0, roles.Length - 1)] : MonitorRole.Cpu;
@@ -152,7 +153,7 @@ public static class CompactMonitor
     {
         var all = readings.ToList();
         var (shown, values) = (Visible(all), Values(all));
-        // Temperature is outside both presets: Full leaves it as it is, Brief hides it.
+        // Temperature and storage are outside both presets: Full leaves them as they are, Brief hides them.
         return (shown & CompactMonitorItems.All) == CompactMonitorItems.All && values == Rings ? CompactMonitorMode.Full
             : shown == Rings && values == CompactMonitorItems.None ? CompactMonitorMode.Brief : null;
     }
@@ -164,7 +165,7 @@ public static class CompactMonitor
         if (preset == CompactMonitorMode.Custom) return;
         foreach (var reading in readings)
         {
-            if (reading.Item == CompactMonitorItems.Temperature) { if (preset == CompactMonitorMode.Brief) reading.Visible = false; continue; }
+            if (reading.Item is CompactMonitorItems.Temperature or CompactMonitorItems.Storage) { if (preset == CompactMonitorMode.Brief) reading.Visible = false; continue; }
             bool ring = HasValueChoice(reading.Item);
             reading.Visible = preset == CompactMonitorMode.Full || ring;
             if (ring) reading.ShowValue = preset == CompactMonitorMode.Full;
@@ -172,13 +173,14 @@ public static class CompactMonitor
     }
 
     // The width of each reading: a ring with its figure (the ring and the room after it) or alone, the core columns, a rate, the
-    // temperature.
-    public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, double figure, double bareRing, double columns, double rate, double temperature = 0) => item => item switch
+    // temperature, the system drive.
+    public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, double figure, double bareRing, double columns, double rate, double temperature = 0, double storage = 0) => item => item switch
     {
         CompactMonitorItems.Columns => columns,
         CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu => (values & item) != 0 ? ring + figure : bareRing,
         CompactMonitorItems.Download or CompactMonitorItems.Upload => rate,
         CompactMonitorItems.Temperature => temperature,
+        CompactMonitorItems.Storage => storage,
         _ => 0
     };
     // Rings alone, as Brief showed them, sit closer together.

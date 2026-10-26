@@ -70,28 +70,44 @@ internal static class TemperatureChecks
     private static void Drives(Action<string, bool> check, bool elevated)
     {
         var watch = Stopwatch.StartNew();
-        var drives = DiskTemperatures.Read();
-        Console.WriteLine($"  {drives.Count} solid-state drive(s) with a temperature, read in {watch.Elapsed.TotalMilliseconds:0} ms");
-        foreach (var drive in drives) Console.WriteLine($"  Drive {drive.Name}: {drive.Celsius:0} °C (warning {drive.Warning?.ToString() ?? "-"}, critical {drive.Critical?.ToString() ?? "-"})");
-        check("drives: every reading plausible and named", drives.All(drive => Temperatures.Plausible(drive.Celsius) is not null && drive.Name.Length > 0));
-        check("drives: thresholds in order where given", drives.All(drive => drive.Warning is not { } w || drive.Critical is not { } c || w <= c));
-        if (drives.Count > 0 && !elevated) check("drives: read without administrator rights", true);
+        var volumes = StorageReader.Volumes();
+        Console.WriteLine($"  {volumes.Count} fixed volume(s), listed in {watch.Elapsed.TotalMilliseconds:0} ms");
+        foreach (var (volume, disk) in volumes)
+            Console.WriteLine($"  Volume {volume.Letter} \"{volume.Label}\": {volume.Used / 1073741824d:0.0} / {volume.Total / 1073741824d:0.0} GB on drive {disk?.ToString() ?? "?"}");
+        check("volumes: each has a letter and a size, its free space within it", volumes.All(item => item.Volume.Letter.EndsWith(':') && item.Volume.Total > 0 && item.Volume.Free <= item.Volume.Total));
 
         // The sampler's reader never waits for the drives: its first sample is empty, and the readings follow on the thread pool.
         // The checks wait for that reading itself, however long the drives take.
-        var reader = new DiskTemperatures();
-        check("drives: unknown until read", reader.State == SensorState.Unknown);
-        check("drives: the first sample does not wait for the drives", reader.Sample(0).Count == 0);
+        var reader = new StorageReader();
+        check("drives: unknown until read", reader.Drives == SensorState.Unknown && reader.Temperatures == SensorState.Unknown && reader.Count == -1);
+        check("drives: the first sample does not wait for the drives", reader.Sample(0, true).Count == 0);
         reader.Pending.Wait();
-        var later = reader.Sample(1);
-        check("drives: the background reading arrives", later.Count == drives.Count && reader.State == (drives.Count > 0 ? SensorState.Found : SensorState.None));
+        var drives = reader.Sample(1, true);
+        foreach (var drive in drives)
+            Console.WriteLine($"  Drive {drive.Number} {drive.Model}: {drive.Letters}, {drive.Used / 1073741824d:0.0} / {drive.Total / 1073741824d:0.0} GB"
+                + (drive.Temperature is { } heat ? $", {heat.Celsius:0} °C (warning {heat.Warning?.ToString() ?? "-"}, critical {heat.Critical?.ToString() ?? "-"})" : ", no temperature"));
+        check("drives: counted and known", reader.Count == drives.Count && reader.Drives == (drives.Count > 0 ? SensorState.Found : SensorState.None));
+        check("drives: each volume on one drive only, the drive's volumes in letter order",
+            drives.SelectMany(drive => drive.Volumes).Select(volume => volume.Letter).Distinct(StringComparer.OrdinalIgnoreCase).Count() == drives.Sum(drive => drive.Volumes.Count)
+            && drives.All(drive => drive.Volumes.Select(volume => volume.Letter).SequenceEqual(drive.Volumes.Select(volume => volume.Letter).Order(StringComparer.OrdinalIgnoreCase))));
+        var placed = volumes.Where(item => item.Disk is not null && item.Volume.Total >= Storage.SmallestVolume).ToList();
+        check("drives: a listed volume sits on the drive its extents name", drives.All(drive => drive.Number < 0
+            || drive.Volumes.All(volume => placed.Any(item => item.Volume.Letter == volume.Letter && item.Disk == drive.Number))));
+        check("drives: small volumes are left out", drives.SelectMany(drive => drive.Volumes).All(volume => volume.Total >= Storage.SmallestVolume));
+        check("drives: the Windows drive is among them", drives.Count == 0 || Storage.System(drives, Storage.WindowsLetter)?.Volumes.Any(volume => volume.Letter.Equals(Storage.WindowsLetter, StringComparison.OrdinalIgnoreCase)) == true);
+        check("drives: temperatures plausible, in order, and their drive's own", drives.All(drive => drive.Temperature is not { } heat
+            || Temperatures.Plausible(heat.Celsius) is not null && heat.Number == drive.Number && (heat.Warning is not { } w || heat.Critical is not { } c || w <= c)));
+        check("drives: temperatures known once read", reader.Temperatures == (drives.Any(drive => drive.Temperature is not null) ? SensorState.Found : SensorState.None));
+        if (drives.Count > 0 && !elevated) check("drives: read without administrator rights", true);
+        check("drives: without temperatures asked for, the same drives without them", reader.Sample(2, false) is var plain
+            && plain.Count == drives.Count && plain.All(drive => drive.Temperature is null));
         reader.Rest();
-        check("drives: the readings stay while the sampler pauses", reader.Sample(2).Count == drives.Count);
+        check("drives: the readings stay while the sampler pauses", reader.Sample(3, true).Count == drives.Count);
         reader.Pending.Wait();
-        check("drives: read again on the next sample after a pause", reader.Sample(3).Count == drives.Count);
-        var early = new DiskTemperatures();
-        early.Start(); early.Start();
+        check("drives: read again on the next sample after a pause", reader.Sample(4, true).Count == drives.Count);
+        var early = new StorageReader();
+        early.Start(true); early.Start(true);
         early.Pending.Wait();
-        check("drives: started early, one reading at a time", early.Sample(0).Count == drives.Count);
+        check("drives: started early, one reading at a time", early.Sample(0, true).Count == drives.Count);
     }
 }

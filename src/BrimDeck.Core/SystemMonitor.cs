@@ -109,6 +109,7 @@ public static class ReadingLevels
         CompactMonitorItems.Download => snapshot?.Network.OrDefault is { } down ? OfRate(down.DownBytesPerSecond) : MemoryLevel.Normal,
         CompactMonitorItems.Upload => snapshot?.Network.OrDefault is { } up ? OfRate(up.UpBytesPerSecond) : MemoryLevel.Normal,
         CompactMonitorItems.Temperature => Temperatures.Hottest(snapshot)?.Level ?? MemoryLevel.Normal,
+        CompactMonitorItems.Storage => snapshot is not null && Core.Storage.System(snapshot.Storage, Core.Storage.WindowsLetter) is { } drive ? OfShare(drive.UsedFraction) : MemoryLevel.Normal,
         _ => MemoryLevel.Normal
     };
 
@@ -225,8 +226,9 @@ public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors,
     public IReadOnlyList<double> UpHistory { get; init; } = [];
     public IReadOnlyList<double> CpuHistory { get; init; } = [];
     public IReadOnlyList<double> GpuHistory { get; init; } = [];
-    // The solid-state drives that report a temperature; empty while temperatures are not read.
-    public IReadOnlyList<DiskTemperature> Disks { get; init; } = [];
+    // The internal drives with their lettered volumes (Storage), each with its temperature while drive temperatures are read;
+    // empty while storage is not read.
+    public IReadOnlyList<StorageDrive> Storage { get; init; } = [];
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,
         Reading<CpuSample>.Unavailable(reason), Reading<MemorySample>.Unavailable(reason), Reading<NetworkSample>.Unavailable(reason),
         Reading<GpuSample>.Unavailable(reason), Reading<ProcessList>.Unavailable(reason));

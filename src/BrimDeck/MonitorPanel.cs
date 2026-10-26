@@ -41,6 +41,16 @@ public partial class MainWindow
         if (strip && !_stripShowing) _compactStrip?.Update(_app.Monitor?.Latest);
         _monitorShowing = page; _stripShowing = strip;
     }
+    // The collapsed readings this machine has none of: the temperature once neither the processor nor the graphics adapter has a
+    // sensor, the drive once no internal drive was found. The row is built without them rather than show a dash.
+    private CompactMonitorItems _stripUnavailable;
+    private CompactMonitorItems StripUnavailable()
+    {
+        var monitor = _app.Monitor;
+        if (monitor is null) return CompactMonitorItems.None;
+        return (Temperatures.Readable(monitor.CpuSensor, monitor.GpuSensor) ? CompactMonitorItems.None : CompactMonitorItems.Temperature)
+            | (monitor.StorageState == SensorState.None ? CompactMonitorItems.Storage : CompactMonitorItems.None);
+    }
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
     private bool MonitorMotion => Settings.Animations && SystemParameters.ClientAreaAnimation;
@@ -48,7 +58,12 @@ public partial class MainWindow
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
         Motion.Enabled = MonitorMotion;
-        if (!_expanded) { _compactStrip?.Update(snapshot); return; }
+        if (!_expanded)
+        {
+            // A reading this machine turns out not to have (no temperature sensor, no internal drive) leaves the row.
+            if (_compactStrip is not null && StripUnavailable() != _stripUnavailable) { RenderCompact(); return; }
+            _compactStrip?.Update(snapshot); return;
+        }
         if (!IsMonitorPage || _monitorView is null) return;
         if (MonitorKey() != _monitorKey)
         {
@@ -64,22 +79,24 @@ public partial class MainWindow
     private MonitorLayout CurrentMonitorLayout()
     {
         double height = ContentCanvas.Height;
-        return MonitorLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), Settings.MonitorProcesses);
+        return MonitorLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), Settings.MonitorProcesses, MonitorSensors().Drives);
     }
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
-    // The sort is not part of it: a new sort reorders the list in place. With temperatures on, the page keeps room for the drives'
-    // line and for a temperature beside the small gauge while their sensors are unknown or found (MonitorSensors), so it is built
-    // again only when a kind of sensor turns out to have none, once per run of the sampler.
+    // The sort is not part of it: a new sort reorders the list in place. The page keeps lines for the drives (as many as were found,
+    // or as many as fit while they are not read yet; MonitorLayout.StorageLines) and room for a temperature beside the small gauge while its sensor is unknown
+    // or found (MonitorSensors), so it is built again only when the drives are first counted or a sensor turns out to have none:
+    // once per run of the sampler, or when a drive comes or goes.
     private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Settings.MonitorProcesses,
         Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors());
-    private (bool Drives, bool Small) _monitorSensors;
-    private (bool Drives, bool Small) MonitorSensors()
+    private (int Drives, bool Small) _monitorSensors;
+    // Drives: the drives to keep lines for, 0 for none; while they are not counted yet, as many as the page can hold.
+    private (int Drives, bool Small) MonitorSensors()
     {
-        if (!Settings.MonitorTemperatures) return (false, false);
         var monitor = _app.Monitor;
+        int lines = !Settings.MonitorStorage || monitor?.StorageState == SensorState.None ? 0 : monitor?.StorageCount is > 0 and var count ? count : 3;
         var small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor : monitor?.CpuSensor;
-        return (monitor?.DriveSensor != SensorState.None, small != SensorState.None);
+        return (lines, Settings.MonitorTemperatures && small != SensorState.None);
     }
 
     private void RenderMonitor()
@@ -103,7 +120,7 @@ public partial class MainWindow
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
         _monitorView = new MonitorView(CurrentMonitorLayout(), MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; },
-            Settings.MonitorTemperatures, _monitorSensors.Drives, _monitorSensors.Small);
+            Settings.MonitorTemperatures, _monitorSensors.Small);
         MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // A new main gauge, asked for on the page, arrives with a short fade instead of a cut.

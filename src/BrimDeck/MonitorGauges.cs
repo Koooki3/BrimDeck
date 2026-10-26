@@ -431,59 +431,126 @@ internal sealed class NetworkBlock : FrameworkElement
 
 }
 
-// The solid-state drives' temperatures on one line under network: a thermometer in the room a dial takes, then each drive's
-// figure, in the order Windows numbers the drives, as many as the line holds. A drive's figure takes the warning or critical
-// color at its level (Temperatures.OfDisk); each drive's model and thresholds are in the tooltip. The page keeps the line's room
-// from the start; the readings fade in there when they arrive, easing as the page's values do.
-internal sealed class DriveTemperatureLine : FrameworkElement
+// The internal drives, one line per physical drive (Storage.Rows), as tall as a row of the process list so its lines and the
+// list's share their baselines: a drive glyph, the drive's letters ("C:", or "C: D:" for a drive split into volumes), its space
+// in use against its size, a bar of the space in use as memory's bar draws it, split into a segment per volume, and, where the
+// drive reports one, its temperature at the end in its level's color. The columns line up from line to line; the temperature
+// column takes room only while a line has a temperature, so no line ends in a gap. With more drives than lines the last line
+// holds the others ("+2"). The bars ease to each reading, and the lines fade in when the first reading arrives.
+internal sealed class StorageBlock : FrameworkElement
 {
+    private const double Gap = 2;
     private readonly MonitorColors _colors;
-    private readonly double _body, _caption;
-    private IReadOnlyList<DiskTemperature> _drives = [];
-    private Eased _shown;
+    private readonly double _body, _caption, _row;
+    private readonly int _room;
+    private readonly bool _temperatures;
+    private IReadOnlyList<StorageRow> _rows = [];
+    private Eased[][] _segments = [];
+    private Eased _shown, _heat;
 
-    public DriveTemperatureLine(MonitorColors colors, double body, double caption)
+    // lines: the lines the page keeps for the drives; room: the most it shows; temperatures: whether lines carry temperatures.
+    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int room, bool temperatures)
     {
-        _colors = colors; _body = body; _caption = caption;
-        Height = Math.Ceiling(body * 1.7);
+        _colors = colors; _body = body; _caption = caption; _row = row; _room = Math.Max(1, room); _temperatures = temperatures;
+        Height = Math.Max(1, lines) * row;
+        SnapsToDevicePixels = true;
     }
 
-    public void Set(IReadOnlyList<DiskTemperature> drives, bool motion)
+    public void Set(IReadOnlyList<StorageDrive> drives, bool motion)
     {
-        if (drives.SequenceEqual(_drives)) return;
-        // The figures that leave stay drawn while they fade.
-        if (drives.Count > 0) _drives = drives;
-        if (_shown.Set(drives.Count > 0 ? 1 : 0, motion)) Motion.Start(this, now => { InvalidateVisual(); return _shown.Moving(now); });
-        ToolTip = drives.Count == 0 ? null : string.Join("\n", drives.Select(drive => drive.Name + " · " + Temperatures.Format(drive.Celsius) + " °C"
-            + (drive.Warning is { } warning ? Loc.T($"（警告 {Temperatures.Format(warning)} °C）", $" (warning at {Temperatures.Format(warning)} °C)") : "")));
+        var rows = Storage.Rows(drives, _room, _temperatures);
+        bool same = rows.Count == _segments.Length && rows.Select(row => row.Segments.Count).SequenceEqual(_segments.Select(segments => segments.Length));
+        // New lines start from an empty bar, so a first reading grows into place as the page's other values do.
+        if (!same) _segments = [.. rows.Select(row => new Eased[row.Segments.Count])];
+        bool moving = false;
+        for (int i = 0; i < rows.Count; i++)
+            for (int s = 0; s < rows[i].Segments.Count; s++) moving |= _segments[i][s].Set(rows[i].Segments[s].Used, motion);
+        if (rows.Count > 0) _rows = rows;
+        moving |= _shown.Set(rows.Count > 0 ? 1 : 0, motion);
+        moving |= _heat.Set(rows.Any(row => row.Celsius is not null) ? 1 : 0, motion);
+        ToolTip = rows.Count == 0 ? null : string.Join("\n", rows.SelectMany(row => row.Drives).Select(Describe));
+        if (moving) Motion.Start(this, Step); else InvalidateVisual();
+    }
+    private bool Step(double now)
+    {
         InvalidateVisual();
+        if (_shown.Moving(now) || _heat.Moving(now)) return true;
+        foreach (var segments in _segments) foreach (var segment in segments) if (segment.Moving(now)) return true;
+        return false;
+    }
+
+    // "C: D: · YMTC YMSS2ED06D25MC · 212 / 477 GB · 44 °C", then each volume of a split drive on a line of its own.
+    private static string Describe(StorageDrive drive)
+    {
+        var (used, total, unit) = Storage.Sizes(drive.Used, drive.Total);
+        string text = drive.Letters + (drive.Model.Length > 0 ? " · " + drive.Model : "") + $" · {used} / {total} {unit}";
+        if (drive.Temperature is { } heat)
+            text += " · " + Temperatures.Detail(heat.Celsius) + (heat.Warning is { } warning ? Loc.T($"（警告 {Temperatures.Format(warning)} °C）", $" (warning at {Temperatures.Format(warning)} °C)") : "");
+        if (drive.Volumes.Count > 1)
+            foreach (var volume in drive.Volumes)
+            {
+                var (u, t, n) = Storage.Sizes(volume.Used, volume.Total);
+                text += $"\n    {volume.Letter}{(volume.Label.Length > 0 ? " " + volume.Label : "")} · {u} / {t} {n}";
+            }
+        return text;
     }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, Height);
 
     protected override void OnRender(DrawingContext drawing)
     {
-        double opacity = Math.Clamp(_shown.At(Eased.Now), 0, 1);
-        if (_drives.Count == 0 || opacity <= .001) return;
-        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), line = Height, badge = Math.Round(_body + 5), baseline = Math.Round(line / 2 + _body * .38);
+        double now = Eased.Now, opacity = Math.Clamp(_shown.At(now), 0, 1);
+        if (_rows.Count == 0 || opacity <= .001) return;
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), badge = Math.Round(_body + 5), space = Math.Round(_body * .7);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
         if (opacity < .999) drawing.PushOpacity(opacity);
-        double glyph = Math.Round(badge * 9 / 16);
-        MonitorDraw.Arrow(drawing, new Point((badge - glyph) / 2, line / 2 - glyph / 2), glyph, Math.Max(1, glyph * .155), MonitorGlyph.Thermometer, UI.Secondary);
-        double x = badge + Math.Round(_body * .5);
-        var label = MonitorDraw.Text(Loc.T("硬盘", "Drives"), _caption, UI.Tertiary, ppd);
-        MonitorDraw.Baseline(drawing, label, x, baseline); x += label.WidthIncludingTrailingWhitespace + Math.Round(_body * .7);
-        foreach (var drive in _drives)
+        // The columns: the letters, the figures (as wide as the widest size can be), and the temperature, as wide as its widest.
+        var texts = _rows.Select(row =>
         {
-            var level = Temperatures.OfDisk(drive);
-            var number = MonitorDraw.Text(Temperatures.Format(drive.Celsius), _body + 1, _colors.Level(level, UI.Primary), ppd, strong: true);
-            var unit = MonitorDraw.Text("°C", _caption, UI.Tertiary, ppd);
-            double width = number.WidthIncludingTrailingWhitespace + 2 + unit.WidthIncludingTrailingWhitespace;
-            if (x + width > w) break;
-            MonitorDraw.Baseline(drawing, number, x, baseline);
-            MonitorDraw.Baseline(drawing, unit, x + number.WidthIncludingTrailingWhitespace + 2, baseline);
-            x += width + Math.Round(_body);
+            var (used, total, unit) = Storage.Sizes(row.Used, row.Total);
+            return (Label: MonitorDraw.Text(row.Label, _body, UI.Secondary, ppd), Used: MonitorDraw.Text(used, _body + 1, UI.Primary, ppd, strong: true),
+                Size: MonitorDraw.Text($" / {total} {unit}", _caption, UI.Tertiary, ppd), Widest: MonitorDraw.Text(total, _body + 1, UI.Primary, ppd, strong: true));
+        }).ToList();
+        double labels = texts.Max(t => t.Label.WidthIncludingTrailingWhitespace), figures = texts.Max(t => t.Widest.WidthIncludingTrailingWhitespace + t.Size.WidthIncludingTrailingWhitespace);
+        var unitText = MonitorDraw.Text("°C", _caption, UI.Tertiary, ppd);
+        double heatWidth = (MonitorDraw.Text("100", _body, UI.Primary, ppd, strong: true).WidthIncludingTrailingWhitespace + 2 + unitText.WidthIncludingTrailingWhitespace + space)
+            * Math.Clamp(_heat.At(now), 0, 1);
+        double glyph = Math.Round(badge * 9 / 16), labelX = badge + Math.Round(_body * .5), figureX = labelX + labels + space, barX = figureX + figures + space;
+        double barEnd = Math.Max(barX, w - heatWidth);
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            var row = _rows[i]; var t = texts[i];
+            double top = i * _row, baseline = Math.Round(top + _row / 2 + _body * .36), middle = top + _row / 2;
+            MonitorDraw.Arrow(drawing, new Point((badge - glyph) / 2, middle - glyph / 2), glyph, Math.Max(1, glyph * .13), MonitorGlyph.Drive, UI.Secondary);
+            MonitorDraw.Baseline(drawing, t.Label, labelX, baseline);
+            MonitorDraw.Baseline(drawing, t.Used, figureX, baseline);
+            MonitorDraw.Baseline(drawing, t.Size, figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
+            if (barEnd - barX >= 16) Bar(drawing, new Rect(barX, Math.Round(middle - 2), barEnd - barX, 4), row, i, now);
+            if (row.Celsius is { } celsius && heatWidth > 1)
+            {
+                var number = MonitorDraw.Text(Temperatures.Format(celsius), _body, _colors.Level(row.Level, UI.Primary), ppd, strong: true);
+                double right = w - unitText.WidthIncludingTrailingWhitespace;
+                MonitorDraw.Baseline(drawing, unitText, right, baseline);
+                MonitorDraw.Baseline(drawing, number, right - 2 - number.WidthIncludingTrailingWhitespace, baseline);
+            }
         }
         if (opacity < .999) drawing.Pop();
+    }
+
+    // The volumes side by side, each its share of the bar, each filled to its own used share, as memory's bar is drawn.
+    private void Bar(DrawingContext drawing, Rect r, StorageRow row, int index, double now)
+    {
+        double radius = r.Height / 2, gaps = Gap * (row.Segments.Count - 1), x = r.X, room = Math.Max(0, r.Width - gaps);
+        var track = UI.Brush(UI.Track); var fill = UI.Brush(_colors.Storage);
+        var eased = index < _segments.Length ? _segments[index] : [];
+        for (int s = 0; s < row.Segments.Count; s++)
+        {
+            double width = s == row.Segments.Count - 1 ? r.Right - x : Math.Round(room * row.Segments[s].Width);
+            if (width <= 0) continue;
+            drawing.DrawRoundedRectangle(track, null, new Rect(x, r.Y, width, r.Height), radius, radius);
+            double used = Math.Clamp(s < eased.Length ? eased[s].At(now) : row.Segments[s].Used, 0, 1) * width;
+            if (used > .5) drawing.DrawRoundedRectangle(fill, null, new Rect(x, r.Y, Math.Max(r.Height, used), r.Height), radius, radius);
+            x += width + Gap;
+        }
     }
 }

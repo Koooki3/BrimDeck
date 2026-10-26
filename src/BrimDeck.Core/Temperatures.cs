@@ -3,8 +3,11 @@ using System.Globalization;
 namespace BrimDeck.Core;
 
 // A solid-state drive's temperature as the drive reports it, in degrees Celsius, with the drive's own warning and critical
-// temperatures where it gives them. Name is the drive's model.
-public sealed record DiskTemperature(string Name, double Celsius, double? Warning = null, double? Critical = null);
+// temperatures where it gives them. Name is the drive's model, Number its number (\\.\PhysicalDriveN), -1 where unknown.
+public sealed record DiskTemperature(string Name, double Celsius, double? Warning = null, double? Critical = null)
+{
+    public int Number { get; init; } = -1;
+}
 
 // The temperatures the system monitor shows, from what Windows reports without a driver or administrator rights: the processor
 // from the ACPI thermal zones, which the firmware defines and which may be the board's rather than the processor's own; the
@@ -79,6 +82,12 @@ public static class Temperatures
         var level = (MemoryLevel)Math.Max((int)(cpu is { } c ? OfCpu(c) : MemoryLevel.Normal), (int)(gpu is { } g ? OfGpu(g) : MemoryLevel.Normal));
         return (Math.Max(cpu ?? double.MinValue, gpu ?? double.MinValue), level);
     }
+
+    // Whether the collapsed row's temperature (the processor's or the graphics adapter's) can show at all: not once both are known
+    // to have no sensor, so the row leaves it out rather than show a dash.
+    public static bool Readable(SensorState cpu, SensorState gpu) => cpu != SensorState.None || gpu != SensorState.None;
+    // A gauge's temperature after its figure, "62 °C", or nothing, so a missing sensor leaves no gap or dash.
+    public static string Detail(double? celsius) => celsius is { } value ? Format(value) + " °C" : "";
 
     // Whole degrees: "47".
     public static string Format(double celsius) => ((int)Math.Round(celsius, MidpointRounding.AwayFromZero)).ToString(CultureInfo.InvariantCulture);

@@ -72,10 +72,15 @@ public sealed partial class SettingsWindow
                 Loc.T("按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行。面板足够大时显示。",
                     "Lists the apps using the most CPU or memory, with the processes of one program folded into one row. Shown when the panel is large enough."),
                 keepPreview: true),
+            Toggle(Loc.T("显示硬盘", "Show drives"), S.MonitorStorage, v => Resize(s => s.MonitorStorage = v, DeckPage.Monitor),
+                help:
+                Loc.T("在内存和网速下方按物理硬盘逐行显示已用空间：一块硬盘分成多个盘符时，一行内按盘符分段。只列出内置硬盘上 1 GB 以上的固定分区，不含 U 盘、移动硬盘、网络盘、光驱和虚拟磁盘。面板放不下时，其余硬盘合并为最后一行。每 10 秒读取一次。",
+                    "Shows the space in use on each physical drive, one line per drive, under memory and network: a drive split into several letters has a segment per letter. Only fixed volumes of 1 GB or more on internal drives are listed, not USB sticks, external, network, optical or virtual drives. When the panel has no room for all, the rest share the last line. Read every 10 seconds."),
+                keepPreview: true),
             Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
-                Loc.T("在 CPU 和 GPU 读数后显示温度；面板足够高时，另起一行显示固态硬盘温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供，10 分钟内没有变化的值视为固定值不显示；硬盘温度每 30 秒读取一次。",
-                    "Shows temperatures after the CPU and GPU readings and, when the panel is tall enough, the solid-state drives' on a line of their own. Sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it; a value that has not changed for 10 minutes is taken for a fixed one and left out; drives are read every 30 seconds."),
+                Loc.T("在 CPU 和 GPU 读数后、各硬盘行的末尾显示温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供，10 分钟内没有变化的值视为固定值不显示；硬盘温度每 30 秒读取一次。",
+                    "Shows temperatures after the CPU and GPU readings and at the end of each drive's line. Sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it; a value that has not changed for 10 minutes is taken for a fixed one and left out; drives are read every 30 seconds."),
                 keepPreview: true));
     }
 
@@ -160,6 +165,7 @@ public sealed partial class SettingsWindow
     {
         MonitorRole.Cpu => Loc.T("CPU 读数与核心柱中性能核的颜色。", "The color of the CPU readings and of the performance cores in the core columns."),
         MonitorRole.Efficiency => Loc.T("核心柱中能效核的颜色。", "The color of the efficiency cores in the core columns."),
+        MonitorRole.Memory => Loc.T("内存与硬盘已用空间的颜色。", "The color of the memory and of the drives' space in use."),
         _ => null
     };
 
@@ -251,7 +257,7 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
-        CompactMonitorItems.Temperature => Loc.T("温度", "Temperature"), _ => "CPU"
+        CompactMonitorItems.Temperature => Loc.T("温度", "Temperature"), CompactMonitorItems.Storage => Loc.T("硬盘", "Drive"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -281,7 +287,7 @@ public sealed partial class SettingsWindow
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Temperature };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Temperature or CompactMonitorItems.Storage };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
@@ -289,6 +295,7 @@ public sealed partial class SettingsWindow
             {
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
                 CompactMonitorItems.Temperature => Loc.T("温度始终显示数值：CPU 与 GPU 中较高的一个。", "The temperature always shows its figure: the higher of the CPU's and the GPU's."),
+                CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值：系统盘已用空间的百分比。", "The drive always shows its figure: the share of the system drive in use."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);

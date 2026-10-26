@@ -26,8 +26,8 @@ internal static class CompactReadingTests
     private static void Migration(Action<string, bool> check)
     {
         var full = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactMonitorItems":3}""");
-        check("Compact readings: old Full shows everything but the temperature with figures in the default order",
-            Same(full.CompactReadings, [.. CompactMonitor.Order]) && full.CompactReadings.All(r => r.Visible == (r.Item != Temperature) && r.ShowValue && r.Color is null)
+        check("Compact readings: old Full shows every usage reading with figures in the default order",
+            Same(full.CompactReadings, [.. CompactMonitor.Order]) && full.CompactReadings.All(r => r.Visible == ((All & r.Item) != 0) && r.ShowValue && r.Color is null)
             && full.CompactMonitor == CompactMonitorMode.Full && full.CompactMonitorItems == All);
         var brief = Read("""{"AppVersion":"0.1.0","CompactMonitor":1,"CompactMonitorItems":63}""");
         check("Compact readings: old Brief shows the three rings without figures",
@@ -45,9 +45,9 @@ internal static class CompactReadingTests
         check("Compact readings: defaults are Full", defaults.CompactMonitor == CompactMonitorMode.Full && CompactMonitor.Preset(defaults.CompactReadings) == CompactMonitorMode.Full
             && Same(defaults.CompactReadings, [.. CompactMonitor.Order]));
 
-        var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":128,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
+        var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":256,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
         check("Compact readings: unknown and repeated readings are dropped, missing ones join hidden",
-            Same(odd.CompactReadings, Download, Cpu, Columns, Memory, Gpu, Upload, Temperature) && odd.CompactReadings[0].Visible && !odd.CompactReadings[1].Visible
+            Same(odd.CompactReadings, Download, Cpu, Columns, Memory, Gpu, Upload, CompactMonitorItems.Storage, Temperature) && odd.CompactReadings[0].Visible && !odd.CompactReadings[1].Visible
             && odd.CompactReadings.Skip(2).All(r => !r.Visible) && odd.CompactMonitorItems == Download && odd.CompactMonitor == CompactMonitorMode.Custom);
         check("Compact readings: an older own color moves into the custom scheme, normalized", odd.MonitorPalette == MonitorPalette.Custom
             && odd.MonitorCustomColors is { Base: MonitorPalette.Theme, Download: "#12AB3C", Cpu: null } && odd.CompactReadings.All(r => !r.HasOwnColors));
@@ -194,7 +194,7 @@ internal static class CompactReadingTests
         check("Level colors: normalized, an invalid one follows the panel theme", levels is { CompactWarningColor: "#ABCDEF", CompactCriticalColor: null }
             && SettingsMigrations.Read(JsonSerializer.Serialize(levels)).CompactWarningColor == "#ABCDEF");
         check("Older colors: they leave the readings, which keep the rest", read.CompactReadings.All(r => !r.HasOwnColors)
-            && !read.CompactReadings.First(r => r.Item == Columns).Visible && Same(read.CompactReadings, Memory, Cpu, Columns, Download, Gpu, Upload, Temperature));
+            && !read.CompactReadings.First(r => r.Item == Columns).Visible && Same(read.CompactReadings, Memory, Cpu, Columns, Download, Gpu, Upload, CompactMonitorItems.Storage, Temperature));
         var plain = Read("""{"AppVersion":"0.1.0","MonitorPalette":1,"CompactReadings":[{"Item":4}]}""");
         check("Older colors: without own colors the scheme stays", plain.MonitorPalette == MonitorPalette.Graphite && !plain.MonitorCustomColors.Changed);
         var readings = JsonSerializer.Serialize(read.CompactReadings);

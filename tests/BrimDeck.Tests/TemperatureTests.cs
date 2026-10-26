@@ -111,14 +111,14 @@ static class TemperatureTests
             && Temperatures.Hottest(Snapshot(84, 91)) is { Celsius: 91, Level: MemoryLevel.Critical });
         check("Hottest: the collapsed reading's level", ReadingLevels.Of(CompactMonitorItems.Temperature, Snapshot(96, 40)) == MemoryLevel.Critical
             && ReadingLevels.Of(CompactMonitorItems.Temperature, Snapshot(null, null)) == MemoryLevel.Normal && ReadingLevels.Of(CompactMonitorItems.Temperature, null) == MemoryLevel.Normal);
-        check("Snapshots: no drives until they are read", MonitorSnapshot.Empty(4, "waiting").Disks.Count == 0);
+        check("Snapshots: no drives until they are read", MonitorSnapshot.Empty(4, "waiting").Storage.Count == 0);
     }
 
     private static void Strip(Action<string, bool> check)
     {
         const CompactMonitorItems Temperature = CompactMonitorItems.Temperature, All = CompactMonitorItems.All;
         check("Compact temperature: a reading of the table, not of the Full preset", CompactMonitor.Order.Contains(Temperature) && (All & Temperature) == 0
-            && CompactMonitor.Every == (All | Temperature) && !CompactMonitor.HasValueChoice(Temperature) && CompactMonitor.Channels(Temperature) == 1);
+            && CompactMonitor.Every == (All | CompactMonitorItems.Storage | Temperature) && !CompactMonitor.HasValueChoice(Temperature) && CompactMonitor.Channels(Temperature) == 1);
         var defaults = new DeckSettings(); defaults.Normalize();
         check("Compact temperature: hidden by default", defaults.CompactReadings.Single(r => r.Item == Temperature) is { Visible: false }
             && CompactMonitor.Preset(defaults.CompactReadings) == CompactMonitorMode.Full && defaults.MonitorTemperatures);

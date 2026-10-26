@@ -45,6 +45,9 @@ public sealed record MonitorColors(string Performance, string Efficiency, string
         return new(accent, efficiency, efficiency, gpu, accent, efficiency, warning, critical);
     }
 
+    // The drives' bars take the memory color: both are space in use, and the scheme keeps one color for each role it lists.
+    public string Storage => Memory;
+
     public string this[MonitorRole role] => role switch
     {
         MonitorRole.Efficiency => Efficiency, MonitorRole.Memory => Memory, MonitorRole.Gpu => Gpu, MonitorRole.Download => Download,
@@ -143,7 +146,14 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
     // A side list takes this share of the width, within these bounds; a list this wide or wider has two columns.
     public const double ListShare = .42, ListMinimum = 220, ListMaximum = 560, TwoColumns = 470;
 
-    public static MonitorLayout For(double width, double height, bool processes)
+    // The drives' lines (Storage): as many as there are drives, within what the readings' height holds (one below 150 DIP, two
+    // below 250, else three; the rest share the last line). They are taken before memory and network choose their room, so a
+    // page with drives sets memory and network on one line sooner and the core columns keep their height.
+    public int StorageLines { get; init; }
+    public static int StorageRoom(double readings) => readings < 150 ? 1 : readings < 250 ? 2 : 3;
+
+    // storage: the drives the page would show a line each.
+    public static MonitorLayout For(double width, double height, bool processes, int storage = 0)
     {
         width = double.IsFinite(width) ? Math.Max(0, width) : 0;
         height = double.IsFinite(height) ? Math.Max(0, height) : 0;
@@ -155,8 +165,10 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
             : height >= StackedReadings + ListHead + MinimumRows * row ? ListPlacement.Below : ListPlacement.None;
         // The core columns need height to read; memory and network give theirs first. Readings above a list have its fixed height.
         double readings = list == ListPlacement.Below ? StackedReadings : height;
-        var metrics = readings < 150 ? MetricsMode.Line : readings < 250 ? MetricsMode.Lines : MetricsMode.Blocks;
-        return new(figure, body, caption, metrics, list, row);
+        int lines = storage <= 0 ? 0 : Math.Min(storage, StorageRoom(readings));
+        double left = readings - lines * row;
+        var metrics = left < 150 ? MetricsMode.Line : left < 250 ? MetricsMode.Lines : MetricsMode.Blocks;
+        return new(figure, body, caption, metrics, list, row) { StorageLines = lines };
     }
 
     // The rows and columns a list of this size shows.
