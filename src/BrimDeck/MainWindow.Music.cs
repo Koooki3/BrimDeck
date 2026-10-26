@@ -72,7 +72,7 @@ public partial class MainWindow
     // (a resize drag does that every frame), so like the readings' StripPresence they belong to the panel and outlive each row.
     private readonly EqualizerBars _compactBars = new();
     // The collapsed title scrolls its laps once per line (MarqueeScroll.Limited); a row built again for the same line keeps it
-    // resting, until the line changes or the pointer comes over the island (ReplayCompactTitle).
+    // resting, until the line changes or the panel closes (ReplayCompactTitle).
     private readonly MarqueeScroll _compactScroll = new() { Limited = true };
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
@@ -1029,7 +1029,8 @@ public partial class MainWindow
         }
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }
-    // The pointer came over the island: a collapsed title that has rested scrolls its laps again.
+    // The panel closed: a collapsed title that has rested scrolls its laps again, as the row comes back into view. (Reaching
+    // the island opens the panel, so the collapsed title is not seen while the pointer is on it.)
     private void ReplayCompactTitle() { if (_compactMarquee is not null) _compactMarquee.Replay(); else _compactScroll.Replay(); }
     private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
     // The bars on the display's frames (Motion), keyed by an element of their own so a row built again never adds a second step.
