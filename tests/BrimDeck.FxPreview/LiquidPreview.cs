@@ -267,6 +267,8 @@ internal static class LiquidPreview
         if (Environment.GetEnvironmentVariable("LIQUID_ZONED") == "1") frame = frame with { Zoned = true };
         // LIQUID_R13: round 13 as it was (the light look reaching .96, whole-leaf text regions, no halo), for the comparisons.
         if (Environment.GetEnvironmentVariable("LIQUID_R13") == "1") frame = frame with { ReachLight = .96f };
+        // LIQUID_PROBE: the slab's displacement drawn instead of the glass (the perimeter check, round 13b).
+        if (Environment.GetEnvironmentVariable("LIQUID_PROBE") == "1") frame = frame with { Probe = true, InsetAlpha = 0 };
         // LIQUID_TEXTFREE: an open panel with no text on it (the body alone), for the show-through numbers (round 13).
         if (Environment.GetEnvironmentVariable("LIQUID_TEXTFREE") == "1" && frame.TextRects is null) frame = frame with { TextRects = [] };
         // The padded region, the desktop's edge rows repeated where it runs off the screen (as at the top for the notch).

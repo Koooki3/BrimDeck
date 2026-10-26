@@ -61,7 +61,7 @@ internal readonly record struct LiquidFrame(
     bool LinearMap = false, bool LinearFilters = true, float CssWidth = 0, float CssHeight = 0,
     float FilterWidth = 0, float FilterHeight = 0,
     float ContentLeft = 0, float ContentTop = 0, float ContentRight = 0, float ContentBottom = 0, float Sigma0 = 0,
-    float[]? TextRects = null, float BodyLight = 0, bool Zoned = false, float ReachLight = 0)
+    float[]? TextRects = null, float BodyLight = 0, bool Zoned = false, float ReachLight = 0, bool Probe = false)
 {
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
@@ -741,7 +741,7 @@ internal sealed class LiquidRenderer : IDisposable
             // The material's masking constant (Liquid.hlsl, Material; calibrated offscreen, round 12): the frame's, else the default.
             Sigma0 = f.Sigma0 > 0 ? f.Sigma0 : DefaultSigma0,
             TextTile = _textInfo.Tile, TextInverseX = _textInfo.InverseX, TextInverseY = _textInfo.InverseY, TextOn = _textInfo.On,
-            BodyLight = f.BodyLight > 0 ? f.BodyLight : DefaultBodyLight, Zoned = f.Zoned ? 1 : 0, ReachLight = f.ReachLight
+            BodyLight = f.BodyLight > 0 ? f.BodyLight : DefaultBodyLight, Zoned = f.Zoned ? 1 : 0, ReachLight = f.ReachLight, Probe = f.Probe ? 1 : 0
         };
         for (int k = 0; k < MostLevels; k++) Unsafe.Add(ref c.Level0, k) = Unsafe.Add(ref _pass.Level0, k);
         _context.UpdateSubresource(in c, _constants);
@@ -913,7 +913,7 @@ internal sealed class LiquidRenderer : IDisposable
         public float StatsInverseX, StatsInverseY, StatsTile, Sigma0;
         public System.Numerics.Vector4 Level0, Level1, Level2, Level3, Level4, Level5, Level6, Level7;
         public float TextTile, TextInverseX, TextInverseY, TextOn;
-        public float BodyLight, Zoned, ReachLight, LookSpareC;
+        public float BodyLight, Zoned, ReachLight, Probe;
     }
 
     // The frost passes' constant buffer (Frost.hlsl, FrostPass), in its order.

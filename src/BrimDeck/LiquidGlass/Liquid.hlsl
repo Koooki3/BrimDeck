@@ -636,7 +636,7 @@ float3 Material(float3 frosted, float3 port, float a)
 // surface with no seam: the refraction fades with the slope, the frost grows with the thickness, the tint and absorption
 // (Beer-Lambert) follow the thickness. Behind text the material covers locally (Acrylic's luminosity, as far as the text
 // needs), feathered.
-static const float SlabIor = 1.45, SlabRefraction = .9, SlabDispersion = .3, BevelDip = 19;
+static const float SlabIor = 1.45, SlabRefraction = .9, SlabDispersion = .3, BevelDip = 19, BevelOfRadius = .6;
 static const float3 LensLightTint = float3(.97, .985, 1), LensDarkTint = float3(.16, .24, .34);
 
 float3 Back(float2 islandPixel) { return Background.SampleLevel(Smooth, (islandPixel + Pad) * Inverse, 0).rgb; }
@@ -663,29 +663,36 @@ float3 Slab(float2 p, float sd, float2 outward)
 {
     float dark = saturate(Dark), opened = sqrt(saturate(Open));
     float shorter = min(Size.x, Size.y);
-    float bevel = min(shorter * .48, BevelDip * Scale);
+    // The bevel is sized to the corner it turns (BevelOfRadius of it), so a capsule's round ends keep the flat top its straight
+    // sides have: the cross-section, a function of the depth alone, is the same all the way round.
+    float corner = max(max(CornerTop, CornerBottom), 1);
+    float bevel = min(min(shorter * .48, BevelDip * Scale), corner * BevelOfRadius);
     float edge = saturate(1 + sd / bevel);                 // 1 at the rim, 0 where the bevel meets the top
     float slope = pow(edge, 1.65) * .94;
     float2 centre = float2(HalfWidth, Size.y * .5);
-    float2 pc = (p - centre) / max(.5 * float2(Size.x, Size.y), 1);
+    // Positions taken from the shape's spine (its middle line), not its centre: the faint curvature over the top and the
+    // magnification are then the same at a round end as along a straight side (from the centre, the ends of a long capsule
+    // would be shifted and tilted far more than its sides).
+    float2 extent = max(.5 * float2(Size.x - Size.y, Size.y - Size.x), 0);
+    float2 local = (p - centre) - clamp(p - centre, -extent, extent);
+    float2 pc = local / max(.5 * shorter, 1);
     float3 normal = normalize(float3(outward * slope + pc * .045, 1));
     float thickness = 1 - pow(edge, 2);                    // of the slab, 0 at the rim .. 1 over the top
 
     // Refraction (Snell), the slab's magnification, and dispersion at the rim.
     float3 ray = refract(float3(0, 0, -1), normal, 1 / SlabIor);
-    float through = (18 + 57 * SlabRefraction) * Scale;
-    float2 offset = ray.xy / max(-ray.z, .25) * through * SlabRefraction - (p - centre) * .016 * SlabRefraction;
+    // The slab no thicker than a few bevels (Lens' thickness suits its large lenses; on a 36 DIP capsule it would reach past the
+    // captured backdrop at the tips).
+    float through = min((18 + 57 * SlabRefraction) * Scale, 3 * bevel);
+    float2 offset = ray.xy / max(-ray.z, .25) * through * SlabRefraction - local * .016 * SlabRefraction;
     // Kept within the padded backdrop, less a margin for the frost's reach (past it the pyramid's levels border each other).
     float2 at = clamp(p + offset, -.5 * Pad, Size + .5 * Pad);
 
     // Where text sits (the collapsed row; the open panel's text regions), the material covers; elsewhere the slab is clear at
     // the rim and frosted with its thickness.
-    float row = 0;
-    if (Content.z > Content.x)
-    {
-        float2 inside = min(p - (Content.xy - float2(RowReach * Scale, 0)), (Content.zw + float2(RowReach * Scale, 0)) - p);
-        row = saturate(min(inside.x, inside.y) / (TextFeatherDip * Scale) + 1);
-    }
+    // The collapsed island carries its text across its whole top: its cover follows the slab's thickness all the way round
+    // (round ends alike), clear at the rim, so its ends are no other material than its sides.
+    float row = Content.z > Content.x ? thickness : 0;
     // The dark look covers the whole open panel (one even dark glass, as round 13 had it); the light look only behind text.
     float text = max(row, opened * max(TextFeathered(p), CoverDark()));
     float calm = 1 - Busy(p);
@@ -699,6 +706,8 @@ float3 Slab(float2 p, float sd, float2 outward)
         c = lerp(c, lerp(c, sharp, .8), saturate(pow(edge, 2.8) * (1 - FrostShown)));
     }
     float3 backdrop = c;
+    // The perimeter check's view (LookInfo.w 1): the displacement's length (over 16 DIPs), the bevel's edge and the thickness.
+    if (LookInfo.w > .5) return float3(saturate(length(offset) / (16 * Scale)), edge, thickness);
 
     // Tint (Lens: the role's tint, more where frosted, more on the dark look) and absorption through the thickness.
     float3 tint = lerp(LensLightTint, LensDarkTint, dark);
