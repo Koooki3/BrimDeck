@@ -132,9 +132,10 @@ public sealed record GpuEngine(string Kind, double Usage);
 public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
 {
     // In degrees Celsius as Task Manager reads it; null without a sensor. TemperatureFrom names the adapter it was read from
-    // when that is not this one (this adapter has no sensor and another has).
+    // when that is not this one (this adapter has no sensor and another has), and TemperatureKind says its kind ("独显").
     public double? Temperature { get; init; }
     public string? TemperatureFrom { get; init; }
+    public string? TemperatureKind { get; init; }
     public IReadOnlyList<GpuEngine> Engines { get; init; } = [];
     public Reading<ulong> SharedBytes { get; init; } = Reading<ulong>.Unavailable("");
     public string? Name { get; init; }

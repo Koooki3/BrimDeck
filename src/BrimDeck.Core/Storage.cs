@@ -33,7 +33,7 @@ public sealed record StorageRow(string Label, ulong Total, ulong Used, IReadOnly
 }
 
 // The drives the system monitor shows: fixed volumes with a letter on internal drives, grouped by physical drive. Removable media
-// (a Ventoy stick, an SD card), USB drives, virtual disks (a mounted VHD or ISO), network and optical drives are left out, and so
+// (a Ventoy stick, an SD card), USB drives, virtual adapters' disks, network and optical drives are left out, and so
 // are volumes too small to matter (a system reserved or recovery partition that has a letter).
 public static class Storage
 {
@@ -43,7 +43,9 @@ public static class Storage
     // The letter of the volume holding Windows, "C:".
     public static string? WindowsLetter { get; } = Path.GetPathRoot(Environment.SystemDirectory)?.TrimEnd('\\', '/') is { Length: > 0 } root ? root : null;
 
-    public static bool Internal(StorageDisk disk) => !disk.Removable && disk.Bus is not (BusUsb or BusSd or BusMmc or BusVirtual or BusFileBackedVirtual);
+    // A file-backed virtual disk that is not removable stays: a Dev Drive (Windows 11) is a VHDX the user keeps as a drive of its
+    // own, as is a VHD mounted for good. Its space is also part of the drive that holds its file.
+    public static bool Internal(StorageDisk disk) => !disk.Removable && disk.Bus is not (BusUsb or BusSd or BusMmc or BusVirtual);
 
     // The drives from the volumes and the physical drive each lies on (null when it spans drives or its drive is unknown), the
     // drives Windows describes, and the temperatures by drive number. A volume on a drive that is not internal is left out, as

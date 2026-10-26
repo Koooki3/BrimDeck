@@ -10,7 +10,7 @@ static class StorageTests
     private static readonly Dictionary<int, StorageDisk> Disks = new()
     {
         [0] = new("YMTC YMSS2ED06D25MC", 17, false), [1] = new("Lecoo L700 1T", 17, false), [2] = new("WD Blue", 11, false),
-        [3] = new("Ventoy", 7, true), [4] = new("Msft Virtual Disk", 15, false), [5] = new("SD card", 12, false), [6] = new("USB SSD", 7, false)
+        [3] = new("Ventoy", 7, true), [4] = new("Msft Virtual Disk", 15, false), [7] = new("Virtual adapter", 14, false), [8] = new("Mounted VHD to remove", 15, true), [5] = new("SD card", 12, false), [6] = new("USB SSD", 7, false)
     };
 
     public static void Run(Action<string, bool> check)
@@ -43,14 +43,15 @@ static class StorageTests
     private static void Exclusions(Action<string, bool> check)
     {
         var drives = Storage.Group([(Volume("C:", 300, 50), 0), (Volume("R:", .5, .1, "Recovery"), 0), (Volume("V:", 64, 1, "Ventoy"), 3), (Volume("X:", 40, 10), 4),
-            (Volume("S:", 32, 16), 5), (Volume("U:", 1000, 500), 6), (Volume("H:", 2000, 1500), 2), (Volume("Z:", 100, 50), 9)], Disks);
-        check("Storage: removable, USB, virtual and SD drives are left out", drives.SelectMany(drive => drive.Volumes).All(volume => volume.Letter is not ("V:" or "X:" or "S:" or "U:")));
+            (Volume("S:", 32, 16), 5), (Volume("U:", 1000, 500), 6), (Volume("H:", 2000, 1500), 2), (Volume("Z:", 100, 50), 9), (Volume("Q:", 50, 10), 7), (Volume("W:", 50, 10), 8)], Disks);
+        check("Storage: removable, USB, SD, virtual adapters' and removable virtual drives are left out", drives.SelectMany(drive => drive.Volumes).All(volume => volume.Letter is not ("V:" or "S:" or "U:" or "Q:" or "W:")));
+        check("Storage: a Dev Drive (a fixed VHDX) stays", drives.Any(drive => drive.Letters == "X:"));
         check("Storage: a small partition (system reserved, recovery) is not listed", drives[0].Letters == "C:");
         check("Storage: a hard disk's space is listed (only its temperature is not asked for)", drives.Any(drive => drive.Letters == "H:"));
         check("Storage: a volume on a drive Windows did not describe is left out", drives.All(drive => drive.Letters != "Z:"));
         check("Storage: internal buses", Storage.Internal(new("", 17, false)) && Storage.Internal(new("", 11, false)) && Storage.Internal(new("", 16, false))
             && !Storage.Internal(new("", 17, true)) && !Storage.Internal(new("", Storage.BusUsb, false)) && !Storage.Internal(new("", Storage.BusVirtual, false))
-            && !Storage.Internal(new("", Storage.BusFileBackedVirtual, false)) && !Storage.Internal(new("", Storage.BusSd, false)) && !Storage.Internal(new("", Storage.BusMmc, false)));
+            && Storage.Internal(new("", Storage.BusFileBackedVirtual, false)) && !Storage.Internal(new("", Storage.BusFileBackedVirtual, true)) && !Storage.Internal(new("", Storage.BusSd, false)) && !Storage.Internal(new("", Storage.BusMmc, false)));
         check("Storage: exactly 1 GB is listed", Storage.Group([(new StorageVolume("C:", "", G, 0), 0)], Disks).Count == 1 && Storage.Group([(new StorageVolume("C:", "", G - 1, 0), 0)], Disks).Count == 0);
     }
 

@@ -24,6 +24,9 @@ internal sealed class StorageReader
     // Touched only by the reading under way.
     private double _temperaturesAt = double.NegativeInfinity;
     private Dictionary<int, DiskTemperature> _known = [];
+    // When the temperatures were last read (a double's bits, so the sampler's thread reads it whole); older than twice their
+    // interval they are no longer shown.
+    private long _heatedAt = BitConverter.DoubleToInt64Bits(double.NegativeInfinity);
     private int _running;
     private volatile Task _reading = Task.CompletedTask;
 
@@ -55,7 +58,7 @@ internal sealed class StorageReader
         {
             _readAt = now; Start(temperatures);
         }
-        return temperatures ? _heated : _plain;
+        return temperatures && now - BitConverter.Int64BitsToDouble(Interlocked.Read(ref _heatedAt)) <= 2 * TemperatureEvery ? _heated : _plain;
     }
 
     // The sampler paused: the next sample reads again at once. The last readings stay until then.
@@ -83,7 +86,9 @@ internal sealed class StorageReader
                 }
                 finally { CloseHandle(device); }
             }
-            if (temperatures && (now - _temperaturesAt >= TemperatureEvery || _temperatures == SensorState.Unknown))
+            // Not asked for, the temperatures read before are dropped rather than kept to show later as if current.
+            if (!temperatures) _known = [];
+            else if (now - _temperaturesAt >= TemperatureEvery || _temperatures == SensorState.Unknown)
             {
                 _temperaturesAt = now;
                 var known = new Dictionary<int, DiskTemperature>();
@@ -95,6 +100,7 @@ internal sealed class StorageReader
                     finally { CloseHandle(device); }
                 }
                 _known = known;
+                Interlocked.Exchange(ref _heatedAt, BitConverter.DoubleToInt64Bits(now));
                 if (known.Count > 0) _temperatures = SensorState.Found; else if (_temperatures == SensorState.Unknown) _temperatures = SensorState.None;
             }
         }
@@ -108,11 +114,16 @@ internal sealed class StorageReader
         if (plain.Count > 0) _drives = SensorState.Found; else if (_drives == SensorState.Unknown) _drives = SensorState.None;
     }
 
-    // Every fixed volume with a letter that is ready, with the drive it lies on: null when its extents span drives or cannot be read.
+    // Every fixed volume with a letter that is ready, with the drive it lies on (null when its extents span drives), each volume
+    // once. A letter made with subst (a folder of another volume, \??\C:\...) is left out, as is a second letter of a volume already
+    // listed (by its volume GUID), and a volume whose extents cannot be read: a VeraCrypt or ImDisk volume is a file or memory on
+    // another drive, already counted there, or not a drive at all.
     public static List<(StorageVolume Volume, int? Disk)> Volumes()
     {
         var volumes = new List<(StorageVolume, int?)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var extents = Marshal.AllocHGlobal(ExtentsSize);
+        var text = new char[1024];
         try
         {
             foreach (var drive in DriveInfo.GetDrives())
@@ -121,10 +132,13 @@ internal sealed class StorageReader
                 {
                     if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
                     string letter = drive.Name.TrimEnd('\\');
+                    if (QueryDosDeviceW(letter, text, text.Length) > 0 && Text(text).StartsWith(@"\??\", StringComparison.Ordinal)) continue;
+                    if (GetVolumeNameForVolumeMountPointW(letter + @"\", text, text.Length) && !seen.Add(Text(text))) continue;
+                    if (Disk(letter, extents) is not { Readable: true } placed) continue;
                     string label = "";
                     try { label = drive.VolumeLabel; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
                     var volume = new StorageVolume(letter, label, (ulong)Math.Max(0, drive.TotalSize), (ulong)Math.Max(0, drive.TotalFreeSpace));
-                    volumes.Add((volume, Disk(letter, extents)));
+                    volumes.Add((volume, placed.Disk));
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Debug.WriteLine(ex); }
             }
@@ -134,21 +148,27 @@ internal sealed class StorageReader
     }
 
     // VOLUME_DISK_EXTENTS: NumberOfDiskExtents, padding, then DISK_EXTENT entries of 24 bytes from 8 (DiskNumber at 0). A volume on
-    // one drive has its extents all on it.
-    private static int? Disk(string letter, IntPtr extents)
+    // one drive has its extents all on it; one spanning drives (a dynamic or Storage Spaces volume) has no single Disk.
+    private static (bool Readable, int? Disk) Disk(string letter, IntPtr extents)
     {
         var volume = Open($@"\\.\{letter}");
-        if (volume == InvalidHandle) return null;
+        if (volume == InvalidHandle) return (false, null);
         try
         {
-            if (!DeviceIoControl(volume, VolumeDiskExtents, IntPtr.Zero, 0, extents, ExtentsSize, out int length, IntPtr.Zero) || length < 32) return null;
+            if (!DeviceIoControl(volume, VolumeDiskExtents, IntPtr.Zero, 0, extents, ExtentsSize, out int length, IntPtr.Zero) || length < 32) return (false, null);
             int count = Marshal.ReadInt32(extents);
-            if (count < 1 || 8 + count * 24 > length) return null;
+            if (count < 1 || 8 + count * 24 > length) return (false, null);
             int first = Marshal.ReadInt32(extents, 8);
-            for (int i = 1; i < count; i++) if (Marshal.ReadInt32(extents, 8 + i * 24) != first) return null;
-            return first is >= 0 and < MaximumDrives ? first : null;
+            for (int i = 1; i < count; i++) if (Marshal.ReadInt32(extents, 8 + i * 24) != first) return (true, null);
+            return first is >= 0 and < MaximumDrives ? (true, first) : (false, null);
         }
         finally { CloseHandle(volume); }
+    }
+    // The text a call wrote, up to its first terminating null.
+    private static string Text(char[] text)
+    {
+        int end = Array.IndexOf(text, '\0');
+        return new string(text, 0, end >= 0 ? end : text.Length);
     }
 
     // STORAGE_DEVICE_DESCRIPTOR: RemovableMedia at 10, the offset of ProductId at 16, BusType at 28.
@@ -190,4 +210,6 @@ internal sealed class StorageReader
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DeviceIoControl(IntPtr device, uint code, IntPtr input, int inputSize, IntPtr output, int outputSize, out int returned, IntPtr overlapped);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern int QueryDosDeviceW(string device, char[] target, int size);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool GetVolumeNameForVolumeMountPointW(string mountPoint, char[] name, int size);
 }

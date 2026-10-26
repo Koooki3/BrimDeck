@@ -89,6 +89,10 @@ public static class Temperatures
     // A gauge's temperature after its figure, "62 °C", or nothing, so a missing sensor leaves no gap or dash.
     public static string Detail(double? celsius) => celsius is { } value ? Format(value) + " °C" : "";
 
+    // An adapter's kind by its dedicated memory, as Task Manager tells them apart: integrated adapters have little or none of
+    // their own. Shown before a temperature read from an adapter other than the one shown.
+    public static string AdapterKind(ulong dedicated) => dedicated >= 512UL << 20 ? Loc.T("独显", "dGPU") : Loc.T("核显", "iGPU");
+
     // Whole degrees: "47".
     public static string Format(double celsius) => ((int)Math.Round(celsius, MidpointRounding.AwayFromZero)).ToString(CultureInfo.InvariantCulture);
 }
@@ -99,22 +103,24 @@ public static class Temperatures
 public enum SensorState { Unknown, Found, None }
 
 // Many desktop boards report a thermal zone that never moves (27.8 °C, 300 K and the like): a value the firmware fills in, not
-// a sensor. A zone whose value has not changed for SteadySeconds is left out until it changes; a real sensor moves by a tenth
-// of a kelvin (or a kelvin) within minutes.
+// a sensor. A zone shows only once its value has changed since it was first read, so a fixed one never shows at all; a real
+// sensor moves by a tenth of a kelvin (or a kelvin) within a minute or so. One that then stays the same for SteadySeconds is
+// left out again until it changes.
 public sealed class SteadyZones
 {
     public const double SteadySeconds = 600;
-    private readonly Dictionary<string, (double Value, double Since)> _zones = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (double Value, double Since, bool Moved)> _zones = new(StringComparer.OrdinalIgnoreCase);
 
-    // The processor's temperature (Temperatures.Pick) from the zones that are not steady, at now (seconds).
+    // The processor's temperature (Temperatures.Pick) from the zones that have moved and are not steady, at now (seconds).
     public (double Celsius, string Zone)? Choose(IReadOnlyDictionary<string, double> zones, double now)
     {
         foreach (var zone in _zones.Keys.Where(zone => !zones.ContainsKey(zone)).ToList()) _zones.Remove(zone);
         var moving = new List<KeyValuePair<string, double>>(zones.Count);
         foreach (var pair in zones)
         {
-            if (!_zones.TryGetValue(pair.Key, out var known) || known.Value != pair.Value) _zones[pair.Key] = known = (pair.Value, now);
-            if (now - known.Since < SteadySeconds) moving.Add(pair);
+            if (!_zones.TryGetValue(pair.Key, out var known)) _zones[pair.Key] = known = (pair.Value, now, false);
+            else if (known.Value != pair.Value) _zones[pair.Key] = known = (pair.Value, now, true);
+            if (known.Moved && now - known.Since < SteadySeconds) moving.Add(pair);
         }
         return Temperatures.Pick(moving);
     }

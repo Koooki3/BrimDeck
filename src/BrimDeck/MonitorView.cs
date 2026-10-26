@@ -81,7 +81,7 @@ internal sealed class MonitorView : Grid
         // The gauge shown small takes a fixed width at the right: a wide block for the GPU, thin columns for the processor. Its
         // line is wider than the column under it, and wider still with a temperature after the figure.
         double mini = cpuMain ? Math.Round(Math.Clamp(layout.Figure * 3.4, 54, 84)) : Math.Round(Math.Clamp(layout.Figure * 5, 80, 120));
-        double headMini = Math.Max(mini, temperatures && smallTemperature ? SmallLine(layout) : Math.Round(layout.Figure * 4.6));
+        double headMini = Math.Max(mini, temperatures && smallTemperature ? SmallLine(layout, gpu: cpuMain) : Math.Round(layout.Figure * 4.6));
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(headMini) });
@@ -169,14 +169,17 @@ internal sealed class MonitorView : Grid
 
     public bool CardOpen => _card is not null;
 
-    // The small gauge's widest line with a temperature, "(G) 100 % 105 °C", as FigureGauge lays it out (its dial, the gaps, the
-    // figure in the display face, the unit and the detail), so no reading is ever cut.
-    private static double SmallLine(MonitorLayout layout)
+    // The small gauge's widest line with a temperature, "(G) 100 % 独显 105 °C" (the kind only for the graphics adapter, when its
+    // temperature is another adapter's), as FigureGauge lays it out (its dial, the gaps, the figure in the display face, the unit
+    // and the detail), so no reading is ever cut.
+    private static double SmallLine(MonitorLayout layout, bool gpu)
     {
         double figure = layout.Body + 1, gap = Math.Round(figure * .4);
         double Width(string text, double size, bool display = false) => MonitorDraw.Text(text, size, UI.Primary, 1, display: display).WidthIncludingTrailingWhitespace;
-        return Math.Ceiling(Math.Round(figure + 3) + gap + Width("100", figure, display: true) + 2 + Width("%", layout.Caption)
-            + gap + Width(Temperatures.Detail(Temperatures.Highest - 20), layout.Caption) + 2);
+        string hottest = Temperatures.Detail(Temperatures.Highest - 20);
+        double detail = gpu ? Math.Max(Width(Temperatures.AdapterKind(0) + " " + hottest, layout.Caption), Width(Temperatures.AdapterKind(ulong.MaxValue) + " " + hottest, layout.Caption))
+            : Width(hottest, layout.Caption);
+        return Math.Ceiling(Math.Round(figure + 3) + gap + Width("100", figure, display: true) + 2 + Width("%", layout.Caption) + gap + detail + 2);
     }
 
     // The list beside the readings fills whole rows from its top, so its last row usually ends above the page's foot; the readings
@@ -226,7 +229,9 @@ internal sealed class MonitorView : Grid
                 + (temperature.Length > 0 ? " · " + temperature + (gpu.TemperatureFrom is { } from ? Loc.T($"（{from} 的温度）", $" ({from}'s temperature)") : "") : "");
             // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure; its
             // temperature follows the figure.
-            _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", temperature, tip, motion, heat is { } c ? Hot(Temperatures.OfGpu(c)) : null);
+            // A temperature read from another adapter (this one has no sensor) carries that adapter's kind: "独显 50 °C".
+            string detail = temperature.Length > 0 && gpu.TemperatureKind is { } kind ? kind + " " + temperature : temperature;
+            _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", detail, tip, motion, heat is { } c ? Hot(Temperatures.OfGpu(c)) : null);
             _gpuBlock?.Set(gpu.Usage, gpu.DedicatedFraction, tip, motion);
             _gpuGraph?.Set(gpu.Engines.Select(engine => new GraphColumn(engine.Usage, null, _colors.Gpu, 0,
                 GpuEngines.Label(engine.Kind) + " · " + MonitorFormat.Percent(engine.Usage) + "%", GpuEngines.Short(engine.Kind))).ToList(), motion);

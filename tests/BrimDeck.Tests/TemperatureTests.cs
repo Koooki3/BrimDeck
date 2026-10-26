@@ -46,18 +46,22 @@ static class TemperatureTests
         var ties = Temperatures.Cpu([], [(@"\_TZ.TZ01", 320.15), (@"\_TZ.TZ00", 320.15)]);
         check("Thermal zones: equal zones choose the same one every time", ties is { Zone: @"\_TZ.TZ00" });
 
-        // A zone the firmware fills with a fixed value (27.8 °C here) drops out once it has not moved for ten minutes.
+        // A zone the firmware fills with a fixed value (27.8 °C here) never shows; a zone shows once its value has changed, and
+        // drops out again after ten minutes without change.
         var steady = new SteadyZones();
         Dictionary<string, double> Read(double fixedZone, double moving) => new() { [@"\_TZ.TZ00"] = fixedZone, [@"\_TZ.TZ01"] = moving };
-        check("Steady zones: at first the hottest zone shows", steady.Choose(Read(27.8, 25), 0) is { Zone: @"\_TZ.TZ00" });
-        check("Steady zones: still shown just before ten minutes", steady.Choose(Read(27.8, 25.1), SteadyZones.SteadySeconds - 1) is { Zone: @"\_TZ.TZ00" });
-        check("Steady zones: a zone that never moves drops out, a moving one shows", steady.Choose(Read(27.8, 25.2), SteadyZones.SteadySeconds) is { Zone: @"\_TZ.TZ01", Celsius: 25.2 });
-        check("Steady zones: the fixed zone comes back once it moves", steady.Choose(Read(28.1, 25.3), SteadyZones.SteadySeconds + 1) is { Zone: @"\_TZ.TZ00", Celsius: 28.1 });
+        check("Steady zones: nothing shows before a zone has moved", steady.Choose(Read(27.8, 25), 0) is null);
+        check("Steady zones: a moving zone shows, the fixed one never does", steady.Choose(Read(27.8, 25.1), 1) is { Zone: @"\_TZ.TZ01", Celsius: 25.1 }
+            && steady.Choose(Read(27.8, 25.2), SteadyZones.SteadySeconds + 5) is { Zone: @"\_TZ.TZ01", Celsius: 25.2 });
+        check("Steady zones: the fixed zone shows once it moves, and wins as the hotter", steady.Choose(Read(28.1, 25.3), SteadyZones.SteadySeconds + 6) is { Zone: @"\_TZ.TZ00", Celsius: 28.1 });
+        check("Steady zones: a zone still for ten minutes after moving drops out again", steady.Choose(Read(28.1, 25.4), 2 * SteadyZones.SteadySeconds + 6) is { Zone: @"\_TZ.TZ01", Celsius: 25.4 });
         var only = new SteadyZones();
-        only.Choose(new Dictionary<string, double> { ["\\_TZ.TZ00"] = 27.8 }, 0);
-        check("Steady zones: with only a fixed zone the processor shows no temperature", only.Choose(new Dictionary<string, double> { ["\\_TZ.TZ00"] = 27.8 }, SteadyZones.SteadySeconds) is null);
-        check("Steady zones: a zone that comes back starts again", only.Choose(new Dictionary<string, double>(), SteadyZones.SteadySeconds + 1) is null
-            && only.Choose(new Dictionary<string, double> { ["\\_TZ.TZ00"] = 27.8 }, SteadyZones.SteadySeconds + 2) is { Celsius: 27.8 });
+        only.Choose(new Dictionary<string, double> { [@"\_TZ.TZ00"] = 27.8 }, 0);
+        check("Steady zones: with only a fixed zone the processor never shows a temperature", only.Choose(new Dictionary<string, double> { [@"\_TZ.TZ00"] = 27.8 }, 1) is null
+            && only.Choose(new Dictionary<string, double> { [@"\_TZ.TZ00"] = 27.8 }, 10 * SteadyZones.SteadySeconds) is null);
+        check("Steady zones: a zone that comes back starts again, unmoved", only.Choose(new Dictionary<string, double>(), 11 * SteadyZones.SteadySeconds) is null
+            && only.Choose(new Dictionary<string, double> { [@"\_TZ.TZ00"] = 27.8 }, 11 * SteadyZones.SteadySeconds + 1) is null
+            && only.Choose(new Dictionary<string, double> { [@"\_TZ.TZ00"] = 28 }, 11 * SteadyZones.SteadySeconds + 2) is { Celsius: 28 });
         check("Zones: none gives no pick", Temperatures.Pick([]) is null && Temperatures.Zones([], []).Count == 0);
     }
 

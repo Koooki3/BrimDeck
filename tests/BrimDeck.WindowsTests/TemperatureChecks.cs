@@ -63,6 +63,10 @@ internal static class TemperatureChecks
             if (found.Count > 0 && without.Count > 0)
                 check("graphics adapters: the adapter that last gave one keeps it", without.All(shown => temperatures.ReadFor(shown, keys, 3)?.Adapter == temperatures.ReadFor(without[0], keys, 3)?.Adapter));
         }
+        // An adapter not in use is never asked for another's sake: shown alone, an adapter without a sensor reads nothing even
+        // after another gave a temperature, so a powered-down dedicated adapter is left asleep.
+        foreach (var without in keys.Except(found))
+            check($"graphics adapter {without}: an idle adapter is not asked for its sake", temperatures.ReadFor(without, [without], 10) is null);
         check("graphics adapters: an unknown key reads nothing", temperatures.Read("luid_0x7FFFFFFF_0x7FFFFFFF", 0) is null && temperatures.Read("not an adapter", 0) is null);
         Console.WriteLine($"  {keys.Count} adapter(s) listed, {found.Count} with a temperature");
     }
@@ -101,6 +105,8 @@ internal static class TemperatureChecks
         if (drives.Count > 0 && !elevated) check("drives: read without administrator rights", true);
         check("drives: without temperatures asked for, the same drives without them", reader.Sample(2, false) is var plain
             && plain.Count == drives.Count && plain.All(drive => drive.Temperature is null));
+        check("drives: temperatures older than twice their interval are not shown", reader.Sample(1e9, true).All(drive => drive.Temperature is null));
+        reader.Pending.Wait();
         reader.Rest();
         check("drives: the readings stay while the sampler pauses", reader.Sample(3, true).Count == drives.Count);
         reader.Pending.Wait();

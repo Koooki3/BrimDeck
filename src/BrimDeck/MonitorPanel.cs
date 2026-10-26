@@ -68,7 +68,7 @@ public partial class MainWindow
         if (MonitorKey() != _monitorKey)
         {
             // Rebuilt because a kind of sensor turned out to have none (or turned up), the page fades in rather than cuts.
-            if (MonitorSensors() != _monitorSensors) _monitorFade = true;
+            if (BuiltSensors() != _monitorSensors) _monitorFade = true;
             RenderMonitor(); return;
         }
         _monitorView.Update(snapshot, MonitorMotion);
@@ -84,19 +84,23 @@ public partial class MainWindow
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
     // The sort is not part of it: a new sort reorders the list in place. The page keeps lines for the drives (as many as were found,
-    // or as many as fit while they are not read yet; MonitorLayout.StorageLines) and room for a temperature beside the small gauge while its sensor is unknown
-    // or found (MonitorSensors), so it is built again only when the drives are first counted or a sensor turns out to have none:
-    // once per run of the sampler, or when a drive comes or goes.
+    // or as many as fit while they are not read yet, within the layout's room: MonitorLayout.StorageLines) and room for a
+    // temperature beside the small gauge (MonitorSensors), so it is built again only when the lines it shows or that room change:
+    // when the drives are first counted, a sensor turns out to have none or first shows, or a drive comes or goes past the room.
     private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Settings.MonitorProcesses,
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors());
-    private (int Drives, bool Small) _monitorSensors;
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors().Small);
+    // What the shown page was built for: its drives' lines and the small gauge's room.
+    private (int Lines, bool Small) _monitorSensors;
+    private (int Lines, bool Small) BuiltSensors() => (CurrentMonitorLayout().StorageLines, MonitorSensors().Small);
     // Drives: the drives to keep lines for, 0 for none; while they are not counted yet, as many as the page can hold.
     private (int Drives, bool Small) MonitorSensors()
     {
         var monitor = _app.Monitor;
         int lines = !Settings.MonitorStorage || monitor?.StorageState == SensorState.None ? 0 : monitor?.StorageCount is > 0 and var count ? count : 3;
-        var small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor : monitor?.CpuSensor;
-        return (lines, Settings.MonitorTemperatures && small != SensorState.None);
+        // The processor's zones are reserved for only once one has shown (a fixed zone never does); a graphics adapter is
+        // reserved for until it is known to have no sensor.
+        bool small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor != SensorState.None : monitor?.CpuSensor == SensorState.Found;
+        return (lines, Settings.MonitorTemperatures && small);
     }
 
     private void RenderMonitor()
@@ -115,7 +119,7 @@ public partial class MainWindow
         var key = MonitorKey();
         bool fade = _monitorFade; _monitorFade = false;
         if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
-        _monitorKey = key; _monitorSensors = MonitorSensors();
+        _monitorKey = key; _monitorSensors = BuiltSensors();
         // The list being replaced may have been under the pointer; its leave event never comes.
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
         _monitorView = new MonitorView(CurrentMonitorLayout(), MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,

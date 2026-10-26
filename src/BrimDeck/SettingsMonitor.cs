@@ -74,13 +74,13 @@ public sealed partial class SettingsWindow
                 keepPreview: true),
             Toggle(Loc.T("显示硬盘", "Show drives"), S.MonitorStorage, v => Resize(s => s.MonitorStorage = v, DeckPage.Monitor),
                 help:
-                Loc.T("在内存和网速下方按物理硬盘逐行显示已用空间：一块硬盘分成多个盘符时，一行内按盘符分段。只列出内置硬盘上 1 GB 以上的固定分区，不含 U 盘、移动硬盘、网络盘、光驱和虚拟磁盘。面板放不下时，其余硬盘合并为最后一行。每 10 秒读取一次。",
-                    "Shows the space in use on each physical drive, one line per drive, under memory and network: a drive split into several letters has a segment per letter. Only fixed volumes of 1 GB or more on internal drives are listed, not USB sticks, external, network, optical or virtual drives. When the panel has no room for all, the rest share the last line. Read every 10 seconds."),
+                Loc.T("在内存和网速下方按物理硬盘逐行显示已用空间：一块硬盘分成多个盘符时，一行内按盘符分段。只列出内置硬盘上 1 GB 以上的固定分区，不含 U 盘、SD 卡、移动硬盘、网络盘和光驱；Dev Drive 和长期挂载的 VHD 照常列出。面板放不下时，其余硬盘合并为最后一行。每 10 秒读取一次。",
+                    "Shows the space in use on each physical drive, one line per drive, under memory and network: a drive split into several letters has a segment per letter. Only fixed volumes of 1 GB or more on internal drives are listed, not USB sticks, SD cards, external, network or optical drives; a Dev Drive or a VHD mounted for good is listed. When the panel has no room for all, the rest share the last line. Read every 10 seconds."),
                 keepPreview: true),
             Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
-                Loc.T("在 CPU 和 GPU 读数后、各硬盘行的末尾显示温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供，10 分钟内没有变化的值视为固定值不显示；硬盘温度每 30 秒读取一次。",
-                    "Shows temperatures after the CPU and GPU readings and at the end of each drive's line. Sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it; a value that has not changed for 10 minutes is taken for a fixed one and left out; drives are read every 30 seconds."),
+                Loc.T("在 CPU 和 GPU 读数后、各硬盘行的末尾显示温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供；热区读数变化过才显示，从不变化的固定值不显示，此后 10 分钟不变也会隐藏；硬盘温度每 30 秒读取一次。",
+                    "Shows temperatures after the CPU and GPU readings and at the end of each drive's line. Sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it; a zone shows only once its value has changed, so a fixed value never shows, and it is left out again after 10 minutes without change; drives are read every 30 seconds."),
                 keepPreview: true));
     }
 
@@ -257,7 +257,7 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
-        CompactMonitorItems.Temperature => Loc.T("温度", "Temperature"), CompactMonitorItems.Storage => Loc.T("硬盘", "Drive"), _ => "CPU"
+        CompactMonitorItems.Temperature => Loc.T("温度", "Temperature"), CompactMonitorItems.Storage => Loc.T("系统所在硬盘", "System drive"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -295,7 +295,7 @@ public sealed partial class SettingsWindow
             {
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
                 CompactMonitorItems.Temperature => Loc.T("温度始终显示数值：CPU 与 GPU 中较高的一个。", "The temperature always shows its figure: the higher of the CPU's and the GPU's."),
-                CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值：系统盘已用空间的百分比。", "The drive always shows its figure: the share of the system drive in use."),
+                CompactMonitorItems.Storage => Loc.T("始终显示数值：Windows 所在硬盘已用空间的百分比（不含 USB 盘和 SD 卡）。", "Always shows its figure: the share in use of the drive Windows is on (not USB drives or SD cards)."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);

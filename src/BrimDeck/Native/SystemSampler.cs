@@ -508,13 +508,16 @@ internal sealed class GpuProvider
         var kinds = GpuEngines.Order(sums.Where(pair => pair.Key.Adapter == busiest.Adapter && pair.Key.Type.Length > 0)
             .Select(pair => new GpuEngine(pair.Key.Type, pair.Value / 100)));
         var info = _adapters.TryGetValue(busiest.Adapter, out var known) ? known : default;
-        var heat = temperatures?.ReadFor(busiest.Adapter, sums.Keys.Select(key => key.Adapter).Distinct().Order(StringComparer.OrdinalIgnoreCase).ToList(), now);
-        // Another adapter's temperature is named, as the page shows it beside this adapter's usage.
-        string? heatFrom = heat is { } h && h.Adapter != busiest.Adapter ? (_adapters.TryGetValue(h.Adapter, out var other) ? other.Name : "GPU") : null;
+        // Only adapters in use are asked for another's sake (GpuTemperatures.ReadFor).
+        var heat = temperatures?.ReadFor(busiest.Adapter, sums.Where(pair => pair.Value > 0).Select(pair => pair.Key.Adapter).Distinct().Order(StringComparer.OrdinalIgnoreCase).ToList(), now);
+        // Another adapter's temperature is named, and marked with that adapter's kind, as the page shows it beside this adapter's usage.
+        (string Name, ulong Dedicated)? from = heat is { } h && h.Adapter != busiest.Adapter && _adapters.TryGetValue(h.Adapter, out var found) ? found : null;
         return new GpuSample(Math.Clamp(busiest.Usage / 100, 0, 1), AdapterMemory(_memory ? MemoryPath : null, busiest.Adapter))
         {
             Engines = kinds, SharedBytes = AdapterMemory(_shared ? SharedPath : null, busiest.Adapter),
-            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null, Temperature = heat?.Celsius, TemperatureFrom = heatFrom
+            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null, Temperature = heat?.Celsius,
+            TemperatureFrom = heat is { } other && other.Adapter != busiest.Adapter ? (from?.Name is { Length: > 0 } name ? name : "GPU") : null,
+            TemperatureKind = heat is { } kind && kind.Adapter != busiest.Adapter ? Temperatures.AdapterKind(from?.Dedicated ?? 0) : null
         };
     }
 

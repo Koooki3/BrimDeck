@@ -39,35 +39,44 @@ internal sealed class ThermalZones(PdhQuery? pdh)
         }
         if (!_available || !collected) return null;
         var zones = Temperatures.Zones(pdh.Read(PrecisePath), pdh.Read(WholePath));
-        if (zones.Count > 0) _state = SensorState.Found; else if (_state == SensorState.Unknown) _state = SensorState.None;
-        return _steady.Choose(zones, now);
+        // Found once a zone gives a temperature (it has moved, SteadyZones); None without any zone. Zones that have not moved yet
+        // leave it Unknown, and the page keeps no room for a processor temperature until one shows.
+        var cpu = _steady.Choose(zones, now);
+        if (cpu is not null) _state = SensorState.Found; else if (zones.Count == 0 && _state == SensorState.Unknown) _state = SensorState.None;
+        return cpu;
     }
 }
 
 // Graphics adapters as Task Manager reads their temperature: the adapter's performance data from the graphics kernel (WDDM 2.4
 // and later). Each adapter is opened by its LUID and kept open. An adapter whose driver says it does not report the data (a
-// software renderer) is not asked again; one that gives no temperature for now, or fails otherwise, is asked again after a
-// pause that grows from 5 seconds to 5 minutes.
+// software renderer) is not asked again. One that answers with no temperature (an adapter that has just woken reports zero) is
+// asked again after 5 seconds; one whose query fails otherwise after a pause that grows from 5 seconds to 5 minutes, which
+// starts over once the adapter becomes the one the page shows.
 internal sealed class GpuTemperatures : IDisposable
 {
     // D3DKMT_ADAPTER_PERFDATA on 64-bit Windows: PhysicalAdapterIndex, then 8-byte figures; Temperature (tenths of a degree
     // Celsius) at 56, 64 bytes in all.
     private const int PerfDataSize = 64, TemperatureOffset = 56, AdapterPerfData = 62;
     private const uint NotSupported = 0xC00000BB, InvalidParameter = 0xC000000D;
-    private const double FirstPause = 5, LongestPause = 300;
+    private const double FirstPause = 5, LongestPause = 300, ZeroPause = 5;
     private sealed class Adapter { public uint Handle; public bool Never; public double RetryAt = double.NegativeInfinity, Pause; }
     private readonly Dictionary<string, Adapter> _adapters = new(StringComparer.OrdinalIgnoreCase);
     private readonly IntPtr _data = Marshal.AllocHGlobal(PerfDataSize);
-    private string? _last;
+    private string? _last, _shown;
     private bool _disposed;
     private volatile SensorState _state;
     public SensorState State => _state;
 
     // The temperature for the adapter the page shows: its own where it has one. Otherwise the adapter that last gave one, and
     // then any other, so an adapter without a sensor (most integrated adapters) never takes the temperature away while the
-    // busiest adapter changes. Adapter is the key of the one read. adapters: every adapter's key, in a fixed order.
-    public (double Celsius, string Adapter)? ReadFor(string shown, IReadOnlyList<string> adapters, double now)
+    // busiest adapter changes. Adapter is the key of the one read. working: the keys of the adapters in use (some engine busy
+    // above zero), in a fixed order; an idle adapter is never asked for another's sake, so a dedicated adapter powered down in a
+    // hybrid laptop stays asleep. The shown adapter is asked, as the page shows its usage anyway.
+    public (double Celsius, string Adapter)? ReadFor(string shown, IReadOnlyList<string> working, double now)
     {
+        // A newly shown adapter is asked at once, not after a pause it built up while another was shown.
+        if (shown != _shown) { _shown = shown; if (_adapters.TryGetValue(shown, out var fresh) && !fresh.Never) { fresh.Pause = 0; fresh.RetryAt = double.NegativeInfinity; } }
+        var adapters = working;
         if (Read(shown, now) is { } own) return Found(own, shown);
         if (_last is { } last && last != shown && adapters.Contains(last, StringComparer.OrdinalIgnoreCase) && Read(last, now) is { } kept) return Found(kept, last);
         foreach (var adapter in adapters)
@@ -94,7 +103,9 @@ internal sealed class GpuTemperatures : IDisposable
         if (status == 0)
         {
             if (Temperatures.FromDeciCelsius((uint)Marshal.ReadInt32(_data, TemperatureOffset)) is { } celsius) { adapter.Pause = 0; return celsius; }
-            return Wait(adapter, now);
+            // An answer without a temperature is no failure: asked again shortly, without growing the pause.
+            adapter.RetryAt = now + ZeroPause;
+            return null;
         }
         // The driver does not report the data at all: this adapter is left alone from now on. Any other failure (the adapter
         // went away, the driver was busy) opens it again after the pause.
