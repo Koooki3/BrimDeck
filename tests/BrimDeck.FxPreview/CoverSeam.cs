@@ -3,10 +3,12 @@ using System;
 // Round 15: the cover seam. The light look's glass over an open panel, rendered twice: with its text cover (T) and without
 // (N, the same frame with no text regions). The cover is D = T - N. Where it turns on (the band where D is between 15 % and
 // 85 % of its strong value), the low-frequency gradient it adds, |grad D|, is set against the glass's own natural variation,
-// the mean |grad N| over the panel, both in CIELAB L* and C* and both at the feather's scale (boxes of 3 DIPs, differences
-// over 3 DIPs). A seam no stronger than the glass's own variation scores at most 1. Next to it, the covered zone (D above
-// 70 %) against the uncovered glass within 24 DIPs of it: their mean colours' Delta E 2000 and chroma ratio, for T and for N
-// (N's are the backdrop's own difference there; the cover's share is T's less N's). A note, not a check.
+// the mean |grad N| over the panel, both in CIELAB L* and C* and both at the feather's scale (boxes of 3 DIPs, central
+// differences across 6). A seam no stronger than the glass's own variation scores at most 1; over a backdrop with nothing in
+// it (a plain colour) that ratio means little, so the peak |grad D| is given too, in L* per DIP. The cover's strength is
+// |D| (a cover may darken as well as lighten). Next to it, the covered zone (|D| above 70 %) against the uncovered glass
+// within a 24 DIP box of it: their mean colours' Delta E 2000 and chroma ratio, for T and for N (N's are the backdrop's own
+// difference there; the cover's share is T's less N's). A note, not a check.
 internal static class CoverSeam
 {
     internal static void Measure(string name, byte[] covered, byte[] free, byte[] alpha, int stride, int gx, int gy, int w, int h, double scale)
@@ -26,8 +28,10 @@ internal static class CoverSeam
         var dl = new double[w * h]; var dc = new double[w * h];
         for (int i = 0; i < w * h; i++) { dl[i] = tl[i] - nl[i]; dc[i] = tc[i] - nc[i]; }
         var sdl = Smooth(dl, w, h, r); var sdc = Smooth(dc, w, h, r); var snl = Smooth(nl, w, h, r); var snc = Smooth(nc, w, h, r);
-        // The cover's strength: D's L* smoothed wider (4 DIPs), against its 95th percentile inside.
-        var wide = Smooth(dl, w, h, (int)Math.Round(4 * scale));
+        // The cover's strength: |D| in L* smoothed wider (4 DIPs), against its 95th percentile inside.
+        var magnitude = new double[w * h];
+        for (int i = 0; i < w * h; i++) magnitude[i] = Math.Abs(dl[i]);
+        var wide = Smooth(magnitude, w, h, (int)Math.Round(4 * scale));
         var values = new System.Collections.Generic.List<double>();
         for (int i = 0; i < w * h; i++) if (inside[i]) values.Add(wide[i]);
         if (values.Count < 100) return;
@@ -44,7 +48,7 @@ internal static class CoverSeam
             double gyv = (f[Math.Min(h - 1, y + s) * w + x] - f[Math.Max(0, y - s) * w + x]) / (2.0 * s / scale);
             return Math.Sqrt(gxv * gxv + gyv * gyv);
         }
-        double bandL = 0, bandC = 0, natL = 0, natC = 0; int band = 0, all = 0;
+        double bandL = 0, bandC = 0, natL = 0, natC = 0, peak = 0; int band = 0, all = 0;
         var zone = new sbyte[w * h];   // 1 covered, -1 uncovered
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
@@ -53,7 +57,7 @@ internal static class CoverSeam
                 if (!inside[i]) continue;
                 double k = wide[i] / strong;
                 natL += Grad(snl, x, y); natC += Grad(snc, x, y); all++;
-                if (k > .15 && k < .85) { bandL += Grad(sdl, x, y); bandC += Grad(sdc, x, y); band++; }
+                if (k > .15 && k < .85) { double g = Grad(sdl, x, y); bandL += g; bandC += Grad(sdc, x, y); band++; peak = Math.Max(peak, g); }
                 zone[i] = (sbyte)(k > .7 ? 1 : k < .15 ? -1 : 0);
             }
         // The uncovered glass next to the covered: within 24 DIPs of it.
@@ -85,7 +89,7 @@ internal static class CoverSeam
             zones = FormattableString.Invariant($"covered vs next to it: dE00 {DeltaE00(tCov, tUnc):0.0} (without cover {DeltaE00(nCovM, nUncM):0.0}), chroma ratio {C(tCov) / Math.Max(C(tUnc), .5):0.00} (without {C(nCovM) / Math.Max(C(nUncM), .5):0.00}), L* {tCov.Item1 - tUnc.Item1:+0.0;-0.0} (without {nCovM.Item1 - nUncM.Item1:+0.0;-0.0})");
         }
         double seamL = band == 0 ? 0 : bandL / band / Math.Max(natL / all, 1e-3), seamC = band == 0 ? 0 : bandC / band / Math.Max(natC / all, 1e-3);
-        Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: cover seam: L* {seamL:0.00}, C* {seamC:0.00} of the glass's own variation (cover up to {strong:0.0} L*; natural {natL / all:0.00} L*/DIP, {natC / all:0.00} C*/DIP); {zones}"));
+        Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: cover seam: L* {seamL:0.00}, C* {seamC:0.00} of the glass's own variation, peak {peak:0.00} L*/DIP (cover up to {strong:0.0} L*; natural {natL / all:0.00} L*/DIP, {natC / all:0.00} C*/DIP); {zones}"));
     }
 
     private static double[] Smooth(double[] f, int w, int h, int r)

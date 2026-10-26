@@ -317,7 +317,7 @@ internal static partial class LiquidPages
         var frame = LiquidFrame.Preset(dark, layer.W, layer.H, (float)layer.CornerTop, (float)layer.CornerBottom, (float)layer.Shoulder, (float)Scale)
             with { Open = (float)layer.Open, TextRects = layer.TextRects };
         // The collapsed row (GlassBackdrop.ContentArea, round 15): the app hands it to the glass on every frame, so the pages do too.
-        if (layer.ContentRow is { } row)
+        if (layer.ContentRow is { IsEmpty: false } row)
             frame = frame with { ContentLeft = (float)(row.Left * Scale), ContentTop = (float)(row.Top * Scale), ContentRight = (float)(row.Right * Scale), ContentBottom = (float)(row.Bottom * Scale) };
         if (Environment.GetEnvironmentVariable("LIQUID_DEBUG") == "1") Console.WriteLine($"NOTE: {name}: {layer.TextRects?.Length / 4 ?? -1} text regions, open {layer.Open:0.00}, island {layer.W}x{layer.H}: " + (layer.TextRects is { } tr ? string.Join(" ", Enumerable.Range(0, tr.Length / 4).Select(i => $"[{tr[i * 4]:0},{tr[i * 4 + 1]:0},{tr[i * 4 + 2]:0},{tr[i * 4 + 3]:0}]")) : ""));
         var glass = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H), frame, (int)Math.Ceiling(48 * Scale));
@@ -550,7 +550,8 @@ internal static partial class LiquidPages
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, mask, w * 4)));
             Directory.CreateDirectory(maskDir);
-            using var file = File.Create(Path.Combine(maskDir, name.Replace(' ', '_') + ".png"));
+            string safe = string.Concat(name.Select(ch => ch == ' ' || Array.IndexOf(Path.GetInvalidFileNameChars(), ch) >= 0 ? '_' : ch));
+            using var file = File.Create(Path.Combine(maskDir, safe + ".png"));
             encoder.Save(file);
         }
         double behind = 0, signal = 0; int count = 0;

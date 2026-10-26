@@ -306,7 +306,7 @@ internal sealed class LiquidRenderer : IDisposable
     private (float[]? Rects, int Width, int Height, float Tile) _textMaskFor;
     private byte[] _textCells = [], _textPair = [];
     private float[] _textField = [], _textSpare = [], _textNear = [];
-    // Round 15: the wide field three box passes of 11 cells (about a Gaussian of 46 DIPs), the near one two of 3 (about 13).
+    // Round 15: the wide field three box passes of 11 cells (about a Gaussian of 46 DIPs), the near one two of 3 (about 11).
     private const int TextBlurCells = 11, TextBlurPasses = 3, TextNearCells = 3;
     // A box blur of radius cells each side along rows (horizontal) or columns, from one grid into another.
     private static void Box(float[] from, float[] to, int cols, int rows, bool horizontal, int radius)
@@ -316,13 +316,15 @@ internal sealed class LiquidRenderer : IDisposable
         {
             float sum = 0;
             int At(int k) => horizontal ? line * cols + Math.Clamp(k, 0, n - 1) : Math.Clamp(k, 0, n - 1) * cols + line;
-            // The grid's edge cells repeated past it (round 15): the field does not fall off toward the panel's edge, so text
-            // near the edge is covered as text in the middle is.
-            for (int k = -radius; k <= radius; k++) sum += from[At(k)];
+            // Nothing past the grid's edge (zeros): the field falls off toward the panel's edge, so its margins keep the glass's
+            // own translucency (round 15 tried the edge cells repeated: the margins of a dark backdrop went white).
+            for (int k = -radius; k <= radius; k++) sum += k < 0 || k >= n ? 0 : from[At(k)];
             for (int k = 0; k < n; k++)
             {
                 to[At(k)] = sum / span;
-                sum += from[At(k + radius + 1)] - from[At(k - radius)];
+                int add = k + radius + 1, drop = k - radius;
+                if (add < n) sum += from[At(add)];
+                if (drop >= 0) sum -= from[At(drop)];
             }
         }
     }
@@ -332,18 +334,27 @@ internal sealed class LiquidRenderer : IDisposable
         if (f.TextRects is not { } rects || f.Faithful) { _textInfo = default; return null; }
         float tile = MathF.Max(1, TextTileDip * scale);
         int cols = (int)MathF.Ceiling(f.Width / tile) + 1, rows = (int)MathF.Ceiling(f.Height / tile) + 1;
-        if (_textMask is null || _textMaskSize != (cols, rows))
+        // The texture in steps of 16 cells (the panel opening changes the grid on every frame; the texture is not made again
+        // for each), the cells past the grid empty.
+        int textureCols = (cols + 15) / 16 * 16, textureRows = (rows + 15) / 16 * 16;
+        if (_textMask is null || _textMaskSize != (textureCols, textureRows))
         {
             _textMaskView?.Dispose(); _textMask?.Dispose();
-            _textMask = _device.CreateTexture2D(new Texture2DDescription(Format.R8G8_UNorm, (uint)cols, (uint)rows, 1, 1, BindFlags.ShaderResource));
+            _textMask = _device.CreateTexture2D(new Texture2DDescription(Format.R8G8_UNorm, (uint)textureCols, (uint)textureRows, 1, 1, BindFlags.ShaderResource));
             _textMaskView = _device.CreateShaderResourceView(_textMask);
-            _textMaskSize = (cols, rows);
+            _textMaskSize = (textureCols, textureRows);
             _textMaskFor = default;
         }
         if (_textMaskFor != (rects, f.Width, f.Height, tile))
         {
             _textMaskFor = (rects, f.Width, f.Height, tile);
-            if (_textCells.Length < cols * rows) { _textCells = new byte[cols * rows]; _textField = new float[cols * rows]; _textSpare = new float[cols * rows]; _textNear = new float[cols * rows]; _textPair = new byte[cols * rows * 2]; }
+            // The grids grow with room to spare (half as much again), so an opening panel does not allocate them on every frame.
+            if (_textCells.Length < cols * rows)
+            {
+                int room = Math.Max(cols * rows, _textCells.Length * 3 / 2);
+                _textCells = new byte[room]; _textField = new float[room]; _textSpare = new float[room]; _textNear = new float[room];
+            }
+            if (_textPair.Length < textureCols * textureRows * 2) _textPair = new byte[Math.Max(textureCols * textureRows * 2, _textPair.Length * 3 / 2)];
             Array.Clear(_textCells, 0, cols * rows);
             for (int i = 0; i + 3 < rects.Length; i += 4)
             {
@@ -360,15 +371,22 @@ internal sealed class LiquidRenderer : IDisposable
             }
             // The density field (round 14, widened in round 15): the cells' coverage blurred wide into a low-frequency field (red),
             // so the glass grows denser smoothly over a block of text and its edge is a long ramp, never a patch round a glyph;
-            // and a nearer one (green, about 13 DIPs) for the little help a lone label still wants.
+            // and a nearer one (green, about 11 DIPs) for the little help a lone label still wants.
             for (int i = 0; i < cols * rows; i++) _textField[i] = _textCells[i] / 255f;
             for (int pass = 0; pass < TextBlurPasses; pass++) { Box(_textField, _textSpare, cols, rows, true, TextBlurCells); Box(_textSpare, _textField, cols, rows, false, TextBlurCells); }
             for (int i = 0; i < cols * rows; i++) _textNear[i] = _textCells[i] / 255f;
             for (int pass = 0; pass < 2; pass++) { Box(_textNear, _textSpare, cols, rows, true, TextNearCells); Box(_textSpare, _textNear, cols, rows, false, TextNearCells); }
-            for (int i = 0; i < cols * rows; i++) { _textPair[i * 2] = (byte)Math.Clamp((int)MathF.Round(_textField[i] * 255), 0, 255); _textPair[i * 2 + 1] = (byte)Math.Clamp((int)MathF.Round(_textNear[i] * 255), 0, 255); }
-            _context.UpdateSubresource(_textPair, _textMask, 0, (uint)cols * 2, 0);
+            Array.Clear(_textPair, 0, textureCols * textureRows * 2);
+            for (int y = 0; y < rows; y++)
+                for (int x = 0; x < cols; x++)
+                {
+                    int i = y * cols + x, o = (y * textureCols + x) * 2;
+                    _textPair[o] = (byte)Math.Clamp((int)MathF.Round(_textField[i] * 255), 0, 255);
+                    _textPair[o + 1] = (byte)Math.Clamp((int)MathF.Round(_textNear[i] * 255), 0, 255);
+                }
+            _context.UpdateSubresource(_textPair, _textMask, 0, (uint)textureCols * 2, 0);
         }
-        _textInfo = (tile, 1f / cols, 1f / rows, 1);
+        _textInfo = (tile, 1f / textureCols, 1f / textureRows, 1);
         return _textMaskView;
     }
 
@@ -608,9 +626,10 @@ internal sealed class LiquidRenderer : IDisposable
     // that is in (not the oldest, as a single texture made it). The percentiles come from a histogram (no sort: a measure of
     // the open panel reads some 37,000 texels).
     private const int MeasureTexels = 512, Bins = 1024, MeasureRing = 3;
+    // Each slot keeps its own size (the level grows while the pyramid does, as the panel opens): a copy in flight is read at
+    // its size, never dropped for a newer one's.
     private readonly ID3D11Texture2D?[] _measures = new ID3D11Texture2D?[MeasureRing];
-    private (int Width, int Height, int Level) _measureFor;
-    private Format _measureFormat;
+    private readonly (int Width, int Height, int Level, Format Format)[] _measureFor = new (int, int, int, Format)[MeasureRing];
     private int _measureHead, _measurePending;
     private readonly (int Pad, int Width, int Height)[] _measuredRegions = new (int, int, int)[MeasureRing];
     private readonly byte[] _measureRow = new byte[MeasureTexels * 4 * 2];
@@ -631,23 +650,24 @@ internal sealed class LiquidRenderer : IDisposable
         while ((w > MeasureTexels || level < least) && level < _built) { level++; w = _down[level]!.Width; h = _down[level]!.Height; }
         var source = level == 0 ? _copy : _down[level]!;
         var format = level == 0 ? _copyFor.Format : Pyramid;
-        if (_measureFor != (w, h, level) || _measureFormat != format)
-        {
-            // Another size: the copies in flight are of the old one, dropped with their textures.
-            for (int i = 0; i < MeasureRing; i++) { _measures[i]?.Dispose(); _measures[i] = null; }
-            _measurePending = 0;
-            _measureFor = (w, h, level);
-            _measureFormat = format;
-        }
         int slot = (_measureHead + _measurePending) % MeasureRing;
-        var target = _measures[slot] ??= _device.CreateTexture2D(new Texture2DDescription(format, (uint)w, (uint)h, 1, 1, BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read));
+        if (_measures[slot] is null || _measureFor[slot] != (w, h, level, format))
+        {
+            // A free slot of another size is made again (it holds no copy). On a device just lost this throws; that frame then
+            // goes without a measure, and the next look at the desktop finds the loss (DesktopSource.Generation).
+            _measures[slot]?.Dispose(); _measures[slot] = null;
+            try { _measures[slot] = _device.CreateTexture2D(new Texture2DDescription(format, (uint)w, (uint)h, 1, 1, BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read)); }
+            catch (SharpGen.Runtime.SharpGenException) { return; }
+            _measureFor[slot] = (w, h, level, format);
+        }
+        var target = _measures[slot]!;
         _context.CopySubresourceRegion(target, 0, 0, 0, 0, source.Texture, 0);
         _measuredRegions[slot] = (pad, width, height);
         _measurePending++;
     }
 
-    // The mean luma (0..1, sRGB) of the background under the island, from the last copy whose answer is in; false while none
-    // is (the next frame's copy goes out once this one is read).
+    // The mean luma (0..1, sRGB) of the background under the island, from the newest copy whose answer is in; false while
+    // none is. A copy goes out on each drawing while the ring has room.
     // Whether a measure is out, to be read on a later frame.
     public bool Measuring => _measurePending > 0;
     public bool TryBackdrop(out double luma) => Read(wait: false, out luma);
@@ -676,11 +696,11 @@ internal sealed class LiquidRenderer : IDisposable
         if (_context.Map(measure, 0, MapMode.Read, wait ? Vortice.Direct3D11.MapFlags.None : Vortice.Direct3D11.MapFlags.DoNotWait, out var mapped).Failure) return false;
         try
         {
-            var (w, h, level) = _measureFor;
+            var (w, h, level, format) = _measureFor[slot];
             double step = 1 << level, sum = 0;
             int count = 0;
             var (pad, width, height) = _measuredRegions[slot];
-            bool half = _measureFormat == Pyramid;
+            bool half = format == Pyramid;
             Array.Clear(_histogram);
             for (int y = 0; y < h; y++)
             {

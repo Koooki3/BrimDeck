@@ -192,9 +192,18 @@ internal static class DesktopSourceTests
         source.DeviceChanged += () => { raised++; inside |= new StackTrace().ToString().Contains("DesktopSource.Capture", StringComparison.Ordinal); };
         var frame = LiquidFrame.Preset(false, region.Width - 48, region.Height - 48, 20, 20, 0, 1);
         long now = 0;
-        // Frames a PollMs apart (E18: a frame that changes only the pointer's light is drawn over the last capture, and a lost
-        // device found at the next look, at most PollMs later).
-        bool Draw(bool tick) { for (int i = 0; i < 40; i++) { if (tick ? host.Tick(region, 24, frame, now += 100) : host.Frame(region, 24, frame with { Hover = i / 40f }, now += LiquidIdle.PollMs)) return true; Thread.Sleep(25); } return false; }
+        // Frames 16 ms apart, only the hover changing (E18: drawn over the last capture until the next look, at most PollMs on):
+        // the lost device is found at the next look and the renderer made again, within a few frames.
+        bool Draw(bool tick, LiquidRenderer? before = null)
+        {
+            for (int i = 0; i < 40; i++)
+            {
+                bool drew = tick ? host.Tick(region, 24, frame, now += 100) : host.Frame(region, 24, frame with { Hover = i / 40f }, now += 16);
+                if (drew && (before is null || !ReferenceEquals(before, host.Renderer))) return true;
+                if (!drew) Thread.Sleep(25);
+            }
+            return false;
+        }
         if (!Draw(false)) { Console.WriteLine("SKIP: device loss (no capture)."); return; }
         var lose = typeof(DesktopSource).GetMethod("Lose", BindingFlags.NonPublic | BindingFlags.Instance)!;
         int swaps = 20, drawn = 0, errors = 0;
@@ -202,7 +211,7 @@ internal static class DesktopSourceTests
         {
             var before = host.Renderer;
             lose.Invoke(source, null);
-            try { if (Draw(k % 2 == 1) && !ReferenceEquals(before, host.Renderer)) drawn++; }
+            try { if (Draw(k % 2 == 1, before) && !ReferenceEquals(before, host.Renderer)) drawn++; }
             catch (Exception ex) when (ex is ObjectDisposedException or NullReferenceException or SharpGen.Runtime.SharpGenException) { errors++; }
         }
         check($"device loss: every lost device is replaced and drawing goes on, frames and ticks alike ({drawn} of {swaps}, {errors} errors)", drawn == swaps && errors == 0);

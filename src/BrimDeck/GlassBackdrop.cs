@@ -456,8 +456,9 @@ internal sealed class GlassBackdrop : IDisposable
                 LiquidFrame.Preset(true, width, height, (float)c.TopLeft, (float)c.BottomLeft, (float)shown.Shoulder, (float)scale), (float)darkness);
             // The band is the glass's own (LiquidFrame.TextLight, TextDark: the theme's text kept at 4.5:1 by an affine lift that
             // keeps the backdrop's detail), not the held blur's narrower one, which the blur needs for its own sake.
-            // D13: the glass's presence is the island's opacity as it comes in and goes (in steps of 1/64, so a held opacity
-            // draws nothing more), its refraction and rim light growing with it.
+            // D13: the glass's presence is the island's opacity as it comes in and goes, its material's blend included (the
+            // indicator's, a notice's handoff), in steps of 1/64 so a held opacity draws nothing more; its refraction, rim light
+            // and edge grow with it.
             var next = Pointered(preset, width, height, scale) with { Presence = (float)(Math.Round(opacity * 64) / 64) };
             // Drawn again only when the glass changed (its shape, place, look, the press) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),

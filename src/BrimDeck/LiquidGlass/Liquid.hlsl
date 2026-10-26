@@ -653,7 +653,7 @@ float TextFeathered(float2 p)
 {
     if (TextInfo.w < .5) return 1;
     // The density over the text, a low-frequency field (the regions blurred about 46 DIPs, LiquidRenderer.TextMask; round 15):
-    // the glass grows denser smoothly over a block of text, its edge a long ramp; a nearer field (about 13 DIPs) gives a lone
+    // the glass grows denser smoothly over a block of text, its edge a long ramp; a nearer field (about 11 DIPs) gives a lone
     // label the little help it still wants, as a soft swell, never a box.
     float2 cell = TextCells.SampleLevel(Smooth, p / TextInfo.x * TextInfo.yz, 0).rg;
     return saturate(max(cell.r * DensityGain, cell.g * GlyphHelp));
@@ -687,7 +687,7 @@ float3 Slab(float2 p, float sd, float2 outward)
     // deeper rim lens.
     float size = saturate((shorter / Scale - 20) / 220);
     // D13 (round 15): the refraction grows with the glass's presence as it comes in and goes (the island's fade): the glass
-    // condenses, it does not only fade.
+    // condenses, it does not only fade. Its edge (the hairline, the shaded rim) grows with it, never ahead of the light.
     float presence = smoothstep(0, 1, saturate(PresenceInfo.x));
     float strength = lerp(.65, .95, size) * SlabRefraction / .9 * presence;
     float through = min((18 + 57 * strength) * Scale, lerp(2.2, 3.2, size) * bevel);
@@ -743,10 +743,16 @@ float3 Slab(float2 p, float sd, float2 outward)
         c = Lum(c) + (c - Lum(c)) * lerp(1, AcrylicSaturation, turned);
         // Between text the light look's body carries a little of it too (BodyCover), so the cover reads as the glass growing
         // denser, not as a plate laid on it.
-        // Where the backdrop behind the text asks for more (much darker than the light look), the density
-        // over the text rises too; over a calm backdrop it stays low and the glass translucent (round 14b).
-        float dim = saturate((.5 - Stats(p).x) / .3);   // a backdrop much darker than the light look
-        float dense = saturate(text * (1 + 1.2 * dim));
+        // The density eases in and out of the open panel's text field (smoothstep: no knee where it reaches its full, round
+        // 15). Over a backdrop with almost nothing in it (its 2nd to 98th percentile within a few levels: a plain colour, a
+        // still second screen) there is no structure for a local cover to hide its edge in, so there the open panel grows
+        // denser evenly - one glass, not white clouds with grey gaps.
+        // Where the backdrop asks for more (much darker than the light look) the field reaches its full sooner, still eased.
+        float dim = saturate((.5 - Stats(p).x) / .3);
+        float flat = saturate(1 - (BandB - BandA - .04) / .16) * opened;
+        // (The collapsed row keeps its own ramp from the rim, as round 14 tuned it.)
+        float boost = 1 + 1.2 * dim, field = opened * max(TextFeathered(p), CoverDark());
+        float dense = max(max(saturate(row * boost), smoothstep(0, 1, saturate(field * boost))), flat);
         c = lerp(c, SetLum(c, Lum(target)), max(a * dense, BodyCover * opened * thickness));
         c = lerp(c, target, AcrylicTintDark * turned * text);
     }
@@ -758,7 +764,9 @@ float3 Slab(float2 p, float sd, float2 outward)
     float3 hue = (backdrop - Lum(backdrop)) / max(cap, 1e-4);
     c = lerp(c, l0 + hue * own, saturate(cap * 6));
     float top = max(c.r, max(c.g, c.b)), saturationCap = cap / max(max(backdrop.r, max(backdrop.g, backdrop.b)), 1e-4);
-    cap = min(cap, saturationCap * top);
+    // (The dark look may keep Acrylic's 1.25 over the backdrop's saturation: navy over a pale blue, not slate; its chroma
+    // still no more than the backdrop's.)
+    cap = min(cap, saturationCap * top * lerp(1, AcrylicSaturation, dark));
     own = Chroma(c);
     if (own > cap) c = l0 + (c - l0) * cap / max(own, 1e-5);
 
@@ -794,11 +802,11 @@ float3 Slab(float2 p, float sd, float2 outward)
     // A 0.75 pt dark hairline just inside the edge (iOS 27's contour).
     // Round 14b: about a third as strong, in the backdrop's own colour (darkened), and fading where the backdrop is already
     // darker than the glass (there the edge reads by itself): the glass's own edge, not an outline.
-    float hair = exp(-pow((d - .9 * Scale) / (.45 * Scale), 2)) * lerp(.05, .09, dark) * thin * saturate((Lum(backdrop) - Lum(c)) * 3 + .6);
+    float hair = exp(-pow((d - .9 * Scale) / (.45 * Scale), 2)) * lerp(.05, .09, dark) * thin * saturate((Lum(backdrop) - Lum(c)) * 3 + .6) * presence;
     c = lerp(c, saturate(backdrop) * .55, hair);
     float sheen = .045 * saturate(dot(-pc, key) * .5 + .5);
     c = lerp(c, 1, sheen * (1 - even * .7) * (1 - .5 * dark));
-    c *= 1 - pow(edge, 8) * .085 * saturate(dot(outward, -key) * .5 + .5);
+    c *= 1 - pow(edge, 8) * .085 * saturate(dot(outward, -key) * .5 + .5) * presence;
     return saturate(c);
 }
 

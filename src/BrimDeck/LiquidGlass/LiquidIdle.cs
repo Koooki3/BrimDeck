@@ -34,7 +34,7 @@ internal sealed class LiquidIdle
     // polled); whether the poll owes a drawing whatever the comparison says (the swap chain holds nothing of it).
     private LiquidFrame _drawn;
     private RECT _drawnOver;
-    private bool _holds, _owed = true;
+    private bool _holds, _owed = true, _lastChanged = true;
     private long _lookedAt = long.MinValue / 2;
     // A tick drew the glass and its measure is to be read SettleMs later (Interval); that tick is under way (Settling); a settle
     // tick was the last one, so the next look keeps the pace from the look before it.
@@ -62,6 +62,7 @@ internal sealed class LiquidIdle
         Settling = false;
         _lookedAt = now;
         if (!source.Update(region, out bool changed) || source.Texture is not { } background) return false;
+        _lastChanged = changed;
         if (changed || _owed)
         {
             if (!render(background)) return false;
@@ -80,16 +81,18 @@ internal sealed class LiquidIdle
     public bool Frame(DesktopSource source, RECT region, in LiquidFrame frame, Func<ID3D11Texture2D, bool> render, long now)
     {
         bool same = _holds && frame == _drawn && region == _drawnOver;
-        // E18: the pointer's light and the press are shading over the same backdrop: drawn again over the last capture at the
-        // frame rate, the desktop still looked at no oftener than PollMs (what lies behind cannot have moved with the pointer).
-        bool shading = !same && _holds && region == _drawnOver
-            && frame with { PointerX = _drawn.PointerX, PointerY = _drawn.PointerY, Hover = _drawn.Hover, Press = _drawn.Press } == _drawn;
+        // E18: the pointer's light, the press and the glass's presence (its fade) are shading over the same backdrop: drawn
+        // again over the last capture at the frame rate, the desktop still looked at no oftener than PollMs - as long as the
+        // last look found the desktop still (a video or a window moving behind keeps being looked at on every frame).
+        bool shading = !same && _holds && region == _drawnOver && !_lastChanged
+            && frame with { PointerX = _drawn.PointerX, PointerY = _drawn.PointerY, Hover = _drawn.Hover, Press = _drawn.Press, Presence = _drawn.Presence } == _drawn;
         bool changed = false, looked = false;
         if ((!same && !shading) || now - _lookedAt >= PollMs)
         {
             looked = true;
             _lookedAt = now;
             if (!source.Update(region, out changed) || source.Texture is null) return false;
+            _lastChanged = changed;
         }
         if (same && !changed) return true;
         if (source.Texture is null || !render(source.Texture)) return false;
@@ -102,7 +105,7 @@ internal sealed class LiquidIdle
     }
 
     // The swap chain no longer holds what was drawn (a new renderer, the glass let go or not shown for a while).
-    public void Forget() { _holds = false; _owed = true; }
+    public void Forget() { _holds = false; _owed = true; _lastChanged = true; }
 
     // The wait before the next tick, and whether that tick only reads the measure (Settling): pointer, whether the pointer is
     // over the island and moves or presses (PointerActive); measuring, whether a measure of the backdrop is out

@@ -76,18 +76,25 @@ internal static class LiquidIdleTests
                     && next == LiquidIdle.StillPollMs - LiquidIdle.SettleMs && settle.Interval(false, true, 4000) == LiquidIdle.IdlePollMs);
             }
 
-            // E18: a followed frame that changes only the pointer's light (hover, press, the pointer) is drawn over the last capture,
-            // the desktop looked at again only PollMs after the last look; any other change looks at once.
+            // E18: a followed frame that changes only the pointer's light (hover, press, the pointer) or the glass's presence is
+            // drawn over the last capture once a look found the desktop still, the desktop looked at again only PollMs after
+            // the last look; any other change looks at once.
             using (new Backdrop(Backdrop.Corner(200, 100), 90, 120, 150))
             {
+                // The backdrop shown and settled first: the desktop there holds still.
+                for (int i = 0; i < 20; i++) { Thread.Sleep(25); if (source.Update(region, out bool moved) && !moved) break; }
                 var follow = new LiquidIdle();
-                bool first = follow.Frame(source, region, frame, Render, 2000);
-                bool lit = follow.Frame(source, region, frame with { Hover = .5f, PointerX = 30, PointerY = 10 }, Render, 2010);
+                long t0 = 2000;
+                bool first = follow.Frame(source, region, frame, Render, t0);
+                // A second look a PollMs on: the desktop held still.
+                bool held = follow.Frame(source, region, frame, Render, t0 += LiquidIdle.PollMs);
+                bool lit = follow.Frame(source, region, frame with { Hover = .5f, PointerX = 30, PointerY = 10 }, Render, t0 + 5);
+                bool faded = follow.Frame(source, region, frame with { Hover = .5f, PointerX = 30, PointerY = 10, Presence = .5f }, Render, t0 + 10);
                 long reused = follow.Reused;
-                bool later = follow.Frame(source, region, frame with { Hover = .8f, PointerX = 40, PointerY = 10 }, Render, 2000 + LiquidIdle.PollMs);
-                bool other = follow.Frame(source, region, frame with { Hover = .8f, PointerX = 40, PointerY = 10, Dark = 0 }, Render, 2000 + LiquidIdle.PollMs + 5);
-                check(FormattableString.Invariant($"liquid idle: the pointer's light alone is drawn over the last capture, the next look PollMs on (reused {reused} then {follow.Reused}, drawn {follow.FrameRenders})"),
-                    first && lit && later && other && reused == 1 && follow.Reused == 1 && follow.FrameRenders == 4);
+                bool later = follow.Frame(source, region, frame with { Hover = .8f, PointerX = 40, PointerY = 10, Presence = .5f }, Render, t0 + LiquidIdle.PollMs);
+                bool other = follow.Frame(source, region, frame with { Hover = .8f, PointerX = 40, PointerY = 10, Presence = .5f, Dark = 0 }, Render, t0 + LiquidIdle.PollMs + 5);
+                check(FormattableString.Invariant($"liquid idle: the pointer's light or the presence alone is drawn over the last capture, the next look PollMs on (reused {reused} then {follow.Reused}, drawn {follow.FrameRenders})"),
+                    first && held && lit && faded && later && other && reused == 2 && follow.Reused == 2 && follow.FrameRenders == 5);
             }
 
             // The test's own loop, with nothing polled, without and with the redraws: what the process spends on it is not the poll's.

@@ -292,7 +292,7 @@ public partial class App : Application
         Glancing = true;
         // The look taken and the exclusion let go even when taking the look throws; and the island waiting for it (AfterGlance)
         // is shown in any case (Within's ended), never left out of sight - also when starting the measure throws before Within
-        // has it (R4-2): the glance then ends here.
+        // has it (R4-2): the glance then ends here, and the start goes on.
         bool handed = false;
         try
         {
@@ -308,6 +308,11 @@ public partial class App : Application
                 }
             }, () => { if (glance == _glance) GlanceEnded(); });
             handed = true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // A measure that cannot start is not worth failing the start for: the look shown stays, as without liquid glass.
+            System.Diagnostics.Trace.WriteLine($"BrimDeck: the first look's measure did not start: {ex.Message}");
         }
         finally
         {
