@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -182,6 +183,8 @@ internal sealed class MusicMarquee : FrameworkElement
     }
     // The width the text takes on one line, in DIPs.
     public double TextWidth => _text.Length == 0 ? 0 : Formatted.Width;
+    // For screen readers: the whole line as text, however much of it shows.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => _text);
     public double FontSize
     {
         get => _fontSize;
@@ -391,6 +394,8 @@ internal sealed class QuotaCarousel : Grid
     public double Travel { get; }
     // Position within the cycle; the window hands it to the next carousel so a rebuild continues where this one was.
     public TimeSpan Elapsed => Rotates ? TimeSpan.FromSeconds(At(Eased.Now)) : _elapsed;
+    // For screen readers: its name, every ring's tooltip line, rotating or not.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
     public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
     {
         // The region is the layout's ring width in whole device pixels; rings sit in fixed slots from its left edge and its
