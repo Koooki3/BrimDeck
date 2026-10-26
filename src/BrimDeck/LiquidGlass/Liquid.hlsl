@@ -108,7 +108,7 @@ cbuffer Frame : register(b0)
     float2 StatsOrigin;   // the island pixel at the stats' tile (0, 0)'s top-left corner
     float2 StatsInverse;  // 1 / the stats texture's size
     float StatsTile;      // a tile's side, device pixels
-    float FrostSpare;
+    float Sigma0;         // the masking constant of the material's adaptivity (linear Y; see Material)
     float4 FrostLevel[8]; // per level: its atlas region's top-left (pixels), its texel (device pixels), its Gaussian deviation
 };
 
@@ -119,7 +119,10 @@ SamplerState Smooth : register(s0);
 
 // The most contrast left behind the open panel's text, and how far the band may move the glass's mean brightness from the
 // backdrop's (dark glass on a dark page, light glass on a light one).
-static const float Cap = 1.5, Calm = .6, BusyCalm = .3, Vibrancy = 1.2, ChromaFloor = .55, RimDip = 10, RowReach = 8;
+// The frost's grain: Acrylic lays its noise texture at .02 opacity, a texture of small spread; a uniform noise of that amplitude
+// adds about 4 levels a pixel of detail behind text (round 12, reading comfort), so it is kept to .006 here.
+static const float GrainAmount = .006;
+static const float Cap = 1.5, Calm = .6, BusyCalm = .3, Vibrancy = 1.2, ChromaFloor = .55, RimDip = 10, RimLeast = 6, RowReach = 8;
 
 struct Vertex { float4 Position : SV_Position; };
 
@@ -405,7 +408,7 @@ float3 Grain(float3 c, float2 p)
     if (GrainOn < .5 || Faithful > .5) return c;
     uint2 at = uint2(int2(floor(p - float2(HalfWidth, 0))) + 65536);
     float3 a = Hash3(uint3(at, 1u)), b = Hash3(uint3(at, 2u));
-    c += (Hash3(uint3(at, 3u)).x - .5) * .02 * FrostShown;
+    c += (Hash3(uint3(at, 3u)).x - .5) * GrainAmount * FrostShown;
     return saturate(c + (a + b - 1) / 255);
 }
 
@@ -516,6 +519,79 @@ float3 Legible(float3 port, float3 behind, float calm, float open)
     return l + d * min(keep, min(room.x, min(room.y, room.z)));
 }
 
+// ----- The material where text sits (A1-A3) -----
+// Windows' Acrylic (microsoft-ui-xaml, MIT: AcrylicBrush; its theme resources' AcrylicBackgroundFillColorDefault): the frosted
+// backdrop's saturation raised 1.25 times (sc_saturation), then a luminosity blend - the backdrop's hue and saturation, the
+// luminosity of the tint (#2C2C2C dark, #FCFCFC light) at the luminosity opacity (.96 dark, .85 light) - then the tint itself at
+// its opacity (.15 dark, 0 light). The luminosity blend is W3C Compositing's non-separable SetLum / ClipColor.
+static const float3 AcrylicDark = float3(.17254902, .17254902, .17254902), AcrylicLight = float3(.98823529, .98823529, .98823529);
+static const float AcrylicLumDark = .96, AcrylicLumLight = .85, AcrylicTintDark = .15, AcrylicSaturation = 1.25;
+
+float Lum(float3 c) { return dot(c, float3(.3, .59, .11)); }
+float3 ClipColor(float3 c)
+{
+    float l = Lum(c), n = min(c.r, min(c.g, c.b)), x = max(c.r, max(c.g, c.b));
+    if (n < 0) c = l + (c - l) * l / max(l - n, 1e-5);
+    if (x > 1) c = l + (c - l) * (1 - l) / max(x - l, 1e-5);
+    return c;
+}
+float3 SetLum(float3 c, float l) { return ClipColor(c + (l - Lum(c))); }
+float Chroma(float3 c) { return max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b)); }
+
+// The text's contrast as APCA reckons it (its published formula: SAPC 0.0.98G; written here from the formula alone, not its
+// code), |Lc| on 0..106, between a text luminance and a background luminance (APCA's Y: sRGB to the 2.4, soft black clamp).
+float ApcaY(float3 c)
+{
+    float y = dot(pow(saturate(c), 2.4), float3(.2126729, .7151522, .0721750));
+    return y < .022 ? y + pow(.022 - y, 1.414) : y;
+}
+float Apca(float text, float back)
+{
+    float lc = back > text ? (pow(back, .56) - pow(text, .57)) * 1.14 : (pow(back, .65) - pow(text, .62)) * 1.14;
+    return abs(lc) < .1 ? 0 : (abs(lc) - .027) * 100;
+}
+
+// The material at a place: the frosted backdrop (unfiltered), the port's glass there (for the colour cap), the place, and the
+// backdrop's statistics around it (Stats: mean luma, band-pass RMS of the frosted backdrop in linear Y). The luminosity
+// opacity is Acrylic's at least, raised just as far as the text's masked contrast - APCA's Lc over sqrt(1 + (sigma / Sigma0)^2),
+// the backdrop's texture masking the text (Scharff and Ahumada) - reaches what it is on the opaque theme (Acrylic's fallback).
+// The statistics are low-passed on the GPU (rising fast, falling with tau 300 ms).
+float Adapt(float2 p, out float busy)
+{
+    float dark = saturate(Dark);
+    float3 tint = lerp(AcrylicLight, AcrylicDark, dark);
+    float base = lerp(AcrylicLumLight, AcrylicLumDark, dark);
+    float yt = lerp(ApcaY(float3(.0627, .0706, .0902)), ApcaY(float3(.9647, .9686, .9765)), dark);
+    float target = Apca(yt, ApcaY(lerp(float3(.9765, .9765, .9765), tint, dark)));
+    float2 stats = Stats(p);
+    float y = ApcaY(stats.xxx), yTint = ApcaY(tint), sigma = stats.y;
+    // The least luminosity opacity at or above Acrylic's whose masked contrast reaches the opaque theme's (bisection).
+    float lo = base, hi = 1;
+    [unroll] for (int i = 0; i < 5; i++)
+    {
+        float a = (lo + hi) * .5, s = (1 - a) * sigma / max(Sigma0, 1e-4);
+        float lc = Apca(yt, lerp(y, yTint, a)) / sqrt(1 + s * s);
+        if (lc >= target * .98) hi = a; else lo = a;
+    }
+    busy = saturate((hi - base) / max(1 - base, 1e-3));
+    return hi;
+}
+
+float3 Material(float3 frosted, float3 port, float a)
+{
+    float dark = saturate(Dark);
+    float3 tint = lerp(AcrylicLight, AcrylicDark, dark);
+    float3 c = frosted;
+    c = Lum(c) + (c - Lum(c)) * AcrylicSaturation;
+    c = lerp(c, SetLum(c, Lum(tint)), a);
+    c = lerp(c, tint, AcrylicTintDark * dark);
+    // Never more colourful than the port's glass, nor than the backdrop itself (D14): the 1.25 only gives back what the blend
+    // took.
+    float cap = min(Chroma(port), Chroma(frosted)), own = Chroma(c), l = Lum(c);
+    if (own > cap) c = l + (c - l) * cap / max(own, 1e-5);
+    return saturate(c);
+}
+
 float3 Glass(float2 p, float sd, float2 n)
 {
     // The element's box (device pixels): the island, reaching TopExtra above a square top.
@@ -537,7 +613,7 @@ float3 Glass(float2 p, float sd, float2 n)
     // The collapsed island's content row: calmed behind its text and glyphs, feathered at its edges, never under the rim band.
     // Where text can sit is frosted as Apple's regular material is; the clear lens is kept to the rim band (a fifth of the
     // shorter side, at most RimDip) and the collapsed island's empty ends.
-    float rim = min(.2 * min(Size.x, Size.y), RimDip * Scale), inner = saturate((-sd - rim) / Feather);
+    float rim = clamp(.2 * min(Size.x, Size.y), RimLeast * Scale, RimDip * Scale), inner = saturate((-sd - rim) / Feather);
     float row = 0;
     if (Content.z > Content.x)
     {
@@ -545,12 +621,19 @@ float3 Glass(float2 p, float sd, float2 n)
         // the text fills the height: the rim band and the feather there shrink with it, down to nothing at 20 DIP.
         float low = saturate((min(Size.x, Size.y) / Scale - 20) / 20), feather = max(Feather * low, Scale);
         float2 inside = min(p - (Content.xy - float2(RowReach * Scale, 0)), (Content.zw + float2(RowReach * Scale, 0)) - p);
-        row = saturate(min(inside.x, inside.y) / feather + 1) * saturate((-sd - rim * low) / feather);
+        // Its rim band the narrowest (RimLeast): the text's box stays inside the material, the clear band and the feather
+        // outside it.
+        row = saturate(min(inside.x, inside.y) / feather + 1) * saturate((-sd - min(rim, RimLeast * Scale) * low) / (feather * .5));
     }
     // The open panel: frosted inside the rim band, its radius growing with the square root of the opening (no crossfade from
     // sharp: what lies behind is unreadable a quarter of the way open); the collapsed content row alike.
     float opened = sqrt(saturate(Open));
+    float material = max(opened * inner, row);
     float frost = max(FrostRadius * opened * inner, ContentFrost * row);
+    // Where the backdrop is busy (the material's luminosity raised past Acrylic's, below), the frost thickens too.
+    float busy = 0, opacity = 0;
+    [branch] if (material > 0 && (Low > 0 || High < 1)) opacity = Adapt(p, busy);
+    frost *= 1 + .5 * busy;
     [branch] if (frost > .75) color = Frost(float2(read), frost);
     float3 unfiltered = color;
     if (LinearFilters > .5) color = ToSrgb(Filters(ToLinear(color)));
@@ -560,7 +643,11 @@ float3 Glass(float2 p, float sd, float2 n)
     if (FilterEnd.x > 0 && any(floor(pixel) >= FilterEnd)) color = Background.Load(int3(int2(floor(pixel) - float2(0, TopExtra) + Pad), 0)).rgb;
 
     // The element's background, then legibility (see the head of the file).
-    color = Legible(lerp(color, Tint.rgb, Tint.a), lerp(unfiltered, Tint.rgb, Tint.a), max(saturate(opened * 1.5) * inner, row), max(opened * inner, row));
+    // The clear glass (the rim band, the collapsed island's empty ends): the port, its brightness kept in the band; where text
+    // sits, the material (Acrylic's), fading in with the opening and over the zone's feather.
+    float3 port = lerp(color, Tint.rgb, Tint.a);
+    color = Legible(port, lerp(unfiltered, Tint.rgb, Tint.a), 0, 0);
+    [branch] if (material > 0 && (Low > 0 || High < 1)) color = lerp(color, Material(unfiltered, port, opacity), material);
 
     // Hover: the glass brightens a little, and its rim catches more light on the side toward the pointer.
     [branch] if (Hover > 0)

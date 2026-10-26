@@ -256,8 +256,10 @@ internal static class LiquidPreview
     }
 
     // The renderer's output for the island at its place on the desktop: premultiplied BGRA rows, Width x Height.
-    internal static byte[] Render(ID3D11Device device, LiquidRenderer renderer, byte[] desktop, int dw, int dh, (int X, int Y, int Width, int Height) at, in LiquidFrame frame, int pad)
+    internal static byte[] Render(ID3D11Device device, LiquidRenderer renderer, byte[] desktop, int dw, int dh, (int X, int Y, int Width, int Height) at, in LiquidFrame given, int pad)
     {
+        // LIQUID_SIGMA0: the material's masking constant for the calibration (round 12), else the renderer's default.
+        var frame = float.TryParse(Environment.GetEnvironmentVariable("LIQUID_SIGMA0"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sigma0) ? given with { Sigma0 = sigma0 } : given;
         // The padded region, the desktop's edge rows repeated where it runs off the screen (as at the top for the notch).
         int bw = at.Width + 2 * pad, bh = at.Height + 2 * pad;
         var region = new byte[bw * bh * 4];

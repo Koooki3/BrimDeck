@@ -455,7 +455,50 @@ internal static partial class LiquidPages
             }
         if (count < 50 || signal <= 0) { Console.WriteLine($"NOTE: {name}: no text boxes to weigh reading comfort in"); return; }
         double ratio = (signal + behind) / signal;
-        Report(ratio <= 1.2, FormattableString.Invariant($"{name}: reading comfort: behind the text {behind / count:0.00} levels/px of detail against the text's own {signal / count:0.00}, (text + behind) / text {ratio:0.00} (an opaque theme 1.00; wanted at most 1.2)"));
+        Report(ratio <= 1.1, FormattableString.Invariant($"{name}: reading comfort: behind the text {behind / count:0.00} levels/px of detail against the text's own {signal / count:0.000}, (text + behind) / text {ratio:0.000} (an opaque theme 1.000; wanted at most 1.1, round 12)"));
+        // Masked contrast (round 12, A3): APCA's Lc of the text against the mean behind it, over sqrt(1 + (sigma / Sigma0)^2),
+        // sigma the band-pass RMS (1 to 4 DIPs) of what lies behind, in linear Y; against the same on the opaque theme (the
+        // Acrylic fallback, #2C2C2C dark, #F9F9F9 light, where sigma is 0).
+        var lum = new double[w * h];
+        for (int yy = 0; yy < h; yy++)
+            for (int xx = 0; xx < w; xx++) { int d = ((gy + yy) * dw + gx + xx) * 4; lum[yy * w + xx] = ApcaY(under[d + 2], under[d + 1], under[d]); }
+        double[] Blur(int r)
+        {
+            var sum = new double[(w + 1) * (h + 1)];
+            for (int yy = 0; yy < h; yy++)
+                for (int xx = 0; xx < w; xx++) sum[(yy + 1) * (w + 1) + xx + 1] = lum[yy * w + xx] + sum[yy * (w + 1) + xx + 1] + sum[(yy + 1) * (w + 1) + xx] - sum[yy * (w + 1) + xx];
+            var o = new double[w * h];
+            for (int yy = 0; yy < h; yy++)
+                for (int xx = 0; xx < w; xx++)
+                {
+                    int x0 = Math.Max(0, xx - r), x1 = Math.Min(w, xx + r + 1), y0 = Math.Max(0, yy - r), y1 = Math.Min(h, yy + r + 1);
+                    o[yy * w + xx] = (sum[y1 * (w + 1) + x1] - sum[y0 * (w + 1) + x1] - sum[y1 * (w + 1) + x0] + sum[y0 * (w + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+                }
+            return o;
+        }
+        var fine = Blur(Math.Max(1, (int)Math.Round(Scale))); var coarse = Blur((int)Math.Round(4 * Scale));
+        double mean = 0, band = 0; int n = 0;
+        for (int i = 0; i < w * h; i++)
+            if (box[i] && glass[i * 4 + 3] >= 250) { mean += lum[i]; double b = fine[i] - coarse[i]; band += b * b; n++; }
+        if (n == 0) return;
+        mean /= n; double sigma = Math.Sqrt(band / n);
+        double yt = ApcaY(layer.Text.R, layer.Text.G, layer.Text.B);
+        double opaque = Apca(yt, yt > .4 ? ApcaY(0x2C, 0x2C, 0x2C) : ApcaY(0xF9, 0xF9, 0xF9));
+        double s0 = double.TryParse(Environment.GetEnvironmentVariable("LIQUID_SIGMA0"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : LiquidRenderer.DefaultSigma0;
+        double masked = Apca(yt, mean) / Math.Sqrt(1 + sigma / s0 * (sigma / s0));
+        Report(masked >= opaque * .9, FormattableString.Invariant($"{name}: masked contrast: Lc {masked:0.0} (sigma {sigma:0.0000} linear Y, Sigma0 {s0:0.000}) against the opaque theme's {opaque:0.0}: {masked / opaque:P0} (wanted at least 90 %)"));
+    }
+
+    // APCA's Y and |Lc| (its published formula, SAPC 0.0.98G; written from the formula alone), as Liquid.hlsl has them.
+    private static double ApcaY(int r, int g, int b)
+    {
+        double y = .2126729 * Math.Pow(r / 255.0, 2.4) + .7151522 * Math.Pow(g / 255.0, 2.4) + .0721750 * Math.Pow(b / 255.0, 2.4);
+        return y < .022 ? y + Math.Pow(.022 - y, 1.414) : y;
+    }
+    private static double Apca(double text, double back)
+    {
+        double lc = back > text ? (Math.Pow(back, .56) - Math.Pow(text, .57)) * 1.14 : (Math.Pow(back, .65) - Math.Pow(text, .62)) * 1.14;
+        return Math.Abs(lc) < .1 ? 0 : (Math.Abs(lc) - .027) * 100;
     }
 
     private static void Contrast(string name, string which, List<double> ratios, double wanted, double least)

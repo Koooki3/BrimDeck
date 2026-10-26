@@ -31,6 +31,7 @@ namespace BrimDeck.LiquidGlass;
 //   Contrast, Brightness, Saturate: the source's backdrop-filter (1.2, 1.05, 1.1).
 //   InsetY, InsetBlur, InsetAlpha: the source's inset shadow (0 -8px 20px rgba(0,0,0,.14)), shrunk for low shapes.
 //   Faithful: the source's own uv field (the proof sheets), not the island's.
+//   Sigma0: the material's masking constant (0: DefaultSigma0); only the calibration sets it.
 //   ContentLeft..ContentBottom: the collapsed island's content row (its text and glyphs), device pixels from the island's
 //     top-left; all 0 for none. Behind it the backdrop's contrast is capped, with a light local frost (Liquid.hlsl).
 //   LinearFilters: the backdrop filtered in linear light, as the browser draws the source (see Liquid.hlsl); off, in sRGB.
@@ -54,7 +55,7 @@ internal readonly record struct LiquidFrame(
     float InsetY = -8, float InsetBlur = 20, float InsetAlpha = .14f, bool Faithful = false,
     bool LinearMap = false, bool LinearFilters = true, float CssWidth = 0, float CssHeight = 0,
     float FilterWidth = 0, float FilterHeight = 0,
-    float ContentLeft = 0, float ContentTop = 0, float ContentRight = 0, float ContentBottom = 0)
+    float ContentLeft = 0, float ContentTop = 0, float ContentRight = 0, float ContentBottom = 0, float Sigma0 = 0)
 {
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
@@ -685,16 +686,20 @@ internal sealed class LiquidRenderer : IDisposable
             // The frost's pyramid and the stats (Frost.hlsl).
             AtlasInverseX = _pass.AtlasInverseX, AtlasInverseY = _pass.AtlasInverseY, FrostLevels = _built, GrainOn = GrainOn ? 1 : 0,
             FrostExtentX = _extent.Width, FrostExtentY = _extent.Height, StatsOriginX = _statsOriginX, StatsOriginY = _statsOriginY,
-            StatsInverseX = 1f / _statsFor.Cols, StatsInverseY = 1f / _statsFor.Rows, StatsTile = _statsFor.Tile
+            StatsInverseX = 1f / _statsFor.Cols, StatsInverseY = 1f / _statsFor.Rows, StatsTile = _statsFor.Tile,
+            // The material's masking constant (Liquid.hlsl, Material; calibrated offscreen, round 12): the frame's, else the default.
+            Sigma0 = f.Sigma0 > 0 ? f.Sigma0 : DefaultSigma0
         };
         for (int k = 0; k < MostLevels; k++) Unsafe.Add(ref c.Level0, k) = Unsafe.Add(ref _pass.Level0, k);
         _context.UpdateSubresource(in c, _constants);
     }
 
     private const float RingCss = 90;
+    // Calibrated in round 12 (pr-plan liquid-glass round-12): see Liquid.hlsl, Material.
+    internal const float DefaultSigma0 = .02f;
     // The open panel's frost, DIP (Liquid.hlsl, Frost: a Gaussian of deviation FrostDeviation of it).
     // The frosts are Apple's regular material, about: 32 DIP on the open panel, 12 behind the collapsed content row.
-    private const float FrostDip = 32, ContentFrostDip = 12, FeatherDip = 6, FrostDeviation = .75f;
+    private const float FrostDip = 32, ContentFrostDip = 12, FeatherDip = 4, FrostDeviation = .75f;
     private float _maxHalf;
     private (float, float, float, float, float, bool) _maxFor;
 
@@ -849,7 +854,7 @@ internal sealed class LiquidRenderer : IDisposable
         public float Hover, PointerX, PointerY, Feather;
         public float AtlasInverseX, AtlasInverseY, FrostLevels, GrainOn;
         public float FrostExtentX, FrostExtentY, StatsOriginX, StatsOriginY;
-        public float StatsInverseX, StatsInverseY, StatsTile, FrostSpare;
+        public float StatsInverseX, StatsInverseY, StatsTile, Sigma0;
         public System.Numerics.Vector4 Level0, Level1, Level2, Level3, Level4, Level5, Level6, Level7;
     }
 
