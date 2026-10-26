@@ -60,7 +60,7 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
     public int LyricRoom => (int)Math.Clamp(Math.Floor((MiddleHeight - Metrics.MiddleGap) / Metrics.LyricLine), 0, 3);
     // lyricsExpected lays out the titles as if lyrics were shown, so they keep their place while lyrics are still looked up,
     // or when a song has none.
-    public static MusicLayout Calculate(double width, double height, bool lyrics, bool timeline, bool message = false, bool logMode = false, bool transport = true,
+    public static MusicLayout Calculate(double width, double height, bool lyrics, bool timeline, bool message = false, bool fullControlEntry = false, bool transport = true,
         bool lyricsExpected = false)
     {
         double density = DensityFor(width, height);
@@ -88,9 +88,9 @@ public sealed record MusicLayout(MusicMetrics Metrics, double Density, double Bo
         double gap = Math.Round(Math.Clamp(bodyW * .14, c.Play * 1.2, c.Play * 2.6));
         double tripletW = c.Skip * 2 + c.Play + 2 * gap;
         double tripletX = Math.Floor((bodyW - tripletW) / 2 + .5), modeX = tripletX - gap - c.Mode;
-        // Netease without full control offers the entry at the right end of the transport row. The entry
+        // Netease and Apple Music without full control offer the entry at the right end of the transport row. The entry
         // never moves the transport; the window shortens its label to the room right of the buttons.
-        double fullControlRoom = !logMode ? 0 : transport ? bodyW - (tripletX + tripletW) - FullControlGap : bodyW;
+        double fullControlRoom = !fullControlEntry ? 0 : transport ? bodyW - (tripletX + tripletW) - FullControlGap : bodyW;
         bool enable = fullControlRoom >= FullControlMinimum;
         if (!enable) fullControlRoom = 0;
         double radius = Math.Clamp(Math.Round(cover * .08), 5, 16);

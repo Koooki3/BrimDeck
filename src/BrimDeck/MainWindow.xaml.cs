@@ -763,6 +763,8 @@ public partial class MainWindow : Window
         if (!inside && Resizing) return;
         // A pointer reaching the island means someone is at the screen: a notice is looked for briskly again (C-L8).
         if (inside && !_pointerInside) BrimDeck.Native.WindowsNoticeSource.Interacted();
+        // A pointer on the island means the display is on, whatever Windows last reported (DisplayPower).
+        if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
         if (inside) ReleaseHotkeyPin();
         if (inside)
