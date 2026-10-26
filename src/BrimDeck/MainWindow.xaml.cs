@@ -61,6 +61,9 @@ public partial class MainWindow : Window
     // A preview from the settings window either holds the panel open or keeps it collapsed while a collapsed size is adjusted.
     private bool _previewExpanded;
     private Rect? _popupReturnArea;
+    // The island's height a pop-up of the usage details needs to lie within the open panel (ShowModelPopup), 0 for none: the
+    // panel grows to it while the pop-up is open and goes back once it has closed.
+    private double _popupFloor;
     private int _days = 1;
     private bool _details;
     // Lets the old content of a rebuilt usage or media page leave while the new one arrives.
@@ -603,6 +606,8 @@ public partial class MainWindow : Window
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
         double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
         var panel = PanelFor(wantedHeight);
+        if (!expanded) _popupFloor = 0;
+        else if (_popupFloor > panel.HeaderExtra + wantedHeight) { wantedHeight = _popupFloor - panel.HeaderExtra; panel = PanelFor(wantedHeight); }
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);
         double width = expanded ? _pageWidth : shape.Surface.Width;
