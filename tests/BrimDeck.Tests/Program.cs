@@ -30,6 +30,7 @@ try
     EqualizerSignalTests.Run(Check);
     CompactMotionTests.Run(Check);
     AuditPerfTests.Run(Check);
+    MemoryFootprintTests.Run(Check);
     ColorMathTests.Run(Check);
     AuditUiTests.Run(Check);
     AuditFollowupTests.Run(Check);

@@ -24,6 +24,10 @@ public sealed class LogReader
     }
     // Claude and Codex read different folders; each keeps only the files its latest read visited.
     private readonly Dictionary<ProviderId, Dictionary<string, CacheItem>> _caches = [];
+    // The statistics of the last read, reused while no file changed: a refresh runs every minute, and gathering and sorting a
+    // month of records again each time allocated a few megabytes for nothing. Next is the earliest record left out for being
+    // in the future, which joins once its time has come.
+    private readonly Dictionary<ProviderId, (DateTimeOffset Cutoff, DateTimeOffset? Next, List<TokenEntry> Entries)> _built = [];
     // A line longer than this (a huge tool result) is skipped and counted as unreadable instead of growing the buffer without end.
     public const int DefaultMaxLine = 32 << 20;
     private const int Chunk = 1 << 20;
@@ -42,7 +46,8 @@ public sealed class LogReader
         var folders = id == ProviderId.Codex ? new[] { "sessions", "archived_sessions" } : new[] { "projects" };
         if (!_caches.TryGetValue(id, out var cache)) _caches[id] = cache = new(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var entries = new Dictionary<string, TokenEntry>();
+        var read = new List<CacheItem>();
+        bool changed = false;
         int count = 0, errors = 0;
         JsonElement latestQuota = default;
         var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
@@ -60,23 +65,32 @@ public sealed class LogReader
                     visited.Add(file);
                     if (!cache.TryGetValue(file, out var cached) || cutoff < cached.Cutoff || info.Length < cached.Length ||
                         info.Length == cached.Length && info.LastWriteTimeUtc != cached.Modified)
-                        cache[file] = cached = new CacheItem(cutoff);
-                    if (info.Length != cached.Length || info.LastWriteTimeUtc != cached.Modified) Parse(file, id, cached, info);
+                    { cache[file] = cached = new CacheItem(cutoff); changed = true; }
+                    if (info.Length != cached.Length || info.LastWriteTimeUtc != cached.Modified) { Parse(file, id, cached, info); changed = true; }
                     count++; errors += cached.Errors;
-                    foreach (var entry in cached.Entries)
-                    {
-                        if (entry.Time < cutoff || entry.Time > now || entry.Total <= 0) continue;
-                        // Streaming Claude records can repeat an id; keep its most complete usage.
-                        if (!entries.TryGetValue(entry.Key, out var old) || entry.Total >= old.Total) entries[entry.Key] = entry;
-                    }
+                    read.Add(cached);
                     if (cached.QuotaTime is { } time && (result.QuotaTime is null || time > result.QuotaTime))
                     { result.QuotaTime = time; latestQuota = cached.Quota; }
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { errors++; cache.Remove(file); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { errors++; changed |= cache.Remove(file); }
             }
         }
-        foreach (var gone in cache.Keys.Where(file => !visited.Contains(file)).ToList()) cache.Remove(gone);
-        result.Entries = entries.Values.OrderBy(x => x.Time).ToList();
+        foreach (var gone in cache.Keys.Where(file => !visited.Contains(file)).ToList()) { cache.Remove(gone); changed = true; }
+        if (changed || !_built.TryGetValue(id, out var built) || built.Cutoff != cutoff || built.Next <= now)
+        {
+            var entries = new Dictionary<string, TokenEntry>();
+            DateTimeOffset? next = null;
+            foreach (var cached in read)
+                foreach (var entry in cached.Entries)
+                {
+                    if (entry.Time > now && entry.Total > 0 && (next is null || entry.Time < next)) next = entry.Time;
+                    if (entry.Time < cutoff || entry.Time > now || entry.Total <= 0) continue;
+                    // Streaming Claude records can repeat an id; keep its most complete usage.
+                    if (!entries.TryGetValue(entry.Key, out var old) || entry.Total >= old.Total) entries[entry.Key] = entry;
+                }
+            _built[id] = built = (cutoff, next, entries.Values.OrderBy(x => x.Time).ToList());
+        }
+        result.Entries = built.Entries;
         var where = place ?? Loc.T("本机", "This PC");
         result.UsageNote = result.UsageAvailable ? Loc.T($"{where} {cutoff.LocalDateTime:yyyy-MM-dd} 起 · {count} 个记录文件", $"{where} since {cutoff.LocalDateTime:yyyy-MM-dd} · " + Loc.Count(count, "record file", "record files"))
             : Loc.T("未找到本机会话记录。", "No local session records were found.");
