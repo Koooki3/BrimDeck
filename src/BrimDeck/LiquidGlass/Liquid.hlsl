@@ -711,6 +711,9 @@ float3 Slab(float2 p, float sd, float2 outward)
     // On a low shape (the bar, its text filling it to near the rim) it reaches its full within a quarter of the bevel.
     float row = Content.z > Content.x ? saturate(thickness / lerp(.25, .7, saturate((shorter / Scale - 20) / 16))) : 0;
     // The dark look covers the whole open panel (one even dark glass, as round 13 had it); the light look only behind text.
+    // The collapsed row's cover hands over to the open panel's with the opening (live check 10-26, LG-02: between the two the
+    // glass had neither, and showed the bare frost of a dark backdrop), so the glass never passes through an uncovered state.
+    row *= 1 - opened * opened;
     float text = max(row, opened * max(TextFeathered(p), CoverDark()));
     // Round 15: the surface's light (Fresnel, lines, glare, caustic, sheen) is the same over the cover as beside it - the
     // cover is the glass grown denser, not a layer on it - so it follows only what is uniform: the collapsed row and the dark
