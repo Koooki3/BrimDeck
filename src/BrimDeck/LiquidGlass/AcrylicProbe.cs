@@ -10,7 +10,14 @@ namespace BrimDeck.LiquidGlass;
 // island and its shadow are never in it and none of our windows needs to be left out of anything.
 internal static class AcrylicProbe
 {
-    public readonly record struct Reading(double Mean, double Bright, double Dark, double Changed);
+    public readonly record struct Reading(double Mean, double Bright, double Dark, double Changed, double Median)
+    {
+        // The brightest and darkest the glass has to answer for, by its openness: the collapsed island's ring is small, so one
+        // bright neighbour would hold its 90th percentile up; the capsule answers to the ring's middle, the open panel (a
+        // ring as large as its sides) to its tenths.
+        public double BrightFor(double openness) => Median + (Bright - Median) * Math.Clamp(openness, 0, 1);
+        public double DarkFor(double openness) => Median + (Dark - Median) * Math.Clamp(openness, 0, 1);
+    }
     private const int Cells = 24;
     private static byte[]? _last;
 
@@ -68,7 +75,7 @@ internal static class AcrylicProbe
         }
         _last = now;
         lumas.Sort();
-        return new Reading(lumas.Average(), lumas[(int)(lumas.Count * .9)], lumas[(int)(lumas.Count * .1)], changed);
+        return new Reading(lumas.Average(), lumas[(int)(lumas.Count * .9)], lumas[(int)(lumas.Count * .1)], changed, lumas[lumas.Count / 2]);
     }
 
     private const int Halftone = 4, SrcCopy = 0x00CC0020;
