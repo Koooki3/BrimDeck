@@ -93,10 +93,11 @@
     }
   },
   // A slow swell (the rim dims a little every 9 s), the shoreline's colors flowing along the rim and a glint of sun crossing
-  // the surface every 26 s. A wave rolls in along a hovered control; a completed press leaves sun glints.
+  // the surface every 26 s. A wave rolls in along a hovered control; a press spreads a ring of water from the control and a
+  // completed one lets a few bubbles rise. The panel goes back into the island as foam, dissolving.
   "motion": {
     "ambient": { "breathe": 9, "breatheDepth": 0.12, "drift": 20, "sweep": 26, "sweepOpacity": 0.05, "flicker": 0, "flickerDepth": 0 },
-    "hover": "wave", "hoverStrength": 0.12, "press": "sparkle", "pressStrength": 0.18, "trail": 0.35, "particles": "star", "focus": "glow", "pace": 1.15, "steps": 0,
+    "hover": "wave", "hoverStrength": 0.12, "press": "splash", "pressStrength": 0.18, "trail": 0.35, "particles": "bubble", "spring": "default", "collapse": "foam", "focus": "glow", "pace": 1.15, "steps": 0,
     "color": "accent", "secondary": "clock", "highlight": "clock"
   },
   // Dusk, the hour before night: a peach sunset sky over a sea warmed by the low sun, a gold line along the horizon and
@@ -184,10 +185,10 @@
         "palm": { "color": "#00000000" }
       }
     },
-    // The swell is slower at night and the moon's glint rarer; a completed press lets glowing plankton rise.
+    // The swell is slower at night and the moon's glint rarer; a completed press lets glowing plankton rise from the ring of water.
     "motion": {
       "ambient": { "breathe": 11, "breatheDepth": 0.14, "drift": 24, "sweep": 40, "sweepOpacity": 0.04, "flicker": 0, "flickerDepth": 0 },
-      "hover": "wave", "hoverStrength": 0.14, "press": "ember", "pressStrength": 0.2, "trail": 0.4, "particles": "firefly", "focus": "glow",
+      "hover": "wave", "hoverStrength": 0.14, "press": "splash", "pressStrength": 0.2, "trail": 0.4, "particles": "firefly", "focus": "glow",
       "color": "accent", "secondary": "clock", "highlight": "accent"
     }
   }

@@ -31,8 +31,10 @@ internal static class CollapseFxTests
     // The new answers to the pointer: splash, rain, bubbles and the chromatic pulse, all chosen by a theme file only.
     private static void Effects(Action<string, bool> check, Func<string, PanelPalette> palette, Func<string, PanelPalette> custom)
     {
-        check("Splash, rain, bubble and the pulse: no built-in theme opts in",
-            PanelThemes.BuiltIns.All(theme => palette(theme.Id).Motion is { Aberration: 0 } m && m.Press != PressFx.Splash && m.Particles is not (ParticleFx.Rain or ParticleFx.Bubble)));
+        check("Splash, rain, bubble and the pulse: only the cyberpunk demo (rain) and the island (splash and bubbles) opt in; no built-in theme takes the pulse",
+            PanelThemes.BuiltIns.Where(theme => theme.Id is not (PanelThemes.Demo or PanelThemes.IslandHoliday))
+                .All(theme => palette(theme.Id).Motion is { Aberration: 0 } m && m.Press != PressFx.Splash && m.Particles is not (ParticleFx.Rain or ParticleFx.Bubble))
+            && palette(PanelThemes.Demo).Motion is { Particles: ParticleFx.Rain, Aberration: 0 } && palette(PanelThemes.IslandHoliday).Motion is { Press: PressFx.Splash, Particles: ParticleFx.Bubble, Aberration: 0 });
         var island = custom("""{ "base": "island-holiday", "motion": { "press": "splash", "particles": "bubble", "trail": 0.4 } }""");
         var night = custom("""{ "base": "cyberpunk-edgerunners", "motion": { "particles": "RAIN", "aberration": 1.25 } }""");
         check("They are read by name from motion.press, motion.particles and motion.aberration",
@@ -56,8 +58,9 @@ internal static class CollapseFxTests
 
     private static void Keys(Action<string, bool> check, Func<string, PanelPalette> palette, Func<string, PanelPalette> custom)
     {
-        check("Collapse: the default fade stays the default, and no built-in theme opts in",
-            ThemeMotion.Default.Collapse == CollapseStyle.Fade && PanelThemes.BuiltIns.All(theme => palette(theme.Id).Motion.Collapse == CollapseStyle.Fade));
+        check("Collapse: the default fade stays the default; only the cyberpunk demo (glitch) and the island (foam) opt in",
+            ThemeMotion.Default.Collapse == CollapseStyle.Fade && PanelThemes.BuiltIns.All(theme => palette(theme.Id).Motion.Collapse
+                == (theme.Id == PanelThemes.Demo ? CollapseStyle.Glitch : theme.Id == PanelThemes.IslandHoliday ? CollapseStyle.Foam : CollapseStyle.Fade)));
         check("motion.collapse is read by name, inherits, and an unknown name keeps the base's",
             custom("""{ "base": "dark", "motion": { "collapse": "glitch" } }""").Motion.Collapse == CollapseStyle.Glitch
             && custom("""{ "base": "dark", "motion": { "collapse": "Genie" } }""").Motion.Collapse == CollapseStyle.Genie

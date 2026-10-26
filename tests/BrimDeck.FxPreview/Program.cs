@@ -403,6 +403,14 @@ internal static class Program
                     case EllipseGeometry e:
                         // Glow dots and particles are soft and round on purpose.
                         if (pen is null && (g.Brush is RadialGradientBrush || e.RadiusX < 3)) return;
+                        // So are bubbles, a thin round outline (2 to 4 DIP) swaying as it rises after a completed press: only their pen
+                        // is checked. They rise after the release, so a small round mark while hovered or pressed is still checked in full.
+                        if (pen is not null && g.Brush is null && e.RadiusX <= 4 && e.RadiusX == e.RadiusY && matrix.M11 == 1 && matrix.M22 == 1
+                            && (where.Contains(" release ", StringComparison.Ordinal) || where.Contains(" leave ", StringComparison.Ordinal)))
+                        {
+                            Width(pen, where + " bubble");
+                            return;
+                        }
                         Width(pen, where + " ellipse");
                         Edges(where + " ellipse", t / 2, e.Center.X - e.RadiusX, e.Center.X + e.RadiusX, e.Center.Y - e.RadiusY, e.Center.Y + e.RadiusY);
                         break;

@@ -24,16 +24,16 @@ internal static class ThemeMotionTests
             && new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion.Press == PressFx.Jelly));
         var islandDay = Palette(PanelThemes.IslandHoliday).Motion;
         var islandNight = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!, true).Motion;
-        check("Island holiday: a swell and waves; sun glints by day, glowing plankton by night",
-            islandDay is { Hover: HoverFx.Wave, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Steps: 0 } && islandDay.Ambient is { Breathe: > 0, Drift: > 0, Sweep: > 0 }
-            && islandNight is { Hover: HoverFx.Wave, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 } && islandNight.Ambient.Breathe > islandDay.Ambient.Breathe
+        check("Island holiday: a swell and waves; a splash of water, bubbles by day and glowing plankton by night; it dissolves into foam",
+            islandDay is { Hover: HoverFx.Wave, Press: PressFx.Splash, Particles: ParticleFx.Bubble, ParticleStrength: > 0, Steps: 0, Collapse: CollapseStyle.Foam, Spring: SpringTier.Default } && islandDay.Ambient is { Breathe: > 0, Drift: > 0, Sweep: > 0 }
+            && islandNight is { Hover: HoverFx.Wave, Press: PressFx.Splash, Particles: ParticleFx.Firefly, ParticleStrength: > 0, Collapse: CollapseStyle.Foam } && islandNight.Ambient.Breathe > islandDay.Ambient.Breathe
             && islandNight.Pace == islandDay.Pace);
         check("Pixel blocks: slots and bevels in four hard steps, square particles, no ambient light",
             Palette(PanelThemes.PixelBlocks).Motion is { Hover: HoverFx.Slot, Press: PressFx.Bevel, Particles: ParticleFx.Pixel, ParticleStrength: > 0, Steps: 4 } pixel && !pixel.Ambient.Any);
         var cyber = Palette(PanelThemes.Demo).Motion;
-        check("Cyberpunk: breathing, drifting, sweeping, a rare flicker; hard HUD answers in steps",
+        check("Cyberpunk: breathing, drifting, sweeping, a rare flicker; hard HUD answers in steps, rain and a glitch collapse",
             cyber.Ambient is { Breathe: 6.5, BreatheDepth: .22, Drift: 11, Sweep: 16, SweepOpacity: .07, Flicker: 41, FlickerDepth: .1 }
-            && cyber is { Hover: HoverFx.Brackets, Press: PressFx.Lock, Focus: FocusFx.Brackets, Color: "accent", Secondary: "shadow", Highlight: "clock", Particles: ParticleFx.None, Steps: 3, Pace: < 1 });
+            && cyber is { Hover: HoverFx.Brackets, Press: PressFx.Lock, Focus: FocusFx.Brackets, Color: "accent", Secondary: "shadow", Highlight: "clock", Particles: ParticleFx.Rain, Steps: 3, Pace: < 1, Collapse: CollapseStyle.Glitch, Aberration: 0, Spring: SpringTier.Firm });
         check("GitHub themes are flat, precise and quick: an underline, a coral indicator, no particles",
             new[] { "github-dark", "github-light" }.All(id => Palette(id).Motion is { Hover: HoverFx.Underline, Press: PressFx.Indicator, Focus: FocusFx.Ring, Particles: ParticleFx.None, Steps: 0, Pace: < 1 }));
         check("Dark and light keep BrimDeck's default look: no hover, press or focus marks",
