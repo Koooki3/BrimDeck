@@ -144,9 +144,24 @@ The answers to the pointer are drawn on the control's own visible shape, never a
 
 Motion colors are kept readable on the surface like any other color chosen outside the theme. The default dark and light themes (and any theme with no `motion` section anywhere in its base chain) draw nothing over the controls, which keep their own hover and press looks. The "system" theme uses Windows' accent color; over a base with answers it gives the quiet Fluent ones (`reveal` and `shade`, keeping a base's `lift` and `sink`), and over the default dark and light it draws nothing either; no ambient light, particles or steps, and its base theme's strengths and pace stay. `Templates/theme-template.json` lists every key with its default.
 
-### Day and night looks (night, daylight)
+### Day, dusk and night looks (night, dusk, daylight)
 
-A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look by the local clock. A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night` ("New from current theme" copies it). `daylight`'s `day` and `night` are when the day and the night begin (`HH:mm`, 06:30 and 18:30 by default); the user can move them in Settings › Current theme › Daytime. At the hour the island's old look fades out over 1.6 seconds, like dusk; with animations off it switches at once. Both looks are held to the readability rules below.
+A theme can carry a night look: `night` holds the `colors`, `apps`, `effects`, `motion` and `clock` that change at night, laid over the day look. A night look belongs to the file that writes it and is not inherited through `base`: a theme based on Island Holiday that should change at night writes its own `night` ("New from current theme" copies it, with its `dusk` and `daylight`).
+
+```jsonc
+"daylight": { "mode": "clock", "day": "06:30", "night": "18:30", "duskMinutes": 60 },
+"night": { "colors": { "surface": "#0B1622" } },
+"dusk": { "colors": { "surface": "#2A1A2E" } }
+```
+
+| Key | What it does | Values |
+|---|---|---|
+| `daylight.mode` | What switches the looks. `clock`: the day look from `day` to `night` and the night look the rest of the time. `system`: the night look while Windows apps use dark mode and the day look in light mode, with no dusk | `clock` (default), `system` |
+| `daylight.day`, `daylight.night` | When the day and the night begin, by the clock; a day may run past midnight | `HH:mm`, 06:30 and 18:30 by default |
+| `daylight.duskMinutes` | How long the dusk look shows before the night begins (clock mode only) | 15–180, 60 by default |
+| `dusk` | An optional dusk look, written like `night` and laid over the day look; it needs a `night` look beside it | |
+
+An unknown `mode`, a `duskMinutes` outside 15–180, a dusk look without a night look, or a bad color in either look makes the file unusable. The user can choose "Follow Windows" or move the hours in Settings › Current theme; the hours cannot be changed while the theme follows Windows. At each change (day to dusk, dusk to night, night to day, or Windows switching between light and dark) the island's old look fades out over 1.6 seconds; with animations off it switches at once. Every look is held to the readability rules below.
 
 ## Readability
 
