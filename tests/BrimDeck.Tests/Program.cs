@@ -31,6 +31,7 @@ try
     CurvesTests.Run(Check);
     MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
+    MusicCostTests.Run(Check);
     DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
     DatePickerMotionTests.Run(Check);

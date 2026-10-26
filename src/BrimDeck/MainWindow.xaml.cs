@@ -151,7 +151,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseWheel += PanelWheel;
@@ -473,6 +473,22 @@ public partial class MainWindow : Window
     private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
+    // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
+    // corners and shoulders, and a rounded clip made every frame of the title and the bars cost a quarter more. The rounded clip
+    // comes back before anything changes the surface; the rectangle only once the closing has had its whole length.
+    private DispatcherTimer? _clipSettle;
+    private void SettleClip(int after)
+    {
+        if (_clipSettle is null)
+        {
+            _clipSettle = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
+            _clipSettle.Tick += (_, _) => { _clipSettle.Stop(); if (!_expanded && !_poweringOff && !_booting && !Resizing && !_bootWaiting) Island.SettledClip = true; };
+        }
+        _clipSettle.Stop();
+        _clipSettle.Interval = TimeSpan.FromMilliseconds(Math.Max(1, after) + 100);
+        _clipSettle.Start();
+    }
+
     // The panel's last opening or closing, so that one turned back part way can tell (motion-review F1, F2).
     private readonly MoveTurn _turn = new();
     // keyboard: a hotkey or Escape asked for it (motion-review C4), so the move is quicker and has no give.
@@ -576,6 +592,8 @@ public partial class MainWindow : Window
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
         if (turning || carried > 0) _turn.Started(now, duration, expanded, width, height);
+        Island.SettledClip = false;
+        if (!expanded) SettleClip(duration);
         // The opening spring is most of the way there within a fifth of the move, so the content follows soon after it.
         Track content = expanded ? new(.12, .8) : new(0, .30);
         Track surface = reshaping || morphing || booting || expanded ? new(0, 1) : new(PanelMotion.CloseSurfaceStart(redirect || carried > 0), line ? .92 : 1);
@@ -727,7 +745,7 @@ public partial class MainWindow : Window
         // A pointer on the island means the display is on, whatever Windows last reported (DisplayPower).
         if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
-        if (inside) ReleaseHotkeyPin();
+        if (inside) { ReleaseHotkeyPin(); ReplayCompactTitle(); }
         if (inside)
         {
             _popupReturnArea = null;
