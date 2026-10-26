@@ -23,10 +23,17 @@ public sealed class DshSessions
         public long Length, Offset;
         public DateTime Modified;
         public byte[] Pending = [];
+        // A line over the length limit is being dropped up to its end, which may come in a later refresh.
+        public bool Skipping, SkippedUsage;
         public readonly List<TokenEntry> Entries = [];
         public int Errors;
     }
     private readonly Dictionary<string, CacheItem> _cache = new(StringComparer.OrdinalIgnoreCase);
+    // A line longer than this (a huge tool result) is dropped and counted as unreadable instead of growing the buffer without
+    // end, as LogReader does (C03).
+    private readonly int _maxLine;
+
+    public DshSessions(int maxLine = LogReader.DefaultMaxLine) => _maxLine = Math.Max(1024, maxLine);
 
     public static string Folder(string home) => Path.Combine(home, "sessions");
 
@@ -69,7 +76,7 @@ public sealed class DshSessions
         if (errors > 0) snapshot.UsageNote += Loc.T($" · {errors} 处记录未能读取", " · " + Loc.Count(errors, "record", "records") + " could not be read");
     }
 
-    private static void Parse(string file, CacheItem item, FileInfo info)
+    private void Parse(string file, CacheItem item, FileInfo info)
     {
         using var stream = SharedFile.Open(file);
         stream.Seek(item.Offset, SeekOrigin.Begin);
@@ -77,13 +84,16 @@ public sealed class DshSessions
         Stream text;
         if (file.EndsWith(".zstd", StringComparison.OrdinalIgnoreCase))
         {
-            // Only the compressed bytes are held whole, to find where the complete frames end.
-            var tail = new byte[Math.Max(0, stream.Length - item.Offset)];
+            // Only the compressed bytes are held whole, to find where the complete frames end. More than an array holds (2 GiB)
+            // makes this one file unreadable, rather than the whole source (C03).
+            long unread = Math.Max(0, stream.Length - item.Offset);
+            if (unread > Array.MaxLength) throw new InvalidDataException("The session file is too large to read.");
+            var tail = new byte[unread];
             stream.ReadExactly(tail);
             var frames = Frames(tail);
             complete = frames.Count == 0 ? 0 : frames[^1].Start + frames[^1].Length;
             // A first read starts at the batch holding the start date; earlier batches are not decompressed.
-            int skip = item.Offset == 0 ? FirstFrameFrom(tail, frames, item.Cutoff) : 0;
+            int skip = item.Offset == 0 ? FirstFrameFrom(tail, frames, item.Cutoff, _maxLine) : 0;
             int from = skip < frames.Count ? frames[skip].Start : (int)complete;
             text = new DecompressionStream(new MemoryStream(tail, from, (int)complete - from));
         }
@@ -91,7 +101,7 @@ public sealed class DshSessions
         using (text)
         {
             // The text is decompressed and split into lines piece by piece; only the token counts are kept.
-            var buffer = new byte[Math.Max(1 << 20, item.Pending.Length * 2)];
+            var buffer = new byte[Math.Min(_maxLine, Math.Max(1 << 20, item.Pending.Length * 2))];
             item.Pending.CopyTo(buffer, 0);
             int filled = item.Pending.Length, read;
             while ((read = text.Read(buffer, filled, buffer.Length - filled)) > 0)
@@ -102,13 +112,29 @@ public sealed class DshSessions
                 int lineStart = 0, newline;
                 while ((newline = Array.IndexOf(buffer, (byte)'\n', lineStart, filled - lineStart)) >= 0)
                 {
-                    ParseLine(buffer.AsSpan(lineStart, newline - lineStart), file, item);
+                    // The end of a line over the limit: only one that held usage leaves a gap in the statistics, so only that
+                    // counts as unreadable; a large tool result is dropped quietly.
+                    if (item.Skipping)
+                    {
+                        if (item.SkippedUsage || buffer.AsSpan(lineStart, newline - lineStart).IndexOf("\"usage\""u8) >= 0) item.Errors++;
+                        item.Skipping = item.SkippedUsage = false;
+                    }
+                    else ParseLine(buffer.AsSpan(lineStart, newline - lineStart), file, item);
                     lineStart = newline + 1;
                 }
                 Buffer.BlockCopy(buffer, lineStart, buffer, 0, filled - lineStart);
                 filled -= lineStart;
-                // A single line longer than the buffer (a large tool result) grows it instead of being split.
-                if (filled == buffer.Length) Array.Resize(ref buffer, buffer.Length * 2);
+                if (filled < buffer.Length) continue;
+                // A single line longer than the buffer (a large tool result) grows it instead of being split, up to the limit;
+                // beyond it the line is dropped up to its end. Its last bytes are kept, so a "usage" across two dropped pieces is
+                // still seen.
+                if (buffer.Length < _maxLine) Array.Resize(ref buffer, (int)Math.Min(_maxLine, buffer.Length * 2L));
+                else
+                {
+                    item.SkippedUsage |= buffer.AsSpan(0, filled).IndexOf("\"usage\""u8) >= 0; item.Skipping = true;
+                    int keep = "\"usage\""u8.Length - 1;
+                    buffer.AsSpan(filled - keep, keep).CopyTo(buffer); filled = keep;
+                }
             }
             item.Pending = buffer[..filled];
         }
@@ -130,25 +156,31 @@ public sealed class DshSessions
 
     // Each batch is a frame that decodes on its own and holds whole lines, and batches are appended in time order.
     // The batch to start from is the last one that begins before the start date, found by decoding only the first
-    // line of a few frames. Frames without a readable time (the session header) count as earlier than any date.
-    private static int FirstFrameFrom(byte[] data, List<(int Start, int Length)> frames, DateTimeOffset cutoff)
+    // line of a few frames. Frames without a readable time (the session header) count as earlier than any date; one whose
+    // first line is over the limit counts as later, so the search starts before it rather than past it.
+    private static int FirstFrameFrom(byte[] data, List<(int Start, int Length)> frames, DateTimeOffset cutoff, int maxLine)
     {
         int low = 0, high = frames.Count - 1, found = 0;
         while (low <= high)
         {
             int middle = (low + high) / 2;
-            if (FirstTime(data, frames[middle]) is { } time && time >= cutoff) high = middle - 1;
+            if (FirstTime(data, frames[middle], maxLine) is { } time && time >= cutoff) high = middle - 1;
             else { found = middle; low = middle + 1; }
         }
         return found;
     }
 
-    private static DateTimeOffset? FirstTime(byte[] data, (int Start, int Length) frame)
+    private static DateTimeOffset? FirstTime(byte[] data, (int Start, int Length) frame, int maxLine)
     {
         using var decoder = new DecompressionStream(new MemoryStream(data, frame.Start, frame.Length));
         var line = new MemoryStream();
         int value;
-        while ((value = decoder.ReadByte()) is >= 0 and not '\n') line.WriteByte((byte)value);
+        while ((value = decoder.ReadByte()) is >= 0 and not '\n')
+        {
+            // A first line over the limit tells no time; the frame counts as not before any date (FirstFrameFrom), so it is read.
+            if (line.Length >= maxLine) return DateTimeOffset.MaxValue;
+            line.WriteByte((byte)value);
+        }
         try
         {
             using var doc = JsonDocument.Parse(line.ToArray());

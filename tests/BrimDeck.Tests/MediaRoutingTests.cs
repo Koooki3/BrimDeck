@@ -56,5 +56,54 @@ internal static class MediaRoutingTests
             && MediaRouting.PreferSystem(logFull with { Title = "Song\u3000A" }, smtcFirst with { Title = "\uFF33\uFF4F\uFF4E\uFF47 A" }).HasTimeline);
         check("A different song keeps the log's timeline out", !MediaRouting.PreferSystem(logFull, smtcFirst with { Title = "\u6625\u96EA\u4E4B\u540E" }).HasTimeline
             && !MediaRouting.PreferSystem(logFull, smtcFirst with { Artist = "\u5176\u4ED6" }).HasTimeline);
+
+        // Measured: Apple Music reports "<artist> \u2014 <album>" as the artist with an empty album.
+        const string apple = "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App";
+        check("Apple Music's artist field is split into artist and album",
+            MediaRouting.SessionArtistAlbum(apple, "\u4F0D\u4F70 & China Blue \u2014 \u6CEA\u6865 (\"Rock Star 1\" Live) - Single", "")
+                == ("\u4F0D\u4F70 & China Blue", "\u6CEA\u6865 (\"Rock Star 1\" Live) - Single"));
+        check("Only the first dash ends Apple Music's artist",
+            MediaRouting.SessionArtistAlbum(apple, "Artist \u2014 Album \u2014 Deluxe", "") == ("Artist", "Album \u2014 Deluxe"));
+        check("Apple Music's artist without a dash or with an album is kept",
+            MediaRouting.SessionArtistAlbum(apple, "Artist", "") == ("Artist", "")
+            && MediaRouting.SessionArtistAlbum(apple, "Artist \u2014 Album", "Album") == ("Artist \u2014 Album", "Album"));
+        check("Other players' artists are not split",
+            MediaRouting.SessionArtistAlbum("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "Artist \u2014 Album", "") == ("Artist \u2014 Album", ""));
+
+        // Measured: Apple Music reported 2.000 at :57.677, again 2.000 at :58.219, then 3.000 at :58.433.
+        var t0 = new DateTimeOffset(2026, 10, 25, 23, 40, 57, 677, TimeSpan.Zero);
+        var known = new MediaTrack { Title = "Song", Artist = "Artist", State = MediaState.Playing, PositionKnown = true,
+            End = TimeSpan.FromSeconds(245), ReportedPosition = TimeSpan.FromSeconds(2), PositionAt = t0 };
+        var repeated = known with { PositionAt = t0.AddMilliseconds(542) };
+        var next = known with { ReportedPosition = TimeSpan.FromSeconds(3), PositionAt = t0.AddMilliseconds(756) };
+        check("A whole-second report behind the known position keeps the known timeline",
+            MediaRouting.KeepsTimeline(known, repeated, t0.AddMilliseconds(600)));
+        check("A report ahead of the known position is taken", !MediaRouting.KeepsTimeline(known, next, t0.AddMilliseconds(800)));
+        check("A step back of more than a second is a seek and is taken",
+            !MediaRouting.KeepsTimeline(known, known with { ReportedPosition = TimeSpan.Zero, PositionAt = t0.AddMilliseconds(500) }, t0.AddMilliseconds(600)));
+        check("A paused, different or untimed song is taken as reported",
+            !MediaRouting.KeepsTimeline(known, repeated with { State = MediaState.Paused }, t0.AddMilliseconds(600))
+            && !MediaRouting.KeepsTimeline(known, repeated with { Title = "Other" }, t0.AddMilliseconds(600))
+            && !MediaRouting.KeepsTimeline(known, repeated with { PositionKnown = false }, t0.AddMilliseconds(600)));
+        // Measured on the Traditional Chinese interface: off and all share a glyph, one has its own.
+        string loop = AppleMusicRepeat.RepeatGlyph, one = AppleMusicRepeat.RepeatOneGlyph;
+        var traditional = new AppleMusicRepeat();
+        check("Apple Music's repeat states are read from the measured names and glyphs",
+            traditional.Observe(loop, "不要重複") == MediaRepeat.None && traditional.Observe(loop, "全部重複") == MediaRepeat.List
+            && traditional.Observe(one, "重複單首歌曲") == MediaRepeat.Track && traditional.Observe("?", "x") is null);
+        var english = new AppleMusicRepeat();
+        bool unknownFirst = english.Observe(loop, "Repeat Off") is null;
+        english.Observe(loop, "Repeat All"); english.Observe(one, "Repeat One");
+        check("Apple Music's repeat names in another language are learnt from the cycle",
+            unknownFirst && english.Observe(loop, "Repeat Off") == MediaRepeat.None && english.Observe(loop, "Repeat All") == MediaRepeat.List);
+        var paused = known with { State = MediaState.Paused, ReportedPosition = TimeSpan.FromSeconds(1), PositionAt = t0.AddMilliseconds(80) };
+        check("The pause Apple Music reports right after a seek is passed over",
+            MediaRouting.SettlingAfterSeek(known, paused, t0, t0.AddMilliseconds(100)));
+        check("A pause after the settling time, without a seek, or on another song is shown",
+            !MediaRouting.SettlingAfterSeek(known, paused, t0, t0 + MediaRouting.SeekSettle) && !MediaRouting.SettlingAfterSeek(known, paused, null, t0)
+            && !MediaRouting.SettlingAfterSeek(known, paused with { Title = "Other" }, t0, t0.AddMilliseconds(100))
+            && !MediaRouting.SettlingAfterSeek(known with { State = MediaState.Paused }, paused, t0, t0.AddMilliseconds(100)));
+        check("Apple Music is recognized by its application id",
+            MediaRouting.IsAppleMusic(apple) && !MediaRouting.IsAppleMusic("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"));
     }
 }

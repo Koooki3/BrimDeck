@@ -51,6 +51,10 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private string _kimiAccount = "", _kimiSaved = "";
     private bool _kimiCacheRead;
     private DateTimeOffset _kimiSavedTime;
+    // Cursor token details by local day, for the account they were read for (the sub claim of its token). A day is read again
+    // until a full read ends an hour after the day did, so records the service adds late still count; older days are kept.
+    private readonly Dictionary<DateTime, (List<TokenEntry> Entries, DateTimeOffset ReadAt)> _cursorDays = [];
+    private string _cursorAccount = "";
     private readonly SemaphoreSlim _gate = new(1);
     private ClaudeQuotaSnapshot? _grokBotRetained;
     // The last Claude quota read online; until this run reads its own, the previous run's (ClaudeQuotaCache), which is read on
@@ -635,12 +639,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             try
             {
-                var parts = token.Split('.');
-                if (parts.Length < 2) throw new InvalidDataException();
-                var payload = parts[1].Replace('-', '+').Replace('_', '/');
-                payload = payload.PadRight((payload.Length + 3) / 4 * 4, '=');
-                using var jwt = JsonDocument.Parse(Convert.FromBase64String(payload));
-                var subject = jwt.RootElement.Get("sub").Text();
+                var subject = CursorAccount(token);
                 if (subject.Length == 0) throw new InvalidDataException();
                 using var request = new HttpRequestMessage(HttpMethod.Get, "https://cursor.com/api/usage-summary");
                 request.Headers.TryAddWithoutValidation("Cookie", "WorkosCursorSessionToken=" + Uri.EscapeDataString(subject + "::" + token));
@@ -664,44 +663,83 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException && !ct.IsCancellationRequested) { }
         Connected(snapshot, Loc.T("Cursor 当前账期", "Cursor current billing period"), now);
-        try { await ReadCursorEvents(snapshot, token, now, start, ct); }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException or TaskCanceledException)
-        { snapshot.UsageAvailable = false; snapshot.Entries.Clear(); snapshot.UsageNote = Loc.T("配额已读取，账户 Token 明细暂时不可用或尚未读取完整。", "The quota was read, but the account's token details are unavailable or not fully read yet."); }
+        await ReadCursorEvents(snapshot, token, now, start, ct);
     }
 
+    // The account's records can run to thousands a day, more than one refresh can read, so they are read a day at a time,
+    // newest first, and every day read in full is kept. The days a refresh did not reach are read by the next ones.
     private async Task ReadCursorEvents(ProviderSnapshot snapshot, string token, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
+        var account = CursorAccount(token);
+        // Details are shown only for the account signed in now; a token that names no account keeps nothing between refreshes.
+        if (account.Length == 0 || account != _cursorAccount) { _cursorDays.Clear(); _cursorAccount = account; }
+        DateTime first = start.LocalDateTime.Date, last = now.LocalDateTime.Date;
+        foreach (var day in _cursorDays.Keys.Where(day => day < first || day > last).ToList()) _cursorDays.Remove(day);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            for (var day = last; day >= first; day = day.AddDays(-1))
+            {
+                var end = new DateTimeOffset(day.AddDays(1));
+                if (_cursorDays.TryGetValue(day, out var kept) && kept.ReadAt >= end.AddHours(1)) continue;
+                _cursorDays[day] = (await ReadCursorDay(token, new DateTimeOffset(day), end, budget.Token), now);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException ||
+            ex is OperationCanceledException && !ct.IsCancellationRequested) { }
+        int days = (int)(last - first).TotalDays + 1, missing = days - _cursorDays.Count;
+        if (missing == days)
+        { snapshot.UsageAvailable = false; snapshot.UsageNote = Loc.T("配额已读取，账户 Token 明细暂时不可用或尚未读取完整。", "The quota was read, but the account's token details are unavailable or not fully read yet."); return; }
+        snapshot.Entries = _cursorDays.Values.SelectMany(read => read.Entries).Where(entry => entry.Time >= start && entry.Time <= now).OrderBy(entry => entry.Time).ToList();
+        snapshot.UsageAvailable = true;
+        snapshot.UsageComplete = missing == 0;
+        if (missing > 0) snapshot.UsageNote += Loc.T($"其中 {missing} 天的明细尚未读取，将在之后的刷新中补全。", " " + Loc.Count(missing, "day", "days") + " not read yet; later refreshes fill them in.");
+    }
+
+    // One local day's records, [from, to). An empty day, or a page past the last, comes back without the list.
+    private async Task<List<TokenEntry>> ReadCursorDay(string token, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
         var entries = new Dictionary<string, TokenEntry>();
         long rowsRead = 0;
         for (int page = 1; page <= 100; page++)
         {
             using var request = Bearer(HttpMethod.Post, "https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents", token);
             request.Headers.TryAddWithoutValidation("Connect-Protocol-Version", "1");
-            request.Content = JsonBody(new { startDate = start.ToUnixTimeMilliseconds().ToString(), endDate = now.ToUnixTimeMilliseconds().ToString(), page, pageSize = 1000 });
-            using var response = await SendAsync(_http, request, budget.Token);
+            request.Content = JsonBody(new { startDate = from.ToUnixTimeMilliseconds().ToString(), endDate = (to.ToUnixTimeMilliseconds() - 1).ToString(), page, pageSize = 1000 });
+            using var response = await SendAsync(_http, request, ct);
             var events = response.RootElement.Get("usageEventsDisplay");
-            if (events.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
-            foreach (var item in events.EnumerateArray())
-            {
-                var entry = ParseCursorEvent(item);
-                if (entry is not null && entry.Time >= start && entry.Time <= now) entries.TryAdd(entry.Key, entry);
-            }
-            rowsRead += events.GetArrayLength();
+            if (events.ValueKind is not (JsonValueKind.Array or JsonValueKind.Undefined)) throw new InvalidDataException();
+            int rows = events.ValueKind == JsonValueKind.Array ? events.GetArrayLength() : 0;
+            if (rows > 0)
+                foreach (var item in events.EnumerateArray())
+                    if (ParseCursorEvent(item) is { } entry && entry.Time >= from && entry.Time < to) entries.TryAdd(entry.Key, entry);
+            rowsRead += rows;
             var total = response.RootElement.Get("totalUsageEventsCount").Number();
-            if ((total is { } expected && rowsRead >= expected) || (total is null && events.GetArrayLength() < 1000))
-            { snapshot.Entries = entries.Values.ToList(); snapshot.UsageAvailable = true; return; }
-            if (events.GetArrayLength() == 0) throw new InvalidDataException();
+            if (rows == 0 || (total is { } expected && rowsRead >= expected) || (total is null && rows < 1000)) return entries.Values.ToList();
         }
         throw new InvalidDataException();
     }
+
+    // The account a Cursor sign-in belongs to: the sub claim of its token, read without checking the signature, since it
+    // only tells accounts apart. "" when the token names none.
+    private static string CursorAccount(string token)
+    {
+        var parts = token.Split('.');
+        if (parts.Length < 2) return "";
+        var payload = parts[1].Replace('-', '+').Replace('_', '/');
+        payload = payload.PadRight((payload.Length + 3) / 4 * 4, '=');
+        try { using var jwt = JsonDocument.Parse(Convert.FromBase64String(payload)); return jwt.RootElement.Get("sub").Text(); }
+        catch (Exception ex) when (ex is FormatException or JsonException) { return ""; }
+    }
+
     public static TokenEntry? ParseCursorEvent(JsonElement item)
     {
         var usage = item.Get("tokenUsage");
         if (usage.ValueKind != JsonValueKind.Object || item.Get("timestamp").Date() is not { } time) return null;
         var model = item.Get("model").Text();
-        var identity = item.Get("id").Text();
+        var identity = item.Get("usageEventId").Text();
+        if (identity.Length == 0) identity = item.Get("id").Text();
         if (identity.Length == 0) identity = time.ToString("O") + ":" + model + ":" + item.Get("conversationId").Text() + ":" + usage.GetRawText();
         decimal? cost = usage.Get("totalCents").Number() is { } cents && cents >= 0 ? (decimal)cents / 100m : null;
         return new("cursor:" + identity, time, model, usage.Get("inputTokens").Count(), usage.Get("cacheReadTokens").Count(),

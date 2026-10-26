@@ -83,4 +83,37 @@ public static class MediaRouting
             CanNext = log.CanNext || system.CanNext
         };
     }
+
+    // Apple Music's session reports "<artist> — <album>" as the artist and leaves the album empty (measured with
+    // version 1.1540.23042.0: "伍佰 & China Blue — 泪桥 - Single"). The first dash ends the artist.
+    public static (string Artist, string Album) SessionArtistAlbum(string appId, string artist, string album)
+    {
+        const string separator = " — ";
+        if (album.Length > 0 || !IsAppleMusic(appId)) return (artist, album);
+        int dash = artist.IndexOf(separator, StringComparison.Ordinal);
+        return dash > 0 ? (artist[..dash], artist[(dash + separator.Length)..]) : (artist, album);
+    }
+    public static bool IsAppleMusic(string appId) => appId.Contains("applemusic", StringComparison.OrdinalIgnoreCase);
+
+    // Apple Music reports its position in whole seconds, stamped with the time of the report, two to four times a
+    // second (measured: 2.000 at :57.677, 2.000 at :58.219, 3.000 at :58.433). Each report is therefore up to a second
+    // behind the song, and taking every one moves the progress bar back and forth. A report that places a playing song
+    // less than WholeSecondLag behind the position already known is such a coarser reading, so the known one is kept;
+    // a report ahead of it, or further behind (a seek), is taken.
+    public static readonly TimeSpan WholeSecondLag = TimeSpan.FromSeconds(1.1);
+
+    // Apple Music reports a pause right after its position is changed and plays on half a second later (measured: Paused
+    // 80 ms after the seek, Playing again 500 ms after that). Within SeekSettle of a seek BrimDeck made, a pause read while
+    // the same song was playing is that pause, and the playing track is kept; a real pause shows once the time is over.
+    public static readonly TimeSpan SeekSettle = TimeSpan.FromSeconds(1.5);
+    public static bool SettlingAfterSeek(MediaTrack known, MediaTrack read, DateTimeOffset? seekAt, DateTimeOffset now) =>
+        seekAt is { } at && now - at >= TimeSpan.Zero && now - at < SeekSettle &&
+        known.State == MediaState.Playing && read.State == MediaState.Paused && SameSong(known, read);
+    public static bool KeepsTimeline(MediaTrack known, MediaTrack read, DateTimeOffset now)
+    {
+        if (known is not { State: MediaState.Playing, HasTimeline: true } || read is not { State: MediaState.Playing, HasTimeline: true } ||
+            known.Duration != read.Duration || !SameSong(known, read)) return false;
+        var behind = known.Position(now) - read.Position(now);
+        return behind > TimeSpan.Zero && behind < WholeSecondLag;
+    }
 }

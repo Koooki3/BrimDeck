@@ -7,8 +7,8 @@ namespace BrimDeck;
 
 // One motion language for the whole app: the same few curves and durations for the panel, its pages, cards, hover and press
 // feedback, and dragging. Moves start promptly and land slowly (Out); what changes in place eases both ways (InOut); what
-// opens or appears leaves at full speed and lands with a slight give (Bounce), and what closes or goes away starts slowly and
-// settles without one (Settle), as the iPhone's island does; what follows the pointer trails it on a spring (BrimDeck.Core.Spring).
+// opens or appears leaves at full speed and lands with a slight give (Bounce), and what closes or goes away leaves at once and
+// lands softly without one (Drawer; the power-off still settles from a slow start, Settle); what follows the pointer trails it on a spring (BrimDeck.Core.Spring).
 // The curves are frozen and shared.
 internal static class Soft
 {
@@ -16,8 +16,11 @@ internal static class Soft
     public static readonly IEasingFunction Out = Frozen(new BezierEase(.22, .8, .28, 1));
     // For what turns or swaps in place.
     public static readonly IEasingFunction InOut = Frozen(new BezierEase(.45, 0, .25, 1));
-    // The collapsing surface: a slow start, then it settles.
+    // The surface drawing back into the dot as BrimDeck powers off: a slow start, then it settles.
     public static readonly IEasingFunction Settle = Frozen(new BezierEase(.45, 0, .12, 1));
+    // The collapsing panel (motion-review C2: chosen over Settle in an A/B comparison): a drawer's curve, which leaves at once
+    // and lands softly; the surface still starts a little after the content (PanelMotion.CloseSurfaceStart).
+    public static readonly IEasingFunction Drawer = Frozen(new BezierEase(.32, .72, 0, 1));
     // The system monitor's move (Curves.Follow): content that moves or swaps, selections that glide, hover feedback.
     public static readonly IEasingFunction Follow = Frozen(new FollowEase());
     // The opening surface: a fast attack that passes its size by under 2 percent and settles back (Curves.Bounce).
@@ -27,6 +30,9 @@ internal static class Soft
     // BrimDeck.Core.Eased.Seconds, and the panel itself the duration chosen in the settings. Hover is the monitor's (Eased.Hover),
     // a glide between choices the monitor's sort pill (Choose), content that moves in or out the monitor's readings (Move).
     public const int Quick = 160, Short = 240, Hover = (int)(Eased.Hover * 1000), Choose = (int)(Eased.Seconds * 750), Move = (int)(Eased.Seconds * 1000);
+    // How small content is as it steps out of or into its place (the island's compact content, motion-review F15): never so
+    // small that it reads as coming from nothing.
+    public const double Shrunk = .94;
 
     // Whether anything moves: the setting in BrimDeck and Windows' own "animation effects".
     public static bool Enabled => SystemParameters.ClientAreaAnimation && (Application.Current as App)?.Settings.Animations != false;
@@ -48,15 +54,15 @@ internal static class Soft
     }
 
     // The way back: it fades as it rises the same few DIPs, a little quicker, as the monitor page's card leaves. done runs once
-    // it has gone.
+    // it has gone. It leaves at full speed and slows, as what arrives does (motion-review F13).
     public static void Leave(UIElement element, Action done, double rise = 4)
     {
-        var fade = Fade(element.Opacity, 0, Quick, InOut);
+        var fade = Fade(element.Opacity, 0, Quick);
         fade.Completed += (_, _) => done();
         element.BeginAnimation(UIElement.OpacityProperty, fade);
         if (element.RenderTransform is not (null or MatrixTransform { Matrix.IsIdentity: true } or TranslateTransform { IsFrozen: false })) return;
         if (element.RenderTransform is not TranslateTransform shift) element.RenderTransform = shift = new TranslateTransform();
-        shift.BeginAnimation(TranslateTransform.YProperty, Fade(shift.Y, -rise, Quick, InOut));
+        shift.BeginAnimation(TranslateTransform.YProperty, Fade(shift.Y, -rise, Quick));
     }
 
     private static IEasingFunction Frozen(Freezable ease) { ease.Freeze(); return (IEasingFunction)ease; }
