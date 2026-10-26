@@ -108,7 +108,6 @@ public static class ReadingLevels
         CompactMonitorItems.Gpu => snapshot?.Gpu.OrDefault is { } gpu ? OfShare(gpu.Usage) : MemoryLevel.Normal,
         CompactMonitorItems.Download => snapshot?.Network.OrDefault is { } down ? OfRate(down.DownBytesPerSecond) : MemoryLevel.Normal,
         CompactMonitorItems.Upload => snapshot?.Network.OrDefault is { } up ? OfRate(up.UpBytesPerSecond) : MemoryLevel.Normal,
-        CompactMonitorItems.Temperature => Temperatures.Hottest(snapshot)?.Level ?? MemoryLevel.Normal,
         CompactMonitorItems.Storage => snapshot is not null && Core.Storage.System(snapshot.Storage, Core.Storage.WindowsLetter) is { } drive ? OfShare(drive.UsedFraction) : MemoryLevel.Normal,
         _ => MemoryLevel.Normal
     };

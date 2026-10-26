@@ -33,6 +33,8 @@ internal sealed class MediaSessions : IDisposable
         public BitmapSource? ShownCover = heir?.ShownCover ?? heir?.Cover;
         // When BrimDeck last moved this session's position through the window controls (MediaRouting.SettlingAfterSeek).
         public DateTimeOffset? SeekAt;
+        // Where Apple Music's whole-second reports place the playing song's start (MediaRouting.FromWholeSeconds).
+        public MediaRouting.WholeSecondStart? WholeSeconds;
     }
     private sealed class CoverCache
     {
@@ -514,8 +516,7 @@ internal sealed class MediaSessions : IDisposable
                 var now = DateTimeOffset.UtcNow;
                 if (source.Track is { } settling && MediaRouting.SettlingAfterSeek(settling, read, source.SeekAt, now))
                     read = read with { State = MediaState.Playing, Start = settling.Start, ReportedPosition = settling.ReportedPosition, PositionAt = settling.PositionAt };
-                else if (source.Track is { } previous && MediaRouting.KeepsTimeline(previous, read, now))
-                    read = read with { Start = previous.Start, ReportedPosition = previous.ReportedPosition, PositionAt = previous.PositionAt };
+                else (read, source.WholeSeconds) = MediaRouting.FromWholeSeconds(source.WholeSeconds, read);
                 // The session offers no shuffle, repeat or seeking; with full control the window's controls stand in while
                 // they are found.
                 if (AppleMusicFullControl) _appleMusic?.Refresh();
