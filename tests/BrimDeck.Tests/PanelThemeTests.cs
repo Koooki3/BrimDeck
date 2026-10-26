@@ -430,6 +430,18 @@ internal static class PanelThemeTests
         check("A preset gradient is recognized however its colors are written", PanelThemes.CarryGradient(dracula, githubDark, lowercase)
             && lowercase.ClockGradient.SequenceEqual(githubDark.ClockGradients[0].Stops) && PanelThemes.CarryGradient(translucent, githubDark, fromTranslucent));
 
+        // Windows' high contrast: the system's colors on the whole panel and nothing drawn over the surface.
+        ThemeColor S(string hex) => ThemeColor.Parse(hex);
+        var hcBlack = PanelThemes.HighContrast(S("#000000"), S("#FFFFFF"), S("#3FF23F"), S("#1AEBFF"), S("#000000"));
+        var hcWhite = PanelThemes.HighContrast(S("#FFFFFF"), S("#000000"), S("#600000"), S("#37006E"), S("#FFFFFF"));
+        check("High contrast shows the system's colors as they are", hcBlack.IsDark && !hcWhite.IsDark && hcBlack.Adjustments.Count == 0 && hcWhite.Adjustments.Count == 0
+            && hcBlack.Surface == S("#000000") && hcBlack["textPrimary"] == S("#FFFFFF") && hcBlack["textTertiary"] == S("#3FF23F") && hcBlack["accent"] == S("#1AEBFF")
+            && hcBlack["onAccent"] == S("#000000") && hcWhite["textPrimary"] == S("#000000") && hcWhite.Apps.Values.All(color => color == S("#37006E")));
+        check("High contrast draws nothing over the surface", new[] { hcBlack, hcWhite }.All(palette => palette.Effects is { SurfaceGradient.Count: 0, RimGradient.Count: 0, Scanlines: 0, Pixel: 0, Texture: 0, ShadowOpacity: 0, Glass: null, Decor: null }
+            && !palette.HasOverlay && !palette.Motion.AnyInteraction && !palette.Motion.Ambient.Any && palette.Colors.Count == PanelThemes.Tokens.Count));
+        check("A system gray text too faint to read is moved like a theme's", PanelThemes.HighContrast(S("#000000"), S("#FFFFFF"), S("#404040"), S("#1AEBFF"), S("#000000")) is var faint
+            && faint.Adjustments.Any(a => a.Key == "textTertiary") && faint["textTertiary"].MinimumContrast([faint.Surface]) >= PanelThemes.TextContrast - .001);
+
         // Settings.
         var settings = new DeckSettings { PanelTheme = "  GitHub-Dark " }; settings.Normalize();
         var empty = new DeckSettings { PanelTheme = "" }; empty.Normalize();

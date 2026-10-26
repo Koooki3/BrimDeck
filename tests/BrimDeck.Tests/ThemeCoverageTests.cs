@@ -116,6 +116,9 @@ internal static class ThemeCoverageTests
         // "system" resolves to one of these; both of its sides are covered above, but it is named so a change to Find shows here.
         yield return ("system-dark", PanelThemes.Resolve(PanelThemes.Find(PanelThemes.SystemId, true, [])));
         yield return ("system-light", PanelThemes.Resolve(PanelThemes.Find(PanelThemes.SystemId, false, [])));
+        // Windows' high contrast in its black and white schemes, as the panel shows it whatever theme is chosen.
+        yield return ("high-contrast-black", PanelThemes.HighContrast(ThemeColor.Parse("#000000"), ThemeColor.Parse("#FFFFFF"), ThemeColor.Parse("#3FF23F"), ThemeColor.Parse("#1AEBFF"), ThemeColor.Parse("#000000")));
+        yield return ("high-contrast-white", PanelThemes.HighContrast(ThemeColor.Parse("#FFFFFF"), ThemeColor.Parse("#000000"), ThemeColor.Parse("#600000"), ThemeColor.Parse("#37006E"), ThemeColor.Parse("#FFFFFF")));
     }
 
     // A backdrop as drawn: its layers composited bottom up over the bottom layer, which is opaque. A surface with a gradient
