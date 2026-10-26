@@ -104,7 +104,8 @@ internal static class CompactRowTests
         var fewRings = CompactMusicLayout.Calculate(170, 1, true, 4, true, 33, RowReadings, 10);
         check("Compact row: no reading shows while a ring is still left out", fewRings is { VisibleRings: 1, MonitorItems: 0, MonitorWidth: 0 });
         check("Compact monitor: the row's priority is the leave order reversed",
-            CompactMonitor.Priority.SequenceEqual([CompactMonitorItems.Cpu, CompactMonitorItems.Memory, CompactMonitorItems.Columns, CompactMonitorItems.Download, CompactMonitorItems.Gpu, CompactMonitorItems.Upload])
+            CompactMonitor.Priority.SequenceEqual([CompactMonitorItems.Cpu, CompactMonitorItems.Memory, CompactMonitorItems.Columns, CompactMonitorItems.Download, CompactMonitorItems.Gpu, CompactMonitorItems.Upload,
+                CompactMonitorItems.Storage, CompactMonitorItems.Temperature])
             && CompactMonitor.First(CompactMonitorItems.All, 2) == (CompactMonitorItems.Cpu | CompactMonitorItems.Memory)
             && CompactMonitor.First(CompactMonitorItems.Memory | CompactMonitorItems.Upload, 1) == CompactMonitorItems.Memory
             && CompactMonitor.First(CompactMonitorItems.All, 0) == CompactMonitorItems.None && CompactMonitor.First(CompactMonitorItems.Gpu, 5) == CompactMonitorItems.Gpu);
