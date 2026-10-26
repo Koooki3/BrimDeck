@@ -119,7 +119,7 @@
       "surface": "#001E3C",
       "textPrimary": "#EEF7F8",
       "textSecondary": "#DCE8EA",
-      "textTertiary": "#A0B7BE",
+      "textTertiary": "#ADC0C7",
       "accent": "#45D5C8",
       "onAccent": "#05222A",
       "danger": "#FFA095",
@@ -140,7 +140,7 @@
       "rangeFill": "#4045D5C8",
       "coverPlaceholder": "#14B1E0E6",
       "coverOutline": "#26B1E0E6",
-      "scrollThumb": "#527895",
+      "scrollThumb": "#57809E",
       "rim": "#45D5C8",
       "shadow": "#2FC9BE",
       "indicator": "#5C7590",
@@ -157,7 +157,7 @@
     },
     "apps": {
       "claude": "#F0AC8C", "codex": "#8EE3B1", "antigravity": "#9EBBFF", "cursor": "#D3DCE2", "zcode": "#9AACEB",
-      "dsh": "#8FAEF2", "grokBot": "#D3DCE2", "kimi": "#6FD8F2", "manual": "#D2A6F2", "other": "#D3DCE2", "warning": "#FFD27A", "critical": "#FF9696"
+      "dsh": "#8FAEF2", "grokBot": "#D3DCE2", "kimi": "#6FD8F2", "manual": "#D2A6F2", "other": "#D3DCE2", "warning": "#FFD27A", "critical": "#FFA5A5"
     },
     "clock": {
       "palette": { "amber": "#FFC06B", "cyan": "#6FE8E0", "pink": "#FF9EC4", "lime": "#D9FF86" },
