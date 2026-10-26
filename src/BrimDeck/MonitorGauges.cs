@@ -300,9 +300,11 @@ internal sealed class BlockGauge : FrameworkElement
 
     public BlockGauge(string color, string button) { _color = color; _action = button; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true; KeyboardPress.Take(this, true); }
 
-    // For screen readers: "GPU 占用 12%，切换为以 GPU 为主".
-    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button,
-        () => Loc.T($"GPU 占用 {MonitorFormat.Percent(_value.Target)}%，", $"GPU usage {MonitorFormat.Percent(_value.Target)}%, ") + _action, () => Clicked?.Invoke());
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button, Spoken, () => Clicked?.Invoke());
+    // For screen readers, named as the block it is, with the memory its line shows, so it never reads the same as the small GPU figure beside the main
+    // gauge that does the same thing (I-02): "GPU 占用块：占用 12% · 显存 18%，切换为以 GPU 为主".
+    private string Spoken() => Loc.T("GPU 占用块：占用 ", "GPU block: usage ") + MonitorFormat.Percent(_value.Target) + "%"
+        + (_hasTick ? Loc.T(" · 显存 ", " · VRAM ") + MonitorFormat.Percent(_tick.Target) + "%" : "") + Loc.T("，", ", ") + _action;
 
     public void Set(double value, double? tick, string tip, bool motion)
     {
