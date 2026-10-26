@@ -180,8 +180,10 @@ public sealed partial class SettingsWindow
         (ComboBox Box, List<TimeSpan> Times) Pick(TimeSpan value, string name)
         {
             var times = steps.Contains(value) ? steps : [.. steps.Append(value).Order()];
+            // The time stands in the middle of its box and of the list; the list opens on the chosen time, a few rows down.
             var box = new ComboBox { Width = 84, Style = (Style)FindResource("SettingsCombo"), ItemsSource = times.Select(PanelThemes.FormatTimeOfDay).ToList(),
-                SelectedIndex = times.IndexOf(value) is var at and >= 0 ? at : 0 };
+                SelectedIndex = times.IndexOf(value) is var at and >= 0 ? at : 0, HorizontalContentAlignment = HorizontalAlignment.Center };
+            box.DropDownOpened += (_, _) => box.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => ShowChosen(box));
             AutomationProperties.SetName(box, name); PopupMotion.Attach(box);
             return (box, times);
         }
@@ -221,6 +223,22 @@ public sealed partial class SettingsWindow
             "The night look is shown while Windows uses dark mode and the day look in light mode; it changes over with a slow fade."));
         yield return Row(Loc.T("白天时段", "Daytime"), pair, help: () => Loc.T("在这段时间内使用白天外观，其余时间使用夜间外观；到点时自动渐变切换。",
             "The day look is shown between these times and the night look the rest of the day; it changes over by itself, with a slow fade."));
+    }
+
+    // Scrolls an open list so its chosen item stands about a third of the way down, with the times before it in view.
+    private static void ShowChosen(ComboBox box)
+    {
+        if (box.ItemContainerGenerator.ContainerFromIndex(box.SelectedIndex) is not FrameworkElement item
+            || FindParent<ScrollViewer>(item) is not { } scroll) return;
+        double top = item.TransformToAncestor(scroll).Transform(new Point()).Y + scroll.VerticalOffset;
+        scroll.ScrollToVerticalOffset(Math.Max(0, top - (scroll.ViewportHeight - item.ActualHeight) / 3));
+    }
+
+    private static T? FindParent<T>(DependencyObject child) where T : DependencyObject
+    {
+        for (var node = System.Windows.Media.VisualTreeHelper.GetParent(child); node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+            if (node is T found) return found;
+        return null;
     }
 
     private TextBlock Wrapped(string text, bool error)
