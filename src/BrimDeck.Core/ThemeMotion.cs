@@ -250,7 +250,8 @@ public static class MotionGate
 // The interaction durations in milliseconds, from the animation length chosen in settings (100 to 1000 ms, 360 by default) and
 // the theme's pace: at the default a hover arrives in about the monitor's hover time (Eased.Hover), a press goes down in under
 // a tenth of a second and lets go in under a fifth, and what a completed press leaves lasts about half a second.
-// PressIn: the button going down. PressOut: letting go. Press: what a completed press leaves (particles, a scan line).
+// HoverOut: a hover leaving, in seven tenths of its arrival (Eased.HoverOut); a stepped theme draws its way out in half of
+// HoverOut (InteractionFx.LeavingPresence), so its HoverOut is twice that. PressIn: the button going down. PressOut: letting go. Press: what a completed press leaves (particles, a scan line).
 // Glitch: the length of a glitch slice, a few frames. Scan: the scan line's pass (0: four fifths of PressOut).
 public readonly record struct MotionTiming(int HoverIn, int HoverOut, int Glide, int Press, int Focus, int PressIn, int PressOut, int Glitch, int Scan = 0)
 {
@@ -258,20 +259,20 @@ public readonly record struct MotionTiming(int HoverIn, int HoverOut, int Glide,
     {
         double d = AnimationLength.Clamp(animationDuration) * Math.Clamp(double.IsFinite(pace) ? pace : 1, MotionSafety.PaceMin, MotionSafety.PaceMax);
         static int Ms(double value, double min, double max) => AnimationLength.Ms(value, min, max);
-        return new(Ms(d * .45, 80, 450), Ms(d * .75, 120, 700), Ms(d * .6, 90, 600), Ms(d * 1.4, 240, 1400), Ms(d * 1.6, 300, 1600),
+        return new(Ms(d * .45, 80, 450), Ms(d * .63, 112, 630), Ms(d * .6, 90, 600), Ms(d * 1.4, 240, 1400), Ms(d * 1.6, 300, 1600),
             Ms(d * .22, 40, 200), Ms(d * .5, 80, 450), Ms(d * .2, 50, 90));
     }
 
     // What the windows use (motion-review C5): the answers to the pointer and the keyboard keep their own pace, whatever the
     // panel's animation length, as the monitor page's hover does: the timings at the default length, with a smooth theme's
-    // hover coming and going in the monitor's hover time (Eased.Hover) times its pace. A stepped theme keeps its quick arrival
-    // and its slower, stepped way out (F14), so it still reads as mechanical.
+    // hover coming in the monitor's hover time (Eased.Hover) times its pace and going in seven tenths of it (Eased.HoverOut). A
+    // stepped theme keeps its quick arrival and its stepped way out (F14), so it still reads as mechanical.
     public static MotionTiming For(double pace, int steps)
     {
         var timing = From(AnimationLength.Default, pace);
         if (steps >= MotionSafety.StepsMin) return timing;
         int hover = AnimationLength.Ms(Eased.Hover * 1000 * Math.Clamp(double.IsFinite(pace) ? pace : 1, MotionSafety.PaceMin, MotionSafety.PaceMax), 80, 450);
-        return timing with { HoverIn = hover, HoverOut = hover };
+        return timing with { HoverIn = hover, HoverOut = AnimationLength.Ms(hover * Eased.HoverOut / Eased.Hover, 56, 315) };
     }
 }
 

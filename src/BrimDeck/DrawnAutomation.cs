@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
+using System.Windows.Controls;
 
 namespace BrimDeck;
 
@@ -20,7 +21,7 @@ internal sealed class DrawnPeer : FrameworkElementAutomationPeer, IInvokeProvide
     private readonly Func<IEnumerable<DrawnPart>>? _parts;
     private readonly Dictionary<string, DrawnPartPeer> _partPeers = [];
 
-    // type: the kind while it takes no clicks; while invoke is set and clickable (by default always) says so, it is a button.
+    // type: its kind; one whose clicks come and go (clickable) is a button while it takes them, and type otherwise.
     public DrawnPeer(FrameworkElement owner, AutomationControlType type, Func<string> name, Action? invoke = null, Func<bool>? clickable = null,
         Func<double?>? share = null, Func<IEnumerable<DrawnPart>>? parts = null) : base(owner)
     {
@@ -30,12 +31,12 @@ internal sealed class DrawnPeer : FrameworkElementAutomationPeer, IInvokeProvide
     private bool Clickable => _invoke is not null && (_clickable?.Invoke() ?? true);
 
     protected override string GetNameCore() { string name = _name(); return name.Length > 0 ? name : base.GetNameCore(); }
-    protected override AutomationControlType GetAutomationControlTypeCore() => Clickable ? AutomationControlType.Button : _type;
+    protected override AutomationControlType GetAutomationControlTypeCore() => _clickable is not null && Clickable ? AutomationControlType.Button : _type;
     protected override string GetClassNameCore() => Owner.GetType().Name;
     public override object GetPattern(PatternInterface pattern) => pattern switch
     {
         PatternInterface.Invoke when Clickable => this,
-        PatternInterface.RangeValue when _share is not null && !Clickable => this,
+        PatternInterface.RangeValue when _share is not null && !(_clickable is not null && Clickable) => this,
         _ => base.GetPattern(pattern)
     };
 
@@ -125,4 +126,12 @@ internal sealed class DrawnPartPeer(DrawnPeer owner) : AutomationPeer, IInvokePr
         if (!Element.IsEnabled) throw new ElementNotEnabledException();
         if (Part.Invoke is { } invoke) Element.Dispatcher.BeginInvoke(invoke);
     }
+}
+
+// A Border that stands for one control (a notice's row on the notices page): a Border has no automation peer, so a screen
+// reader would pass over it and read only the text inside. This one is read as its name with its kind, its buttons inside it
+// stay its children, and invoking it does what a click does.
+internal sealed class SpokenBorder(AutomationControlType type, Action? invoke = null) : Border
+{
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, type, () => AutomationProperties.GetName(this), invoke);
 }
