@@ -8,10 +8,15 @@ namespace BrimDeck.Core;
 public enum GpuKind { Unknown, Integrated, Discrete }
 
 // A graphics adapter as DXGI describes it. Its LUID names it in the performance counters until the next restart or driver reset;
-// Key names it for good (GpuReadings.Keyed). Software adapters (the Basic Render Driver) are listed so their counters are left out.
+// Key names it for good (GpuReadings.Keyed). Location is where it sits on the bus ("1:0.0", PCI bus, device and function), which
+// tells two cards of one model apart and stays the same across restarts; null where the system does not give it. LegacyKey is
+// the key saved before there was a location, to find a choice saved then. Software adapters (the Basic Render Driver) are listed
+// so their counters are left out.
 public sealed record GpuAdapter(ulong Luid, string Name, uint VendorId, uint DeviceId, uint SubSystemId, ulong DedicatedTotal, GpuKind Kind, bool Software = false)
 {
     public string Key { get; init; } = "";
+    public string? Location { get; init; }
+    public string LegacyKey { get; init; } = "";
 }
 
 // One adapter's counters with every process's share summed: by engine type ("3D", "Compute_0", ...) in percent, and its memory in
@@ -98,21 +103,28 @@ public static class GpuReadings
         true => GpuKind.Integrated, false => GpuKind.Discrete, _ => dedicated < IntegratedBelow ? GpuKind.Integrated : GpuKind.Discrete
     };
 
-    // Gives each adapter a key that outlives its LUID: its vendor, device and subsystem ids, or its name where it has no ids. Two
-    // identical cards are told apart by their order ("#2"), which is all that is left to tell them by.
+    // Gives each adapter a key that outlives its LUID: its vendor, device and subsystem ids (or its name where it has no ids) and
+    // where it sits on the bus, "10DE:2684:16F310DE@1:0.0", so two identical cards keep their own keys across restarts, whatever
+    // order they are listed in. Without a location (the system does not give one) identical cards are told apart by their order
+    // ("#2"), as before; that order is the LUIDs', which can change with a restart. LegacyKey is that older key for every adapter.
     public static IReadOnlyList<GpuAdapter> Keyed(IEnumerable<GpuAdapter> adapters)
     {
         var counts = new Dictionary<string, int>();
         var keyed = new List<GpuAdapter>();
         foreach (var adapter in adapters.OrderBy(adapter => adapter.Luid))
         {
-            string identity = adapter.VendorId != 0 ? $"{adapter.VendorId:X4}:{adapter.DeviceId:X4}:{adapter.SubSystemId:X8}"
-                : adapter.Name.Length > 0 ? adapter.Name : LuidText(adapter.Luid);
+            string identity = Identity(adapter);
             int count = counts[identity] = counts.GetValueOrDefault(identity) + 1;
-            keyed.Add(adapter with { Key = count == 1 ? identity : identity + "#" + count });
+            string legacy = count == 1 ? identity : identity + "#" + count;
+            keyed.Add(adapter with { Key = adapter.Location is { Length: > 0 } location ? identity + "@" + location : legacy, LegacyKey = legacy });
         }
         return keyed;
     }
+    private static string Identity(GpuAdapter adapter) => adapter.VendorId != 0 ? $"{adapter.VendorId:X4}:{adapter.DeviceId:X4}:{adapter.SubSystemId:X8}"
+        : adapter.Name.Length > 0 ? adapter.Name : LuidText(adapter.Luid);
+    // A PCI location as Windows gives it (bus, device, function); null for one that is not on PCI (all ones, a software adapter).
+    public static string? Location(uint bus, uint device, uint function) =>
+        bus > 0xFFFF || device > 31 || function > 7 ? null : $"{bus}:{device}.{function}";
 
     // One sample per adapter with counters. With adapters described (DXGI listed any), only the hardware adapters it lists are
     // kept: the software rasterizer has engines of its own, and NPUs and other compute-only devices have counters but are not
@@ -131,7 +143,7 @@ public static class GpuReadings
             {
                 Engines = GpuEngines.Order(engines), SharedBytes = Bytes(total.Shared, noMemory),
                 Name = adapter?.Name is { Length: > 0 } name ? name : null, DedicatedTotal = adapter?.DedicatedTotal is > 0 and var size ? size : null,
-                Luid = luid, Key = adapter?.Key is { Length: > 0 } key ? key : LuidText(luid), Kind = adapter?.Kind ?? GpuKind.Unknown
+                Luid = luid, Key = adapter?.Key is { Length: > 0 } key ? key : LuidText(luid), LegacyKey = adapter?.LegacyKey ?? "", Kind = adapter?.Kind ?? GpuKind.Unknown
             });
         }
         samples.Sort(static (a, b) => Rank(a.Kind) != Rank(b.Kind) ? Rank(a.Kind).CompareTo(Rank(b.Kind))
@@ -162,25 +174,45 @@ public static class GpuChoice
         return discrete ?? before ?? busiest;
     }
 
-    // The saved adapter: by its key; then by the LUID it was saved under, for an adapter with no ids; then by its name, for an
-    // adapter whose ids changed with its driver. Null while it is not there (an external GPU unplugged); the choice is kept for
-    // when it returns.
+    // The saved adapter: by its key; then by the key saved before adapters had a location (LegacyKey), for a choice saved then;
+    // then by the LUID it was saved under, for an adapter with no ids; then by its name, for an adapter whose ids changed with its
+    // driver, when no other adapter has that name. Null while it is not there (an external GPU unplugged); the choice is kept for
+    // when it returns. A choice found any other way than by its key is saved again under the adapter's key (Resolve's upgrade).
     public static GpuSample? Saved(IReadOnlyList<GpuSample> gpus, string key, string? name)
     {
         foreach (var gpu in gpus) if (gpu.Key == key) return gpu;
+        // A key with a location names one card: another card of the model is not it, though it has the same ids and name (the
+        // chosen card may be the one removed). By name only an adapter whose ids changed (a new driver) is found.
+        if (key.IndexOf('@') is var at and > 0)
+        {
+            string identity = key[..at];
+            return Named(gpus, name) is { } named && named.Key.Split('@')[0] != identity ? named : null;
+        }
+        foreach (var gpu in gpus) if (gpu.LegacyKey.Length > 0 && gpu.LegacyKey == key) return gpu;
         foreach (var gpu in gpus) if (GpuReadings.LuidText(gpu.Luid) == key) return gpu;
-        if (name is { Length: > 0 }) foreach (var gpu in gpus) if (gpu.Name == name) return gpu;
-        return null;
+        return Named(gpus, name);
+    }
+    // Two cards of one model have one name: only an adapter that is the only one with the name is taken by it.
+    private static GpuSample? Named(IReadOnlyList<GpuSample> gpus, string? name)
+    {
+        if (name is not { Length: > 0 }) return null;
+        GpuSample? named = null; int count = 0;
+        foreach (var gpu in gpus) if (gpu.Name == name) { named = gpu; count++; }
+        return count == 1 ? named : null;
     }
 
     // The adapter to show for a saved choice (null for 自动), falling back to 自动 while the chosen one is not there. automatic:
-    // 自动 chose it, so it is the adapter to keep (previousAuto) next time.
-    public static GpuSample? Resolve(IReadOnlyList<GpuSample> gpus, string? key, string? name, ulong previousAuto, out bool automatic)
+    // 自动 chose it, so it is the adapter to keep (previousAuto) next time. upgrade: the key to save the choice under now, when it
+    // was found by an older or weaker mark than its key; null otherwise.
+    public static GpuSample? Resolve(IReadOnlyList<GpuSample> gpus, string? key, string? name, ulong previousAuto, out bool automatic, out string? upgrade)
     {
         var saved = key is null ? null : Saved(gpus, key, name);
         automatic = saved is null;
+        upgrade = saved is not null && saved.Key != key && saved.Key.Length > 0 ? saved.Key : null;
         return saved ?? Auto(gpus, previousAuto);
     }
+    public static GpuSample? Resolve(IReadOnlyList<GpuSample> gpus, string? key, string? name, ulong previousAuto, out bool automatic)
+        => Resolve(gpus, key, name, previousAuto, out automatic, out _);
 
     // The adapter after this one, in the list's order, round to the first.
     public static GpuSample? Next(IReadOnlyList<GpuSample> gpus, GpuSample current)
@@ -198,5 +230,67 @@ public static class GpuChoice
     {
         string shown = name is { Length: > 0 } ? name : "GPU", word = KindName(kind);
         return word.Length == 0 ? shown : Loc.T($"{shown}（{word}）", $"{shown} ({word})");
+    }
+}
+
+// The adapters' descriptions (GpuAdapters.Read), read again when the counters name an adapter not described. A read that fails,
+// or that misses an adapter (one failed to describe itself), never shuts an adapter out for long: the descriptions it had are kept,
+// and an adapter still without one is asked about again after a pause that grows from FirstPause to LongestPause, so one that
+// failed once returns within seconds, while a device DXGI never lists (an NPU, which has counters but is no graphics adapter)
+// costs a read now and then only. An adapter described again starts over.
+public sealed class GpuDescriptions
+{
+    public const double FirstPause = 5, LongestPause = 600;
+    private readonly Func<(IReadOnlyDictionary<ulong, GpuAdapter> Adapters, bool Described, bool Complete)> _read;
+    private IReadOnlyDictionary<ulong, GpuAdapter> _adapters = new Dictionary<ulong, GpuAdapter>();
+    private readonly Dictionary<ulong, (double At, double Pause)> _waiting = [];
+    private double _retryAt = double.NegativeInfinity, _pause;
+
+    public GpuDescriptions(Func<(IReadOnlyDictionary<ulong, GpuAdapter> Adapters, bool Described, bool Complete)> read, double now)
+    {
+        _read = read;
+        Read([], now);
+    }
+
+    // Whether any read described an adapter; until then the samples are kept unnamed (GpuReadings.Samples).
+    public bool Described { get; private set; }
+    // How many times the adapters were read (for the tests).
+    public int Reads { get; private set; }
+    public IReadOnlyDictionary<ulong, GpuAdapter> Adapters => _adapters;
+
+    // The descriptions for the adapters the counters list now (luids), read again when one is not described and its pause is over.
+    public IReadOnlyDictionary<ulong, GpuAdapter> For(IReadOnlyCollection<ulong> luids, double now)
+    {
+        bool due = !Described && now >= _retryAt;
+        foreach (var luid in luids)
+            if (!_adapters.ContainsKey(luid) && (!_waiting.TryGetValue(luid, out var wait) || now >= wait.At)) due = true;
+        if (due) Read(luids, now);
+        // Adapters that left the counters are forgotten, so one that comes back is asked about at once.
+        if (_waiting.Count > 0) foreach (var luid in _waiting.Keys.Where(luid => !luids.Contains(luid)).ToList()) _waiting.Remove(luid);
+        return _adapters;
+    }
+
+    private void Read(IReadOnlyCollection<ulong> luids, double now)
+    {
+        Reads++;
+        var (adapters, described, complete) = _read();
+        if (described)
+        {
+            // An adapter this read missed keeps the description it had.
+            if (!complete && _adapters.Count > 0)
+            {
+                var merged = new Dictionary<ulong, GpuAdapter>(adapters);
+                foreach (var (luid, adapter) in _adapters) merged.TryAdd(luid, adapter);
+                adapters = merged;
+            }
+            _adapters = adapters; Described = true; _pause = 0;
+        }
+        else if (!Described) { _pause = Math.Clamp(_pause * 2, FirstPause, LongestPause); _retryAt = now + _pause; }
+        foreach (var luid in luids)
+        {
+            if (_adapters.ContainsKey(luid)) { _waiting.Remove(luid); continue; }
+            var pause = Math.Clamp((_waiting.TryGetValue(luid, out var wait) ? wait.Pause : 0) * 2, FirstPause, LongestPause);
+            _waiting[luid] = (now + pause, pause);
+        }
     }
 }
