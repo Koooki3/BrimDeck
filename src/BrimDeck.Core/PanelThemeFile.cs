@@ -15,9 +15,6 @@ public sealed class PanelThemeFile
     public string Homepage { get; set; } = "";
     // A built-in theme id. Unset means "dark".
     public string Base { get; set; } = "";
-    // "liquid": drawn as liquid glass (PanelThemes.IsLiquid). Only BrimDeck's built-in liquid glass themes can declare it; in a
-    // theme file of the user's it is ignored, and the theme's glass is the blur. Not inherited from the base theme.
-    public string Renderer { get; set; } = "";
     public Dictionary<string, string>? Colors { get; set; }
     public Dictionary<string, string>? Apps { get; set; }
     public PanelThemeEffects? Effects { get; set; }

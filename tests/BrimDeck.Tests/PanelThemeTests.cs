@@ -157,7 +157,7 @@ internal static class PanelThemeTests
             var claims = ByFile(found, "claims.json");
             var claimedPalette = PanelThemes.Resolve(claims);
             check("A user's theme declaring the liquid renderer, based on liquid glass, is usable glass but never drawn as liquid glass",
-                claims.Usable && claims.File.Renderer == "liquid" && claimedPalette.IsGlass && !PanelThemes.IsLiquid(claimedPalette) && !PanelThemes.IsLiquid(claims.Id));
+                claims.Usable && claimedPalette.IsGlass && !PanelThemes.IsLiquid(claimedPalette) && !PanelThemes.IsLiquid(claims.Id));
             check("A user's file can take neither a liquid glass theme's id nor automatic liquid glass's",
                 !ByFile(found, "thief.json").Usable && !ByFile(found, "auto.json").Usable
                 && PanelThemes.Find(PanelThemes.GlassLight, false, found).BuiltIn && found.All(theme => !theme.Usable || !PanelThemes.IsLiquid(PanelThemes.Resolve(theme))));
