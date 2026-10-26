@@ -107,7 +107,8 @@ internal sealed class MonitorView : Grid
         }
         else
         {
-            _gpuGraph = new ColumnGraph(44, layout.Caption, !layout.CompactMetrics, gap: 6);
+            // The engines spread over the room the graph has, so a wide page leaves no gap between them and the processor's columns.
+            _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, !layout.CompactMetrics, gap: 6);
             _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu);
             _cpuGraph.Clicked += () => mainChanged(MonitorMain.Cpu);
             SetColumn(_cpuGraph, 2); graphs.Children.Add(_gpuGraph); graphs.Children.Add(_cpuGraph);
@@ -168,6 +169,9 @@ internal sealed class MonitorView : Grid
     }
 
     public bool CardOpen => _card is not null;
+    // The widest a graphics engine's column grows on the page with the GPU large: no narrower than the graph's room needs, so the
+    // few kinds of engine an adapter has always fill it.
+    public const double EngineColumn = 1000;
 
     // The small gauge's widest line with a temperature, "(G) 100 % 独显 105 °C" (the kind only for the graphics adapter, when its
     // temperature is another adapter's), as FigureGauge lays it out (its dial, the gaps, the figure in the display face, the unit

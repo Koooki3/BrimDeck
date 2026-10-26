@@ -185,7 +185,8 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("收起时", "When collapsed"));
 
         var rows = new StackPanel();
-        foreach (var reading in S.CompactReadings) rows.Children.Add(ReadingRow(reading.Item, rows, refresh, Edit));
+        // The usage and rate readings in the table; the system drive and the temperature have a group of their own below it.
+        foreach (var reading in S.CompactReadings.Where(reading => (StripAdmission.Later & reading.Item) == 0)) rows.Children.Add(ReadingRow(reading.Item, rows, refresh, Edit));
         UpdateDividers(rows);
         var headings = ReadingColumns(); headings.Height = 34;
         AddHeadings(headings, new[]
@@ -223,8 +224,25 @@ public sealed partial class SettingsWindow
             levels.Children.Add(SwatchCell(LevelName(level), LevelHelp(level), () => LevelSwatch(level, Refresh), refresh, info: true));
         var status = Row(Loc.T("状态颜色", "Level colors"), levels, help: () => Loc.T("用于收起时的读数；展开时只有温度会变色，占用不变色。",
             "Used by the collapsed readings; on the expanded page only temperatures change color, usage does not."));
+        // The system drive and the temperature: each on or off, either or both, after the table's readings in the row. They show
+        // once their first figures arrive, and not at all on a machine without the sensor.
+        var extras = new List<FrameworkElement>();
+        foreach (var (item, label, help) in new[]
+        {
+            (CompactMonitorItems.Storage, Loc.T("系统所在硬盘", "System drive"), Loc.T("显示 Windows 所在硬盘已用空间的百分比（不含 USB 盘和 SD 卡）。", "Shows the share in use of the drive Windows is on (not USB drives or SD cards).")),
+            (CompactMonitorItems.Temperature, Loc.T("温度", "Temperature"), Loc.T("显示 CPU 与 GPU 中较高的温度；读不到温度的电脑上不显示。", "Shows the higher of the CPU's and the GPU's temperatures; not shown on a PC whose temperatures cannot be read."))
+        })
+        {
+            var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(toggle, Loc.T("收起时显示", "Show when collapsed: ") + label);
+            toggle.Checked += (_, _) => Edit(s => Reading(s, item).Visible = true); toggle.Unchecked += (_, _) => Edit(s => Reading(s, item).Visible = false);
+            refresh.Add(() => toggle.IsChecked = Reading(S, item).Visible);
+            extras.Add(Row(label, toggle, help: () => help));
+        }
         Refresh();
         Group(table, quick, status);
+        SectionTitle(Loc.T("收起时 · 附加读数（可多选）", "When collapsed · more readings (any of them)"), help: () => Loc.T("可以只选其中一项，也可以都选；它们排在上表读数之后。", "Choose either or both; they follow the readings of the table above."));
+        Group([.. extras]);
     }
 
     private static Grid ReadingColumns()
@@ -317,7 +335,8 @@ public sealed partial class SettingsWindow
         AttachDrag(handle, () => rows, ReadingRowHeight, list =>
         {
             var order = list.Children.OfType<Border>().Where(b => b.Tag is CompactMonitorItems).Select(b => (CompactMonitorItems)b.Tag).ToArray();
-            Change(s => s.CompactReadings = order.Select(id => Reading(s, id)).ToList());
+            // The system drive and the temperature are not in the table; they keep their places after its readings.
+            Change(s => s.CompactReadings = [.. order.Select(id => Reading(s, id)), .. s.CompactReadings.Where(reading => (StripAdmission.Later & reading.Item) != 0)]);
         });
         return new Border { Child = row, Height = ReadingRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = item, RenderTransform = new TranslateTransform() };
     }

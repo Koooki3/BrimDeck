@@ -50,6 +50,18 @@ public sealed class StripAdmission
     // The readings left out of the row as it was last built; all of them until the first figures.
     public CompactMonitorItems Hidden { get; private set; } = Later;
 
+    // Whether the system must still be read for the row although it shows none of these readings yet: a chosen reading (chosen,
+    // CompactMonitor.Shown) left out only because its first figure has not come. Without this a row showing only the temperature
+    // or the system drive would have no width, so no readings would be asked for, so the first figure would never come. False
+    // once each such reading's sensor is known to be missing, so a machine without them stops reading for them.
+    public bool Awaits(CompactMonitorItems chosen, SensorState cpu, SensorState gpu, SensorState storage)
+    {
+        var waiting = chosen & Hidden & Later;
+        if (!Temperatures.Readable(cpu, gpu)) waiting &= ~CompactMonitorItems.Temperature;
+        if (storage == SensorState.None) waiting &= ~CompactMonitorItems.Storage;
+        return waiting != CompactMonitorItems.None;
+    }
+
     // The readings to leave out for this snapshot and the sensors' states, and those that join now (Hidden before, not now).
     public (CompactMonitorItems Hidden, CompactMonitorItems Arriving) Update(MonitorSnapshot? latest, SensorState cpu, SensorState gpu, SensorState storage)
     {

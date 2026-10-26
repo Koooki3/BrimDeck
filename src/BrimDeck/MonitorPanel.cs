@@ -34,7 +34,8 @@ public partial class MainWindow
         // being read, and takes the current readings when the display is back.
         bool shown = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
         bool page = shown && !DisplayPower.Off;
-        bool strip = !_expanded && _compactStrip is not null && IsVisible && !IsSuppressed && !DisplayPower.Off && _alert is null && EffectiveStyle != CompactStyle.Line;
+        // A row whose chosen readings all wait for their first figures has no width, yet must be read for them (StripAwaits).
+        bool strip = !_expanded && (_compactStrip is not null || StripAwaits()) && IsVisible && !IsSuppressed && !DisplayPower.Off && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -52,6 +53,14 @@ public partial class MainWindow
     // The collapsed readings the row was last built without (StripAdmission.Hidden): the temperature and the system drive until
     // their first figures, and for good on a machine without the sensor.
     private CompactMonitorItems _stripUnavailable;
+    // Whether this surface shows the system readings and waits for the first figures of one it does not show yet.
+    private bool StripAwaits()
+    {
+        if (!Settings.ShowsMonitor(EffectiveStyle)) return false;
+        var monitor = _app.Monitor;
+        return _stripAdmission.Awaits(CompactMonitor.Shown(Settings.CompactReadings), monitor?.CpuSensor ?? SensorState.Unknown, monitor?.GpuSensor ?? SensorState.Unknown,
+            monitor?.StorageState ?? SensorState.Unknown);
+    }
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
     private bool MonitorMotion => Settings.Animations && SystemParameters.ClientAreaAnimation;
@@ -66,7 +75,9 @@ public partial class MainWindow
         {
             // The temperature or the system drive got its first figure: the row is built again with it, and it comes in with the
             // row's own entrance while the others slide aside. Until then the row did not show it, so nothing else changes.
-            if (_compactStrip is not null && hidden != _stripUnavailable) { _stripPresence.Arrive(arriving); RenderCompact(); return; }
+            if ((_compactStrip is not null || Settings.ShowsMonitor(EffectiveStyle)) && hidden != _stripUnavailable) { _stripPresence.Arrive(arriving); RenderCompact(); return; }
+            // A row still waiting for its first figures stops asking for readings once its sensors turn out to be missing.
+            if (_compactStrip is null) { UpdateMonitorDemand(); return; }
             _compactStrip?.Update(snapshot); return;
         }
         if (!IsMonitorPage || _monitorView is null) return;

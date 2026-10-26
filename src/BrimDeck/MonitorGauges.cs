@@ -338,21 +338,29 @@ internal sealed class MemoryBlock : FrameworkElement
         }
         if (_compact)
         {
-            // One line: the bar fills what the figures leave.
+            // One line: the bar fills what the figures leave, with the commit charge as a thin line just under it, so it shows at
+            // every size and not only where memory has a block of its own.
             double start = x + 10, end = w;
-            if (end - start > 16) Bar(drawing, new Rect(start, Math.Round(line / 2 - 2), end - start, 4), color, now);
+            if (end - start > 16)
+            {
+                double top = Math.Round(line / 2 - 4);
+                Bar(drawing, new Rect(start, top, end - start, 4), color, now);
+                Commit(drawing, new Rect(start, top + 4 + 3, end - start, 2), now);
+            }
             return;
         }
         double barTop = line + 6;
         Bar(drawing, new Rect(0, barTop, w, 5), color, now);
-        // The commit charge as a thin line under the bar, as ftop draws swap.
-        if (_memory is not null)
-        {
-            var r = new Rect(0, barTop + 5 + 5, w, 2);
-            drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, r, 1, 1);
-            double share = Math.Clamp(_commit.At(now), 0, 1);
-            if (share > 0) drawing.DrawRoundedRectangle(UI.Brush(UI.Secondary), null, new Rect(r.X, r.Y, Math.Max(2, r.Width * share), 2), 1, 1);
-        }
+        Commit(drawing, new Rect(0, barTop + 5 + 5, w, 2), now);
+    }
+
+    // The commit charge as a thin line under the bar, as ftop draws swap.
+    private void Commit(DrawingContext drawing, Rect r, double now)
+    {
+        if (_memory is null) return;
+        drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, r, 1, 1);
+        double share = Math.Clamp(_commit.At(now), 0, 1);
+        if (share > 0) drawing.DrawRoundedRectangle(UI.Brush(UI.Secondary), null, new Rect(r.X, r.Y, Math.Max(2, r.Width * share), 2), 1, 1);
     }
 
     // The memory in use, then the cache in the same color, lighter, then the free rest.
