@@ -16,6 +16,7 @@ public sealed record MediaTrack
     public string? CurrentLyric { get; init; }
     public TimeSpan? CurrentLyricStart { get; init; }
     public bool IsQqMusic => Source == "QQ 音乐" || SongId.StartsWith("qq:", StringComparison.Ordinal) || SongId.StartsWith("qqid:", StringComparison.Ordinal);
+    public bool IsAppleMusic => Source == "Apple Music";
     public MediaState State { get; init; }
     public bool IsNeteaseLog { get; init; }
     public bool PreviousRestricted { get; init; }
@@ -30,6 +31,8 @@ public sealed record MediaTrack
     public bool CanRepeat { get; init; }
     public bool Shuffle { get; init; }
     public MediaRepeat Repeat { get; init; }
+    // Shuffle and repeat are independent switches with a button each (Apple Music), not one cycling playback mode.
+    public bool SeparateModes { get; init; }
     // Only a player connection that both reports and changes the liked state offers it; Liked is meaningful only with CanLike.
     public bool CanLike { get; init; }
     public bool Liked { get; init; }
