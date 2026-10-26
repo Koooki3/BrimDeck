@@ -21,11 +21,16 @@ namespace BrimDeck;
 // pointer stops, and near a limit the drag meets growing resistance instead of a wall. The size is saved once the spring has come
 // to rest after the button is released. The window already has the largest size either form can take (ApplySettings), so each
 // frame resizes only the surface; the window itself never changes, and the panel neither opens nor closes.
+// The resize shortcut (KeyboardResize) does what a drag does, one step per press of an arrow key, on the same spring and within
+// the same limits, so a panel can be sized without the mouse.
 public partial class MainWindow
 {
     private ResizeGripLayer _grips = null!;
     private ResizeEdges _resizeEdge, _hoverEdge;
     private bool _resizeCompact, _resizeChanged, _resizeSettling, _springHooked;
+    // The size is moving for the resize shortcut, and the edges it moves (lit as a drag lights them).
+    private bool _resizeByKey;
+    private ResizeEdges _keyEdges;
     private Point _resizeStart;
     private (double Width, double Height) _resizeFrom;
     private Spring _springWidth, _springHeight;
@@ -190,7 +195,7 @@ public partial class MainWindow
             _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
             _resizeChanged = false;
         }
-        _resizeCompact = compact; _resizeStyle = style; _resizePage = CurrentPage; _resizeSettling = false; Island.SettledClip = false;
+        _resizeCompact = compact; _resizeStyle = style; _resizePage = CurrentPage; _resizeSettling = false; _resizeByKey = false; Island.SettledClip = false;
         _resizeEdge = edge; _resizeStart = WindowsHost.Cursor();
         SetHoverEdge(edge);
         _grips.Light(edge, true, SizeLabel(_resizeFrom.Width, _resizeFrom.Height));
@@ -255,7 +260,7 @@ public partial class MainWindow
             Settings.SetCompactWidth(style, width); Settings.SetCompactAutoWidth(style, false);
             UpdateCollapsedGeometry();
             SetExpanded(false, instant: true);
-            _grips.Light(_resizeEdge == ResizeEdges.None ? _hoverEdge : _resizeEdge, true, SizeLabel(Collapsed.Surface.Width, 0));
+            _grips.Light(LitEdges, true, SizeLabel(Collapsed.Surface.Width, 0));
             return;
         }
         var (minWidth, maxWidth, minHeight, maxHeight) = PageLimits;
@@ -277,7 +282,40 @@ public partial class MainWindow
             // Columns that stay within their size step stretch; nothing else in the panel changes meanwhile.
             if (_resizePage != DeckPage.Usage || _details || ColumnsBuild() != _usageBuilt) RenderUsage();
         }
-        _grips.Light(_resizeEdge == ResizeEdges.None ? _hoverEdge : _resizeEdge, true, SizeLabel(width, height));
+        _grips.Light(LitEdges, true, SizeLabel(width, height));
+    }
+
+    private ResizeEdges LitEdges => _resizeEdge != ResizeEdges.None ? _resizeEdge : _resizeByKey ? _keyEdges : _hoverEdge;
+
+    // One press (or repeat) of the resize shortcut's arrow keys. Open, Left and Right change the page's width and Up and Down its
+    // height; collapsed, Left and Right change the surface's width as dragging an end does, and Up and Down do nothing. Not while
+    // a drag is under way, nor where a drag could not start (a preview, hidden, a quota alert, powering off).
+    internal void ResizeFromKeyboard(KeyboardResize.Direction direction)
+    {
+        bool compact = !_expanded;
+        bool horizontal = KeyboardResize.Horizontal(direction);
+        if (Dragging || (compact ? !CompactResizable || !horizontal : !PanelResizable)) return;
+        // A press while the surface still settles moves on from where it is heading, as holding a key repeats.
+        bool settling = _resizeSettling && _resizeCompact == compact && (compact ? EffectiveStyle == _resizeStyle : CurrentPage == _resizePage);
+        if (_resizeSettling && !settling) { StopSpring(); FinishResize(); }
+        if (!settling)
+        {
+            if (!compact) { _monitorView?.CloseCard(); _detailPopup?.Close(); }
+            _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : DeckPages.Size(Settings, CurrentPage);
+            _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
+            _resizeChanged = false;
+            _resizeCompact = compact; _resizeStyle = EffectiveStyle; _resizePage = CurrentPage;
+            _keyEdges = ResizeEdges.None;
+        }
+        _resizeSettling = true; _resizeByKey = true; Island.SettledClip = false;
+        _keyEdges |= horizontal ? ResizeEdges.Left | ResizeEdges.Right : ResizeEdges.Bottom;
+        if (horizontal)
+        {
+            var (min, max) = compact ? CollapsedGeometry.WidthRange(EffectiveStyle, MonitorBoundsDip, WorkDip) : (PageLimits.MinWidth, PageLimits.MaxWidth);
+            _springWidth.Target = KeyboardResize.Next(_springWidth.Target, direction, min, max);
+        }
+        else _springHeight.Target = KeyboardResize.Next(_springHeight.Target, direction, PageLimits.MinHeight, PageLimits.MaxHeight);
+        StartSpring();
     }
 
     // The button is up: the spring settles where the pointer left it, and then the size is saved.
@@ -293,8 +331,8 @@ public partial class MainWindow
 
     private void FinishResize()
     {
-        bool compact = _resizeCompact;
-        _resizeSettling = false; _resizeCompact = false;
+        bool compact = _resizeCompact, byKey = _resizeByKey;
+        _resizeSettling = false; _resizeCompact = false; _resizeByKey = false; _keyEdges = ResizeEdges.None;
         // Saved like any change from the settings window, which applies it to every panel and fits the window again. A press that
         // moved nothing only fits the window again.
         if (_resizeChanged) _app.UpdateSettings(Settings.Copy()); else ApplySettings();
@@ -305,7 +343,8 @@ public partial class MainWindow
         var cursor = WindowsHost.Cursor();
         SetHoverEdge(TrackGrips(cursor));
         _grips.Light(_hoverEdge, false, "");
-        if (compact) return;
+        // The keyboard moved nothing under the pointer: the panel stays as the pointer left it.
+        if (compact || byKey) return;
         if (Island.IsMouseOver || InsideOpenPanel(cursor)) { PointerChanged(true); return; }
         // A drag that made the panel larger usually ends with the pointer ahead of the edge, past the panel: the panel stays a
         // moment for the pointer to come back (TrackPointer takes it as an entry), and closes only if it does not.
