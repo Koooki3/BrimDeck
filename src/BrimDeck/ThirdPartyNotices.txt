@@ -794,7 +794,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 Window Animations (Windhawk mod "windows-animations", ZenDesktop 1.5.2): the Cyber Glitch, the Perlin Dissolve and the macOS
-genie's lamp curve, ported to the island's collapse pictures (BrimDeck.Core/CollapseFx.cs)
+genie's lamp curve, ported to the island's collapse textures (BrimDeck.Core/CollapseFx.cs)
 https://github.com/redrag2105 (Window Animations by ReDrag); https://windhawk.net/mods/macos-minimize-animation (macOS Minimize
 Animation by Abdullah Masood); https://github.com/Potassiumuncher/MacOS-Animation-for-windows (the Direct2D genie engine by
 Potassiumuncher)

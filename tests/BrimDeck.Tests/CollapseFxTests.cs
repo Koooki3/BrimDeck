@@ -1,7 +1,7 @@
 using BrimDeck.Core;
 
-// The motion upgrade's collapse pictures (CollapseFx): the theme key, the ported glitch, foam and genie, the interruption and
-// the flash budget.
+// The motion upgrade's collapse textures (CollapseFx): the theme key, the glitch's smooth bands, the foam's field and masks, the
+// genie, the interruption and the flash budget.
 internal static class CollapseFxTests
 {
     internal static void Run(Action<string, bool> check)
@@ -32,7 +32,7 @@ internal static class CollapseFxTests
             custom("""{ "base": "dark", "motion": { "press": "splash", "splashMs": 620 } }""").Motion.SplashMs == 620
             && custom("""{ "base": "dark", "motion": { "splashMs": 2000 } }""").Motion.SplashMs == 800 && ThemeMotion.Default.SplashMs == 0);
         check("Lengths: a theme's collapseMs replaces the style's length, whatever its pace",
-            CollapseFx.Length(CollapseStyle.Glitch, .8, 480) == .48 && CollapseFx.Length(CollapseStyle.Glitch, .8) == .24 && CollapseFx.Length(CollapseStyle.Fade, 1, 480) == 0);
+            CollapseFx.Length(CollapseStyle.Glitch, .8, 480) == .48 && CollapseFx.Length(CollapseStyle.Glitch, .8) == .40 && CollapseFx.Length(CollapseStyle.Fade, 1, 480) == 0);
         check("Lengths: the theme template writes them out", PanelThemes.FillTemplate("t", custom("""{ "base": "dark", "motion": { "collapseMs": 480, "scanMs": 300 } }""")) is var t
             && t.Contains("\"collapseMs\": 480") && t.Contains("\"scanMs\": 300"));
         // lock's slice and scan line take the theme's lengths; the scan line keeps the press alive until it has passed.
@@ -76,11 +76,6 @@ internal static class CollapseFxTests
         check("The pulse lasts at most 120 ms and peaks at its amount",
             CollapseFx.AberrationAt(.06, 1.5, 2) is > 2.99 and <= 3 && CollapseFx.AberrationAt(.12, 1.5, 2) == 0 && CollapseFx.AberrationAt(-.01, 1.5, 2) == 0
             && CollapseFx.AberrationAt(.05, 0, 2) == 0);
-        // Red pulled right and blue left, nothing at the centre: a white bar's ends turn red on the right, blue on the left.
-        var row = new uint[21]; for (int x = 5; x <= 15; x++) row[x] = 0xFFFFFFFF;
-        CollapseFx.Aberrate(row, new uint[21], 3);
-        check("Aberration: red moves right and blue left at the edges, the centre stays",
-            row[10] == 0xFFFFFFFF && (row[16] & 0xFF0000) != 0 && (row[16] & 0xFF) == 0 && (row[4] & 0xFF) != 0 && (row[4] & 0xFF0000) == 0 && (row[16] & 0xFF00) == 0);
     }
 
     private static void Keys(Action<string, bool> check, Func<string, PanelPalette> palette, Func<string, PanelPalette> custom)
@@ -95,21 +90,14 @@ internal static class CollapseFxTests
             && custom("""{ "base": "dark", "motion": { "collapse": "3" } }""").Motion.Collapse == CollapseStyle.Fade);
         check("System never plays a collapse picture", custom("""{ "base": "dark", "motion": { "collapse": "foam" } }""").Motion.ForSystem().Collapse == CollapseStyle.Fade);
         check("The theme template writes the collapse out", PanelThemes.FillTemplate("t", custom("""{ "base": "dark", "motion": { "collapse": "foam" } }""")).Contains("\"collapse\": \"foam\""));
-        check("Lengths: glitch 240-300 ms, foam 300-360 ms, genie about 450 ms, whatever the pace",
-            Math.Abs(CollapseFx.Length(CollapseStyle.Glitch, 1) - .27) < 1e-9 && Math.Abs(CollapseFx.Length(CollapseStyle.Foam, 1) - .33) < 1e-9
+        check("Lengths: the closing takes glitch 400-450 ms, foam 460-520 ms, genie 420-480 ms, whatever the pace",
+            Math.Abs(CollapseFx.Length(CollapseStyle.Glitch, 1) - .42) < 1e-9 && Math.Abs(CollapseFx.Length(CollapseStyle.Foam, 1) - .48) < 1e-9
             && Math.Abs(CollapseFx.Length(CollapseStyle.Genie, 1) - .45) < 1e-9
-            && new[] { .6, 1.6, double.NaN }.All(p => CollapseFx.Length(CollapseStyle.Glitch, p) is >= .24 and <= .30
-                && CollapseFx.Length(CollapseStyle.Foam, p) is >= .30 and <= .36 && CollapseFx.Length(CollapseStyle.Genie, p) is >= .42 and <= .48)
+            && new[] { .6, 1.6, double.NaN }.All(p => CollapseFx.Length(CollapseStyle.Glitch, p) is >= .40 and <= .45
+                && CollapseFx.Length(CollapseStyle.Foam, p) is >= .46 and <= .52 && CollapseFx.Length(CollapseStyle.Genie, p) is >= .42 and <= .48)
             && CollapseFx.Length(CollapseStyle.Fade, 1) == 0);
-    }
-
-    // A test picture: opaque, a different color per row and column, with a transparent margin of two pixels.
-    private static uint[] Picture(int w, int h)
-    {
-        var pixels = new uint[w * h];
-        for (int y = 2; y < h - 2; y++)
-            for (int x = 2; x < w - 2; x++) pixels[y * w + x] = 0xFF000000u | (uint)(x * 3 & 0xFF) << 16 | (uint)(y * 5 & 0xFF) << 8 | 0x40;
-        return pixels;
+        check("The texture plays over the start of the closing while the outline morphs on its own track",
+            CollapseFx.Track(CollapseStyle.Glitch) == (0, .75) && CollapseFx.Track(CollapseStyle.Foam) == (0, .75) && CollapseFx.Track(CollapseStyle.Genie) == (0, .85));
     }
 
     private static void Glitch(Action<string, bool> check)
@@ -125,97 +113,60 @@ internal static class CollapseFxTests
         for (int x = -50; x < 50; x += 7) for (int y = -30; y < 300; y += 11) same &= CollapseFx.GlitchHash(x, y) == Reference(x, y);
         check("Glitch: the hash is the original's to the bit", same);
         check("Glitch: 24 to 32 bands, one per four DIP", CollapseFx.GlitchBands(32) == 24 && CollapseFx.GlitchBands(112) == 28 && CollapseFx.GlitchBands(400) == 32);
-        check("Glitch: alpha (1 - ss(0,1,p))(1 - ss(.55,1,p)) after smoothstep, whole at the start and gone at the end",
-            CollapseFx.GlitchAlpha(0) == 1 && CollapseFx.GlitchAlpha(1) == 0 && Math.Abs(CollapseFx.GlitchAlpha(.5) - .5) < 1e-9 && CollapseFx.GlitchAlpha(.75) < .2);
-
-        int w = 300, h = 120;
-        var glitch = new GlitchCollapse(Picture(w, h), w, h, CollapseFx.GlitchBands(60));
-        int limit = (int)Math.Ceiling((GlitchCollapse.Tear + GlitchCollapse.Jitter) / 2 * w);
-        bool within = true; var patterns = new HashSet<string>();
-        for (double p = 0; p <= 1.0001; p += .01)
-        {
-            var shifts = Enumerable.Range(0, h).Select(y => glitch.Shift(y, p)).ToArray();
-            within &= shifts.All(s => Math.Abs(s) <= limit) && limit < glitch.Margin;
-            patterns.Add(string.Join(",", shifts));
-        }
-        check($"Glitch: rows tear at most ±5% and jitter ±1.25% of the width ({limit} px of {w}), inside the canvas margin", within);
-        // Three hard steps of the seed over the collapse (and the end frame's own seed): never a smooth slide.
-        check($"Glitch: the tears jump in three steps, not smoothly ({patterns.Count} patterns)", patterns.Count == 3);
-        // Each step holds a third of the picture: at the cyberpunk theme's 480 ms, 160 ms each, and the tears jump twice,
-        // under three changes in any second.
-        int jumps = 0; int last = GlitchCollapse.Seed(0);
-        for (double t = 0; t <= .48; t += .001) { int seed = GlitchCollapse.Seed(t / .48); if (seed != last) { jumps++; last = seed; } }
-        check("Glitch: each step holds a third of the length and the tears jump twice (under 3 a second)",
-            jumps == 2 && GlitchCollapse.Seed(.33) == 0 && GlitchCollapse.Seed(.34) == 1 && GlitchCollapse.Seed(.67) == 2 && GlitchCollapse.Seed(1) == 2);
-        check("Glitch: it breaks up and fades only in the last third",
-            GlitchCollapse.BreakupAt(.66) == 0 && GlitchCollapse.BreakupAt(1) == 1 && Math.Abs(GlitchCollapse.BreakupAt(5 / 6.0) - .5) < 1e-9);
-        int active = Enumerable.Range(0, 200).Count(line => CollapseFx.GlitchHash(line, 0) >= GlitchCollapse.Threshold);
+        int active = Enumerable.Range(0, 200).Count(band => CollapseFx.GlitchHash(band, 0) >= GlitchTexture.Threshold);
         check($"Glitch: about 45% of the bands tear ({active / 2.0:0}%)", active is > 70 and < 110);
 
-        var canvas = new uint[glitch.CanvasWidth * h];
-        int Drawn(double p) { glitch.Render(p, canvas); return canvas.Count(c => c >> 24 != 0); }
-        int whole = Picture(w, h).Count(c => c >> 24 != 0);
-        glitch.Render(0, canvas);
-        bool rowsIntact = true;
-        for (int y = 0; y < h; y++)
-        {
-            var row = canvas.AsSpan(y * glitch.CanvasWidth, glitch.CanvasWidth).ToArray().Where(c => c != 0).ToArray();
-            var source = Picture(w, h).AsSpan(y * w, w).ToArray().Where(c => c != 0).ToArray();
-            rowsIntact &= row.SequenceEqual(source);
-        }
-        check("Glitch: the first frame is the whole picture, each row only moved sideways", Drawn(0) == whole && rowsIntact);
-        check("Glitch: through the first two steps the whole picture shows, torn but unbroken", Drawn(.5) == whole && Drawn(.6) == whole);
-        double share = Drawn(5 / 6.0) / (double)whole, cut = 1 - CollapseFx.SmoothStep(0, 1, .5) * GlitchCollapse.Breakup;
-        check($"Glitch: in the last third it breaks up pixel by pixel (1 - 0.92p kept: {share:P0} against {cut:P0})", Math.Abs(share - cut) < .06);
-        check("Glitch: nothing is left at the end", Drawn(1) == 0 && Drawn(.995) == 0);
+        // Smooth: from one 60 Hz frame of a 315 ms texture to the next no band moves more than a small share of its range, and
+        // it starts and ends in place.
+        const double frame = 1 / (60 * .315);
+        double limit = (GlitchTexture.Tear + GlitchTexture.Jitter) / 2, worst = 0; bool within = true;
+        for (int band = 0; band < 32; band++)
+            for (double p = 0; p < 1; p += frame)
+            {
+                double a = GlitchTexture.Offset(band, p), b = GlitchTexture.Offset(band, Math.Min(1, p + frame));
+                within &= Math.Abs(a) <= limit + 1e-9;
+                worst = Math.Max(worst, Math.Abs(b - a));
+            }
+        check($"Glitch: bands slide smoothly within ±{limit:P2} of the width, never jumping (largest step a frame {worst:P2})",
+            within && worst < limit * .4 && Enumerable.Range(0, 32).All(band => GlitchTexture.Offset(band, 0) == 0 && Math.Abs(GlitchTexture.Offset(band, 1)) < 1e-12));
+        check("Glitch: bands drop out one by one between 40 and 100 percent of the way, all there at first and gone at the end",
+            Enumerable.Range(0, 32).All(band => GlitchTexture.Alpha(band, .39) == 1 && GlitchTexture.Alpha(band, 1) == 0)
+            && Enumerable.Range(0, 32).Select(band => GlitchTexture.Alpha(band, .7)).Distinct().Count() > 8);
+        check("Glitch: the jolt doubles the tears for a tenth of the way, from 30 percent, and only when it plays",
+            GlitchTexture.JoltOn(.35) && !GlitchTexture.JoltOn(.25) && !GlitchTexture.JoltOn(.45)
+            && Enumerable.Range(0, 32).All(band => Math.Abs(GlitchTexture.Offset(band, .35, jolt: true)) <= 2 * limit + 1e-9)
+            && Enumerable.Range(0, 32).Any(band => GlitchTexture.Offset(band, .35, jolt: true) != GlitchTexture.Offset(band, .35)));
     }
 
     private static void Foam(Action<string, bool> check)
     {
-        check("Foam: the hash is windows-animations' pseudo_hash", FoamCollapse.Hash(3, 7) == ((3u * 73856093u) ^ (7u * 19349663u)) % 10000 / 10000.0);
-        int w = 240, h = 96;
-        var source = Picture(w, h);
-        var foam = new FoamCollapse(source, w, h, 2);
-        bool starts = true;
-        for (int y = 0; y < h; y += 3) for (int x = 0; x < w; x += 3) starts &= foam.StartOf(x, y) is >= 0 and <= (float)(1 - FoamCollapse.LifeSpan) + 1e-5f;
-        check("Foam: every block starts within the run so the last is gone exactly at the end (0.15 after its start)", starts && foam.Edge == 2);
-        // IS-01: the field covers the whole run, from a block that starts at once to one gone exactly at the end.
-        float first = float.MaxValue, last2 = 0;
-        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) { first = Math.Min(first, foam.StartOf(x, y)); last2 = Math.Max(last2, foam.StartOf(x, y)); }
-        check("Foam: no corner lingers — the field runs from 0 to 1 - LifeSpan", first == 0 && Math.Abs(last2 - (1 - FoamCollapse.LifeSpan)) < 1e-5);
-        var canvas = new uint[w * h];
-        foam.Render(0, canvas);
-        check("Foam: the first frame is the picture itself", canvas.SequenceEqual(source));
-        int last = int.MaxValue; bool shrinking = true, foamed = false, foamNearGone = true;
-        uint white = 0xE6E6E6E6;
-        for (double p = .05; p <= 1.0001; p += .05)
+        check("Foam: the hash is windows-animations' pseudo_hash", FoamField.Hash(3, 7) == ((3u * 73856093u) ^ (7u * 19349663u)) % 10000 / 10000.0);
+        var panel = new FoamField(760, 300);
+        check($"Foam: a panel's field has at most about 16 000 blocks ({panel.Columns * panel.Rows}, {panel.Block} DIP each)", panel.Columns * panel.Rows <= 16500 && panel.Block >= 3);
+        var field = new FoamField(340, 92);
+        int n = field.Columns * field.Rows;
+        float first = float.MaxValue, last = 0;
+        for (int y = 0; y < field.Rows; y++) for (int x = 0; x < field.Columns; x++) { first = Math.Min(first, field.StartOf(x, y)); last = Math.Max(last, field.StartOf(x, y)); }
+        check("Foam: the field is spread over the whole move (IS-01: no corner lingers)", first == 0 && Math.Abs(last - 1) < 1e-6);
+        var shown = new byte[n]; var foam = new byte[n];
+        field.Mask(0, shown, foam);
+        bool whole = shown.All(a => a == 255) && foam.All(f => f == 0);
+        field.Mask(FoamField.Levels - 1, shown, foam);
+        bool gone = shown.All(a => a == 0) && foam.All(f => f == 0);
+        check("Foam: the first level shows everything and no foam, the last nothing", whole && gone);
+        // Steady: about the same share goes at every step, and what shows is whole or gone, not a wide half-faded band (IS-02).
+        int before = n; bool steady = true, crisp = true, foamed = false;
+        for (int level = 1; level < FoamField.Levels; level++)
         {
-            foam.Render(p, canvas);
-            int visible = canvas.Count(c => c >> 24 != 0);
-            shrinking &= visible <= last; last = visible;
-            for (int y = 1; y < h - 1; y++)
-                for (int x = 1; x < w - 1; x++)
-                {
-                    if (canvas[y * w + x] != white) continue;
-                    foamed = true;
-                    // A foam pixel's block touches a block that has dissolved.
-                    bool near = false;
-                    for (int dy = 1 - 2 * foam.Edge; dy < 2 * foam.Edge && !near; dy++)
-                        for (int dx = 1 - 2 * foam.Edge; dx < 2 * foam.Edge && !near; dx++)
-                        {
-                            int xx = x + dx, yy = y + dy;
-                            near = xx >= 0 && yy >= 0 && xx < w && yy < h && (p - foam.StartOf(xx, yy)) / FoamCollapse.LifeSpan >= 1;
-                        }
-                    foamNearGone &= near;
-                }
+            field.Mask(level, shown, foam);
+            int left = shown.Count(a => a > 127), half = shown.Count(a => a is > 12 and < 243);
+            steady &= left <= before && before - left <= n * .12;
+            crisp &= half <= n * .12;
+            foamed |= foam.Any(f => f > 200);
+            before = left;
         }
-        foam.Render(1, canvas);
-        check("Foam: it dissolves steadily, leaving a line of foam along the dissolving edge and nothing at the end",
-            shrinking && foamed && foamNearGone && canvas.All(c => c == 0));
-        // IS-02: mid-way, what is left is mostly whole, not a wide band of half-faded blocks that darken over a dark desktop.
-        foam.Render(.5, canvas);
-        int shown = canvas.Count(c => c >> 24 != 0), half = canvas.Count(c => c >> 24 is > 12 and < 243 && c != white);
-        check($"Foam: mid-way few blocks are half faded, besides the foam ({half} of {shown})", shown > 0 && half < shown * .05);
+        check("Foam: it dissolves steadily level by level, with a soft edge and a line of foam, never a wide half-faded band", steady && crisp && foamed);
+        check("Foam: a frame picks its level by progress", FoamField.LevelAt(0) == 0 && FoamField.LevelAt(1) == FoamField.Levels - 1 && FoamField.LevelAt(.5) is > 15 and < 25);
     }
 
     private static void Genie(Action<string, bool> check)
@@ -266,23 +217,18 @@ internal static class CollapseFxTests
     {
         var on = new MotionConditions(true, true, false, true, false, false, false, false, true);
         var off = on with { SystemAnimations = false };
+        check("Budget: a texture plays while motion is allowed; with Windows' animations off it does not",
+            CollapseFx.Plays(CollapseStyle.Foam, on) && !CollapseFx.Plays(CollapseStyle.Foam, off) && !CollapseFx.Plays(CollapseStyle.Fade, on));
         var shared = new FlashBudget();
-        check("Budget: a theme without a picture spends nothing", CollapseFx.Choose(CollapseStyle.Fade, on, shared, 0) == CollapseStyle.Fade && shared.Available(0) && shared.TryTake(0) && shared.TryTake(0) && !shared.Available(0));
-        shared.Clear();
-        check("Budget: with Windows' animations off the default fade runs and spends nothing",
-            CollapseFx.Choose(CollapseStyle.Glitch, off, shared, 0) == CollapseStyle.Fade && !CollapseFx.Possible(CollapseStyle.Glitch, off, shared, 0) && shared.TryTake(0) && shared.TryTake(0));
-        shared.Clear();
-        var picks = new[] { 0, .2, .4, .9, 1.25 }.Select(t => CollapseFx.Choose(CollapseStyle.Glitch, on, shared, t)).ToArray();
-        check($"Budget: each collapse is a flash; a third within one second falls back to the default fade ({string.Join(",", picks)})",
-            picks.SequenceEqual([CollapseStyle.Glitch, CollapseStyle.Glitch, CollapseStyle.Fade, CollapseStyle.Fade, CollapseStyle.Glitch]));
-        // A window's presses spend the same budget: two glitch slices leave no room for a picture in that second, and a
-        // picture's flash leaves a press only one.
+        var jolts = new[] { 0, .2, .4, 1.25 }.Select(t => CollapseFx.Jolt(CollapseStyle.Glitch, shared, t)).ToArray();
+        check($"Budget: only the glitch's jolt is a flash; a third within a second plays without it ({string.Join(",", jolts)})",
+            jolts.SequenceEqual([true, true, false, true]) && !CollapseFx.Jolt(CollapseStyle.Foam, new FlashBudget(), 0) && !CollapseFx.Jolt(CollapseStyle.Genie, new FlashBudget(), 0));
+        // A window's presses spend the same budget: two glitch slices leave no jolt in that second.
         shared.Clear();
         var presses = new FlashBudget(shared);
         bool pressed = presses.TryTake(0) && presses.TryTake(.1);
-        check("Budget: presses and pictures share one budget (two flashes a second in all)",
-            pressed && CollapseFx.Choose(CollapseStyle.Foam, on, shared, .3) == CollapseStyle.Fade && !CollapseFx.Possible(CollapseStyle.Foam, on, shared, .3)
-            && CollapseFx.Choose(CollapseStyle.Foam, on, shared, 1.05) == CollapseStyle.Foam && presses.TryTake(1.15) && !presses.TryTake(1.2));
+        check("Budget: presses and the jolt share one budget (two flashes a second in all)",
+            pressed && !CollapseFx.Jolt(CollapseStyle.Glitch, shared, .3) && CollapseFx.Jolt(CollapseStyle.Glitch, shared, 1.05) && presses.TryTake(1.15) && !presses.TryTake(1.2));
         presses.Clear();
         check("Budget: clearing a window's budget leaves the shared one spent", !shared.Available(1.2) && !presses.Available(1.2));
         check("Budget: the app has one shared budget", ReferenceEquals(FlashBudget.Shared, FlashBudget.Shared));

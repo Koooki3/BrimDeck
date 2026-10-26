@@ -120,9 +120,9 @@ public readonly record struct AmbientFrame(double Rim, double Drift, double Swee
 // Pace scales every interaction duration. Steps quantizes the motion into that many hard steps (0: smooth), for a mechanical
 // theme. Spring is how much the theme's springs give (SpringTier), always at the monitor page's frequency. Collapse is how a
 // notice or the open panel goes back into the island (CollapseFx); fade, the panel's own closing, unless the theme asks.
-// Aberration is a short chromatic pulse in DIP (0: none, otherwise 1 to 1.5): red and blue pulled apart at a completed press's
-// edges and through the first moments of a pixel collapse picture, for at most CollapseFx.AberrationLength.
-// The lengths a theme may set itself, in milliseconds, 0 for the built-in ones: CollapseMs the collapse picture's,
+// Aberration is a short chromatic pulse in DIP (0: none, otherwise 1 to 1.5): the main and second colors pulled apart at a
+// completed press's edges, for at most CollapseFx.AberrationLength.
+// The lengths a theme may set itself, in milliseconds, 0 for the built-in ones: CollapseMs the closing's with a texture,
 // ParticleMs how long the particles live (each keeps its own small spread), SliceMs the lock press's glitch slice and ScanMs
 // its scan line, SplashMs each of the splash press's rings. They change only how long a beat holds; the flashes stay rationed as before.
 public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double HoverStrength, PressFx Press, double PressStrength,
@@ -438,9 +438,9 @@ public sealed class PanelThemeMotion
     public string? Spring { get; set; }
     // fade, glitch, foam, genie (CollapseStyle): how a notice or the open panel goes back into the island
     public string? Collapse { get; set; }
-    // 0 (none) or 1 to 1.5 DIP: a short chromatic pulse on a completed press and a pixel collapse picture
+    // 0 (none) or 1 to 1.5 DIP: a short chromatic pulse on a completed press
     public double? Aberration { get; set; }
-    // The theme's own lengths in milliseconds, 0 for the built-in ones: the collapse picture (200 to 630), the particles
+    // The theme's own lengths in milliseconds, 0 for the built-in ones: the closing with a texture (200 to 630), the particles
     // (300 to 2400), the lock press's glitch slice (50 to 160) and scan line (100 to 400), each splash ring (300 to 800)
     public double? CollapseMs { get; set; }
     public double? ParticleMs { get; set; }

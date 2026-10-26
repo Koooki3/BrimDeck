@@ -1,39 +1,41 @@
 namespace BrimDeck.Core;
 
 // How a theme's notice or open panel goes back into the island (ThemeMotion.Collapse). fade is the panel's own closing and
-// stays the default; the others are short pictures played on a snapshot of what leaves, while the real element is already
-// in its final state underneath (ux #119: cancellable, the final state set at once):
-//   glitch (cyberpunk): the snapshot tears into horizontal bands that jump sideways in three hard steps and breaks up pixel by
-//     pixel as it fades (windows-animations' Cyber Glitch, scaled to the island).
-//   foam (island holiday): the snapshot dissolves along a value-noise field, leaving a thin line of foam at the dissolving
-//     edge (windows-animations' Perlin Dissolve).
-//   genie (liquid glass): the snapshot is drawn into the island along the macOS lamp curve, on a 12 x 12 mesh inside a
-//     rounded outline (windows-animations' macOS genie).
-// The pixel effects write premultiplied BGRA (WPF's Pbgra32) into a buffer the caller shows; the genie gives the mesh, which
-// the caller draws as one affine piece per cell. Everything here is plain arithmetic on the progress, so a frame depends on
-// its time alone and the same collapse looks the same in a preview. Each collapse counts as one flash (FlashBudget).
+// stays the default. The others are a texture on that same closing, never a picture of their own: the island's outline
+// morphs into the notch, capsule or line exactly as it always does (MainWindow.SetExpanded, the monitor page's curves), on a
+// move this long (Length) instead of the plain one, and only the content that leaves is drawn differently while it goes,
+// over the first part of the move (Track), inside the island's own clip:
+//   glitch (cyberpunk): the content tears into horizontal bands that slide sideways in smooth waves and drop out one by one;
+//     once per collapse, if the second's flashes allow it, a few frames jolt harder with neon edges.
+//   foam (island holiday): the content dissolves along a value-noise field with a soft line of foam at the dissolving edge.
+//   genie (liquid glass): the content is drawn into the island along the macOS lamp curve, on a 12 x 12 mesh inside a
+//     rounded outline.
+// All of it is drawn by the composition engine from one snapshot taken as the closing starts: bands are the snapshot clipped
+// and moved, the dissolve is the snapshot under one of a set of small masks made at that moment, the genie is the snapshot
+// under one affine transform per mesh cell. No frame works through pixels. Everything here is arithmetic on the progress, so
+// a frame depends on its time alone and looks the same in a preview.
 //
-// The glitch, the dissolve and the lamp curve are ported from windows-animations by ReDrag and, for the macOS genie, by
-// Abdullah Masood and Potassiumuncher (MIT; ThirdPartyNotices.txt). Changes: band and noise scales follow the island's size,
-// the glitch's seeds step three times (the cyberpunk theme's steps), the dissolve leaves a foam edge, the genie's target is
-// the island's own outline.
+// The glitch's bands and hash, the dissolve's value noise and the lamp curve come from windows-animations by ReDrag and, for
+// the macOS genie, Abdullah Masood and Potassiumuncher (MIT; ThirdPartyNotices.txt). Changes: band and noise scales follow
+// the island's size, the bands slide smoothly instead of jumping, the dissolve is spread evenly over the move and leaves a foam
+// edge, the genie's target is the island's own outline.
 public enum CollapseStyle { Fade, Glitch, Foam, Genie }
 
 public static class CollapseFx
 {
-    // The lengths in seconds at pace 1, and the range the theme's pace may move each within.
-    public const double GlitchLength = .27, GlitchMin = .24, GlitchMax = .30;
-    public const double FoamLength = .33, FoamMin = .30, FoamMax = .36;
+    // The closing's length in seconds at pace 1 when a texture plays, and the range the theme's pace may move it within: the
+    // panel's own closing family (the 360 ms setting's 270 ms close, a little longer so the texture can be seen).
+    public const double GlitchLength = .42, GlitchMin = .40, GlitchMax = .45;
+    public const double FoamLength = .48, FoamMin = .46, FoamMax = .52;
     // The user's genie: 360 ms times the genie's 1.25.
     public const double GenieLength = .45, GenieMin = .42, GenieMax = .48;
-    // The chromatic pulse a theme may add (ThemeMotion.Aberration): this long at most, red and blue this many DIP apart at the
-    // edges and none at the centre.
+    // The chromatic pulse a theme may add to a completed press (ThemeMotion.Aberration): this long at most, red and blue this
+    // many DIP apart at the edges.
     public const double AberrationLength = .12, AberrationMin = 1, AberrationMax = 1.5;
-    // A theme's own length for its collapse (ThemeMotion.CollapseMs), in milliseconds: within the user's desktop's own
-    // window motion, from a quick 200 ms to the 630 ms of its close animation.
+    // A theme's own length for its closing (ThemeMotion.CollapseMs), in milliseconds.
     public const int CollapseMsMin = 200, CollapseMsMax = 630;
 
-    // The picture's length in seconds: the theme's own (milliseconds, 0 for the style's) or the style's at the theme's pace.
+    // The closing's length in seconds: the theme's own (milliseconds, 0 for the style's) or the style's at the theme's pace.
     public static double Length(CollapseStyle style, double pace, int milliseconds = 0)
     {
         if (style == CollapseStyle.Fade) return 0;
@@ -48,14 +50,17 @@ public static class CollapseFx
         };
     }
 
-    // What a collapse plays: the style the theme asks for while motion is allowed and the second's flashes are not spent,
-    // otherwise the default fade. Taking a picture spends one of the shared flashes.
-    public static CollapseStyle Choose(CollapseStyle wanted, in MotionConditions conditions, FlashBudget budget, double now)
-        => wanted == CollapseStyle.Fade || !conditions.MotionAllowed || !budget.TryTake(now) ? CollapseStyle.Fade : wanted;
+    // The share of the closing over which the texture plays, from its start: the content's own track (PanelCloseContent)
+    // stretched so the texture can be read, while the outline morphs on the panel's own surface track. The genie draws the
+    // content into the island and needs most of the move.
+    public static (double Start, double End) Track(CollapseStyle style) => style == CollapseStyle.Genie ? (0, .85) : (0, .75);
 
-    // Whether a picture could be taken now, without spending anything: the caller snapshots only then.
-    public static bool Possible(CollapseStyle wanted, in MotionConditions conditions, FlashBudget budget, double now)
-        => wanted != CollapseStyle.Fade && conditions.MotionAllowed && budget.Available(now);
+    // Whether a texture plays: the theme asks for one and motion is allowed (BrimDeck's and Windows' animation settings, high
+    // contrast). It spends no flash; only the glitch's jolt does (Jolt).
+    public static bool Plays(CollapseStyle wanted, in MotionConditions conditions) => wanted != CollapseStyle.Fade && conditions.MotionAllowed;
+
+    // The glitch's jolt is a flash: it plays only while the second's shared flashes allow it, and spends one.
+    public static bool Jolt(CollapseStyle style, FlashBudget budget, double now) => style == CollapseStyle.Glitch && budget.TryTake(now);
 
     public static double SmoothStep(double e0, double e1, double x)
     {
@@ -63,31 +68,9 @@ public static class CollapseFx
         return t * t * (3 - 2 * t);
     }
 
-    // The red and blue channels' offset in device pixels at a time into the collapse: one swell and back within
-    // AberrationLength, nothing after it. dip is the theme's amount (0: none).
+    // The red and blue offset in device pixels at a time into a press's pulse: one swell and back within AberrationLength.
     public static double AberrationAt(double seconds, double dip, double scale)
         => dip <= 0 || seconds < 0 || seconds >= AberrationLength ? 0 : dip * scale * Math.Sin(Math.PI * seconds / AberrationLength);
-
-    // Red moved right and blue left by up to `offset` device pixels, none at the row's centre and all of it at its ends, as the
-    // wallpaper's center falloff; green and the coverage stay. `row` is one row of premultiplied pixels, `scratch` as long.
-    public static void Aberrate(Span<uint> row, Span<uint> scratch, double offset)
-    {
-        int w = row.Length;
-        if (offset < .5 || w < 3) return;
-        row.CopyTo(scratch);
-        double half = (w - 1) / 2.0;
-        for (int x = 0; x < w; x++)
-        {
-            int d = (int)Math.Round(offset * Math.Abs(x - half) / half);
-            if (d == 0) continue;
-            uint c = scratch[x];
-            uint red = x - d >= 0 ? scratch[x - d] : 0, blue = x + d < w ? scratch[x + d] : 0;
-            uint a = Math.Max(c >> 24, Math.Max(red >> 24, blue >> 24));
-            row[x] = a << 24 | red & 0xFF0000 | c & 0xFF00 | blue & 0xFF;
-        }
-    }
-
-    // ----- Glitch -----
 
     // windows-animations' hash (RenderGlitch's ihash), to the bit.
     public static double GlitchHash(int x, int y)
@@ -97,269 +80,122 @@ public static class CollapseFx
         return (h & 0xFFFFu) / 65535.0;
     }
 
-    // Bands for a picture this many DIP tall: one per four DIP, 24 to 32 (the original's 70 suit a whole window).
+    // Bands for content this many DIP tall: one per four DIP, 24 to 32 (the original's 70 suit a whole window).
     public static int GlitchBands(double heightDip) => Math.Clamp((int)Math.Round(heightDip / 4), 24, 32);
+}
 
-    // The alpha the original gives its progress (after smoothstep): (1 - ss(0,1,p))(1 - ss(.55,1,p)).
-    public static double GlitchAlpha(double progress)
+// The glitch texture: each band of the content slides sideways and drops out on its own. A band that the original's hash
+// marks (threshold 0.55, about 45 percent) tears up to half the original's ±5 percent of the width; every band also jitters
+// by up to the original's ±1.25 percent. Both are slow waves (at most one swing over the texture), swelling in
+// and dying away, so nothing jumps; bands drop out between 40 and 100 percent of the way. The jolt, a flash, holds a tenth of
+// the way from 30 percent: the tears double and the band edges take the theme's neon colors.
+public static class GlitchTexture
+{
+    public const double Threshold = .55, Tear = .10, Jitter = .025, JoltFrom = .30, JoltTo = .40;
+
+    // How far a band moves sideways at a progress, as a share of the content's width. jolt: the jolt plays in this collapse.
+    public static double Offset(int band, double progress, bool jolt = false)
     {
-        double p = SmoothStep(0, 1, progress);
-        return (1 - SmoothStep(0, 1, p)) * (1 - SmoothStep(.55, 1, p));
+        double p = Math.Clamp(progress, 0, 1);
+        double swell = CollapseFx.SmoothStep(0, .3, p) * (1 - CollapseFx.SmoothStep(.7, 1, p));
+        bool tears = CollapseFx.GlitchHash(band, 0) >= Threshold;
+        double f = .4 + .6 * CollapseFx.GlitchHash(band, 1), phase = CollapseFx.GlitchHash(band, 2);
+        double g = .4 + .6 * CollapseFx.GlitchHash(band, 3), phase2 = CollapseFx.GlitchHash(band, 4);
+        double tear = tears ? Tear / 2 * Math.Sin(2 * Math.PI * (f * p + phase)) : 0;
+        double jitter = Jitter / 2 * Math.Sin(2 * Math.PI * (g * p + phase2));
+        double kick = jolt && JoltOn(p) ? 2 : 1;
+        return swell * (tear * kick + jitter);
+    }
+
+    public static bool JoltOn(double progress) => progress >= JoltFrom && progress < JoltTo;
+
+    // How much of a band shows at a progress: whole until its own moment between 40 and 80 percent, then gone over a fifth.
+    public static double Alpha(int band, double progress)
+    {
+        double from = .4 + .4 * CollapseFx.GlitchHash(band, 5);
+        return 1 - CollapseFx.SmoothStep(from, from + .2, Math.Clamp(progress, 0, 1));
     }
 }
 
-// The glitch on one snapshot. The canvas is wider than the snapshot by Margin on either side, room for the tears.
-// Its time runs in three equal steps (the cyberpunk theme's steps:3): the tears jump at the start of each and hold for a
-// third of the length, so each can be read, and the picture only breaks up and fades in the last third, on the original's
-// own curves run over that third. The tears thus jump twice in a picture of 480 ms or more: under three changes a second.
-public sealed class GlitchCollapse
+// The foam texture's field and masks. The field is the original's three octaves of value noise, worked out per block (Block
+// DIP square, so a panel has at most about 16 000 blocks) and spread evenly over the move by rank, so no corner lingers and the
+// same share dissolves at every moment. Levels masks are made at once from it, each a soft edge at one moment of the dissolve
+// and a soft line of foam just ahead of it; a frame only picks the one for its progress.
+public sealed class FoamField
 {
-    public const double Threshold = .55, Tear = .10, Jitter = .025, Breakup = .92;
-    // The seeds step this many times over the collapse, as the cyberpunk theme's own steps:3 (the original's 18 to 64 steps).
-    public const int SeedSteps = 3;
-    private readonly uint[] _source;
-    private readonly uint[] _scratch;
-    public int Width { get; }
-    public int Height { get; }
-    public int Bands { get; }
-    public int Margin { get; }
-    public int CanvasWidth => Width + 2 * Margin;
-
-    public GlitchCollapse(uint[] source, int width, int height, int bands)
-    {
-        if (width < 1 || height < 1 || source.Length < width * height) throw new ArgumentException("The snapshot does not match its size.");
-        _source = source; Width = width; Height = height; Bands = Math.Clamp(bands, 1, 256);
-        // The furthest a row moves: half the tear and half the jitter of the width.
-        Margin = (int)Math.Ceiling((Tear + Jitter) / 2 * width) + 1;
-        _scratch = new uint[CanvasWidth];
-    }
-
-    // How far a row moves sideways at a progress, in pixels (the original's tear plus micro-jitter).
-    // The step a progress lies in: 0, 1 or 2.
-    public static int Seed(double progress) => Math.Clamp((int)Math.Floor(Math.Clamp(progress, 0, 1) * SeedSteps), 0, SeedSteps - 1);
-    // How far through the breakup, the last step, a progress is: 0 before it, 1 at the end.
-    public static double BreakupAt(double progress) => Math.Clamp((Math.Clamp(progress, 0, 1) - (SeedSteps - 1.0) / SeedSteps) * SeedSteps, 0, 1);
-
-    public int Shift(int y, double progress)
-    {
-        int seed = Seed(progress);
-        // The jitter lines are as much finer than the bands as the original's 220 are than its 70.
-        int microLines = (int)Math.Round(Bands * 220 / 70.0);
-        int lineId = (int)((double)y / Height * Bands);
-        double band = CollapseFx.GlitchHash(lineId, seed) >= Threshold ? 1 : 0;
-        double tear = (CollapseFx.GlitchHash((int)(lineId * 1.7f), seed) - .5) * Tear * band;
-        double micro = (CollapseFx.GlitchHash((int)((double)y / Height * microLines), seed) - .5) * Jitter;
-        return (int)((tear + micro) * Width);
-    }
-
-    // One frame into `canvas` (CanvasWidth x Height, cleared here). aberration: the red and blue offset in device pixels.
-    public void Render(double progress, uint[] canvas, double aberration = 0)
-    {
-        Array.Clear(canvas);
-        // The original's breakup and fade, over the last step only.
-        double p = CollapseFx.SmoothStep(0, 1, BreakupAt(progress));
-        double alpha = (1 - CollapseFx.SmoothStep(0, 1, p)) * (1 - CollapseFx.SmoothStep(.55, 1, p));
-        if (alpha <= .01) return;
-        int seed = Seed(progress);
-        double cut = 1 - p * Breakup;
-        // Until about a tenth of the way nothing breaks up, as in the original.
-        bool whole = cut >= Breakup;
-        bool opaque = alpha >= .99;
-        uint scale = (uint)Math.Round(alpha * 256);
-        int stride = CanvasWidth;
-        for (int y = 0; y < Height; y++)
-        {
-            int shift = Shift(y, progress);
-            var row = canvas.AsSpan(y * stride, stride);
-            int src = y * Width;
-            for (int x = 0; x < Width; x++)
-            {
-                if (!whole && CollapseFx.GlitchHash(x, y + seed * 17) > cut) continue;
-                int dx = Margin + x + shift;
-                if ((uint)dx >= (uint)stride) continue;
-                uint c = _source[src + x];
-                row[dx] = opaque ? c : Scale(c, scale);
-            }
-            if (aberration >= .5) CollapseFx.Aberrate(row, _scratch, aberration);
-        }
-    }
-
-    // Every channel of a premultiplied pixel times scale / 256.
-    internal static uint Scale(uint c, uint scale)
-    {
-        uint rb = (c & 0x00FF00FF) * scale >> 8 & 0x00FF00FF;
-        uint ag = (c >> 8 & 0x00FF00FF) * scale & 0xFF00FF00;
-        return rb | ag;
-    }
-}
-
-// The foam dissolve on one snapshot, drawn in place (the canvas is the snapshot's size). As in the original, the field is
-// worked out per block, here one DIP square (Block device pixels), so a panel at 200 percent costs about what it does at 100.
-public sealed class FoamCollapse
-{
-    // windows-animations' Perlin Dissolve: every block starts dissolving at 0.9 times three octaves of value noise and is gone
-    // a LifeSpan of the progress later.
-    public const double LifeSpan = .15, StartScale = .9;
-    // How far into its life a block starts to fade, and from where everything left fades together.
-    public const double Crisp = .85, EndFade = .88;
-    private readonly uint[] _source;
+    public const int Levels = 40;
+    // How soft the dissolving edge is, and how wide the foam, as shares of the move.
+    public const double Edge = .035, FoamWidth = .07;
     private readonly float[] _start;
-    private readonly byte[] _gone, _near;
-    private readonly uint[] _scratch;
-    private readonly uint _foam;
-    private readonly int _columns, _rows;
-    public int Width { get; }
-    public int Height { get; }
-    // The block's side in device pixels: 1 DIP. The foam is one block wide.
-    public int Block { get; }
-    public int Edge => Block;
-    public double NoiseScale { get; }
+    public int Columns { get; }
+    public int Rows { get; }
+    public double Block { get; }
 
-    // scale: device pixels per DIP. foam: the foam's color, straight (not premultiplied) BGRA with its alpha.
-    public FoamCollapse(uint[] source, int width, int height, double scale, uint foam = 0xE6FFFFFF)
+    public FoamField(double widthDip, double heightDip)
     {
-        if (width < 1 || height < 1 || source.Length < width * height) throw new ArgumentException("The snapshot does not match its size.");
-        _source = source; Width = width; Height = height; _foam = foam;
-        Block = Math.Max(1, (int)Math.Round(scale));
-        _columns = (width + Block - 1) / Block; _rows = (height + Block - 1) / Block;
-        // The original's 150 px cells suit a whole window; here a cell is half the snapshot's shorter side, so a notice and a
-        // panel both dissolve in a few large islands rather than in dust.
-        NoiseScale = Math.Max(4, Math.Min(width, height) * .5);
-        _start = new float[_columns * _rows];
-        _gone = new byte[_start.Length];
-        _near = new byte[_start.Length];
-        _scratch = new uint[width];
-        // As the original, each lattice row's hashes are worked out once and shared by the blocks between it and the next.
+        Block = Math.Max(3, Math.Ceiling(Math.Sqrt(Math.Max(1, widthDip * heightDip) / 16000)));
+        Columns = Math.Max(1, (int)Math.Ceiling(widthDip / Block)); Rows = Math.Max(1, (int)Math.Ceiling(heightDip / Block));
+        _start = new float[Columns * Rows];
+        // A cell is half the content's shorter side, so a notice and a panel both dissolve in a few large islands.
+        double scale = Math.Max(4, Math.Min(widthDip, heightDip) * .5) / Block;
         double amplitude = .5;
-        var ux = new double[_columns];
-        var ix = new int[_columns];
         for (int octave = 0; octave < 3; octave++)
         {
-            double cell = NoiseScale / (1 << octave);
-            for (int bx = 0; bx < _columns; bx++)
+            double cell = scale / (1 << octave);
+            for (int y = 0; y < Rows; y++)
             {
-                double tx = bx * Block / cell;
-                ix[bx] = (int)Math.Floor(tx);
-                double fx = tx - ix[bx];
-                ux[bx] = fx * fx * (3 - 2 * fx);
-            }
-            int lattice = ix[^1] + 2;
-            var upper = new double[lattice];
-            var lower = new double[lattice];
-            int cached = int.MinValue;
-            for (int by = 0; by < _rows; by++)
-            {
-                double ty = by * Block / cell;
-                int iy = (int)Math.Floor(ty);
-                double fy = ty - iy, uy = fy * fy * (3 - 2 * fy);
-                if (iy != cached)
+                double ty = y / cell; int iy = (int)Math.Floor(ty); double fy = ty - iy, uy = fy * fy * (3 - 2 * fy);
+                for (int x = 0; x < Columns; x++)
                 {
-                    for (int x = 0; x < lattice; x++) { upper[x] = Hash(x, iy); lower[x] = Hash(x, iy + 1); }
-                    cached = iy;
-                }
-                int i = by * _columns;
-                for (int bx = 0; bx < _columns; bx++, i++)
-                {
-                    int x = ix[bx];
-                    double u = ux[bx];
-                    double top = upper[x] * (1 - u) + upper[x + 1] * u;
-                    double bottom = lower[x] * (1 - u) + lower[x + 1] * u;
-                    _start[i] += (float)(amplitude * (top * (1 - uy) + bottom * uy));
+                    double tx = x / cell; int ix = (int)Math.Floor(tx); double fx = tx - ix, ux = fx * fx * (3 - 2 * fx);
+                    double top = Hash(ix, iy) * (1 - ux) + Hash(ix + 1, iy) * ux, bottom = Hash(ix, iy + 1) * (1 - ux) + Hash(ix + 1, iy + 1) * ux;
+                    _start[y * Columns + x] += (float)(amplitude * (top * (1 - uy) + bottom * uy));
                 }
             }
             amplitude *= .5;
         }
-        // The original scales the noise by 0.9 and lets whatever it gives decide when the last block goes, so the slowest corner
-        // of a snapshot could linger after the rest had gone (live check IS-01), and three octaves bunch most blocks in the
-        // middle of the run, where they went all at once. The field keeps its shapes but is spread evenly over the whole run by
-        // rank (a histogram of 1024 steps): its lowest block starts at once, its highest is gone exactly at the end, and about
-        // the same share dissolves at every moment.
+        // Spread over the run by rank: a histogram of 1024 steps, each block keeping its place within its step.
         float low = float.MaxValue, high = float.MinValue;
         foreach (var v in _start) { low = Math.Min(low, v); high = Math.Max(high, v); }
         const int bins = 1024;
         var below = new int[bins + 1];
-        float span = Math.Max(1e-6f, high - low), room = (float)(1 - LifeSpan);
+        float span = Math.Max(1e-6f, high - low);
         int Bin(float v) => Math.Min(bins - 1, (int)((v - low) / span * bins));
         foreach (var v in _start) below[Bin(v) + 1]++;
         for (int i = 1; i <= bins; i++) below[i] += below[i - 1];
         double total = Math.Max(1, _start.Length - 1);
         for (int i = 0; i < _start.Length; i++)
         {
-            // Within its bin a block keeps its place by its own value, so the shapes stay smooth.
             int bin = Bin(_start[i]);
             double within = (_start[i] - low) / span * bins - bin, rank = below[bin] + within * (below[bin + 1] - below[bin] - 1);
-            _start[i] = (float)(Math.Clamp(rank / total, 0, 1) * room);
+            _start[i] = (float)Math.Clamp(rank / total, 0, 1);
         }
     }
 
     // windows-animations' pseudo_hash, to the bit.
     public static double Hash(int x, int y) => unchecked((uint)x * 73856093u ^ (uint)y * 19349663u) % 10000 / 10000.0;
 
-    // When the block holding a pixel starts to dissolve.
-    public float StartOf(int x, int y) => _start[y / Block * _columns + x / Block];
+    // When a block dissolves, 0 to 1.
+    public float StartOf(int column, int row) => _start[row * Columns + column];
 
-    // One frame into `canvas` (Width x Height). A block fades over its LifeSpan; one still there next to a block that has gone
-    // turns to foam. The foam itself fades in the last tenth.
-    public void Render(double progress, uint[] canvas, double aberration = 0)
+    // The level a progress shows.
+    public static int LevelAt(double progress) => Math.Clamp((int)Math.Round(Math.Clamp(progress, 0, 1) * (Levels - 1)), 0, Levels - 1);
+
+    // The dissolve's front at a level: everything has gone at the last one, nothing at the first.
+    public static double Front(int level) => (double)level / (Levels - 1) * (1 + Edge + FoamWidth) - Edge - FoamWidth;
+
+    // A level's mask (how much of each block shows) and foam (how much foam lies on it), 0 to 255, block by block.
+    public void Mask(int level, byte[] shown, byte[] foam)
     {
-        double p = Math.Clamp(progress, 0, 1);
-        // Gone wherever the noise has passed, inside the shape or not: the shape's own transparent surroundings foam only once
-        // the dissolve reaches them, so its outline does not foam from the first frame.
-        for (int i = 0; i < _start.Length; i++) _gone[i] = (byte)((p - _start[i]) / LifeSpan >= 1 ? 1 : 0);
-        Dilate();
-        // Everything still there, foam and all, fades together over the last eighth, so no block is left on its own at the end.
-        double tail = 1 - CollapseFx.SmoothStep(EndFade, 1, p);
-        double foamFade = tail;
-        uint foamAlpha = (uint)Math.Round((_foam >> 24) * foamFade);
-        uint foam = foamAlpha == 0 ? 0 : Premultiply(_foam & 0xFFFFFF | foamAlpha << 24);
-        int w = Width;
-        for (int y = 0; y < Height; y++)
+        double q = Front(level);
+        for (int i = 0; i < _start.Length; i++)
         {
-            int blockRow = y / Block * _columns, row = y * w;
-            for (int x = 0; x < w; x++)
-            {
-                int b = blockRow + x / Block, i = row + x;
-                uint c = _source[i];
-                if (_gone[b] != 0 || c >> 24 == 0) { canvas[i] = 0; continue; }
-                if (_near[b] != 0 && foam != 0) { canvas[i] = foam; continue; }
-                // A block keeps its colour until just before it goes: the original fades it over its whole life, which over a dark
-                // desktop left a wide band of half-faded, darkened blocks ahead of the foam (live check IS-02).
-                double local = (p - _start[b]) / LifeSpan;
-                double alpha = (1 - CollapseFx.SmoothStep(Crisp, 1, local)) * tail;
-                canvas[i] = alpha >= .999 ? c : GlitchCollapse.Scale(c, (uint)Math.Round(alpha * 256));
-            }
+            double s = _start[i];
+            double a = CollapseFx.SmoothStep(q, q + Edge, s);
+            double f = CollapseFx.SmoothStep(q, q + Edge, s) * (1 - CollapseFx.SmoothStep(q + Edge, q + Edge + FoamWidth, s));
+            shown[i] = (byte)Math.Round(255 * a);
+            foam[i] = (byte)Math.Round(255 * f);
         }
-        if (aberration >= .5)
-            for (int y = 0; y < Height; y++) CollapseFx.Aberrate(canvas.AsSpan(y * w, w), _scratch, aberration);
-    }
-
-    // _near: a block next to a gone one (its eight neighbours).
-    private void Dilate()
-    {
-        int c = _columns, r = _rows;
-        for (int y = 0; y < r; y++)
-            for (int x = 0; x < c; x++)
-            {
-                byte near = 0;
-                for (int dy = -1; dy <= 1 && near == 0; dy++)
-                {
-                    int yy = y + dy;
-                    if ((uint)yy >= (uint)r) continue;
-                    for (int dx = -1; dx <= 1; dx++)
-                    {
-                        int xx = x + dx;
-                        if ((uint)xx < (uint)c && _gone[yy * c + xx] != 0) { near = 1; break; }
-                    }
-                }
-                _near[y * c + x] = near;
-            }
-    }
-
-    private static uint Premultiply(uint c)
-    {
-        uint a = c >> 24;
-        uint r = (c >> 16 & 0xFF) * a / 255, g = (c >> 8 & 0xFF) * a / 255, b = (c & 0xFF) * a / 255;
-        return a << 24 | r << 16 | g << 8 | b;
     }
 }
 

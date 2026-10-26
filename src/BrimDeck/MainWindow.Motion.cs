@@ -16,23 +16,23 @@ public partial class MainWindow
 {
     private AmbientGlow? _ambient;
     private FxSurface? _fx;
-    // The theme's collapse picture, over everything the window shows (CollapseLayer).
-    private CollapseLayer? _collapse;
+    // The theme's collapse texture on the page that leaves as the panel closes (CollapseTexture), in the page's own place.
+    private CollapseTexture? _collapse;
 
     private void InitializeMotion()
     {
         var content = (Panel)Island.Child;
         _ambient = new AmbientGlow(Island, content, MotionState, () => _expanded);
         _fx = InteractionFx.Island(this, Island, content, () => _expanded && !_preview);
-        _collapse = new CollapseLayer();
-        Stage.Children.Add(_collapse);
+        _collapse = new CollapseTexture();
+        content.Children.Insert(content.Children.IndexOf(ExpandedContent) + 1, _collapse);
         IsVisibleChanged += (_, _) => _ambient.Update();
         MotionEnvironment.Changed += EnvironmentChanged;
         Closed += (_, _) => { MotionEnvironment.Changed -= EnvironmentChanged; _ambient.Stop(); _collapse.Stop(); };
         IsVisibleChanged += (_, _) => { if (!IsVisible) StopCollapse(); };
     }
 
-    // Something needs the island now (a notice, an alert, the panel opening again): a collapse picture still playing ends at once.
+    // Something needs the island now (a notice, an alert, the panel opening again): a collapse texture still playing ends at once.
     internal void StopCollapse() => _collapse?.Stop();
 
     // Windows changed something motion depends on (lock, display, battery saver, animation effects, high contrast).
