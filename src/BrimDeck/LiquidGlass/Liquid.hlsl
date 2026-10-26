@@ -113,6 +113,7 @@ cbuffer Frame : register(b0)
     float4 TextInfo;      // the open panel's text regions (t3): cell (device pixels), 1 / columns, 1 / rows, 1 when given
     float4 LookInfo;      // x: the light look's luminosity opacity between the text regions; y: 1 for round 12's zones;
                           // z: the light look's reach of the opaque theme's masked contrast (0: ReachLight)
+    float4 PresenceInfo;  // x: how far the glass has come into being (D13: the entrance and exit), 0..1
 };
 
 Texture2D Background : register(t0);
@@ -685,7 +686,10 @@ float3 Slab(float2 p, float sd, float2 outward)
     // Thickness reads as size (round 14): the thin bar the thinnest, the capsule thin and crisp, the open panel thicker with a
     // deeper rim lens.
     float size = saturate((shorter / Scale - 20) / 220);
-    float strength = lerp(.65, .95, size) * SlabRefraction / .9;
+    // D13 (round 15): the refraction grows with the glass's presence as it comes in and goes (the island's fade): the glass
+    // condenses, it does not only fade.
+    float presence = smoothstep(0, 1, saturate(PresenceInfo.x));
+    float strength = lerp(.65, .95, size) * SlabRefraction / .9 * presence;
     float through = min((18 + 57 * strength) * Scale, lerp(2.2, 3.2, size) * bevel);
     float2 offset = ray.xy / max(-ray.z, .25) * through * strength - local * .016 * strength;
     // Kept within the padded backdrop, less a margin for the frost's reach (past it the pyramid's levels border each other).
@@ -710,7 +714,7 @@ float3 Slab(float2 p, float sd, float2 outward)
     [branch] if (edge > .02)
     {
         // At most a pixel, at the outermost rim, fading with depth (long looks at split colour tire the eyes).
-        float split = pow(edge, 2.8) * SlabDispersion;
+        float split = pow(edge, 2.8) * SlabDispersion * presence;
         float3 sharp = float3(Back(at + outward * split).r, Back(at).g, Back(at - outward * split).b);
         c = lerp(c, lerp(c, sharp, .8), saturate(pow(edge, 2.8) * (1 - FrostShown)));
     }
@@ -760,7 +764,7 @@ float3 Slab(float2 p, float sd, float2 outward)
     float2 key = normalize(float2(-80, -150) + (Hover > 0 ? (Pointer - centre) / Scale * .25 * Hover : 0));
     float3 l = normalize(float3(key, .45));
     float3 lo = normalize(float3(-key, .45));
-    float live = lerp(RestLight, 1, max(Hover, Press));
+    float live = lerp(RestLight, 1, max(Hover, Press)) * presence;
     float directional = pow(saturate(dot(normal, l)), 7) + .52 * pow(saturate(dot(normal, lo)), 7);
     // Schlick's Fresnel for n = 1.45 (F0 = .034) at the slope's grazing angle, with liquid-glass-studio's fifth-power rim term
     // for the very edge: what it reflects is the scene's own colour (the backdrop's broad average), not white.
