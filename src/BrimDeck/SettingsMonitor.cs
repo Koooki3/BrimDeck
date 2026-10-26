@@ -291,7 +291,8 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
-        CompactMonitorItems.Temperature => Loc.T("温度", "Temperature"), CompactMonitorItems.Storage => Loc.T("系统所在硬盘", "System drive"), _ => "CPU"
+        CompactMonitorItems.Temperature => Loc.T("温度", "Temperature"), CompactMonitorItems.Storage => Loc.T("系统所在硬盘", "System drive"),
+        CompactMonitorItems.Battery => Loc.T("设备最低电量", "Lowest device battery"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -321,7 +322,7 @@ public sealed partial class SettingsWindow
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Temperature or CompactMonitorItems.Storage };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Temperature or CompactMonitorItems.Storage or CompactMonitorItems.Battery };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
@@ -330,6 +331,7 @@ public sealed partial class SettingsWindow
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
                 CompactMonitorItems.Temperature => Loc.T("温度始终显示数值：CPU 与 GPU 中较高的一个。", "The temperature always shows its figure: the higher of the CPU's and the GPU's."),
                 CompactMonitorItems.Storage => Loc.T("始终显示数值：Windows 所在硬盘已用空间的百分比（不含 USB 盘和 SD 卡）。", "Always shows its figure: the share in use of the drive Windows is on (not USB drives or SD cards)."),
+                CompactMonitorItems.Battery => Loc.T("始终显示数值：设备页上电量最低的无线设备。", "Always shows its figure: the wireless device with the lowest charge on the devices page."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);

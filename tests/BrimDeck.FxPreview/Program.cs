@@ -40,6 +40,10 @@ internal static class Program
 
         // The date range picker's strips (DatePreview): --date <output folder>.
         if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
+        // The devices page in every theme (DevicesSheet): --devices <output folder>; the devices on this PC, read only: --devices-probe.
+        if (args.Length > 1 && args[0] == "--devices") return DevicesSheet.Run(args[1]);
+        if (args.Length > 0 && args[0] == "--devices-cost") return DevicesSheet.Cost(args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 60);
+        if (args.Length > 0 && args[0] == "--devices-probe") return DevicesSheet.Probe(args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 12);
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
         if (args.Length > 1 && args[0] == "--sheet")
         {

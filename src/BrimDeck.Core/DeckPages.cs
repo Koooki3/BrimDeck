@@ -5,12 +5,12 @@ namespace BrimDeck.Core;
 public static class DeckPages
 {
     // The page switch, left to right.
-    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Notices];
+    public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Devices, DeckPage.Notices];
 
     // The recent notices page exists while dynamic notices are on.
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {
-        DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage,
+        DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage, DeckPage.Devices => settings.DevicesPage,
         DeckPage.Notices => settings.NoticesEnabled && settings.NoticesPage, _ => false
     };
 
@@ -25,7 +25,7 @@ public static class DeckPages
     public static DeckPage? Opening(DefaultDeckPage choice) => choice switch
     {
         DefaultDeckPage.Usage => DeckPage.Usage, DefaultDeckPage.Music => DeckPage.Music, DefaultDeckPage.Monitor => DeckPage.Monitor,
-        DefaultDeckPage.Notices => DeckPage.Notices, _ => null
+        DefaultDeckPage.Notices => DeckPage.Notices, DefaultDeckPage.Devices => DeckPage.Devices, _ => null
     };
 
     // Every page's size lies within these; the usage page is also at least as wide as its columns need (MinimumWidth).
@@ -44,6 +44,7 @@ public static class DeckPages
             case DeckPage.Music: settings.MusicWidth = width; settings.MusicHeight = height; break;
             case DeckPage.Monitor: settings.MonitorWidth = width; settings.MonitorHeight = height; break;
             case DeckPage.Notices: settings.NoticesWidth = width; settings.NoticesHeight = height; break;
+            case DeckPage.Devices: settings.DevicesWidth = width; settings.DevicesHeight = height; break;
             default: settings.Width = width; settings.Height = height; break;
         }
     }
@@ -53,6 +54,7 @@ public static class DeckPages
         DeckPage.Music => (settings.MusicWidth, settings.MusicHeight),
         DeckPage.Monitor => (settings.MonitorWidth, settings.MonitorHeight),
         DeckPage.Notices => (settings.NoticesWidth, settings.NoticesHeight),
+        DeckPage.Devices => (settings.DevicesWidth, settings.DevicesHeight),
         _ => (Math.Max(settings.Width, settings.MinimumWidth), settings.Height)
     };
 

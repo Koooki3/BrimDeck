@@ -41,6 +41,11 @@ public partial class App : Application
     internal SystemSampler? Monitor { get; private set; }
     internal event Action<MonitorSnapshot>? MonitorUpdated;
     private readonly HashSet<MainWindow> _presentingMonitor = [], _stripMonitor = [];
+    // The wireless devices' batteries, shared by every panel; created when first wanted (UpdateDeviceDemand).
+    internal DeviceBatteries? Devices { get; private set; }
+    internal event Action? DevicesChanged;
+    private readonly HashSet<MainWindow> _devicePages = [], _deviceStrips = [];
+    private readonly LowBatteryWatch _lowBattery = new();
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
 
@@ -182,6 +187,7 @@ public partial class App : Application
         ApplyHotkeys();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
         UpdateMonitorExtras();
+        UpdateDeviceDemand();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
@@ -300,6 +306,32 @@ public partial class App : Application
         Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
         UpdateMonitorExtras();
     }
+    // The devices are read in full while any panel shows the devices page or the collapsed battery reading; otherwise, while the
+    // low battery notice can show (the dynamic notices are on), the sources only listen (DeviceDemand.Listen); else nothing runs.
+    internal void PresentDevices(MainWindow deck, bool page, bool strip)
+    {
+        if (page) _devicePages.Add(deck); else _devicePages.Remove(deck);
+        if (strip) _deviceStrips.Add(deck); else _deviceStrips.Remove(deck);
+        UpdateDeviceDemand();
+    }
+    private void UpdateDeviceDemand()
+    {
+        var demand = _devicePages.Count + _deviceStrips.Count > 0 || _deviceSettings ? DeviceDemand.Watch
+            : Settings.DeviceLowNotice && Settings.NoticesEnabled ? DeviceDemand.Listen : DeviceDemand.None;
+        if (Exiting || Devices is null && demand == DeviceDemand.None) return;
+        if (Devices is null) { Devices = new DeviceBatteries(Dispatcher); Devices.Changed += DeviceBatteriesChanged; }
+        Devices.SetDemand(demand);
+    }
+    // The settings' devices page lists what is connected, so it reads the devices while it is open.
+    private bool _deviceSettings;
+    internal void WatchDevicesForSettings(bool open) { _deviceSettings = open; UpdateDeviceDemand(); }
+    private void DeviceBatteriesChanged()
+    {
+        if (Devices is { } devices && Settings.DeviceLowNotice && Settings.NoticesEnabled)
+            foreach (var low in _lowBattery.Update(devices.All.Where(device => !Settings.Hides(device.Key)), Settings.DeviceLowPercent))
+                Notices.SendDeviceLow(low);
+        DevicesChanged?.Invoke();
+    }
     // Temperatures and drives are read for an open page with them on, the drives' temperatures only there; the processor's and the
     // graphics adapter's temperatures, and the drives, also for a collapsed row showing those readings.
     private void UpdateMonitorExtras()
@@ -356,7 +388,7 @@ public partial class App : Application
     {
         // A settings change still waiting for its timer (made during the exit animation) is written before the last wait (life-L13).
         Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; InteractionFx.Uninstall(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Media?.Dispose(); Monitor?.Dispose(); Devices?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

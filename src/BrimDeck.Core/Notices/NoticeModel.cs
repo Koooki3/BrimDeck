@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 namespace BrimDeck.Core.Notices;
 
 // Where a notice came from: the Windows notification center, a WSL desktop notification, brim-notify (from Windows or WSL),
-// or BrimDeck's own test notice.
-public enum NoticeOrigin { Windows, Wsl, Cli, Test }
+// BrimDeck's own test notice, or one of BrimDeck's own (a device's low battery). Saved as numbers, so new members go at the end.
+public enum NoticeOrigin { Windows, Wsl, Cli, Test, BrimDeck }
 // Shown as a small status mark beside the application's icon; never as the application's color.
 public enum NoticeCategory { Message, Task, Success, Warning, Error, Info }
 public enum NoticePriority { Low, Normal, High }
