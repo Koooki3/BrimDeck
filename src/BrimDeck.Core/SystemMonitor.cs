@@ -130,8 +130,10 @@ public sealed record GpuEngine(string Kind, double Usage);
 // null where the system does not give them.
 public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
 {
-    // In degrees Celsius as Task Manager reads it; null without a sensor.
+    // In degrees Celsius as Task Manager reads it; null without a sensor. TemperatureFrom names the adapter it was read from
+    // when that is not this one (this adapter has no sensor and another has).
     public double? Temperature { get; init; }
+    public string? TemperatureFrom { get; init; }
     public IReadOnlyList<GpuEngine> Engines { get; init; } = [];
     public Reading<ulong> SharedBytes { get; init; } = Reading<ulong>.Unavailable("");
     public string? Name { get; init; }

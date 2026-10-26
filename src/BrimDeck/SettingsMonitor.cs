@@ -74,8 +74,8 @@ public sealed partial class SettingsWindow
                 keepPreview: true),
             Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
-                Loc.T("在 CPU 和 GPU 读数后显示温度；面板足够高时，另起一行显示固态硬盘温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供；硬盘温度每 30 秒读取一次。",
-                    "Shows temperatures after the CPU and GPU readings and, when the panel is tall enough, the solid-state drives' on a line of their own. Sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it; drives are read every 30 seconds."),
+                Loc.T("在 CPU 和 GPU 读数后显示温度；面板足够高时，另起一行显示固态硬盘温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供，10 分钟内没有变化的值视为固定值不显示；硬盘温度每 30 秒读取一次。",
+                    "Shows temperatures after the CPU and GPU readings and, when the panel is tall enough, the solid-state drives' on a line of their own. Sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it; a value that has not changed for 10 minutes is taken for a fixed one and left out; drives are read every 30 seconds."),
                 keepPreview: true));
     }
 

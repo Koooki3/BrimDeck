@@ -87,9 +87,17 @@ internal sealed class SystemSampler : IDisposable
 
     // Called on the UI thread with what the panels show: readings, the processor's and the graphics adapter's temperatures (the
     // expanded page with temperatures on, or the collapsed row's temperature); drives, the drives' too (the expanded page only).
-    public void SetTemperatures(bool readings, bool drives) { _temperatures = readings || drives; _driveTemperatures = drives; }
-    // Whether any drive has reported a temperature since BrimDeck started (the page keeps a row for the drives from then on).
-    public bool DrivesFound => _disks.Found;
+    // The drives are first read at once, so the page knows early whether it needs their line.
+    public void SetTemperatures(bool readings, bool drives)
+    {
+        _temperatures = readings || drives; _driveTemperatures = drives;
+        if (drives && _disks.State == SensorState.Unknown) _disks.Start();
+    }
+    // Whether the processor's zones, the graphics adapters and the drives have given temperatures (SensorState); the page keeps
+    // room for a kind that has, or that has not been asked yet.
+    public SensorState CpuSensor => _zones?.State ?? SensorState.Unknown;
+    public SensorState GpuSensor => _gpuTemperatures.State;
+    public SensorState DriveSensor => _disks.State;
 
     private void Run()
     {
@@ -105,7 +113,7 @@ internal sealed class SystemSampler : IDisposable
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _disks.Forget(); _wake.WaitOne(); continue; }
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _disks.Rest(); _wake.WaitOne(); continue; }
                 if (!primed || _primeProcesses)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
@@ -151,9 +159,9 @@ internal sealed class SystemSampler : IDisposable
             _history.Enqueue((rates.DownBytesPerSecond, rates.UpBytesPerSecond));
         }
         bool temperatures = _temperatures;
-        var cpu = _cpu!.Sample(pdh); var gpu = _gpu!.Sample(pdh, temperatures ? _gpuTemperatures : null);
-        if (temperatures && _zones!.Sample(pdh) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
-        if (!_driveTemperatures) _disks.Forget();
+        var cpu = _cpu!.Sample(pdh); var gpu = _gpu!.Sample(pdh, temperatures ? _gpuTemperatures : null, now);
+        // Asked on every tick, so the zones' counters leave the query once temperatures are no longer wanted.
+        if (_zones!.Sample(pdh, temperatures, now) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
         IReadOnlyList<DiskTemperature> disks = _driveTemperatures ? _disks.Sample(now) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage); Remember(_gpuHistory, gpu.OrDefault?.Usage);
         return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network, gpu, _lastProcesses)
@@ -475,8 +483,8 @@ internal sealed class GpuProvider
         _shared = pdh?.Add(SharedPath) == true;
     }
 
-    // temperatures: read the shown adapter's temperature too.
-    public Reading<GpuSample> Sample(bool collected, GpuTemperatures? temperatures = null)
+    // temperatures: read a temperature too, the shown adapter's where it has one (GpuTemperatures.ReadFor).
+    public Reading<GpuSample> Sample(bool collected, GpuTemperatures? temperatures = null, double now = 0)
     {
         if (!_engines) return Reading<GpuSample>.Unavailable(_pdh?.IsOpen == true ? Why.NoGpu : Why.NoCounters);
         if (!collected) return Reading<GpuSample>.Unavailable(Why.NoCounters);
@@ -497,10 +505,13 @@ internal sealed class GpuProvider
         var kinds = GpuEngines.Order(sums.Where(pair => pair.Key.Adapter == busiest.Adapter && pair.Key.Type.Length > 0)
             .Select(pair => new GpuEngine(pair.Key.Type, pair.Value / 100)));
         var info = _adapters.TryGetValue(busiest.Adapter, out var known) ? known : default;
+        var heat = temperatures?.ReadFor(busiest.Adapter, sums.Keys.Select(key => key.Adapter).Distinct().Order(StringComparer.OrdinalIgnoreCase).ToList(), now);
+        // Another adapter's temperature is named, as the page shows it beside this adapter's usage.
+        string? heatFrom = heat is { } h && h.Adapter != busiest.Adapter ? (_adapters.TryGetValue(h.Adapter, out var other) ? other.Name : "GPU") : null;
         return new GpuSample(Math.Clamp(busiest.Usage / 100, 0, 1), AdapterMemory(_memory ? MemoryPath : null, busiest.Adapter))
         {
             Engines = kinds, SharedBytes = AdapterMemory(_shared ? SharedPath : null, busiest.Adapter),
-            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null, Temperature = temperatures?.Read(busiest.Adapter)
+            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null, Temperature = heat?.Celsius, TemperatureFrom = heatFrom
         };
     }
 

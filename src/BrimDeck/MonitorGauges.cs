@@ -433,12 +433,14 @@ internal sealed class NetworkBlock : FrameworkElement
 
 // The solid-state drives' temperatures on one line under network: a thermometer in the room a dial takes, then each drive's
 // figure, in the order Windows numbers the drives, as many as the line holds. A drive's figure takes the warning or critical
-// color at its level (Temperatures.OfDisk); each drive's model and thresholds are in the tooltip.
+// color at its level (Temperatures.OfDisk); each drive's model and thresholds are in the tooltip. The page keeps the line's room
+// from the start; the readings fade in there when they arrive, easing as the page's values do.
 internal sealed class DriveTemperatureLine : FrameworkElement
 {
     private readonly MonitorColors _colors;
     private readonly double _body, _caption;
     private IReadOnlyList<DiskTemperature> _drives = [];
+    private Eased _shown;
 
     public DriveTemperatureLine(MonitorColors colors, double body, double caption)
     {
@@ -446,10 +448,12 @@ internal sealed class DriveTemperatureLine : FrameworkElement
         Height = Math.Ceiling(body * 1.7);
     }
 
-    public void Set(IReadOnlyList<DiskTemperature> drives)
+    public void Set(IReadOnlyList<DiskTemperature> drives, bool motion)
     {
         if (drives.SequenceEqual(_drives)) return;
-        _drives = drives;
+        // The figures that leave stay drawn while they fade.
+        if (drives.Count > 0) _drives = drives;
+        if (_shown.Set(drives.Count > 0 ? 1 : 0, motion)) Motion.Start(this, now => { InvalidateVisual(); return _shown.Moving(now); });
         ToolTip = drives.Count == 0 ? null : string.Join("\n", drives.Select(drive => drive.Name + " · " + Temperatures.Format(drive.Celsius) + " °C"
             + (drive.Warning is { } warning ? Loc.T($"（警告 {Temperatures.Format(warning)} °C）", $" (warning at {Temperatures.Format(warning)} °C)") : "")));
         InvalidateVisual();
@@ -459,9 +463,11 @@ internal sealed class DriveTemperatureLine : FrameworkElement
 
     protected override void OnRender(DrawingContext drawing)
     {
-        if (_drives.Count == 0) return;
+        double opacity = Math.Clamp(_shown.At(Eased.Now), 0, 1);
+        if (_drives.Count == 0 || opacity <= .001) return;
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), line = Height, badge = Math.Round(_body + 5), baseline = Math.Round(line / 2 + _body * .38);
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
+        if (opacity < .999) drawing.PushOpacity(opacity);
         double glyph = Math.Round(badge * 9 / 16);
         MonitorDraw.Arrow(drawing, new Point((badge - glyph) / 2, line / 2 - glyph / 2), glyph, Math.Max(1, glyph * .155), MonitorGlyph.Thermometer, UI.Secondary);
         double x = badge + Math.Round(_body * .5);
@@ -478,5 +484,6 @@ internal sealed class DriveTemperatureLine : FrameworkElement
             MonitorDraw.Baseline(drawing, unit, x + number.WidthIncludingTrailingWhitespace + 2, baseline);
             x += width + Math.Round(_body);
         }
+        if (opacity < .999) drawing.Pop();
     }
 }

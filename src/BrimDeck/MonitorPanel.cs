@@ -50,7 +50,12 @@ public partial class MainWindow
         Motion.Enabled = MonitorMotion;
         if (!_expanded) { _compactStrip?.Update(snapshot); return; }
         if (!IsMonitorPage || _monitorView is null) return;
-        if (MonitorKey() != _monitorKey) { RenderMonitor(); return; }
+        if (MonitorKey() != _monitorKey)
+        {
+            // Rebuilt because a kind of sensor turned out to have none (or turned up), the page fades in rather than cuts.
+            if (MonitorSensors() != _monitorSensors) _monitorFade = true;
+            RenderMonitor(); return;
+        }
         _monitorView.Update(snapshot, MonitorMotion);
     }
 
@@ -63,11 +68,19 @@ public partial class MainWindow
     }
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
-    // The sort is not part of it: a new sort reorders the list in place. The drives' line is kept from the first reading that finds
-    // a drive with a temperature (SystemSampler.DrivesFound), so the page is built again once, when the drives first report.
+    // The sort is not part of it: a new sort reorders the list in place. With temperatures on, the page keeps room for the drives'
+    // line and for a temperature beside the small gauge while their sensors are unknown or found (MonitorSensors), so it is built
+    // again only when a kind of sensor turns out to have none, once per run of the sampler.
     private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Settings.MonitorProcesses,
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorDrives);
-    private bool MonitorDrives => Settings.MonitorTemperatures && _app.Monitor?.DrivesFound == true;
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors());
+    private (bool Drives, bool Small) _monitorSensors;
+    private (bool Drives, bool Small) MonitorSensors()
+    {
+        if (!Settings.MonitorTemperatures) return (false, false);
+        var monitor = _app.Monitor;
+        var small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor : monitor?.CpuSensor;
+        return (monitor?.DriveSensor != SensorState.None, small != SensorState.None);
+    }
 
     private void RenderMonitor()
     {
@@ -85,12 +98,12 @@ public partial class MainWindow
         var key = MonitorKey();
         bool fade = _monitorFade; _monitorFade = false;
         if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
-        _monitorKey = key;
+        _monitorKey = key; _monitorSensors = MonitorSensors();
         // The list being replaced may have been under the pointer; its leave event never comes.
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
         _monitorView = new MonitorView(CurrentMonitorLayout(), MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; },
-            Settings.MonitorTemperatures, MonitorDrives);
+            Settings.MonitorTemperatures, _monitorSensors.Drives, _monitorSensors.Small);
         MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // A new main gauge, asked for on the page, arrives with a short fade instead of a cut.

@@ -30,14 +30,22 @@ public static class Temperatures
     // a kelvin) where a zone has it, else the whole kelvin one. A zone named for the processor wins; otherwise the hottest zone,
     // as the processor is usually what heats a zone most. Null without a zone giving a plausible reading.
     public static (double Celsius, string Zone)? Cpu(IEnumerable<(string Instance, double Value)> precise, IEnumerable<(string Instance, double Value)> whole)
+        => Pick(Zones(precise, whole));
+
+    // Each zone's plausible reading in degrees Celsius, the high precision counter where the zone has a plausible one.
+    public static Dictionary<string, double> Zones(IEnumerable<(string Instance, double Value)> precise, IEnumerable<(string Instance, double Value)> whole)
     {
         var zones = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var (zone, value) in whole) if (FromKelvin(value) is { } celsius) zones[zone] = celsius;
         foreach (var (zone, value) in precise) if (FromDeciKelvin(value) is { } celsius) zones[zone] = celsius;
-        if (zones.Count == 0) return null;
+        return zones;
+    }
+
+    public static (double Celsius, string Zone)? Pick(IEnumerable<KeyValuePair<string, double>> zones)
+    {
         static bool Processor(string zone) => zone.Contains("CPU", StringComparison.OrdinalIgnoreCase) || zone.Contains("PROC", StringComparison.OrdinalIgnoreCase);
-        var best = zones.OrderByDescending(pair => Processor(pair.Key)).ThenByDescending(pair => pair.Value).ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).First();
-        return (best.Value, best.Key);
+        return zones.OrderByDescending(pair => Processor(pair.Key)).ThenByDescending(pair => pair.Value).ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => ((double Celsius, string Zone)?)(pair.Value, pair.Key)).FirstOrDefault();
     }
 
     // A drive's reading, or null when it is not plausible. Thresholds the drive gives are kept only when they are plausible and
@@ -74,6 +82,33 @@ public static class Temperatures
 
     // Whole degrees: "47".
     public static string Format(double celsius) => ((int)Math.Round(celsius, MidpointRounding.AwayFromZero)).ToString(CultureInfo.InvariantCulture);
+}
+
+// Whether a kind of sensor (the processor's zones, the graphics adapters, the drives) has given a reading since the sampler
+// started: Unknown until it is first asked, then Found or None. The page keeps room for a kind that is Unknown or Found, so it
+// is built again only for a kind that turns out to have none, or one that turns up later.
+public enum SensorState { Unknown, Found, None }
+
+// Many desktop boards report a thermal zone that never moves (27.8 °C, 300 K and the like): a value the firmware fills in, not
+// a sensor. A zone whose value has not changed for SteadySeconds is left out until it changes; a real sensor moves by a tenth
+// of a kelvin (or a kelvin) within minutes.
+public sealed class SteadyZones
+{
+    public const double SteadySeconds = 600;
+    private readonly Dictionary<string, (double Value, double Since)> _zones = new(StringComparer.OrdinalIgnoreCase);
+
+    // The processor's temperature (Temperatures.Pick) from the zones that are not steady, at now (seconds).
+    public (double Celsius, string Zone)? Choose(IReadOnlyDictionary<string, double> zones, double now)
+    {
+        foreach (var zone in _zones.Keys.Where(zone => !zones.ContainsKey(zone)).ToList()) _zones.Remove(zone);
+        var moving = new List<KeyValuePair<string, double>>(zones.Count);
+        foreach (var pair in zones)
+        {
+            if (!_zones.TryGetValue(pair.Key, out var known) || known.Value != pair.Value) _zones[pair.Key] = known = (pair.Value, now);
+            if (now - known.Since < SteadySeconds) moving.Add(pair);
+        }
+        return Temperatures.Pick(moving);
+    }
 }
 
 // The adapter's locally unique identifier from the key the performance counters and DXGI name adapters by,

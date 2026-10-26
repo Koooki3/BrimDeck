@@ -6,54 +6,104 @@ namespace BrimDeck.Native;
 
 // The temperatures Windows reports to a normal user without a driver: nothing here needs administrator rights or loads anything
 // beyond the system's own libraries. Hardware monitors that read the processor's own sensors do it through a kernel driver
-// (WinRing0 and the like), which BrimDeck does not install. Each reader belongs to the sampling thread, as the providers do.
+// (WinRing0 and the like), which BrimDeck does not install. Each reader belongs to the sampling thread, as the providers do; the
+// sensor states are read from the UI thread.
 
 // The processor from the ACPI thermal zones, through the performance counters the sampler already collects. The zones are the
-// firmware's: on some machines one is the processor package, on others the board near it, and some machines have none (then
-// the page shows no processor temperature). The counters join the query the first time a temperature is asked for.
+// firmware's: on some machines one is the processor package, on others the board near it, some report a fixed value (SteadyZones
+// leaves those out) and some machines have none (then the page shows no processor temperature). The counters are in the query
+// only while temperatures are wanted.
 internal sealed class ThermalZones(PdhQuery? pdh)
 {
     private const string PrecisePath = @"\Thermal Zone Information(*)\High Precision Temperature";
     private const string WholePath = @"\Thermal Zone Information(*)\Temperature";
+    private readonly SteadyZones _steady = new();
     private bool _added, _available;
+    private volatile SensorState _state = pdh is null ? SensorState.None : SensorState.Unknown;
+    public SensorState State => _state;
 
-    public (double Celsius, string Zone)? Sample(bool collected)
+    // Called on every tick: wanted adds the counters (read from the next collection on), not wanted takes them out again.
+    public (double Celsius, string Zone)? Sample(bool collected, bool wanted, double now)
     {
         if (pdh is null) return null;
-        // Added now, read from the next collection on.
-        if (!_added) { _added = true; _available = pdh.Add(PrecisePath) | pdh.Add(WholePath); return null; }
-        return _available && collected ? Temperatures.Cpu(pdh.Read(PrecisePath), pdh.Read(WholePath)) : null;
+        if (!wanted)
+        {
+            if (_added) { pdh.Remove(PrecisePath); pdh.Remove(WholePath); _added = false; }
+            return null;
+        }
+        if (!_added)
+        {
+            _added = true; _available = pdh.Add(PrecisePath) | pdh.Add(WholePath);
+            if (!_available) _state = SensorState.None;
+            return null;
+        }
+        if (!_available || !collected) return null;
+        var zones = Temperatures.Zones(pdh.Read(PrecisePath), pdh.Read(WholePath));
+        if (zones.Count > 0) _state = SensorState.Found; else if (_state == SensorState.Unknown) _state = SensorState.None;
+        return _steady.Choose(zones, now);
     }
 }
 
 // Graphics adapters as Task Manager reads their temperature: the adapter's performance data from the graphics kernel (WDDM 2.4
-// and later). Each adapter is opened once by its LUID and kept open; one that gives no temperature (a software renderer, most
-// integrated adapters) is not asked again. The sampler asks only for the adapter the page shows, the busiest, so a dedicated
-// adapter idling in a hybrid laptop is left alone.
+// and later). Each adapter is opened by its LUID and kept open. An adapter whose driver says it does not report the data (a
+// software renderer) is not asked again; one that gives no temperature for now, or fails otherwise, is asked again after a
+// pause that grows from 5 seconds to 5 minutes.
 internal sealed class GpuTemperatures : IDisposable
 {
     // D3DKMT_ADAPTER_PERFDATA on 64-bit Windows: PhysicalAdapterIndex, then 8-byte figures; Temperature (tenths of a degree
     // Celsius) at 56, 64 bytes in all.
     private const int PerfDataSize = 64, TemperatureOffset = 56, AdapterPerfData = 62;
-    private readonly Dictionary<string, uint> _adapters = new(StringComparer.OrdinalIgnoreCase);
+    private const uint NotSupported = 0xC00000BB, InvalidParameter = 0xC000000D;
+    private const double FirstPause = 5, LongestPause = 300;
+    private sealed class Adapter { public uint Handle; public bool Never; public double RetryAt = double.NegativeInfinity, Pause; }
+    private readonly Dictionary<string, Adapter> _adapters = new(StringComparer.OrdinalIgnoreCase);
     private readonly IntPtr _data = Marshal.AllocHGlobal(PerfDataSize);
+    private string? _last;
     private bool _disposed;
+    private volatile SensorState _state;
+    public SensorState State => _state;
 
-    // The adapter by the counters' key ("luid_0x…_0x…"), or null without a temperature.
-    public double? Read(string adapter)
+    // The temperature for the adapter the page shows: its own where it has one. Otherwise the adapter that last gave one, and
+    // then any other, so an adapter without a sensor (most integrated adapters) never takes the temperature away while the
+    // busiest adapter changes. Adapter is the key of the one read. adapters: every adapter's key, in a fixed order.
+    public (double Celsius, string Adapter)? ReadFor(string shown, IReadOnlyList<string> adapters, double now)
+    {
+        if (Read(shown, now) is { } own) return Found(own, shown);
+        if (_last is { } last && last != shown && adapters.Contains(last, StringComparer.OrdinalIgnoreCase) && Read(last, now) is { } kept) return Found(kept, last);
+        foreach (var adapter in adapters)
+            if (adapter != shown && adapter != _last && Read(adapter, now) is { } other) return Found(other, adapter);
+        if (_state == SensorState.Unknown && adapters.Count > 0) _state = SensorState.None;
+        return null;
+    }
+    private (double, string) Found(double celsius, string adapter) { _last = adapter; _state = SensorState.Found; return (celsius, adapter); }
+
+    // The adapter by the counters' key ("luid_0x…_0x…"), or null without a temperature for now.
+    public double? Read(string key, double now)
     {
         if (_disposed) return null;
-        if (!_adapters.TryGetValue(adapter, out uint handle)) _adapters[adapter] = handle = Open(adapter);
-        if (handle == 0) return null;
+        if (!_adapters.TryGetValue(key, out var adapter)) _adapters[key] = adapter = new Adapter();
+        if (adapter.Never || now < adapter.RetryAt) return null;
+        if (adapter.Handle == 0 && (adapter.Handle = Open(key)) == 0) return Wait(adapter, now);
         for (int i = 0; i < PerfDataSize; i += 8) Marshal.WriteInt64(_data, i, 0);
-        var query = new QueryAdapterInfo { Adapter = handle, Type = AdapterPerfData, Data = _data, Size = PerfDataSize };
-        try
+        var query = new QueryAdapterInfo { Adapter = adapter.Handle, Type = AdapterPerfData, Data = _data, Size = PerfDataSize };
+        uint status;
+        try { status = (uint)D3DKMTQueryAdapterInfo(ref query); }
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException) { Debug.WriteLine(ex); adapter.Never = true; return null; }
+        if (status == 0)
         {
-            if (D3DKMTQueryAdapterInfo(ref query) == 0) return Temperatures.FromDeciCelsius((uint)Marshal.ReadInt32(_data, TemperatureOffset));
+            if (Temperatures.FromDeciCelsius((uint)Marshal.ReadInt32(_data, TemperatureOffset)) is { } celsius) { adapter.Pause = 0; return celsius; }
+            return Wait(adapter, now);
         }
-        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException) { Debug.WriteLine(ex); }
-        // The driver does not report it (or the adapter went away): this adapter is left alone from now on.
-        Close(handle); _adapters[adapter] = 0;
+        // The driver does not report the data at all: this adapter is left alone from now on. Any other failure (the adapter
+        // went away, the driver was busy) opens it again after the pause.
+        Close(adapter.Handle); adapter.Handle = 0;
+        if (status is NotSupported or InvalidParameter) { adapter.Never = true; return null; }
+        return Wait(adapter, now);
+    }
+    private static double? Wait(Adapter adapter, double now)
+    {
+        adapter.Pause = Math.Clamp(adapter.Pause * 2, FirstPause, LongestPause);
+        adapter.RetryAt = now + adapter.Pause;
         return null;
     }
 
@@ -76,7 +126,7 @@ internal sealed class GpuTemperatures : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        foreach (var handle in _adapters.Values) Close(handle);
+        foreach (var adapter in _adapters.Values) Close(adapter.Handle);
         _adapters.Clear();
         Marshal.FreeHGlobal(_data);
     }
@@ -93,42 +143,47 @@ internal sealed class GpuTemperatures : IDisposable
 // storage stack's temperature property. The drive is opened without read or write access, which a normal user may do. Asking
 // sends the drive a command and takes from a few to over a hundred milliseconds, and wakes a drive from its deepest power
 // state, so the drives are read on the thread pool now and then, never on a tick. Hard disks are left out, as asking could spin
-// one up, and so are removable and USB drives.
+// one up, and so are removable and USB drives. The readings and the state are kept while the sampler pauses, so a page opened
+// again has its drives' line at once.
 internal sealed class DiskTemperatures
 {
     private const double Every = 30;
     private const int MaximumDrives = 16;
     private volatile IReadOnlyList<DiskTemperature> _latest = [];
+    private volatile SensorState _state;
     private double _readAt = double.NegativeInfinity;
-    private Task? _reading;
-    // Counts the pauses, so a reading still under way when the sampler paused does not bring its figures back.
-    private volatile int _generation;
-    // Whether any drive has reported a temperature since BrimDeck started; the page keeps a row for the drives from then on.
-    public volatile bool Found;
+    private int _running;
+    private volatile Task _reading = Task.CompletedTask;
+    public SensorState State => _state;
+    // The reading under way, or a finished task.
+    public Task Pending => _reading;
+
+    // Starts reading the drives on the thread pool unless a reading is under way. Called from the sampler and, to know early
+    // whether the page needs a line for them, from the UI thread when the drives are first wanted.
+    public void Start()
+    {
+        if (Interlocked.Exchange(ref _running, 1) == 1) return;
+        _reading = Task.Run(() =>
+        {
+            try
+            {
+                var drives = Read();
+                _latest = drives;
+                if (drives.Count > 0) _state = SensorState.Found; else if (_state == SensorState.Unknown) _state = SensorState.None;
+            }
+            finally { Volatile.Write(ref _running, 0); }
+        });
+    }
 
     // The latest readings; a new reading is started when the last is old, and its result shows from the next tick.
     public IReadOnlyList<DiskTemperature> Sample(double now)
     {
-        if (now - _readAt >= Every && _reading?.IsCompleted != false)
-        {
-            _readAt = now;
-            int generation = _generation;
-            _reading = Task.Run(() =>
-            {
-                var drives = Read();
-                if (drives.Count > 0) Found = true;
-                if (generation == _generation) _latest = drives;
-            });
-        }
+        if (now - _readAt >= Every) { _readAt = now; Start(); }
         return _latest;
     }
 
-    // Once the sampler pauses the readings grow old: the next start reads the drives again at once.
-    public void Forget()
-    {
-        if (_readAt == double.NegativeInfinity && _latest.Count == 0) return;
-        _generation++; _latest = []; _readAt = double.NegativeInfinity;
-    }
+    // The sampler paused: the next sample reads the drives again at once. The last readings stay until then.
+    public void Rest() => _readAt = double.NegativeInfinity;
 
     public static List<DiskTemperature> Read()
     {

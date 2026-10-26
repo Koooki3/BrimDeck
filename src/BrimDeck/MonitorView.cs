@@ -61,9 +61,10 @@ internal sealed class MonitorView : Grid
     private bool _motion;
 
     // temperatures: the gauges carry the processor's and the graphics adapter's temperatures after their figures; drives: the drives'
-    // temperatures take a line under network, where the page has room for one (not when memory and network share a line).
+    // temperatures take a line under network, where the page has room for one (not when memory and network share a line);
+    // smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
     public MonitorView(MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
-        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, bool temperatures = false, bool drives = false)
+        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, bool temperatures = false, bool drives = false, bool smallTemperature = false)
     {
         _layout = layout; _colors = colors; _main = main; _temperatures = temperatures;
         bool cpuMain = main == MonitorMain.Cpu;
@@ -78,7 +79,7 @@ internal sealed class MonitorView : Grid
         // The gauge shown small takes a fixed width at the right: a wide block for the GPU, thin columns for the processor. Its
         // line is wider than the column under it, and wider still with a temperature after the figure.
         double mini = cpuMain ? Math.Round(Math.Clamp(layout.Figure * 3.4, 54, 84)) : Math.Round(Math.Clamp(layout.Figure * 5, 80, 120));
-        double headMini = Math.Max(mini, Math.Round(layout.Figure * (temperatures ? 5.8 : 4.6)));
+        double headMini = Math.Max(mini, Math.Round(layout.Figure * (temperatures && smallTemperature ? 5.8 : 4.6)));
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(headMini) });
@@ -190,7 +191,7 @@ internal sealed class MonitorView : Grid
             string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
             string tip = (gpu.Name ?? "GPU") + " · " + MonitorFormat.Percent(gpu.Usage) + "%" + (memory.Length > 0 ? " · " + memory : "")
                 + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "")
-                + (temperature.Length > 0 ? " · " + temperature : "");
+                + (temperature.Length > 0 ? " · " + temperature + (gpu.TemperatureFrom is { } from ? Loc.T($"（{from} 的温度）", $" ({from}'s temperature)") : "") : "");
             // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure; its
             // temperature follows the figure.
             _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", temperature, tip, motion, heat is { } c ? Hot(Temperatures.OfGpu(c)) : null);
@@ -210,7 +211,7 @@ internal sealed class MonitorView : Grid
         (cpuMain ? _cpuGauge : _gpuGauge).Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
         _memory.Set(snapshot.Memory, motion);
         _network.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
-        _drives?.Set(snapshot.Disks);
+        _drives?.Set(snapshot.Disks, motion);
         _list?.Set(snapshot.Processes, _cores, motion);
         _processes = snapshot.Processes.OrDefault;
         // An open card follows its app's readings; it closes when the app has left the list.

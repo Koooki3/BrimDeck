@@ -20,13 +20,18 @@ internal static class TemperatureChecks
 
     private static void Zones(PdhQuery pdh, Action<string, bool> check)
     {
+        // A query whose counters have no instances at all collects nothing (PDH_NO_DATA); the sampler's always has the processor's.
+        pdh.Add(@"\Processor Information(_Total)\% Processor Utility");
         var zones = new ThermalZones(pdh);
-        check("thermal zones: the first ask only adds the counters", zones.Sample(pdh.Collect()) is null);
+        check("thermal zones: unknown until asked", zones.State == SensorState.Unknown);
+        check("thermal zones: the first ask only adds the counters", zones.Sample(pdh.Collect(), true, 0) is null);
         bool collected = pdh.Collect();
-        var cpu = zones.Sample(collected);
-        Console.WriteLine(cpu is { } zone ? $"  CPU {zone.Celsius:0.0} °C from {zone.Zone}" : "  CPU: no ACPI thermal zone gives a temperature on this machine");
+        var cpu = zones.Sample(collected, true, 1);
+        Console.WriteLine(cpu is { } zone ? $"  CPU {zone.Celsius:0.0} °C from {zone.Zone}" : $"  CPU: no ACPI thermal zone gives a temperature on this machine ({zones.State})");
         check("thermal zones: the processor's temperature is plausible or none", cpu is null || Temperatures.Plausible(cpu.Value.Celsius) is not null);
-        check("thermal zones: none without a collection", zones.Sample(false) is null);
+        check("thermal zones: known once read", zones.State != SensorState.Unknown && (cpu is null || zones.State == SensorState.Found));
+        check("thermal zones: none without a collection", zones.Sample(false, true, 2) is null);
+        check("thermal zones: none once not wanted, and the counters leave the query", zones.Sample(pdh.Collect(), false, 3) is null && pdh.Read(@"\Thermal Zone Information(*)\Temperature").Count == 0);
     }
 
     private static void Adapters(PdhQuery pdh, Action<string, bool> check)
@@ -35,20 +40,31 @@ internal static class TemperatureChecks
         const string Memory = @"\GPU Adapter Memory(*)\Dedicated Usage";
         pdh.Add(Memory); pdh.Collect();
         var keys = pdh.Read(Memory).Select(item => item.Instance).Select(instance => instance.IndexOf("_phys", StringComparison.Ordinal) is var end and > 0 ? instance[..end] : instance)
-            .Where(key => AdapterLuid.Parse(key) is not null).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            .Where(key => AdapterLuid.Parse(key) is not null).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
         using var temperatures = new GpuTemperatures();
-        int read = 0;
+        var found = new List<string>();
         foreach (var key in keys)
         {
-            var first = temperatures.Read(key);
-            var second = temperatures.Read(key);
+            var first = temperatures.Read(key, 0);
+            var soon = temperatures.Read(key, 1);
             Console.WriteLine(first is { } celsius ? $"  GPU {key}: {celsius:0.0} °C" : $"  GPU {key}: no temperature");
             check($"graphics adapter {key}: plausible or none", first is null || Temperatures.Plausible(first.Value) is not null);
-            check($"graphics adapter {key}: an adapter without a sensor stays without one", first is not null || second is null);
-            if (first is not null) read++;
+            check($"graphics adapter {key}: one without a temperature is not asked again at once", first is not null || soon is null);
+            if (first is not null) found.Add(key);
         }
-        check("graphics adapters: an unknown key reads nothing", temperatures.Read("luid_0x7FFFFFFF_0x7FFFFFFF") is null && temperatures.Read("not an adapter") is null);
-        Console.WriteLine($"  {keys.Count} adapter(s) listed, {read} with a temperature");
+        if (keys.Count > 0)
+        {
+            // Whichever adapter is the busiest, the temperature comes from one with a sensor and stays with it.
+            var readings = keys.Select(shown => temperatures.ReadFor(shown, keys, 2)).ToList();
+            check("graphics adapters: an adapter without a sensor does not take the temperature away", found.Count == 0
+                ? readings.All(reading => reading is null) && temperatures.State == SensorState.None
+                : readings.All(reading => reading is { } r && found.Contains(r.Adapter)) && temperatures.State == SensorState.Found);
+            var without = keys.Except(found).ToList();
+            if (found.Count > 0 && without.Count > 0)
+                check("graphics adapters: the adapter that last gave one keeps it", without.All(shown => temperatures.ReadFor(shown, keys, 3)?.Adapter == temperatures.ReadFor(without[0], keys, 3)?.Adapter));
+        }
+        check("graphics adapters: an unknown key reads nothing", temperatures.Read("luid_0x7FFFFFFF_0x7FFFFFFF", 0) is null && temperatures.Read("not an adapter", 0) is null);
+        Console.WriteLine($"  {keys.Count} adapter(s) listed, {found.Count} with a temperature");
     }
 
     private static void Drives(Action<string, bool> check, bool elevated)
@@ -62,12 +78,20 @@ internal static class TemperatureChecks
         if (drives.Count > 0 && !elevated) check("drives: read without administrator rights", true);
 
         // The sampler's reader never waits for the drives: its first sample is empty, and the readings follow on the thread pool.
+        // The checks wait for that reading itself, however long the drives take.
         var reader = new DiskTemperatures();
+        check("drives: unknown until read", reader.State == SensorState.Unknown);
         check("drives: the first sample does not wait for the drives", reader.Sample(0).Count == 0);
-        IReadOnlyList<DiskTemperature> later = [];
-        for (int attempt = 0; attempt < 100 && later.Count < drives.Count; attempt++) { Thread.Sleep(50); later = reader.Sample(1); }
-        check("drives: the background reading arrives", later.Count == drives.Count && reader.Found == drives.Count > 0);
-        reader.Forget();
-        check("drives: forgotten once the sampler pauses, read again on the next sample", reader.Sample(2).Count == 0);
+        reader.Pending.Wait();
+        var later = reader.Sample(1);
+        check("drives: the background reading arrives", later.Count == drives.Count && reader.State == (drives.Count > 0 ? SensorState.Found : SensorState.None));
+        reader.Rest();
+        check("drives: the readings stay while the sampler pauses", reader.Sample(2).Count == drives.Count);
+        reader.Pending.Wait();
+        check("drives: read again on the next sample after a pause", reader.Sample(3).Count == drives.Count);
+        var early = new DiskTemperatures();
+        early.Start(); early.Start();
+        early.Pending.Wait();
+        check("drives: started early, one reading at a time", early.Sample(0).Count == drives.Count);
     }
 }
