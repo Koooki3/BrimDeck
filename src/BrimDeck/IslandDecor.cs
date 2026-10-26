@@ -95,10 +95,12 @@ internal sealed class IslandDecor
             }
             if (_palm is not null)
             {
-                // At most 120 DIP, set partly beyond the top-right corner, so it stays in the corner and clear of the clock
-                // column below it.
+                // At most 120 DIP, set well beyond the top-right corner, so it stays in the corner, clear of the clock column
+                // below it and of the settings button in the corner itself.
+                // It is shade on the sand, so it stops at the horizon (and its contrast is checked over the sky alone).
                 double frond = Math.Min(120, h * .5);
-                scene.Children.Add(new DrawingGroup { Transform = new MatrixTransform(frond, 0, 0, frond, w - frond * .8, -frond * .12), Children = { _palm } });
+                var shade = new DrawingGroup { Transform = new MatrixTransform(frond, 0, 0, frond, w - frond * .72, -frond * .2), Children = { _palm } };
+                scene.Children.Add(_decor.Horizon is null ? shade : new DrawingGroup { ClipGeometry = new RectangleGeometry(new Rect(0, 0, w, seaTop)), Children = { shade } });
             }
             if (scene.Children.Count > 0) group.Children.Add(scene);
         }
@@ -128,8 +130,8 @@ internal sealed class IslandDecor
                 double b = Math.Sin(3 * v + 1.3 * Math.Sin(2 * u - .9));
                 double c = Math.Sin(u + 2 * v + 1.1 * Math.Sin(3 * u));
                 // A thin bright ridge where each field is near zero, softened, then the brightest of the three.
-                static double Ridge(double s) { double d = 1 - Math.Min(1, Math.Abs(s) / .22); return d * d * (3 - 2 * d); }
-                double light = Math.Max(Ridge(a) * .9, Math.Max(Ridge(b) * .75, Ridge(c) * .6));
+                static double Ridge(double s) { double d = 1 - Math.Min(1, Math.Abs(s) / .3); return d * d * (3 - 2 * d); }
+                double light = Math.Max(Ridge(a), Math.Max(Ridge(b) * .85, Ridge(c) * .7));
                 byte alpha = (byte)Math.Round(color.A * light);
                 int i = (y * size + x) * 4;
                 // Premultiplied BGRA.

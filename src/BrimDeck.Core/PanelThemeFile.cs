@@ -87,7 +87,7 @@ public sealed class PanelThemeEffects
 // A theme's motifs, drawn into the surface under the content and as faint as a texture, so they never compete with it:
 //   horizon: a sea below a horizon at "at" (0.3 to 0.9 of the height), the "sea" color laid over the surface there and a thin
 //     "line" of light along the horizon;
-//   caustics: the light a sunlit (or moonlit) sea throws, a net of soft bright lines in "color" (its alpha at most 0.12);
+//   caustics: the light a sunlit (or moonlit) sea throws, a net of soft bright lines in "color" (its alpha at most 0.2);
 //   palm: the shadow of a palm frond reaching into the top-right corner of the open panel, in "color" (alpha at most 0.12);
 //   hud: HUD marks, a 45-degree cut drawn across the bottom-left and the top-right corner (the bottom-right on an island hanging
 //     from the screen's edge), "chamfer" 0 to 10 DIP, with a hexagonal tick beside each, in "color".

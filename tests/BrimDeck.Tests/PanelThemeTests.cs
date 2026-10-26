@@ -268,7 +268,7 @@ internal static class PanelThemeTests
             $$"""{ "formatVersion": 1, "id": "decor", "base": "{{baseId ?? "light"}}", "effects": { "decor": {{decor}} } }"""));
         var fitted = Decor("""{ "horizon": { "at": 2, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#FFFFFFFF" }, "palm": { "color": "#40002010" }, "hud": { "color": "#6600F0FF", "chamfer": 40 } }""");
         check("Motifs are fitted: the horizon and chamfer to their ranges, the caustics and palm to a faint alpha",
-            fitted.Effects.Decor is { Horizon: { At: .9, Line: not null } horizon, Caustics: { A: 31 }, Palm: { A: 31 }, Hud: { Chamfer: 10 } }
+            fitted.Effects.Decor is { Horizon: { At: .9, Line: not null } horizon, Caustics: { A: 51 }, Palm: { A: 31 }, Hud: { Chamfer: 10 } }
             && horizon.Sea == ThemeColor.Parse("#4000A6A6"));
         check("A motif without a usable color is left out, and no motifs at all is none",
             Decor("""{ "horizon": { "at": 0.5 }, "palm": { "color": "#00000000" }, "hud": { "color": "#FF00F0FF" } }""").Effects.Decor is { Horizon: null, Palm: null, Hud: { Chamfer: 6 } }
@@ -290,6 +290,12 @@ internal static class PanelThemeTests
         check("The sea is measured over the gradient it lies on", dusky.SurfaceStops.Contains(duskySea) && dusky["textPrimary"].MinimumContrast([duskySea]) >= 7 - .001);
         var lit = Decor("""{ "horizon": { "sea": "#2000A6A6", "line": "#FFFFC24B" } }""");
         check("The horizon's line is measured too", lit.SurfaceStops.Contains(ThemeColor.Parse("#FFFFC24B")));
+        // Each motif is measured over what it is drawn on: the palm over the sky (it stops at the horizon), the caustics over the sea.
+        var shaded = Decor("""{ "horizon": { "sea": "#4000A6A6" }, "palm": { "color": "#1F000000" }, "caustics": { "color": "#33FFFFFF" } }""");
+        var shadedSea = shaded.Effects.Decor!.Horizon!.Sea.Over(shaded.Surface);
+        check("The palm is measured over the sky and the caustics over the sea", shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shaded.Surface))
+            && !shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shadedSea)) && shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shadedSea))
+            && !shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shaded.Surface)));
         var badDecor = PanelThemes.LoadFolder(Folder("decor-bad", ("sea.json", """{ "formatVersion": 1, "id": "sea", "effects": { "decor": { "horizon": { "sea": "teal" } } } }"""),
             ("hud.json", """{ "formatVersion": 1, "id": "hud", "effects": { "decor": { "hud": { "color": "#12345" } } } }""")));
         check("A motif color that is not a color is refused", badDecor.Count == 2 && badDecor.All(theme => theme.Error is not null));

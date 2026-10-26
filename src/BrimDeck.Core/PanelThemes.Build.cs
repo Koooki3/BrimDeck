@@ -117,9 +117,18 @@ public static partial class PanelThemes
                 foreach (var water in new[] { horizon.Sea, horizon.Deep }) { var sea = water.Over(ground); grounds.Add(sea); yield return sea; }
                 if (horizon.Line is { } line) { yield return line.Over(ground); yield return line.Over(horizon.Sea.Over(ground)); }
             }
-        foreach (var tint in new[] { decor.Caustics, decor.Palm })
-            if (tint is { } color)
-                foreach (var ground in grounds) yield return color.Over(ground);
+        // Each motif over what it is drawn on: the caustics over the sea (over the whole surface without a horizon), the palm
+        // over the sky above the horizon, where it is clipped.
+        var seas = decor.Horizon is null ? surfaces : grounds.Skip(surfaces.Count).ToList();
+        if (decor.Caustics is { } caustics)
+            foreach (var ground in seas) yield return caustics.Over(ground);
+        if (decor.Palm is { } palm)
+            foreach (var ground in surfaces)
+            {
+                yield return palm.Over(ground);
+                // Without a horizon the caustics' light lies on the same surface, so the shade falls over it too.
+                if (decor.Horizon is null && decor.Caustics is { } light) yield return palm.Over(light.Over(ground));
+            }
     }
 
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.
@@ -216,8 +225,8 @@ public static partial class PanelThemes
             glass, pixel, texture, DecorValues(effects.Decor));
     }
 
-    // The motifs in their ranges; a part without a color it can use is left out. The caustics and the palm stay as faint as a
-    // texture (their alpha at most 0.12), so they read as light and shade on the surface, never as pictures over the content.
+    // The motifs in their ranges; a part without a color it can use is left out. The caustics and the palm stay faint (their
+    // alpha at most 0.2 and 0.12), so they read as light and shade on the surface, never as pictures over the content.
     private static PanelDecor? DecorValues(PanelThemeDecor? decor)
     {
         if (decor is null) return null;
@@ -228,7 +237,7 @@ public static partial class PanelThemes
         }
         var horizon = decor.Horizon is { Sea: var seaText } h && Color(seaText) is { } sea ? new PanelHorizon(Fit(h.At, .3, .9, .62), sea, Color(h.Line)) : null;
         var hud = decor.Hud is { Color: var hudText } hudFile && Color(hudText) is { } hudColor ? new PanelHud(hudColor, Fit(hudFile.Chamfer, 0, 10, 6)) : null;
-        var values = new PanelDecor(horizon, Color(decor.Caustics?.Color, .12), Color(decor.Palm?.Color, .12), hud);
+        var values = new PanelDecor(horizon, Color(decor.Caustics?.Color, .2), Color(decor.Palm?.Color, .12), hud);
         return values.Any ? values : null;
     }
 
