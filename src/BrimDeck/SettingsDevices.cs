@@ -33,7 +33,7 @@ public partial class SettingsWindow
             SelectedIndex = Math.Max(0, Devices.LowChoices.ToList().IndexOf(S.DeviceLowPercent)) };
         AutomationProperties.SetName(threshold, Loc.T("低电量阈值", "Low battery threshold")); PopupMotion.Attach(threshold);
         threshold.SelectionChanged += (_, _) => { if (threshold.SelectedIndex >= 0) Change(s => s.DeviceLowPercent = Devices.LowChoices[threshold.SelectedIndex]); };
-        var off = TextLine(Loc.T("灵动提示未开启，提醒不会显示。", "Live notices are off, so the notice will not show."), 11.5, TextSecondary);
+        var off = TextLine(Loc.T("灵动提示未开启，提醒不会显示。", "Live notices are off, so the notice will not show."), TextSize.Body, TextSecondary);
         off.TextWrapping = TextWrapping.Wrap; off.Visibility = S.NoticesEnabled ? Visibility.Collapsed : Visibility.Visible;
         Group(Toggle(Loc.T("电量低时提醒", "Notify when a battery is low"), S.DeviceLowNotice, value => Change(s => s.DeviceLowNotice = value), enabled: S.NoticesEnabled,
                 help: Loc.T("设备电量降到阈值时，在岛上显示一次提醒；充电后或电量回升后才会再次提醒。提醒通过灵动提示显示，需先在“灵动提示”中开启。设备页没打开时，蓝牙设备随 Windows 的电量变化提醒，2.4G 接收器每 15 分钟读一次；Xbox 无线适配器上的手柄、AirPods，以及只能通过蓝牙电池服务读取电量的低功耗蓝牙设备，只在设备页打开时读取，不会在后台提醒。",
@@ -51,7 +51,7 @@ public partial class SettingsWindow
         Target.Children.Add(new Border { Child = _deviceRows, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, 0, 0, 28) });
         FillDeviceRows(_deviceRows);
         var strip = TextLine(Loc.T("提示：在“显示与读数”的收起读数中可加入“设备最低电量”，在刘海或胶囊里显示电量最低的设备。",
-            "Tip: add \"Lowest device battery\" to the collapsed readings under Display and readings to show the device with the lowest charge in the notch or capsule."), 11.5, TextSecondary);
+            "Tip: add \"Lowest device battery\" to the collapsed readings under Display and readings to show the device with the lowest charge in the notch or capsule."), TextSize.Body, TextSecondary);
         strip.TextWrapping = TextWrapping.Wrap; Target.Children.Add(strip);
     }
     private StackPanel? _deviceRows;
@@ -78,8 +78,8 @@ public partial class SettingsWindow
         var missing = S.HiddenDevices.Where(hidden => !keys.Contains(hidden.Key)).ToList();
         if (devices.Count == 0 && missing.Count == 0)
         {
-            var empty = TextLine(_app.Devices?.Settled == true ? Loc.T("没有已连接的无线设备。", "No wireless devices connected.") : Loc.T("正在查找设备…", "Looking for devices…"), 12.5, TextSecondary);
-            empty.Margin = new Thickness(0, 12, 0, 12); rows.Children.Add(empty);
+            var empty = TextLine(_app.Devices?.Settled == true ? Loc.T("没有已连接的无线设备。", "No wireless devices connected.") : Loc.T("正在查找设备…", "Looking for devices…"), TextSize.Body, TextSecondary);
+            empty.Margin = new Thickness(0, Space.S12, 0, Space.S12); rows.Children.Add(empty);
             return;
         }
         void Add(string key, string title, string detail)
@@ -89,7 +89,7 @@ public partial class SettingsWindow
             AutomationProperties.SetName(toggle, Loc.T("显示 ", "Show ") + title);
             toggle.Checked += (_, _) => Change(s => s.HiddenDevices = [.. s.HiddenDevices.Where(hidden => hidden.Key != key)]);
             toggle.Unchecked += (_, _) => Change(s => s.HiddenDevices = [.. s.HiddenDevices.Where(hidden => hidden.Key != key).Append(new HiddenDevice(key, title))]);
-            var line = TextLine(detail, 11.5, TextSecondary); line.TextWrapping = TextWrapping.Wrap;
+            var line = TextLine(detail, TextSize.Body, TextSecondary); line.TextWrapping = TextWrapping.Wrap;
             _deviceDetails[key] = line;
             rows.Children.Add(Row(title, toggle, line));
         }
@@ -103,7 +103,7 @@ public partial class SettingsWindow
 
     private void DeviceSizeControls()
     {
-        var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
+        var dimensions = new Grid { Margin = new Thickness(0, Space.S8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
         var width = Dimension(Loc.T("宽度", "Width"), S.DevicesWidth, 440, 1200, value => Resize(s => s.DevicesWidth = value, DeckPage.Devices)); width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
         var height = Dimension(Loc.T("高度", "Height"), S.DevicesHeight, 140, 400, value => Resize(s => s.DevicesHeight = value, DeckPage.Devices)); height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
         Target.Children.Add(dimensions);

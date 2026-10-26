@@ -13,7 +13,7 @@ public sealed partial class SettingsWindow
 {
     private FrameworkElement SettingLabel(string title, Func<string>? help = null)
     {
-        var label = TextLine(title, 13, TextPrimary, FontWeights.SemiBold);
+        var label = TextLine(title, TextSize.Strong, TextPrimary, FontWeights.SemiBold);
         label.VerticalAlignment = VerticalAlignment.Center;
         if (help is null) return label;
         var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
@@ -112,7 +112,7 @@ public sealed partial class SettingsWindow
         // The first size pass places the highlight (and may start a continued slide); later passes only follow resizes.
         host.Loaded += (_, _) => { if (highlight.Visibility != Visibility.Visible) Place(false); };
         host.SizeChanged += (_, _) => { if (move.HasAnimatedProperties) return; Place(false); };
-        return new Border { Child = host, Background = UI.Brush(Inset), CornerRadius = new CornerRadius(7), Padding = new Thickness(3), Margin = new Thickness(0, 4, 0, 4) };
+        return new Border { Child = host, Background = UI.Brush(Inset), CornerRadius = new CornerRadius(7), Padding = new Thickness(3), Margin = new Thickness(0, Space.S4, 0, Space.S4) };
     }
 
     private (Slider Slider, Border Number) NumericControls(string title, double value, double min, double max, double tick, string unit, Action<double> changed)
@@ -122,12 +122,12 @@ public sealed partial class SettingsWindow
         var input = new TextBox { Style=(Style)FindResource("SettingsNumber"),Width=40,Text=slider.Value.ToString("0",CultureInfo.InvariantCulture),VerticalAlignment=VerticalAlignment.Center };
         AutomationProperties.SetName(slider,title); AutomationProperties.SetName(input,Loc.T(title+"数值", title+" value"));
         var line=new StackPanel {Orientation=Orientation.Horizontal};line.Children.Add(input);
-        var units=TextLine(unit,10,TextTertiary);units.Margin=new Thickness(4,0,6,0);units.VerticalAlignment=VerticalAlignment.Center;line.Children.Add(units);
+        var units=TextLine(unit,TextSize.Caption,TextTertiary);units.Margin=new Thickness(Space.S4, 0, Space.Tight, 0);units.VerticalAlignment=VerticalAlignment.Center;line.Children.Add(units);
         var minus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="−" };
         var plus=new RepeatButton { Style=(Style)FindResource("SettingsStepper"),Content="+" };
         AutomationProperties.SetName(minus,Loc.T("减少"+title, "Decrease "+title));AutomationProperties.SetName(plus,Loc.T("增加"+title, "Increase "+title));
-        line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(2,5,3,5)});line.Children.Add(minus);line.Children.Add(plus);
-        var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.Border),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
+        line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(Space.Hair, Space.S4, 3, Space.S4)});line.Children.Add(minus);line.Children.Add(plus);
+        var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.Border),BorderThickness=new Thickness(1),Padding=new Thickness(Space.S8, 0, Space.Hair, 0)};
         input.GotKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Accent);
         input.LostKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Border);
         void Set(double number)
@@ -153,9 +153,9 @@ public sealed partial class SettingsWindow
         var controls=NumericControls(title,value,min,max,10,"DIP",changed);
         KeepPreview(controls.Slider); KeepPreview(controls.Number);
         var head=new DockPanel();DockPanel.SetDock(controls.Number,Dock.Right);head.Children.Add(controls.Number);
-        var label=TextLine(title,13,TextPrimary);label.VerticalAlignment=VerticalAlignment.Center;head.Children.Add(label);panel.Children.Add(head);
-        controls.Slider.Margin=new Thickness(0,24,0,6);panel.Children.Add(controls.Slider);
-        var scale=new DockPanel();var last=TextLine(max.ToString("0"),10,TextTertiary);DockPanel.SetDock(last,Dock.Right);scale.Children.Add(last);scale.Children.Add(TextLine(min.ToString("0"),10,TextTertiary));panel.Children.Add(scale);
+        var label=TextLine(title,TextSize.Strong,TextPrimary);label.VerticalAlignment=VerticalAlignment.Center;head.Children.Add(label);panel.Children.Add(head);
+        controls.Slider.Margin=new Thickness(0, Space.S24, 0, Space.Tight);panel.Children.Add(controls.Slider);
+        var scale=new DockPanel();var last=TextLine(max.ToString("0"),TextSize.Caption,TextTertiary);DockPanel.SetDock(last,Dock.Right);scale.Children.Add(last);scale.Children.Add(TextLine(min.ToString("0"),TextSize.Caption,TextTertiary));panel.Children.Add(scale);
         return panel;
     }
 
@@ -169,14 +169,14 @@ public sealed partial class SettingsWindow
         _palette.Apply(dialog.Resources); Native.SettingsChrome.Apply(dialog);
         dialog.SourceInitialized += (_, _) => Native.SettingsChrome.SetTheme(dialog, _palette.Dark);
         TextOptions.SetTextFormattingMode(dialog, TextFormattingMode.Display);
-        var panel = new StackPanel { Margin = new Thickness(24, 20, 24, 20) };
-        var heading = TextLine(title, 16, TextPrimary, FontWeights.SemiBold); heading.Margin = new Thickness(0, 0, 0, 10); panel.Children.Add(heading);
-        var text = TextLine(message, 12.5, TextSecondary); text.TextWrapping = TextWrapping.Wrap; panel.Children.Add(text);
+        var panel = new StackPanel { Margin = new Thickness(Space.S24, 20, Space.S24, 20) };
+        var heading = TextLine(title, TextSize.Title, TextPrimary, FontWeights.SemiBold); heading.Margin = new Thickness(0, 0, 0, 10); panel.Children.Add(heading);
+        var text = TextLine(message, TextSize.Body, TextSecondary); text.TextWrapping = TextWrapping.Wrap; panel.Children.Add(text);
         bool confirmed = false;
         var cancel = ActionButton(Loc.T("取消", "Cancel"), dialog.Close); cancel.Style = (Style)dialog.FindResource("SettingsOutlineButton"); cancel.IsCancel = true;
         var confirm = ActionButton(action, () => { confirmed = true; dialog.Close(); }); confirm.Style = (Style)dialog.FindResource("SettingsDangerButton");
-        foreach (var button in new[] { cancel, confirm }) { button.MinWidth = 84; button.Padding = new Thickness(14, 6, 14, 6); }
-        confirm.Margin = new Thickness(8, 0, 0, 0);
+        foreach (var button in new[] { cancel, confirm }) { button.MinWidth = 84; button.Padding = new Thickness(14, Space.Tight, 14, Space.Tight); }
+        confirm.Margin = new Thickness(Space.S8, 0, 0, 0);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };
         buttons.Children.Add(cancel); buttons.Children.Add(confirm); panel.Children.Add(buttons);
         var frame = new Border { BorderThickness = new Thickness(1), Child = panel };

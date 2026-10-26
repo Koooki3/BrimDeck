@@ -50,31 +50,31 @@ internal sealed class NeteaseControlWindow : Window
 
         bool start = action == NeteaseControlAction.Start;
         string confirm = start ? Loc.T("启动并启用", "Start and enable") : Loc.T("重启并启用", "Restart and enable");
-        var restartHeading = Text(start ? Loc.T("会启动网易云音乐", "NetEase Cloud Music will start") : Loc.T("会重启一次网易云", "NetEase Cloud Music will restart once"), 13.5, palette.Primary, true); restartHeading.Margin = new Thickness(0, 22, 0, 0); body.Children.Add(restartHeading);
+        var restartHeading = Text(start ? Loc.T("会启动网易云音乐", "NetEase Cloud Music will start") : Loc.T("会重启一次网易云", "NetEase Cloud Music will restart once"), 13.5, palette.Primary, true); restartHeading.Margin = new Thickness(0, Space.S24, 0, 0); body.Children.Add(restartHeading);
         var restart = Text(start ? Loc.T("点击“启动并启用”后，网易云音乐会以完整控制方式打开。整个过程通常需要几秒钟。",
                 "After you click \"Start and enable\", NetEase Cloud Music opens with full control. This usually takes a few seconds.")
             : Loc.T("点击“重启并启用”后，网易云音乐会先关闭再重新打开，然后自动回到当前这首歌和播放位置；如果此刻正在播放，会接着播放。整个过程通常需要几秒钟。",
                 "After you click \"Restart and enable\", NetEase Cloud Music closes and opens again, then returns to the current song and position; if it is playing now, it keeps playing. This usually takes a few seconds."), 13, palette.Secondary, lineHeight: 21);
-        restart.Margin = new Thickness(0, 6, 0, 0); body.Children.Add(restart);
+        restart.Margin = new Thickness(0, Space.Tight, 0, 0); body.Children.Add(restart);
 
         var notice = new StackPanel();
         var heading = new StackPanel { Orientation = Orientation.Horizontal };
         var shield = new System.Windows.Shapes.Path { Width = 15, Height = 15, Stretch = Stretch.Uniform,
             Data = Geometry.Parse("M8,1.5 L13.5,3.6 V7.4 C13.5,10.7 11.2,13.3 8,14.5 C4.8,13.3 2.5,10.7 2.5,7.4 V3.6 Z M5.6,8 L7.4,9.8 L10.6,6.4"),
             Stroke = UI.Brush(palette.Secondary), StrokeThickness = 1.4, StrokeLineJoin = PenLineJoin.Round,
-            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Margin = new Thickness(0, 0, Space.S8, 0), VerticalAlignment = VerticalAlignment.Center };
         heading.Children.Add(shield); heading.Children.Add(Text(Loc.T("只在您信任的电脑上启用", "Enable it only on a PC you trust"), 13.5, palette.Primary, true)); notice.Children.Add(heading);
-        var warning = Text(SecurityNotice, 13, palette.Secondary, lineHeight: 21); warning.Margin = new Thickness(0, 6, 0, 0); notice.Children.Add(warning);
-        body.Children.Add(new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(8)), Padding = new Thickness(14, 12, 14, 13), Margin = new Thickness(0, 20, 0, 0),
+        var warning = Text(SecurityNotice, 13, palette.Secondary, lineHeight: 21); warning.Margin = new Thickness(0, Space.Tight, 0, 0); notice.Children.Add(warning);
+        body.Children.Add(new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Padding = new Thickness(14, Space.S12, 14, Space.S12), Margin = new Thickness(0, 20, 0, 0),
             Background = UI.Brush(palette.Inset), BorderBrush = UI.Brush(palette.RowDivider), BorderThickness = new Thickness(1), Child = notice });
 
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 22, 0, 0) };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, Space.S24, 0, 0) };
         var cancel = new Button { Content = Loc.T("取消", "Cancel"), Style = (Style)FindResource("ControlDialogButton"), IsCancel = true, Margin = new Thickness(0, 0, 10, 0) };
         var enable = new Button { Content = confirm, Style = (Style)FindResource("ControlDialogPrimaryButton") };
         AutomationProperties.SetName(cancel, Loc.T("取消", "Cancel")); AutomationProperties.SetName(enable, confirm);
         cancel.Click += (_, _) => DialogResult = false; enable.Click += (_, _) => DialogResult = true;
         buttons.Children.Add(cancel); buttons.Children.Add(enable); body.Children.Add(buttons);
-        Content = new Border { Background = UI.Brush(palette.Surface), Padding = new Thickness(28, 24, 28, 24), Child = body };
+        Content = new Border { Background = UI.Brush(palette.Surface), Padding = new Thickness(28, Space.S24, 28, Space.S24), Child = body };
         // Keep cancellation as the safe initial keyboard action without drawing
         // the focus indicator that is reserved for Tab navigation.
         Loaded += (_, _) => cancel.Focus();

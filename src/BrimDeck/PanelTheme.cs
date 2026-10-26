@@ -178,8 +178,9 @@ internal static class PanelTheme
         var next = new ResourceDictionary();
         foreach (var (resource, token) in Resources) next[resource] = UI.Brush(Hex(token));
         // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
-        for (int r = 1; r <= 16; r++) next["PanelR" + r] = new CornerRadius(Corner(r));
-        next["SegmentCorner"] = new CornerRadius(Corner(5));
+        foreach (var (name, radius) in new[] { ("Xs", Radius.Xs), ("Sm", Radius.Sm), ("Md", Radius.Md), ("Lg", Radius.Lg), ("Xl", Radius.Xl), ("Full", Radius.Full) })
+            next["PanelRadius" + name] = new CornerRadius(Corner(radius));
+        next["SegmentCorner"] = new CornerRadius(Corner(Radius.Sm));
         var merged = resources.MergedDictionaries;
         int at = _published is not null ? merged.IndexOf(_published) : -1;
         if (at < 0) for (int i = 0; i < merged.Count && at < 0; i++) if (merged[i].Contains("PanelSurface")) at = i;
@@ -226,9 +227,11 @@ internal static class PanelTheme
         island.EdgeBrush = GlassShownFor(palette) ? EdgeBrush(palette) : null;
     }
 
-    // The text of a window of the panel's own (the date picker, the app filter): unsmoothed in a pixel theme, as on the island.
+    // The text of a window of the panel's own (the date picker, the app filter): unsmoothed in a pixel theme, as on the island,
+    // and with tabular figures, as on the panel (MainWindow.xaml), so changing readings keep their width.
     public static void Text(FrameworkElement root)
     {
+        System.Windows.Documents.Typography.SetNumeralAlignment(root, FontNumeralAlignment.Tabular);
         if (Current.Effects.Pixel > 0) TextOptions.SetTextRenderingMode(root, TextRenderingMode.Aliased);
         else root.ClearValue(TextOptions.TextRenderingModeProperty);
     }

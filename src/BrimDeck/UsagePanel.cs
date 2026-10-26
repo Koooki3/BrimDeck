@@ -209,10 +209,10 @@ public partial class MainWindow
         {
             _usageForm = "empty";
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            empty.Children.Add(UI.Fixed(Settings.UsagePage ? Loc.T("未选择应用", "No apps selected") : Loc.T("AI 用量已关闭", "AI usage is off"), 14, 20, UI.Secondary));
+            empty.Children.Add(UI.Fixed(Settings.UsagePage ? Loc.T("未选择应用", "No apps selected") : Loc.T("AI 用量已关闭", "AI usage is off"), TextSize.Strong, 20, UI.Secondary));
             var openText = Loc.T("打开设置", "Open settings");
             var open = Segmented([new(openText, openText, false, _app.OpenSettings)], 12, 22, 12, centerText: true);
-            open.Margin = new Thickness(0, 12, 0, 0); open.HorizontalAlignment = HorizontalAlignment.Center;
+            open.Margin = new Thickness(0, Space.S12, 0, 0); open.HorizontalAlignment = HorizontalAlignment.Center;
             empty.Children.Add(open); UsageContent.Children.Add(empty);
             return;
         }
@@ -241,11 +241,11 @@ public partial class MainWindow
             AutomationProperties.SetName(button, item.Name);
             strip.Children.Add(button);
         }
-        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
+        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Padding = new Thickness(1) };
         // motion-review F8: the fill is laid out once at its new width; a change of width is drawn by stretching it from its
         // left edge, so the glide lays nothing out again.
         var shift = new TranslateTransform(); var stretch = new ScaleTransform();
-        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(PanelTheme.Corner(5)), HorizontalAlignment = HorizontalAlignment.Left,
+        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Sm)), HorizontalAlignment = HorizontalAlignment.Left,
             IsHitTestVisible = false, RenderTransform = new TransformGroup { Children = { stretch, shift } }, Visibility = Visibility.Hidden };
         var host = new Grid { Children = { fill, strip } };
         int chosen = items.ToList().FindIndex(item => item.Active);
@@ -266,7 +266,7 @@ public partial class MainWindow
                 stretch.BeginAnimation(ScaleTransform.ScaleXProperty, widen);
             }
         };
-        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
+        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Padding = new Thickness(1) };
     }
     // Where each gliding strip's fill was last, by its key.
     private static readonly Dictionary<string, (double X, double Width, long At)> SegmentFills = [];
@@ -301,10 +301,10 @@ public partial class MainWindow
             {
                 var button = ModelAction(label, name, () => { _applicationPage += step; _usageHandover = step > 0 ? Handover.Forward : Handover.Back; RenderUsage(); }, toolTip: false);
                 button.IsEnabled = step < 0 ? _applicationPage > 0 : _applicationPage + 1 < pages;
-                button.Padding = new Thickness(6, 0, 6, 0); return button;
+                button.Padding = new Thickness(Space.Tight, 0, Space.Tight, 0); return button;
             }
             controls.Children.Add(PageButton("‹", Loc.T("上一页应用", "Previous apps"), -1));
-            var page = UI.Centered($"{_applicationPage + 1}/{pages}", 11, UI.Secondary); page.Margin = new Thickness(4, 0, 4, 0);
+            var page = UI.Centered($"{_applicationPage + 1}/{pages}", TextSize.Caption, UI.Secondary); page.Margin = new Thickness(Space.S4, 0, Space.S4, 0);
             page.ToolTip = Loc.T($"共 {columns.Count} 项应用", $"{columns.Count} apps in total"); controls.Children.Add(page);
             controls.Children.Add(PageButton("›", Loc.T("下一页应用", "Next apps"), 1));
             ApplicationPages.Children.Add(controls); ApplicationPages.Visibility = Visibility.Visible;
@@ -370,8 +370,8 @@ public partial class MainWindow
             var detail = UI.Text(first ? Loc.T("首次同步中，完成后自动显示。", "Syncing for the first time; it shows here once done.") : snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
             detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.MaxHeight = 34; detail.TextTrimming = TextTrimming.CharacterEllipsis;
             status.Children.Add(detail);
-            var sync = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2), Height = 24,
-                HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-6, 4, 0, 0), Content = Loc.T("立即同步", "Sync now") };
+            var sync = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(Space.Tight, Space.Hair, Space.Tight, Space.Hair), Height = 24,
+                HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-6, Space.S4, 0, 0), Content = Loc.T("立即同步", "Sync now") };
             AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
             sync.Click += (_, _) => _ = RefreshAsync();
             status.Children.Add(sync); body = status;
@@ -470,8 +470,8 @@ public partial class MainWindow
         var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, UI.Tertiary);
         return new Border
         {
-            Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(4)),
-            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(6, 0, 0, 0),
+            Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Sm)),
+            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(Space.Tight, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center
         };
     }
@@ -497,7 +497,7 @@ public partial class MainWindow
             TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         // A custom item without a value leaves the row empty; the row keeps its height so blocks stay aligned.
         if (quota.ValueText.Length > 0) number.Inlines.Add(new Run(quota.ValueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
-        if (layout.UsedWord && quota.ValueSuffix.Length > 0) number.Inlines.Add(new Run(" " + quota.ValueSuffix) { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
+        if (layout.UsedWord && quota.ValueSuffix.Length > 0) number.Inlines.Add(new Run(" " + quota.ValueSuffix) { FontSize = TextSize.Caption, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
         number.ToolTip = quota.Kind switch
         {
             MetricKind.Balance => Loc.T("可用 " + quota.ValueText, quota.ValueText + " available")
@@ -520,7 +520,7 @@ public partial class MainWindow
         if (upperText.Length > 0)
         {
             var reset = UI.Fixed(upperText, layout.Reset, layout.LabelRow, UI.Tertiary);
-            reset.HorizontalAlignment = HorizontalAlignment.Right; reset.Margin = new Thickness(6, 0, 0, 0);
+            reset.HorizontalAlignment = HorizontalAlignment.Right; reset.Margin = new Thickness(Space.Tight, 0, 0, 0);
             reset.ToolTip = text ? null : expiryAbove ? quota.ExpiresAt!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
                 : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
             Grid.SetColumn(reset, 1); labelRow.Children.Add(reset);
@@ -532,7 +532,7 @@ public partial class MainWindow
             right.FontFamily = UI.PanelFont;
             right.ToolTip = text ? null : (quota.ResetAt ?? quota.ExpiresAt)!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
             right.VerticalAlignment = VerticalAlignment.Bottom; right.HorizontalAlignment = HorizontalAlignment.Right;
-            right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
+            right.Margin = new Thickness(Space.Tight, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
         block.Children.Add(numbers);
         var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", used / 100, color); Grid.SetRow(track, 4);
@@ -577,7 +577,7 @@ public partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         // Captions end on one vertical line, so "今日" and "七日" stack cleanly and both figures start at the same distance.
         var caption = new JustifiedText(label, layout.Foot, UI.Tertiary, captionWidth)
-        { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Space.S8, 0) };
         row.Children.Add(caption);
         // Each row prices its records once; the figure and its tooltip share the result.
         long total = entries.Sum(x => x.Total);
@@ -599,7 +599,7 @@ public partial class MainWindow
         Grid.SetColumn(arrow, 3); row.Children.Add(arrow);
         var link = DetailLink(row, Loc.T($"查看 {entry.Name} {label}明细", $"Show {entry.Name} {label.ToLowerInvariant()} details"), () => OpenModelDetails(snapshot.Id, days));
         // Extend the highlight into the column inset without shifting the aligned totals.
-        link.Padding = new Thickness(6, 0, 6, 0);
+        link.Padding = new Thickness(Space.Tight, 0, Space.Tight, 0);
         link.Margin = new Thickness(-6, 0, -6, 0);
         AutomationProperties.SetAutomationId(link, $"usage-{days}-{entry.InstanceId:N}");
         return link;

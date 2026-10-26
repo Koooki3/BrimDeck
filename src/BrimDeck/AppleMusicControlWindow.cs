@@ -45,14 +45,14 @@ internal sealed class AppleMusicControlWindow : Window
         Add(Loc.T("•  如果 Apple Music 的主窗口没有最小化，使用这三项功能时，它的窗口会被带到最前面。\n•  这三项功能需要 Apple Music 的主窗口存在。关闭主窗口会退出 Apple Music，功能也随之不可用。\n•  Apple Music 更新后，如果窗口中的按钮发生变化，这三项功能可能暂时无法使用。",
             "•  If the Apple Music main window is not minimized, using these functions brings it to the front.\n•  These functions need the Apple Music main window. Closing it quits Apple Music, and the functions stop working.\n•  If an Apple Music update changes the buttons in its window, these functions may stop working for a while."), 6);
 
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 22, 0, 0) };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, Space.S24, 0, 0) };
         string confirm = Loc.T("启用", "Enable");
         var cancel = new Button { Content = Loc.T("取消", "Cancel"), Style = (Style)FindResource("ControlDialogButton"), IsCancel = true, Margin = new Thickness(0, 0, 10, 0) };
         var enable = new Button { Content = confirm, Style = (Style)FindResource("ControlDialogPrimaryButton") };
         AutomationProperties.SetName(cancel, Loc.T("取消", "Cancel")); AutomationProperties.SetName(enable, confirm);
         cancel.Click += (_, _) => DialogResult = false; enable.Click += (_, _) => DialogResult = true;
         buttons.Children.Add(cancel); buttons.Children.Add(enable); body.Children.Add(buttons);
-        Content = new Border { Background = UI.Brush(palette.Surface), Padding = new Thickness(28, 24, 28, 24), Child = body };
+        Content = new Border { Background = UI.Brush(palette.Surface), Padding = new Thickness(28, Space.S24, 28, Space.S24), Child = body };
         Loaded += (_, _) => cancel.Focus();
     }
 }

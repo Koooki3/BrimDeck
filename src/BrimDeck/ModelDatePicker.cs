@@ -101,23 +101,23 @@ internal sealed class ModelDatePicker : Border
 
         System.Windows.Documents.TextElement.SetFontFamily(this, UI.PanelFont);
         Child = _body; Background = Brush("popup"); BorderBrush = Brush("popupBorder"); BorderThickness = new Thickness(1);
-        CornerRadius = new CornerRadius(Corner(10)); Padding = new Thickness(8);
+        CornerRadius = new CornerRadius(Corner(BrimDeck.Radius.Lg)); Padding = new Thickness(Space.S8);
         if (_palette.Effects.Pixel > 0) TextOptions.SetTextRenderingMode(this, TextRenderingMode.Aliased);
 
         // The fields, with the active one's outline lying over both and gliding between them.
-        var fields = new Grid { Margin = new Thickness(0, 0, 0, 5) };
+        var fields = new Grid { Margin = new Thickness(0, 0, 0, Space.S4) };
         fields.ColumnDefinitions.Add(new ColumnDefinition()); fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(FieldGap) }); fields.ColumnDefinitions.Add(new ColumnDefinition());
         foreach (bool end in new[] { false, true })
         {
             var content = new Grid();
             content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) });
             content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(21) });
-            content.Children.Add(UI.Centered(end ? Loc.T("结束", "End") : Loc.T("开始", "Start"), 10, Hex("textTertiary")));
-            var value = UI.Centered("", 12, Hex("textPrimary"));
+            content.Children.Add(UI.Centered(end ? Loc.T("结束", "End") : Loc.T("开始", "Start"), TextSize.Caption, Hex("textTertiary")));
+            var value = UI.Centered("", TextSize.Body, Hex("textPrimary"));
             Grid.SetRow(value, 1); content.Children.Add(value);
             bool chosen = end;
             var field = Control(content, end ? Loc.T("选择结束日期", "Choose the end date") : Loc.T("选择开始日期", "Choose the start date"), () => ChooseField(chosen));
-            field.Padding = new Thickness(7, 2, 7, 2); field.Background = Brush("input"); field.BorderBrush = Brush("outline");
+            field.Padding = new Thickness(Space.S8, Space.Hair, Space.S8, Space.Hair); field.Background = Brush("input"); field.BorderBrush = Brush("outline");
             field.FocusVisualStyle = TryFindResource("PanelOutsetKeyboardFocus") as Style;
             Grid.SetColumn(field, end ? 2 : 0); fields.Children.Add(field);
             _fields[end ? 1 : 0] = field; _fieldValues[end ? 1 : 0] = value;
@@ -128,12 +128,12 @@ internal sealed class ModelDatePicker : Border
         _body.Children.Add(fields);
 
         // The month and its arrows; the header keeps a second line for the month that leaves.
-        var navigation = new Grid { Height = 26, Margin = new Thickness(0, 2, 0, 3) };
+        var navigation = new Grid { Height = 26, Margin = new Thickness(0, Space.Hair, 0, 3) };
         navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) }); navigation.ColumnDefinitions.Add(new ColumnDefinition()); navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
         _previous = MonthButton(false); navigation.Children.Add(_previous);
         var header = new Grid { ClipToBounds = true, IsHitTestVisible = false };
-        _monthText = UI.Centered("", 12, Hex("textSecondary")); _monthText.HorizontalAlignment = HorizontalAlignment.Center; _monthText.RenderTransform = _monthShift;
-        _monthLeaving = UI.Centered("", 12, Hex("textSecondary")); _monthLeaving.HorizontalAlignment = HorizontalAlignment.Center; _monthLeaving.RenderTransform = _monthLeavingShift; _monthLeaving.Opacity = 0;
+        _monthText = UI.Centered("", TextSize.Body, Hex("textSecondary")); _monthText.HorizontalAlignment = HorizontalAlignment.Center; _monthText.RenderTransform = _monthShift;
+        _monthLeaving = UI.Centered("", TextSize.Body, Hex("textSecondary")); _monthLeaving.HorizontalAlignment = HorizontalAlignment.Center; _monthLeaving.RenderTransform = _monthLeavingShift; _monthLeaving.Opacity = 0;
         header.Children.Add(_monthLeaving); header.Children.Add(_monthText);
         Grid.SetColumn(header, 1); navigation.Children.Add(header);
         _next = MonthButton(true); Grid.SetColumn(_next, 2); navigation.Children.Add(_next);
@@ -141,7 +141,7 @@ internal sealed class ModelDatePicker : Border
 
         var weekdays = new UniformGrid { Columns = DatePickerMotion.Columns, Rows = 1, Height = 18 };
         foreach (var day in Loc.IsEnglish ? new[] { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" } : new[] { "一", "二", "三", "四", "五", "六", "日" })
-        { var label = UI.Centered(day, 10, Hex("textTertiary")); label.TextAlignment = TextAlignment.Center; weekdays.Children.Add(label); }
+        { var label = UI.Centered(day, TextSize.Caption, Hex("textTertiary")); label.TextAlignment = TextAlignment.Center; weekdays.Children.Add(label); }
         _body.Children.Add(weekdays);
 
         // The grid: the band under the day buttons, the markers' faces over them and the markers' figures over the faces, so a
@@ -187,15 +187,15 @@ internal sealed class ModelDatePicker : Border
         _body.Children.Add(_calendar);
 
         // The message has a slot that opens to its height, so the buttons below move on the shared curve rather than jump.
-        _message = UI.Line(Loc.T("开始日期不能晚于结束日期。", "The start date cannot be later than the end date."), 11, Hex("danger"));
+        _message = UI.Line(Loc.T("开始日期不能晚于结束日期。", "The start date cannot be later than the end date."), TextSize.Caption, Hex("danger"));
         _message.TextWrapping = TextWrapping.Wrap; _message.TextTrimming = TextTrimming.None;
         _message.Margin = new Thickness(0, MessageGap, 0, 0); _message.VerticalAlignment = VerticalAlignment.Top; _message.RenderTransform = _messageShift; _message.Opacity = 0;
         _messageSlot.Child = _message;
         _body.Children.Add(_messageSlot);
 
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 7, 0, 0) };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, Space.S8, 0, 0) };
         var cancel = Control(Text(Loc.T("取消", "Cancel")), Loc.T("取消日期筛选", "Cancel the date filter"), () => Cancelled?.Invoke());
-        cancel.Padding = new Thickness(10, 1, 10, 1); cancel.Margin = new Thickness(0, 0, 6, 0); actions.Children.Add(cancel);
+        cancel.Padding = new Thickness(10, 1, 10, 1); cancel.Margin = new Thickness(0, 0, Space.Tight, 0); actions.Children.Add(cancel);
         _apply = Control(Text(Loc.T("应用", "Apply")), Loc.T("应用日期筛选", "Apply the date filter"), ApplySelection);
         _apply.Padding = new Thickness(10, 1, 10, 1); _apply.Background = Brush("accent"); _apply.Foreground = Brush("onAccent");
         // The focus ring is drawn in the accent, so on an accent button it stands outside it.
@@ -230,7 +230,7 @@ internal sealed class ModelDatePicker : Border
         return brush;
     }
 
-    private TextBlock Text(string label) { var text = UI.Centered(label, 12, Hex("textPrimary")); text.ClearValue(TextBlock.ForegroundProperty); return text; }
+    private TextBlock Text(string label) { var text = UI.Centered(label, TextSize.Body, Hex("textPrimary")); text.ClearValue(TextBlock.ForegroundProperty); return text; }
 
     private Button Control(object content, string name, Action click)
     {
@@ -251,8 +251,8 @@ internal sealed class ModelDatePicker : Border
     private static (Grid Content, TextBlock Text, Ellipse Dot) DayFace(string color, string dotColor)
     {
         var grid = new Grid();
-        var text = UI.Centered("", 12, color); text.HorizontalAlignment = HorizontalAlignment.Center; text.TextAlignment = TextAlignment.Center;
-        var dot = new Ellipse { Width = 3, Height = 3, Fill = UI.Brush(dotColor), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 2), Visibility = Visibility.Hidden };
+        var text = UI.Centered("", TextSize.Body, color); text.HorizontalAlignment = HorizontalAlignment.Center; text.TextAlignment = TextAlignment.Center;
+        var dot = new Ellipse { Width = 3, Height = 3, Fill = UI.Brush(dotColor), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, Space.Hair), Visibility = Visibility.Hidden };
         grid.Children.Add(text); grid.Children.Add(dot);
         return (grid, text, dot);
     }

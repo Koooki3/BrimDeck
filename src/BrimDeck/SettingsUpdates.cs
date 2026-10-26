@@ -46,7 +46,7 @@ public sealed partial class SettingsWindow
 
     private Border UpdateBadge()
     {
-        var badge = new Border { CornerRadius = new CornerRadius(4), Padding = new Thickness(5, 2, 5, 2), Margin = new Thickness(9, 0, 0, 0),
+        var badge = new Border { CornerRadius = new CornerRadius(4), Padding = new Thickness(Space.S4, Space.Hair, Space.S4, Space.Hair), Margin = new Thickness(Space.S8, 0, 0, 0),
             Background = UI.Brush(Inset), VerticalAlignment = VerticalAlignment.Center, Visibility = _app.Updates.HasUpdate ? Visibility.Visible : Visibility.Collapsed,
             Child = TextLine(Loc.T("新版本", "New"), 9, _palette.Accent, FontWeights.Medium) };
         AutomationProperties.SetName(badge, Loc.T("有新版本可用", "A new version is available")); return badge;
@@ -61,8 +61,8 @@ public sealed partial class SettingsWindow
         dialog.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/BrimDeck;component/SettingsResources.xaml", UriKind.Relative) });
         _palette.Apply(dialog.Resources); Native.SettingsChrome.Apply(dialog); dialog.ResizeMode = ResizeMode.NoResize;
         dialog.SourceInitialized += (_, _) => Native.SettingsChrome.SetTheme(dialog, _palette.Dark);
-        var panel = new StackPanel { Margin = new Thickness(26, 22, 26, 24) };
-        var title = TextLine(Loc.T("软件更新", "Software update"), 21, TextPrimary, FontWeights.SemiBold); title.Margin = new Thickness(0, 0, 0, 22); panel.Children.Add(title);
+        var panel = new StackPanel { Margin = new Thickness(Space.S24, Space.S24, Space.S24, Space.S24) };
+        var title = TextLine(Loc.T("软件更新", "Software update"), 21, TextPrimary, FontWeights.SemiBold); title.Margin = new Thickness(0, 0, 0, Space.S24); panel.Children.Add(title);
         var view = CreateUpdateView(false); panel.Children.Add(view.Root);
         var close = ActionButton(Loc.T("稍后", "Later"), dialog.Close); close.HorizontalAlignment = HorizontalAlignment.Right;
         close.Margin = new Thickness(0, 18, 0, 0); close.IsCancel = true; panel.Children.Add(close);
@@ -88,12 +88,12 @@ public sealed partial class SettingsWindow
         var updates = _app.Updates;
         var title = TextLine("", inline ? 13 : 15, TextPrimary, FontWeights.SemiBold);
         AutomationProperties.SetLiveSetting(title, AutomationLiveSetting.Polite);
-        var detail = TextLine("", 12, TextSecondary); detail.TextWrapping = TextWrapping.Wrap; detail.Margin = new Thickness(0, inline ? 3 : 7, 0, 0);
-        var notes = TextLine("", 12, TextSecondary); notes.TextWrapping = TextWrapping.Wrap;
-        var noteScroll = new ScrollViewer { Content = notes, MaxHeight = 170, Margin = inline ? new Thickness(0, 2, 0, 16) : new Thickness(0, 16, 0, 0), Style = (Style)FindResource("SettingsScrollViewer") };
-        var progress = new ProgressBar { Minimum = 0, Maximum = 100, Height = 5, Margin = inline ? new Thickness(0, 2, 0, 16) : new Thickness(0, 18, 0, 0), Style = (Style)FindResource("SettingsUpdateProgress") };
+        var detail = TextLine("", TextSize.Body, TextSecondary); detail.TextWrapping = TextWrapping.Wrap; detail.Margin = new Thickness(0, inline ? 3 : 7, 0, 0);
+        var notes = TextLine("", TextSize.Body, TextSecondary); notes.TextWrapping = TextWrapping.Wrap;
+        var noteScroll = new ScrollViewer { Content = notes, MaxHeight = 170, Margin = inline ? new Thickness(0, Space.Hair, 0, Space.S16) : new Thickness(0, Space.S16, 0, 0), Style = (Style)FindResource("SettingsScrollViewer") };
+        var progress = new ProgressBar { Minimum = 0, Maximum = 100, Height = 5, Margin = inline ? new Thickness(0, Space.Hair, 0, Space.S16) : new Thickness(0, 18, 0, 0), Style = (Style)FindResource("SettingsUpdateProgress") };
         AutomationProperties.SetName(progress, Loc.T("更新下载进度", "Update download progress"));
-        var error = TextLine("", 12, _palette.Dark ? "#F0A6AA" : "#B12E3A"); error.Margin = inline ? new Thickness(0, 0, 0, 14) : new Thickness(0, 12, 0, 0); error.TextWrapping = TextWrapping.Wrap;
+        var error = TextLine("", TextSize.Body, _palette.Dark ? "#F0A6AA" : "#B12E3A"); error.Margin = inline ? new Thickness(0, 0, 0, 14) : new Thickness(0, Space.S12, 0, 0); error.TextWrapping = TextWrapping.Wrap;
         AutomationProperties.SetLiveSetting(error, AutomationLiveSetting.Assertive);
         var primary = ActionButton(Loc.T("下载更新", "Download update"), () =>
         {
@@ -105,17 +105,17 @@ public sealed partial class SettingsWindow
         var skip = ActionButton(Loc.T("跳过此版本", "Skip this version"), updates.SkipVersion);
         var cancel = ActionButton(Loc.T("取消下载", "Cancel download"), updates.CancelDownload);
         check.Style = cancel.Style = skip.Style = (Style)FindResource("SettingsOutlineButton");
-        foreach (var button in new[] { primary, check, cancel, skip }) { button.Padding = new Thickness(14, 6, 14, 6); button.MinWidth = 96; }
+        foreach (var button in new[] { primary, check, cancel, skip }) { button.Padding = new Thickness(14, Space.Tight, 14, Space.Tight); button.MinWidth = 96; }
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
         FrameworkElement root;
         if (inline)
         {
             var header = new Grid { MinHeight = 44 };
             header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 10, 16, 10) };
+            var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 10, Space.S16, 10) };
             labels.Children.Add(title); labels.Children.Add(detail); header.Children.Add(labels);
             // The primary action keeps the right edge; its gap is collapsed together with it.
-            primary.Margin = new Thickness(8, 0, 0, 0); skip.Margin = new Thickness(0, 0, 8, 0); actions.Children.Add(skip); actions.Children.Add(check); actions.Children.Add(cancel); actions.Children.Add(primary);
+            primary.Margin = new Thickness(Space.S8, 0, 0, 0); skip.Margin = new Thickness(0, 0, Space.S8, 0); actions.Children.Add(skip); actions.Children.Add(check); actions.Children.Add(cancel); actions.Children.Add(primary);
             actions.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(actions, 1); header.Children.Add(actions);
             var panel = new StackPanel(); panel.Children.Add(header); panel.Children.Add(progress); panel.Children.Add(error); panel.Children.Add(noteScroll);
             panel.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
@@ -127,8 +127,8 @@ public sealed partial class SettingsWindow
             var content = new StackPanel { Margin = new Thickness(20, 18, 20, 18) };
             content.Children.Add(title); content.Children.Add(detail); content.Children.Add(noteScroll); content.Children.Add(progress); content.Children.Add(error);
             actions.Margin = new Thickness(0, 18, 0, 0); content.Children.Add(actions);
-            primary.MinWidth = 112; primary.Margin = new Thickness(0, 0, 8, 0); actions.Children.Add(primary); actions.Children.Add(check); actions.Children.Add(cancel);
-            skip.Margin = new Thickness(8, 0, 0, 0); actions.Children.Add(skip);
+            primary.MinWidth = 112; primary.Margin = new Thickness(0, 0, Space.S8, 0); actions.Children.Add(primary); actions.Children.Add(check); actions.Children.Add(cancel);
+            skip.Margin = new Thickness(Space.S8, 0, 0, 0); actions.Children.Add(skip);
             var card = new Border { CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1), Child = content };
             card.SetResourceReference(Border.BackgroundProperty, "SettingsInput"); card.SetResourceReference(Border.BorderBrushProperty, "SettingsBorder");
             root = card;

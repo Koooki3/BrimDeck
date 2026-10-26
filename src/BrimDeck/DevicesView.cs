@@ -211,7 +211,7 @@ internal sealed class DevicesView : FrameworkElement
     private void DrawCard(DrawingContext drawing, Card card, Rect r, double now, double ppd)
     {
         bool high = SystemParameters.HighContrast;
-        double radius = PanelTheme.Corner(8);
+        double radius = PanelTheme.Corner(Radius.Md);
         drawing.DrawRoundedRectangle(high ? null : UI.Brush(UI.Fill), high ? DeviceGlyphs.Stroke(UI.Outline, 1) : null, r, radius, radius);
         double pad = Math.Round(Math.Clamp(r.Height * .22, 8, 14)), icon = Math.Round(Math.Clamp(r.Height * .4, 16, 22)), middle = r.Y + r.Height / 2;
         double figureSize = _layout.Figure, right = r.Right - pad, baseline = Math.Round(middle + figureSize * .36);

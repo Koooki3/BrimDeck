@@ -82,7 +82,7 @@ public sealed partial class SettingsWindow
             EffectRow(theme, draft, palette, "shadowOpacity", Loc.T("阴影不透明度", "Shadow opacity"), .01, Percent),
             EffectRow(theme, draft, palette, "scanlines", Loc.T("扫描线", "Scan lines"), .01, Percent));
         var rest = TextLine(Loc.T("表面渐变、边缘渐变、时间的预设颜色与渐变，以及颜色选择器的预设色，仍需在主题文件中修改。",
-            "The surface and rim gradients, the clock's preset colors and gradients, and the color picker's presets are still set in the theme file."), 11.5, TextTertiary);
+            "The surface and rim gradients, the clock's preset colors and gradients, and the color picker's presets are still set in the theme file."), TextSize.Body, TextTertiary);
         rest.TextWrapping = TextWrapping.Wrap; rest.Margin = new Thickness(0, -16, 0, 28);
         Target.Children.Add(rest);
     }
@@ -99,18 +99,18 @@ public sealed partial class SettingsWindow
         bool changed = draft is not null && (app ? draft.Apps.ContainsKey(key) : draft.Colors.ContainsKey(key));
         if (!app && palette.Adjustments.FirstOrDefault(adjustment => adjustment.Key == key) is { } adjusted)
             note += Loc.T($"；为保证可读，将显示为 {adjusted.After}", $"; shown as {adjusted.After} to stay readable");
-        var subtitle = TextLine(note, 11, TextTertiary); subtitle.TextWrapping = TextWrapping.Wrap;
+        var subtitle = TextLine(note, TextSize.Caption, TextTertiary); subtitle.TextWrapping = TextWrapping.Wrap;
 
         var controls = new StackPanel { Orientation = Orientation.Horizontal };
         if (changed)
         {
-            var mark = TextLine(Loc.T("修改未保存", "Unsaved"), 11.5, TextSecondary); mark.VerticalAlignment = VerticalAlignment.Center; mark.Margin = new Thickness(0, 0, 10, 0);
+            var mark = TextLine(Loc.T("修改未保存", "Unsaved"), TextSize.Body, TextSecondary); mark.VerticalAlignment = VerticalAlignment.Center; mark.Margin = new Thickness(0, 0, 10, 0);
             mark.SetResourceReference(TextBlock.ForegroundProperty, "SettingsAccent");
             controls.Children.Add(mark);
             if (!seed)
             {
                 var undo = ActionButton(Loc.T("撤销", "Undo"), () => EditTheme(theme, (d, file) => { if (app) d.SetApp(file, key, null); else d.SetColor(file, key, null); }));
-                undo.Style = (Style)FindResource("SettingsLink"); undo.VerticalAlignment = VerticalAlignment.Center; undo.Margin = new Thickness(0, 0, 12, 0);
+                undo.Style = (Style)FindResource("SettingsLink"); undo.VerticalAlignment = VerticalAlignment.Center; undo.Margin = new Thickness(0, 0, Space.S12, 0);
                 AutomationProperties.SetName(undo, Loc.T("撤销修改 ", "Undo change to ") + title);
                 controls.Children.Add(undo);
             }
@@ -131,11 +131,11 @@ public sealed partial class SettingsWindow
     {
         var line = new StackPanel { Orientation = Orientation.Horizontal };
         line.Children.Add(new Ellipse { Width = 14, Height = 14, Fill = UI.Brush(color.Over(surface).ToString()), Stroke = UI.Brush(_palette.Border), StrokeThickness = 1,
-            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
-        var text = TextLine(color.ToString(), 12, TextPrimary); text.VerticalAlignment = VerticalAlignment.Center;
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Space.S8, 0) });
+        var text = TextLine(color.ToString(), TextSize.Body, TextPrimary); text.VerticalAlignment = VerticalAlignment.Center;
         line.Children.Add(text);
         var chip = new Button { Style = (Style)FindResource("SettingsButton"), Content = line, MinWidth = 120, HorizontalContentAlignment = HorizontalAlignment.Left,
-            Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.Border), Padding = new Thickness(10, 5, 12, 5) };
+            Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.Border), Padding = new Thickness(10, Space.S4, Space.S12, Space.S4) };
         AutomationProperties.SetName(chip, title + " " + color); chip.ToolTip = Loc.T("选择颜色", "Choose a color");
         var popup = new Popup { PlacementTarget = chip, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
         popup.Child = ColorPicker(color.WithAlpha(255).ToString(), !canUndo, value =>
@@ -162,12 +162,12 @@ public sealed partial class SettingsWindow
             TickFrequency = tick, IsSnapToTickEnabled = true, IsMoveToPointEnabled = true, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 18, 0) };
         AutomationProperties.SetName(slider, title);
         Grid.SetColumn(slider, 1); row.Children.Add(slider);
-        var shown = TextLine(format(value), 12, TextSecondary); shown.Width = 64; shown.TextAlignment = TextAlignment.Right; shown.VerticalAlignment = VerticalAlignment.Center;
+        var shown = TextLine(format(value), TextSize.Body, TextSecondary); shown.Width = 64; shown.TextAlignment = TextAlignment.Right; shown.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(shown, 2); row.Children.Add(shown);
         var state = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(14, 0, 0, 0), MinWidth = 104 };
         if (changed)
         {
-            var mark = TextLine(Loc.T("修改未保存", "Unsaved"), 11.5, TextSecondary); mark.VerticalAlignment = VerticalAlignment.Center; mark.Margin = new Thickness(0, 0, 10, 0);
+            var mark = TextLine(Loc.T("修改未保存", "Unsaved"), TextSize.Body, TextSecondary); mark.VerticalAlignment = VerticalAlignment.Center; mark.Margin = new Thickness(0, 0, 10, 0);
             mark.SetResourceReference(TextBlock.ForegroundProperty, "SettingsAccent");
             var undo = ActionButton(Loc.T("撤销", "Undo"), () => EditTheme(theme, (d, file) => d.SetEffect(file, key, null)));
             undo.Style = (Style)FindResource("SettingsLink"); undo.VerticalAlignment = VerticalAlignment.Center;
@@ -235,25 +235,25 @@ public sealed partial class SettingsWindow
     {
         var token = PanelThemes.Tokens.FirstOrDefault(token => token.Key == adjustment.Key);
         string name = token is not null ? Loc.T(token.Chinese, token.English) : Loc.T("应用颜色 · ", "App color · ") + AppColorName(adjustment.Key);
-        var row = new Grid { MinHeight = 34, Margin = new Thickness(16, 0, 0, 0), ToolTip = adjustment.Describe() };
+        var row = new Grid { MinHeight = 34, Margin = new Thickness(Space.S16, 0, 0, 0), ToolTip = adjustment.Describe() };
         row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var label = TextLine(name, 12, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(label);
+        var label = TextLine(name, TextSize.Body, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(label);
         var values = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         string ratio = adjustment.Ratio.ToString("0.0", CultureInfo.InvariantCulture), minimum = adjustment.Minimum.ToString("0.#", CultureInfo.InvariantCulture);
-        var contrast = TextLine(Loc.T($"对比度 {ratio}:1，需要 {minimum}:1", $"Contrast {ratio}:1, needs {minimum}:1"), 11.5, TextTertiary);
-        contrast.VerticalAlignment = VerticalAlignment.Center; contrast.Margin = new Thickness(0, 0, 16, 0);
+        var contrast = TextLine(Loc.T($"对比度 {ratio}:1，需要 {minimum}:1", $"Contrast {ratio}:1, needs {minimum}:1"), TextSize.Body, TextTertiary);
+        contrast.VerticalAlignment = VerticalAlignment.Center; contrast.Margin = new Thickness(0, 0, Space.S16, 0);
         values.Children.Add(contrast);
         void Color(string hex)
         {
-            values.Children.Add(new Ellipse { Width = 10, Height = 10, Fill = UI.Brush(hex), Stroke = UI.Brush(_palette.Border), StrokeThickness = 1, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
-            var text = TextLine(hex, 11.5, TextSecondary); text.VerticalAlignment = VerticalAlignment.Center; values.Children.Add(text);
+            values.Children.Add(new Ellipse { Width = 10, Height = 10, Fill = UI.Brush(hex), Stroke = UI.Brush(_palette.Border), StrokeThickness = 1, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Space.S4, 0) });
+            var text = TextLine(hex, TextSize.Body, TextSecondary); text.VerticalAlignment = VerticalAlignment.Center; values.Children.Add(text);
         }
         Color(adjustment.Before);
-        var arrow = TextLine("→", 11.5, TextTertiary); arrow.VerticalAlignment = VerticalAlignment.Center; arrow.Margin = new Thickness(8, 0, 8, 0); values.Children.Add(arrow);
+        var arrow = TextLine("→", TextSize.Body, TextTertiary); arrow.VerticalAlignment = VerticalAlignment.Center; arrow.Margin = new Thickness(Space.S8, 0, Space.S8, 0); values.Children.Add(arrow);
         Color(adjustment.After);
         if (!adjustment.Reached)
         {
-            var note = TextLine(Loc.T("无法完全达标", "Not fully reached"), 11.5, _palette.Dark ? "#F0A6AA" : "#B12E3A"); note.VerticalAlignment = VerticalAlignment.Center; note.Margin = new Thickness(10, 0, 0, 0);
+            var note = TextLine(Loc.T("无法完全达标", "Not fully reached"), TextSize.Body, _palette.Dark ? "#F0A6AA" : "#B12E3A"); note.VerticalAlignment = VerticalAlignment.Center; note.Margin = new Thickness(10, 0, 0, 0);
             values.Children.Add(note);
         }
         Grid.SetColumn(values, 1); row.Children.Add(values);
@@ -265,7 +265,7 @@ public sealed partial class SettingsWindow
     private Button SaveCard(string label, string? color, Action save)
     {
         var card = ActionButton("", save);
-        card.Style = (Style)FindResource("SettingsSaveCard"); card.Content = null; card.Tag = label; card.Margin = new Thickness(6, 3, 6, 6);
+        card.Style = (Style)FindResource("SettingsSaveCard"); card.Content = null; card.Tag = label; card.Margin = new Thickness(Space.Tight, 3, Space.Tight, Space.Tight);
         if (color is null) card.SetResourceReference(ForegroundProperty, "SettingsAccent"); else card.Foreground = UI.Brush(color);
         return card;
     }
