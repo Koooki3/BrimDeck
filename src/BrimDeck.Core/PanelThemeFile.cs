@@ -28,19 +28,28 @@ public sealed class PanelThemeFile
     // A theme with a day and a night look: Night is laid over the theme from Daylight's evening to its morning. Only its colors,
     // apps, effects, motion and clock are read; it has no base or name of its own.
     public PanelThemeFile? Night { get; set; }
+    // A dusk look, read like Night and laid over the day look for Daylight.DuskMinutes before the night begins. By the clock
+    // only, and only beside a night look.
+    public PanelThemeFile? Dusk { get; set; }
     public PanelThemeDaylight? Daylight { get; set; }
 }
 
-// When the day look of a theme with a night look begins and ends, as "HH:mm" local time. The settings can move both.
+// What chooses between the looks of a theme with a night look (PanelThemes.LookAt). The settings can move the hours and
+// choose the mode.
 public sealed class PanelThemeDaylight
 {
+    // "clock" (or empty): by Day and Night below. "system": the night look while Windows apps use dark mode.
+    public string Mode { get; set; } = "";
+    // When the day and the night begin, as "HH:mm" local time.
     public string Day { get; set; } = "";
     public string Night { get; set; } = "";
+    // How long the dusk look shows before the night, 15 to 180 minutes; 60 when not given.
+    public int? DuskMinutes { get; set; }
 }
 
 public sealed class PanelThemeClock
 {
-    // A ClockStyle name: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel.
+    // A ClockStyle name: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel, tektur, rounded.
     public string Style { get; set; } = "";
     // "default" (the theme's clock color), amber, cyan, pink, lime, custom, gradient or cover.
     public string Color { get; set; } = "";
@@ -80,6 +89,43 @@ public sealed class PanelThemeEffects
     // A pixel theme's block texture: squares of the pixel size a little lighter or darker than the surface, at most this opacity
     // (0 to 0.12), as a stone or dirt block is mottled.
     public double? Texture { get; set; }
+    // Quiet pictures drawn into the surface, under the content (PanelThemeDecor). Each value is inherited on its own.
+    public PanelThemeDecor? Decor { get; set; }
+}
+
+// A theme's motifs, drawn into the surface under the content and as faint as a texture, so they never compete with it:
+//   horizon: a sea below a horizon at "at" (0.3 to 0.9 of the height), the "sea" color laid over the surface there and a thin
+//     "line" of light along the horizon;
+//   caustics: the light a sunlit (or moonlit) sea throws, a net of soft bright lines in "color" (its alpha at most 0.2);
+//   palm: the shadow of a palm frond reaching into the top-right corner of the open panel, in "color" (alpha at most 0.12);
+//   hud: HUD marks, a 45-degree cut drawn across the bottom-left and the top-right corner (the bottom-right on an island hanging
+//     from the screen's edge), "chamfer" 0 to 10 DIP, with a hexagonal tick beside each, in "color".
+// A fully transparent color turns a part off, so a night or dusk look can drop a motif the day has.
+// Text is held to its minimums over every color the motifs can lay under it (PanelThemes.DecorStops).
+public sealed class PanelThemeDecor
+{
+    public PanelThemeHorizon? Horizon { get; set; }
+    public PanelThemeMotif? Caustics { get; set; }
+    public PanelThemeMotif? Palm { get; set; }
+    public PanelThemeHud? Hud { get; set; }
+}
+
+public sealed class PanelThemeHorizon
+{
+    public double? At { get; set; }
+    public string? Sea { get; set; }
+    public string? Line { get; set; }
+}
+
+public sealed class PanelThemeMotif
+{
+    public string? Color { get; set; }
+}
+
+public sealed class PanelThemeHud
+{
+    public string? Color { get; set; }
+    public double? Chamfer { get; set; }
 }
 
 // The glass material (PanelGlass once fitted). Tint is the color laid over the desktop; text is held to its minimums

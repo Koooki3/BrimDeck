@@ -35,6 +35,7 @@ internal static class Program
             Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
                 && work.Width > 0 && work.Height > 0 && scale > 0);
             TemperatureChecks.Run(Check);
+            DeviceChecks.Run(Check);
 
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))
             {

@@ -30,6 +30,7 @@ internal static class ThemeSheet
         {
             Draw(PanelThemes.Resolve(theme), Path.Combine(folder, theme.Id + suffix + "-sheet.png"), theme.DisplayName);
             if (theme.File.Night is not null) Draw(PanelThemes.Resolve(theme, true), Path.Combine(folder, theme.Id + suffix + "-night-sheet.png"), theme.DisplayName + " · 夜间");
+            if (theme.File.Dusk is not null) Draw(PanelThemes.Resolve(theme, DaylightLook.Dusk), Path.Combine(folder, theme.Id + suffix + "-dusk-sheet.png"), theme.DisplayName + " · 黄昏");
         }
         Console.WriteLine("Wrote theme sheets to " + Path.GetFullPath(folder));
         return 0;
@@ -88,7 +89,7 @@ internal static class ThemeSheet
     }
 
     // Dark wallpaper with bright shapes on the left, a light document with text on the right.
-    private static Brush Desktop()
+    internal static Brush Desktop()
     {
         var group = new DrawingGroup();
         var dark = new LinearGradientBrush(Color.FromRgb(0x1B, 0x1F, 0x3A), Color.FromRgb(0x6A, 0x2A, 0x86), 30);
@@ -108,7 +109,7 @@ internal static class ThemeSheet
 
     // The island as the panel dresses it, with its shadow or glow drawn from a copy outside the island only (as MainWindow does
     // for glass, where the copy would show through).
-    private static Grid Island(PanelPalette palette, double width, double height, CornerRadius corners, double shoulder, UIElement content)
+    internal static Grid Island(PanelPalette palette, double width, double height, CornerRadius corners, double shoulder, UIElement content)
     {
         IslandBorder Shape(double inset) => new()
         {

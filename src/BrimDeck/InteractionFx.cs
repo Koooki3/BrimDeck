@@ -152,7 +152,10 @@ internal sealed partial class FxSurface : FrameworkElement
     // A fixed handful, so nothing is allocated; when all are taken the faintest gives way.
     private readonly FxMark?[] _leaving = new FxMark?[3];
     private readonly PressTrack _press = new();
-    private readonly FlashBudget _flashes = new();
+    // The app's flashes are shared by every window (FlashBudget.Shared: a collapse picture spends from it too); a preview, on its
+    // own clock, keeps its own.
+    private readonly FlashBudget _flashes = new(FlashBudget.Shared), _previewFlashes = new();
+    private FlashBudget Flashes => Preview is null ? _flashes : _previewFlashes;
     private double _focusAt = double.NaN;
     private readonly FocusAccentGate _focusGate = new();
     private int _serial;
@@ -233,6 +236,9 @@ internal sealed partial class FxSurface : FrameworkElement
         }
         // The theme's pace and steps, worked out once; the panel's animation length plays no part (motion-review C5).
         _timing = MotionTiming.For(_motion.Pace, _motion.Steps);
+        // A theme's own lengths for lock's slice and scan line.
+        if (_motion.SliceMs > 0) _timing = _timing with { Glitch = _motion.SliceMs };
+        if (_motion.ScanMs > 0) _timing = _timing with { Scan = _motion.ScanMs };
     }
 
     // ----- Pointer -----
@@ -412,9 +418,9 @@ internal sealed partial class FxSurface : FrameworkElement
         // A quick second press on the same control goes down from where the first one is, never from nothing.
         double from = ReferenceEquals(mark, _pressed) ? _press.At(now, _timing, _motion.Steps).Held : 0;
         Unwatch();
-        _pressed = mark;
+        _pressed = mark; _pulseAt = double.NaN;
         mark.Serial = ++_serial;
-        bool glitch = _motion.Press == PressFx.Lock && _flashes.TryTake(now);
+        bool glitch = _motion.Press == PressFx.Lock && Flashes.TryTake(now);
         _press.Press(now, from, glitch);
         if (glitch) PrepareGlitch(mark);
         mark.Control.LostMouseCapture += CaptureLost;
@@ -432,9 +438,11 @@ internal sealed partial class FxSurface : FrameworkElement
         bool byKey = _keyPress;
         _keyPress = false;
         Unwatch();
-        bool scan = inside && _motion.Press == PressFx.Lock && _flashes.TryTake(now);
+        bool scan = inside && _motion.Press == PressFx.Lock && Flashes.TryTake(now);
         _press.Release(now, inside, scan, _timing, _motion.Steps);
         if (_press.Committed && !byKey && _motion.Particles != ParticleFx.None && _motion.ParticleStrength > 0 && _pressed.Valid) Burst(_pressed, now);
+        // The chromatic pulse of a completed press, rationed as the other flashes are.
+        if (_press.Committed && _motion.Aberration > 0 && _pressed.Valid && Flashes.TryTake(now)) _pulseAt = now;
         Wake();
     }
 
@@ -508,7 +516,7 @@ internal sealed partial class FxSurface : FrameworkElement
         if (_hover is { Valid: false }) { if (!_hover.Control.IsVisible || PresentationSource.FromVisual(_hover.Control) is null) _hover = null; else HoverOn(null); }
         for (int i = 0; i < _leaving.Length; i++)
             if (_leaving[i] is { } mark && (!mark.Valid || LeavingPresence(mark, now) <= 0)) _leaving[i] = null;
-        if (_pressed is not null && (!_pressed.Valid || !_press.Alive(now, _timing))) { if (_press.Down) Unwatch(); _press.Clear(); _pressed = null; _slice.Visual = null; }
+        if (_pressed is not null && (!_pressed.Valid || !_press.Alive(now, _timing) && !Lingering(now))) { if (_press.Down) Unwatch(); _press.Clear(); _pressed = null; _slice.Visual = null; }
         if (_focus is not null && (!_focus.Valid || now - _focusAt > _timing.Focus / 1000.0)) _focus = null;
         bool particles = StepParticles(now);
 
@@ -540,13 +548,22 @@ internal sealed partial class FxSurface : FrameworkElement
         if (!_hover.Valid || _hover.Box != before) Wake();
     }
 
+    // The panel closes: what the presses left goes at once rather than flying on over the closing (one thing moves at a time,
+    // ux #7); with a collapse picture everything else ends too (MainWindow.SetExpanded).
+    public void EndParticles()
+    {
+        if (_detached || !StepParticles(Clock())) return;
+        ClearParticles();
+        Wake();
+    }
+
     // Ends everything at once, as if nothing had been shown, and leaves no frame callback or handler behind.
     public void Reset()
     {
         Unwatch();
         _hover = _pressed = _focus = null;
         Array.Clear(_leaving);
-        _press.Clear(); _flashes.Clear(); _focusGate.Clear(); _slice.Visual = null; _keyPress = false;
+        _press.Clear(); _flashes.Clear(); _previewFlashes.Clear(); _pulseAt = double.NaN; _focusGate.Clear(); _slice.Visual = null; _keyPress = false;
         _lastSource = null; _lastTarget = null;
         ClearParticles();
         Sleep(); WatchLayout(false);

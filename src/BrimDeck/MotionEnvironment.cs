@@ -236,8 +236,8 @@ internal static class MotionEnvironment
     private static extern bool WTSQuerySessionInformationW(IntPtr server, uint session, int infoClass, out IntPtr buffer, out int bytes);
     [DllImport("wtsapi32")] private static extern void WTSFreeMemory(IntPtr memory);
 
-    // The conditions shared by every window; the window adds whether it is on screen.
-    public static MotionConditions Conditions(bool visible = true, bool suppressed = false, bool poweringOff = false, bool hasMaterial = true) => new(
+    // The conditions shared by every window; the window adds whether it is on screen and covered.
+    public static MotionConditions Conditions(bool visible = true, bool suppressed = false, bool poweringOff = false, bool hasMaterial = true, bool covered = false) => new(
         (Application.Current as App)?.Settings.Animations != false, SystemParameters.ClientAreaAnimation, SystemParameters.HighContrast,
-        visible, suppressed, poweringOff, Locked, BatterySaver, hasMaterial, DisplayOff);
+        visible, suppressed, poweringOff, Locked, BatterySaver, hasMaterial, DisplayOff, covered);
 }

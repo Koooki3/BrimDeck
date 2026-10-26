@@ -92,8 +92,15 @@ public static partial class PanelThemes
         bool pixel = file.Effects?.Pixel is { } pixelSize ? Math.Round(Math.Clamp(double.IsFinite(pixelSize) ? pixelSize : 0, 0, 4), MidpointRounding.AwayFromZero) > 0 : baseEffects?.Pixel > 0;
         if (glass && pixel) return Loc.T("像素（pixel）不能与玻璃（glass）同时使用", "Pixel art (pixel) cannot be combined with glass");
         if (file.Night is { } night && LayerProblem(night) is { } nightProblem) return Loc.T("夜间外观：", "Night look: ") + nightProblem;
+        if (file.Dusk is { } dusk && LayerProblem(dusk) is { } duskProblem) return Loc.T("黄昏外观：", "Dusk look: ") + duskProblem;
+        // Dusk leads into the night, so it has nothing to lead into without one.
+        if (file.Dusk is not null && file.Night is null) return Loc.T("黄昏外观（dusk）需要同时写出夜间外观（night）", "A dusk look (dusk) needs a night look (night)");
         foreach (var time in new[] { file.Daylight?.Day, file.Daylight?.Night })
             if (time is { Length: > 0 } && ParseTimeOfDay(time) is null) return Loc.T($"时间“{time}”不是 HH:mm", $"The time \"{time}\" is not HH:mm");
+        if (file.Daylight?.Mode is { } mode && ParseDaylightMode(mode) is null)
+            return Loc.T($"未知的日夜模式“{mode}”（可用 clock 或 system）", $"Unknown daylight mode \"{mode}\" (clock or system)");
+        if (file.Daylight?.DuskMinutes is { } minutes && minutes is < MinDuskMinutes or > MaxDuskMinutes)
+            return Loc.T($"duskMinutes 必须在 {MinDuskMinutes} 到 {MaxDuskMinutes} 之间", $"duskMinutes must be from {MinDuskMinutes} to {MaxDuskMinutes}");
         return null;
     }
 
@@ -113,7 +120,9 @@ public static partial class PanelThemes
         if (file.Swatches is { } swatches && (swatches.Count > 12 || swatches.Any(value => !ThemeColor.TryParse(value, out _))))
             return Loc.T("颜色选择器预设色最多十二个，且必须是有效颜色", "The picker swatches must be at most twelve valid colors");
         var glass = file.Effects?.Glass;
-        foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []).Concat(new[] { glass?.Tint, glass?.Highlight }.OfType<string>()))
+        var decor = file.Effects?.Decor;
+        var decorColors = new[] { decor?.Horizon?.Sea, decor?.Horizon?.Line, decor?.Caustics?.Color, decor?.Palm?.Color, decor?.Hud?.Color }.OfType<string>();
+        foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []).Concat(new[] { glass?.Tint, glass?.Highlight }.OfType<string>()).Concat(decorColors))
             if (!ThemeColor.TryParse(value, out _)) return Loc.T($"效果中的颜色“{value}”无效", $"The effect color \"{value}\" is invalid");
         if (glass?.Backdrop is { } band && (band.Count != 2 || band.Any(v => !double.IsFinite(v) || v < 0 || v > 1)))
             return Loc.T("玻璃的 backdrop 必须是 0 到 1 之间的两个数", "The glass backdrop must be two numbers from 0 to 1");

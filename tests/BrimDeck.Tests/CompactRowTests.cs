@@ -105,7 +105,7 @@ internal static class CompactRowTests
         check("Compact row: no reading shows while a ring is still left out", fewRings is { VisibleRings: 1, MonitorItems: 0, MonitorWidth: 0 });
         check("Compact monitor: the row's priority is the leave order reversed",
             CompactMonitor.Priority.SequenceEqual([CompactMonitorItems.Cpu, CompactMonitorItems.Memory, CompactMonitorItems.Columns, CompactMonitorItems.Download, CompactMonitorItems.Gpu, CompactMonitorItems.Upload,
-                CompactMonitorItems.Storage, CompactMonitorItems.Temperature])
+                CompactMonitorItems.Storage, CompactMonitorItems.Temperature, CompactMonitorItems.Battery])
             && CompactMonitor.First(CompactMonitorItems.All, 2) == (CompactMonitorItems.Cpu | CompactMonitorItems.Memory)
             && CompactMonitor.First(CompactMonitorItems.Memory | CompactMonitorItems.Upload, 1) == CompactMonitorItems.Memory
             && CompactMonitor.First(CompactMonitorItems.All, 0) == CompactMonitorItems.None && CompactMonitor.First(CompactMonitorItems.Gpu, 5) == CompactMonitorItems.Gpu);

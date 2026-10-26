@@ -7,30 +7,41 @@ namespace BrimDeck.Core;
 public static partial class PanelThemes
 {
     // Built-in palettes never change. A user file is resolved once per reading: an edited file is read again into a new entry.
-    // A theme with a night look resolves to two palettes, kept side by side.
-    private static readonly Dictionary<(string, bool), PanelPalette> ResolvedBuiltIns = [];
-    private static readonly ConditionalWeakTable<PanelThemeInfo, PanelPalette> ResolvedFiles = new(), ResolvedNights = new();
-    public static PanelPalette Resolve(PanelThemeInfo theme) => Resolve(theme, false);
-    public static PanelPalette Resolve(PanelThemeInfo theme, bool night)
+    // A theme with a night look resolves to two palettes, or three with a dusk look, kept side by side.
+    private static readonly Dictionary<(string, DaylightLook), PanelPalette> ResolvedBuiltIns = [];
+    private static readonly ConditionalWeakTable<PanelThemeInfo, PanelPalette> ResolvedFiles = new(), ResolvedDusks = new(), ResolvedNights = new();
+    public static PanelPalette Resolve(PanelThemeInfo theme) => Resolve(theme, DaylightLook.Day);
+    public static PanelPalette Resolve(PanelThemeInfo theme, bool night) => Resolve(theme, night ? DaylightLook.Night : DaylightLook.Day);
+    public static PanelPalette Resolve(PanelThemeInfo theme, DaylightLook look)
     {
-        night &= theme.File.Night is not null;
-        var files = night ? ResolvedNights : ResolvedFiles;
-        if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue((theme.Id, night), out var cached) : files.TryGetValue(theme, out cached)) return cached;
-        var palette = Build(theme.Id, theme.File, night);
-        if (theme.BuiltIn) ResolvedBuiltIns[(theme.Id, night)] = palette; else files.AddOrUpdate(theme, palette);
+        look = Available(theme.File, look);
+        var files = look switch { DaylightLook.Night => ResolvedNights, DaylightLook.Dusk => ResolvedDusks, _ => ResolvedFiles };
+        if (theme.BuiltIn ? ResolvedBuiltIns.TryGetValue((theme.Id, look), out var cached) : files.TryGetValue(theme, out cached)) return cached;
+        var palette = Build(theme.Id, theme.File, look);
+        if (theme.BuiltIn) ResolvedBuiltIns[(theme.Id, look)] = palette; else files.AddOrUpdate(theme, palette);
         return palette;
     }
+    // A look the file does not write is its day look.
+    private static DaylightLook Available(PanelThemeFile file, DaylightLook look) => look switch
+    {
+        DaylightLook.Night when file.Night is not null => DaylightLook.Night,
+        DaylightLook.Dusk when file.Dusk is not null && file.Night is not null => DaylightLook.Dusk,
+        _ => DaylightLook.Day
+    };
 
     // night lays the file's night look over it, when it has one.
-    public static PanelPalette Build(string id, PanelThemeFile file, bool night = false)
+    public static PanelPalette Build(string id, PanelThemeFile file, bool night = false) => Build(id, file, night ? DaylightLook.Night : DaylightLook.Day);
+    // The night or dusk look is laid over the day look, when the file has it.
+    public static PanelPalette Build(string id, PanelThemeFile file, DaylightLook look)
     {
         var colors = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var apps = new Dictionary<string, ThemeColor>(StringComparer.Ordinal);
         var effects = new PanelThemeEffects();
         PanelThemeClock? clock = null;
         var chain = BaseChain(file);
-        night &= file.Night is not null;
-        if (night) chain.Add(file.Night!);
+        look = Available(file, look);
+        if (look == DaylightLook.Night) chain.Add(file.Night!);
+        else if (look == DaylightLook.Dusk) chain.Add(file.Dusk!);
         foreach (var layer in chain)
         {
             foreach (var (key, value) in layer.Colors ?? [])
@@ -51,7 +62,7 @@ public static partial class PanelThemes
         colors["bubble"] = colors["bubble"].Over(surface);
         var values = EffectValues(effects);
         // Glass is read over the darkest and the lightest backdrop it can stand on; its surface color is what shows without it.
-        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? [], .. TextureStops(values, colors, surface)];
+        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? [], .. TextureStops(values, colors, surface), .. DecorStops(values, surface)];
 
         var adjustments = new List<PanelThemeAdjustment>();
         var popup = colors["popup"].Over(surface);
@@ -89,7 +100,7 @@ public static partial class PanelThemes
         // A theme's own picker colors are offered as the panel draws them, like the ones derived from its palette.
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
             .OfType<ThemeColor>().Take(12).ToList();
-        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps) { Motion = MotionValues(chain), IsNight = night };
+        return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps) { Motion = MotionValues(chain), Look = look };
     }
 
     // A texture's lightest and darkest squares (PanelTheme.Texture), which text must read on as on the surface.
@@ -99,6 +110,36 @@ public static partial class PanelThemes
         var light = colors["textPrimary"]; var alpha = (byte)Math.Round(255 * values.Texture);
         yield return new ThemeColor(alpha, light.R, light.G, light.B).Over(surface);
         yield return new ThemeColor(alpha, 0, 0, 0).Over(surface);
+    }
+
+    // What the motifs lay under the content: the sea (the surface where the horizon puts it), and the caustics' and the palm's
+    // colors over the surface and over the sea. The HUD marks sit in the corners, away from any text.
+    internal static IEnumerable<ThemeColor> DecorStops(PanelThemeEffectValues values, ThemeColor surface)
+    {
+        if (values.Decor is not { } decor) yield break;
+        // The sea lies over the gradient's lower part, so it is measured over every stop of it.
+        var surfaces = new List<ThemeColor> { surface };
+        surfaces.AddRange(values.SurfaceGradient.Select(stop => stop.Over(surface)));
+        var grounds = new List<ThemeColor>(surfaces);
+        if (decor.Horizon is { } horizon)
+            foreach (var ground in surfaces)
+            {
+                // The sea from its color at the horizon to its deep color at the bottom, and the line of light along its top.
+                foreach (var water in new[] { horizon.Sea, horizon.Deep }) { var sea = water.Over(ground); grounds.Add(sea); yield return sea; }
+                if (horizon.Line is { } line) { yield return line.Over(ground); yield return line.Over(horizon.Sea.Over(ground)); }
+            }
+        // Each motif over what it is drawn on: the caustics over the sea (over the whole surface without a horizon), the palm
+        // over the sky above the horizon, where it is clipped.
+        var seas = decor.Horizon is null ? surfaces : grounds.Skip(surfaces.Count).ToList();
+        if (decor.Caustics is { } caustics)
+            foreach (var ground in seas) yield return caustics.Over(ground);
+        if (decor.Palm is { } palm)
+            foreach (var ground in surfaces)
+            {
+                yield return palm.Over(ground);
+                // Without a horizon the caustics' light lies on the same surface, so the shade falls over it too.
+                if (decor.Horizon is null && decor.Caustics is { } light) yield return palm.Over(light.Over(ground));
+            }
     }
 
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.
@@ -142,6 +183,19 @@ public static partial class PanelThemes
         merged.Scanlines = layer.Scanlines ?? merged.Scanlines;
         merged.Pixel = layer.Pixel ?? merged.Pixel;
         merged.Texture = layer.Texture ?? merged.Texture;
+        if (layer.Decor is { } decor)
+        {
+            // Field by field, into new parts, so a layer that moves only the horizon keeps the sea it inherits and the base's own
+            // parts are never changed.
+            var below = merged.Decor;
+            merged.Decor = new PanelThemeDecor
+            {
+                Horizon = decor.Horizon is { } h ? new PanelThemeHorizon { At = h.At ?? below?.Horizon?.At, Sea = h.Sea ?? below?.Horizon?.Sea, Line = h.Line ?? below?.Horizon?.Line } : below?.Horizon,
+                Caustics = decor.Caustics is { } c ? new PanelThemeMotif { Color = c.Color ?? below?.Caustics?.Color } : below?.Caustics,
+                Palm = decor.Palm is { } p ? new PanelThemeMotif { Color = p.Color ?? below?.Palm?.Color } : below?.Palm,
+                Hud = decor.Hud is { } u ? new PanelThemeHud { Color = u.Color ?? below?.Hud?.Color, Chamfer = u.Chamfer ?? below?.Hud?.Chamfer } : below?.Hud
+            };
+        }
         if (layer.Glass is { } glass)
         {
             merged.Glass ??= new PanelThemeGlass();
@@ -179,7 +233,23 @@ public static partial class PanelThemes
         double Value(string key) { var (min, max, fallback) = EffectRange(key); return Fit(Effect(effects, key), min, max, fallback); }
         return new(surfaceGradient.Count >= 2 ? surfaceGradient : [], rimGradient.Count >= 2 ? rimGradient : [],
             Value("rimWidth"), Value("shadowBlur"), Value("shadowDepth"), Value("shadowOpacity"), Value("scanlines"),
-            glass, pixel, texture);
+            glass, pixel, texture, DecorValues(effects.Decor));
+    }
+
+    // The motifs in their ranges; a part without a color it can use is left out. The caustics and the palm stay faint (their
+    // alpha at most 0.2 and 0.12), so they read as light and shade on the surface, never as pictures over the content.
+    private static PanelDecor? DecorValues(PanelThemeDecor? decor)
+    {
+        if (decor is null) return null;
+        static ThemeColor? Color(string? text, double maxAlpha = 1)
+        {
+            if (text is null || !ThemeColor.TryParse(text, out var color) || color.A == 0) return null;
+            return color with { A = (byte)Math.Min(color.A, Math.Round(255 * maxAlpha)) };
+        }
+        var horizon = decor.Horizon is { Sea: var seaText } h && Color(seaText) is { } sea ? new PanelHorizon(Fit(h.At, .3, .9, .62), sea, Color(h.Line)) : null;
+        var hud = decor.Hud is { Color: var hudText } hudFile && Color(hudText) is { } hudColor ? new PanelHud(hudColor, Fit(hudFile.Chamfer, 0, 10, 6)) : null;
+        var values = new PanelDecor(horizon, Color(decor.Caustics?.Color, .2), Color(decor.Palm?.Color, .12), hud);
+        return values.Any ? values : null;
     }
 
     // The numeric effects by their names in the file, with their ranges and the values used when no theme sets them.

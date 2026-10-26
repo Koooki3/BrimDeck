@@ -33,8 +33,8 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
-public enum DeckPage { Usage, Music, Monitor, Notices }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor, Notices }
+public enum DeckPage { Usage, Music, Monitor, Notices, Devices }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Notices, Devices }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
@@ -49,7 +49,8 @@ public static class CompactParts
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
 }
-public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel }
+// Saved settings keep the number, so a new style goes at the end.
+public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel, Tektur, Rounded }
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
 // and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
 public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom }
@@ -207,7 +208,8 @@ public sealed class DeckSettings
     // What the user changed under each panel theme, by theme id (see ThemeChoices); the theme in use keeps its choices in the
     // ordinary settings, and they are saved here when another theme is chosen.
     public Dictionary<string, ThemeChoices> ThemeChoices { get; set; } = [];
-    // When a theme with a night look shows its day look, "HH:mm-HH:mm" local time; empty keeps the theme's own hours.
+    // When a theme with a night look shows its day look: "HH:mm-HH:mm" local time, "system" to follow Windows' dark and light
+    // mode, or empty for the theme's own choice (PanelThemes.DaylightModeOf).
     public string ThemeDaylight { get; set; } = "";
     // A first start replaces the default with the Windows display language (SettingsStore.Load); files saved before
     // English existed are Chinese (SettingsMigrations).
@@ -310,6 +312,18 @@ public sealed class DeckSettings
     public bool MonitorTemperatures { get; set; } = true;
     // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
     public bool MonitorStorage { get; set; } = true;
+    // The devices page: the battery of the connected wireless devices (Devices); it reads them only while it shows.
+    public bool DevicesPage { get; set; } = true;
+    public double DevicesWidth { get; set; } = 460;
+    public double DevicesHeight { get; set; } = 200;
+    // The devices left off the page, the collapsed reading and the notice, by their key (DeviceBattery.Key), with the name they
+    // had, so the settings can list one that is not connected.
+    public List<HiddenDevice> HiddenDevices { get; set; } = [];
+    public bool Hides(string key) => HiddenDevices.Any(device => device.Key == key);
+    // A notice when a device's battery falls to DeviceLowPercent or under, once per discharge (LowBatteryWatch); it goes
+    // through the dynamic notices, so it shows only while those are on.
+    public bool DeviceLowNotice { get; set; } = true;
+    public int DeviceLowPercent { get; set; } = Devices.DefaultLowPercent;
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
@@ -520,9 +534,8 @@ public sealed class DeckSettings
         AnimationDuration = AnimationLength.Clamp(AnimationDuration);
         if (!Enum.IsDefined(Theme)) Theme = SettingsTheme.System;
         PanelTheme = PanelThemes.NormalizeId(PanelTheme) is { Length: > 0 } panelTheme ? panelTheme : PanelThemes.Dark;
-        // Anything but a valid pair of different times goes back to the theme's own hours.
-        ThemeDaylight = (ThemeDaylight ?? "").Split('-', 2) is [var day, var night] && PanelThemes.ParseTimeOfDay(day) is { } d && PanelThemes.ParseTimeOfDay(night) is { } n && d != n
-            ? PanelThemes.FormatDaylight(d, n) : "";
+        // Anything but "system" or a valid pair of different times goes back to the theme's own choice.
+        ThemeDaylight = PanelThemes.NormalizeDaylightSetting(ThemeDaylight);
         Language = Loc.Normalize(Language);
         if (!Enum.IsDefined(Style)) Style = CompactStyle.Notch;
         static double Fit(double value, double min, double max, double fallback) => double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
@@ -584,6 +597,11 @@ public sealed class DeckSettings
         NoticeHotkey ??= "";
         NoticesWidth = double.IsFinite(NoticesWidth) ? Math.Clamp(NoticesWidth, 440, 1200) : 460;
         NoticesHeight = double.IsFinite(NoticesHeight) ? Math.Clamp(NoticesHeight, 140, 400) : 280;
+        DevicesWidth = double.IsFinite(DevicesWidth) ? Math.Clamp(DevicesWidth, 440, 1200) : 460;
+        DevicesHeight = double.IsFinite(DevicesHeight) ? Math.Clamp(DevicesHeight, 140, 400) : 200;
+        HiddenDevices = [.. (HiddenDevices ?? []).OfType<HiddenDevice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)
+            .Select(device => device with { Name = device.Name ?? "" })];
+        DeviceLowPercent = Devices.LowChoices.Contains(DeviceLowPercent) ? DeviceLowPercent : Devices.DefaultLowPercent;
         NoticeApps = (NoticeApps ?? []).Where(rule => rule is not null && !string.IsNullOrWhiteSpace(rule.Key)).DistinctBy(rule => rule.Key).Take(500).ToList();
         foreach (var rule in NoticeApps)
         {

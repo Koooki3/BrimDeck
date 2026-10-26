@@ -187,7 +187,9 @@ public partial class MainWindow
         else
         {
             _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : DeckPages.Size(Settings, CurrentPage);
-            _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
+            // The theme's spring tier (motion.spring) chooses only how much the surface gives; default is the monitor's spring.
+            double damping = SpringTiers.Damping(PanelTheme.Motion.Spring);
+            _springWidth = new Spring(_resizeFrom.Width, damping); _springHeight = new Spring(_resizeFrom.Height, damping);
             _resizeChanged = false;
         }
         _resizeCompact = compact; _resizeStyle = style; _resizePage = CurrentPage; _resizeSettling = false; Island.SettledClip = false;
@@ -282,6 +284,7 @@ public partial class MainWindow
         // second during the drag, and once more when it ends (FinishResize saves the size).
         bool stretched = _resizePage == DeckPage.Notices && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout();
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
+        else if (_resizePage == DeckPage.Devices) RenderDevices();
         else if (!stretched && Environment.TickCount64 - _resizeRendered >= 40)
         {
             _resizeRendered = Environment.TickCount64;

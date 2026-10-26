@@ -47,9 +47,10 @@ internal static class PanelThemeTests
         check("A built-in theme's id is its file name", PanelThemes.BuiltIns.All(theme => PanelThemes.NormalizeId(theme.File.Id) == theme.Id));
         check("Every built-in theme names an open license", PanelThemes.BuiltIns.All(theme => theme.File.License is "MIT" or "Apache-2.0"));
         bool allValid = true; var adjusted = new List<string>();
-        // A theme with a night look is held to the same rules in both looks.
-        foreach (var (theme, palette) in PanelThemes.BuiltIns.SelectMany(theme => theme.File.Night is null
-            ? new[] { (theme, PanelThemes.Resolve(theme)) } : [(theme, PanelThemes.Resolve(theme)), (theme, PanelThemes.Resolve(theme, true))]))
+        // A theme with a night or dusk look is held to the same rules in every look.
+        foreach (var (theme, palette) in PanelThemes.BuiltIns.SelectMany(theme => new[] { DaylightLook.Day, DaylightLook.Dusk, DaylightLook.Night }
+            .Where(look => look == DaylightLook.Day || look == DaylightLook.Night && theme.File.Night is not null || look == DaylightLook.Dusk && theme.File.Dusk is not null)
+            .Select(look => (theme, PanelThemes.Resolve(theme, look)))))
         {
             allValid &= palette.Colors.Count == PanelThemes.Tokens.Count;
             var popup = palette["popup"].Over(palette.Surface);
@@ -62,7 +63,7 @@ internal static class PanelThemeTests
             allValid &= palette["textSecondary"].MinimumContrast([palette["fill"].Over(palette.Surface), palette["hover"].Over(palette.Surface)]) >= PanelThemes.TextContrast - .001;
             foreach (var color in palette.Apps.Values) allValid &= color.IsOpaque && color.MinimumContrast(palette.SurfaceStops) >= PanelThemes.GraphicContrast - .001;
             // The built-in themes are designed to pass as written; an adjustment would mean a mistake in the file.
-            adjusted.AddRange(palette.Adjustments.Select(a => $"{theme.Id}{(palette.IsNight ? " (night)" : "")}.{a.Key} {a.Before}->{a.After} {a.Ratio:0.00}/{a.Minimum}"));
+            adjusted.AddRange(palette.Adjustments.Select(a => $"{theme.Id}{(palette.Look == DaylightLook.Day ? "" : $" ({palette.Look.ToString().ToLowerInvariant()})")}.{a.Key} {a.Before}->{a.After} {a.Ratio:0.00}/{a.Minimum}"));
         }
         check("Every built-in theme meets every contrast rule", allValid);
         check("Built-in themes pass without any adjustment " + string.Join("; ", adjusted), adjusted.Count == 0);
@@ -124,7 +125,7 @@ internal static class PanelThemeTests
         }
         var demo = BuiltIn(PanelThemes.Demo);
         check("The demo theme is listed with the extensions, leaving the custom section to the user", PanelThemes.BuiltIn(PanelThemes.Demo)!.Kind == PanelThemeKind.Extension);
-        check("The demo theme carries its effects", demo.HasOverlay && demo.Effects.RimGradient.Count == 3 && demo.Effects.ShadowDepth == 0 && demo.Effects.Scanlines > 0);
+        check("The demo theme carries its effects", demo.HasOverlay && demo.Effects.RimGradient.Count == 4 && demo.Effects.ShadowDepth == 0 && demo.Effects.Scanlines > 0 && demo.Effects.Decor is { Hud: not null });
         check("System follows the Windows app theme", PanelThemes.Find("system", true, []).Id == "dark" && PanelThemes.Find("SYSTEM", false, []).Id == "light");
         check("An unknown theme shows as dark", PanelThemes.Find("gone", false, []).Id == "dark");
         check("Automatic liquid glass shows the glass look its backdrop asks for", PanelThemes.Find(PanelThemes.LiquidLook(PanelThemes.GlassAuto, glassDark: false), true, []).Id == PanelThemes.GlassLight
@@ -302,6 +303,44 @@ internal static class PanelThemeTests
             && ByFile(pixelGlass, "flat-on-glass.json").Error is null);
         check("A theme that gets both anyway is pixel art without glass",
             PanelThemes.Build("both", PanelThemes.Parse("""{ "formatVersion": 1, "id": "both", "effects": { "pixel": 2, "glass": { "tint": "#E0F8FAFD" } } }""")).Effects is { Pixel: 2, Glass: null });
+        // Motifs: fitted into their ranges, inherited part by part, held under the text and carried by a copy.
+        PanelPalette Decor(string decor, string? baseId = null) => PanelThemes.Build("decor", PanelThemes.Parse(
+            $$"""{ "formatVersion": 1, "id": "decor", "base": "{{baseId ?? "light"}}", "effects": { "decor": {{decor}} } }"""));
+        var fitted = Decor("""{ "horizon": { "at": 2, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#FFFFFFFF" }, "palm": { "color": "#40002010" }, "hud": { "color": "#6600F0FF", "chamfer": 40 } }""");
+        check("Motifs are fitted: the horizon and chamfer to their ranges, the caustics and palm to a faint alpha",
+            fitted.Effects.Decor is { Horizon: { At: .9, Line: not null } horizon, Caustics: { A: 51 }, Palm: { A: 31 }, Hud: { Chamfer: 10 } }
+            && horizon.Sea == ThemeColor.Parse("#4000A6A6"));
+        check("A motif without a usable color is left out, and no motifs at all is none",
+            Decor("""{ "horizon": { "at": 0.5 }, "palm": { "color": "#00000000" }, "hud": { "color": "#FF00F0FF" } }""").Effects.Decor is { Horizon: null, Palm: null, Hud: { Chamfer: 6 } }
+            && Decor("""{ "horizon": { "at": 0.5 } }""").Effects.Decor is null && BuiltIn("dark").Effects.Decor is null);
+        // The night look names only a sea; the day's palm stays.
+        // The night look names only a sea and a chamfer: the day's horizon height, line, palm and HUD color stay.
+        var layered = PanelThemes.Parse("""{ "formatVersion": 1, "id": "layered", "base": "light", "effects": { "decor": { "palm": { "color": "#20002010" }, "horizon": { "at": 0.5, "sea": "#2000A6A6", "line": "#80FFFFFF" }, "hud": { "color": "#4000F0FF" } } }, "night": { "effects": { "decor": { "horizon": { "sea": "#3000A6A6" }, "hud": { "chamfer": 3 } } } } }""");
+        check("Each motif value is inherited on its own", PanelThemes.Build("layered", layered).Effects.Decor is { Palm: not null, Horizon: { At: .5, Sea.A: 0x20 }, Hud.Chamfer: 6 }
+            && PanelThemes.Build("layered", layered, night: true).Effects.Decor is { Palm: not null, Horizon: { At: .5, Sea.A: 0x30, Line: not null }, Hud: { Chamfer: 3, Color.A: 0x40 } }
+            && layered.Effects!.Decor!.Horizon!.Sea == "#2000A6A6");
+        // A deep lagoon under dark text: the text is darkened until it reads over the sea too.
+        var deepSea = Decor("""{ "horizon": { "at": 0.4, "sea": "#A000A6A6" } }""");
+        var sea = deepSea.Effects.Decor!.Horizon!.Sea.Over(deepSea.Surface);
+        check("Text is held over the sea the horizon lays under it, at the horizon and at its deepest", deepSea.SurfaceStops.Contains(sea)
+            && deepSea.SurfaceStops.Contains(deepSea.Effects.Decor!.Horizon!.Deep.Over(deepSea.Surface))
+            && deepSea["textPrimary"].MinimumContrast([sea]) >= 4.5 - .001 && deepSea.Adjustments.Count > 0);
+        var dusky = PanelThemes.Build("dusky", PanelThemes.Parse("""{ "formatVersion": 1, "id": "dusky", "base": "light", "effects": { "surfaceGradient": ["#00FFFFFF", "#FF8FB8C8"], "decor": { "horizon": { "sea": "#A000A6A6" } } } }"""));
+        var duskySea = dusky.Effects.Decor!.Horizon!.Sea.Over(dusky.Effects.SurfaceGradient[1].Over(dusky.Surface));
+        check("The sea is measured over the gradient it lies on", dusky.SurfaceStops.Contains(duskySea) && dusky["textPrimary"].MinimumContrast([duskySea]) >= 7 - .001);
+        var lit = Decor("""{ "horizon": { "sea": "#2000A6A6", "line": "#FFFFC24B" } }""");
+        check("The horizon's line is measured too", lit.SurfaceStops.Contains(ThemeColor.Parse("#FFFFC24B")));
+        // Each motif is measured over what it is drawn on: the palm over the sky (it stops at the horizon), the caustics over the sea.
+        var shaded = Decor("""{ "horizon": { "sea": "#4000A6A6" }, "palm": { "color": "#1F000000" }, "caustics": { "color": "#33FFFFFF" } }""");
+        var shadedSea = shaded.Effects.Decor!.Horizon!.Sea.Over(shaded.Surface);
+        check("The palm is measured over the sky and the caustics over the sea", shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shaded.Surface))
+            && !shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shadedSea)) && shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shadedSea))
+            && !shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shaded.Surface)));
+        var badDecor = PanelThemes.LoadFolder(Folder("decor-bad", ("sea.json", """{ "formatVersion": 1, "id": "sea", "effects": { "decor": { "horizon": { "sea": "teal" } } } }"""),
+            ("hud.json", """{ "formatVersion": 1, "id": "hud", "effects": { "decor": { "hud": { "color": "#12345" } } } }""")));
+        check("A motif color that is not a color is refused", badDecor.Count == 2 && badDecor.All(theme => theme.Error is not null));
+        var decorCopy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", fitted, "light")));
+        check("A theme made from one with motifs keeps them", decorCopy.Effects.Decor == fitted.Effects.Decor && decorCopy.Adjustments.Count == 0);
         // A theme with a night look keeps it, with its hours: the copy's night look is the original's.
         var island = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
         var islandCopy = PanelThemes.Parse(PanelThemes.FillTemplate("copy", PanelThemes.Resolve(island), PanelThemes.IslandHoliday, island.File));
@@ -311,12 +350,27 @@ internal static class PanelThemeTests
             islandCopy.Night is not null && islandCopy.Daylight is { Day: "06:30", Night: "18:30" } && nightCopy.Adjustments.Count == 0
             && nightOriginal.Colors.All(pair => nightCopy[pair.Key] == pair.Value) && nightOriginal.Effects.SurfaceGradient.SequenceEqual(nightCopy.Effects.SurfaceGradient)
             && nightOriginal.Motion == nightCopy.Motion && PanelThemes.Build("copy", islandCopy).Colors.All(pair => PanelThemes.Resolve(island)[pair.Key] == pair.Value));
+        // The night look turns the palm off with a transparent color.
+        check("The island's motifs differ by look and a copy keeps each one", new[] { DaylightLook.Day, DaylightLook.Dusk, DaylightLook.Night }.All(look =>
+                PanelThemes.Resolve(island, look).Effects.Decor is { Horizon: not null, Caustics: not null } decor && (decor.Palm is null) == (look == DaylightLook.Night)
+                && PanelThemes.Build("copy", islandCopy, look).Effects.Decor == decor)
+            && PanelThemes.Resolve(island, DaylightLook.Dusk).Effects.Decor != PanelThemes.Resolve(island).Effects.Decor
+            && PanelThemes.Resolve(island, true).Effects.Decor != PanelThemes.Resolve(island).Effects.Decor);
         var nightOwl = BuiltIn("night-owl");
         // No built-in theme suggests a gradient clock, so a theme of its own carries one.
         var glow = PanelThemes.Build("glow", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "neon", Color = "gradient", Gradient = ["#C792EA", "#82AAFF", "#7FDBCA"] } });
         check("A theme made from another keeps its clock gradient, and the template's placeholder otherwise",
             PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", glow, "night-owl"))).Clock is { Style: "neon", Color: "gradient" } copiedClock
             && copiedClock.Gradient!.SequenceEqual(glow.Clock!.Gradient!) && PanelThemes.Parse(PanelThemes.FillTemplate("copy", nightOwl)).Clock!.Custom == "#B9A8FF");
+        // Tektur came last, so the styles saved before it keep their numbers; a theme file names it like any other style.
+        var tekturFile = PanelThemes.LoadFolder(Folder("tektur", ("tektur.json", """{ "formatVersion": 1, "id": "tektur", "base": "night-owl", "clock": { "style": "Tektur" } }"""))).Single();
+        var tektur = PanelThemes.Build("tektur", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "tektur" } });
+        var tekturSettings = new DeckSettings();
+        PanelThemes.ApplyClock(tektur, tekturSettings);
+        check("The Tektur clock style is read from a theme file and comes back from the template",
+            (int)ClockStyle.Tektur == 10 && (int)ClockStyle.Rounded == 11 && (int)ClockStyle.Pixel == 9 && tekturFile.Error is null && tekturSettings.ClockStyle == ClockStyle.Tektur
+            && PanelThemes.Parse(PanelThemes.FillTemplate("copy", tektur, "night-owl")).Clock is { Style: "tektur" }
+            && PanelThemes.Template.Contains("condensed, pixel, tektur, rounded", StringComparison.Ordinal));
 
         // Clock, swatches and what choosing a theme changes.
         bool clockColors = true, pickers = true;
@@ -342,7 +396,7 @@ internal static class PanelThemeTests
             PanelThemes.BuiltIns.All(theme => PanelThemes.Resolve(theme).Clock?.Color != "gradient"));
         var demoClock = new DeckSettings { ClockGradient = ["#111111", "#222222", "#333333"] };
         PanelThemes.ApplyClock(demo, demoClock);
-        check("The demo uses the seven-segment clock in the theme's color and leaves the gradient alone", demoClock.ClockStyle == ClockStyle.Segment
+        check("The demo uses the Tektur clock in the theme's color and leaves the gradient alone", demoClock.ClockStyle == ClockStyle.Tektur
             && demoClock.ClockColor == ClockColor.White && demoClock.ClockGradient.SequenceEqual(["#111111", "#222222", "#333333"]));
         var placeholder = new DeckSettings { ClockCustomColor = "#123456", ClockGradient = ["#111111", "#222222", "#333333"] };
         PanelThemes.ApplyClock(PanelThemes.Build("p", template), placeholder);
@@ -357,7 +411,7 @@ internal static class PanelThemeTests
         var matched = new DeckSettings(); matched.Apps[0].ThemeColor = "#123456"; matched.Apps[0].WarningColor = "#654321"; matched.Apps[1].CriticalColor = "#ABCDEF";
         PanelThemes.ApplyMatching(BuiltIn("cyberpunk-edgerunners"), matched);
         check("Choosing a theme makes the app colors follow it and switches the clock", matched.Apps.All(app => app.ThemeColor == "" && app.WarningColor == "" && app.CriticalColor == "")
-            && matched.ClockStyle == ClockStyle.Segment);
+            && matched.ClockStyle == ClockStyle.Tektur);
         var dracula = BuiltIn("dracula"); var githubDark = BuiltIn("github-dark");
         var carried = new DeckSettings { ClockGradient = [.. dracula.ClockGradients[2].Stops] };
         PanelThemes.ApplyMatching(githubDark, carried, dracula);

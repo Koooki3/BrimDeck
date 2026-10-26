@@ -121,6 +121,7 @@ public partial class MainWindow : Window
         _handover = new PageHandover(LeavingContent);
         InitializeMusic();
         InitializeMonitor();
+        InitializeDevices();
         InitializeResize();
         Island.Background = _surface;
         InitializeShadow();
@@ -436,6 +437,7 @@ public partial class MainWindow : Window
     {
         System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
+        System.Windows.Automation.AutomationProperties.SetName(DevicesPageButton, Loc.T("设备", "Devices"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("最近通知", "Recent notices"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
@@ -564,6 +566,16 @@ public partial class MainWindow : Window
     public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
+        // The theme's collapse picture (CollapseLayer) photographs the open panel before anything about it changes, without
+        // the pointer's marks and particles, which end with it (one thing moves at a time, ux #7); opening again ends a
+        // picture still playing at once.
+        bool closing = _expanded && !expanded;
+        if (closing) _fx?.EndParticles();
+        bool picture = closing && !instant && !_preview && CollapseLayer.CanPlay;
+        if (picture) _fx?.Reset();
+        var collapseShot = picture ? _collapse?.Capture(Island) : null;
+        var collapseFrom = collapseShot is null ? Rect.Empty : Island.TransformToAncestor(Stage).TransformBounds(new Rect(Island.RenderSize));
+        if (expanded) StopCollapse();
         // Whatever this changes, the surface moves under its rounded clip; a collapse settles again below (SettleClip).
         Island.SettledClip = false; _clipSettle?.Stop();
         if (expanded && !_expanded) EndBoot();
@@ -649,6 +661,9 @@ public partial class MainWindow : Window
         // on, on the same drawer curve, rather than holding for the closing's delay and starting a whole new move.
         int carried = !turning && !expanded ? _turn.Carried(now, false, duration) : 0;
         if (carried > 0) duration = carried;
+        // A collapse picture plays over the island, which takes its closed shape at once underneath.
+        if (collapseShot is not null && turning && duration > 0 && !redirect
+            && _collapse!.Begin(collapseShot, collapseFrom, new Rect(left, gap, width, height), null)) duration = 0;
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.

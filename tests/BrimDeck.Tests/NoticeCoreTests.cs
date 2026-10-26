@@ -451,8 +451,8 @@ internal static class NoticeCoreTests
         var settings = new DeckSettings();
         check("The notices page is hidden while notices are off", !DeckPages.Shown(settings, DeckPage.Notices) && DeckPages.Resolve(settings, DeckPage.Notices) == DeckPage.Usage);
         settings.NoticesEnabled = true;
-        check("The notices page shows once notices are on, last in the switch", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Notices]));
-        settings.UsagePage = false; settings.MusicPage = false; settings.MonitorPage = false;
+        check("The notices page shows once notices are on, last in the switch", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Devices, DeckPage.Notices]));
+        settings.UsagePage = false; settings.MusicPage = false; settings.MonitorPage = false; settings.DevicesPage = false;
         check("With only the notices page it is the one shown", DeckPages.Resolve(settings, DeckPage.Usage) == DeckPage.Notices && DeckPages.Largest(settings) == (settings.NoticesWidth, settings.NoticesHeight));
         check("The notices page opens by choice", DeckPages.Opening(DefaultDeckPage.Notices) == DeckPage.Notices && DeckPages.Opening(DefaultDeckPage.Last) is null);
         check("The notices page is saved as number 3, after the monitor page", (int)DeckPage.Monitor == 2 && (int)DeckPage.Notices == 3 && (int)DefaultDeckPage.Notices == 4);
