@@ -82,8 +82,10 @@ public sealed partial class LyricsService : IDisposable
     // A lyric reply is a few kilobytes; a larger one is given up rather than read into memory.
     public const int MaxResponseBytes = 2 * 1024 * 1024;
     private const int MaxRedirects = 2;
-    public LyricsService(HttpClient? http = null)
+    public LyricsService(HttpClient? http = null, IAppleMusicAccount? appleAccount = null, Func<IEnumerable<string>>? appleCacheRoots = null)
     {
+        _appleAccount = appleAccount;
+        _appleCacheRoots = appleCacheRoots ?? AppleCacheRoots;
         _ownsHttp = http is null;
         // Redirects are followed by Get, only to HTTPS on the same host.
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(8) };
@@ -97,11 +99,19 @@ public sealed partial class LyricsService : IDisposable
         try
         {
             string cacheKey = string.Join("\n", track.Source, track.SongId, track.SongKey);
-            if (_cache.TryGetValue(cacheKey, out var cached))
-            { _order.Remove(cacheKey); _order.AddLast(cacheKey); return cached; }
+            // A third-party result for Apple Music is kept only until Apple's own lyrics can be had: Apple Music
+            // may cache them later, or the user may authorize BrimDeck.
+            bool hit = _cache.TryGetValue(cacheKey, out var cached);
+            if (hit && (!track.IsAppleMusic || cached!.Source == AppleSource))
+            { _order.Remove(cacheKey); _order.AddLast(cacheKey); return cached!; }
             var lyrics = Lyrics.Empty;
             // QQ tracks must stay within QQ, including when lookup fails or metadata is incomplete.
             if (track.IsQqMusic) lyrics = await FindQq(track, token);
+            else if (track.IsAppleMusic)
+            {
+                lyrics = await FindApple(track, cacheKey, token);
+                if (!lyrics.Synced || lyrics.Lines.Count == 0) lyrics = hit ? cached! : await FindAppleFallback(track, lyrics, token);
+            }
             else
             {
                 if (track.SongId.StartsWith("netease:", StringComparison.Ordinal))
@@ -113,7 +123,7 @@ public sealed partial class LyricsService : IDisposable
             // An empty result can be a temporary provider failure. Do not keep it for the entire app session.
             if (lyrics.Lines.Count > 0 || lyrics.Instrumental)
             {
-                _cache[cacheKey] = lyrics; _order.AddLast(cacheKey);
+                _cache[cacheKey] = lyrics; _order.Remove(cacheKey); _order.AddLast(cacheKey);
                 while (_order.Count > 80) { _cache.Remove(_order.First!.Value); _order.RemoveFirst(); }
             }
             return lyrics;
@@ -167,14 +177,14 @@ public sealed partial class LyricsService : IDisposable
         return null;
     }
     // The reply, or null once it is larger than MaxResponseBytes, whatever its declared length said.
-    private static async Task<byte[]?> ReadLimitedAsync(Stream stream, CancellationToken token)
+    private static async Task<byte[]?> ReadLimitedAsync(Stream stream, CancellationToken token, int limit = MaxResponseBytes)
     {
         using var buffer = new MemoryStream();
         var chunk = new byte[16384];
         int read;
         while ((read = await stream.ReadAsync(chunk, token)) > 0)
         {
-            if (buffer.Length + read > MaxResponseBytes) return null;
+            if (buffer.Length + read > limit) return null;
             buffer.Write(chunk, 0, read);
         }
         return buffer.ToArray();
@@ -182,8 +192,10 @@ public sealed partial class LyricsService : IDisposable
     private static string Str(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
     private static double Num(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) ? number : 0;
     private static string Normalize(string value) => Regex.Replace(value, @"[\s\p{P}\p{S}]", "").ToUpperInvariant();
+    // Apple Music shows names in the storefront's script (李耀陽); the other providers may use another (李耀阳).
+    private static string MatchText(MediaTrack track, string value) => Normalize(track.IsAppleMusic ? SimplifyAppleText(value) : value);
     private static bool Matches(MediaTrack track, string title, string artist, double seconds)
-        => Normalize(track.Title) == Normalize(title) && Regex.Split(track.Artist, @"\s*[/、,，&;；]\s*").Where(a => a.Length > 0).All(a => Normalize(artist).Contains(Normalize(a), StringComparison.Ordinal))
+        => MatchText(track, track.Title) == MatchText(track, title) && Regex.Split(track.Artist, @"\s*[/、,，&;；]\s*").Where(a => a.Length > 0).All(a => MatchText(track, artist).Contains(MatchText(track, a), StringComparison.Ordinal))
             && (track.Duration.TotalSeconds <= 0 || Math.Abs(seconds - track.Duration.TotalSeconds) <= 2);
     private async Task<Lyrics> FindNeteaseId(string id, double duration, CancellationToken token)
     {

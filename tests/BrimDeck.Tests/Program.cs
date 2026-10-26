@@ -16,6 +16,7 @@ try
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
+    await AppleMusicLyricsTests.Run(root, Check);
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);

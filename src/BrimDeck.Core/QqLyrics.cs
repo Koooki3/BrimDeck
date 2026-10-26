@@ -46,7 +46,7 @@ public sealed partial class LyricsService
                 string candidateMid = Str(item, "songmid");
                 if (!Regex.IsMatch(candidateMid, @"\A[a-zA-Z0-9]{8,32}\z") ||
                     !Matches(track, WebUtility.HtmlDecode(Str(item, "songname")), WebUtility.HtmlDecode(artist), track.Duration.TotalSeconds) ||
-                    !string.IsNullOrWhiteSpace(track.Album) && Normalize(track.Album) != Normalize(WebUtility.HtmlDecode(Str(item, "albumname")))) continue;
+                    track.IsQqMusic && !string.IsNullOrWhiteSpace(track.Album) && Normalize(track.Album) != Normalize(WebUtility.HtmlDecode(Str(item, "albumname")))) continue;
                 var expectedArtists = Regex.Split(track.Artist, @"\s*[/、,，&;；]\s*").Select(Normalize).Where(a => a.Length > 0).ToHashSet();
                 var actualArtists = singers.EnumerateArray().Where(s => s.ValueKind == JsonValueKind.Object)
                     .Select(s => Normalize(WebUtility.HtmlDecode(Str(s, "name")))).Where(a => a.Length > 0);
@@ -54,7 +54,7 @@ public sealed partial class LyricsService
             }
             mid = candidates.Where(c => Math.Abs(c.Seconds - track.Duration.TotalSeconds) <= 2)
                 .OrderBy(c => Math.Abs(c.Seconds - track.Duration.TotalSeconds)).Select(c => c.Mid).FirstOrDefault();
-            if (mid is null && !string.IsNullOrWhiteSpace(track.Album))
+            if (mid is null && track.IsQqMusic && !string.IsNullOrWhiteSpace(track.Album))
             {
                 // A VIP preview reports the clip duration. Require an unambiguous recording
                 // and verify its preview length with QQ's song detail before accepting it.
