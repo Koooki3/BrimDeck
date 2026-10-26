@@ -410,10 +410,12 @@ internal sealed class GlassBackdrop : IDisposable
         // The notch's shoulders, thinner than its corners, stay clear glass.
         double left = double.MinValue, top = double.MinValue, right = double.MaxValue, bottom = double.MaxValue, radius = 0, shoulder = 0;
         bool squareTop = true;
+        double topRound = double.MaxValue, bottomRound = 0;
         for (int i = first; i <= last; i++)
         {
             var shape = _recent[i];
             var c = shape.Corners;
+            topRound = Math.Min(topRound, Math.Max(c.TopLeft, c.TopRight)); bottomRound = Math.Max(bottomRound, Math.Max(c.BottomLeft, c.BottomRight));
             bool square = c.TopLeft < .5 && c.TopRight < .5;
             squareTop &= square;
             radius = Math.Max(radius, square ? Math.Max(c.BottomLeft, c.BottomRight) : Math.Max(Math.Max(c.TopLeft, c.TopRight), Math.Max(c.BottomLeft, c.BottomRight)));
@@ -439,10 +441,18 @@ internal sealed class GlassBackdrop : IDisposable
             // lies along that outline.
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
             Dress();
-            _clip.Offset = new Vector2((float)outerLeft, (float)clipTop);
-            _clip.Size = new Vector2((float)Math.Max(0, outerRight - outerLeft), (float)Math.Max(0, outerBottom - clipTop));
-            _clip.CornerRadius = new Vector2((float)radius);
-            Rim(outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
+            // Its top follows the island's top corners continuously (live check 10-26: expanding, the top edge flickered - the
+            // blur's clip jumped from a rounded top at the island's edge to a square one reaching above the screen the frame
+            // every recent shape was square, which the island's own surface hid under the blur but nothing hides over acrylic):
+            // the rectangle rises above the island's top by as much as its top corners are flatter than its bottom ones, so the
+            // rounding it shows at the top is the island's, from the capsule's to none, with no step.
+            double round = Math.Max(topRound, bottomRound), raise = bottomRound > topRound ? bottomRound - topRound + 2 * (1 - topRound / Math.Max(bottomRound, 1)) : 0;
+            double acrylicTop = top - raise;
+            _clip.Offset = new Vector2((float)outerLeft, (float)acrylicTop);
+            _clip.Size = new Vector2((float)Math.Max(0, outerRight - outerLeft), (float)Math.Max(0, outerBottom - acrylicTop));
+            _clip.CornerRadius = new Vector2((float)round);
+            clipTop = acrylicTop;
+            Rim(outerLeft, acrylicTop, outerRight, outerBottom, round, opacity);
             Probe(true);
         }
         else if (_rim is not null) _rim.IsVisible = false;
