@@ -51,6 +51,13 @@ public sealed class IslandBorder : Border
 
     // The edge light's bands: widths in DIP inside the outline, each adding an equal share of the light, so it fades inward.
     private static readonly double[] EdgeBands = [1.5, 3.5, 7];
+    // Windows sends a click on this layered window to whatever lies below wherever its pixels are fully transparent. Under
+    // liquid glass the surface steps aside (opacity 0) and the glass is drawn by a window of its own beneath, so without this
+    // the open panel took clicks only on its text and glyphs: elsewhere they fell through to the glass window or to the
+    // application under the panel (live check X-01). The faintest fill under the surface keeps the whole outline the
+    // panel's own, as an opaque surface does; at 1/255 black it changes no visible pixel.
+    private static readonly Brush InputCatch = CreateCatch();
+    private static Brush CreateCatch() { var brush = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)); brush.Freeze(); return brush; }
 
     private Pen? _rim;
     private Pen[]? _edge;
@@ -85,6 +92,7 @@ public sealed class IslandBorder : Border
     protected override void OnRender(DrawingContext drawingContext)
     {
         var outline = Outline();
+        drawingContext.DrawGeometry(InputCatch, null, outline);
         drawingContext.DrawGeometry(Background, null, outline);
         if (MaterialOpacity <= 0) return;
         // Only a fading material needs the opacity layer; fully shown, the layers draw straight onto the surface.
