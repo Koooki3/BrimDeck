@@ -188,6 +188,8 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
+    // Opens the settings on one of their pages (SettingsWindow.ShowPage).
+    internal void OpenSettings(int page) { ShowSettings(false); _settingsWindow?.ShowPage(page); }
     // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the
     // panel is resumed either way, in case the two disagree (ResumeAfterPreview does nothing when no preview is on).
     internal void EndPreviewFromDeck()

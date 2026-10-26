@@ -27,8 +27,8 @@ internal static class Program
             var command = NotifyCommandLine.Parse(args);
             if (command.Kind == NotifyCommandKind.Stdio) return await RelayAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
             return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
-                Unreachable: "BrimDeck is not running, or dynamic notices are switched off in its settings.",
-                NotReceiving: "BrimDeck is not receiving notices (not running, or dynamic notices are off)."));
+                Unreachable: "BrimDeck is not running, or live notices are switched off in its settings.",
+                NotReceiving: "BrimDeck is not receiving notices (not running, or live notices are off)."));
         }
         finally
         {
