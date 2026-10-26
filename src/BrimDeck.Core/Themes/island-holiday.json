@@ -97,7 +97,7 @@
   // completed one lets a few bubbles rise. The panel goes back into the island as foam, dissolving.
   "motion": {
     "ambient": { "breathe": 9, "breatheDepth": 0.12, "drift": 20, "sweep": 26, "sweepOpacity": 0.05, "flicker": 0, "flickerDepth": 0 },
-    "hover": "wave", "hoverStrength": 0.12, "press": "splash", "pressStrength": 0.18, "trail": 0.35, "particles": "bubble", "spring": "default", "collapse": "foam", "collapseMs": 480, "splashMs": 500, "particleMs": 1450, "focus": "glow", "pace": 1.15, "steps": 0,
+    "hover": "wave", "hoverStrength": 0.12, "press": "splash", "pressStrength": 0.18, "trail": 0.35, "particles": "bubble", "spring": "default", "splashMs": 500, "particleMs": 1450, "focus": "glow", "pace": 1.15, "steps": 0,
     "color": "accent", "secondary": "clock", "highlight": "clock"
   },
   // Dusk, the hour before night: a peach sunset sky over a sea warmed by the low sun, a gold line along the horizon and

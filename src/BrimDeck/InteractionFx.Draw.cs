@@ -23,8 +23,6 @@ namespace BrimDeck;
 //   splash: a ring of water spreads out from the shape's own edge as the press goes down and a second, fainter one as a
 //     completed press lets go (not before the first is half way out), each 320 to 400 ms on the soft landing or the theme's
 //     splashMs (never from the pointer).
-//   aberration (any press): a completed press pulls the shape's edge apart, the main color a DIP or so to the left and the
-//     second to the right, for at most 120 ms, as the wallpaper's chromatic aberration (a flash: FlashBudget).
 // Brushes and pens are made when the theme dresses the layer and frozen; strengths are applied as opacity, so a frame only
 // draws.
 internal sealed partial class FxSurface
@@ -183,21 +181,19 @@ internal sealed partial class FxSurface
         if (_pressed is { Valid: true } pressed && !ReferenceEquals(pressed, _hover) && !pressedLeaving)
             DrawMark(dc, pressed, pressed.Box, pressed.Radius, 0, press);
         if (_focus is { Valid: true } focus) DrawFocus(dc, focus, now);
-        if (_pressed is { Valid: true } pulsed && now - _pulseAt is >= 0 and < CollapseFx.AberrationLength) DrawPulse(dc, pulsed, now - _pulseAt);
         DrawParticles(dc, now);
     }
 
-    // ----- Splash and the chromatic pulse -----
+    // ----- Splash -----
 
-    private double _drawNow, _pulseAt = double.NaN;
+    private double _drawNow;
     private double SplashLength => _motion.SplashMs > 0 ? _motion.SplashMs / 1000.0 : Math.Clamp(.36 * _motion.Pace, .32, .40);
     // The second ring starts as a completed press lets go, but never before the first is half way out, so the two read as
     // one splash and its echo rather than one ring drawn twice (NaN while there is none).
     private double SecondRingAt => _press.Committed ? Math.Max(_press.UpAt, _press.DownAt + SplashLength / 2) : double.NaN;
-    // Whether a ring or the pulse of the last press still shows, so the press is kept that long.
+    // Whether a ring of the last press still shows, so the press is kept that long.
     private bool Lingering(double now) => _motion.Press == PressFx.Splash
-        && (now - _press.DownAt < SplashLength || now - SecondRingAt < SplashLength)
-        || now - _pulseAt is >= 0 and < CollapseFx.AberrationLength;
+        && (now - _press.DownAt < SplashLength || now - SecondRingAt < SplashLength);
 
     // One ring of the splash, `age` seconds after it started: it leaves the edge and spreads 2 to 9 DIP out, fading as it goes.
     private void Ring(DrawingContext dc, Rect r, double radius, bool ellipse, double age, double alpha)
@@ -206,17 +202,6 @@ internal sealed partial class FxSurface
         double e = MotionCurve.Ease(age / SplashLength, Steps), spread = Px(2 + 7 * e);
         var ring = r; ring.Inflate(spread, spread);
         Edge(dc, _mainLine, ring, radius + spread, ellipse, alpha * (1 - e));
-    }
-
-    private void DrawPulse(DrawingContext dc, FxMark mark, double age)
-    {
-        double d = CollapseFx.AberrationAt(age, _motion.Aberration, 1), a = Math.Sin(Math.PI * age / CollapseFx.AberrationLength) * .8;
-        if (d <= .05 || a <= .001) return;
-        var r = mark.Box;
-        var left = r; left.Offset(-d, 0);
-        var right = r; right.Offset(d, 0);
-        Edge(dc, _mainLine, left, mark.Radius, mark.Ellipse, a);
-        Edge(dc, _secondLine, right, mark.Radius, mark.Ellipse, a);
     }
 
     private void DrawMark(DrawingContext dc, FxMark mark, Rect r, double radius, double h, in PressFrame press)

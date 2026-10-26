@@ -41,7 +41,7 @@ try
     ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");
     ThemeMotionTests.Run(Check);
     MotionUpgradeTests.Run(Check);
-    CollapseFxTests.Run(Check);
+    MotionEffectsTests.Run(Check);
     DatePickerMotionTests.Run(Check);
     InteractionFxTests.Run(Check);
     MotionReviewTests.Run(Check);

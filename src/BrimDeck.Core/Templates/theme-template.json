@@ -156,12 +156,6 @@
     "pace": 1,                      // 0.6 to 1.6: scales the pace of hover, press and focus feedback
     "steps": 0,                     // 0 (smooth) or 2 to 8: moves in that many hard steps, for a mechanical feel
     "spring": "default",            // firm, default, jelly: how much the springs give (damping 0.85, 0.70, 0.50), always at 16 rad/s
-    "collapse": "fade",             // fade, glitch, foam, genie: how the content leaves as a notice or the panel closes, as
-                                    // a texture inside the island's usual morph (glitch: bands sliding and dropping out, ~420 ms;
-                                    // foam: a noise dissolve with a foam edge, ~480 ms; genie: drawn into the island, ~450 ms)
-    "aberration": 0,                // 0 (none) or 1 to 1.5: the main and second colors pulled apart by this many DIP at a
-                                    // completed press's edges, for at most 120 ms
-    "collapseMs": 0,                // 0 (the style's own) or 200 to 630: how long the closing takes with a texture
     "particleMs": 0,                // 0 (the style's own) or 300 to 2400: how long the particles a press leaves live
     "sliceMs": 0,                   // 0 (about 70 ms) or 50 to 160: how long lock's glitch slice holds
     "scanMs": 0,                    // 0 (about 140 ms) or 100 to 400: how long lock's scan line takes to pass

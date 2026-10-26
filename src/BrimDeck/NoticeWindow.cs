@@ -31,8 +31,6 @@ internal sealed partial class NoticeWindow : Window
     private readonly Canvas _stage = new() { Background = null };
     private readonly NoticeSurface _glow = new() { IsHitTestVisible = false };
     private readonly NoticeSurface _surface = new() { Cursor = Cursors.Hand, Focusable = false };
-    // The theme's collapse texture on the content as the notice goes back (CollapseTexture), in the content's own place.
-    private readonly CollapseTexture _collapse = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly Grid _content = new();
     private readonly Grid _toast = new() { Opacity = 0 }, _detail = new() { Opacity = 0, Visibility = Visibility.Collapsed };
     private readonly PromptTimer _hoverOpen, _leaveClose;
@@ -72,7 +70,7 @@ internal sealed partial class NoticeWindow : Window
         Content = _stage;
         _stage.Children.Add(_glow); _stage.Children.Add(_surface);
         _surface.Child = _content;
-        _content.Children.Add(_toast); _content.Children.Add(_detail); _content.Children.Add(_collapse);
+        _content.Children.Add(_toast); _content.Children.Add(_detail);
         // The text sits on the theme's opaque surface, as the island's does, so ClearType stays on for it; over glass WPF chooses
         // (PanelTheme.ClearType, set when the window is dressed).
         RenderOptions.SetClearTypeHint(_content, ClearTypeHint.Enabled);
@@ -99,7 +97,7 @@ internal sealed partial class NoticeWindow : Window
         PreviewKeyDown += KeyPressed;
         Deactivated += (_, _) => { if (_keyboard) EndKeyboard(); };
         _app.Notices.Icons.Loaded += IconLoaded;
-        Closed += (_, _) => { if (_hiding) { CompositionTarget.Rendering -= BlankFrame; _hiding = false; } _collapse.Stop(); _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _announceLater?.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
+        Closed += (_, _) => { if (_hiding) { CompositionTarget.Rendering -= BlankFrame; _hiding = false; } _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _announceLater?.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
         // ui-3: moved to a monitor with another scale while it shows, the material is made again for that scale.
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
@@ -116,8 +114,6 @@ internal sealed partial class NoticeWindow : Window
     public void Present(AttentionItem item)
     {
         // Still on screen only to draw its empty frame before it hides (Finish): this notice starts afresh, from the island.
-        // A collapse texture still playing ends at once; the surface it lay on carries on as any notice going back does.
-        _collapse.Stop();
         bool continuing = IsVisible && !_hiding;
         StopHiding();
         _item = item; _leaving = false; _openFailed = false;
@@ -214,23 +210,8 @@ internal sealed partial class NoticeWindow : Window
         // It goes back as the panel closes, in three quarters of the time (motion-review C1), or in the keyboard's shorter time
         // for Escape (C4); content that leaves eases out (F13).
         double duration = NoticeMotion.ReturnLength(Duration(), _keyMove);
-        bool keyMove = _keyMove;
         _keyMove = false;
-        // The theme's collapse texture (CollapseTexture): the move is the theme's closing length and the content leaves as its
-        // texture instead of fading, while the surface goes back into the island exactly as it always does.
-        var motion = PanelTheme.Motion;
-        var shot = duration > 0 && !keyMove && CollapseTexture.CanPlay ? CollapseTexture.Capture(_content) : null;
-        if (shot is not null) duration = Math.Round(CollapseFx.Length(motion.Collapse, motion.Pace, motion.CollapseMs) * 1000);
         bool redirect = Turn(opening: false, _collapsed, ref duration);
-        if (shot is not null && !redirect)
-        {
-            SetImmediate(_toast, OpacityProperty, 0d); SetImmediate(_detail, OpacityProperty, 0d);
-            var (from, to) = CollapseFx.Track(motion.Collapse);
-            // The genie draws into the island's outline, centred where the content ends up.
-            double w = shot.PixelWidth / (shot.DpiX / 96), h = shot.PixelHeight / (shot.DpiY / 96);
-            var island = new Rect((w - _collapsed.Rect.Width) / 2, (h - _collapsed.Rect.Height) / 2, _collapsed.Rect.Width, _collapsed.Rect.Height);
-            _collapse.Begin(shot, duration / 1000 * (to - from), island);
-        }
         Animate(_toast, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
         Animate(_glow, OpacityProperty, Indicator ? 0 : 1, duration, NoticeMotion.ReturnGlow, Soft.Out);
@@ -299,7 +280,6 @@ internal sealed partial class NoticeWindow : Window
 
     private void Finish(bool reveal = false)
     {
-        _collapse.Stop();
         _leaving = false; _showingDetail = false; _detailFor = null;
         // The notice ended in the island's outline and material: the island shows again in the same frame as the window hides,
         // and its own content lands as it does when the panel closes.

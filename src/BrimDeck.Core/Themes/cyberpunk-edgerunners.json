@@ -94,7 +94,7 @@
   // glitch, torn into bands. No soft blooms.
   "motion": {
     "ambient": { "breathe": 6.5, "breatheDepth": 0.22, "drift": 11, "sweep": 16, "sweepOpacity": 0.07, "flicker": 41, "flickerDepth": 0.1 },
-    "hover": "brackets", "hoverStrength": 0.24, "press": "lock", "pressStrength": 0.3, "trail": 0.35, "particles": "rain", "spring": "firm", "collapse": "glitch", "collapseMs": 420, "particleMs": 800, "sliceMs": 120, "scanMs": 300, "focus": "brackets", "pace": 0.8, "steps": 3,
+    "hover": "brackets", "hoverStrength": 0.24, "press": "lock", "pressStrength": 0.3, "trail": 0.35, "particles": "rain", "spring": "firm", "particleMs": 800, "sliceMs": 120, "scanMs": 300, "focus": "brackets", "pace": 0.8, "steps": 3,
     "color": "accent", "secondary": "shadow", "highlight": "clock"
   }
 }

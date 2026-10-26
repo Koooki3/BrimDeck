@@ -74,11 +74,9 @@ public partial class MainWindow
                 // Likewise while the panel is still closing: the notice would take the island's final shape in one frame and the
                 // half-closed panel would vanish under it (N50-4).
                 if (HoldsNotices) { ShowAfterBoot(item); return; }
-                StopCollapse();
                 (_noticeWindow ??= new NoticeWindow(this, _app)).Present(item);
                 break;
             case AttentionKind.Quota when item.Payload is CompactAlertInfo alert:
-                StopCollapse();
                 PresentAlert(alert); break;
             case AttentionKind.Track:
                 _trackNoticeUntil = DateTimeOffset.UtcNow + item.Duration;

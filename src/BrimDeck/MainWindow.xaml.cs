@@ -571,16 +571,8 @@ public partial class MainWindow : Window
     public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
-        // The theme's collapse texture (CollapseTexture) photographs the open page before anything about it changes, without
-        // the pointer's marks and particles, which end with it (one thing moves at a time, ux #7); opening again ends a
-        // texture still playing at once.
-        bool closing = _expanded && !expanded;
-        if (closing) _fx?.EndParticles();
-        bool textured = closing && !instant && !keyboard && !_preview && _collapse is not null && CollapseTexture.CanPlay;
-        if (textured) _fx?.Reset();
-        var collapseShot = textured ? CollapseTexture.Capture(ExpandedContent) : null;
-        double collapseTop = collapseShot is null ? 0 : ExpandedContent.TransformToAncestor((Visual)Island.Child).TransformBounds(new Rect(ExpandedContent.RenderSize)).Y;
-        if (expanded) StopCollapse();
+        // What the presses left ends as the panel closes, rather than flying on over the closing (one thing moves at a time, ux #7).
+        if (_expanded && !expanded) _fx?.EndParticles();
         // Whatever this changes, the surface moves under its rounded clip; a collapse settles again below (SettleClip).
         Island.SettledClip = false; _clipSettle?.Stop();
         if (expanded && !_expanded) EndBoot();
@@ -668,11 +660,6 @@ public partial class MainWindow : Window
         // on, on the same drawer curve, rather than holding for the closing's delay and starting a whole new move.
         int carried = !turning && !expanded ? _turn.Carried(now, false, duration) : 0;
         if (carried > 0) duration = carried;
-        // With a collapse texture the closing takes the theme's length (CollapseFx.Length, the panel's own closing family); the
-        // outline morphs on its usual tracks all the same.
-        var motion = PanelTheme.Motion;
-        if (collapseShot is not null && (!turning || duration <= 0 || redirect || carried > 0)) collapseShot = null;
-        if (collapseShot is not null) duration = (int)Math.Round(CollapseFx.Length(motion.Collapse, motion.Pace, motion.CollapseMs) * 1000);
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
@@ -739,17 +726,6 @@ public partial class MainWindow : Window
         // (GlassBackdrop.Lag), so opening, the content starts no earlier than LiquidLeadMs in (live check 10-26, LG-02).
         if (expanded && duration > 0 && LiquidTheme.Shown(_glass)) content = content with { Start = Math.Max(content.Start, Math.Min(.5, LiquidLeadMs / duration)) };
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
-        if (collapseShot is not null)
-        {
-            // The page leaves as the theme's texture, in its own place, while the outline morphs into the closed shape around it;
-            // the genie draws it into that shape, centred as the page is.
-            SetImmediate(ExpandedContent, OpacityProperty, 0d);
-            ExpandedContent.Visibility = Visibility.Hidden;
-            var (from, to) = CollapseFx.Track(motion.Collapse);
-            double w = collapseShot.PixelWidth / (collapseShot.DpiX / 96);
-            _collapse!.Margin = new Thickness(0, collapseTop, 0, 0);
-            _collapse.Begin(collapseShot, duration / 1000.0 * (to - from), new Rect((w - width) / 2, -collapseTop, width, height));
-        }
         // motion-review F13: what leaves eases out as what arrives does; InOut is for what changes in place.
         Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, easeOut);
         Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, easeOut);

@@ -99,13 +99,6 @@ internal static class Program
         // Automatic liquid glass's decision over video-like backdrops, in both Windows app modes, against the round-11 decision:
         // --liquid-looks.
         if (args.Length > 0 && args[0] == "--liquid-looks") return LiquidLooks.Run();
-        // The collapse pictures (CollapsePreview): --collapse <output folder> [--themes id,id,...].
-        if (args.Length > 1 && args[0] == "--collapse")
-        {
-            int at = Array.IndexOf(args, "--themes"), step = Array.IndexOf(args, "--step");
-            if (step > 0 && step + 1 < args.Length) CollapsePreview.FrameStep = double.Parse(args[step + 1], CultureInfo.InvariantCulture) / 1000;
-            return CollapsePreview.Run(args[1], at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null) == 0 ? 0 : 1;
-        }
         // The devices page in every theme (DevicesSheet): --devices <output folder>; the devices on this PC, read only: --devices-probe.
         if (args.Length > 1 && args[0] == "--devices") return DevicesSheet.Run(args[1]);
         if (args.Length > 0 && args[0] == "--devices-cost") return DevicesSheet.Cost(args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 60);
@@ -649,8 +642,7 @@ internal static class Program
     private static readonly (string Id, string Json)[] UpgradeThemes =
     [
         ("upgrade-splash-bubble", """{ "base": "island-holiday", "motion": { "press": "splash", "particles": "bubble", "trail": 0.4 } }"""),
-        ("upgrade-rain-pulse", """{ "base": "cyberpunk-edgerunners", "motion": { "particles": "rain", "trail": 0.4, "aberration": 1.25, "highlight": "#B0D0F0" } }"""),
-        ("upgrade-glass-pulse", """{ "base": "liquid-glass-dark", "motion": { "aberration": 1.5 } }"""),
+        ("upgrade-rain", """{ "base": "cyberpunk-edgerunners", "motion": { "particles": "rain", "trail": 0.4, "highlight": "#B0D0F0" } }"""),
         // The built-in theme itself, as it ships.
         ("cyberpunk-edgerunners", ""),
         ("island-holiday", ""),
