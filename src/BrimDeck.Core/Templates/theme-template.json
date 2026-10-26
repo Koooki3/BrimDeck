@@ -38,7 +38,7 @@
     "clock": "#F5F5F7",             // The clock when its color is "Theme default" ("default" below). At least 4.5:1.
     "equalizer": "#9EEBEBF5",       // The equalizer when it does not follow the cover. At least 3:1.
     "hairline": "#17FFFFFF",        // Dividers between columns and rows.
-    "track": "#1FFFFFFF",           // The empty part of a quota bar.
+    "track": "#32FFFFFF",           // The empty part of a quota bar; keep it visible on the surface while the bar on it stands 3:1.
     "ringTrack": "#29FFFFFF",       // The empty part of a quota ring.
     "fill": "#12FFFFFF",            // The background of joined switches.
     "fillSelected": "#24FFFFFF",    // The chosen segment.

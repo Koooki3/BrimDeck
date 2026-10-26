@@ -65,6 +65,9 @@ internal static class UI
     private static readonly CustomPopupPlacementCallback Leftward = (popup, target, _) =>
         [new CustomPopupPlacement(new Point(target.Width - popup.Width, target.Height + ToolTipGap), PopupPrimaryAxis.Horizontal)];
     public static ToolTip LeftwardToolTip(object content) => new() { Content = content, Placement = PlacementMode.Custom, CustomPopupPlacementCallback = Leftward };
+    // The width a text block's text takes on one line, in DIPs.
+    public static double TextWidth(TextBlock block) => new FormattedText(block.Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+        new Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch), block.FontSize, System.Windows.Media.Brushes.Black, 1).WidthIncludingTrailingWhitespace;
     // A single line whose height is exactly the given value, independent of the font's own line box.
     public static TextBlock Fixed(string text, double size, double lineHeight, string color, FontWeight? weight = null, FontFamily? font = null)
     {

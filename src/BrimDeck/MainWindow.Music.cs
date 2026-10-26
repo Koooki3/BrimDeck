@@ -508,13 +508,18 @@ public partial class MainWindow
             MusicContent.Children.Clear(); _musicControls = null; _musicFullControl = null; _musicSmtcHint = null; _musicControlButtons.Clear();
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = Math.Max(200, w - 60) };
             var icon = MusicVisuals.Icon("music", 26); icon.Margin = new Thickness(0, 0, 0, 8); empty.Children.Add(icon);
-            empty.Children.Add(UI.Fixed(Loc.T("没有正在播放的媒体", "Nothing is playing"), 14, 22, UI.Secondary));
+            // The whole block is centred: the title, the hint and the button (V-02).
+            var heading = UI.Fixed(Loc.T("没有正在播放的媒体", "Nothing is playing"), 14, 22, UI.Secondary); heading.HorizontalAlignment = HorizontalAlignment.Center;
+            empty.Children.Add(heading);
             // Why the page is empty, and where to go next: the players BrimDeck follows are chosen in the settings.
             var hint = UI.Line(_media?.Error ?? Loc.T("打开网易云音乐、QQ 音乐、Spotify 等播放器并开始播放后，会在这里显示。", "Start playing in NetEase Cloud Music, QQ Music, Spotify or another player and it shows here."),
                 11.5, UI.Tertiary);
-            hint.TextWrapping = TextWrapping.Wrap; hint.TextAlignment = TextAlignment.Center; empty.Children.Add(hint);
-            var players = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2), Height = 26,
-                HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0), Content = Loc.T("选择播放器", "Choose players") };
+            hint.TextWrapping = TextWrapping.Wrap; hint.TextAlignment = TextAlignment.Center; hint.HorizontalAlignment = HorizontalAlignment.Center;
+            // A hint that wraps is cut into lines of even length, so its last line is never a stray word or two (V-02).
+            double room = Math.Min(360, Math.Max(200, w - 60)), whole = UI.TextWidth(hint);
+            if (whole > room) hint.MaxWidth = Math.Ceiling(whole / Math.Ceiling(whole / room)) + 14;
+            empty.Children.Add(hint);
+            var players = EmptyAction(Loc.T("选择播放器", "Choose players"), 26); players.HorizontalAlignment = HorizontalAlignment.Center; players.Margin = new Thickness(0, 8, 0, 0);
             players.Click += (_, _) => _app.OpenSettings(SettingsWindow.PlayersPage);
             empty.Children.Add(players);
             MusicContent.Children.Add(empty); _handover.Release(empty, motion); return;

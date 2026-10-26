@@ -370,8 +370,7 @@ public partial class MainWindow
             var detail = UI.Text(first ? Loc.T("首次同步中，完成后自动显示。", "Syncing for the first time; it shows here once done.") : snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
             detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.MaxHeight = 34; detail.TextTrimming = TextTrimming.CharacterEllipsis;
             status.Children.Add(detail);
-            var sync = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2), Height = 24,
-                HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-6, 4, 0, 0), Content = Loc.T("立即同步", "Sync now") };
+            var sync = EmptyAction(Loc.T("立即同步", "Sync now"), 24); sync.HorizontalAlignment = HorizontalAlignment.Left; sync.Margin = new Thickness(0, 6, 0, 0);
             AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
             sync.Click += (_, _) => _ = RefreshAsync();
             status.Children.Add(sync); body = status;
@@ -565,6 +564,16 @@ public partial class MainWindow
         return lines.Count > 0 ? string.Join("\n", lines) : snapshot.LiveQuota || snapshot.Metrics.Count > 0 ? null : Loc.T("尚未获取配额", "Quota not read yet");
     }
     private static string MetricLabel(UsageMetric metric) => metric.Kind == MetricKind.Text ? metric.Label : UI.QuotaLabel(new Quota(metric.Label, 0, null, metric.Window));
+
+    // An empty state's way forward ("立即同步", "选择播放器"): a text button on the theme's fill with 8 DIP corners, as the notice
+    // page's own buttons are, so it reads as a button rather than as text (V-01).
+    private Button EmptyAction(string text, double height)
+    {
+        var button = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(12, 2, 12, 2), Height = height,
+            Content = text, Background = UI.Brush(UI.Fill) };
+        button.Loaded += (_, _) => { if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelTheme.Corner(8)); };
+        return button;
+    }
 
     // Stacked: caption | tokens ... cost, so both rows line up. Grouped (side by side): caption, tokens and cost close together.
     private FrameworkElement TotalRow(AppEntry entry, ProviderSnapshot snapshot, string label, int days, Layout layout, double captionWidth, bool grouped = false)
