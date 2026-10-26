@@ -153,6 +153,8 @@ public partial class App : Application
     {
         _offscreen = true;
         AppInstance.ForTest();
+        // A folder of its own for what the notices keep next to the settings (their banner ledger): never the user's.
+        Store = new SettingsStore(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-offscreen-" + Environment.ProcessId));
         Settings = settings;
         UseLanguage();
         Notices = new NoticeCenter(this);
