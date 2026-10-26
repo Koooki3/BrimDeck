@@ -355,7 +355,28 @@ internal static partial class LiquidPages
             }
         if (n < 100) { Console.WriteLine($"NOTE: {name}: body: too little of it between the text ({n} pixels)"); return; }
         double mean = sum / n, std = Math.Sqrt(Math.Max(0, squares / n - mean * mean));
-        Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: body: {n * 100.0 / (w * h):0}% of the panel, mean luma {mean:0.0}, std {std:0.0}, chroma kept {chroma / Math.Max(back, 1):0.00}"));
+        // Blotchiness (round 14): the glass alone's luma at middle frequencies (a box of 8 DIPs less one of 32), its std over
+        // the panel inside 20 DIPs of its edge: patches of cover round the text show here, the backdrop's frosted forms too.
+        var lum = new double[w * h];
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) lum[y * w + x] = Lightness(under, ((gy + y) * dw + gx + x) * 4);
+        var integral = new double[(w + 1) * (h + 1)];
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) integral[(y + 1) * (w + 1) + x + 1] = lum[y * w + x] + integral[y * (w + 1) + x + 1] + integral[(y + 1) * (w + 1) + x] - integral[y * (w + 1) + x];
+        double Box(int x, int y, int r)
+        {
+            int x0 = Math.Max(0, x - r), x1 = Math.Min(w, x + r + 1), y0 = Math.Max(0, y - r), y1 = Math.Min(h, y + r + 1);
+            return (integral[y1 * (w + 1) + x1] - integral[y0 * (w + 1) + x1] - integral[y1 * (w + 1) + x0] + integral[y0 * (w + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+        }
+        int fine = (int)Math.Round(4 * Scale), coarse = (int)Math.Round(16 * Scale), inset = (int)Math.Round(20 * Scale);
+        double bs = 0, bq = 0; int bn = 0;
+        for (int y = inset; y < h - inset; y += 2)
+            for (int x = inset; x < w - inset; x += 2)
+            {
+                if (glass[(y * w + x) * 4 + 3] < 250) continue;
+                double v = Box(x, y, fine) - Box(x, y, coarse);
+                bs += v; bq += v * v; bn++;
+            }
+        double blotch = bn == 0 ? 0 : Math.Sqrt(Math.Max(0, bq / bn - bs / bn * (bs / bn)));
+        Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: body: {n * 100.0 / (w * h):0}% of the panel, mean luma {mean:0.0}, std {std:0.0}, chroma kept {chroma / Math.Max(back, 1):0.00}, blotchiness {blotch:0.00}"));
     }
 
     // Premultiplied source over an opaque destination.

@@ -137,6 +137,12 @@ public partial class MainWindow
             // Round 13b: only the text and the glyphs themselves - every run of glyphs a visual draws (text blocks and the pages'
             // drawn text alike, read off the visual's own drawing) and the icons (paths) - so the glass between and around
             // them keeps its translucency. Covers, plates, tracks and bars are left to the glass.
+            // A text block as a whole (a line or a paragraph of text: one block of density, round 14).
+            if (node is TextBlock { ActualWidth: > 0, ActualHeight: > 0 } block)
+            {
+                Add(block.TransformToAncestor(Island).TransformBounds(new Rect(block.RenderSize)));
+                return;
+            }
             if (node is Visual visual)
             {
                 if (node is System.Windows.Shapes.Path { ActualWidth: > 0, ActualHeight: > 0 } icon)

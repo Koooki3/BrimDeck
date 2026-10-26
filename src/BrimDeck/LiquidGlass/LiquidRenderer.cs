@@ -302,7 +302,27 @@ internal sealed class LiquidRenderer : IDisposable
     private ID3D11ShaderResourceView? _textMaskView;
     private (int Cols, int Rows) _textMaskSize;
     private (float[]? Rects, int Width, int Height, float Tile) _textMaskFor;
-    private byte[] _textCells = [];
+    private byte[] _textCells = [], _textPair = [];
+    private float[] _textField = [], _textSpare = [];
+    private const int TextBlurCells = 7;
+    // A box blur of TextBlurCells each side along rows (horizontal) or columns, from one grid into another.
+    private static void Box(float[] from, float[] to, int cols, int rows, bool horizontal)
+    {
+        int n = horizontal ? cols : rows, lines = horizontal ? rows : cols, span = 2 * TextBlurCells + 1;
+        for (int line = 0; line < lines; line++)
+        {
+            float sum = 0;
+            int At(int k) => horizontal ? line * cols + Math.Clamp(k, 0, n - 1) : Math.Clamp(k, 0, n - 1) * cols + line;
+            for (int k = -TextBlurCells; k <= TextBlurCells; k++) sum += k < 0 || k >= n ? 0 : from[At(k)];
+            for (int k = 0; k < n; k++)
+            {
+                to[At(k)] = sum / span;
+                int add = k + TextBlurCells + 1, drop = k - TextBlurCells;
+                if (add < n) sum += from[At(add)];
+                if (drop >= 0) sum -= from[At(drop)];
+            }
+        }
+    }
     private (float Tile, float InverseX, float InverseY, float On) _textInfo;
     private ID3D11ShaderResourceView? TextMask(in LiquidFrame f, float scale)
     {
@@ -312,7 +332,7 @@ internal sealed class LiquidRenderer : IDisposable
         if (_textMask is null || _textMaskSize != (cols, rows))
         {
             _textMaskView?.Dispose(); _textMask?.Dispose();
-            _textMask = _device.CreateTexture2D(new Texture2DDescription(Format.R8_UNorm, (uint)cols, (uint)rows, 1, 1, BindFlags.ShaderResource));
+            _textMask = _device.CreateTexture2D(new Texture2DDescription(Format.R8G8_UNorm, (uint)cols, (uint)rows, 1, 1, BindFlags.ShaderResource));
             _textMaskView = _device.CreateShaderResourceView(_textMask);
             _textMaskSize = (cols, rows);
             _textMaskFor = default;
@@ -320,7 +340,7 @@ internal sealed class LiquidRenderer : IDisposable
         if (_textMaskFor != (rects, f.Width, f.Height, tile))
         {
             _textMaskFor = (rects, f.Width, f.Height, tile);
-            if (_textCells.Length < cols * rows) _textCells = new byte[cols * rows];
+            if (_textCells.Length < cols * rows) { _textCells = new byte[cols * rows]; _textField = new float[cols * rows]; _textSpare = new float[cols * rows]; _textPair = new byte[cols * rows * 2]; }
             Array.Clear(_textCells, 0, cols * rows);
             for (int i = 0; i + 3 < rects.Length; i += 4)
             {
@@ -335,7 +355,13 @@ internal sealed class LiquidRenderer : IDisposable
                         cell = (byte)Math.Min(255, cell + cover);
                     }
             }
-            _context.UpdateSubresource(_textCells, _textMask, 0, (uint)cols, 0);
+            // Round 14: the density field. The cells' coverage blurred wide (two box passes of TextBlurCells each way: about a
+            // Gaussian of 23 DIPs) into a low-frequency field (red), so the glass grows denser smoothly over a text block, not in
+            // patches round each glyph; the cells themselves (green) for the little glyph-level help still wanted.
+            for (int i = 0; i < cols * rows; i++) _textField[i] = _textCells[i] / 255f;
+            for (int pass = 0; pass < 2; pass++) { Box(_textField, _textSpare, cols, rows, true); Box(_textSpare, _textField, cols, rows, false); }
+            for (int i = 0; i < cols * rows; i++) { _textPair[i * 2] = (byte)Math.Clamp((int)MathF.Round(_textField[i] * 255), 0, 255); _textPair[i * 2 + 1] = _textCells[i]; }
+            _context.UpdateSubresource(_textPair, _textMask, 0, (uint)cols * 2, 0);
         }
         _textInfo = (tile, 1f / cols, 1f / rows, 1);
         return _textMaskView;
