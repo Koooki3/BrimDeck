@@ -55,7 +55,7 @@ internal sealed class MonitorView : Grid
     private readonly bool _temperatures;
     private readonly Grid _readings = new();
     // How far the readings stop above the page's foot, so their last line ends level with the list's last row (AlignFoot).
-    private Eased _foot;
+    private readonly FootAlignment _foot = new();
     private readonly ProcessListView? _list;
     private readonly Canvas _overlay = new() { IsHitTestVisible = false };
     private ProcessCard? _card;
@@ -183,20 +183,19 @@ internal sealed class MonitorView : Grid
     }
 
     // The list beside the readings fills whole rows from its top, so its last row usually ends above the page's foot; the readings
-    // stop there too, their graph giving up the difference. When a resize adds or takes a row the readings' foot eases to the
-    // list's new one, as the page's values ease.
+    // stop there too, their graph giving up the difference. During a resize the foot holds and the readings stretch with it; once
+    // the size settles the foot eases to the list's, as the page's values ease.
     private void AlignFoot()
     {
         if (_list is null || ActualHeight <= 0) return;
         var (rows, _) = MonitorLayout.ListGrid(_list.ActualWidth, ActualHeight, _layout.RowHeight);
-        double foot = rows > 0 ? Math.Max(0, ActualHeight - MonitorLayout.ListHead - rows * _layout.RowHeight) : 0;
-        // The first size the page gets is taken at once.
-        bool animate = _motion && _aligned; _aligned = true;
-        if (_foot.Set(foot, animate)) Motion.Start(this, now => { PlaceFoot(now); return _foot.Moving(now); });
-        else PlaceFoot(Eased.Now);
+        double now = Eased.Now;
+        // While the page is being resized the foot holds, and follows the list once the size settles (FootAlignment).
+        _foot.Resize(rows > 0 ? ActualHeight - MonitorLayout.ListHead - rows * _layout.RowHeight : 0, now);
+        PlaceFoot(now);
+        Motion.Start(this, frame => { bool moving = _foot.Step(frame, _motion); PlaceFoot(frame); return moving; });
     }
-    private bool _aligned;
-    private void PlaceFoot(double now) => _readings.Margin = new Thickness(0, 0, 0, Math.Round(Math.Max(0, _foot.At(now))));
+    private void PlaceFoot(double now) => _readings.Margin = new Thickness(0, 0, 0, Math.Round(_foot.At(now)));
 
     public void Update(MonitorSnapshot snapshot, bool motion)
     {
@@ -302,4 +301,36 @@ internal sealed class MonitorView : Grid
     }
 
     public void SetSort(ProcessSort sort) => _list?.SetSort(sort, _motion);
+}
+
+// The monitor page giving way to a new build of itself (a resize across a layout step, a sensor found or missing, a new main
+// gauge): the new page fades in while every page it replaces fades out from where it is, so their opacities always add up to one
+// and the page never dims, even when a drag crosses several steps in quick succession. Nothing jumps to its new place in one
+// frame; the pages that leave take no input. Without animations the new page simply replaces them.
+internal static class MonitorCrossfade
+{
+    private const double Seconds = Eased.Seconds * .6;
+
+    public static void Swap(Panel host, FrameworkElement next, FrameworkElement old, bool motion)
+    {
+        if (!motion || !host.Children.Contains(old)) { host.Children.Clear(); host.Children.Add(next); return; }
+        var leaving = host.Children.OfType<UIElement>().Select(child => (Element: child, From: child.Opacity)).ToList();
+        foreach (var (element, _) in leaving) { element.IsHitTestVisible = false; element.BeginAnimation(UIElement.OpacityProperty, null); }
+        // The opacities the leaving pages had, after any animation of their own was taken off.
+        leaving = [.. leaving.Select(page => (page.Element, page.Element.Opacity))];
+        next.Opacity = 0;
+        host.Children.Add(next);
+        var fade = new Eased(0, Seconds);
+        fade.Set(1, true);
+        Motion.Start(host, now =>
+        {
+            double t = Math.Clamp(fade.At(now), 0, 1);
+            next.Opacity = t;
+            foreach (var (element, from) in leaving) element.Opacity = from * (1 - t);
+            if (fade.Moving(now)) return true;
+            next.Opacity = 1;
+            foreach (var (element, _) in leaving) host.Children.Remove(element);
+            return false;
+        });
+    }
 }

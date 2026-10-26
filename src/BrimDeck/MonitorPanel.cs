@@ -75,10 +75,13 @@ public partial class MainWindow
 
     // The page's bottom margin for a page of this height; its sides are the header's inset.
     private static double MonitorBottom(double height) => height < 170 ? 10 : 16;
+    // The step the page is built for, kept while a resize stays within MonitorLayout.Hysteresis of it.
+    private MonitorLayout? _monitorLayout;
     private MonitorLayout CurrentMonitorLayout()
     {
         double height = ContentCanvas.Height;
-        return MonitorLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), Settings.MonitorProcesses, MonitorSensors().Drives);
+        return MonitorLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), Settings.MonitorProcesses, MonitorSensors().Drives,
+            _monitorView is not null ? _monitorLayout : null);
     }
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
@@ -104,6 +107,9 @@ public partial class MainWindow
 
     private void RenderMonitor()
     {
+        // A page on screen that is built again (a resize across a step, a sensor found or missing, a new main gauge) gives way to
+        // the new one with a crossfade; a page opened from another one appears as it always has.
+        bool shown = MonitorContent.Visibility == Visibility.Visible && _monitorView is not null && MonitorContent.Children.Contains(_monitorView);
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
@@ -118,17 +124,23 @@ public partial class MainWindow
         var key = MonitorKey();
         bool fade = _monitorFade; _monitorFade = false;
         if (_monitorView is not null && key == _monitorKey && MonitorContent.Children.Contains(_monitorView)) return;
-        _monitorKey = key; _monitorSensors = BuiltSensors();
+        var layout = CurrentMonitorLayout();
+        _monitorKey = key; _monitorLayout = layout; _monitorSensors = BuiltSensors();
         // The list being replaced may have been under the pointer; its leave event never comes.
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
-        _monitorView = new MonitorView(CurrentMonitorLayout(), MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
+        var old = shown ? _monitorView : null;
+        old?.CloseCard();
+        _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; },
             Settings.MonitorTemperatures, _monitorSensors.Small);
-        MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
-        // A new main gauge, asked for on the page, arrives with a short fade instead of a cut.
-        if (fade && MonitorMotion)
-            _monitorView.BeginAnimation(OpacityProperty, Soft.Fade(.15, 1, Soft.Short));
+        if (old is not null) MonitorCrossfade.Swap(MonitorContent, _monitorView, old, MonitorMotion);
+        else
+        {
+            MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
+            // A new main gauge, asked for on the page, arrives with a short fade instead of a cut.
+            if (fade && MonitorMotion) _monitorView.BeginAnimation(OpacityProperty, Soft.Fade(.15, 1, Soft.Short));
+        }
     }
 
     private (double Width, double Height, IReadOnlyList<ProviderSnapshot> Snapshots, DeckSettings Settings, PanelHeader Header)? _usageHeader;
