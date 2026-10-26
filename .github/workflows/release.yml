@@ -58,10 +58,12 @@ jobs:
         run: |
           dotnet run --project tests/BrimDeck.Tests -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
-      - name: Package installer and update feed
+      - name: Package installer, portable zip and update feed
         run: ./scripts/Publish-Release.ps1 -Version $env:RELEASE_VERSION
       - name: Verify install, in-app update and uninstall
         run: ./scripts/Test-AppUpdate.ps1
+      - name: Verify in-app update of a portable copy
+        run: ./scripts/Test-PortableUpdate.ps1
       - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:

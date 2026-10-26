@@ -34,6 +34,7 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
     public async Task<ProviderResult> RunAsync()
     {
         if (entry.QuotaSource == ProviderId.KimiApi) return await RunKimiAsync();
+        if (entry.QuotaSource == ProviderId.OpenCodeGo) return await RunOpenCodeGoAsync();
         using var engine = new Engine(options =>
         {
             options.ExperimentalFeatures = ExperimentalFeature.TaskInterop;
@@ -188,6 +189,31 @@ internal sealed class ScriptSession(HttpClient http, AppEntry entry, string secr
         var metrics = KimiUsage.Usages(root, global ? "USD" : "CNY");
         if (metrics.Count == 0) throw new InvalidDataException(t("这个密钥所属的账户没有 Kimi Code 会员套餐额度。", "The account of this key has no Kimi Code plan quota."));
         return new(metrics, KimiUsage.Plan(me), "plan", [], []) { Source = KimiUsage.Source(ProviderCatalog.Name(ProviderId.KimiApi), global) };
+    }
+    // An OpenCode Console API key (oc_sk_…) reads the same Go allowance as OpenCode's own sign-in, read by OpenCodeUsage. A key
+    // belongs to one workspace, so none is named. opencode.ai sits behind Cloudflare, which refuses requests without a user agent
+    // it accepts; its refusals are told apart from OpenCode's own 403, which means the workspace has no Go plan.
+    private async Task<ProviderResult> RunOpenCodeGoAsync()
+    {
+        string t(string zh, string en) => Loc.T(zh, en);
+        var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + secret, ["Accept"] = "application/json", ["User-Agent"] = "BrimDeck/0.1" };
+        var url = OpenCodeUsage.UsageAddress(OpenCodeUsage.DefaultServer)!.AbsoluteUri;
+        using var reply = JsonDocument.Parse(await SendAsync("GET", JsonSerializer.Serialize(new { url, options = new { headers } })));
+        if (reply.RootElement.Get("error").Text() is { Length: > 0 } error) throw new InvalidDataException(error);
+        int status = (int)(reply.RootElement.Get("status").Number() ?? 0);
+        var body = reply.RootElement.Get("body").Text();
+        if (status == 401) throw new InvalidDataException(t("OpenCode 拒绝了这个 API 密钥，请确认它是在 OpenCode Console 创建的密钥（oc_sk_…），且未被撤销或过期。",
+            "OpenCode rejected this API key. Check that it was created in OpenCode Console (oc_sk_…) and has not been revoked or expired."));
+        if (status == 403 && !body.Contains("\"cloudflare_error\"", StringComparison.Ordinal))
+            throw new InvalidDataException(t("这个密钥所属的工作区没有订阅 OpenCode Go，或密钥没有读取用量的权限。", "The workspace of this key has no OpenCode Go plan, or the key may not read usage."));
+        if (status != 200) throw new HttpRequestException("HTTP " + status);
+        JsonElement root;
+        try { using var doc = JsonDocument.Parse(body); root = doc.RootElement.Clone(); }
+        catch (JsonException) { root = default; }
+        var quotas = OpenCodeUsage.Allowance(root, out bool limited);
+        if (quotas.Count == 0) throw new InvalidDataException(t("OpenCode 返回的 Go 用量无法识别。", "The Go usage OpenCode returned is not recognized."));
+        List<string> warnings = limited ? [t("已达到 OpenCode Go 的用量上限，重置前请求会被拒绝", "The OpenCode Go limit is reached; requests are refused until it resets.")] : [];
+        return new(quotas.Select(UsageMetric.FromQuota).ToList(), "", "plan", [], warnings) { Source = "OpenCode Go" };
     }
     private static string Error(string error) => JsonSerializer.Serialize(new { error });
     // pick: { path: "data", fields: ["a", "b"] } keeps only those fields of each object in the array at path; anything else becomes null.

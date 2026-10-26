@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 . (Join-Path $PSScriptRoot 'ReleaseNotes.ps1')
+. (Join-Path $PSScriptRoot 'PortablePackage.ps1')
 Push-Location $projectRoot
 try {
     if (!$ReleaseNotes) { $ReleaseNotes = "releases/$Version.md" }
@@ -22,13 +23,20 @@ try {
     & $iscc -qp "-dAppVersion=$Version" "-dSourceDir=$publishPath" "-o$outputPath" installer/BrimDeck.iss
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
     $installer = Get-Item -LiteralPath (Join-Path $outputPath "BrimDeck-$Version-Setup.exe")
-    # The app reads update.json from the latest release and verifies the installer against it before running it.
+    $portable = New-PortablePackage -SourceDir $publishPath -Destination (Join-Path $outputPath "BrimDeck-$Version-Portable-x64.zip")
+    # The app reads update.json from the latest release and verifies the package against it before using it. file, size and
+    # sha256 describe the installer, as every installed version expects; portable describes the zip for portable copies.
     $manifest = [ordered]@{
         version = $Version
         notes = Read-ReleaseNotes $notesPath
         file = $installer.Name
         size = $installer.Length
         sha256 = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        portable = [ordered]@{
+            file = $portable.Name
+            size = $portable.Length
+            sha256 = (Get-FileHash -LiteralPath $portable.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
     }
     [IO.File]::WriteAllText((Join-Path $outputPath 'update.json'), ($manifest | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
     Get-ChildItem -LiteralPath $outputPath -File | Where-Object Name -ne 'SHA256SUMS.txt' | ForEach-Object {
