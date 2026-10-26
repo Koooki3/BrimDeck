@@ -31,11 +31,31 @@ public sealed partial class SettingsWindow
             note.TextWrapping = TextWrapping.Wrap; Target.Children.Add(note);
             return;
         }
-        NoticeSources(center);
-        NoticeAppearanceSection(center);
-        NoticeBehavior(center);
-        NoticeRules(center);
-        NoticeHistorySection(center);
+        // A long page (SW-10): links at its top go to its sections.
+        var anchors = new WrapPanel { Margin = new Thickness(0, -6, 0, 22) };
+        Target.Children.Add(anchors);
+        void Section(string name, Action build)
+        {
+            int at = Target.Children.Count;
+            build();
+            if (at >= Target.Children.Count) return;
+            var start = Target.Children[at];
+            var link = ActionButton(name, () =>
+            {
+                // The section's title at the top of the view.
+                double y = start.TranslatePoint(new Point(), _content).Y;
+                _scroll.ScrollToVerticalOffset(Math.Max(0, y - 4));
+            });
+            link.Style = (Style)FindResource("SettingsLink"); link.Foreground = UI.Brush(_palette.Accent);
+            link.Margin = new Thickness(anchors.Children.Count == 0 ? 0 : 16, 0, 0, 0);
+            AutomationProperties.SetName(link, Loc.T("转到", "Go to ") + name);
+            anchors.Children.Add(link);
+        }
+        Section(Loc.T("来源", "Sources"), () => NoticeSources(center));
+        Section(Loc.T("外观", "Look"), () => NoticeAppearanceSection(center));
+        Section(Loc.T("提醒方式", "Behavior"), () => NoticeBehavior(center));
+        Section(Loc.T("应用", "Apps"), () => NoticeRules(center));
+        Section(Loc.T("历史与隐私", "History"), () => NoticeHistorySection(center));
         // The status lines follow the sources while the page is shown.
         var watcher = new Border();
         Action refresh = () => { foreach (var line in _noticeStatusLines.ToList()) line(); };
@@ -166,9 +186,24 @@ public sealed partial class SettingsWindow
     }
 
     // The time-kind applications this PC has (read only): their alarms, mail and reminders are recognized automatically.
+    // Whether the time notices' list of apps and the full list of apps are open; kept while the page is built again.
+    private bool _noticeTimeOpen, _noticeAppsOpen;
     private void NoticeTimeSection(NoticeCenter center)
     {
-        SectionTitle(Loc.T("时间类通知", "Time notices"), help: () => Loc.T("闹钟、计时器、邮件和日程提醒会自动识别：倒计时实时显示剩余时间，闹钟和日程提醒优先显示。下列应用的提醒来自 Windows 通知，需要开启“Windows 应用通知”；BrimDeck 不读取邮箱或日历内容。",
+        // The list of apps that are recognized is information, not settings: it stays folded behind one link (SW-10).
+        Border? list = null;
+        Button toggle = null!;
+        toggle = ActionButton("", () => { _noticeTimeOpen = !_noticeTimeOpen; ShowList(); });
+        toggle.Style = (Style)FindResource("SettingsLink"); toggle.Foreground = UI.Brush(_palette.Accent);
+        void ShowList()
+        {
+            toggle.Content = _noticeTimeOpen ? Loc.T("收起", "Hide") : Loc.T($"已识别 {NoticeTimeSources.All.Count + 1} 个来源 ›", $"{NoticeTimeSources.All.Count + 1} sources recognized ›");
+            AutomationProperties.SetName(toggle, Loc.T("时间类通知的来源", "Time notice sources"));
+            AutomationProperties.SetItemStatus(toggle, _noticeTimeOpen ? Loc.T("已展开", "Expanded") : Loc.T("已收起", "Collapsed"));
+            // Folded, the group keeps its room below so the next section starts where it always does after a group.
+            if (list is not null) { list.Child.Visibility = _noticeTimeOpen ? Visibility.Visible : Visibility.Collapsed; list.BorderThickness = new Thickness(0, _noticeTimeOpen ? 1 : 0, 0, 0); }
+        }
+        SectionTitle(Loc.T("时间类通知", "Time notices"), toggle, help: () => Loc.T("闹钟、计时器、邮件和日程提醒会自动识别：倒计时实时显示剩余时间，闹钟和日程提醒优先显示。下列应用的提醒来自 Windows 通知，需要开启“Windows 应用通知”；BrimDeck 不读取邮箱或日历内容。",
             "Alarms, timers, mail and event reminders are recognized automatically: countdowns show the time left as it runs, and alarms and event reminders come first. The apps below remind through Windows notifications, so \"Windows app notifications\" needs to be on; BrimDeck does not read mailboxes or calendars."));
         Note(Loc.T("闹钟、计时器和日程提醒会显示倒计时；需要开启“Windows 应用通知”。", "Alarms, timers and reminders show their countdown; \"Windows app notifications\" needs to be on."));
         var rows = new List<FrameworkElement>();
@@ -202,6 +237,8 @@ public sealed partial class SettingsWindow
             () => Loc.T("用 brim-notify 设倒计时、秒表或日程提醒（Windows 和 WSL 都可用），由 BrimDeck 自己计时：倒计时到点和日程开始前会提醒，可取消、停止或 5 分钟后再提醒。",
                 "Set a countdown, stopwatch or event reminder with brim-notify (on Windows and in WSL); BrimDeck keeps the time itself: it reminds when a countdown ends and before an event starts, and they can be cancelled, stopped or snoozed for 5 minutes.")));
         Group([.. rows]);
+        list = (Border)Target.Children[^1];
+        ShowList();
     }
 
     // on: the distribution's switch. The line only says whether notices arrive (SW-11): nothing while the switch is off, which says so.
@@ -325,7 +362,29 @@ public sealed partial class SettingsWindow
             var subtitle = TextLine(origin.Length > 0 ? origin : key, 11, TextTertiary);
             rows.Add(Row(name, controls, subtitle));
         }
+        // Past five apps the rest wait behind one link (SW-10), until it is opened for this visit of the page.
+        const int Shown = 5;
+        bool folded = rows.Count > Shown && !_noticeAppsOpen;
+        Button? more = null;
+        if (folded)
+        {
+            more = ActionButton(Loc.T($"显示其余 {rows.Count - Shown} 个应用", $"Show {rows.Count - Shown} more apps"), () => { });
+            more.Style = (Style)FindResource("SettingsLink"); more.Foreground = UI.Brush(_palette.Accent); more.HorizontalAlignment = HorizontalAlignment.Left;
+            rows.Add(new Border { Child = more, Padding = new Thickness(0, 12, 0, 12) });
+        }
         Group([.. rows]);
+        if (!folded || ((Border)Target.Children[^1]).Child is not StackPanel panel) return;
+        // The group's children are its rows with a divider before each one after the first.
+        var hidden = panel.Children.OfType<UIElement>().Skip(2 * Shown - 1).Take(2 * (rows.Count - 1 - Shown)).ToList();
+        foreach (var element in hidden) element.Visibility = Visibility.Collapsed;
+        more!.Click += (_, _) =>
+        {
+            _noticeAppsOpen = true;
+            foreach (var element in hidden) element.Visibility = Visibility.Visible;
+            ((FrameworkElement)more.Parent).Visibility = Visibility.Collapsed;
+            // The link goes away; the keyboard continues at the first app it showed.
+            Descendants(hidden[1]).OfType<UIElement>().FirstOrDefault(element => element.Focusable && System.Windows.Input.KeyboardNavigation.GetIsTabStop(element))?.Focus();
+        };
     }
 
     private void NoticeHistorySection(NoticeCenter center)
