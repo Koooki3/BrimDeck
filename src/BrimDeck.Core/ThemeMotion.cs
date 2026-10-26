@@ -21,14 +21,17 @@ public enum HoverFx { None, Reveal, Lift, Underline, Caret, Brackets, Sheen, Glo
 // release; sparkle: the tint deepens and a few stars twinkle on the corners on release; ember: a warm glow swells from the
 // middle and fireflies rise from the top on release; bevel: the block's bevel turns over, shaded on top and lit below, as a
 // pixel-art button pressed in; jelly: the light on the shape squashes wider and lower as a drop of glass pressed, shaded only
-// along its bottom so the top keeps its highlight, and springs back past its shape once on release (liquid glass).
-public enum PressFx { None, Shade, Sink, Indicator, Select, Lock, Sparkle, Ember, Bevel, Jelly }
+// along its bottom so the top keeps its highlight, and springs back past its shape once on release (liquid glass); splash: a
+// ring of water spreads out from the shape's own edge as it goes down, and a second, fainter one as a completed press lets
+// go (island holiday).
+public enum PressFx { None, Shade, Sink, Indicator, Select, Lock, Sparkle, Ember, Bevel, Jelly, Splash }
 // A short accent where keyboard focus lands, over the focus outline the control keeps: a ring, a soft glow, brackets or a caret.
 public enum FocusFx { None, Ring, Glow, Brackets, Caret }
 // What a completed press leaves for a moment, from the control's own edges (never where the pointer is): dust (soft motes),
 // pixel (small squares, as a contribution graph), spark (short dashes), star (four-point twinkles on the corners), firefly
-// (warm lights rising slowly from the top edge), neon (round motes in two neon colors).
-public enum ParticleFx { None, Dust, Pixel, Spark, Star, Firefly, Neon }
+// (warm lights rising slowly from the top edge), neon (round motes in two neon colors), rain (a few fine slanted streaks
+// falling from the bottom edge, as the night city's rain), bubble (three to five small bubbles rising from the bottom edge).
+public enum ParticleFx { None, Dust, Pixel, Spark, Star, Firefly, Neon, Rain, Bubble }
 
 // Style names in theme files, with the names of earlier versions read as the closest new style.
 public static class MotionStyles
@@ -41,6 +44,8 @@ public static class MotionStyles
     public static PressFx Press(string? value, PressFx fallback) => Parse(value, PressAliases, fallback);
     public static FocusFx Focus(string? value, FocusFx fallback) => Parse(value, FocusAliases, fallback);
     public static ParticleFx Particles(string? value, ParticleFx fallback) => Parse(value, null, fallback);
+    public static SpringTier Spring(string? value, SpringTier fallback) => Parse(value, null, fallback);
+    public static CollapseStyle Collapse(string? value, CollapseStyle fallback) => Parse(value, null, fallback);
 
     // A name only: numbers ("7") are not styles, whatever the enum would make of them.
     private static T Parse<T>(string? value, Dictionary<string, T>? aliases, T fallback) where T : struct, Enum
@@ -113,9 +118,13 @@ public readonly record struct AmbientFrame(double Rim, double Drift, double Swee
 // Highlight the color of the moment of a press (a scan line, an indicator, a selection, sparkles, fireflies).
 // ParticleStrength is how strongly the particles a completed press leaves show (0: none); the theme file calls it "trail".
 // Pace scales every interaction duration. Steps quantizes the motion into that many hard steps (0: smooth), for a mechanical
-// theme.
+// theme. Spring is how much the theme's springs give (SpringTier), always at the monitor page's frequency. Collapse is how a
+// notice or the open panel goes back into the island (CollapseFx); fade, the panel's own closing, unless the theme asks.
+// Aberration is a short chromatic pulse in DIP (0: none, otherwise 1 to 1.5): red and blue pulled apart at a completed press's
+// edges and through the first moments of a pixel collapse picture, for at most CollapseFx.AberrationLength.
 public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double HoverStrength, PressFx Press, double PressStrength,
-    double ParticleStrength, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent")
+    double ParticleStrength, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent",
+    SpringTier Spring = SpringTier.Default, CollapseStyle Collapse = CollapseStyle.Fade, double Aberration = 0)
 {
     public const string SystemAccent = "system";
     // Without a motion section anywhere in the base chain, nothing is drawn over the controls: they keep their own hover and
@@ -124,15 +133,15 @@ public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double Ho
     public bool AnyInteraction => Hover != HoverFx.None && HoverStrength > 0 || Press != PressFx.None && PressStrength > 0 || ParticleStrength > 0 && Particles != ParticleFx.None || Focus != FocusFx.None;
 
     // "system" follows Windows: its accent color and the quiet Fluent answers (a light theme's lift and sink stay), with no
-    // ambient light, particles or steps. The base theme's strengths and pace stay, and a base without answers (the default dark
-    // and light themes) keeps none.
+    // ambient light, particles, steps or collapse pictures. The base theme's strengths and pace stay, and a base without answers
+    // (the default dark and light themes) keeps none.
     public ThemeMotion ForSystem() => this with
     {
         Ambient = AmbientMotion.None,
         Hover = Hover switch { HoverFx.None => HoverFx.None, HoverFx.Lift => HoverFx.Lift, _ => HoverFx.Reveal },
         Press = Press switch { PressFx.None => PressFx.None, PressFx.Sink => PressFx.Sink, _ => PressFx.Shade },
-        ParticleStrength = 0, Particles = ParticleFx.None, Steps = 0, Focus = Focus == FocusFx.None ? FocusFx.None : FocusFx.Ring,
-        Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
+        ParticleStrength = 0, Particles = ParticleFx.None, Steps = 0, Focus = Focus == FocusFx.None ? FocusFx.None : FocusFx.Ring, Spring = SpringTier.Default,
+        Collapse = CollapseStyle.Fade, Aberration = 0, Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
     };
 
     // A motion color as the palette draws it: a key of the palette, a color, or the Windows accent (systemAccent; the palette's
@@ -159,6 +168,10 @@ public static class MotionSafety
     // Stepped motion: 0 is smooth, otherwise 2 to 8 steps. A step moves a mark; brightness changes that read as a flash (a glitch
     // slice, a scan line) are rationed by FlashBudget to PressFlashes in any second, however fast the clicks come.
     public const int StepsMin = 2, StepsMax = 8, PressFlashes = 2;
+
+    // The chromatic pulse: 0 (or less) turns it off; anything else lies within CollapseFx's 1 to 1.5 DIP.
+    public static double Aberration(double? value, double fallback)
+        => value is not { } v || !double.IsFinite(v) ? fallback : v <= 0 ? 0 : Math.Clamp(v, CollapseFx.AberrationMin, CollapseFx.AberrationMax);
 
     public static int Steps(int? value, int fallback) => value is not { } v ? fallback : v < StepsMin ? 0 : Math.Min(v, StepsMax);
 
@@ -217,9 +230,10 @@ public static class MotionSafety
 // Whether motion may run now. Animations, SystemAnimations and HighContrast make the app-wide rule (Soft.Enabled): BrimDeck's
 // setting, Windows' "animation effects", and no motion in high contrast. Ambient light is a loop, so it also needs the island
 // on screen, the session in front of the user with its display on, and power to spare; the answers to the pointer only need
-// motion to be allowed.
+// motion to be allowed. Covered: a maximized or full-screen window is in front on the island's monitor, where the user's
+// wallpaper pauses too (7c-6), so the loop stops there as well.
 public readonly record struct MotionConditions(bool Animations, bool SystemAnimations, bool HighContrast, bool Visible, bool Suppressed,
-    bool PoweringOff, bool Locked, bool BatterySaver, bool HasMaterial, bool DisplayOff = false)
+    bool PoweringOff, bool Locked, bool BatterySaver, bool HasMaterial, bool DisplayOff = false, bool Covered = false)
 {
     public bool MotionAllowed => Allowed(Animations, SystemAnimations, HighContrast);
     // The rule itself, for Soft.Enabled and these conditions alike.
@@ -230,7 +244,7 @@ public static class MotionGate
 {
     public static bool Interaction(in MotionConditions c, ThemeMotion motion) => c.MotionAllowed && motion.AnyInteraction;
     public static bool Ambient(in MotionConditions c, ThemeMotion motion) => c.MotionAllowed
-        && c.Visible && !c.Suppressed && !c.PoweringOff && !c.Locked && !c.DisplayOff && !c.BatterySaver && c.HasMaterial && motion.Ambient.Any;
+        && c.Visible && !c.Suppressed && !c.PoweringOff && !c.Locked && !c.DisplayOff && !c.BatterySaver && !c.Covered && c.HasMaterial && motion.Ambient.Any;
 }
 
 // The interaction durations in milliseconds, from the animation length chosen in settings (100 to 1000 ms, 360 by default) and
@@ -285,17 +299,23 @@ public static class MotionCurve
     public static double HoverOut(double t, int steps) { double e = Ease(t, steps); return e > 1 - 1e-9 ? 1 : e; }
 }
 
-// Rations what reads as a flash (a glitch slice, a scan line): at most MotionSafety.PressFlashes start in any one second,
-// however fast the clicks come; the others are left out and the press still answers with its steady marks.
+// Rations what reads as a flash (a glitch slice, a scan line, a collapse picture): at most MotionSafety.PressFlashes start in
+// any one second, however fast the clicks come; the others are left out and the press still answers with its steady marks,
+// a collapse with the default fade. Shared is the app's own budget, which every window's flashes also spend, so two windows
+// together stay within it; a budget made over it takes from both or from neither, and clearing it leaves Shared alone.
 public sealed class FlashBudget
 {
+    public static FlashBudget Shared { get; } = new();
     private readonly double[] _starts = new double[MotionSafety.PressFlashes];
+    private readonly FlashBudget? _shared;
     private int _next;
-    public FlashBudget() => Array.Fill(_starts, double.NegativeInfinity);
+    public FlashBudget(FlashBudget? shared = null) { _shared = shared; Array.Fill(_starts, double.NegativeInfinity); }
+    // The oldest of the last few starts must be over a second ago.
+    public bool Available(double now) => now - _starts[_next] >= 1 && (_shared?.Available(now) ?? true);
     public bool TryTake(double now)
     {
-        // The oldest of the last few starts must be over a second ago.
-        if (now - _starts[_next] < 1) return false;
+        if (!Available(now)) return false;
+        _shared?.TryTake(now);
         _starts[_next] = now;
         _next = (_next + 1) % _starts.Length;
         return true;
@@ -387,12 +407,12 @@ public sealed class PanelThemeMotion
     // none, reveal, lift, underline, caret, brackets, sheen, glow, lens, wave, slot (HoverFx); earlier names: spot, edge, neon
     public string? Hover { get; set; }
     public double? HoverStrength { get; set; }
-    // none, shade, sink, indicator, select, lock, sparkle, ember, bevel, jelly (PressFx); earlier names: pulse, ripple, ring
+    // none, shade, sink, indicator, select, lock, sparkle, ember, bevel, jelly, splash (PressFx); earlier names: pulse, ripple, ring
     public string? Press { get; set; }
     public double? PressStrength { get; set; }
     // 0 to 0.6: how strongly the particles a completed press leaves show (0: none)
     public double? Trail { get; set; }
-    // none, dust, pixel, spark, star, firefly, neon
+    // none, dust, pixel, spark, star, firefly, neon, rain, bubble
     public string? Particles { get; set; }
     // none, ring, glow, brackets, caret (FocusFx); earlier name: neon
     public string? Focus { get; set; }
@@ -402,6 +422,12 @@ public sealed class PanelThemeMotion
     public string? Color { get; set; }
     public string? Secondary { get; set; }
     public string? Highlight { get; set; }
+    // firm, default, jelly (SpringTier): how much the springs give, damping 0.85, 0.70 or 0.50 at 16 rad/s
+    public string? Spring { get; set; }
+    // fade, glitch, foam, genie (CollapseStyle): how a notice or the open panel goes back into the island
+    public string? Collapse { get; set; }
+    // 0 (none) or 1 to 1.5 DIP: a short chromatic pulse on a completed press and a pixel collapse picture
+    public double? Aberration { get; set; }
 }
 
 public sealed class PanelThemeAmbient
@@ -447,7 +473,10 @@ public static partial class PanelThemes
                 Steps = MotionSafety.Steps(motion.Steps is { } steps && double.IsFinite(steps) ? (int)Math.Round(Math.Clamp(steps, -1, 99)) : null, m.Steps),
                 Color = motion.Color is { Length: > 0 } color ? color.Trim() : m.Color,
                 Secondary = motion.Secondary is { Length: > 0 } secondary ? secondary.Trim() : m.Secondary,
-                Highlight = motion.Highlight is { Length: > 0 } highlight ? highlight.Trim() : m.Highlight
+                Highlight = motion.Highlight is { Length: > 0 } highlight ? highlight.Trim() : m.Highlight,
+                Spring = MotionStyles.Spring(motion.Spring, m.Spring),
+                Collapse = MotionStyles.Collapse(motion.Collapse, m.Collapse),
+                Aberration = MotionSafety.Aberration(motion.Aberration, m.Aberration)
             };
         }
         return m with { Ambient = a };

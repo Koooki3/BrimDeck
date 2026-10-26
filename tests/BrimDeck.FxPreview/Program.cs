@@ -40,6 +40,12 @@ internal static class Program
 
         // The date range picker's strips (DatePreview): --date <output folder>.
         if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
+        // The collapse pictures (CollapsePreview): --collapse <output folder> [--themes id,id,...].
+        if (args.Length > 1 && args[0] == "--collapse")
+        {
+            int at = Array.IndexOf(args, "--themes");
+            return CollapsePreview.Run(args[1], at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null) == 0 ? 0 : 1;
+        }
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
         if (args.Length > 1 && args[0] == "--sheet")
         {
@@ -47,10 +53,11 @@ internal static class Program
             return ThemeSheet.Run(args[1], at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
                 scale > 0 && scale + 1 < args.Length ? double.Parse(args[scale + 1], CultureInfo.InvariantCulture) : 1);
         }
-        string? folder = null; double stripDpi = 1; HashSet<string>? only = null;
+        string? folder = null; double stripDpi = 1; HashSet<string>? only = null; bool upgrade = false;
         for (int i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--dpi" && i + 1 < args.Length) stripDpi = double.Parse(args[++i], CultureInfo.InvariantCulture);
+            if (args[i] == "--upgrade") upgrade = true;
+            else if (args[i] == "--dpi" && i + 1 < args.Length) stripDpi = double.Parse(args[++i], CultureInfo.InvariantCulture);
             else if (args[i] == "--themes" && i + 1 < args.Length) only = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
             else folder = args[i];
         }
@@ -74,6 +81,13 @@ internal static class Program
         if (folder is not null)
         {
             Directory.CreateDirectory(folder);
+            // --upgrade: only the motion upgrade's press effects, on theme files that opt in (no built-in theme does).
+            if (upgrade)
+            {
+                foreach (var (id, json) in UpgradeThemes) UpgradeStrip(PanelThemes.Build(id, PanelThemes.Parse(json)), id, folder);
+                Console.WriteLine($"Wrote upgrade strips at {stripDpi * 100:0}% to " + System.IO.Path.GetFullPath(folder));
+                return _failures == 0 ? 0 : 1;
+            }
             foreach (var theme in PanelThemes.BuiltIns.Where(t => only is null || only.Contains(t.Id))) Strips(PanelThemes.Resolve(theme), theme.Id, folder);
             if (only is null || only.Contains("system-dark")) Strips(PanelThemes.Resolve(PanelThemes.BuiltIn("dark")!), "system-dark", folder, system: true);
             if (only is null || only.Contains("system-light")) Strips(PanelThemes.Resolve(PanelThemes.BuiltIn("light")!), "system-light", folder, system: true);
@@ -550,6 +564,29 @@ internal static class Program
         cases.Add(Run(scene, CardArea, [(0, "键盘焦点", s => s.Fx.FocusOn(s.CardButton)), (timing.Focus / 4000.0, "1/4", null), (timing.Focus / 2000.0, "1/2", null), (timing.Focus / 1000.0 * .8, "4/5", null)]));
         cases.Add(Run(scene, NoticeArea, [(0, "禁用控件悬停", s => Hover(s, s.Disabled)), (hi, "无标记", null), (hi + .1, "按下", s => Down(s, s.Disabled)), (hi + .2, "无反应", null)]));
         Save(cases, palette, id + " · 其他情形", System.IO.Path.Combine(folder, id + "-cases.png"));
+        scene.Source.Dispose();
+    }
+
+    // Theme files that try the motion upgrade's press effects on the themes they were made for.
+    private static readonly (string Id, string Json)[] UpgradeThemes =
+    [
+        ("upgrade-splash-bubble", """{ "base": "island-holiday", "motion": { "press": "splash", "particles": "bubble", "trail": 0.4 } }"""),
+        ("upgrade-rain-pulse", """{ "base": "cyberpunk-edgerunners", "motion": { "particles": "rain", "trail": 0.4, "aberration": 1.25, "highlight": "#B0D0F0" } }"""),
+        ("upgrade-glass-pulse", """{ "base": "liquid-glass-dark", "motion": { "aberration": 1.5 } }"""),
+    ];
+
+    // A press held and let go on a page button and a media button, sampled long enough for the second ring and the particles.
+    private static void UpgradeStrip(PanelPalette palette, string id, string folder)
+    {
+        var scene = Build(palette);
+        var timing = MotionTiming.For(palette.Motion.Pace, palette.Motion.Steps);
+        double hi = timing.HoverIn / 1000.0, down = hi + .1, up = down + .45;
+        List<(double, string, Action<Scene>?)> Steps(Func<Scene, Button> target) => [
+            (0, "悬停", s => Hover(s, target(s))), (down, "按下 +0", s => Down(s, target(s))), (down + .1, "+100ms", null), (down + .2, "+200ms", null), (down + .36, "+360ms", null),
+            (up, "松开 +0", s => Up(s, target(s), true)), (up + .06, "+60ms", null), (up + .12, "+120ms", null), (up + .2, "+200ms", null), (up + .36, "+360ms", null),
+            (up + .5, "+500ms", null), (up + .7, "+700ms", null), (up + .95, "+950ms", null), (up + 1.25, "+1250ms", null)];
+        var press = new List<List<Shot>> { Run(scene, Toolbar, Steps(s => s.Page2)), Run(scene, Media, Steps(s => s.Play)), Run(scene, Rows, Steps(s => s.Row1)) };
+        Save(press, palette, id + " · 按下与松开", System.IO.Path.Combine(folder, id + "-press.png"));
         scene.Source.Dispose();
     }
 
