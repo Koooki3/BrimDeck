@@ -383,8 +383,8 @@ public sealed partial class SettingsWindow : Window
             { SaveStatus(Loc.T("无法设置自启动：", "Could not change the startup setting: ")+ex.Message,true); ShowPage(0); }
         }),
             Toggle(Loc.T("空闲时释放内存", "Free memory when idle"), S.TrimMemoryWhenIdle, value => Change(s => s.TrimMemoryWhenIdle = value),
-                help: Loc.T("面板收起 45 秒后释放暂时不用的内存，最多每 5 分钟一次。开启后内存占用更低，但下次展开时可能稍有卡顿。",
-                    "45 seconds after the panel collapses, memory not in use is released, at most once every 5 minutes. Memory use is lower, but the next time the panel opens it may stutter slightly.")));
+                help: Loc.T("面板收起 45 秒后，除了始终会归还的空闲内存，还把常驻内存交还系统，最多每 5 分钟一次。任务管理器中的数字更低，但下次展开时这些内存要重新读入，可能稍有卡顿。",
+                    "45 seconds after the panel collapses, besides the free memory that is always returned, memory in use is handed back to Windows too, at most once every 5 minutes. Task Manager shows less, but that memory is read back in the next time the panel opens, which may stutter slightly.")));
         SectionTitle(Loc.T("外观与语言", "Appearance and language"));
         var themes = new UniformGrid { Columns=3,Width=292 };
         foreach(var theme in Enum.GetValues<SettingsTheme>())

@@ -42,6 +42,7 @@ public partial class MainWindow
     // ui-2: nothing starts while the panel powers off; it draws back into the dot in sight (PowerOff ends a shown notice).
     internal bool CanShowNotices => IsVisible && !IsSuppressed && !_preview && !_poweringOff;
     private bool NoticeCovering => _noticeWindow?.Covering == true;
+    internal bool NoticeShown => _noticeWindow?.IsVisible == true;
 
     private void SubscribeNotices()
     {

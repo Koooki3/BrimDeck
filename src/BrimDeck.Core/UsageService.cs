@@ -37,6 +37,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     // is skipped for that round, and no new one starts until it has ended.
     private readonly Dictionary<ProviderId, LogReader> _wslLogs = new() { [ProviderId.Claude] = new(), [ProviderId.Codex] = new() };
     private readonly System.Collections.Concurrent.ConcurrentDictionary<ProviderId, WslRead> _wslReads = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<ProviderId, (List<TokenEntry> Local, List<TokenEntry> Wsl, List<TokenEntry> Merged)> _wslMerged = [];
     private readonly object _wslGate = new();
     // Home folders are searched again every few minutes: listing them touches the distributions' file systems.
     private (DateTimeOffset Time, IReadOnlyList<WslHome> Homes)? _wsl;
@@ -203,10 +204,17 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         try { result = await read.Task; }
         catch (Exception ex) when (ex is not OperationCanceledException) { snapshot.UsageComplete = false; return; }
         if (result is null) return;
-        var merged = new Dictionary<string, TokenEntry>();
-        foreach (var entry in snapshot.Entries.Concat(result.Entries))
-            if (!merged.TryGetValue(entry.Key, out var old) || entry.Total >= old.Total) merged[entry.Key] = entry;
-        snapshot.Entries = merged.Values.OrderBy(entry => entry.Time).ToList();
+        // Both readers hand back the same lists while their files are unchanged (LogReader); so does this merge.
+        if (_wslMerged.TryGetValue(snapshot.Id, out var last) && last.Local == snapshot.Entries && last.Wsl == result.Entries) snapshot.Entries = last.Merged;
+        else
+        {
+            var local = snapshot.Entries;
+            var merged = new Dictionary<string, TokenEntry>();
+            foreach (var entry in local.Concat(result.Entries))
+                if (!merged.TryGetValue(entry.Key, out var old) || entry.Total >= old.Total) merged[entry.Key] = entry;
+            snapshot.Entries = merged.Values.OrderBy(entry => entry.Time).ToList();
+            _wslMerged[snapshot.Id] = (local, result.Entries, snapshot.Entries);
+        }
         snapshot.UsageAvailable |= result.UsageAvailable;
         snapshot.UsageComplete &= result.UsageComplete;
         if (!result.UsageAvailable) return;

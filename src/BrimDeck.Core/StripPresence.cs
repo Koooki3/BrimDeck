@@ -53,6 +53,23 @@ public sealed class StripPresence
         return moving;
     }
 
+    // A new figure's width, taken at once, held a while when it narrows (HeldWidth). Returns whether any width changed, so the
+    // row places its readings again. Easing these changes kept the collapsed row drawing at the display's rate for a third of a
+    // second whenever a figure changed length (9% to 10%, a rate gaining a digit): measured, about seven frames a second on
+    // average and as much CPU as the rest of the idle panel. A reading coming or going (Set) still eases.
+    public bool Resize(CompactMonitorItems chosen, Func<CompactMonitorItems, double> width)
+    {
+        double now = Eased.Now; bool changed = false;
+        foreach (var item in CompactMonitor.Order)
+        {
+            if ((chosen & item) == 0 || !_widths.TryGetValue(item, out var entry)) continue;
+            double target = entry.Held.Update(width(item), now);
+            if (Math.Abs(target - entry.Width.Target) > 1e-6 || entry.Width.Moving(now)) { entry.Width.Set(target, false, now); changed = true; }
+            _widths[item] = entry;
+        }
+        return changed;
+    }
+
     public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
     public double? Width(CompactMonitorItems item, double now) => _widths.TryGetValue(item, out var entry) ? Math.Max(0, entry.Width.At(now)) : null;
     // Whether any reading still shows, even fading out.
