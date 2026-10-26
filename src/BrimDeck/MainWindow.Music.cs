@@ -210,9 +210,9 @@ public partial class MainWindow
             button.Height = header.ButtonHeight;
             // A local corner for these two buttons only; PanelIconButton keeps its 5 DIP corner elsewhere.
             button.ApplyTemplate();
-            if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelHeader.ButtonRadius);
+            if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelTheme.Corner(PanelHeader.ButtonRadius));
         }
-        PageCapsule.CornerRadius = new CornerRadius(PanelHeader.ButtonRadius);
+        PageCapsule.CornerRadius = new CornerRadius(PanelTheme.Corner(PanelHeader.ButtonRadius));
         SettingsButton.Height = header.SettingsHeight;
         if (SettingsButton.Parent is FrameworkElement right) right.Margin = new Thickness(0, 0, header.RightMargin, 0);
         ApplicationPages.Margin = new Thickness(ApplicationPagesLeft(header.Side), 0, 0, 0);
@@ -899,7 +899,7 @@ public partial class MainWindow
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
         // The system readings ask for the width of everything chosen, on whole device pixels, and show what fits in the region they get.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
-            !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi) : null;
+            !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden) : null;
         // Readings that do not fit scroll in their region, as the rings and the lyric do, so the region keeps its width.
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0); CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice

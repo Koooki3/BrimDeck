@@ -31,7 +31,8 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 // hue, just far enough to reach it (PanelThemes.Build.cs).
 public static partial class PanelThemes
 {
-    public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
+    public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners", PixelBlocks = "pixel-blocks";
+    public const string IslandHoliday = "island-holiday";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2;
 
     public static readonly IReadOnlyList<PanelThemeToken> Tokens =
@@ -97,9 +98,11 @@ public static partial class PanelThemes
         var file = JsonSerializer.Deserialize<PanelThemeFile>(json, Json) ?? throw new JsonException("The theme file is empty.");
         // Properties are checked for null by the serializer; values inside the colors, apps and gradient collections are not.
         static bool HasNull(IEnumerable<string?>? values) => values?.Any(value => value is null) == true;
-        if (HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
+        // The night look is a layer of the same format and is checked the same way.
+        static bool AnyNull(PanelThemeFile file) => HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
             || HasNull(file.Effects?.SurfaceGradient) || HasNull(file.Effects?.RimGradient)
-            || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true)
+            || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true;
+        if (AnyNull(file) || file.Night is { } night && AnyNull(night))
             throw new JsonException(Loc.T("颜色值不能为 null", "A color cannot be null"));
         return file;
     }
@@ -107,8 +110,8 @@ public static partial class PanelThemes
     // Built-in themes are read on demand: startup reads only the chosen theme and its base themes. The id of each is its resource
     // name, which a test keeps equal to the id inside the file.
     private const string ThemeResources = ".Themes.";
-    // Dark and light first, then the ported editor themes, then the custom demo.
-    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", Demo];
+    // Dark and light first, then the ported editor themes, then BrimDeck's own extensions with the custom demo last.
+    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, PixelBlocks, Demo];
     private static (string Id, string Resource)[]? _builtInIndex;
     private static (string Id, string Resource)[] BuiltInIndex => _builtInIndex ??= [.. typeof(PanelThemes).Assembly.GetManifestResourceNames()
         .Where(name => name.Contains(ThemeResources, StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))

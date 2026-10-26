@@ -85,6 +85,16 @@ public static partial class PanelThemes
         if (file.FormatVersion > 1) return Loc.T("需要更新版本的 BrimDeck", "This theme needs a newer BrimDeck");
         var baseId = NormalizeId(file.Base);
         if (baseId.Length > 0 && !IsBuiltIn(baseId)) return Loc.T($"基础主题“{file.Base}”不存在", $"The base theme \"{file.Base}\" does not exist");
+        if (LayerProblem(file) is { } problem) return problem;
+        if (file.Night is { } night && LayerProblem(night) is { } nightProblem) return Loc.T("夜间外观：", "Night look: ") + nightProblem;
+        foreach (var time in new[] { file.Daylight?.Day, file.Daylight?.Night })
+            if (time is { Length: > 0 } && ParseTimeOfDay(time) is null) return Loc.T($"时间“{time}”不是 HH:mm", $"The time \"{time}\" is not HH:mm");
+        return null;
+    }
+
+    // What makes the colors, effects or clock of a file, or of its night look, unusable.
+    private static string? LayerProblem(PanelThemeFile file)
+    {
         foreach (var (key, value) in file.Colors ?? [])
         {
             if (Tokens.All(token => !string.Equals(token.Key, key, StringComparison.OrdinalIgnoreCase))) return Loc.T($"未知的颜色项“{key}”", $"Unknown color \"{key}\"");
