@@ -303,23 +303,24 @@ internal sealed class LiquidRenderer : IDisposable
     private (int Cols, int Rows) _textMaskSize;
     private (float[]? Rects, int Width, int Height, float Tile) _textMaskFor;
     private byte[] _textCells = [], _textPair = [];
-    private float[] _textField = [], _textSpare = [];
-    private const int TextBlurCells = 7;
-    // A box blur of TextBlurCells each side along rows (horizontal) or columns, from one grid into another.
-    private static void Box(float[] from, float[] to, int cols, int rows, bool horizontal)
+    private float[] _textField = [], _textSpare = [], _textNear = [];
+    // Round 15: the wide field three box passes of 11 cells (about a Gaussian of 46 DIPs), the near one two of 3 (about 13).
+    private const int TextBlurCells = 11, TextBlurPasses = 3, TextNearCells = 3;
+    // A box blur of radius cells each side along rows (horizontal) or columns, from one grid into another.
+    private static void Box(float[] from, float[] to, int cols, int rows, bool horizontal, int radius)
     {
-        int n = horizontal ? cols : rows, lines = horizontal ? rows : cols, span = 2 * TextBlurCells + 1;
+        int n = horizontal ? cols : rows, lines = horizontal ? rows : cols, span = 2 * radius + 1;
         for (int line = 0; line < lines; line++)
         {
             float sum = 0;
             int At(int k) => horizontal ? line * cols + Math.Clamp(k, 0, n - 1) : Math.Clamp(k, 0, n - 1) * cols + line;
-            for (int k = -TextBlurCells; k <= TextBlurCells; k++) sum += k < 0 || k >= n ? 0 : from[At(k)];
+            // The grid's edge cells repeated past it (round 15): the field does not fall off toward the panel's edge, so text
+            // near the edge is covered as text in the middle is.
+            for (int k = -radius; k <= radius; k++) sum += from[At(k)];
             for (int k = 0; k < n; k++)
             {
                 to[At(k)] = sum / span;
-                int add = k + TextBlurCells + 1, drop = k - TextBlurCells;
-                if (add < n) sum += from[At(add)];
-                if (drop >= 0) sum -= from[At(drop)];
+                sum += from[At(k + radius + 1)] - from[At(k - radius)];
             }
         }
     }
@@ -340,7 +341,7 @@ internal sealed class LiquidRenderer : IDisposable
         if (_textMaskFor != (rects, f.Width, f.Height, tile))
         {
             _textMaskFor = (rects, f.Width, f.Height, tile);
-            if (_textCells.Length < cols * rows) { _textCells = new byte[cols * rows]; _textField = new float[cols * rows]; _textSpare = new float[cols * rows]; _textPair = new byte[cols * rows * 2]; }
+            if (_textCells.Length < cols * rows) { _textCells = new byte[cols * rows]; _textField = new float[cols * rows]; _textSpare = new float[cols * rows]; _textNear = new float[cols * rows]; _textPair = new byte[cols * rows * 2]; }
             Array.Clear(_textCells, 0, cols * rows);
             for (int i = 0; i + 3 < rects.Length; i += 4)
             {
@@ -355,12 +356,14 @@ internal sealed class LiquidRenderer : IDisposable
                         cell = (byte)Math.Min(255, cell + cover);
                     }
             }
-            // Round 14: the density field. The cells' coverage blurred wide (two box passes of TextBlurCells each way: about a
-            // Gaussian of 23 DIPs) into a low-frequency field (red), so the glass grows denser smoothly over a text block, not in
-            // patches round each glyph; the cells themselves (green) for the little glyph-level help still wanted.
+            // The density field (round 14, widened in round 15): the cells' coverage blurred wide into a low-frequency field (red),
+            // so the glass grows denser smoothly over a block of text and its edge is a long ramp, never a patch round a glyph;
+            // and a nearer one (green, about 13 DIPs) for the little help a lone label still wants.
             for (int i = 0; i < cols * rows; i++) _textField[i] = _textCells[i] / 255f;
-            for (int pass = 0; pass < 2; pass++) { Box(_textField, _textSpare, cols, rows, true); Box(_textSpare, _textField, cols, rows, false); }
-            for (int i = 0; i < cols * rows; i++) { _textPair[i * 2] = (byte)Math.Clamp((int)MathF.Round(_textField[i] * 255), 0, 255); _textPair[i * 2 + 1] = _textCells[i]; }
+            for (int pass = 0; pass < TextBlurPasses; pass++) { Box(_textField, _textSpare, cols, rows, true, TextBlurCells); Box(_textSpare, _textField, cols, rows, false, TextBlurCells); }
+            for (int i = 0; i < cols * rows; i++) _textNear[i] = _textCells[i] / 255f;
+            for (int pass = 0; pass < 2; pass++) { Box(_textNear, _textSpare, cols, rows, true, TextNearCells); Box(_textSpare, _textNear, cols, rows, false, TextNearCells); }
+            for (int i = 0; i < cols * rows; i++) { _textPair[i * 2] = (byte)Math.Clamp((int)MathF.Round(_textField[i] * 255), 0, 255); _textPair[i * 2 + 1] = (byte)Math.Clamp((int)MathF.Round(_textNear[i] * 255), 0, 255); }
             _context.UpdateSubresource(_textPair, _textMask, 0, (uint)cols * 2, 0);
         }
         _textInfo = (tile, 1f / cols, 1f / rows, 1);

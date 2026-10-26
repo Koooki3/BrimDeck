@@ -129,13 +129,15 @@ static const float GrainAmount = .006;
 // Round 12b: the masked contrast reached behind text (a share of the opaque theme's), the busy-ness reference (unfrosted band
 // RMS, linear Y), and the body's depth: its fall toward the edges and its top light.
 // Round 13b: the light look reaches .95 of the opaque theme's masked contrast (its text carries a halo and a target of 75 %).
-static const float ReachLight = .95;
-static const float BodyCover = .1, DensityGain = 2, GlyphHelp = .35;
+// Round 15: .82 over a light backdrop (Adapt raises it toward .95 over a dark one): the cover's lift no larger than the page
+// check's 75 % needs, so it reads as the same glass grown denser, not a white layer.
+static const float ReachLight = .82;
+static const float BodyCover = .1, DensityGain = 2.8, GlyphHelp = .6;
 static const float Reach = .96, BusyRef = .03, EdgeFall = .05, Sheen = .06, SheenDip = 36;
 // Round 13's slab: its tint (Lens' roles: small .12, panel .14), absorption per unit thickness (light: barely, cool; dark:
 // deeper), the frost of its body with no text over it (DIP, collapsed; the open panel's is half its text frost), the light's
 // strength at rest, and the light look's least cover behind text.
-static const float SlabTintSmall = .12, SlabTintPanel = .14, BodyFrostDip = 2.5, RestLight = .55, SlabCoverLight = .35;
+static const float SlabTintSmall = .12, SlabTintPanel = .14, BodyFrostDip = 2.5, RestLight = .55, SlabCoverLight = .28;
 static const float3 AbsorbLight = float3(.035, .025, .015), AbsorbDark = float3(.22, .19, .15);
 static const float Cap = 1.5, Calm = .6, BusyCalm = .3, Vibrancy = 1.2, ChromaFloor = .55, RimDip = 10, RimLeast = 6, RowReach = 8;
 
@@ -599,12 +601,15 @@ float Adapt(float2 p, float base, out float busy)
     float2 stats = Stats(p);
     float y = ApcaY(stats.xxx), yTint = ApcaY(tint), sigma = stats.y;
     // The least luminosity opacity at or above Acrylic's whose masked contrast reaches the opaque theme's (bisection).
+    // Round 15: the light look reaches ReachLight over a light backdrop, more (up to round 13b's .95) over a darker one, where
+    // the lift is large and this estimate runs optimistic (the frosted mean under a word is darker than the tiles' mean).
+    float reachLight = LookInfo.z > 0 ? LookInfo.z : lerp(ReachLight, .95, saturate((.7 - stats.x) / .25));
     float lo = base, hi = 1;
     [unroll] for (int i = 0; i < 5; i++)
     {
         float a = (lo + hi) * .5, s = (1 - a) * sigma / max(Sigma0, 1e-4);
         float lc = Apca(yt, lerp(y, yTint, a)) / sqrt(1 + s * s);
-        if (lc >= target * lerp(LookInfo.z > 0 ? LookInfo.z : ReachLight, Reach, dark)) hi = a; else lo = a;
+        if (lc >= target * lerp(reachLight, Reach, dark)) hi = a; else lo = a;
     }
     busy = saturate((hi - base) / max(1 - base, 1e-3));
     return hi;
@@ -646,8 +651,9 @@ static const float TextFeatherDip = 8;
 float TextFeathered(float2 p)
 {
     if (TextInfo.w < .5) return 1;
-    // Round 14: the density over the text, a low-frequency field (the regions blurred about 23 DIPs, LiquidRenderer.TextMask):
-    // the glass grows denser smoothly over a block of text; only a little glyph-level help on top, where text stands alone.
+    // The density over the text, a low-frequency field (the regions blurred about 46 DIPs, LiquidRenderer.TextMask; round 15):
+    // the glass grows denser smoothly over a block of text, its edge a long ramp; a nearer field (about 13 DIPs) gives a lone
+    // label the little help it still wants, as a soft swell, never a box.
     float2 cell = TextCells.SampleLevel(Smooth, p / TextInfo.x * TextInfo.yz, 0).rg;
     return saturate(max(cell.r * DensityGain, cell.g * GlyphHelp));
 }
@@ -693,6 +699,10 @@ float3 Slab(float2 p, float sd, float2 outward)
     float row = Content.z > Content.x ? saturate(thickness / lerp(.25, .7, saturate((shorter / Scale - 20) / 16))) : 0;
     // The dark look covers the whole open panel (one even dark glass, as round 13 had it); the light look only behind text.
     float text = max(row, opened * max(TextFeathered(p), CoverDark()));
+    // Round 15: the surface's light (Fresnel, lines, glare, caustic, sheen) is the same over the cover as beside it - the
+    // cover is the glass grown denser, not a layer on it - so it follows only what is uniform: the collapsed row and the dark
+    // look's whole-panel cover, never the text field.
+    float even = max(row, opened * CoverDark());
     float calm = 1 - Busy(p);
     float bodyFrost = lerp(BodyFrostDip, FrostRadius / Scale * .5, opened) * Scale * lerp(.6, 1, 1 - calm);
     float frost = max(bodyFrost * thickness, max(ContentFrost * row, FrostRadius * opened * TextFeathered(p)) * saturate(thickness * 2));
@@ -752,27 +762,27 @@ float3 Slab(float2 p, float sd, float2 outward)
     float shown = FrostShown;
     float3 scene = Frost(p + Pad, EnvDip * Scale);
     FrostShown = shown;    // (the grain follows the glass's own frost, not this look-up's)
-    c = lerp(c, saturate(scene * 1.1 + .04), saturate(fresnel * EnvGain * live * thin * (1 - .6 * text)));
+    c = lerp(c, saturate(scene * 1.1 + .04), saturate(fresnel * EnvGain * live * thin * (1 - .6 * even)));
     // Thin specular lines along the slope: one facing the key light, its pair opposite, each a narrow line a little in from
     // the rim (no white ring), coloured by the backdrop lifted in lightness (its hue kept).
     float d = -sd;
     float lines = exp(-pow((d - 1.6 * Scale) / (.7 * Scale), 2));
     float facing = pow(saturate(dot(outward, key)), 2) + .5 * pow(saturate(dot(outward, -key)), 2);
     float3 lifted = lerp(SetLum(saturate(backdrop), min(1, Lum(backdrop) + .45)), 1, .3);
-    c = lerp(c, lifted, saturate(lines * facing * .55 * live * thin * (1 - .6 * text)));
+    c = lerp(c, lifted, saturate(lines * facing * .55 * live * thin * (1 - .6 * even)));
     // The broad directional term, weaker now (the lines carry the edge): where the glass is frosted denser behind text its
     // surface scatters, the highlight there spreads out and dims (rough glass).
     float3 glare = lerp(1, saturate(backdrop * 1.6 + .25), .5);
-    c = lerp(c, glare, saturate(directional * .3 * live * edge * thin * (1 - .8 * text)));
+    c = lerp(c, glare, saturate(directional * .3 * live * edge * thin * (1 - .8 * even)));
     // A very soft caustic where the rim's refraction converges, inside the bevel.
-    c = lerp(c, 1, edge * (1 - edge) * 4 * .03 * (1 - .5 * dark) * thin * (1 - .6 * text));
+    c = lerp(c, 1, edge * (1 - edge) * 4 * .03 * (1 - .5 * dark) * thin * (1 - .6 * even));
     // A 0.75 pt dark hairline just inside the edge (iOS 27's contour).
     // Round 14b: about a third as strong, in the backdrop's own colour (darkened), and fading where the backdrop is already
     // darker than the glass (there the edge reads by itself): the glass's own edge, not an outline.
     float hair = exp(-pow((d - .9 * Scale) / (.45 * Scale), 2)) * lerp(.05, .09, dark) * thin * saturate((Lum(backdrop) - Lum(c)) * 3 + .6);
     c = lerp(c, saturate(backdrop) * .55, hair);
     float sheen = .045 * saturate(dot(-pc, key) * .5 + .5);
-    c = lerp(c, 1, sheen * (1 - text * .7) * (1 - .5 * dark));
+    c = lerp(c, 1, sheen * (1 - even * .7) * (1 - .5 * dark));
     c *= 1 - pow(edge, 8) * .085 * saturate(dot(outward, -key) * .5 + .5);
     return saturate(c);
 }

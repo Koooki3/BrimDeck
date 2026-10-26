@@ -332,6 +332,16 @@ internal static partial class LiquidPages
             }
         Check(name, layer, glass, under, composed, dw, gx, gy);
         Body(name, layer, glass, under, desktop, dw, gx, gy);
+        // Round 15: the cover seam (CoverSeam), on the light look's open panels: the same frame without its text cover.
+        if (!dark && layer.Open >= .5 && layer.TextRects is { Length: > 0 })
+        {
+            var bare = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H), frame with { TextRects = [] }, (int)Math.Ceiling(48 * Scale));
+            var freeUnder = (byte[])desktop.Clone();
+            for (int y = 0; y < layer.H; y++)
+                for (int x = 0; x < layer.W; x++)
+                    Over(bare, (y * layer.W + x) * 4, freeUnder, ((gy + y) * dw + gx + x) * 4);
+            CoverSeam.Measure(name, under, freeUnder, glass, dw, gx, gy, layer.W, layer.H, Scale);
+        }
         // The tile: the island and its shadow with a margin, the background around it.
         int margin = (int)Math.Round(36 * Scale);
         int tx = Math.Max(0, gx - margin), tw = Math.Min(dw, gx + layer.W + margin) - tx, th = Math.Min(dh, gy + layer.H + margin);

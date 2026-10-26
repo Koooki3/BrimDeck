@@ -267,6 +267,8 @@ internal static class LiquidPreview
         if (Environment.GetEnvironmentVariable("LIQUID_ZONED") == "1") frame = frame with { Zoned = true };
         // LIQUID_R13: round 13 as it was (the light look reaching .96, whole-leaf text regions, no halo), for the comparisons.
         if (Environment.GetEnvironmentVariable("LIQUID_R13") == "1") frame = frame with { ReachLight = .96f };
+        // LIQUID_REACH: the light look's reach (round 15 tuning).
+        if (float.TryParse(Environment.GetEnvironmentVariable("LIQUID_REACH"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var reach)) frame = frame with { ReachLight = reach };
         // LIQUID_PROBE: the slab's displacement drawn instead of the glass (the perimeter check, round 13b).
         if (Environment.GetEnvironmentVariable("LIQUID_PROBE") == "1") frame = frame with { Probe = true, InsetAlpha = 0 };
         // LIQUID_TEXTFREE: an open panel with no text on it (the body alone), for the show-through numbers (round 13).
