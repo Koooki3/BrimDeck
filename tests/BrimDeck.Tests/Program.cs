@@ -46,6 +46,7 @@ try
     InteractionFxTests.Run(Check);
     MotionReviewTests.Run(Check);
     PanelThemeEditorTests.Run(root, Check);
+    PixelBlocksTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
@@ -67,6 +68,7 @@ try
     MusicCostTests.Run(Check);
     DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
+    DatePickerMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     GpuAdapterTests.Run(root, Check);
     GpuIdentityTests.Run(Check);

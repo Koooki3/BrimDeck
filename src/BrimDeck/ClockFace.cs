@@ -246,15 +246,16 @@ internal sealed class ClockFace : FrameworkElement
     }
 
     // Pixel: the dot matrix's digits as solid square blocks, 2 DIP each with no gap, so each lit block meets its neighbors and
-    // the strokes read as one pixel-art glyph. Blocks lie on whole device pixels at every scale: the face is placed on the
-    // pixel grid by its row (the collapsed row snaps it), and a block is the device pixels its square covers.
+    // the strokes read as one pixel-art glyph. Blocks lie on whole device pixels at every scale: the face starts on a whole
+    // device pixel (OnRender), and a block is the device pixels its square covers.
     private double Blocks(DrawingContext? dc, string clock, double x)
     {
-        // Every block the same whole number of device pixels (at 125 % a 2 DIP block would alternate between 2 and 3 pixels).
+        // Every block the same whole number of device pixels (at 125 % a 2 DIP block would alternate between 2 and 3 pixels);
+        // a half rounds up, as the island's pixel steps do (PixelStairs.Step).
         double device = _scale * VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        double block = Math.Max(1, Math.Round(2 * device, MidpointRounding.AwayFromZero)) / device, gap = block;
-        double top = Math.Round((FaceHeight - 7 * block) / 2 * device) / device, start = x;
-        double Snap(double value) => Math.Round(value * device) / device;
+        double Snap(double value) => Math.Round(value * device, MidpointRounding.AwayFromZero) / device;
+        double block = PixelStairs.Step(2, device), gap = block;
+        double top = Snap((FaceHeight - 7 * block) / 2), start = x;
         for (int i = 0; i < clock.Length; i++)
         {
             var rows = DotFont[clock[i]];

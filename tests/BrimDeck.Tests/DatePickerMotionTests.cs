@@ -34,16 +34,14 @@ internal static class DatePickerMotionTests
             && DatePickerMotion.Direction(october, new DateTime(2025, 12, 1)) == -1 && DatePickerMotion.Direction(october, new DateTime(2026, 10, 30)) == 0
             && DatePickerMotion.Direction(new DateTime(2025, 12, 1), new DateTime(2026, 1, 1)) == 1);
 
-        var timing = DatePickerTiming.From(360);
-        check("At the default length the picker moves as the panel does (sort pill, short swap, monitor move, hover)",
-            timing.Glide == 315 && timing.Band == 240 && timing.Arrive == 420 && timing.Enable == 162 && timing.Message == 240);
-        var slow = DatePickerTiming.From(1000); var quick = DatePickerTiming.From(100); var wild = DatePickerTiming.From(-5);
-        check("Durations follow the animation length and stay within bounds", slow.Glide > timing.Glide && quick.Glide < timing.Glide && wild == quick
-            && slow.Arrive <= 1000 && quick.Leave >= 50);
+        var timing = DatePickerTiming.Fixed;
+        check("The picker moves as the panel's feedback does (sort pill, short swap, monitor move, hover), whatever the animation length",
+            timing.Glide == 315 && timing.Band == 240 && timing.Leave == 144 && timing.Arrive == 420 && timing.Enable == 160 && timing.Message == 240 && timing.Dissolve == 240);
 
-        // The old month leaves before the new one arrives: whenever the new one shows, the old one is under a tenth.
+        // The old month leaves before the new one arrives: whenever the new one shows, the old one is under a tenth. Checked for
+        // the picker's own timing and for much shorter and longer ones, so the rule does not hang on one pair of lengths.
         bool apart = true, forward = true;
-        foreach (var t in new[] { DatePickerTiming.From(100), timing, slow })
+        foreach (var t in new[] { timing with { Leave = 50, Arrive = 120 }, timing, timing with { Leave = 400, Arrive = 1000 } })
             for (double ms = 0; ms <= t.MonthLength + 20; ms += 4)
             {
                 var frame = DatePickerMotion.Slide(ms, 1, t);

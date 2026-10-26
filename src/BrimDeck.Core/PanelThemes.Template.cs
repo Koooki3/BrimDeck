@@ -60,8 +60,9 @@ public static partial class PanelThemes
         if (effects.Glass is { } glass)
             text = Regex.Replace(text, @"// , ""glass"": \{[^}]*\}", GlassJson(glass))
                 .Replace("\"texture\": 0 ", "\"texture\": 0,", StringComparison.Ordinal);
-        foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines), ("pixel", effects.Pixel), ("texture", effects.Texture) })
-            text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {value.ToString("0.###", CultureInfo.InvariantCulture)}");
+        // Every numeric effect, those the settings page cannot edit (pixel, texture) included, so a copy keeps them.
+        foreach (var key in EffectKeys)
+            text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {Effect(effects, key).ToString("0.###", CultureInfo.InvariantCulture)}");
         // The motifs follow the last numeric effect, before the glass when there is one.
         if (effects.Decor is { } decor)
             text = new Regex(@"(""texture"": [0-9.]+)(,?)").Replace(text, match => match.Groups[1].Value + ", \"decor\": " + DecorJson(decor) + match.Groups[2].Value, 1);

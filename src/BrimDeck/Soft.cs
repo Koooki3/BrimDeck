@@ -7,8 +7,8 @@ namespace BrimDeck;
 
 // One motion language for the whole app: the same few curves and durations for the panel, its pages, cards, hover and press
 // feedback, and dragging. Moves start promptly and land slowly (Out); what changes in place eases both ways (InOut); what
-// opens or appears leaves at full speed and lands with a slight give (Bounce), and what closes or goes away starts slowly and
-// settles without one (Settle), as the iPhone's island does; what follows the pointer trails it on a spring (BrimDeck.Core.Spring).
+// opens or appears leaves at full speed and lands with a slight give (Bounce), and what closes or goes away leaves at once and
+// lands softly without one (Drawer; the power-off still settles from a slow start, Settle); what follows the pointer trails it on a spring (BrimDeck.Core.Spring).
 // The curves are frozen and shared.
 internal static class Soft
 {
@@ -18,8 +18,8 @@ internal static class Soft
     public static readonly IEasingFunction InOut = Frozen(new BezierEase(.45, 0, .25, 1));
     // The surface drawing back into the dot as BrimDeck powers off: a slow start, then it settles.
     public static readonly IEasingFunction Settle = Frozen(new BezierEase(.45, 0, .12, 1));
-    // The collapsing panel and a notice going back (motion-review C2, option B, for an A/B comparison with Settle): a drawer's
-    // curve, which leaves at once and lands softly; the surface still starts a little after the content (PanelCloseSurface).
+    // The collapsing panel and a notice going back (motion-review C2: chosen over Settle in an A/B comparison): a drawer's
+    // curve, which leaves at once and lands softly; the surface still starts a little after the content (PanelMotion.CloseSurfaceStart).
     public static readonly IEasingFunction Drawer = Frozen(new BezierEase(.32, .72, 0, 1));
     // The system monitor's move (Curves.Follow): content that moves or swaps, selections that glide, hover feedback.
     public static readonly IEasingFunction Follow = Frozen(new FollowEase());

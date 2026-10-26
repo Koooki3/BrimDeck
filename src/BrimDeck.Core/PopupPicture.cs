@@ -31,4 +31,7 @@ public sealed class PopupPicture
     // How long after a change the picture is taken again: the theme's hover time and a little more, so a hover's fade has
     // settled.
     public static int SettleMilliseconds(MotionTiming timing) => timing.HoverIn + 40;
+    // How long after a change the picture is taken again: the hover fade's time (milliseconds) and a little more, so a hover's
+    // fade has settled.
+    public static int SettleMilliseconds(int hover) => hover + 40;
 }

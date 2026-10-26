@@ -202,8 +202,8 @@ internal static class PanelTheme
     public static string WarningDefault => Current.WarningDefault?.ToString() ?? AppPresets.WarningColor;
     public static string CriticalDefault => Current.CriticalDefault?.ToString() ?? AppPresets.CriticalColor;
 
-    // Gives an island the theme's layers over its base color: the gradient, the scan lines and the rim. The base color is the
-    // caller's, as the panel animates it between the surface and the indicator.
+    // Gives an island the theme's layers over its base color: the gradient, the scan lines or texture, the rim and a pixel
+    // theme's steps and bevel. The base color is the caller's, as the panel animates it between the surface and the indicator.
     public static void Dress(IslandBorder island, PanelPalette? palette = null, double dpiScale = 1)
     {
         palette ??= Current;
@@ -214,12 +214,18 @@ internal static class PanelTheme
         island.EdgeBrush = GlassShownFor(palette) ? EdgeBrush(palette) : null;
     }
 
-    // The text of a window or pop-up of the panel's (a menu, a tooltip, the date picker): unsmoothed in a pixel theme, as on the
-    // island. Menus and tooltips get it as they open (App.ApplyPanelText).
+    // The text of a window of the panel's own (the date picker, the app filter): unsmoothed in a pixel theme, as on the island.
     public static void Text(FrameworkElement root)
     {
         if (Current.Effects.Pixel > 0) TextOptions.SetTextRenderingMode(root, TextRenderingMode.Aliased);
         else root.ClearValue(TextOptions.TextRenderingModeProperty);
+    }
+    // A menu or tooltip takes the text rendering of what it opens from (App.OnStartup): unsmoothed over a pixel theme's panel,
+    // smoothed over the settings, which follow Windows rather than the panel theme, and over the tray.
+    public static void Text(FrameworkElement popup, DependencyObject? from)
+    {
+        if (from is not null && TextOptions.GetTextRenderingMode(from) == TextRenderingMode.Aliased) TextOptions.SetTextRenderingMode(popup, TextRenderingMode.Aliased);
+        else popup.ClearValue(TextOptions.TextRenderingModeProperty);
     }
 
     // A corner of the panel's own drawing as the theme draws it: square in a pixel theme, where the island's steps are the only
@@ -329,20 +335,20 @@ internal static class PanelTheme
         palette ??= Current;
         var effects = palette.Effects;
         if (effects.Texture <= 0 || effects.Pixel <= 0) return null;
-        if (!(dpiScale > 0) || !double.IsFinite(dpiScale)) dpiScale = 1;
-        double cell = Math.Max(1, Math.Round(effects.Pixel * dpiScale, MidpointRounding.AwayFromZero)) / dpiScale, size = 8 * cell;
+        double cell = PixelStairs.Step(effects.Pixel, dpiScale), size = 8 * cell;
         var light = ToColor(palette["textPrimary"]);
         var tile = new DrawingGroup();
         tile.Children.Add(new GeometryDrawing(Brushes.Transparent, null, new RectangleGeometry(new Rect(0, 0, size, size))));
         for (int y = 0; y < 8; y++)
             for (int x = 0; x < 8; x++)
             {
-                // A fixed hash per square: a third plain, the rest lighter or darker in three strengths.
+                // A fixed hash per square: a third plain, the rest lighter or darker in up to the texture's opacity (the lightest
+                // and darkest are held to the contrast rules, PanelThemes.TextureStops).
                 uint h = (uint)(x * 73856093 ^ y * 19349663) * 2654435761u;
                 int kind = (int)(h >> 29);
                 if (kind < 3) continue;
-                double strength = effects.Texture * ((h >> 20 & 3) + 1) / 4;
-                var color = kind < 6 ? Color.FromArgb((byte)Math.Round(255 * strength), light.R, light.G, light.B) : Color.FromArgb((byte)Math.Round(255 * strength), 0, 0, 0);
+                byte alpha = (byte)Math.Round(255 * effects.Texture * ((h >> 20 & 3) + 1) / 4);
+                var color = kind < 6 ? Color.FromArgb(alpha, light.R, light.G, light.B) : Color.FromArgb(alpha, 0, 0, 0);
                 tile.Children.Add(new GeometryDrawing(new SolidColorBrush(color), null, new RectangleGeometry(new Rect(x * cell, y * cell, cell, cell))));
             }
         var brush = new DrawingBrush(tile) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, size, size), ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.None };
@@ -350,7 +356,6 @@ internal static class PanelTheme
         brush.Freeze();
         return brush;
     }
-
     public static Brush RimBrush(PanelPalette? palette = null)
     {
         palette ??= Current;

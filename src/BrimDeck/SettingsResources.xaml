@@ -1,6 +1,8 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:BrimDeck">
   <PopupAnimation x:Key="{x:Static SystemParameters.ToolTipPopupAnimationKey}">None</PopupAnimation>
   <Style TargetType="ToolTip" BasedOn="{StaticResource BrimDeckToolTip}">
+    <!-- The settings follow Windows, not the panel theme: their tooltips keep the rounded corner a pixel theme squares. -->
+    <Style.Resources><CornerRadius x:Key="PanelR6">6</CornerRadius></Style.Resources>
     <Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/>
     <Setter Property="Background" Value="{DynamicResource SettingsPopup}"/>
     <Setter Property="BorderBrush" Value="{DynamicResource SettingsBorder}"/>

@@ -87,7 +87,7 @@ public sealed class PanelThemeEffects
     // Pixel art: corners become steps of this many DIP (1 to 4), the rim a bevel and the text unsmoothed. 0 turns it off.
     public double? Pixel { get; set; }
     // A pixel theme's block texture: squares of the pixel size a little lighter or darker than the surface, at most this opacity
-    // (0 to 0.12), as a stone or dirt block is mottled.
+    // (0 to 0.12), as a stone or dirt block is mottled. Without pixel art there are no blocks to mottle, so it is ignored.
     public double? Texture { get; set; }
     // Quiet pictures drawn into the surface, under the content (PanelThemeDecor). Each value is inherited on its own.
     public PanelThemeDecor? Decor { get; set; }

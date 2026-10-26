@@ -88,7 +88,7 @@ public sealed class PanelPalette
     public IReadOnlyDictionary<string, ThemeColor> WrittenApps { get; }
     public ThemeColor this[string key] => _colors[key];
     public ThemeColor Surface => _colors["surface"];
-    // The surface and every gradient stop: text must read on each of them.
+    // The surface, every gradient stop and a texture's lightest and darkest squares: text must read on each of them.
     public IReadOnlyList<ThemeColor> SurfaceStops { get; }
     public bool IsDark { get; }
 

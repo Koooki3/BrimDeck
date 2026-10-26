@@ -20,7 +20,6 @@ public partial class MainWindow
     private bool _hotkeyOpened;
     // Opened by the expand hotkey and not entered by the pointer yet.
     private bool _hotkeyPinned;
-    private DispatcherTimer? _hotkeyRehide;
     // Holding the keyboard since a hotkey opened the panel, and the window that had it before.
     private bool _keyboardPanel;
     private IntPtr _keyboardReturn;
@@ -40,7 +39,6 @@ public partial class MainWindow
         if (_preview) { if (_previewExpanded) return; _app.EndPreviewFromDeck(); }
         // The full-screen rule hides the panel; the hotkey does not override it.
         if (Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Hide) return;
-        _hotkeyRehide?.Stop();
         if (_app.UserHidden && !_hotkeyOpened) { _hotkeyOpened = true; ApplySettings(); }
         _hover.Stop(); _leave.Stop();
         _hotkeyPinned = true;
@@ -105,20 +103,15 @@ public partial class MainWindow
         if (!_hotkeyOpened) return;
         _hotkeyOpened = false;
         if (!_app.UserHidden) return;
-        // Hide again once the closing animation has played (at most the pointer's closing; the keyboard's is shorter). Never
-        // from inside SetExpanded: ApplySettings calls it.
-        int duration = Soft.Enabled ? NoticeMotion.PanelLength(Settings.AnimationDuration, closing: true, keyboard: false) : 0;
-        _hotkeyRehide ??= new DispatcherTimer(DispatcherPriority.Normal, Dispatcher);
-        _hotkeyRehide.Stop();
-        _hotkeyRehide.Interval = TimeSpan.FromMilliseconds(Math.Max(1, duration));
-        _hotkeyRehide.Tick -= Rehide; _hotkeyRehide.Tick += Rehide;
-        _hotkeyRehide.Start();
+        // The panels are hidden: closing goes straight back to hidden, as hiding always does (ApplySettings), instead of
+        // playing the close into the collapsed island and showing that for a moment first. Not from inside SetExpanded,
+        // which ApplySettings calls, but before the next frame is drawn.
+        Dispatcher.BeginInvoke(DispatcherPriority.Send, Rehide);
     }
 
     // Called by App for every panel when the hidden state changes.
     internal void UserHiddenChanged()
     {
-        _hotkeyRehide?.Stop();
         _hotkeyOpened = false; _hotkeyPinned = false;
         if (_app.UserHidden)
         {
@@ -129,9 +122,9 @@ public partial class MainWindow
         ApplySettings(true);
     }
 
-    private void Rehide(object? sender, EventArgs e)
+    // A panel retired meanwhile (its monitor was removed) is closed and left alone.
+    private void Rehide()
     {
-        _hotkeyRehide?.Stop();
-        if (HiddenByUser && !_expanded) ApplySettings();
+        if (IsLoaded && HiddenByUser && !_expanded) ApplySettings();
     }
 }

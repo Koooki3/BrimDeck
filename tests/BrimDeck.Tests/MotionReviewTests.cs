@@ -16,11 +16,16 @@ internal static class MotionReviewTests
             NoticeMotion.PanelLength(360, closing: false, keyboard: true) == 216 && NoticeMotion.PanelLength(360, closing: true, keyboard: true) == 216
             && NoticeMotion.PanelLength(360, true, true) < NoticeMotion.PanelLength(360, true, false));
         check("Motion review: without animations every move takes no time", NoticeMotion.PanelLength(0, true, true) == 0 && NoticeMotion.PanelLength(0, false, false) == 0);
+        check("Motion review: the panel's lengths are the notices' (PanelMotion)", PanelMotion.Length(360, closing: true, keyboard: false) == 270
+            && PanelMotion.Length(360, closing: false, keyboard: true) == 216 && PanelMotion.Length(0, false, false) == 0);
+        check("Motion review: a page switch takes the default opening length, whatever the set duration", PanelMotion.Reshape == new DeckSettings().AnimationDuration);
 
         // F1: turned back, the surface starts at once; otherwise the accepted slow, delayed start stays.
         check("Motion review: a closing that turns an opening around starts its surface at once",
             NoticeMotion.ReturnSurfaceFor(true) == new NoticeMotion.Track(0, 1) && NoticeMotion.ReturnSurfaceFor(false) == NoticeMotion.PanelCloseSurface
             && NoticeMotion.PanelCloseSurface.Start > 0);
+        check("Motion review: the panel's closing surface starts as a notice's does",
+            PanelMotion.CloseSurfaceStart(true) == 0 && PanelMotion.CloseSurfaceStart(false) == PanelMotion.CloseSurfaceDelay && PanelMotion.CloseSurfaceDelay > 0);
 
         // F2: the share of a whole move a turned-back move takes.
         check("Motion review: turned back half way, a move takes half its time",
@@ -74,6 +79,8 @@ internal static class MotionReviewTests
         check("Motion review: a pop-up's picture is taken again once the theme's hover has settled",
             PopupPicture.SettleMilliseconds(MotionTiming.For(1, 0)) == 200 && PopupPicture.SettleMilliseconds(MotionTiming.For(1.2, 0)) == 232
             && PopupPicture.SettleMilliseconds(MotionTiming.For(.8, 3)) == MotionTiming.For(.8, 3).HoverIn + 40);
+        check("Motion review: a pop-up's picture is taken again once a hover's fade has settled",
+            PopupPicture.SettleMilliseconds((int)(Eased.Hover * 1000)) == (int)(Eased.Hover * 1000) + 40);
 
         // C5, F14: the pointer's answers keep their own pace, whatever the panel's animation length.
         var smooth = MotionTiming.For(1, 0);
@@ -105,7 +112,6 @@ internal static class MotionReviewTests
         check("Motion review: cleared, the next focus move plays it", gate.Take(12.4));
 
         // C5: the date picker keeps the timings it had at the default length.
-        check("Motion review: the date picker moves at its own pace", DatePickerTiming.Fixed == DatePickerTiming.From(AnimationLength.Default)
-            && DatePickerTiming.Fixed.Glide == 315 && DatePickerTiming.Fixed.Arrive == 420);
+        check("Motion review: the date picker moves at its own pace", DatePickerTiming.Fixed.Glide == 315 && DatePickerTiming.Fixed.Arrive == 420);
     }
 }
