@@ -49,7 +49,7 @@ public partial class MainWindow
     // What the glass decided for the last frame, and what the island made of it: liquid glass shown, the surface aside, the
     // surface's opacity, and whether the shadow's caster is opaque (MainWindow.LiquidShadow).
     internal (bool Shown, bool Aside, double Surface, bool Caster) OffscreenGlassState =>
-        (_glass?.LiquidShown == true, _glass?.SurfaceAside == true, _surface.Opacity,
+        (_glass?.BodyShown == true, _glass?.SurfaceAside == true, _surface.Opacity,
             IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster && ReferenceEquals(caster.Background, System.Windows.Media.Brushes.Black));
 
     // The pointer over the island (DIP, island coordinates; null: it left) and its button, as the island's mouse handlers pass

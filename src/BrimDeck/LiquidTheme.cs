@@ -34,7 +34,7 @@ internal static class LiquidTheme
     // Whether the theme on screen is drawn as liquid glass: the gate of the renderer (GlassBackdrop).
     public static bool Renders => PanelThemes.IsLiquid(PanelTheme.Current);
     // Whether liquid glass is shown under an island now.
-    public static bool Shown(GlassBackdrop? glass) => glass?.LiquidShown == true && Renders;
+    public static bool Shown(GlassBackdrop? glass) => glass?.BodyShown == true && Renders;
 
     // A theme change to show at once, without the fade (the first look automatic liquid glass decides): the Generation it
     // becomes. MainWindow.ThemeFade and GlassBackdrop skip their fades into it.
