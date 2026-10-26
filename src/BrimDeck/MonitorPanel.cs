@@ -96,14 +96,18 @@ public partial class MainWindow
     // or leaves. Asked on every system reading and every change of the devices.
     private bool AdmitStrip(MonitorSnapshot? snapshot)
     {
-        var monitor = _app.Monitor;
-        var (hidden, arriving) = _stripAdmission.Update(snapshot, monitor?.CpuSensor ?? SensorState.Unknown, monitor?.GpuSensor ?? SensorState.Unknown,
-            monitor?.StorageState ?? SensorState.Unknown, BatteryState());
+        var (hidden, arriving) = UpdateStripAdmission(snapshot);
         // Open, the row is not on screen; it is built with the new readings when the panel collapses.
         // A row not built yet (its chosen readings all waiting) is built once one of them joins.
         if (_expanded || _compactStrip is null && !Settings.ShowsMonitor(EffectiveStyle) || hidden == _stripUnavailable) return false;
         _stripPresence.Arrive(arriving); RenderCompact();
         return true;
+    }
+    private (CompactMonitorItems Hidden, CompactMonitorItems Arriving) UpdateStripAdmission(MonitorSnapshot? snapshot)
+    {
+        var monitor = _app.Monitor;
+        return _stripAdmission.Update(snapshot, monitor?.CpuSensor ?? SensorState.Unknown, monitor?.GpuSensor ?? SensorState.Unknown,
+            monitor?.StorageState ?? SensorState.Unknown, BatteryState());
     }
     // The battery reading's state: Found while a shown device reports a charge, None once the devices are listed and none
     // does, Unknown before (or while nothing reads them).

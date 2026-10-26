@@ -191,8 +191,6 @@ public static class Devices
         return c != 0 ? c : string.CompareOrdinal(a.Key, b.Key);
     });
 
-    // A Bluetooth address from a device instance or interface path ("..._cd5994078968\..." or "Dev_CD5994078968") or a
-    // 48-bit number; null when there is none.
     // "045E:0B13" from an id carrying "VID&02045e_PID&0b13" (Bluetooth LE), "VID&0002054c_PID&0d58" (classic) or "VID_046D&PID_C52B" (USB).
     public static string? HardwareIn(string? id)
     {
@@ -202,7 +200,8 @@ public static class Devices
     }
     public static string Hardware(int vendor, int product) => $"{vendor & 0xFFFF:X4}:{product & 0xFFFF:X4}";
 
-    public static string? Address(ulong address) => address == 0 ? null : address.ToString("X12", System.Globalization.CultureInfo.InvariantCulture);
+    // A Bluetooth address from a device instance or interface path ("..._cd5994078968\..." or "Dev_CD5994078968"); null when
+    // there is none.
     public static string? AddressIn(string? id)
     {
         if (string.IsNullOrEmpty(id)) return null;

@@ -129,6 +129,7 @@ public partial class App : Application
         InitializeHotkeys();
         StartBackgroundUpdates();
         DisplayPower.Install(Dispatcher);
+        DisplayPower.Changed += UpdateDeviceDemand;
         _save.Tick += (_, _) => FlushSettings();
         _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden)
         {
@@ -458,7 +459,9 @@ public partial class App : Application
     }
     private void UpdateDeviceDemand()
     {
-        var demand = _devicePages.Count + _deviceStrips.Count > 0 || _deviceSettings ? DeviceDemand.Watch
+        // The settings page is not read for with the display off, as a panel is not (its own demand drops then); the notice
+        // still listens.
+        var demand = _devicePages.Count + _deviceStrips.Count > 0 || _deviceSettings && !DisplayPower.Off ? DeviceDemand.Watch
             : Settings.DeviceLowNotice && Settings.NoticesEnabled ? DeviceDemand.Listen : DeviceDemand.None;
         if (Exiting || Devices is null && demand == DeviceDemand.None) return;
         if (Devices is null) { Devices = new DeviceBatteries(Dispatcher); Devices.Changed += DeviceBatteriesChanged; }

@@ -917,9 +917,12 @@ public partial class MainWindow
         // The system readings offer each chosen reading, in the order of the settings' table and in the scheme's colors; the row
         // admits those that fit whole (CompactMusicLayout).
         double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        // A device switched on or off in the settings changes whether the battery reading shows, with no change of the devices to
+        // say so: its admission is taken again as the row is built.
+        if (StripChoosesBattery) _stripPresence.Arrive(UpdateStripAdmission(_app.Monitor?.Latest).Arriving);
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
             !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden) : null;
-        strip?.SetBattery(LowestBattery());
+        if (StripChoosesBattery) strip?.SetBattery(StripBattery());
         double rowWidth = SnapDown(contentWidth, dpi);
         var layout = CompactMusicLayout.Calculate(rowWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.Candidates ?? [], strip?.Gap ?? 0);
         CurrentCompactLayout = layout;

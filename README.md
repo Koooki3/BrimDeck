@@ -110,7 +110,7 @@ The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT
 - Shows the battery of the connected wireless keyboards, mice, headphones, controllers and pens; AirPods show each bud and the case. A low battery changes color and carries a mark; a charging one shows a bolt.
 - Reads the Bluetooth battery Windows reads (as Windows Settings shows it), Logitech Unifying, Bolt and Lightspeed receivers, Razer wireless mice, SteelSeries and HyperX wireless headsets, 2.4 GHz mice by ATK, VXE, VGN, MCHOSE and others, and Xbox and PlayStation controllers. Read only: nothing on the devices or in Windows is changed.
 - The notch or capsule can show the device with the lowest charge; with dynamic notices on, a battery falling below the threshold (15% by default) notices once. Devices can be switched off one by one under Settings › Devices.
-- Parts of the protocols are ported from [device-battery-viewer](https://github.com/CharlesGool/device-battery-viewer) and [razer-battery-report](https://github.com/xzeldon/razer-battery-report) (both MIT License).
+- Parts of the protocols are ported from [device-battery-viewer](https://github.com/CharlesGool/device-battery-viewer), [razer-battery-report](https://github.com/xzeldon/razer-battery-report), [ATK-A9-Battery](https://github.com/Lkig/ATK-A9-Battery), [atkctl](https://github.com/cobanov/atkctl) and [InphicBatteryTray](https://github.com/Tan-TanZi/InphicBatteryTray) (all MIT License; see ThirdPartyNotices.txt).
 
 ### Panel themes
 

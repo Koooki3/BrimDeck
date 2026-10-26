@@ -600,8 +600,8 @@ public sealed class DeckSettings
         NoticeHotkey ??= "";
         NoticesWidth = double.IsFinite(NoticesWidth) ? Math.Clamp(NoticesWidth, 440, 1200) : 460;
         NoticesHeight = double.IsFinite(NoticesHeight) ? Math.Clamp(NoticesHeight, 140, 400) : 280;
-        DevicesWidth = double.IsFinite(DevicesWidth) ? Math.Clamp(DevicesWidth, 440, 1200) : 460;
-        DevicesHeight = double.IsFinite(DevicesHeight) ? Math.Clamp(DevicesHeight, 140, 400) : 200;
+        DevicesWidth = double.IsFinite(DevicesWidth) ? Math.Clamp(DevicesWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 460;
+        DevicesHeight = double.IsFinite(DevicesHeight) ? Math.Clamp(DevicesHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         HiddenDevices = [.. (HiddenDevices ?? []).OfType<HiddenDevice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)
             .Select(device => device with { Name = device.Name ?? "" })];
         DeviceLowPercent = Devices.LowChoices.Contains(DeviceLowPercent) ? DeviceLowPercent : Devices.DefaultLowPercent;
