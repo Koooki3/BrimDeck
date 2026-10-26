@@ -41,7 +41,7 @@
     <Ellipse Stroke="{DynamicResource SettingsAccent}" StrokeThickness="2" Margin="2,3"/>
   </ControlTemplate></Setter.Value></Setter></Style>
   <Style x:Key="SettingsSmallHelpFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate>
-    <Ellipse Stroke="{DynamicResource SettingsAccent}" StrokeThickness="2" Margin="-3"/>
+    <Ellipse Stroke="{DynamicResource SettingsAccent}" StrokeThickness="2" Margin="3"/>
   </ControlTemplate></Setter.Value></Setter></Style>
   <Style x:Key="SettingsButton" TargetType="Button">
     <Setter Property="FocusVisualStyle" Value="{StaticResource SettingsFocus}"/>
@@ -166,9 +166,11 @@
   <Style x:Key="SettingsLink" TargetType="Button" BasedOn="{StaticResource SettingsButton}">
     <Setter Property="Padding" Value="0"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-      <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+      <!-- The text is 16 DIP tall; a transparent edge 4 DIP above and below makes the link 24 DIP to the pointer (SW-08) without
+           moving it or anything around it. -->
+      <Border Background="Transparent" Margin="0,-4" Padding="0,4"><Border Background="Transparent" Padding="{TemplateBinding Padding}">
         <TextBlock x:Name="Text" Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center"/>
-      </Border>
+      </Border></Border>
       <ControlTemplate.Triggers>
         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Text" Property="TextDecorations" Value="Underline"/></Trigger>
         <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.7"/></Trigger>

@@ -394,6 +394,7 @@ public sealed partial class SettingsWindow : Window
         {
             string name=theme switch { SettingsTheme.System=>Loc.T("跟随系统", "System"),SettingsTheme.Light=>Loc.T("浅色", "Light"),_=>Loc.T("深色", "Dark") };
             var choice=new RadioButton { Style=(Style)FindResource("SettingsSegment"),Content=name,IsChecked=S.Theme==theme,GroupName="Theme" };
+            if(theme==new DeckSettings().Theme)MarkDefault(choice);
             AutomationProperties.SetName(choice,name); choice.Checked+=(_,_)=> { Change(s=>s.Theme=theme); RebuildTheme(); }; themes.Children.Add(choice);
         }
         // Each language is named in itself. Choosing one rebuilds the window in it, as a theme change does.
@@ -419,6 +420,7 @@ public sealed partial class SettingsWindow : Window
         foreach (var (placement, name) in new[] { (DisplayPlacement.Primary, Loc.T("跟随主显示器", "Primary display")), (DisplayPlacement.Chosen, Loc.T("自选显示器", "Choose displays")) })
         {
             var option = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = name, IsChecked = S.Display == placement, GroupName = "Display" };
+            if (placement == new DeckSettings().Display) MarkDefault(option);
             AutomationProperties.SetName(option, Loc.T("显示在 · ", "Show on · ") + name);
             option.Checked += (_, _) =>
             {
@@ -642,6 +644,8 @@ public sealed partial class SettingsWindow : Window
         void EnableDuration(bool enabled)
         {
             foreach (var control in duration.Children.OfType<FrameworkElement>().Where(control => Grid.GetColumn(control) > 0)) control.IsEnabled = enabled;
+            // The whole row reads as off (SW-12): the title and the number box fade as the slider does (its own 0.35).
+            foreach (var part in duration.Children.OfType<FrameworkElement>().Where(control => control is not Slider)) part.Opacity = enabled ? 1 : .4;
         }
         EnableDuration(S.Animations);
         Group(SliderRow(Loc.T("展开延迟", "Expand delay"), S.OpenDelay, 0, 2000, 50, Loc.T("毫秒", "ms"), value => Change(s => s.OpenDelay = (int)value),
@@ -658,9 +662,10 @@ public sealed partial class SettingsWindow : Window
     private void WindowRules()
     {
         SectionTitle(Loc.T("窗口行为", "Window behavior"));
-        Group(BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value)),
-            BehaviorRow(Loc.T("有应用处于无边框全屏时", "When an app is in borderless full screen"), S.Borderless, value => Change(s => s.Borderless = value)),
-            BehaviorRow(Loc.T("有应用处于独占全屏时", "When an app is in exclusive full screen"), S.Exclusive, value => Change(s => s.Exclusive = value)),
+        var defaults = new DeckSettings();
+        Group(BehaviorRow(Loc.T("有窗口最大化时", "When a window is maximized"), S.Maximized, value => Change(s => s.Maximized = value), defaults.Maximized),
+            BehaviorRow(Loc.T("有应用处于无边框全屏时", "When an app is in borderless full screen"), S.Borderless, value => Change(s => s.Borderless = value), defaults.Borderless),
+            BehaviorRow(Loc.T("有应用处于独占全屏时", "When an app is in exclusive full screen"), S.Exclusive, value => Change(s => s.Exclusive = value), defaults.Exclusive),
             ExceptionsRow());
     }
 
@@ -729,7 +734,8 @@ public sealed partial class SettingsWindow : Window
                 // centred mark otherwise sits higher than the Chinese label beside it. The box leaves half a unit around the
                 // circle's stroke: a box exactly the circle's size clips the outer edge of the stroke on all four sides.
                 var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
-                var info = new HelpMark { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(2.5, 0, 0, 0),
+                // The 12 DIP mark takes the pointer 24 DIP square (SW-08); the negative margin keeps its place.
+                var info = new HelpMark { Width = 24, Height = 24, Background = Brushes.Transparent, Margin = new Thickness(2.5 - 6, -6, -6, -6),
                     VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
                     FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
                 AttachSettingHelp(info, title, () => help);
@@ -1124,18 +1130,32 @@ public sealed partial class SettingsWindow : Window
         {
             var option = new RadioButton { Content = label, Style = (Style)FindResource("SettingsSegment"), GroupName = "MouseWheel", IsChecked = S.MouseWheel == action };
             AutomationProperties.SetName(option, title + " · " + label); option.Checked += (_, _) => Change(s => s.MouseWheel = action); options.Children.Add(option);
+            if (action == new DeckSettings().MouseWheel) MarkDefault(option);
         }
         return Row(title, SegmentBorder(options), help: () => Loc.T("仅在展开的面板区域内滚动时生效；歌词、明细等会滚动的区域不受影响。",
             "Works only when the wheel is rolled over the expanded panel; areas that scroll, such as the lyrics and the details, are not affected."));
     }
 
-    private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed)
+    // An option that is the setting's default carries a faint "默认" after its name, and says so to screen readers (SW-14, S-05).
+    private void MarkDefault(RadioButton option)
     {
-        var options = new UniformGrid { Columns = 3, Width = 324 };
+        if (option.Content is not string label) return;
+        var mark = TextLine(Loc.T("默认", "default"), 10, TextTertiary); mark.Margin = new Thickness(4, 1, 0, 0); mark.VerticalAlignment = VerticalAlignment.Center;
+        var content = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+        content.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center }); content.Children.Add(mark);
+        option.Content = content;
+        AutomationProperties.SetHelpText(option, Loc.T("默认选项", "Default option"));
+    }
+
+    private FrameworkElement BehaviorRow(string title, WindowBehavior selected, Action<WindowBehavior> changed, WindowBehavior fallback)
+    {
+        // Wide enough for the longest option with its "默认" mark.
+        var options = new UniformGrid { Columns = 3, Width = Loc.IsEnglish ? 384 : 354 };
         foreach (var behavior in Enum.GetValues<WindowBehavior>())
         {
             var option = new RadioButton { Content = BehaviorName(behavior), Style = (Style)FindResource("SettingsSegment"), GroupName = "Behavior" + title, IsChecked = selected == behavior };
             AutomationProperties.SetName(option, title + " · " + BehaviorName(behavior)); option.Checked += (_, _) => changed(behavior); options.Children.Add(option);
+            if (behavior == fallback) MarkDefault(option);
         }
         return Row(title, SegmentBorder(options));
     }

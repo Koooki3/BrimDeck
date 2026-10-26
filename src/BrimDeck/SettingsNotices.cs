@@ -113,7 +113,8 @@ public sealed partial class SettingsWindow
             privacy.Visibility = state == NoticeSourceState.Denied ? Visibility.Visible : Visibility.Collapsed;
             return state switch
             {
-                NoticeSourceState.Off => (Loc.T("已关闭", "Off"), false),
+                // The switch says on or off; the line only says whether notices arrive (SW-11), so a switch that is on never reads "off".
+                NoticeSourceState.Off => S.NoticeWindowsSource ? (Loc.T("未在接收：通知来源还没有启动，稍后重试。", "Not receiving: the source has not started yet; trying again shortly."), true) : ("", false),
                 NoticeSourceState.NeedsAccess => (Loc.T("需要授权：点击“允许访问”，Windows 会询问是否允许 BrimDeck 读取通知。", "Needs access: click \"Allow access\" and Windows asks whether BrimDeck may read notifications."), true),
                 NoticeSourceState.Denied => (Loc.T("Windows 拒绝了访问。可在“设置 › 隐私和安全性 › 通知”中允许应用访问通知。", "Windows denies access. Allow apps to access notifications in Settings › Privacy & security › Notifications."), true),
                 NoticeSourceState.EventLog => (Loc.T("正在接收（事件日志模式：Windows 记录通知后立即读取）", "Receiving (event log mode: reads as soon as Windows logs a notification)"), false),
@@ -137,7 +138,7 @@ public sealed partial class SettingsWindow
             AutomationProperties.SetName(toggle, "WSL · " + name);
             toggle.Checked += (_, _) => Change(s => { if (!s.NoticeWslDistros.Contains(name, StringComparer.OrdinalIgnoreCase)) s.NoticeWslDistros.Add(name); });
             toggle.Unchecked += (_, _) => Change(s => s.NoticeWslDistros.RemoveAll(d => string.Equals(d, name, StringComparison.OrdinalIgnoreCase)));
-            var status = StatusLine(() => WslStatus(center, name));
+            var status = StatusLine(() => WslStatus(center, name, S.NoticeWslDistros.Contains(name, StringComparer.OrdinalIgnoreCase)));
             rows.Add(Row("WSL · " + name, toggle, status));
         }
         if (rows.Count == 0)
@@ -145,7 +146,7 @@ public sealed partial class SettingsWindow
             var none = TextLine(Loc.T("未检测到 WSL 发行版。", "No WSL distribution was found."), 12, TextSecondary);
             rows.Add(new Border { Child = none, MinHeight = 44, Padding = new Thickness(0, 13, 0, 13) });
         }
-        SectionTitle(Loc.T("WSL（默认关闭）", "WSL (off by default)"), help: () => Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。代理运行时发行版和 WSL 虚拟机不会自动停止，所以发行版中你的程序（终端、后台任务等）全部结束 5 分钟后，代理会自行退出，让 WSL 照常停止发行版并释放内存，发行版下次运行时再自动接入。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
+        SectionTitle("WSL", help: () => Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。代理运行时发行版和 WSL 虚拟机不会自动停止，所以发行版中你的程序（终端、后台任务等）全部结束 5 分钟后，代理会自行退出，让 WSL 照常停止发行版并释放内存，发行版下次运行时再自动接入。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
             "Once a distribution is on, BrimDeck copies its notice agent to ~/.local/share/brimdeck there and adds ~/.local/bin/brim-notify. The agent starts only while the distribution runs; a distribution is never started for notices. While the agent runs, WSL does not stop the distribution or its virtual machine, so the agent ends by itself 5 minutes after the last of your programs there (terminals, background jobs) ended; WSL then stops the distribution and frees its memory as usual, and the agent connects again the next time it runs. Without a notification service, the agent becomes the session's standard desktop notification service (notify-send and others work as usual); with one, it watches it, and where the bus does not allow watching only brim-notify works."));
         Note(Loc.T("在 WSL 里运行的程序也能把通知发到这里；开启发行版后可使用 brim-notify 和 notify-send。",
             "Programs in WSL can send notices here too; once a distribution is on, brim-notify and notify-send work there."));
@@ -203,9 +204,11 @@ public sealed partial class SettingsWindow
         Group([.. rows]);
     }
 
-    private static (string, bool) WslStatus(NoticeCenter center, string name)
+    // on: the distribution's switch. The line only says whether notices arrive (SW-11): nothing while the switch is off, which says so.
+    private static (string, bool) WslStatus(NoticeCenter center, string name, bool on)
     {
-        if (!center.WslStates.TryGetValue(name, out var state)) return (Loc.T("未开启", "Off"), false);
+        if (!on) return ("", false);
+        if (!center.WslStates.TryGetValue(name, out var state)) return (Loc.T("未在接收：正在等待发行版接入。", "Not receiving: waiting for the distribution to connect."), false);
         // The agent ended by itself (W2); said apart from the states below, which are the agent's own.
         if (state.State == WslAgentState.Idle)
             return (Loc.T("发行版中已没有你的程序在运行，代理已退出，让 WSL 可以停止它；发行版下次运行时自动接入。", "Nothing of yours runs in the distribution any more, so the agent ended to let WSL stop it; it connects again the next time the distribution runs."), false);
@@ -224,7 +227,7 @@ public sealed partial class SettingsWindow
             WslAgentState.MonitorDenied => (Loc.T("已有通知服务，且总线不允许监视；brim-notify 仍可用。", "Another notification service runs and the bus does not allow watching it; brim-notify still works."), true),
             WslAgentState.NoBus => (Loc.T("没有可用的会话总线；brim-notify 仍可用。", "No session bus is available; brim-notify still works."), true),
             WslAgentState.Failed => (Loc.T("连接失败，稍后重试", "Connection failed; trying again later") + (state.Detail.Length > 0 ? Loc.T("（", " (") + state.Detail + Loc.T("）", ")") : ""), true),
-            _ => (Loc.T("未开启", "Off"), false)
+            _ => (Loc.T("未在接收。", "Not receiving."), false)
         };
         if (!state.Conflict) return (text, warning);
         return (text + Loc.T(" ~/.local/bin/brim-notify 是你自己的文件，BrimDeck 未改动它；可改用 ~/.local/share/brimdeck/brimdeck-agent notify。",

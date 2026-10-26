@@ -90,6 +90,9 @@ public sealed partial class SettingsWindow
             frame.Padding = focused ? new Thickness(Math.Max(0, padding.Left - 1), padding.Top, Math.Max(0, padding.Right - 1), padding.Bottom) : padding;
         }
         input.IsKeyboardFocusWithinChanged += (_, _) => Show(input.IsKeyboardFocusWithin);
+        // The whole frame is the field's click target, not only the 16 DIP line of text in it (SW-08). The steppers and the text
+        // itself take their own clicks first.
+        if (input is TextBox box) frame.MouseLeftButtonDown += (_, e) => { box.Focus(); box.CaretIndex = box.Text.Length; e.Handled = true; };
     }
 
     // Where each segmented control's highlight stood when the user last pressed it, so a page rebuilt by that
