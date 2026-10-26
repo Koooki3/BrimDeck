@@ -187,7 +187,9 @@ public partial class MainWindow
         else
         {
             _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : DeckPages.Size(Settings, CurrentPage);
-            _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
+            // The theme's spring tier (motion.spring) chooses only how much the surface gives; default is the monitor's spring.
+            double damping = SpringTiers.Damping(PanelTheme.Motion.Spring);
+            _springWidth = new Spring(_resizeFrom.Width, damping); _springHeight = new Spring(_resizeFrom.Height, damping);
             _resizeChanged = false;
         }
         _resizeCompact = compact; _resizeStyle = style; _resizePage = CurrentPage; _resizeSettling = false; Island.SettledClip = false;

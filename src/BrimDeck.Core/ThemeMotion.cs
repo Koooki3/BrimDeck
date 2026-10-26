@@ -41,6 +41,7 @@ public static class MotionStyles
     public static PressFx Press(string? value, PressFx fallback) => Parse(value, PressAliases, fallback);
     public static FocusFx Focus(string? value, FocusFx fallback) => Parse(value, FocusAliases, fallback);
     public static ParticleFx Particles(string? value, ParticleFx fallback) => Parse(value, null, fallback);
+    public static SpringTier Spring(string? value, SpringTier fallback) => Parse(value, null, fallback);
 
     // A name only: numbers ("7") are not styles, whatever the enum would make of them.
     private static T Parse<T>(string? value, Dictionary<string, T>? aliases, T fallback) where T : struct, Enum
@@ -113,9 +114,10 @@ public readonly record struct AmbientFrame(double Rim, double Drift, double Swee
 // Highlight the color of the moment of a press (a scan line, an indicator, a selection, sparkles, fireflies).
 // ParticleStrength is how strongly the particles a completed press leaves show (0: none); the theme file calls it "trail".
 // Pace scales every interaction duration. Steps quantizes the motion into that many hard steps (0: smooth), for a mechanical
-// theme.
+// theme. Spring is how much the theme's springs give (SpringTier), always at the monitor page's frequency.
 public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double HoverStrength, PressFx Press, double PressStrength,
-    double ParticleStrength, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent")
+    double ParticleStrength, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent",
+    SpringTier Spring = SpringTier.Default)
 {
     public const string SystemAccent = "system";
     // Without a motion section anywhere in the base chain, nothing is drawn over the controls: they keep their own hover and
@@ -131,7 +133,7 @@ public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double Ho
         Ambient = AmbientMotion.None,
         Hover = Hover switch { HoverFx.None => HoverFx.None, HoverFx.Lift => HoverFx.Lift, _ => HoverFx.Reveal },
         Press = Press switch { PressFx.None => PressFx.None, PressFx.Sink => PressFx.Sink, _ => PressFx.Shade },
-        ParticleStrength = 0, Particles = ParticleFx.None, Steps = 0, Focus = Focus == FocusFx.None ? FocusFx.None : FocusFx.Ring,
+        ParticleStrength = 0, Particles = ParticleFx.None, Steps = 0, Focus = Focus == FocusFx.None ? FocusFx.None : FocusFx.Ring, Spring = SpringTier.Default,
         Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
     };
 
@@ -402,6 +404,8 @@ public sealed class PanelThemeMotion
     public string? Color { get; set; }
     public string? Secondary { get; set; }
     public string? Highlight { get; set; }
+    // firm, default, jelly (SpringTier): how much the springs give, damping 0.85, 0.70 or 0.50 at 16 rad/s
+    public string? Spring { get; set; }
 }
 
 public sealed class PanelThemeAmbient
@@ -447,7 +451,8 @@ public static partial class PanelThemes
                 Steps = MotionSafety.Steps(motion.Steps is { } steps && double.IsFinite(steps) ? (int)Math.Round(Math.Clamp(steps, -1, 99)) : null, m.Steps),
                 Color = motion.Color is { Length: > 0 } color ? color.Trim() : m.Color,
                 Secondary = motion.Secondary is { Length: > 0 } secondary ? secondary.Trim() : m.Secondary,
-                Highlight = motion.Highlight is { Length: > 0 } highlight ? highlight.Trim() : m.Highlight
+                Highlight = motion.Highlight is { Length: > 0 } highlight ? highlight.Trim() : m.Highlight,
+                Spring = MotionStyles.Spring(motion.Spring, m.Spring)
             };
         }
         return m with { Ambient = a };

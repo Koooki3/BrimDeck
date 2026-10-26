@@ -307,8 +307,12 @@ internal sealed partial class FxSurface
                 break;
             case PressFx.Jelly:
             {
-                // Held, the squash follows the press; let go, a damped spring takes it back and once past its shape.
-                double squash = press.Release >= 0 ? Math.Exp(-5 * press.Release) * Math.Cos(9 * press.Release) * Math.Max(k, .6) : k;
+                // Held, the squash follows the press; let go, a damped spring takes it back and once past its shape. A theme that
+                // chooses its spring tier (motion.spring) lets go on that spring instead: the monitor's 16 rad/s at its damping,
+                // timed from the release (jelly passes its shape twice, firm barely once).
+                double squash = press.Release < 0 ? k
+                    : _motion.Spring == SpringTier.Default ? Math.Exp(-5 * press.Release) * Math.Cos(9 * press.Release) * Math.Max(k, .6)
+                    : SpringTiers.Response(SpringTiers.Damping(_motion.Spring), press.Flourish >= 0 ? press.Flourish * _timing.Press / 1000.0 : press.Release * _timing.PressOut / 1000.0) * Math.Max(k, .6);
                 if (Math.Abs(squash) < .002 && k <= .001) break;
                 double cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2, w = r.Width * (1 + .05 * squash), hgt = r.Height * (1 - .07 * squash);
                 var drop = Grid(new Rect(cx - w / 2, cy - hgt / 2, w, hgt));

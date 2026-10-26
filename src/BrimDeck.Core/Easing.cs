@@ -57,13 +57,17 @@ public struct Eased
 }
 
 // A spring that trails its target, for what follows the pointer: slightly under-damped, so a fast drag that stops overshoots a
-// little and settles back, and slow enough (a period of about 0.4 s) that the motion reads as weight rather than lag.
+// little and settles back, and slow enough (a period of about 0.4 s) that the motion reads as weight rather than lag. Every
+// spring in BrimDeck has the monitor page's frequency; a theme may only choose how much it gives (SpringTier).
 public struct Spring
 {
-    private const double Frequency = 16, DampingRatio = .7;
+    public const double Frequency = 16, DampingRatio = .7;
     public double Value, Velocity, Target;
+    // The damping ratio it settles with; 0 (a spring made with default) is DampingRatio.
+    public double Damping;
 
-    public Spring(double value) { Value = Target = value; Velocity = 0; }
+    public Spring(double value, double damping = 0) { Value = Target = value; Velocity = 0; Damping = damping; }
+    private readonly double Zeta => Damping > 0 && double.IsFinite(Damping) ? Damping : DampingRatio;
 
     // Advances by dt seconds, in steps short enough to stay stable after a stalled frame. Returns whether it still moves.
     public bool Step(double dt)
@@ -72,7 +76,7 @@ public struct Spring
         while (dt > 0)
         {
             double h = Math.Min(dt, 1 / 240.0);
-            Velocity += (-Frequency * Frequency * (Value - Target) - 2 * DampingRatio * Frequency * Velocity) * h;
+            Velocity += (-Frequency * Frequency * (Value - Target) - 2 * Zeta * Frequency * Velocity) * h;
             Value += Velocity * h;
             dt -= h;
         }
@@ -88,6 +92,34 @@ public struct Spring
         if (raw > max - zone) return max - zone + zone * (1 - Math.Exp(-(raw - (max - zone)) / zone));
         if (raw < min + zone) return min + zone - zone * (1 - Math.Exp(-(min + zone - raw) / zone));
         return raw;
+    }
+}
+
+// How much a theme's springs give (motion.spring), at the monitor page's frequency (Spring.Frequency, 16 rad/s): firm settles
+// almost without passing its target (a mechanical theme), default is the monitor's own spring, jelly passes it and comes back
+// twice (glass, after the user's wobbly windows at their middle setting). Only the damping changes, so every tier keeps the
+// same rhythm.
+public enum SpringTier { Default, Firm, Jelly }
+
+public static class SpringTiers
+{
+    public const double Firm = .85, Jelly = .5;
+    public static double Damping(SpringTier tier) => tier switch { SpringTier.Firm => Firm, SpringTier.Jelly => Jelly, _ => Spring.DampingRatio };
+
+    // A spring let go at rest one unit from its target, `seconds` later: e^(-z w t) (cos(wd t) + z / sqrt(1 - z^2) sin(wd t)).
+    // It passes the target (goes below 0) as often as its damping allows, each time by less.
+    public static double Response(double damping, double seconds)
+    {
+        if (!(seconds > 0)) return 1;
+        double z = Math.Clamp(double.IsFinite(damping) ? damping : Spring.DampingRatio, .05, .99), w = Spring.Frequency, wd = w * Math.Sqrt(1 - z * z);
+        return Math.Exp(-z * w * seconds) * (Math.Cos(wd * seconds) + z / Math.Sqrt(1 - z * z) * Math.Sin(wd * seconds));
+    }
+
+    // How far the spring let go passes its target the first time, as a share of where it started (the classic e^(-pi z/sqrt(1-z^2))).
+    public static double Overshoot(double damping)
+    {
+        double z = Math.Clamp(damping, .05, .99);
+        return Math.Exp(-Math.PI * z / Math.Sqrt(1 - z * z));
     }
 }
 

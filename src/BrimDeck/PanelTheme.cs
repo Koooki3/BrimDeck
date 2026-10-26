@@ -214,6 +214,10 @@ internal static class PanelTheme
     // curve, and as given otherwise.
     public static double Corner(double radius) => Current.Effects.Pixel > 0 ? 0 : radius;
 
+    // The motion BrimDeck's windows move with: the theme's, or its quiet Windows form while "system" is chosen (as the pointer
+    // layer dresses itself, FxSurface.EnsureDressed).
+    public static ThemeMotion Motion => PanelThemes.NormalizeId((Application.Current as App)?.Settings.PanelTheme) == PanelThemes.SystemId ? Current.Motion.ForSystem() : Current.Motion;
+
     // Glass shows as glass only where Windows' transparency effects are on and high contrast is off; otherwise its surface
     // color is drawn, opaque, like any other theme's.
     public static bool GlassShown => GlassShownFor(Current);
