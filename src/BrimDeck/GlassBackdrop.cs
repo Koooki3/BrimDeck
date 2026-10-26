@@ -149,6 +149,15 @@ internal sealed class GlassBackdrop : IDisposable
     private CompositionLinearGradientBrush? _lightBrush;
     private CompositionColorGradientStop? _lightTop, _lightFade;
     private bool? _rimDark;
+    // The acrylic body's luminosity opacity now (GlassEffect.LuminosityFor) and the probe that sets it (AcrylicProbe): a couple
+    // of looks a second at what lies around the island, never in the frame's path. It rises at once when the text needs more
+    // and comes down only after the backdrop stayed calmer for ProbeDwellMs (a video's flashes never make it pump); automatic
+    // liquid glass's look takes the same reading through GlassAppearance (its prior, hysteresis, dwell and video hold).
+    private double _luminosity = GlassEffect.LuminosityBase;
+    private long _lowerSince = -1;
+    private DispatcherTimer? _probe;
+    private GlassAppearance? _probeLook;
+    private const int ProbeMs = 500, ProbeDwellMs = 2500;
     private LiquidHost? _host;
     private SpriteVisual? _liquid;
     private CompositionRoundedRectangleGeometry? _liquidClip;
@@ -365,6 +374,9 @@ internal sealed class GlassBackdrop : IDisposable
         // The frames Lag back and one either side, as far as there are any; the newest only on the first frame.
         int end = _recent.Count - 1, at = Math.Max(0, end - Lag);
         int first = Math.Max(0, at - 1), last = Math.Min(end, at + 1);
+        // The acrylic body (round 16, live check 10-26: opening, the light glass trailed the island by a frame and more, its
+        // content showing without glass, then caught up in one frame): the shape a frame back, kept inside the newest one too.
+        if (AcrylicBody) { at = Math.Max(0, end - 1); first = at; last = end; }
         var shown = _recent[at];
         double opacity = shown.Opacity * shown.Material;
         double speed = 0;
@@ -398,10 +410,12 @@ internal sealed class GlassBackdrop : IDisposable
         // The notch's shoulders, thinner than its corners, stay clear glass.
         double left = double.MinValue, top = double.MinValue, right = double.MaxValue, bottom = double.MaxValue, radius = 0, shoulder = 0;
         bool squareTop = true;
+        double topRound = double.MaxValue, bottomRound = 0;
         for (int i = first; i <= last; i++)
         {
             var shape = _recent[i];
             var c = shape.Corners;
+            topRound = Math.Min(topRound, Math.Max(c.TopLeft, c.TopRight)); bottomRound = Math.Max(bottomRound, Math.Max(c.BottomLeft, c.BottomRight));
             bool square = c.TopLeft < .5 && c.TopRight < .5;
             squareTop &= square;
             radius = Math.Max(radius, square ? Math.Max(c.BottomLeft, c.BottomRight) : Math.Max(Math.Max(c.TopLeft, c.TopRight), Math.Max(c.BottomLeft, c.BottomRight)));
@@ -427,10 +441,19 @@ internal sealed class GlassBackdrop : IDisposable
             // lies along that outline.
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
             Dress();
-            _clip.Offset = new Vector2((float)outerLeft, (float)clipTop);
-            _clip.Size = new Vector2((float)Math.Max(0, outerRight - outerLeft), (float)Math.Max(0, outerBottom - clipTop));
-            _clip.CornerRadius = new Vector2((float)radius);
-            Rim(outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
+            // Its top follows the island's top corners continuously (live check 10-26: expanding, the top edge flickered - the
+            // blur's clip jumped from a rounded top at the island's edge to a square one reaching above the screen the frame
+            // every recent shape was square, which the island's own surface hid under the blur but nothing hides over acrylic):
+            // the rectangle rises above the island's top by as much as its top corners are flatter than its bottom ones, so the
+            // rounding it shows at the top is the island's, from the capsule's to none, with no step.
+            double round = Math.Max(topRound, bottomRound), raise = bottomRound > topRound ? bottomRound - topRound + 2 * (1 - topRound / Math.Max(bottomRound, 1)) : 0;
+            double acrylicTop = top - raise;
+            _clip.Offset = new Vector2((float)outerLeft, (float)acrylicTop);
+            _clip.Size = new Vector2((float)Math.Max(0, outerRight - outerLeft), (float)Math.Max(0, outerBottom - acrylicTop));
+            _clip.CornerRadius = new Vector2((float)round);
+            clipTop = acrylicTop;
+            Rim(outerLeft, acrylicTop, outerRight, outerBottom, round, opacity);
+            Probe(true);
         }
         else if (_rim is not null) _rim.IsVisible = false;
         _sprite!.Opacity = liquid ? 0 : (float)opacity;
@@ -785,7 +808,7 @@ internal sealed class GlassBackdrop : IDisposable
         if (AcrylicBody)
             try
             {
-                _sprite.Brush = GlassEffect.Acrylic(compositor, PanelTheme.Current.IsDark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight);
+                _sprite.Brush = GlassEffect.Acrylic(compositor, (PanelTheme.Current.IsDark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = _luminosity });
                 return;
             }
             catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or InvalidCastException) { }
@@ -858,12 +881,55 @@ internal sealed class GlassBackdrop : IDisposable
         }
     }
 
+    private void Probe(bool on)
+    {
+        if (!on) { _probe?.Stop(); return; }
+        if (_probe is null)
+        {
+            _probe = new DispatcherTimer(DispatcherPriority.Background, _owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(ProbeMs) };
+            _probe.Tick += (_, _) => ProbeTick();
+        }
+        if (!_probe.IsEnabled) { _probe.Start(); ProbeTick(); }
+    }
+
+    private void ProbeTick()
+    {
+        if (_disposed || !AcrylicBody || _last is not { } frame || _windowRect is not { } window) { _probe?.Stop(); return; }
+        double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
+        var island = new LiquidGlass.RECT(window.X + (int)frame.Left, window.Y + (int)frame.Top, window.X + (int)frame.Right, window.Y + (int)frame.Bottom);
+        if (LiquidGlass.AcrylicProbe.Read(island, (int)(24 * scale), (int)(40 * scale)) is not { } reading) return;
+        long now = Environment.TickCount64;
+        bool dark = PanelTheme.Current.IsDark;
+        double wanted = GlassEffect.LuminosityFor(dark, reading.Bright, reading.Dark);
+        if (wanted > _luminosity) { _luminosity = wanted; _lowerSince = -1; Redress(); }
+        else if (wanted < _luminosity)
+        {
+            if (_lowerSince < 0) _lowerSince = now;
+            else if (now - _lowerSince >= ProbeDwellMs) { _luminosity = Math.Max(wanted, _luminosity - .05); _lowerSince = now; Redress(); }
+        }
+        else _lowerSince = -1;
+        // Automatic liquid glass: its look from the same reading, held while the panel is open or pressed.
+        if (AutoLook?.Invoke() == true)
+        {
+            _probeLook ??= new GlassAppearance(dark, LiquidTheme.AppDark);
+            _probeLook.Prior(LiquidTheme.AppDark);
+            if (_probeLook.Dark != dark) _probeLook.Reset(dark, now);
+            _probeLook.Changed(reading.Changed, now);
+            bool held = Openness?.Invoke() > .001 || _pointerDown;
+            if (_probeLook.Feed(reading.Mean, now, held)) Look?.Invoke(_probeLook.Dark, false);
+            if (double.IsFinite(reading.Mean)) SeenLuma = reading.Mean;
+        }
+        else _probeLook = null;
+
+        void Redress() { _brushFor = null; Dress(); }
+    }
+
     // No blur now, the window kept for the next time.
     private void Conceal()
     {
         bool shown = _shown;
         _shown = false;
-        ShowLiquid(false); Poll(false);
+        ShowLiquid(false); Poll(false); Probe(false);
         if (_sprite is not null) _sprite.Opacity = 0;
         if (shown && _window is not null) ShowWindowNative(_window.Handle, Hidden);
     }

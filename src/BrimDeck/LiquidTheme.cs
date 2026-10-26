@@ -170,11 +170,11 @@ public sealed partial class SettingsWindow
     private static List<(string Id, string Name, PanelThemeInfo Theme)> WithGlassAuto(List<(string Id, string Name, PanelThemeInfo Theme)> basics)
     {
         int glass = basics.FindIndex(card => card.Id == PanelThemes.GlassLight);
-        basics.Insert(glass < 0 ? basics.Count : glass, (LiquidTheme.Auto, Loc.T("液态玻璃（自动）", "Liquid Glass (auto)"), PanelTheme.Find(LiquidTheme.Auto)));
+        basics.Insert(glass < 0 ? basics.Count : glass, (LiquidTheme.Auto, Loc.T("液态玻璃（自动）alpha", "Liquid Glass (auto) alpha"), PanelTheme.Find(LiquidTheme.Auto)));
         return basics;
     }
 
-    private static string GlassTitle(PanelThemeInfo theme) => Loc.T("液态玻璃（自动，当前：", "Liquid Glass (auto, now: ") + theme.DisplayName + Loc.T("）", ")");
+    private static string GlassTitle(PanelThemeInfo theme) => Loc.T("液态玻璃（自动）alpha，当前：", "Liquid Glass (auto) alpha, now: ") + theme.DisplayName;
     private static string GlassDescription => Loc.T("清透的液态玻璃，按岛后方内容的明暗自动换成浅色或深色玻璃，文字随之切换，始终清晰可读。开启液态玻璃时，用 DXGI 桌面复制录屏的软件录不到岛。",
         "Clear liquid glass that turns light or dark with what lies behind the island, its text following, so it always reads. While liquid glass is on, recorders that use DXGI desktop duplication do not capture the island.");
 
