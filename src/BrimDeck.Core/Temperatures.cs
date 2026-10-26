@@ -73,19 +73,6 @@ public static class Temperatures
         return Level(disk.Celsius, warning, critical);
     }
 
-    // The hotter of the processor and the graphics adapter, for the collapsed row: its temperature and the higher of their levels,
-    // so a hot adapter warns even while the processor reads higher but within its range. Null while neither has a reading.
-    public static (double Celsius, MemoryLevel Level)? Hottest(MonitorSnapshot? snapshot)
-    {
-        double? cpu = snapshot?.Cpu.OrDefault?.Temperature, gpu = snapshot?.Gpu.OrDefault?.Temperature;
-        if (cpu is null && gpu is null) return null;
-        var level = (MemoryLevel)Math.Max((int)(cpu is { } c ? OfCpu(c) : MemoryLevel.Normal), (int)(gpu is { } g ? OfGpu(g) : MemoryLevel.Normal));
-        return (Math.Max(cpu ?? double.MinValue, gpu ?? double.MinValue), level);
-    }
-
-    // Whether the collapsed row's temperature (the processor's or the graphics adapter's) can show at all: not once both are known
-    // to have no sensor, so the row leaves it out rather than show a dash.
-    public static bool Readable(SensorState cpu, SensorState gpu) => cpu != SensorState.None || gpu != SensorState.None;
     // A gauge's temperature after its figure, "62 °C", or nothing, so a missing sensor leaves no gap or dash.
     public static string Detail(double? celsius) => celsius is { } value ? Format(value) + " °C" : "";
 

@@ -142,8 +142,9 @@ internal static class ConfiguredProviderTests
         check("A rejected DeepSeek key explains what to check", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false, StatusLabel: "密钥无效" } rejected && rejected.Status.Contains("DeepSeek"));
         // Kimi Code API: a key from the Kimi Code console reads the plan quota the Kimi Code sign-in reads.
         var manual = ProviderCatalog.Sources.Where(id => !ProviderCatalog.IsBuiltIn(id)).ToList();
-        check("Kimi Code API is entered by hand, right after DeepSeek and before New API",
-            manual.IndexOf(ProviderId.KimiApi) == manual.IndexOf(ProviderId.DeepSeek) + 1 && manual.IndexOf(ProviderId.NewApi) == manual.IndexOf(ProviderId.KimiApi) + 1 &&
+        check("Kimi Code API is entered by hand, right after DeepSeek, then OpenCode Go, then New API",
+            manual.IndexOf(ProviderId.KimiApi) == manual.IndexOf(ProviderId.DeepSeek) + 1 && manual.IndexOf(ProviderId.OpenCodeGo) == manual.IndexOf(ProviderId.KimiApi) + 1 &&
+            manual.IndexOf(ProviderId.NewApi) == manual.IndexOf(ProviderId.OpenCodeGo) + 1 &&
             ProviderCatalog.Group(ProviderId.KimiApi) == "手动填写" && ProviderCatalog.Name(ProviderId.KimiApi) == "Kimi Code API" && !ProviderCatalog.NeedsSite(ProviderId.KimiApi) &&
             !ProviderCatalog.IsUsageSource(ProviderId.KimiApi) && (int)ProviderId.KimiApi == 16);
         var kimiSaved = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.KimiApi }] }))!;
@@ -185,6 +186,34 @@ internal static class ConfiguredProviderTests
             invalid.Status.Contains("sk-kimi-") && !invalid.Status.Contains("fixture-key"));
         check("Kimi's region comes from /me", KimiUsage.GlobalRegion(Json("""{"region":"REGION_CN"}""")) == false && KimiUsage.GlobalRegion(Json("""{"region":"REGION_GLOBAL"}""")) == true &&
             KimiUsage.GlobalRegion(Json("{}")) is null && KimiUsage.GlobalRegion(default) is null && KimiUsage.GlobalRegion(Json("""{"region":"cn"}""")) is null);
+        // OpenCode Go: an OpenCode Console API key reads the Go allowance OpenCode's own sign-in reads.
+        entry.QuotaSource = ProviderId.OpenCodeGo;
+        string agent = "";
+        const string goUsage = """{"usage":{"rolling":{"status":"ok","percent":4,"resetsAt":"2026-09-20T15:00:00.000Z"},"weekly":{"status":"ok","percent":1},"monthly":{"status":"ok","percent":0}}}""";
+        HttpResponseMessage GoReply(HttpRequestMessage request, Func<HttpResponseMessage> answer)
+        {
+            agent = request.Headers.UserAgent.ToString();
+            return request.RequestUri!.AbsoluteUri == "https://opencode.ai/zen/go/v1/usage" ? answer() : new(HttpStatusCode.NotFound) { Content = new StringContent("") };
+        }
+        handler.Respond = request => GoReply(request, () => Reply(goUsage));
+        handler.Calls.Clear();
+        var go = (await providers.TestAsync(entry)).Snapshot;
+        check("An OpenCode Go key reads the Go allowance with the Bearer key and a user agent Cloudflare accepts",
+            handler.Calls.Select(c => c.Path).SequenceEqual(["/zen/go/v1/usage"]) && handler.Calls.Single().Authorization == "Bearer fixture-key-a" &&
+            agent.StartsWith("BrimDeck/", StringComparison.Ordinal) && go.LiveQuota && go.Scope == "plan" && go.Source == "OpenCode Go" && go.StatusLabel == "已连接" &&
+            go.Metrics.Select(m => m.Window).SequenceEqual(new int?[] { 300, 10080, null }) && go.Metrics[0] is { Label: "5 小时额度", Percent: 4 });
+        handler.Respond = request => GoReply(request, () => Reply("""{"usage":{"rolling":{"status":"rate-limited","percent":100},"weekly":{"percent":30},"monthly":{"percent":10}}}"""));
+        check("A reached Go limit is told after the connected state", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: true } limitedGo && limitedGo.Status.Contains("上限"));
+        handler.Respond = request => GoReply(request, () => new(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"type":"error","error":{"type":"AuthError"}}""") });
+        var goRejected = (await providers.TestAsync(entry)).Snapshot;
+        check("A rejected OpenCode Go key explains what to check without showing the key", goRejected is { LiveQuota: false, StatusLabel: "密钥无效" } &&
+            goRejected.Status.Contains("oc_sk_") && !goRejected.Status.Contains("fixture-key"));
+        handler.Respond = request => GoReply(request, () => new(HttpStatusCode.Forbidden) { Content = new StringContent("""{"type":"error","error":{"type":"AuthError","message":"No subscription"}}""") });
+        check("OpenCode's own 403 means the key's workspace has no Go plan", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } noGo && noGo.Status.Contains("没有订阅 OpenCode Go"));
+        handler.Respond = request => GoReply(request, () => new(HttpStatusCode.Forbidden) { Content = new StringContent("""{"cloudflare_error":true,"error_code":1010}""") });
+        check("A Cloudflare refusal is not taken for a missing Go plan", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } blocked && !blocked.Status.Contains("没有订阅"));
+        handler.Respond = request => GoReply(request, () => Reply("""{"usage":{}}"""));
+        check("An answer without windows is reported as unrecognized", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } empty && empty.Status.Contains("无法识别"));
         entry.QuotaSource = ProviderId.Custom;
         entry.Script = """async function fetchUsage(ctx) { const [a,b] = await Promise.all([ctx.http.get("https://example.test/a"),ctx.http.post("https://example.test/b",{body:{value:1}})]); ctx.log(ctx.secrets.key); return {metrics:[{kind:"balance",label:"余额",amount:a.json().balance+b.json().balance,currency:"USD"}]}; }""";
         handler.Respond = _ => Reply("""{"balance":2}""");

@@ -12,9 +12,11 @@ public sealed record StorageVolume(string Letter, string Label, ulong Total, ulo
 
 // A physical drive and its lettered volumes, in letter order. Number is the drive's number (\\.\PhysicalDriveN), or -1 for a volume
 // that spans drives or whose drive is unknown; Model is the drive's model. The temperature belongs to the drive, not to a volume.
+// SolidState: a solid-state drive, the only kind asked for a temperature.
 public sealed record StorageDrive(int Number, string Model, IReadOnlyList<StorageVolume> Volumes)
 {
     public DiskTemperature? Temperature { get; init; }
+    public bool SolidState { get; init; }
     public ulong Total => Volumes.Aggregate(0UL, (sum, volume) => sum + volume.Total);
     public ulong Used => Volumes.Aggregate(0UL, (sum, volume) => sum + volume.Used);
     public double UsedFraction => Total > 0 ? Math.Clamp((double)Used / Total, 0, 1) : 0;
@@ -48,17 +50,19 @@ public static class Storage
     public static bool Internal(StorageDisk disk) => !disk.Removable && disk.Bus is not (BusUsb or BusSd or BusMmc or BusVirtual);
 
     // The drives from the volumes and the physical drive each lies on (null when it spans drives or its drive is unknown), the
-    // drives Windows describes, and the temperatures by drive number. A volume on a drive that is not internal is left out, as
-    // is one that is too small; a volume without a known drive is a drive of its own. Drives in the order of their first letter.
+    // drives Windows describes, the temperatures by drive number and the solid-state drives' numbers. A volume on a drive that is
+    // not internal is left out, as is one that is too small; a volume without a known drive is a drive of its own. Drives in the
+    // order of their first letter.
     public static List<StorageDrive> Group(IEnumerable<(StorageVolume Volume, int? Disk)> volumes, IReadOnlyDictionary<int, StorageDisk> disks,
-        IReadOnlyDictionary<int, DiskTemperature>? temperatures = null)
+        IReadOnlyDictionary<int, DiskTemperature>? temperatures = null, IReadOnlySet<int>? solid = null)
     {
         var kept = volumes.Where(item => item.Volume.Total >= SmallestVolume
             && (item.Disk is not { } number || disks.TryGetValue(number, out var disk) && Internal(disk))).ToList();
         var drives = kept.Where(item => item.Disk is not null).GroupBy(item => item.Disk!.Value)
             .Select(group => new StorageDrive(group.Key, disks[group.Key].Model, group.Select(item => item.Volume).OrderBy(Letter).ToList())
             {
-                Temperature = temperatures is not null && temperatures.TryGetValue(group.Key, out var heat) ? heat : null
+                Temperature = temperatures is not null && temperatures.TryGetValue(group.Key, out var heat) ? heat : null,
+                SolidState = solid?.Contains(group.Key) == true
             })
             .Concat(kept.Where(item => item.Disk is null).Select(item => new StorageDrive(-1, "", [item.Volume])))
             .OrderBy(drive => Letter(drive.Volumes[0])).ToList();
@@ -96,6 +100,19 @@ public static class Storage
     public static StorageDrive? System(IReadOnlyList<StorageDrive> drives, string? windowsLetter) =>
         drives.FirstOrDefault(drive => windowsLetter is not null && drive.Volumes.Any(volume => volume.Letter.Equals(windowsLetter, StringComparison.OrdinalIgnoreCase)))
         ?? drives.FirstOrDefault();
+
+    // The drive holding the volume with this letter ("D:"), and that volume; null when no listed drive has it.
+    public static (StorageDrive Drive, StorageVolume Volume)? Find(IReadOnlyList<StorageDrive> drives, string letter)
+    {
+        // By index: asked for each chosen letter on every reading of the collapsed row.
+        for (int i = 0; i < drives.Count; i++)
+        {
+            var volumes = drives[i].Volumes;
+            for (int j = 0; j < volumes.Count; j++)
+                if (volumes[j].Letter.Equals(letter, StringComparison.OrdinalIgnoreCase)) return (drives[i], volumes[j]);
+        }
+        return null;
+    }
 
     // A line's figures in one unit chosen by its size: binary gigabytes, whole from 10 GB ("212", "477", "GB"), or terabytes with
     // one decimal from 1000 GB ("0.4", "1.8", "TB").

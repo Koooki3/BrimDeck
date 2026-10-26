@@ -17,8 +17,9 @@ public enum CompactMonitorMode { Full, Brief, Custom }
 public enum CompactMonitorItems
 {
     None = 0, Columns = 1, Cpu = 2, Memory = 4, Gpu = 8, Download = 16, Upload = 32,
-    // The usage and rate readings, as the Full preset shows them. Temperature and Storage came later and are not among them: each
-    // shows only when chosen in the table (CompactMonitor.Every is every reading).
+    // The usage and rate readings, as the Full preset shows them. Storage came later and is not among them: it shows only when
+    // chosen in the table (CompactMonitor.Every is every reading). Temperature was a reading of its own before the temperatures
+    // joined CPU, GPU and the drives (CompactFigures); never released, it is dropped from saved tables and its number not reused.
     All = Columns | Cpu | Memory | Gpu | Download | Upload,
     Temperature = 64, Storage = 128
 }
@@ -32,11 +33,15 @@ public enum CompactMonitorItems
 // scheme's in the normal state, for the further channels in the normal state (the core columns' slowest kind of core), and at
 // the warning and critical levels. They are kept to read older files, which DeckSettings.Normalize moves into the custom
 // scheme and the level colors (CompactMonitor.MoveColors), and are not written.
+// Figures: what CPU, GPU and the drives show after their glyph, the share in use and the temperature (CompactFigures); Sources:
+// the drive letters the drives show (CompactSources). Both chosen in the table's menus, null for the default.
 public sealed class CompactReading
 {
     public CompactMonitorItems Item { get; set; }
     public bool Visible { get; set; } = true;
     public bool ShowValue { get; set; } = true;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? Figures { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? Sources { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Color { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string?>? ExtraColors { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? WarningColor { get; set; }
@@ -47,6 +52,8 @@ public sealed class CompactReading
     {
         var copy = (CompactReading)MemberwiseClone();
         copy.ExtraColors = ExtraColors?.ToList();
+        copy.Figures = Figures?.ToList();
+        copy.Sources = Sources?.ToList();
         return copy;
     }
 }
@@ -58,11 +65,11 @@ public static class CompactMonitor
     // Left to right by default; the settings' table can reorder them.
     public static readonly IReadOnlyList<CompactMonitorItems> Order =
         [CompactMonitorItems.Columns, CompactMonitorItems.Cpu, CompactMonitorItems.Memory, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Upload,
-            CompactMonitorItems.Storage, CompactMonitorItems.Temperature];
-    public const CompactMonitorItems Every = CompactMonitorItems.All | CompactMonitorItems.Storage | CompactMonitorItems.Temperature;
+            CompactMonitorItems.Storage];
+    public const CompactMonitorItems Every = CompactMonitorItems.All | CompactMonitorItems.Storage;
     // When the row is too short, readings leave in this order.
     public static readonly IReadOnlyList<CompactMonitorItems> LeaveOrder =
-        [CompactMonitorItems.Temperature, CompactMonitorItems.Storage, CompactMonitorItems.Upload, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Columns, CompactMonitorItems.Memory, CompactMonitorItems.Cpu];
+        [CompactMonitorItems.Storage, CompactMonitorItems.Upload, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Columns, CompactMonitorItems.Memory, CompactMonitorItems.Cpu];
 
     // The readings with a figure that can be hidden.
     public const CompactMonitorItems Rings = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu;
@@ -76,9 +83,8 @@ public static class CompactMonitor
         [CompactMonitorItems.Columns] = [MonitorRole.Cpu, MonitorRole.Efficiency], [CompactMonitorItems.Cpu] = [MonitorRole.Cpu],
         [CompactMonitorItems.Memory] = [MonitorRole.Memory], [CompactMonitorItems.Gpu] = [MonitorRole.Gpu],
         [CompactMonitorItems.Download] = [MonitorRole.Download], [CompactMonitorItems.Upload] = [MonitorRole.Upload],
-        // The scheme has no color of its own for temperature or storage: the thermometer takes the CPU color, as the first
-        // reading, and storage the memory color, as the page draws its bars.
-        [CompactMonitorItems.Temperature] = [MonitorRole.Cpu], [CompactMonitorItems.Storage] = [MonitorRole.Memory]
+        // The scheme has no color of its own for storage: it takes the memory color, as the page draws its bars.
+        [CompactMonitorItems.Storage] = [MonitorRole.Memory]
     };
     public static MonitorRole Role(CompactMonitorItems item, int channel = 0) =>
         Roles.TryGetValue(item, out var roles) ? roles[Math.Clamp(channel, 0, roles.Length - 1)] : MonitorRole.Cpu;
@@ -134,7 +140,8 @@ public static class CompactMonitor
         }
         var list = (readings ?? []).OfType<CompactReading>().Where(reading => Order.Contains(reading.Item)).DistinctBy(reading => reading.Item)
             .Select(reading => new CompactReading { Item = reading.Item, Visible = reading.Visible, ShowValue = reading.ShowValue, Color = Valid(reading.Color),
-                ExtraColors = Extra(reading), WarningColor = Valid(reading.WarningColor), CriticalColor = Valid(reading.CriticalColor) }).ToList();
+                ExtraColors = Extra(reading), WarningColor = Valid(reading.WarningColor), CriticalColor = Valid(reading.CriticalColor),
+                Figures = CompactFigures.Normalize(reading.Item, reading.Figures), Sources = CompactSources.Normalize(reading.Item, reading.Sources) }).ToList();
         list.AddRange(Order.Where(item => list.All(reading => reading.Item != item)).Select(item => new CompactReading { Item = item, Visible = false }));
         return list;
     }
@@ -153,7 +160,7 @@ public static class CompactMonitor
     {
         var all = readings.ToList();
         var (shown, values) = (Visible(all), Values(all));
-        // Temperature and storage are outside both presets: Full leaves them as they are, Brief hides them.
+        // Storage is outside both presets: Full leaves it as it is, Brief hides it.
         return (shown & CompactMonitorItems.All) == CompactMonitorItems.All && values == Rings ? CompactMonitorMode.Full
             : shown == Rings && values == CompactMonitorItems.None ? CompactMonitorMode.Brief : null;
     }
@@ -165,7 +172,7 @@ public static class CompactMonitor
         if (preset == CompactMonitorMode.Custom) return;
         foreach (var reading in readings)
         {
-            if (reading.Item is CompactMonitorItems.Temperature or CompactMonitorItems.Storage) { if (preset == CompactMonitorMode.Brief) reading.Visible = false; continue; }
+            if (reading.Item == CompactMonitorItems.Storage) { if (preset == CompactMonitorMode.Brief) reading.Visible = false; continue; }
             bool ring = HasValueChoice(reading.Item);
             reading.Visible = preset == CompactMonitorMode.Full || ring;
             if (ring) reading.ShowValue = preset == CompactMonitorMode.Full;
@@ -173,13 +180,12 @@ public static class CompactMonitor
     }
 
     // The width of each reading: a ring with its figure (the ring and the room after it) or alone, the core columns, a rate, the
-    // temperature, the system drive.
-    public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, double figure, double bareRing, double columns, double rate, double temperature = 0, double storage = 0) => item => item switch
+    // drives. figure: the room after a ring, by ring (a ring showing its temperature too takes more).
+    public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, Func<CompactMonitorItems, double> figure, double bareRing, double columns, double rate, double storage = 0) => item => item switch
     {
         CompactMonitorItems.Columns => columns,
-        CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu => (values & item) != 0 ? ring + figure : bareRing,
+        CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu => (values & item) != 0 ? ring + figure(item) : bareRing,
         CompactMonitorItems.Download or CompactMonitorItems.Upload => rate,
-        CompactMonitorItems.Temperature => temperature,
         CompactMonitorItems.Storage => storage,
         _ => 0
     };

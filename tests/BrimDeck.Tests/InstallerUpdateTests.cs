@@ -16,8 +16,8 @@ internal static class InstallerUpdateTests
         using var http = new HttpClient(server);
         var directory = Path.Combine(root, "installer-updates");
         var launches = new List<ProcessStartInfo>();
-        InstallerUpdateBackend Backend(string version = "0.1.0", bool installed = true) => new(http, ManifestUri,
-            m => new Uri($"https://updates.test/v{m.Version}/{m.File}"), version, directory, installed, start => { launches.Add(start); return true; });
+        InstallerUpdateBackend Backend(string version = "0.1.0", UpdateMode mode = UpdateMode.Installer) => new(http, ManifestUri,
+            (m, p) => new Uri($"https://updates.test/v{m.Version}/{p.File}"), version, directory, mode, start => { launches.Add(start); return true; });
 
         var backend = Backend();
         var release = await backend.CheckAsync(CancellationToken.None);
@@ -84,7 +84,7 @@ internal static class InstallerUpdateTests
         backend = Backend(); await backend.DownloadAsync((await backend.CheckAsync(CancellationToken.None))!, _ => { }, CancellationToken.None);
         check("the downloaded installer is removed once that version is running", Backend("0.2.0").PendingRelease is null && !Directory.Exists(directory));
 
-        var service = new AppUpdates(Backend(installed: false), Path.Combine(root, "installer-updates-data"));
+        var service = new AppUpdates(Backend(mode: UpdateMode.None), Path.Combine(root, "installer-updates-data"));
         await service.CheckAsync(true); await service.DownloadAsync();
         check("a copy that was not installed by the installer only reports the release", service.HasUpdate && service.Stage == AppUpdateStage.Available && !Directory.Exists(directory));
         service = new AppUpdates(Backend(), Path.Combine(root, "installer-updates-data"));

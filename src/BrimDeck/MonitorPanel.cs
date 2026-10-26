@@ -15,7 +15,7 @@ public partial class MainWindow
     private MonitorStrip? _compactStrip;
     // Which readings the collapsed row shows and how far each has come in or gone out, kept while the row is built again.
     private readonly StripPresence _stripPresence = new();
-    // When the temperature and the system drive join the collapsed row: only once their first figures arrive (StripAdmission).
+    // When the temperatures and the drives join the collapsed row: only once their first figures arrive (StripAdmission).
     private readonly StripAdmission _stripAdmission = new();
     private bool _monitorShowing, _monitorShown, _stripShowing, _monitorFade;
 
@@ -50,16 +50,16 @@ public partial class MainWindow
         if (strip && !_stripShowing) _compactStrip?.Update(_app.Monitor?.Latest);
         _monitorShowing = page; _stripShowing = strip;
     }
-    // The collapsed readings the row was last built without (StripAdmission.Hidden): the temperature and the system drive until
-    // their first figures, and for good on a machine without the sensor.
+    // The collapsed readings the row was last built without (StripAdmission.Hidden): the drives until their first figures, and for
+    // good on a machine without them; and the temperatures and letters it was built with (StripAdmission.Layout).
     private CompactMonitorItems _stripUnavailable;
+    private string _stripLayout = "";
+    private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor) : SensorStates.Unknown;
     // Whether this surface shows the system readings and waits for the first figures of one it does not show yet.
     private bool StripAwaits()
     {
         if (!Settings.ShowsMonitor(EffectiveStyle)) return false;
-        var monitor = _app.Monitor;
-        return _stripAdmission.Awaits(CompactMonitor.Shown(Settings.CompactReadings), monitor?.CpuSensor ?? SensorState.Unknown, monitor?.GpuSensor ?? SensorState.Unknown,
-            monitor?.StorageState ?? SensorState.Unknown);
+        return _stripAdmission.Awaits(Settings.CompactReadings, _app.Monitor?.Latest, StripSensors);
     }
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
@@ -68,14 +68,13 @@ public partial class MainWindow
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
         Motion.Enabled = MonitorMotion;
-        var monitor = _app.Monitor;
-        var (hidden, arriving) = _stripAdmission.Update(snapshot, monitor?.CpuSensor ?? SensorState.Unknown, monitor?.GpuSensor ?? SensorState.Unknown,
-            monitor?.StorageState ?? SensorState.Unknown);
+        var (hidden, arriving) = _stripAdmission.Update(snapshot, Settings.CompactReadings, StripSensors);
         if (!_expanded)
         {
-            // The temperature or the system drive got its first figure: the row is built again with it, and it comes in with the
-            // row's own entrance while the others slide aside. Until then the row did not show it, so nothing else changes.
-            if ((_compactStrip is not null || Settings.ShowsMonitor(EffectiveStyle)) && hidden != _stripUnavailable) { _stripPresence.Arrive(arriving); RenderCompact(); return; }
+            // The drives got their first figure: the row is built again with them, and they come in with the row's own entrance
+            // while the others slide aside. Until then the row did not show them, so nothing else changes. A temperature or a letter
+            // that joins or leaves changes its reading's width, and the row is built again for it.
+            if ((_compactStrip is not null || Settings.ShowsMonitor(EffectiveStyle)) && (hidden != _stripUnavailable || _stripAdmission.Layout != _stripLayout)) { _stripPresence.Arrive(arriving); RenderCompact(); return; }
             // A row still waiting for its first figures stops asking for readings once its sensors turn out to be missing.
             if (_compactStrip is null) { UpdateMonitorDemand(); return; }
             _compactStrip?.Update(snapshot); return;

@@ -36,6 +36,8 @@ internal sealed class StorageReader
     public SensorState Temperatures => _temperatures;
     // The reading under way, or a finished task.
     public Task Pending => _reading;
+    // The drives as last read, without temperatures.
+    public IReadOnlyList<StorageDrive> Listed => _plain;
 
     // Starts a reading on the thread pool unless one is under way; temperatures: ask the drives for theirs too when they are due.
     public void Start(bool temperatures)
@@ -107,9 +109,9 @@ internal sealed class StorageReader
         finally { Marshal.FreeHGlobal(query); Marshal.FreeHGlobal(output); }
         // A volume whose drive could not be described is left out with it.
         var described = volumes.Where(item => item.Disk is not { } number || disks.ContainsKey(number)).ToList();
-        var plain = Core.Storage.Group(described, disks);
+        var plain = Core.Storage.Group(described, disks, solid: solid);
         _plain = plain;
-        _heated = Core.Storage.Group(described, disks, _known);
+        _heated = Core.Storage.Group(described, disks, _known, solid);
         _count = plain.Count;
         if (plain.Count > 0) _drives = SensorState.Found; else if (_drives == SensorState.Unknown) _drives = SensorState.None;
     }
