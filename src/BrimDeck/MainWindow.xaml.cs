@@ -707,6 +707,8 @@ public partial class MainWindow : Window
     {
         // Dragging an edge may take the pointer outside; the panel stays open until the drag ends.
         if (!inside && Resizing) return;
+        // A pointer on the island means the display is on, whatever Windows last reported (DisplayPower).
+        if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
         if (inside) ReleaseHotkeyPin();
         if (inside)
