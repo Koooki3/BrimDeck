@@ -108,7 +108,7 @@ public partial class MainWindow
         if (_expanded || IsSuppressed || !CanAnimateLifecycle) { SetImmediate(HoverZone, OpacityProperty, 1d); return; }
         var shape = Collapsed = ShapeFor(EffectiveStyle);
         PlaceDot(shape);
-        _bootDot = true;
+        _bootDot = true; Island.SettledClip = false;
         SetImmediate(ShadowHost, OpacityProperty, 0d);
         if (Compact.Visibility == Visibility.Visible)
         {
@@ -188,7 +188,7 @@ public partial class MainWindow
         int boot = ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
         if (_expanded) SetExpanded(false, instant: true);
         _hover.Stop(); _leave.Stop(); _pointerInside = false; _cursorInCompact = false;
-        _poweringOff = true; _whenGone = gone;
+        _poweringOff = true; _whenGone = gone; Island.SettledClip = false;
         UpdateGrips();
         ResetDotPose();
         var shape = Collapsed;

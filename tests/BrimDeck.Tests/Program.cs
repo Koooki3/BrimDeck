@@ -30,6 +30,7 @@ try
     CompactReadingTests.Run(Check);
     CurvesTests.Run(Check);
     IdleCostTests.Run(Check);
+    MusicCostTests.Run(Check);
     DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
     DatePickerMotionTests.Run(Check);

@@ -20,6 +20,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
     private float[] _buffer = new float[4096];
     private short[] _pcm = new short[4096];
     private double _analysed = double.NegativeInfinity;
+    public const double AnalysisInterval = 1 / 30d;
     public AutoResetEvent Ready { get; } = new(false);
     public EqualizerSignal Signal { get; } = new(Format.SampleRate);
     public uint ProcessId { get; }
@@ -87,8 +88,11 @@ internal sealed class ProcessLoopbackCapture : IDisposable
                 _capture.ReleaseBuffer(frames);
                 Signal.Push(_buffer.AsSpan(0, count), Format.Channels, now);
             }
-            // Packets arrive about every 10 ms; the bars need 60 analyses a second.
-            if (now - _analysed >= 1 / 60d) { _analysed = now; Signal.Advance(now); }
+            // The bars move 30 times a second (MainWindow.TickMusic) and read the analyses in between, so 30 analyses serve them.
+            // Packets arrive about every 10 ms and are drained as each arrives (AudioLevelMeter): the stream keeps only a few
+            // tens of ms whatever buffer is asked for, and draining once per analysis lost about 2 % of the audio unflagged. An
+            // analysis is due a few ms early, so it lands every third packet rather than every fourth.
+            if (now - _analysed >= AnalysisInterval - .005) { _analysed = now; Signal.Advance(now); }
             return true;
         }
         catch (COMException) { return false; }
