@@ -597,7 +597,7 @@ public partial class MainWindow : Window
         if (wasExpanded != expanded && !_preview) Dispatcher.BeginInvoke(() => _app.Notices?.DeckExpanded(this, _expanded));
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
-        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); _app.RequestTrim(); }
+        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); }
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;
@@ -852,7 +852,7 @@ public partial class MainWindow : Window
         if (inside && !_pointerInside) { MotionEnvironment.InputSeen(); BrimDeck.Native.WindowsNoticeSource.Interacted(); }
         if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
-        if (inside) { ReleaseHotkeyPin(); ReplayCompactTitle(); }
+        if (inside) ReleaseHotkeyPin();
         if (inside)
         {
             _popupReturnArea = null;
