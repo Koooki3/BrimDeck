@@ -54,6 +54,7 @@ try
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);
     StripAdmissionTests.Run(Check);
+    ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);

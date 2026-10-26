@@ -153,15 +153,48 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
     public const double MinimumGraph = 40;
     public static int StorageRoom(double readings, MetricsMode metrics, double figure, double body, double row)
     {
+        var (head, margins, rest, storageMargin) = Fixed(metrics, figure, body);
+        return Math.Clamp((int)Math.Floor((readings - head - margins - rest - storageMargin - MinimumGraph) / row), 0, 3);
+    }
+
+    // The heights MonitorView gives the readings' parts: the main gauge's line, the graph's margins, memory and network, and the
+    // drives' top margin. The graph takes what is left.
+    private static (double Head, double Margins, double Metrics, double StorageMargin) Fixed(MetricsMode metrics, double figure, double body)
+    {
         double line = Math.Ceiling(body * 1.7);
-        // As MonitorView lays them out: the main gauge's line, the graph's margins, memory and network, the drives' top margin.
-        double used = Math.Ceiling(figure * 1.4) + (metrics == MetricsMode.Line ? 10 : 16) + metrics switch
+        return (Math.Ceiling(figure * 1.4), metrics == MetricsMode.Line ? 10 : 16, metrics switch
         {
             MetricsMode.Line => line,
             MetricsMode.Lines => 2 * line + 6,
             _ => Math.Ceiling(body * 1.7 + 19) + Math.Ceiling(body * 1.7 + 4 + body * 2) + 10
-        } + (metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 });
-        return Math.Clamp((int)Math.Floor((readings - used - MinimumGraph) / row), 0, 3);
+        }, metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 });
+    }
+
+    // The readings' parts top to bottom in a column this tall (foot: the room left under them, FootAlignment): the main gauge's
+    // line, the graph, memory and network together, and the drives' lines, each (Top, Height), as MonitorView lays them out.
+    public IReadOnlyList<(double Top, double Height)> Parts(double readings, double foot = 0)
+    {
+        var (head, margins, metrics, storageMargin) = Fixed(Metrics, Figure, Body);
+        double storage = StorageLines > 0 ? storageMargin + StorageLines * RowHeight : 0;
+        double graph = Math.Max(16, readings - foot - head - margins - metrics - storage);
+        double graphTop = head + (Metrics == MetricsMode.Line ? 4 : 6);
+        double metricsTop = head + margins + graph;
+        return [(0, head), (graphTop, graph), (metricsTop, metrics), (metricsTop + metrics, storage)];
+    }
+
+    // How far past a step a resize must go before the page takes the next step, so a size held at a step does not flip back and
+    // forth between two pages. Within the band the page keeps the step it has and stretches, as it does within any step.
+    public const double Hysteresis = 12;
+
+    // The layout for this size, keeping previous (the step the page shows) while the size is within Hysteresis of it.
+    public static MonitorLayout For(double width, double height, bool processes, int storage, MonitorLayout? previous)
+    {
+        var next = For(width, height, processes, storage);
+        if (previous is null || next == previous) return next;
+        foreach (double dw in new[] { 0, -Hysteresis, Hysteresis })
+            foreach (double dh in new[] { 0, -Hysteresis, Hysteresis })
+                if (For(width + dw, height + dh, processes, storage) == previous) return previous;
+        return next;
     }
 
     // storage: the drives the page would show a line each.
@@ -193,4 +226,33 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
 
     // The side list's width in a page of this width: its share, within its bounds, leaving the readings at least 260 DIP.
     public static double SideListWidth(double width) => Math.Clamp(Math.Round(width * ListShare), ListMinimum, Math.Min(ListMaximum, Math.Max(ListMinimum, width - 260)));
+}
+
+// Where the readings beside the process list end: level with the list's last row, which steps by a row as the page grows or
+// shrinks. While the page is being resized the foot stays where it is, so the readings stretch with the drag as they did before
+// the list set their foot, instead of jumping a row's height each time the list gains or loses one; once the size has held for
+// Settle seconds the foot eases to the list's. The first size is taken at once.
+public sealed class FootAlignment
+{
+    public const double Settle = .16;
+    private Eased _foot;
+    private bool _placed;
+    private double _target, _resizedAt = double.NegativeInfinity;
+
+    public void Resize(double foot, double now)
+    {
+        _target = double.IsFinite(foot) ? Math.Max(0, foot) : 0;
+        if (!_placed) { _placed = true; _foot = new Eased(_target); return; }
+        _resizedAt = now;
+    }
+
+    // Called on each frame while it returns true: whether the foot moves or still waits for the size to settle.
+    public bool Step(double now, bool motion)
+    {
+        if (now - _resizedAt < Settle) return true;
+        if (Math.Abs(_foot.Target - _target) > 1e-9) return _foot.Set(_target, motion, now);
+        return _foot.Moving(now);
+    }
+
+    public double At(double now) => Math.Max(0, _foot.At(now));
 }
