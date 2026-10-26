@@ -80,9 +80,18 @@ public readonly record struct GlideCycle(double Travel, bool Discrete = false)
 // The scrolling title or lyric (MusicMarquee): rest for Rest, glide by Overflow at Speed DIP a second, rest again, then start
 // over at once. Each edge fade grows or shrinks over the first or last EdgeWidth of travel (to EdgeStop, the fade's share of the
 // region), so it follows how much of the text is hidden on that side.
+// The collapsed row's title scrolls Laps whole cycles and then rests at its start (Done, Played): a song plays for minutes,
+// and the glide's frames were most of what the row cost while it played. A new title, or the pointer coming over the island,
+// lets it scroll again.
 public readonly record struct MarqueeCycle(double Overflow, double Speed, double EdgeWidth, double EdgeStop)
 {
     public const double Rest = 1.5;
+    public const int Laps = 3;
+
+    // Whether the cycle has run its laps after played seconds in all (not wrapped), and where it then stands within one cycle:
+    // at the start of its first rest once the laps are done.
+    public bool Done(double played) => Period > 0 && double.IsFinite(played) && played >= Laps * Period - 1e-9;
+    public double Played(double played) => Done(played) ? 0 : Wrap(played);
 
     public double Travel => Overflow / Speed;
     public double Ramp => Math.Min(Travel, EdgeWidth / Speed);

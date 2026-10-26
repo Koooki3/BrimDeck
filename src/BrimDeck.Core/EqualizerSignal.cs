@@ -14,13 +14,18 @@ public sealed class EqualizerSignal
     private const double SilenceDb = -6;
     private static readonly double[] Edges = [50, 150, 500, 1500, 4500, 14000];
     private static readonly double[] Hann = Enumerable.Range(0, WindowSize).Select(i => .5 - .5 * Math.Cos(2 * Math.PI * i / (WindowSize - 1))).ToArray();
+    // The FFT's twiddle factors, e^(-2πik/N) for k below N/2, taken once instead of carried by a recurrence in every butterfly.
+    private static readonly double[] TwiddleCos = Enumerable.Range(0, WindowSize / 2).Select(k => Math.Cos(-2 * Math.PI * k / WindowSize)).ToArray();
+    private static readonly double[] TwiddleSin = Enumerable.Range(0, WindowSize / 2).Select(k => Math.Sin(-2 * Math.PI * k / WindowSize)).ToArray();
     private readonly int _rate;
     private readonly float[] _samples = new float[WindowSize];
     private readonly double[] _real = new double[WindowSize], _imaginary = new double[WindowSize];
     private readonly Queue<(double Time, double Db)>[] _ranges = Enumerable.Range(0, Edges.Length - 1).Select(_ => new Queue<(double, double)>()).ToArray();
     private readonly double[] _smoothed = new double[Edges.Length - 1], _rises = new double[Edges.Length - 1];
     private readonly List<(double Time, double Value)> _history = [];
-    private double[] _sorted = new double[256];
+    // Each band's last RangeSeconds of levels in order, kept as levels come and go, for its percentiles: sorting them all again
+    // on every analysis was most of its cost.
+    private readonly List<double>[] _ordered = Enumerable.Range(0, Edges.Length - 1).Select(_ => new List<double>(128)).ToArray();
     private readonly object _gate = new();
     private int _write;
     private double _head, _last = double.NaN, _lastInput = double.NaN;
@@ -88,6 +93,7 @@ public sealed class EqualizerSignal
     {
         Array.Clear(_samples); _write = 0; _last = _lastInput = double.NaN;
         foreach (var range in _ranges) range.Clear();
+        foreach (var ordered in _ordered) ordered.Clear();
         Array.Fill(_smoothed, double.NaN); Array.Clear(_rises);
         lock (_gate) { _head = 0; _history.Clear(); }
     }
@@ -103,14 +109,10 @@ public sealed class EqualizerSignal
             double power = 0;
             for (int k = k0; k < k1; k++) power += _real[k] * _real[k] + _imaginary[k] * _imaginary[k];
             double db = Math.Max(SilenceDb, 10 * Math.Log10(1e-12 + power));
-            var range = _ranges[b]; range.Enqueue((now, db));
-            while (now - range.Peek().Time > RangeSeconds) range.Dequeue();
-            // One sort per band and frame serves both percentiles; the buffer is reused across frames.
-            int count = range.Count, n = 0;
-            if (_sorted.Length < count) _sorted = new double[count * 2];
-            foreach (var (_, value) in range) _sorted[n++] = value;
-            Array.Sort(_sorted, 0, count);
-            double floor = Percentile(_sorted, count, .25), ceiling = Math.Max(Percentile(_sorted, count, .98), floor + 15);
+            var range = _ranges[b]; var ordered = _ordered[b];
+            range.Enqueue((now, db)); Insert(ordered, db);
+            while (now - range.Peek().Time > RangeSeconds) Remove(ordered, range.Dequeue().Db);
+            double floor = Percentile(ordered, .25), ceiling = Math.Max(Percentile(ordered, .98), floor + 15);
             level += Math.Pow(Math.Clamp((db - floor) / (ceiling - floor), 0, 1), 1.5) / (Edges.Length - 1);
             if (double.IsNaN(_smoothed[b])) _smoothed[b] = db;
             _rises[b] = Math.Clamp((db - _smoothed[b]) / 6, 0, 1);
@@ -122,7 +124,17 @@ public sealed class EqualizerSignal
         return Math.Clamp(.05 + .45 * level + .45 * (first + second) / 2, 0, 1);
     }
 
-    private static double Percentile(double[] sorted, int count, double p) => sorted[(int)Math.Clamp(p * (count - 1), 0, count - 1)];
+    private static double Percentile(List<double> sorted, double p) => sorted[(int)Math.Clamp(p * (sorted.Count - 1), 0, sorted.Count - 1)];
+    private static void Insert(List<double> sorted, double value)
+    {
+        int at = sorted.BinarySearch(value);
+        sorted.Insert(at < 0 ? ~at : at, value);
+    }
+    private static void Remove(List<double> sorted, double value)
+    {
+        int at = sorted.BinarySearch(value);
+        if (at >= 0) sorted.RemoveAt(at);
+    }
 
     private static void Fft(double[] re, double[] im)
     {
@@ -136,16 +148,16 @@ public sealed class EqualizerSignal
         }
         for (int length = 2; length <= n; length <<= 1)
         {
-            double angle = -2 * Math.PI / length, wr = Math.Cos(angle), wi = Math.Sin(angle);
+            // The stage's twiddle for j is the window's for j * (n / length).
+            int stride = n / length;
             for (int i = 0; i < n; i += length)
             {
-                double cr = 1, ci = 0;
                 for (int j = 0; j < length / 2; j++)
                 {
                     int a = i + j, b = a + length / 2;
+                    double cr = TwiddleCos[j * stride], ci = TwiddleSin[j * stride];
                     double tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
                     re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
-                    (cr, ci) = (cr * wr - ci * wi, cr * wi + ci * wr);
                 }
             }
         }

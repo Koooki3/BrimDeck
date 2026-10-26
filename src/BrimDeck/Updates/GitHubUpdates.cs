@@ -13,13 +13,17 @@ internal static class GitHubUpdates
     public static string BuildVersion => ApplicationVersion.Current;
     private static readonly HttpClient Http = CreateClient();
 
-    // /releases/latest skips drafts and prereleases. Installers are fetched from their own tag so a release published
+    // /releases/latest skips drafts and prereleases. Packages are fetched from their own tag so a release published
     // between the check and the download cannot swap the file.
     public static InstallerUpdateBackend Create(string dataDirectory) => Create(new Uri(RepositoryUrl + "/releases/latest/download/" + UpdateManifest.FileName),
-        manifest => new Uri($"{RepositoryUrl}/releases/download/v{manifest.Version}/{manifest.File}"), Http, InstallerAppId, dataDirectory);
+        (manifest, package) => new Uri($"{RepositoryUrl}/releases/download/v{manifest.Version}/{package.File}"), Http, InstallerAppId, dataDirectory);
 
-    internal static InstallerUpdateBackend Create(Uri manifest, Func<UpdateManifest, Uri> installer, HttpClient http, string appId, string dataDirectory) =>
-        new(http, manifest, installer, BuildVersion, Path.Combine(dataDirectory, "updates"), IsInstalled(appId, AppContext.BaseDirectory));
+    internal static InstallerUpdateBackend Create(Uri manifest, Func<UpdateManifest, UpdatePackage, Uri> package, HttpClient http, string appId, string dataDirectory) =>
+        new(http, manifest, package, BuildVersion, Path.Combine(dataDirectory, "updates"), Mode(appId, AppContext.BaseDirectory));
+
+    // A copy the installer registered updates through the installer; a portable copy replaces its own files.
+    internal static UpdateMode Mode(string appId, string directory) =>
+        IsInstalled(appId, directory) ? UpdateMode.Installer : PortableUpdate.IsPortable(directory) ? UpdateMode.Portable : UpdateMode.None;
 
     // In-app updates are offered only to the copy the installer registered; a build output or copied folder is left alone.
     internal static bool IsInstalled(string appId, string directory)

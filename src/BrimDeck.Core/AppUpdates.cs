@@ -14,6 +14,8 @@ public interface IAppUpdateBackend
     Task<AppRelease?> CheckAsync(CancellationToken cancellation);
     Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation);
     void PrepareRestart();
+    // Why the last restart into a new version kept this one; read once at startup.
+    RestartFailure? LastRestartFailure => null;
 }
 
 // A version check the server refused; RetryAfter carries its Retry-After header when it sent one.
@@ -82,6 +84,8 @@ public sealed class AppUpdates
     public int Progress { get; private set; }
     public string? Error { get; private set; }
     public DateTimeOffset? LastChecked { get; private set; }
+    // The restart into a new version failed and this version started again; the app shows the error once.
+    public bool RestartFailed { get; }
     public DateTimeOffset NextBackgroundCheck => UpdateSchedule.NextCheck(_started, LastChecked, _failures, _lastFailure, _retryUntil);
 
     public AppUpdates(IAppUpdateBackend backend, string dataDirectory, Func<DateTimeOffset>? clock = null)
@@ -90,8 +94,18 @@ public sealed class AppUpdates
         _stateFile = Path.Combine(dataDirectory, "update-state.json");
         LoadState(Path.Combine(dataDirectory, "update-prompt.txt"));
         LastChecked = _state.LastSuccess;
+        var failure = backend.LastRestartFailure;
         Release = backend.PendingRelease;
         Stage = Release is null ? AppUpdateStage.Idle : AppUpdateStage.Ready;
+        RestartFailed = failure is not null;
+        Error = failure switch
+        {
+            RestartFailure.Declined => Loc.T("未获得管理员权限，已保留当前版本。可以前往 GitHub 下载新的免安装版本，解压后替换当前文件夹。",
+                "Administrator rights were not granted, so this version was kept. You can download the new portable version from GitHub and replace this folder with it."),
+            RestartFailure.Failed => Loc.T("无法替换程序文件，已保留当前版本。可以前往 GitHub 下载新的免安装版本，解压后替换当前文件夹。",
+                "The program files could not be replaced, so this version was kept. You can download the new portable version from GitHub and replace this folder with it."),
+            _ => null
+        };
     }
 
     public bool AutoCheck

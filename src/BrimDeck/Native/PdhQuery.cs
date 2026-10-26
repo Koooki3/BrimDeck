@@ -31,6 +31,13 @@ internal sealed class PdhQuery : IDisposable
         return true;
     }
 
+    // Takes a counter out of the query, so the collections no longer read it.
+    public void Remove(string path)
+    {
+        if (!_counters.Remove(path, out var counter)) return;
+        PdhRemoveCounter(counter);
+    }
+
     // Takes a reading of every counter. False when the query failed as a whole.
     public bool Collect() => _query != IntPtr.Zero && PdhCollectQueryData(_query) == 0;
 
@@ -87,4 +94,5 @@ internal sealed class PdhQuery : IDisposable
     [DllImport("pdh.dll")] private static extern uint PdhCollectQueryData(IntPtr query);
     [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhGetFormattedCounterArrayW(IntPtr counter, uint format, ref uint bufferSize, out uint itemCount, IntPtr buffer);
     [DllImport("pdh.dll")] private static extern uint PdhCloseQuery(IntPtr query);
+    [DllImport("pdh.dll")] private static extern uint PdhRemoveCounter(IntPtr counter);
 }

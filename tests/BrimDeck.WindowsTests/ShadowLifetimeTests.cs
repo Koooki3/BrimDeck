@@ -80,15 +80,3 @@ public partial class MainWindow : Window
         Console.WriteLine("PASS: " + name);
     }
 }
-
-// Only the dependency property observed by the shadow code is needed; drawing is outside this lifetime test.
-public sealed class IslandBorder : Border
-{
-    public static readonly DependencyProperty ShoulderRadiusProperty = DependencyProperty.Register(
-        nameof(ShoulderRadius), typeof(double), typeof(IslandBorder), new PropertyMetadata(0d));
-    public double ShoulderRadius
-    {
-        get => (double)GetValue(ShoulderRadiusProperty);
-        set => SetValue(ShoulderRadiusProperty, value);
-    }
-}

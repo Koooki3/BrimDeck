@@ -318,7 +318,7 @@ internal sealed class ProcessCard : Border
 
     public ProcessCard(double body, double caption)
     {
-        Width = 248; Padding = new Thickness(14, 12, 14, 12); CornerRadius = new CornerRadius(12);
+        Width = 248; Padding = new Thickness(14, 12, 14, 12); CornerRadius = new CornerRadius(PanelTheme.Corner(12));
         Background = UI.Brush(PanelTheme.Hex("popup")); BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")); BorderThickness = new Thickness(1);
         Cursor = Cursors.Hand; AutomationProperties.SetName(this, Loc.T("进程详情", "Process details"));
         var stack = new StackPanel();
