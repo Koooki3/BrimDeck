@@ -30,8 +30,12 @@ try
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
     CurvesTests.Run(Check);
+    MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
+    MusicCostTests.Run(Check);
+    DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
+    DatePickerMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
@@ -45,6 +49,7 @@ try
     await DshUsageTests.Run(root, Check);
     await KimiUsageTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
+    await CursorUsageTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[

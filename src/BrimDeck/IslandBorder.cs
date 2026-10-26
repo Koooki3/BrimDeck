@@ -87,6 +87,7 @@ public sealed class IslandBorder : Border
                 drawingContext.DrawGeometry(RimBrush, null, bevel.Light);
                 drawingContext.DrawGeometry(shade, null, bevel.Shade);
             }
+            else if (_settledClip) drawingContext.DrawGeometry(RimBrush, null, Ring(outline));
             else
             {
                 if (_rim is null) { _rim = new Pen(RimBrush, RimWidth * 2); _rim.Freeze(); }
@@ -97,7 +98,35 @@ public sealed class IslandBorder : Border
     }
 
     // The visible surface owns input; its decorative shadow is a separate, non-interactive sibling.
-    protected override Geometry? GetLayoutClip(Size layoutSlotSize) => Outline();
+    // At rest collapsed (SettledClip, set by the window), the content keeps clear of the corners and shoulders and is clipped to
+    // the bounds instead: a rounded clip made each frame of the scrolling title and the bars cost about a quarter more. The surface
+    // itself is still drawn as its outline (OnRender).
+    protected override Geometry? GetLayoutClip(Size layoutSlotSize) => _settledClip ? Bounds() : Outline();
+    private bool _settledClip;
+    public bool SettledClip
+    {
+        get => _settledClip;
+        set { if (_settledClip == value) return; _settledClip = value; InvalidateArrange(); InvalidateVisual(); }
+    }
+    // The rim's inner half as a filled ring, for the outline it was made from; made only at rest, so never on an animation's frames.
+    private Geometry? _ring, _ringOutline;
+    private double _ringWidth;
+    private Geometry Ring(Geometry outline)
+    {
+        if (_ring is not null && ReferenceEquals(_ringOutline, outline) && _ringWidth == RimWidth) return _ring;
+        var widened = outline.GetWidenedPathGeometry(new Pen(Brushes.Black, RimWidth * 2));
+        var ring = Geometry.Combine(outline, widened, GeometryCombineMode.Intersect, null);
+        ring.Freeze();
+        _ring = ring; _ringOutline = outline; _ringWidth = RimWidth;
+        return ring;
+    }
+    private RectangleGeometry? _bounds;
+    private Geometry Bounds()
+    {
+        var rect = new Rect(RenderSize);
+        if (_bounds?.Rect != rect) { _bounds = new RectangleGeometry(rect); _bounds.Freeze(); }
+        return _bounds;
+    }
 
     // A pixel theme's steps are whole device pixels, so a new scale needs a new outline.
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
