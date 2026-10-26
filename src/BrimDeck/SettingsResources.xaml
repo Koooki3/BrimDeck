@@ -454,7 +454,7 @@
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
-  <!-- A slim bar laid over a list (a combo box's): a 4 DIP handle, no track. -->
+  <!-- A slim bar beside a combo box's list: a 4 DIP handle, no track. -->
   <Style x:Key="SettingsThinScrollBar" TargetType="ScrollBar">
     <Setter Property="Width" Value="6"/><Setter Property="MinWidth" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="Stylus.IsPressAndHoldEnabled" Value="False"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
@@ -483,18 +483,19 @@
         <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
           <!-- The arrow is drawn, not a glyph: an icon font's glyph sits where that font puts it (and Windows 10 has another icon
                font), so it would not share the text's centre. -->
-          <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chrome" Background="{DynamicResource SettingsInput}" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="1" CornerRadius="6"><Path Data="M0.5,0.5 L4.5,4.5 L8.5,0.5" Width="9" Height="5" Stroke="{DynamicResource SettingsTextSecondary}" StrokeThickness="1.25" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,0"/></Border></ControlTemplate></ToggleButton.Template>
+          <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chrome" Background="{DynamicResource SettingsInput}" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="1" CornerRadius="6"><Path Data="M0.5,0.5 L4.5,4.5 L8.5,0.5" Width="9" Height="5" Stroke="{DynamicResource SettingsTextSecondary}" StrokeThickness="1.25" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,0"><Path.RenderTransform><TranslateTransform Y="0.5"/></Path.RenderTransform></Path></Border></ControlTemplate></ToggleButton.Template>
         </ToggleButton>
         <ContentPresenter x:Name="Selection" Content="{TemplateBinding SelectionBoxItem}" Margin="10,0,28,0" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" IsHitTestVisible="False"/>
         <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
-          <!-- As wide as the box. A long list scrolls under a thin bar laid over its right edge, shown while the pointer is on the
-               list, so no column is kept for it. -->
+          <!-- Keep the scrollbar in its own column so it never covers a highlighted item. The column stays reserved while
+               the pointer leaves the list, preventing the items from shifting when the scrollbar is hidden. -->
           <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" Margin="0,4,0,0" Background="{DynamicResource SettingsInput}" BorderBrush="{DynamicResource SettingsBorder}" BorderThickness="1" CornerRadius="6" Padding="4">
             <ScrollViewer MaxHeight="{TemplateBinding MaxDropDownHeight}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False" PanningMode="VerticalOnly">
               <ScrollViewer.Template><ControlTemplate TargetType="ScrollViewer">
                 <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"/>
-                  <ScrollBar x:Name="PART_VerticalScrollBar" Style="{DynamicResource SettingsThinScrollBar}" HorizontalAlignment="Right" Margin="0,0,-3,0" Opacity="0" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"/>
+                  <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Style="{DynamicResource SettingsThinScrollBar}" Margin="2,0,0,0" Opacity="0" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"/>
                 </Grid>
                 <ControlTemplate.Triggers>
                   <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="PART_VerticalScrollBar" Property="Opacity" Value="1"/></Trigger>
@@ -507,9 +508,11 @@
         <Border x:Name="Focus" IsHitTestVisible="False" Visibility="Collapsed" BorderBrush="{DynamicResource SettingsAccent}" BorderThickness="1" CornerRadius="6"/>
       </Grid>
       <ControlTemplate.Triggers>
-        <!-- A centred value (the time boxes) stands in the middle of the whole box, clear of the arrow on both sides, and half
-             a DIP higher: digits have no descenders, so their ink sits below the middle of the line box. -->
-        <Trigger Property="HorizontalContentAlignment" Value="Center"><Setter TargetName="Selection" Property="Margin" Value="22,0,22,1"/></Trigger>
+        <!-- Keep the time horizontally centred; offset its natural line box to centre the visible digits vertically. -->
+        <Trigger Property="HorizontalContentAlignment" Value="Center">
+          <Setter TargetName="Selection" Property="Margin" Value="22,0,22,0"/>
+          <Setter TargetName="Selection" Property="RenderTransform"><Setter.Value><TranslateTransform Y="-1.25"/></Setter.Value></Setter>
+        </Trigger>
       </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
     <Setter Property="ItemContainerStyle"><Setter.Value><Style TargetType="ComboBoxItem">

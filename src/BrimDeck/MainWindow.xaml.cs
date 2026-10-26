@@ -24,6 +24,8 @@ public partial class MainWindow : Window
     // Compact hover follows the cursor position rather than window mouse messages, which reach
     // this per-pixel transparent window unreliably over the nearly invisible strip around the surface.
     private bool _cursorInCompact, _trackPointer;
+    // Set while a window is dragged and kept until the pointer leaves the hover area after the drag (see TrackPointer).
+    private bool _dragHold;
     // Checks run every 40 ms near the surface. Farther away the interval grows with the distance, assuming the cursor
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
     private const double TrackNear = 40, TrackFar = 160, ApproachSpeed = 10;
@@ -737,6 +739,15 @@ public partial class MainWindow : Window
             if (wasPinned && inside && !_pointerInside) { PointerChanged(true); return; }
             if (_pointerInside && !inside) PointerChanged(false);
             else if (!_pointerInside && inside && _leave.IsEnabled) PointerChanged(true);
+            return;
+        }
+        // A window dragged to the top of the screen for Snap Layouts passes the surface. Neither the drag nor the release
+        // there counts as an entry: the panel opens only once the pointer has left the area and come back.
+        _dragHold = _app.WindowDrags.Active || _dragHold && inCompact;
+        if (_dragHold)
+        {
+            _cursorInCompact = inCompact;
+            if (_pointerInside) PointerChanged(false);
             return;
         }
         if (inCompact != _cursorInCompact) { _cursorInCompact = inCompact; PointerChanged(inCompact); }
