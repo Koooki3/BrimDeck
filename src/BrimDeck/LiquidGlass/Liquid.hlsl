@@ -110,11 +110,14 @@ cbuffer Frame : register(b0)
     float StatsTile;      // a tile's side, device pixels
     float Sigma0;         // the masking constant of the material's adaptivity (linear Y; see Material)
     float4 FrostLevel[8]; // per level: its atlas region's top-left (pixels), its texel (device pixels), its Gaussian deviation
+    float4 TextInfo;      // the open panel's text regions (t3): cell (device pixels), 1 / columns, 1 / rows, 1 when given
+    float4 LookInfo;      // x: the light look's luminosity opacity between the text regions; y: 1 for round 12's zones
 };
 
 Texture2D Background : register(t0);
 Texture2D FrostAtlas : register(t1);   // the frost's levels (Frost.hlsl)
-Texture2D StatsTiles : register(t2);   // per tile: mean luma, frosted band RMS, unfrosted band RMS (Frost.hlsl, Stats)
+Texture2D StatsTiles : register(t2);
+Texture2D TextCells : register(t3);    // the open panel's text regions: how much of each cell they cover (LiquidRenderer.TextMask)   // per tile: mean luma, frosted band RMS, unfrosted band RMS (Frost.hlsl, Stats)
 SamplerState Smooth : register(s0);
 
 // The most contrast left behind the open panel's text, and how far the band may move the glass's mean brightness from the
@@ -122,6 +125,14 @@ SamplerState Smooth : register(s0);
 // The frost's grain: Acrylic lays its noise texture at .02 opacity, a texture of small spread; a uniform noise of that amplitude
 // adds about 4 levels a pixel of detail behind text (round 12, reading comfort), so it is kept to .006 here.
 static const float GrainAmount = .006;
+// Round 12b: the masked contrast reached behind text (a share of the opaque theme's), the busy-ness reference (unfrosted band
+// RMS, linear Y), and the body's depth: its fall toward the edges and its top light.
+static const float Reach = .96, BusyRef = .03, EdgeFall = .05, Sheen = .06, SheenDip = 36;
+// Round 13's slab: its tint (Lens' roles: small .12, panel .14), absorption per unit thickness (light: barely, cool; dark:
+// deeper), the frost of its body with no text over it (DIP, collapsed; the open panel's is half its text frost), the light's
+// strength at rest, and the light look's least cover behind text.
+static const float SlabTintSmall = .12, SlabTintPanel = .14, BodyFrostDip = 2.5, RestLight = .55, SlabCoverLight = .55;
+static const float3 AbsorbLight = float3(.035, .025, .015), AbsorbDark = float3(.22, .19, .15);
 static const float Cap = 1.5, Calm = .6, BusyCalm = .3, Vibrancy = 1.2, ChromaFloor = .55, RimDip = 10, RimLeast = 6, RowReach = 8;
 
 struct Vertex { float4 Position : SV_Position; };
@@ -556,11 +567,29 @@ float Apca(float text, float back)
 // opacity is Acrylic's at least, raised just as far as the text's masked contrast - APCA's Lc over sqrt(1 + (sigma / Sigma0)^2),
 // the backdrop's texture masking the text (Scharff and Ahumada) - reaches what it is on the opaque theme (Acrylic's fallback).
 // The statistics are low-passed on the GPU (rising fast, falling with tau 300 ms).
-float Adapt(float2 p, out float busy)
+// The look behind text while the look turns (automatic liquid glass): it turns in the middle of the turn, steeply, as the
+// text turns its colour there (LiquidFrame.TextTurns): never light text over a light cover, nor dark over a dark one.
+float CoverDark() { return smoothstep(.4, .6, saturate(Dark)); }
+
+// How much the open panel's text regions cover a place (1 when none are given: the whole panel).
+float TextCover(float2 p)
 {
-    float dark = saturate(Dark);
+    if (TextInfo.w < .5) return 1;
+    return saturate(TextCells.SampleLevel(Smooth, p / TextInfo.x * TextInfo.yz, 0).r * 1.5);
+}
+
+// How busy the backdrop is around a place, 0..1: its unfrosted band-pass RMS (Stats' third channel) against BusyRef.
+float Busy(float2 p)
+{
+    return saturate(StatsTiles.SampleLevel(Smooth, (p - StatsOrigin) / StatsTile * StatsInverse, 0).b / BusyRef);
+}
+
+// The luminosity opacity behind text: at least the base (the body's), raised just as far as the text's masked contrast needs
+// to reach Reach of the opaque theme's.
+float Adapt(float2 p, float base, out float busy)
+{
+    float dark = CoverDark();
     float3 tint = lerp(AcrylicLight, AcrylicDark, dark);
-    float base = lerp(AcrylicLumLight, AcrylicLumDark, dark);
     float yt = lerp(ApcaY(float3(.0627, .0706, .0902)), ApcaY(float3(.9647, .9686, .9765)), dark);
     float target = Apca(yt, ApcaY(lerp(float3(.9765, .9765, .9765), tint, dark)));
     float2 stats = Stats(p);
@@ -571,7 +600,7 @@ float Adapt(float2 p, out float busy)
     {
         float a = (lo + hi) * .5, s = (1 - a) * sigma / max(Sigma0, 1e-4);
         float lc = Apca(yt, lerp(y, yTint, a)) / sqrt(1 + s * s);
-        if (lc >= target * .98) hi = a; else lo = a;
+        if (lc >= target * Reach) hi = a; else lo = a;
     }
     busy = saturate((hi - base) / max(1 - base, 1e-3));
     return hi;
@@ -589,6 +618,111 @@ float3 Material(float3 frosted, float3 port, float a)
     // took.
     float cap = min(Chroma(port), Chroma(frosted)), own = Chroma(c), l = Lum(c);
     if (own > cap) c = l + (c - l) * cap / max(own, 1e-5);
+    return saturate(c);
+}
+
+// ----- Round 13: one slab of glass (the default material; Glass above is round 12's zones and the lgw port) -----
+// Lens (ruiqichenbiec/design-systems, MIT: lens/internal/renderer.js, as documented in pr-plan vendor-benchmark 7.1): a bevel of
+// min(the shorter side x .48, 19 px) whose slope edge^1.65 x .94 tilts the surface normal, with a faint .045 curvature over the
+// whole top; a ray straight down refracted at 1/1.45 (Snell) and carried through a slab (18 + 57 refraction) px thick; R and B
+// split along the normal at the rim (dispersion, edge^2.8); a key light from the top left (offset (-80, 150), the pointer only
+// biasing it), its directional term max(n.L, 0)^7 with .52 of it on the opposite side; Fresnel .04 + .96 (1 - n.z)^5 plus a
+// grazing term at the very rim (liquid-glass-studio, iyinchao, MIT: a fifth-power rim falloff, its highlight coloured by the
+// refracted backdrop rather than white). Everything is a function of the one height field, so the rim and the body are one
+// surface with no seam: the refraction fades with the slope, the frost grows with the thickness, the tint and absorption
+// (Beer-Lambert) follow the thickness. Behind text the material covers locally (Acrylic's luminosity, as far as the text
+// needs), feathered.
+static const float SlabIor = 1.45, SlabRefraction = .9, SlabDispersion = .3, BevelDip = 19;
+static const float3 LensLightTint = float3(.97, .985, 1), LensDarkTint = float3(.16, .24, .34);
+
+float3 Back(float2 islandPixel) { return Background.SampleLevel(Smooth, (islandPixel + Pad) * Inverse, 0).rgb; }
+
+// The text regions' cover, feathered over about TextFeatherDip (five taps of the cell grid), and the collapsed row's.
+static const float TextFeatherDip = 8;
+float TextFeathered(float2 p)
+{
+    if (TextInfo.w < .5) return 1;
+    // Grown, not averaged: whole over the regions themselves, fading over the feather outside them.
+    float f = TextFeatherDip * Scale, h = f * .5;
+    float near = max(max(TextCover(p + float2(h, 0)), TextCover(p - float2(h, 0))), max(TextCover(p + float2(0, h)), TextCover(p - float2(0, h))));
+    float far = max(max(TextCover(p + float2(f, 0)), TextCover(p - float2(f, 0))), max(TextCover(p + float2(0, f)), TextCover(p - float2(0, f))));
+    return max(TextCover(p), max(near * .75, far * .4));
+}
+
+float3 Slab(float2 p, float sd, float2 outward)
+{
+    float dark = saturate(Dark), opened = sqrt(saturate(Open));
+    float shorter = min(Size.x, Size.y);
+    float bevel = min(shorter * .48, BevelDip * Scale);
+    float edge = saturate(1 + sd / bevel);                 // 1 at the rim, 0 where the bevel meets the top
+    float slope = pow(edge, 1.65) * .94;
+    float2 centre = float2(HalfWidth, Size.y * .5);
+    float2 pc = (p - centre) / max(.5 * float2(Size.x, Size.y), 1);
+    float3 normal = normalize(float3(outward * slope + pc * .045, 1));
+    float thickness = 1 - pow(edge, 2);                    // of the slab, 0 at the rim .. 1 over the top
+
+    // Refraction (Snell), the slab's magnification, and dispersion at the rim.
+    float3 ray = refract(float3(0, 0, -1), normal, 1 / SlabIor);
+    float through = (18 + 57 * SlabRefraction) * Scale;
+    float2 offset = ray.xy / max(-ray.z, .25) * through * SlabRefraction - (p - centre) * .016 * SlabRefraction;
+    // Kept within the padded backdrop, less a margin for the frost's reach (past it the pyramid's levels border each other).
+    float2 at = clamp(p + offset, -.5 * Pad, Size + .5 * Pad);
+
+    // Where text sits (the collapsed row; the open panel's text regions), the material covers; elsewhere the slab is clear at
+    // the rim and frosted with its thickness.
+    float row = 0;
+    if (Content.z > Content.x)
+    {
+        float2 inside = min(p - (Content.xy - float2(RowReach * Scale, 0)), (Content.zw + float2(RowReach * Scale, 0)) - p);
+        row = saturate(min(inside.x, inside.y) / (TextFeatherDip * Scale) + 1);
+    }
+    float text = max(row, opened * TextFeathered(p));
+    float calm = 1 - Busy(p);
+    float bodyFrost = lerp(BodyFrostDip, FrostRadius / Scale * .5, opened) * Scale * lerp(.6, 1, 1 - calm);
+    float frost = max(bodyFrost * thickness, max(ContentFrost * row, FrostRadius * opened * TextFeathered(p)) * saturate(thickness * 2));
+    float3 c = Frost(at + Pad, frost);
+    [branch] if (edge > .02)
+    {
+        float split = pow(edge, 2.8) * SlabDispersion * 2.6 * Scale;
+        float3 sharp = float3(Back(at + outward * split).r, Back(at).g, Back(at - outward * split).b);
+        c = lerp(c, lerp(c, sharp, .8), saturate(pow(edge, 2.8) * (1 - FrostShown)));
+    }
+    float3 backdrop = c;
+
+    // Tint (Lens: the role's tint, more where frosted, more on the dark look) and absorption through the thickness.
+    float3 tint = lerp(LensLightTint, LensDarkTint, dark);
+    float amount = lerp(SlabTintSmall, SlabTintPanel, opened) + saturate(frost / (10 * Scale)) * .12 + dark * .10;
+    c = Lum(c) + (c - Lum(c)) * 1.035;
+    c = lerp(c, tint, amount * (.6 + .4 * thickness));
+    c *= exp(-lerp(AbsorbLight, AbsorbDark, dark) * thickness);
+
+    // Behind text: Acrylic's luminosity blend, as far as the text needs (Adapt), feathered (no box).
+    [branch] if (text > .001 && (Low > 0 || High < 1))
+    {
+        float turned = CoverDark(), busy, base = lerp(SlabCoverLight, AcrylicLumDark, turned);
+        float a = Adapt(p, base, busy);
+        float3 target = lerp(AcrylicLight, AcrylicDark, turned);
+        c = lerp(c, SetLum(c, Lum(target)), a * text);
+        c = lerp(c, target, AcrylicTintDark * turned * text);
+    }
+    // Colour no more than the backdrop's own (D14).
+    float cap = Chroma(backdrop), own = Chroma(c), l0 = Lum(c);
+    if (own > cap) c = l0 + (c - l0) * cap / max(own, 1e-5);
+
+    // Light: a key light from the top left, the pointer biasing it; the directional term on the slope and its pair opposite,
+    // Fresnel at grazing slopes and the very rim, a soft sheen over the top; quieter at rest, fuller on hover and press.
+    float2 key = normalize(float2(-80, -150) + (Hover > 0 ? (Pointer - centre) / Scale * .25 * Hover : 0));
+    float3 l = normalize(float3(key, .45));
+    float3 lo = normalize(float3(-key, .45));
+    float live = lerp(RestLight, 1, max(Hover, Press));
+    float directional = pow(saturate(dot(normal, l)), 7) + .52 * pow(saturate(dot(normal, lo)), 7);
+    float fresnel = .04 + .96 * pow(1 - normal.z, 5) + .5 * pow(edge, 6);
+    float3 glare = lerp(1, saturate(backdrop * 1.6 + .25), .5);     // the highlight coloured by what lies behind
+    // Where the glass is frosted denser behind text its surface scatters: the highlight there spreads out and dims (rough glass).
+    c = lerp(c, glare, saturate((directional * .55 + fresnel * .25) * live * edge * (1 - .8 * text)));
+    float sheen = .045 * saturate(dot(-pc, key) * .5 + .5);
+    c = lerp(c, 1, sheen * (1 - text * .7) * (1 - .5 * dark));
+    c *= 1 - pow(edge, 8) * .085 * saturate(dot(outward, -key) * .5 + .5);
     return saturate(c);
 }
 
@@ -629,10 +763,13 @@ float3 Glass(float2 p, float sd, float2 n)
     // sharp: what lies behind is unreadable a quarter of the way open); the collapsed content row alike.
     float opened = sqrt(saturate(Open));
     float material = max(opened * inner, row);
-    float frost = max(FrostRadius * opened * inner, ContentFrost * row);
+    // Round 12b: the material covers fully only behind the text (the content row; the open panel's text regions); between them
+    // it stays translucent glass (the light look's BodyLight), its frost thinner where the backdrop is calm.
+    float text = row > 0 ? 1 : TextCover(p), calm = material > 0 ? 1 - Busy(p) : 0;
+    float frost = max(FrostRadius * opened * inner, ContentFrost * row) * lerp(lerp(.55, 1, 1 - calm), 1, text);
     // Where the backdrop is busy (the material's luminosity raised past Acrylic's, below), the frost thickens too.
-    float busy = 0, opacity = 0;
-    [branch] if (material > 0 && (Low > 0 || High < 1)) opacity = Adapt(p, busy);
+    float busy = 0, opacity = 0, body = lerp(LookInfo.x, AcrylicLumDark, saturate(Dark));
+    [branch] if (material > 0 && (Low > 0 || High < 1)) opacity = lerp(body, Adapt(p, body, busy), text);
     frost *= 1 + .5 * busy;
     [branch] if (frost > .75) color = Frost(float2(read), frost);
     float3 unfiltered = color;
@@ -647,7 +784,16 @@ float3 Glass(float2 p, float sd, float2 n)
     // sits, the material (Acrylic's), fading in with the opening and over the zone's feather.
     float3 port = lerp(color, Tint.rgb, Tint.a);
     color = Legible(port, lerp(unfiltered, Tint.rgb, Tint.a), 0, 0);
-    [branch] if (material > 0 && (Low > 0 || High < 1)) color = lerp(color, Material(unfiltered, port, opacity), material);
+    [branch] if (material > 0 && (Low > 0 || High < 1))
+    {
+        float3 m = Material(unfiltered, port, opacity);
+        // A glass's depth across the body (not behind text): a little darker toward its edges (thicker glass there), and a soft
+        // light from the top.
+        float depth = 1 - text, edge = 1 - saturate(-sd / (.3 * min(Size.x, Size.y)));
+        m *= 1 - EdgeFall * edge * depth;
+        m = lerp(m, 1, Sheen * exp(-p.y / (SheenDip * Scale)) * depth * (1 - .5 * saturate(Dark)));
+        color = lerp(color, m, material);
+    }
 
     // Hover: the glass brightens a little, and its rim catches more light on the side toward the pointer.
     [branch] if (Hover > 0)
@@ -677,9 +823,9 @@ float3 Glass(float2 p, float sd, float2 n)
     return saturate(color * (1 - shadow));
 }
 
-float4 PS(Vertex input) : SV_Target
+// The pixel: one shader for each material (compiled apart, so the app builds only the slab's: the other is made when first asked).
+float4 Shade(float2 p, bool slab)
 {
-    float2 p = input.Position.xy;
     float2 n;
     float sd = Outline(p, n);
     if (sd > 1.5) return 0;
@@ -695,5 +841,30 @@ float4 PS(Vertex input) : SV_Target
         cover *= .25;
     }
     if (cover <= 0) return 0;
-    return float4(Grain(Glass(p, sd, n), p) * cover, cover);
+    float3 glass;
+    if (!slab) glass = Glass(p, sd, n);
+    else
+    {
+        glass = Slab(p, sd, n);
+        // The lgw inner shadow and its press, over the slab as over the port.
+        float2 halfSize = float2(Size.x, Size.y + TopExtra) * .5, centred = float2(p.x, p.y + TopExtra) - halfSize;
+        float r = (CornerTop > 0 ? CornerTop : CornerBottom), sigma = max(InsetBlur * .5 * Scale, .5);
+        float shadow = InsetAlpha * (1 - BoxCoverage(centred - float2(0, InsetY * Scale), halfSize, r, sigma, Narrow));
+        if (Press > 0)
+        {
+            float k = InsetBlur / 20;
+            float deep = .18 * (1 - BoxCoverage(centred - float2(0, -8 * k * Scale), halfSize, r, max(8 * k * Scale, .5), Narrow));
+            shadow = 1 - (1 - shadow) * (1 - Press * deep);
+            float spread = 3 * k * Scale;
+            float glow = .55 * (1 - BoxCoverage(centred, halfSize - spread, max(r - spread, 0), max(8 * k * Scale, .5), Narrow));
+            glass = lerp(glass, 1, Press * glow);
+        }
+        glass = saturate(glass * (1 - shadow));
+    }
+    return float4(Grain(glass, p) * cover, cover);
 }
+
+// Round 13's slab (the app's glass).
+float4 PS(Vertex input) : SV_Target { return Shade(input.Position.xy, true); }
+// Round 12's zones and the lgw port (the proof sheets, the comparisons).
+float4 PSZoned(Vertex input) : SV_Target { return Shade(input.Position.xy, false); }

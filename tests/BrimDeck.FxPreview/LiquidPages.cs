@@ -63,7 +63,7 @@ internal static partial class LiquidPages
     // One page drawn: the panel's layer (premultiplied BGRA, the root's size in device pixels) and the island's rectangle in it.
     // Runs marks the pixels inside the theme's secondary (2) and tertiary (3) text runs (TextBlocks drawn in that brush).
     private sealed record Layer(byte[] Pixels, int Width, int Height, int X, int Y, int W, int H, double CornerTop, double CornerBottom, double Shoulder, bool ShadowShown, Color Text, bool HasText,
-        byte[] Runs, Color Secondary, Color Tertiary, double Open);
+        byte[] Runs, Color Secondary, Color Tertiary, double Open, float[]? TextRects);
 
     // BrimDeck's own App (never run) and its MainWindow, whose stage lies in a source that is never shown, with the notices and
     // no updates. Also used by ShadowCost (with animations on).
@@ -237,7 +237,7 @@ internal static partial class LiquidPages
         Color secondary = PanelTheme.ColorOf("textSecondary"), tertiary = PanelTheme.ColorOf("textTertiary");
         return new Layer(pixels, width, height, x, y, w, h, c.TopLeft * Scale, c.BottomLeft * Scale, island.ShoulderRadius * Scale, deck.ShadowHost.Opacity > 0,
             PanelTheme.ColorOf("textPrimary"), page != Page.Capsule, Runs(root, deck.Stage, width, height, secondary, tertiary), secondary, tertiary,
-            deck.GlassOpenness());
+            deck.GlassOpenness(), deck.GlassTextRegions() is { } regions ? [.. regions.SelectMany(r => new[] { (float)(r.Left * Scale), (float)(r.Top * Scale), (float)(r.Right * Scale), (float)(r.Bottom * Scale) })] : null);
     }
 
     // The secondary and tertiary text runs: every TextBlock shown whose brush (its own or inherited) is the theme's secondary
@@ -292,7 +292,8 @@ internal static partial class LiquidPages
         int gx = (int)Math.Round((dw - layer.W) / 2.0), gy = layer.Y, ox = layer.X - gx;
         // How far the panel is open, as the app gives it to the glass (MainWindow.GlassOpenness): its frost and calmer backdrop.
         var frame = LiquidFrame.Preset(dark, layer.W, layer.H, (float)layer.CornerTop, (float)layer.CornerBottom, (float)layer.Shoulder, (float)Scale)
-            with { Open = (float)layer.Open };
+            with { Open = (float)layer.Open, TextRects = layer.TextRects };
+        if (Environment.GetEnvironmentVariable("LIQUID_DEBUG") == "1") Console.WriteLine($"NOTE: {name}: {layer.TextRects?.Length / 4 ?? -1} text regions, open {layer.Open:0.00}, island {layer.W}x{layer.H}: " + (layer.TextRects is { } tr ? string.Join(" ", Enumerable.Range(0, tr.Length / 4).Select(i => $"[{tr[i * 4]:0},{tr[i * 4 + 1]:0},{tr[i * 4 + 2]:0},{tr[i * 4 + 3]:0}]")) : ""));
         var glass = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H), frame, (int)Math.Ceiling(48 * Scale));
         var under = (byte[])desktop.Clone();
         for (int y = 0; y < layer.H; y++)

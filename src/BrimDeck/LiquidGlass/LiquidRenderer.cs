@@ -32,6 +32,11 @@ namespace BrimDeck.LiquidGlass;
 //   InsetY, InsetBlur, InsetAlpha: the source's inset shadow (0 -8px 20px rgba(0,0,0,.14)), shrunk for low shapes.
 //   Faithful: the source's own uv field (the proof sheets), not the island's.
 //   Sigma0: the material's masking constant (0: DefaultSigma0); only the calibration sets it.
+//   TextRects: the open panel's text and content regions, device pixels from the island's top-left, 4 floats each (left, top,
+//     right, bottom); null: the whole panel counts as text (the previews without a page). Behind them the material covers as
+//     far as the text needs; between them it stays translucent (round 12b).
+//   Zoned: round 12's zones (a clear rim, Acrylic inside) instead of round 13's one slab, for the comparisons.
+//   BodyLight: the light look's luminosity opacity between the text regions (0: DefaultBodyLight); only the sweep sets it.
 //   ContentLeft..ContentBottom: the collapsed island's content row (its text and glyphs), device pixels from the island's
 //     top-left; all 0 for none. Behind it the backdrop's contrast is capped, with a light local frost (Liquid.hlsl).
 //   LinearFilters: the backdrop filtered in linear light, as the browser draws the source (see Liquid.hlsl); off, in sRGB.
@@ -55,7 +60,8 @@ internal readonly record struct LiquidFrame(
     float InsetY = -8, float InsetBlur = 20, float InsetAlpha = .14f, bool Faithful = false,
     bool LinearMap = false, bool LinearFilters = true, float CssWidth = 0, float CssHeight = 0,
     float FilterWidth = 0, float FilterHeight = 0,
-    float ContentLeft = 0, float ContentTop = 0, float ContentRight = 0, float ContentBottom = 0, float Sigma0 = 0)
+    float ContentLeft = 0, float ContentTop = 0, float ContentRight = 0, float ContentBottom = 0, float Sigma0 = 0,
+    float[]? TextRects = null, float BodyLight = 0, bool Zoned = false)
 {
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
@@ -101,16 +107,11 @@ internal readonly record struct LiquidFrame(
     public static bool TextTurns(double luma, double dark, bool toDark, bool arrived)
     {
         if (arrived) return true;
-        var light = Preset(false, 1, 1, 0, 0, 0, 1);
-        var deep = Preset(true, 1, 1, 0, 0, 0, 1);
-        double t = Math.Clamp(dark, 0, 1);
-        double low = light.BandLow + (deep.BandLow - light.BandLow) * t, high = light.BandHigh + (deep.BandHigh - light.BandHigh) * t;
-        double shown = Math.Clamp(luma, low, Math.Max(low, high));
-        // Then the glass's own background over it (light: white at .08; dark: its dark base at .3).
-        double tintLuma = (light.Tint_R + (deep.Tint_R - light.Tint_R) * t) * .2126 + (light.Tint_G + (deep.Tint_G - light.Tint_G) * t) * .7152 + (light.Tint_B + (deep.Tint_B - light.Tint_B) * t) * .0722;
-        double tintAlpha = light.TintAlpha + (deep.TintAlpha - light.TintAlpha) * t;
-        shown += (tintLuma - shown) * tintAlpha;
-        return toDark ? shown <= TextTurn : shown >= TextTurn;
+        // Round 13's slab: behind text the glass covers as far as the text needs, its look turning in the middle of the turn
+        // (Liquid.hlsl, CoverDark), about .93 light and .18 dark whatever lies behind (luma no longer matters).
+        double s = Math.Clamp((Math.Clamp(dark, 0, 1) - .4) / .2, 0, 1);
+        double covered = .93 + (.18 - .93) * s * s * (3 - 2 * s);
+        return toDark ? covered <= TextTurn : covered >= TextTurn;
     }
 
     // ----- The source's displacement map -----
@@ -180,6 +181,9 @@ internal sealed class LiquidRenderer : IDisposable
     private readonly ID3D11DeviceContext _context;
     private readonly ID3D11VertexShader _vertex;
     private readonly ID3D11PixelShader _pixel, _downPass, _upPass, _bandPass, _statsPass;
+    // Round 12's zones and the lgw port: made only when a frame asks for them (the proof sheets, the comparisons).
+    private ID3D11PixelShader? _zoned;
+    private ID3D11PixelShader Zoned() => _zoned ??= _device.CreatePixelShader(Shaders.Value.Zoned);
     private readonly ID3D11Buffer _constants, _passConstants;
     private IDXGISwapChain2? _swapChain;
     private ID3D11RenderTargetView? _target;
@@ -271,9 +275,9 @@ internal sealed class LiquidRenderer : IDisposable
         Write(frame, description, pad);
         context.OMSetRenderTargets(target);
         context.RSSetViewport(new Viewport(frame.Width, frame.Height));
-        context.PSSetShader(_pixel);
+        context.PSSetShader(frame.Faithful || frame.Zoned ? Zoned() : _pixel);
         context.PSSetConstantBuffer(0, _constants);
-        Bind(copy.View, _atlas!.View, _stats[_statsAt]!.View);
+        Bind(copy.View, _atlas!.View, _stats[_statsAt]!.View, TextMask(frame, scale));
         context.Draw(3, 0);
         // The background is copied again next frame and the pyramid redrawn: none may stay bound as a shader input meanwhile.
         Unbind();
@@ -281,13 +285,60 @@ internal sealed class LiquidRenderer : IDisposable
     }
 
     // The inputs t0..t2 bound, from an array kept (nothing allocated per frame), and let go.
-    private readonly ID3D11ShaderResourceView[] _none = new ID3D11ShaderResourceView[3], _bound = new ID3D11ShaderResourceView[3];
+    private readonly ID3D11ShaderResourceView[] _none = new ID3D11ShaderResourceView[4], _bound = new ID3D11ShaderResourceView[4];
     private void Unbind() => _context.PSSetShaderResources(0, _none);
-    private void Bind(ID3D11ShaderResourceView a, ID3D11ShaderResourceView? b, ID3D11ShaderResourceView? c)
+    private void Bind(ID3D11ShaderResourceView a, ID3D11ShaderResourceView? b, ID3D11ShaderResourceView? c, ID3D11ShaderResourceView? d)
     {
-        _bound[0] = a; _bound[1] = b!; _bound[2] = c!;
+        _bound[0] = a; _bound[1] = b!; _bound[2] = c!; _bound[3] = d!;
         _context.PSSetShaderResources(0, _bound);
-        _bound[0] = _bound[1] = _bound[2] = null!;
+        _bound[0] = _bound[1] = _bound[2] = _bound[3] = null!;
+    }
+
+    // ----- The open panel's text regions (round 12b) -----
+    // A coverage grid of TextTileDip cells over the island (R8: how much of each cell the regions cover), drawn again only when
+    // the regions or the island's size change; the glass reads it filtered, so the cover fades over about a cell.
+    private const float TextTileDip = 4;
+    private ID3D11Texture2D? _textMask;
+    private ID3D11ShaderResourceView? _textMaskView;
+    private (int Cols, int Rows) _textMaskSize;
+    private (float[]? Rects, int Width, int Height, float Tile) _textMaskFor;
+    private byte[] _textCells = [];
+    private (float Tile, float InverseX, float InverseY, float On) _textInfo;
+    private ID3D11ShaderResourceView? TextMask(in LiquidFrame f, float scale)
+    {
+        if (f.TextRects is not { } rects || f.Faithful) { _textInfo = default; return null; }
+        float tile = MathF.Max(1, TextTileDip * scale);
+        int cols = (int)MathF.Ceiling(f.Width / tile) + 1, rows = (int)MathF.Ceiling(f.Height / tile) + 1;
+        if (_textMask is null || _textMaskSize != (cols, rows))
+        {
+            _textMaskView?.Dispose(); _textMask?.Dispose();
+            _textMask = _device.CreateTexture2D(new Texture2DDescription(Format.R8_UNorm, (uint)cols, (uint)rows, 1, 1, BindFlags.ShaderResource));
+            _textMaskView = _device.CreateShaderResourceView(_textMask);
+            _textMaskSize = (cols, rows);
+            _textMaskFor = default;
+        }
+        if (_textMaskFor != (rects, f.Width, f.Height, tile))
+        {
+            _textMaskFor = (rects, f.Width, f.Height, tile);
+            if (_textCells.Length < cols * rows) _textCells = new byte[cols * rows];
+            Array.Clear(_textCells, 0, cols * rows);
+            for (int i = 0; i + 3 < rects.Length; i += 4)
+            {
+                float l = rects[i], t = rects[i + 1], r = rects[i + 2], b = rects[i + 3];
+                int c0 = Math.Max(0, (int)(l / tile)), c1 = Math.Min(cols - 1, (int)(r / tile)), r0 = Math.Max(0, (int)(t / tile)), r1 = Math.Min(rows - 1, (int)(b / tile));
+                for (int y = r0; y <= r1; y++)
+                    for (int x = c0; x <= c1; x++)
+                    {
+                        float w = MathF.Max(0, MathF.Min(r, (x + 1) * tile) - MathF.Max(l, x * tile)), h = MathF.Max(0, MathF.Min(b, (y + 1) * tile) - MathF.Max(t, y * tile));
+                        byte cover = (byte)Math.Clamp((int)MathF.Round(w * h / (tile * tile) * 255), 0, 255);
+                        ref byte cell = ref _textCells[y * cols + x];
+                        cell = (byte)Math.Min(255, cell + cover);
+                    }
+            }
+            _context.UpdateSubresource(_textCells, _textMask, 0, (uint)cols, 0);
+        }
+        _textInfo = (tile, 1f / cols, 1f / rows, 1);
+        return _textMaskView;
     }
 
     // The background copied into a texture of ours (the pyramid's first source; the glass reads its pixels).
@@ -470,7 +521,7 @@ internal sealed class LiquidRenderer : IDisposable
         _context.RSSetViewport(new Viewport(bx0, by0, Math.Max(1, bx1 - bx0), Math.Max(1, by1 - by0)));
         _context.PSSetShader(_bandPass);
         _context.PSSetConstantBuffer(0, _passConstants);
-        Bind(copy.View, _atlas!.View, null);
+        Bind(copy.View, _atlas!.View, null, null);
         _context.Draw(3, 0);
         Unbind();
         _pass.SrcInverseX = 1f / image.Width; _pass.SrcInverseY = 1f / image.Height;
@@ -478,7 +529,7 @@ internal sealed class LiquidRenderer : IDisposable
         _context.OMSetRenderTargets(next.Target);
         _context.RSSetViewport(new Viewport(x0, y0, Math.Max(1, x1 - x0), Math.Max(1, y1 - y0)));
         _context.PSSetShader(_statsPass);
-        Bind(image.View, null, last.View);
+        Bind(image.View, null, last.View, null);
         _context.Draw(3, 0);
         Unbind();
         _statsAt ^= 1;
@@ -688,7 +739,9 @@ internal sealed class LiquidRenderer : IDisposable
             FrostExtentX = _extent.Width, FrostExtentY = _extent.Height, StatsOriginX = _statsOriginX, StatsOriginY = _statsOriginY,
             StatsInverseX = 1f / _statsFor.Cols, StatsInverseY = 1f / _statsFor.Rows, StatsTile = _statsFor.Tile,
             // The material's masking constant (Liquid.hlsl, Material; calibrated offscreen, round 12): the frame's, else the default.
-            Sigma0 = f.Sigma0 > 0 ? f.Sigma0 : DefaultSigma0
+            Sigma0 = f.Sigma0 > 0 ? f.Sigma0 : DefaultSigma0,
+            TextTile = _textInfo.Tile, TextInverseX = _textInfo.InverseX, TextInverseY = _textInfo.InverseY, TextOn = _textInfo.On,
+            BodyLight = f.BodyLight > 0 ? f.BodyLight : DefaultBodyLight, Zoned = f.Zoned ? 1 : 0
         };
         for (int k = 0; k < MostLevels; k++) Unsafe.Add(ref c.Level0, k) = Unsafe.Add(ref _pass.Level0, k);
         _context.UpdateSubresource(in c, _constants);
@@ -697,6 +750,8 @@ internal sealed class LiquidRenderer : IDisposable
     private const float RingCss = 90;
     // Calibrated in round 12 (pr-plan liquid-glass round-12): see Liquid.hlsl, Material.
     internal const float DefaultSigma0 = .02f;
+    // The light look's luminosity opacity between the text regions of the open panel (round 12b sweep; Acrylic's is .85).
+    internal const float DefaultBodyLight = .6f;
     // The open panel's frost, DIP (Liquid.hlsl, Frost: a Gaussian of deviation FrostDeviation of it).
     // The frosts are Apple's regular material, about: 32 DIP on the open panel, 12 behind the collapsed content row.
     private const float FrostDip = 32, ContentFrostDip = 12, FeatherDip = 4, FrostDeviation = .75f;
@@ -763,21 +818,22 @@ internal sealed class LiquidRenderer : IDisposable
     // `FxPreview --compile-liquid`: compiling the source at run time took about 4 s on the UI thread) and embedded with the hash
     // of the source they were made from. Should a hash not be its embedded source's (the source edited, the bytecode not made
     // again; a test catches it), that source is compiled here instead, once per run.
-    internal readonly record struct Bytecode(byte[] Vertex, byte[] Pixel, byte[] Down, byte[] Up, byte[] Band, byte[] Stats);
+    internal readonly record struct Bytecode(byte[] Vertex, byte[] Pixel, byte[] Zoned, byte[] Down, byte[] Up, byte[] Band, byte[] Stats);
     private static readonly Lazy<Bytecode> Shaders = new(() =>
     {
         var liquid = Resource("BrimDeck.LiquidGlass.Liquid.hlsl") ?? throw new InvalidOperationException("Liquid.hlsl is not embedded.");
         var frost = Resource("BrimDeck.LiquidGlass.Frost.hlsl") ?? throw new InvalidOperationException("Frost.hlsl is not embedded.");
         var vertex = Resource("BrimDeck.LiquidGlass.Liquid.vs.cso");
         var pixel = Resource("BrimDeck.LiquidGlass.Liquid.ps.cso");
-        var (v, p) = vertex is not null && pixel is not null && EmbeddedHash() == SourceHash(liquid) ? (vertex, pixel) : Compiled(liquid);
+        var zoned = Resource("BrimDeck.LiquidGlass.Liquid.zoned.cso");
+        var (v, p, z) = vertex is not null && pixel is not null && zoned is not null && EmbeddedHash() == SourceHash(liquid) ? (vertex, pixel, zoned) : Compiled(liquid);
         var down = Resource("BrimDeck.LiquidGlass.Frost.down.cso");
         var up = Resource("BrimDeck.LiquidGlass.Frost.up.cso");
         var band = Resource("BrimDeck.LiquidGlass.Frost.band.cso");
         var stats = Resource("BrimDeck.LiquidGlass.Frost.stats.cso");
         var (d, u, b, st) = down is not null && up is not null && band is not null && stats is not null && EmbeddedFrostHash() == SourceHash(frost)
             ? (down, up, band, stats) : CompiledFrost(frost);
-        return new Bytecode(v, p, d, u, b, st);
+        return new Bytecode(v, p, z, d, u, b, st);
     });
 
     // The hash the bytecode is made for: SHA-256 of the source's bytes, its line ends taken as LF (a checkout may give it CRLF),
@@ -798,10 +854,10 @@ internal sealed class LiquidRenderer : IDisposable
     }
 
     // Both shaders compiled from the source (bytes, ASCII only: the compiler is given them as they are).
-    internal static (byte[] Vertex, byte[] Pixel) Compiled(byte[] source)
+    internal static (byte[] Vertex, byte[] Pixel, byte[] Zoned) Compiled(byte[] source)
     {
         string text = Encoding.UTF8.GetString(source);
-        return (Compile(text, "Liquid.hlsl", "VS", "vs_5_0"), Compile(text, "Liquid.hlsl", "PS", "ps_5_0"));
+        return (Compile(text, "Liquid.hlsl", "VS", "vs_5_0"), Compile(text, "Liquid.hlsl", "PS", "ps_5_0"), Compile(text, "Liquid.hlsl", "PSZoned", "ps_5_0"));
     }
 
     // The frost's passes compiled from Frost.hlsl.
@@ -831,7 +887,7 @@ internal sealed class LiquidRenderer : IDisposable
         _copy?.Dispose(); DisposePyramid(); _stats[0]?.Dispose(); _stats[1]?.Dispose(); _measure?.Dispose();
         // The immediate context is not let go: Vortice keeps one wrapper for the device, which the capture side uses too.
         _constants.Dispose(); _passConstants.Dispose(); _smooth.Dispose();
-        _pixel.Dispose(); _downPass.Dispose(); _upPass.Dispose(); _bandPass.Dispose(); _statsPass.Dispose(); _vertex.Dispose();
+        _pixel.Dispose(); _zoned?.Dispose(); _downPass.Dispose(); _upPass.Dispose(); _bandPass.Dispose(); _statsPass.Dispose(); _vertex.Dispose();
     }
 
     // The shader's constant buffer (Liquid.hlsl, Frame), in its order: 16 floats a row, nothing straddling a row.
@@ -856,6 +912,8 @@ internal sealed class LiquidRenderer : IDisposable
         public float FrostExtentX, FrostExtentY, StatsOriginX, StatsOriginY;
         public float StatsInverseX, StatsInverseY, StatsTile, Sigma0;
         public System.Numerics.Vector4 Level0, Level1, Level2, Level3, Level4, Level5, Level6, Level7;
+        public float TextTile, TextInverseX, TextInverseY, TextOn;
+        public float BodyLight, Zoned, LookSpareB, LookSpareC;
     }
 
     // The frost passes' constant buffer (Frost.hlsl, FrostPass), in its order.

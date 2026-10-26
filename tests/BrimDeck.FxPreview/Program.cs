@@ -69,11 +69,12 @@ internal static class Program
         if (args.Length > 1 && args[0] == "--compile-liquid")
         {
             var source = File.ReadAllBytes(System.IO.Path.Combine(args[1], "Liquid.hlsl"));
-            var (vertex, pixel) = BrimDeck.LiquidGlass.LiquidRenderer.Compiled(source);
+            var (vertex, pixel, zoned) = BrimDeck.LiquidGlass.LiquidRenderer.Compiled(source);
             File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.vs.cso"), vertex);
             File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.ps.cso"), pixel);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.zoned.cso"), zoned);
             File.WriteAllText(System.IO.Path.Combine(args[1], "Liquid.hlsl.sha256"), BrimDeck.LiquidGlass.LiquidRenderer.SourceHash(source) + "\n");
-            Console.WriteLine($"Compiled Liquid.hlsl: vertex {vertex.Length} bytes, pixel {pixel.Length} bytes");
+            Console.WriteLine($"Compiled Liquid.hlsl: vertex {vertex.Length} bytes, pixel {pixel.Length} bytes, zoned {zoned.Length} bytes");
             // The frost's pyramid and stats (Frost.hlsl), alike.
             var frost = File.ReadAllBytes(System.IO.Path.Combine(args[1], "Frost.hlsl"));
             var (down, up, band, stats) = BrimDeck.LiquidGlass.LiquidRenderer.CompiledFrost(frost);

@@ -16,6 +16,7 @@
     <EmbeddedResource Include="LiquidGlass\Liquid.hlsl" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl" />
     <EmbeddedResource Include="LiquidGlass\Liquid.vs.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.vs.cso" />
     <EmbeddedResource Include="LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" />
+    <EmbeddedResource Include="LiquidGlass\Liquid.zoned.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.zoned.cso" />
     <EmbeddedResource Include="LiquidGlass\Liquid.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl.sha256" />
     <EmbeddedResource Include="LiquidGlass\Frost.hlsl" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl" />
     <EmbeddedResource Include="LiquidGlass\Frost.down.cso" LogicalName="BrimDeck.LiquidGlass.Frost.down.cso" />

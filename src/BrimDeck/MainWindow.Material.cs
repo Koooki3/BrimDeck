@@ -90,6 +90,53 @@ public partial class MainWindow
         }
     }
 
+    // The open panel's text and content regions (round 12b: the glass covers behind them as far as the text needs, and stays
+    // translucent between them), in the island's DIPs, grown by TextGrow: every leaf of the visual tree shown (a text, an icon,
+    // a cover, a custom drawing), a text block as a whole. Walked again after a layout pass, at most every TextRegionsMs; a
+    // new list only when the regions changed (the glass draws again only then).
+    private const double TextGrow = 3, TextRegionsMs = 100;
+    private readonly List<Rect> _textRegions = [];
+    private Rect[]? _textShown;
+    private bool _textStale = true;
+    private long _textAt = long.MinValue;
+    internal IReadOnlyList<Rect>? GlassTextRegions()
+    {
+        if (!_expanded || !Island.IsVisible || ExpandedContent.Visibility != Visibility.Visible) return null;
+        long now = Environment.TickCount64;
+        if (_textStale && (_textShown is null || _offscreen is not null || now - _textAt >= TextRegionsMs))
+        {
+            _textStale = false; _textAt = now;
+            _textRegions.Clear();
+            try { Leaves(ExpandedContent); }
+            catch (InvalidOperationException) { }
+            if (_textShown is null || !_textShown.AsSpan().SequenceEqual(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_textRegions))) _textShown = [.. _textRegions];
+        }
+        return _textShown;
+
+        void Leaves(DependencyObject node)
+        {
+            if (node is UIElement { IsVisible: false } or UIElement { Opacity: < .01 }) return;
+            int count = VisualTreeHelper.GetChildrenCount(node);
+            // A leaf: no children, a text block, or an element drawing its own visuals (a page's drawn text and gauges).
+            bool drawn = count > 0;
+            for (int i = 0; drawn && i < count; i++) drawn = VisualTreeHelper.GetChild(node, i) is not UIElement;
+            // (Covering only what carries text, not the icons, covers and bars, was tried in round 13: the drawn pages' text then
+            // went uncovered and the masked contrast fell to 70 %.)
+            if (node is FrameworkElement element && (count == 0 || drawn || element is TextBlock))
+            {
+                if (element.ActualWidth <= 0 || element.ActualHeight <= 0) return;
+                // A whole drawn page (a canvas of drawn visuals as large as the panel) is no region: a third of the island or
+                // more is taken as background, not text.
+                if (drawn && element.ActualWidth * element.ActualHeight > Island.ActualWidth * Island.ActualHeight / 3) return;
+                var box = element.TransformToAncestor(Island).TransformBounds(new Rect(element.RenderSize));
+                box.Inflate(TextGrow, TextGrow);
+                _textRegions.Add(box);
+                return;
+            }
+            for (int i = 0; i < count; i++) Leaves(VisualTreeHelper.GetChild(node, i));
+        }
+    }
+
     // The pointer over the island (DIP, island coordinates; null when it left) and whether its button is down: the glass's
     // hover and press (GlassBackdrop.Pointer) and the press's jelly.
     private void GlassPress(Point? at, bool down)
@@ -116,7 +163,8 @@ public partial class MainWindow
             _glass.Crossed += () => _app.GlassCrossed(this);
             _glass.Openness = GlassOpenness;
             _glass.ContentArea = GlassContentArea;
-            Island.LayoutUpdated += (_, _) => _contentAreaStale = true;
+            _glass.TextRegions = GlassTextRegions;
+            Island.LayoutUpdated += (_, _) => { _contentAreaStale = true; _textStale = true; };
             OffscreenGlass();
             // Liquid glass brightens and lights its rim from the pointer and presses with it: where the pointer is over the
             // island, and whether the button is down (seen even when a button under it handles the click).

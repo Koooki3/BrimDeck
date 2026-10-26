@@ -222,6 +222,10 @@ internal sealed class GlassBackdrop : IDisposable
     // Where the collapsed island's content row lies (its text and glyphs), in DIPs from the island's top-left; null or empty for
     // none (the open panel, a notice). Behind it the glass calms the backdrop (Liquid.hlsl, the content row).
     internal Func<Rect?>? ContentArea { get; set; }
+    // The open panel's text and content regions (island DIPs), where the glass covers as far as the text needs; null: none.
+    internal Func<IReadOnlyList<Rect>?>? TextRegions { get; set; }
+    private IReadOnlyList<Rect>? _textFor;
+    private float[]? _textRects;
 
     private void StandInFrame()
     {
@@ -484,6 +488,19 @@ internal sealed class GlassBackdrop : IDisposable
         var (hover, press, x, y) = Answer(width, height, open);
         var next = preset with { Hover = hover, Press = press, PointerX = x, PointerY = y, Open = (float)open };
         // The collapsed island's content row (island DIPs, from ContentArea), in device pixels from the glass's corner.
+        // The open panel's text regions, in device pixels from the glass's corner: a new array only when they changed.
+        var regions = TextRegions?.Invoke();
+        if (!ReferenceEquals(regions, _textFor) || regions is null)
+        {
+            _textFor = regions;
+            _textRects = regions is null ? null : new float[regions.Count * 4];
+            for (int i = 0; regions is not null && i < regions.Count; i++)
+            {
+                _textRects![i * 4] = (float)(regions[i].Left * scale); _textRects[i * 4 + 1] = (float)(regions[i].Top * scale);
+                _textRects[i * 4 + 2] = (float)(regions[i].Right * scale); _textRects[i * 4 + 3] = (float)(regions[i].Bottom * scale);
+            }
+        }
+        if (_textRects is not null) next = next with { TextRects = _textRects };
         if (ContentArea?.Invoke() is { IsEmpty: false } row)
             next = next with
             {

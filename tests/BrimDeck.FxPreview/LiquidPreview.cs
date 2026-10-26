@@ -137,8 +137,9 @@ internal static class LiquidPreview
         const double scale = 1.5;
         int w = (int)(228 * scale), h = (int)(40 * scale), pad = (int)Math.Ceiling(48 * scale);
         int dw = w + 2 * pad, dh = h + 2 * pad;
-        var light = LiquidFrame.Preset(false, w, h, (float)(20 * scale), (float)(20 * scale), 0, (float)scale);
-        var deep = LiquidFrame.Preset(true, w, h, (float)(20 * scale), (float)(20 * scale), 0, (float)scale);
+        // The capsule's content row where its text is (between the rounded ends, its whole height), as the island gives it.
+        var light = LiquidFrame.Preset(false, w, h, (float)(20 * scale), (float)(20 * scale), 0, (float)scale) with { ContentLeft = h * .5f, ContentRight = w - h * .5f, ContentBottom = h };
+        var deep = LiquidFrame.Preset(true, w, h, (float)(20 * scale), (float)(20 * scale), 0, (float)scale) with { ContentLeft = h * .5f, ContentRight = w - h * .5f, ContentBottom = h };
         (byte R, byte G, byte B) darkInk = (0x10, 0x12, 0x17), lightInk = (0xF6, 0xF7, 0xF9);
         double worst = double.MaxValue;
         string worstAt = "";
@@ -260,6 +261,12 @@ internal static class LiquidPreview
     {
         // LIQUID_SIGMA0: the material's masking constant for the calibration (round 12), else the renderer's default.
         var frame = float.TryParse(Environment.GetEnvironmentVariable("LIQUID_SIGMA0"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sigma0) ? given with { Sigma0 = sigma0 } : given;
+        // LIQUID_BODY: the light look's luminosity opacity between the text regions, for the sweep (round 12b).
+        if (float.TryParse(Environment.GetEnvironmentVariable("LIQUID_BODY"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var body)) frame = frame with { BodyLight = body };
+        // LIQUID_ZONED: round 12's zones (clear rim, Acrylic inside) instead of the slab, for the comparisons (round 13).
+        if (Environment.GetEnvironmentVariable("LIQUID_ZONED") == "1") frame = frame with { Zoned = true };
+        // LIQUID_TEXTFREE: an open panel with no text on it (the body alone), for the show-through numbers (round 13).
+        if (Environment.GetEnvironmentVariable("LIQUID_TEXTFREE") == "1" && frame.TextRects is null) frame = frame with { TextRects = [] };
         // The padded region, the desktop's edge rows repeated where it runs off the screen (as at the top for the notch).
         int bw = at.Width + 2 * pad, bh = at.Height + 2 * pad;
         var region = new byte[bw * bh * 4];
