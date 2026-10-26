@@ -3,6 +3,7 @@ using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -256,5 +257,43 @@ internal static class RadioGroups
         if (at < 0 || open.Count < 2) return;
         var next = open[(at + step + open.Count) % open.Count];
         next.Focus(); next.IsChecked = true; e.Handled = true;
+    }
+}
+
+// A drop-down drawn as a button with a popup list (the app rows' quota source and usage app). A button reads as one that only acts;
+// this one reads as a combo box with its chosen value and whether its list is open, and opens or closes it on request (SW-04).
+internal sealed class DropDownButton : System.Windows.Controls.Button
+{
+    public Func<string> Value { get; init; } = () => "";
+    public System.Windows.Controls.Primitives.Popup? Menu
+    {
+        get => _menu;
+        set
+        {
+            _menu = value;
+            if (value is null) return;
+            value.Opened += (_, _) => Changed(ExpandCollapseState.Collapsed, ExpandCollapseState.Expanded);
+            value.Closed += (_, _) => Changed(ExpandCollapseState.Expanded, ExpandCollapseState.Collapsed);
+        }
+    }
+    private System.Windows.Controls.Primitives.Popup? _menu;
+    private void Changed(ExpandCollapseState from, ExpandCollapseState to) =>
+        (UIElementAutomationPeer.FromElement(this) as Peer)?.RaisePropertyChangedEvent(ExpandCollapsePatternIdentifiers.ExpandCollapseStateProperty, from, to);
+
+    protected override AutomationPeer OnCreateAutomationPeer() => new Peer(this);
+
+    private sealed class Peer(DropDownButton owner) : ButtonAutomationPeer(owner), IExpandCollapseProvider, IValueProvider
+    {
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.ComboBox;
+        protected override string GetClassNameCore() => nameof(DropDownButton);
+        public override object GetPattern(PatternInterface pattern) =>
+            pattern is PatternInterface.ExpandCollapse or PatternInterface.Value ? this : base.GetPattern(pattern);
+        public ExpandCollapseState ExpandCollapseState => owner._menu?.IsOpen == true ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+        // Opening goes through the button's own click, which first fits the list to the screen.
+        public void Expand() { if (owner._menu?.IsOpen != true) ((IInvokeProvider)this).Invoke(); }
+        public void Collapse() { if (owner._menu is { IsOpen: true } menu) menu.IsOpen = false; }
+        public string Value => owner.Value();
+        public bool IsReadOnly => true;
+        public void SetValue(string value) => throw new InvalidOperationException();
     }
 }
