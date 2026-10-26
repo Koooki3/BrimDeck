@@ -113,7 +113,9 @@ public static partial class PanelThemes
         if (file.Swatches is { } swatches && (swatches.Count > 12 || swatches.Any(value => !ThemeColor.TryParse(value, out _))))
             return Loc.T("颜色选择器预设色最多十二个，且必须是有效颜色", "The picker swatches must be at most twelve valid colors");
         var glass = file.Effects?.Glass;
-        foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []).Concat(new[] { glass?.Tint, glass?.Highlight }.OfType<string>()))
+        var decor = file.Effects?.Decor;
+        var decorColors = new[] { decor?.Horizon?.Sea, decor?.Horizon?.Line, decor?.Caustics?.Color, decor?.Palm?.Color, decor?.Hud?.Color }.OfType<string>();
+        foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []).Concat(new[] { glass?.Tint, glass?.Highlight }.OfType<string>()).Concat(decorColors))
             if (!ThemeColor.TryParse(value, out _)) return Loc.T($"效果中的颜色“{value}”无效", $"The effect color \"{value}\" is invalid");
         if (glass?.Backdrop is { } band && (band.Count != 2 || band.Any(v => !double.IsFinite(v) || v < 0 || v > 1)))
             return Loc.T("玻璃的 backdrop 必须是 0 到 1 之间的两个数", "The glass backdrop must be two numbers from 0 to 1");

@@ -51,7 +51,7 @@ public static partial class PanelThemes
         colors["bubble"] = colors["bubble"].Over(surface);
         var values = EffectValues(effects);
         // Glass is read over the darkest and the lightest backdrop it can stand on; its surface color is what shows without it.
-        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? [], .. TextureStops(values, colors, surface)];
+        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? [], .. TextureStops(values, colors, surface), .. DecorStops(values, surface)];
 
         var adjustments = new List<PanelThemeAdjustment>();
         var popup = colors["popup"].Over(surface);
@@ -101,6 +101,18 @@ public static partial class PanelThemes
         yield return new ThemeColor(alpha, 0, 0, 0).Over(surface);
     }
 
+    // What the motifs lay under the content: the sea (the surface where the horizon puts it), and the caustics' and the palm's
+    // colors over the surface and over the sea. The HUD marks sit in the corners, away from any text.
+    internal static IEnumerable<ThemeColor> DecorStops(PanelThemeEffectValues values, ThemeColor surface)
+    {
+        if (values.Decor is not { } decor) yield break;
+        var grounds = new List<ThemeColor> { surface };
+        if (decor.Horizon is { } horizon) { var sea = horizon.Sea.Over(surface); grounds.Add(sea); yield return sea; }
+        foreach (var tint in new[] { decor.Caustics, decor.Palm })
+            if (tint is { } color)
+                foreach (var ground in grounds) yield return color.Over(ground);
+    }
+
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.
     private static List<PanelThemeFile> BaseChain(PanelThemeFile file)
     {
@@ -142,6 +154,14 @@ public static partial class PanelThemes
         merged.Scanlines = layer.Scanlines ?? merged.Scanlines;
         merged.Pixel = layer.Pixel ?? merged.Pixel;
         merged.Texture = layer.Texture ?? merged.Texture;
+        if (layer.Decor is { } decor)
+        {
+            merged.Decor ??= new PanelThemeDecor();
+            merged.Decor.Horizon = decor.Horizon ?? merged.Decor.Horizon;
+            merged.Decor.Caustics = decor.Caustics ?? merged.Decor.Caustics;
+            merged.Decor.Palm = decor.Palm ?? merged.Decor.Palm;
+            merged.Decor.Hud = decor.Hud ?? merged.Decor.Hud;
+        }
         if (layer.Glass is { } glass)
         {
             merged.Glass ??= new PanelThemeGlass();
@@ -179,7 +199,23 @@ public static partial class PanelThemes
         double Value(string key) { var (min, max, fallback) = EffectRange(key); return Fit(Effect(effects, key), min, max, fallback); }
         return new(surfaceGradient.Count >= 2 ? surfaceGradient : [], rimGradient.Count >= 2 ? rimGradient : [],
             Value("rimWidth"), Value("shadowBlur"), Value("shadowDepth"), Value("shadowOpacity"), Value("scanlines"),
-            glass, pixel, texture);
+            glass, pixel, texture, DecorValues(effects.Decor));
+    }
+
+    // The motifs in their ranges; a part without a color it can use is left out. The caustics and the palm stay as faint as a
+    // texture (their alpha at most 0.12), so they read as light and shade on the surface, never as pictures over the content.
+    private static PanelDecor? DecorValues(PanelThemeDecor? decor)
+    {
+        if (decor is null) return null;
+        static ThemeColor? Color(string? text, double maxAlpha = 1)
+        {
+            if (text is null || !ThemeColor.TryParse(text, out var color) || color.A == 0) return null;
+            return color with { A = (byte)Math.Min(color.A, Math.Round(255 * maxAlpha)) };
+        }
+        var horizon = decor.Horizon is { Sea: var seaText } h && Color(seaText) is { } sea ? new PanelHorizon(Fit(h.At, .3, .9, .62), sea, Color(h.Line)) : null;
+        var hud = decor.Hud is { Color: var hudText } hudFile && Color(hudText) is { } hudColor ? new PanelHud(hudColor, Fit(hudFile.Chamfer, 0, 10, 6)) : null;
+        var values = new PanelDecor(horizon, Color(decor.Caustics?.Color, .12), Color(decor.Palm?.Color, .12), hud);
+        return values.Any ? values : null;
     }
 
     // The numeric effects by their names in the file, with their ranges and the values used when no theme sets them.

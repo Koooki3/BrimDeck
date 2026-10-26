@@ -1,0 +1,194 @@
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using BrimDeck.Core;
+
+namespace BrimDeck;
+
+// A theme's motifs drawn into the island's surface, under its content (PanelDecor): a sea below a horizon, the caustics a sea
+// throws, a palm frond's shadow in the open panel's corner, HUD cuts and ticks in the corners. They are drawn once for a size
+// and kept; the caustics' tile is drawn once for the theme. Nothing here moves: a theme's motion (AmbientGlow) may drift
+// them later, but the picture itself is still.
+internal sealed class IslandDecor
+{
+    // The open panel shows the palm; the small collapsed island has no room for it.
+    private const double PalmMinHeight = 90, HudMinHeight = 40;
+    private readonly PanelDecor _decor;
+    private readonly Brush? _caustics;
+    private (Size Size, CornerRadius Corners)? _for;
+    private DrawingGroup? _drawing;
+
+    public IslandDecor(PanelDecor decor)
+    {
+        _decor = decor;
+        if (decor.Caustics is { } color) _caustics = Caustics(ToColor(color));
+    }
+
+    public static IslandDecor? For(PanelPalette palette) => palette.Effects.Decor is { } decor ? new IslandDecor(decor) : null;
+
+    public void Draw(DrawingContext dc, Size size, CornerRadius corners, Geometry outline)
+    {
+        if (size.Width < 2 || size.Height < 2) return;
+        if (_for != (size, corners) || _drawing is null) { _drawing = Build(size, corners); _for = (size, corners); }
+        dc.PushClip(outline);
+        dc.DrawDrawing(_drawing);
+        dc.Pop();
+    }
+
+    private DrawingGroup Build(Size size, CornerRadius corners)
+    {
+        var group = new DrawingGroup();
+        double w = size.Width, h = size.Height;
+        double seaTop = 0;
+        if (_decor.Horizon is { } horizon)
+        {
+            // The horizon sits a little lower on a short island, where a sea across most of it would read as a band of color.
+            seaTop = Math.Round(h * horizon.At);
+            var sea = ToColor(horizon.Sea);
+            var deep = Color.FromArgb(sea.A, (byte)(sea.R * .82), (byte)(sea.G * .86), (byte)(sea.B * .9));
+            // The sea is lightest at the horizon, where the sky's light lies on it, and deepens toward the bottom.
+            var water = new LinearGradientBrush(new GradientStopCollection { new(sea, 0), new(deep, 1) }, new Point(0, 0), new Point(0, 1));
+            water.Freeze();
+            group.Children.Add(new GeometryDrawing(water, null, new RectangleGeometry(new Rect(0, seaTop, w, h - seaTop))));
+            if (horizon.Line is { } line)
+            {
+                // A line of light along the horizon, brightest in the middle, as the sun lays on the water far off.
+                var light = ToColor(line);
+                var glint = new LinearGradientBrush(new GradientStopCollection
+                {
+                    new(Color.FromArgb(0, light.R, light.G, light.B), 0), new(light, .5), new(Color.FromArgb(0, light.R, light.G, light.B), 1)
+                }, new Point(0, 0), new Point(1, 0));
+                glint.Freeze();
+                group.Children.Add(new GeometryDrawing(glint, null, new RectangleGeometry(new Rect(0, seaTop - .5, w, 1))));
+            }
+        }
+        if (_caustics is not null)
+            group.Children.Add(new GeometryDrawing(_caustics, null, new RectangleGeometry(new Rect(0, seaTop, w, h - seaTop))));
+        if (_decor.Palm is { } palm && h >= PalmMinHeight)
+            group.Children.Add(Palm(ToColor(palm), w, h));
+        if (_decor.Hud is { } hud && h >= HudMinHeight)
+            group.Children.Add(Hud(ToColor(hud.Color), hud.Chamfer, w, h, corners));
+        group.Freeze();
+        return group;
+    }
+
+    // A tile of caustic light: two sine fields, each warped by the other, light where either crosses zero, so the lines meet
+    // in the loose net sunlight draws on a sandy bottom. The tile wraps (whole periods), so it repeats without a seam.
+    private static Brush Caustics(Color color)
+    {
+        const int size = 192;
+        var pixels = new byte[size * size * 4];
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                double u = 2 * Math.PI * x / size, v = 2 * Math.PI * y / size;
+                double a = Math.Sin(2 * u + 1.6 * Math.Sin(v + .7 * Math.Sin(2 * u)));
+                double b = Math.Sin(3 * v + 1.3 * Math.Sin(2 * u - .9));
+                double c = Math.Sin(u + 2 * v + 1.1 * Math.Sin(3 * u));
+                // A thin bright ridge where each field is near zero, softened, then the brightest of the three.
+                static double Ridge(double s) { double d = 1 - Math.Min(1, Math.Abs(s) / .22); return d * d * (3 - 2 * d); }
+                double light = Math.Max(Ridge(a) * .9, Math.Max(Ridge(b) * .75, Ridge(c) * .6));
+                byte alpha = (byte)Math.Round(color.A * light);
+                int i = (y * size + x) * 4;
+                // Premultiplied BGRA.
+                pixels[i] = (byte)(color.B * alpha / 255); pixels[i + 1] = (byte)(color.G * alpha / 255); pixels[i + 2] = (byte)(color.R * alpha / 255); pixels[i + 3] = alpha;
+            }
+        var bitmap = BitmapSource.Create(size, size, 96, 96, PixelFormats.Pbgra32, null, pixels, size * 4);
+        bitmap.Freeze();
+        // About 120 DIP across: lines a few DIP wide, wide apart enough to read as light, not as a pattern.
+        var brush = new ImageBrush(bitmap) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, 120, 120), ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
+        RenderOptions.SetCachingHint(brush, CachingHint.Cache);
+        brush.Freeze();
+        return brush;
+    }
+
+    // A palm frond's shadow: a curved stem from beyond the top-right corner, with long narrow leaflets falling from it on both
+    // sides, as the shade of a palm overhead falls on the sand. Sized to the panel's height, at most 170 DIP.
+    private static Drawing Palm(Color color, double w, double h)
+    {
+        double size = Math.Min(170, h * .9);
+        var geometry = new StreamGeometry();
+        using (var g = geometry.Open())
+        {
+            // The stem: a quadratic curve from beyond the corner down and to the left, in units of the frond's size.
+            Point Stem(double t) => new(1.05 - .95 * t, -.05 + .5 * t * t + .12 * t);
+            Point Tangent(double t) { var a = Stem(Math.Max(0, t - .01)); var b = Stem(Math.Min(1, t + .01)); var d = b - a; d.Normalize(); return new Point(d.X, d.Y); }
+            for (int i = 0; i < 15; i++)
+            {
+                double t = .08 + i * .062;
+                var at = Stem(t); var dir = Tangent(t);
+                // Leaflets lengthen toward the middle of the frond and shorten at its tip; they fall forward along the stem.
+                double length = .2 + .26 * Math.Sin(Math.PI * Math.Min(1, t * 1.05));
+                foreach (int side in new[] { -1, 1 })
+                {
+                    var normal = new Vector(-dir.Y * side, dir.X * side);
+                    var along = new Vector(dir.X, dir.Y);
+                    var tip = at + (normal * .85 + along * .55) * length;
+                    var width = .028 * (1 - .5 * t);
+                    var bend = at + (normal * .45 + along * .1) * length + new Vector(0, .03);
+                    g.BeginFigure(at + along * width, true, true);
+                    g.QuadraticBezierTo(bend + along * width, tip, true, true);
+                    g.QuadraticBezierTo(bend - along * width, at - along * width, true, true);
+                }
+            }
+            // The stem itself, a thin taper.
+            g.BeginFigure(Stem(0) + new Vector(0, -.012), true, true);
+            for (int i = 1; i <= 10; i++) g.LineTo(Stem(i / 10.0) + new Vector(0, -.012 * (1 - i / 10.0)), true, true);
+            for (int i = 10; i >= 0; i--) g.LineTo(Stem(i / 10.0) + new Vector(0, .012 * (1 - i / 10.0)), true, true);
+        }
+        geometry.Transform = new MatrixTransform(size, 0, 0, size, w - size, 0);
+        geometry.Freeze();
+        var fill = new SolidColorBrush(color);
+        fill.Freeze();
+        return new GeometryDrawing(fill, null, geometry);
+    }
+
+    // HUD marks: a 45-degree cut across the top-right and bottom-left corners, each led in by a short straight run along the
+    // edge, and two small hexagons beside each cut, as on the heads-up displays the theme borrows from. One DIP lines.
+    private static Drawing Hud(Color color, double chamfer, double w, double h, CornerRadius corners)
+    {
+        var geometry = new StreamGeometry();
+        double inset = 3.5, lead = 14;
+        using (var g = geometry.Open())
+        {
+            void Corner(Point corner, Vector across, Vector down, double radius)
+            {
+                // Inside a rounded corner the cut moves in with the curve (a 45-degree line touches a radius r arc r(1 - 1/sqrt 2)
+                // from the corner), so it is never clipped away.
+                double c = Math.Max(chamfer, 2) + radius * .3;
+                // The cut runs from c along the top edge to c down the side, inset from the edge; the leads extend it.
+                var start = corner - across * (c + lead) + down * inset;
+                var cutTop = corner - across * (c + inset) + down * inset;
+                var cutSide = corner - across * inset + down * (c + inset);
+                var end = corner - across * inset + down * (c + inset + lead);
+                g.BeginFigure(start, false, false);
+                g.LineTo(cutTop, true, true); g.LineTo(cutSide, true, true); g.LineTo(end, true, true);
+                // Two hexagonal ticks just inside the cut.
+                for (int k = 0; k < 2; k++)
+                {
+                    var centre = corner - across * (c + inset + 9 + k * 7) + down * (inset + 7);
+                    Hexagon(g, centre, 2.4);
+                }
+            }
+            // Only corners that are drawn round; a square corner (the notch's top) is the screen's edge.
+            if (corners.TopRight > 2) Corner(new Point(w, 0), new Vector(1, 0), new Vector(0, 1), corners.TopRight);
+            if (corners.BottomLeft > 2) Corner(new Point(0, h), new Vector(-1, 0), new Vector(0, -1), corners.BottomLeft);
+        }
+        geometry.Freeze();
+        var pen = new Pen(new SolidColorBrush(color), 1) { StartLineCap = PenLineCap.Flat, EndLineCap = PenLineCap.Flat, LineJoin = PenLineJoin.Miter };
+        pen.Freeze();
+        return new GeometryDrawing(null, pen, geometry);
+    }
+
+    private static Color ToColor(ThemeColor color) => Color.FromArgb(color.A, color.R, color.G, color.B);
+
+    private static void Hexagon(StreamGeometryContext g, Point centre, double radius)
+    {
+        g.BeginFigure(centre + new Vector(radius, 0), false, true);
+        for (int i = 1; i < 6; i++)
+        {
+            double a = Math.PI / 3 * i;
+            g.LineTo(centre + new Vector(radius * Math.Cos(a), radius * Math.Sin(a)), true, true);
+        }
+    }
+}

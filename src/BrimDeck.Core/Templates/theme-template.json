@@ -99,6 +99,11 @@
                                     // and with a rimGradient the rim is a bevel: its first color lights the edges facing up and
                                     // left, its last shades the others. Not with glass: a theme with both is refused
     "texture": 0                    // 0 to 0.12, with pixel art: squares a little lighter or darker than the surface, a block's grain
+    // Motifs: remove the "//" to draw quiet pictures into the surface, under the content. horizon: a sea below "at" (0.3 to 0.9
+    // of the height) and a line of light along it; caustics: a net of soft light lines; palm: a palm frond's shadow in the open
+    // panel's top-right corner (both at most 0.12 alpha); hud: 45-degree cuts across two corners ("chamfer", 0 to 10 DIP) with
+    // hexagonal ticks. Text is held to its minimums over the sea and the motifs too.
+    // , "decor": { "horizon": { "at": 0.62, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#1AFFFFFF" } }
     // Glass: remove the "//" to make the surface a tint over the desktop instead of a solid color. Text is held to its minimums
     // over the tint on both a black and a white desktop, so a light tint needs to be fairly dense (about 75 %). "surface" above
     // is drawn instead where Windows' transparency effects are off. edge: 0 to 1, the light along the inner edge.

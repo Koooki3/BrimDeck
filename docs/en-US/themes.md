@@ -102,6 +102,7 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `glass` | Glass: `tint` is a translucent color laid over the desktop (its opacity strictly between 0 and 1), `edge` the light gathered along the inner edge (0–1), `highlight` its color. See "Glass" below | |
 | `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels) and the island's text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right. Not with `glass`, also from the base theme: such a file is refused | 0, or 1–4 |
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain | 0–0.12 |
+| `decor` | Quiet pictures drawn into the surface under the content, each part inherited on its own: `horizon` a sea (`sea`) below `at` of the height with a line of light (`line`) along it; `caustics` a net of soft light lines below the horizon; `palm` a palm frond's shadow in the open panel's top-right corner; `hud` 45-degree cuts across the top-right and bottom-left corners (`chamfer`) with hexagonal ticks. Text is held to its minimums over the sea and the motifs | `at` 0.3–0.9, caustics and palm alpha ≤ 0.12, `chamfer` 0–10 |
 
 #### Glass
 

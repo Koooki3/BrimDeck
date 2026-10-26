@@ -263,6 +263,30 @@ internal static class PanelThemeTests
             && ByFile(pixelGlass, "flat-on-glass.json").Error is null);
         check("A theme that gets both anyway is pixel art without glass",
             PanelThemes.Build("both", PanelThemes.Parse("""{ "formatVersion": 1, "id": "both", "effects": { "pixel": 2, "glass": { "tint": "#E0F8FAFD" } } }""")).Effects is { Pixel: 2, Glass: null });
+        // Motifs: fitted into their ranges, inherited part by part, held under the text and carried by a copy.
+        PanelPalette Decor(string decor, string? baseId = null) => PanelThemes.Build("decor", PanelThemes.Parse(
+            $$"""{ "formatVersion": 1, "id": "decor", "base": "{{baseId ?? "light"}}", "effects": { "decor": {{decor}} } }"""));
+        var fitted = Decor("""{ "horizon": { "at": 2, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#FFFFFFFF" }, "palm": { "color": "#40002010" }, "hud": { "color": "#6600F0FF", "chamfer": 40 } }""");
+        check("Motifs are fitted: the horizon and chamfer to their ranges, the caustics and palm to a faint alpha",
+            fitted.Effects.Decor is { Horizon: { At: .9, Line: not null } horizon, Caustics: { A: 31 }, Palm: { A: 31 }, Hud: { Chamfer: 10 } }
+            && horizon.Sea == ThemeColor.Parse("#4000A6A6"));
+        check("A motif without a usable color is left out, and no motifs at all is none",
+            Decor("""{ "horizon": { "at": 0.5 }, "palm": { "color": "#00000000" }, "hud": { "color": "#FF00F0FF" } }""").Effects.Decor is { Horizon: null, Palm: null, Hud: { Chamfer: 6 } }
+            && Decor("""{ "horizon": { "at": 0.5 } }""").Effects.Decor is null && BuiltIn("dark").Effects.Decor is null);
+        // The night look names only a sea; the day's palm stays.
+        var layered = PanelThemes.Parse("""{ "formatVersion": 1, "id": "layered", "base": "light", "effects": { "decor": { "palm": { "color": "#20002010" } } }, "night": { "effects": { "decor": { "horizon": { "sea": "#3000A6A6" } } } } }""");
+        check("Each motif is inherited on its own", PanelThemes.Build("layered", layered).Effects.Decor is { Palm: not null, Horizon: null }
+            && PanelThemes.Build("layered", layered, night: true).Effects.Decor is { Palm: not null, Horizon.At: .62 });
+        // A deep lagoon under dark text: the text is darkened until it reads over the sea too.
+        var deepSea = Decor("""{ "horizon": { "at": 0.4, "sea": "#A000A6A6" } }""");
+        var sea = deepSea.Effects.Decor!.Horizon!.Sea.Over(deepSea.Surface);
+        check("Text is held over the sea the horizon lays under it", deepSea.SurfaceStops.Contains(sea)
+            && deepSea["textPrimary"].MinimumContrast([sea]) >= 4.5 - .001 && deepSea.Adjustments.Count > 0);
+        var badDecor = PanelThemes.LoadFolder(Folder("decor-bad", ("sea.json", """{ "formatVersion": 1, "id": "sea", "effects": { "decor": { "horizon": { "sea": "teal" } } } }"""),
+            ("hud.json", """{ "formatVersion": 1, "id": "hud", "effects": { "decor": { "hud": { "color": "#12345" } } } }""")));
+        check("A motif color that is not a color is refused", badDecor.Count == 2 && badDecor.All(theme => theme.Error is not null));
+        var decorCopy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", fitted, "light")));
+        check("A theme made from one with motifs keeps them", decorCopy.Effects.Decor == fitted.Effects.Decor && decorCopy.Adjustments.Count == 0);
         // A theme with a night look keeps it, with its hours: the copy's night look is the original's.
         var island = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
         var islandCopy = PanelThemes.Parse(PanelThemes.FillTemplate("copy", PanelThemes.Resolve(island), PanelThemes.IslandHoliday, island.File));

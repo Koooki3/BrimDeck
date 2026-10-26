@@ -197,6 +197,7 @@ internal static class PanelTheme
     {
         palette ??= Current;
         island.Gradient = SurfaceGradient(palette); island.Pattern = Texture(palette, dpiScale) ?? Scanlines(palette, dpiScale);
+        island.Decor = IslandDecor.For(palette);
         island.RimBrush = RimBrush(palette); island.RimWidth = palette.Effects.RimWidth;
         island.Pixel = palette.Effects.Pixel; island.BevelBrush = BevelBrush(palette);
         island.EdgeBrush = GlassShownFor(palette) ? EdgeBrush(palette) : null;

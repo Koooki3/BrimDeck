@@ -21,7 +21,16 @@ public sealed record PanelThemeAdjustment(string Key, string Before, string Afte
 }
 
 public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGradient, IReadOnlyList<ThemeColor> RimGradient, double RimWidth,
-    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, PanelGlass? Glass = null, double Pixel = 0, double Texture = 0);
+    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, PanelGlass? Glass = null, double Pixel = 0, double Texture = 0,
+    PanelDecor? Decor = null);
+
+// A theme's motifs (PanelThemeDecor, fitted); null parts are not drawn.
+public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, ThemeColor? Palm, PanelHud? Hud)
+{
+    public bool Any => Horizon is not null || Caustics is not null || Palm is not null || Hud is not null;
+}
+public sealed record PanelHorizon(double At, ThemeColor Sea, ThemeColor? Line);
+public sealed record PanelHud(ThemeColor Color, double Chamfer);
 
 // The glass a theme's surface is made of (PanelThemeGlass, fitted): the tint over the backdrop, the strength of the light along
 // its inner edge and the color of that light.
@@ -61,7 +70,7 @@ public sealed class PanelPalette
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
         WrittenColors = writtenColors; WrittenApps = writtenApps;
-        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. effects.Glass?.Extremes ?? [], .. PanelThemes.TextureStops(effects, colors, Surface)];
+        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. effects.Glass?.Extremes ?? [], .. PanelThemes.TextureStops(effects, colors, Surface), .. PanelThemes.DecorStops(effects, Surface)];
         IsDark = SurfaceStops.Average(stop => stop.Luminance) < .18;
     }
 
