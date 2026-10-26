@@ -291,18 +291,28 @@ public partial class App : Application
         LiquidGlass.CaptureExclusion.Acquire([], ours);
         Glancing = true;
         // The look taken and the exclusion let go even when taking the look throws; and the island waiting for it (AfterGlance)
-        // is shown in any case (Within's ended), never left out of sight.
-        LiquidGlass.SourceStart.Within(LiquidGlass.SourceStart.Prepare(region, measure: true), GlanceBoundMs, prepared =>
+        // is shown in any case (Within's ended), never left out of sight - also when starting the measure throws before Within
+        // has it (R4-2): the glance then ends here.
+        bool handed = false;
+        try
         {
-            try { Glanced(glance, dark, prepared?.Luma); }
-            finally
+            LiquidGlass.SourceStart.Within(LiquidGlass.SourceStart.Prepare(region, measure: true), GlanceBoundMs, prepared =>
             {
-                // Let go once the island's glass has taken the capture (DesktopSource.Open, at Render priority) and holds the
-                // exclusion itself, so our windows do not flicker back into the capture in between. Too late, at once.
-                if (prepared is null) LiquidGlass.CaptureExclusion.Release();
-                else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, LiquidGlass.CaptureExclusion.Release);
-            }
-        }, () => { if (glance == _glance) GlanceEnded(); });
+                try { Glanced(glance, dark, prepared?.Luma); }
+                finally
+                {
+                    // Let go once the island's glass has taken the capture (DesktopSource.Open, at Render priority) and holds the
+                    // exclusion itself, so our windows do not flicker back into the capture in between. Too late, at once.
+                    if (prepared is null) LiquidGlass.CaptureExclusion.Release();
+                    else Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, LiquidGlass.CaptureExclusion.Release);
+                }
+            }, () => { if (glance == _glance) GlanceEnded(); });
+            handed = true;
+        }
+        finally
+        {
+            if (!handed) { LiquidGlass.CaptureExclusion.Release(); GlanceEnded(); }
+        }
         return dark;
     }
     // The first look measured: taken at once when it differs from the one shown, unless the theme was chosen again meanwhile,

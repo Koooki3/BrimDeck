@@ -139,7 +139,7 @@ static const float Reach = .96, BusyRef = .03, EdgeFall = .05, Sheen = .06, Shee
 // strength at rest, and the light look's least cover behind text.
 static const float SlabTintSmall = .12, SlabTintPanel = .14, BodyFrostDip = 2.5, RestLight = .55, SlabCoverLight = .28;
 static const float3 AbsorbLight = float3(.035, .025, .015), AbsorbDark = float3(.22, .19, .15);
-static const float Cap = 1.5, Calm = .6, BusyCalm = .3, Vibrancy = 1.2, ChromaFloor = .55, RimDip = 10, RimLeast = 6, RowReach = 8;
+static const float Cap = 1.5, Calm = .6, BusyCalm = .3, ChromaFloor = .55, RimDip = 10, RimLeast = 6, RowReach = 8;
 
 struct Vertex { float4 Position : SV_Position; };
 
@@ -525,14 +525,14 @@ float3 Legible(float3 port, float3 behind, float calm, float open)
         l = lerp(l, capped, calm);
     }
     // Colour: only the luma is compressed; the chroma keeps about min(1, 1.5 k) of the port's, never under ChromaFloor (k the band's compression, not
-    // the calm's: a coloured backdrop calmed stays coloured), with a little vibrancy (as Apple's materials lift the
-    // saturation of what they show), as far as it stays in gamut (the luma kept exactly).
+    // the calm's: a coloured backdrop calmed stays coloured), as far as it stays in gamut (the luma kept exactly). (Round 15:
+    // no extra vibrancy on top, R4: what is kept only gives back what the compression took.)
     float3 d = port - x;
     float3 room = d > 0 ? (1 - l) / max(d, 1e-5) : d < 0 ? l / max(-d, 1e-5) : 1e5;
     // Never more colourful than the port's glass, nor than the backdrop itself there (no cast a compressed yellow turns olive in).
     float own = max(port.r, max(port.g, port.b)) - min(port.r, min(port.g, port.b));
     float under = max(behind.r, max(behind.g, behind.b)) - min(behind.r, min(behind.g, behind.b));
-    float keep = min(min(1, max(1.5 * band, ChromaFloor) * Vibrancy), under / max(own, 1e-4));
+    float keep = min(min(1, max(1.5 * band, ChromaFloor)), under / max(own, 1e-4));
     return l + d * min(keep, min(room.x, min(room.y, room.z)));
 }
 
@@ -743,8 +743,16 @@ float3 Slab(float2 p, float sd, float2 outward)
         c = lerp(c, SetLum(c, Lum(target)), max(a * dense, BodyCover * opened * thickness));
         c = lerp(c, target, AcrylicTintDark * turned * text);
     }
-    // Colour no more than the backdrop's own (D14).
+    // Colour no more than the backdrop's own (D14): its chroma, and (round 15, R4) its saturation, the chroma over the
+    // brightest channel - a dark glass keeping a yellow's chroma at a lower lightness turns it a muddy olive.
+    // And its hue (round 15): over a coloured backdrop the glass's colour is the backdrop's own direction at the glass's
+    // chroma - the tint (cool, or the dark look's slate) moves only lightness and chroma, so a yellow never drifts green.
     float cap = Chroma(backdrop), own = Chroma(c), l0 = Lum(c);
+    float3 hue = (backdrop - Lum(backdrop)) / max(cap, 1e-4);
+    c = lerp(c, l0 + hue * own, saturate(cap * 6));
+    float top = max(c.r, max(c.g, c.b)), saturationCap = cap / max(max(backdrop.r, max(backdrop.g, backdrop.b)), 1e-4);
+    cap = min(cap, saturationCap * top);
+    own = Chroma(c);
     if (own > cap) c = l0 + (c - l0) * cap / max(own, 1e-5);
 
     // Light: a key light from the top left, the pointer biasing it; the directional term on the slope and its pair opposite,

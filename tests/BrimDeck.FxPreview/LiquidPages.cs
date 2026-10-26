@@ -63,7 +63,7 @@ internal static partial class LiquidPages
     // One page drawn: the panel's layer (premultiplied BGRA, the root's size in device pixels) and the island's rectangle in it.
     // Runs marks the pixels inside the theme's secondary (2) and tertiary (3) text runs (TextBlocks drawn in that brush).
     private sealed record Layer(byte[] Pixels, int Width, int Height, int X, int Y, int W, int H, double CornerTop, double CornerBottom, double Shoulder, bool ShadowShown, Color Text, bool HasText,
-        byte[] Runs, Color Secondary, Color Tertiary, double Open, float[]? TextRects);
+        byte[] Runs, Color Secondary, Color Tertiary, double Open, float[]? TextRects, Rect? ContentRow = null);
 
     // BrimDeck's own App (never run) and its MainWindow, whose stage lies in a source that is never shown, with the notices and
     // no updates. Also used by ShadowCost (with animations on).
@@ -260,7 +260,7 @@ internal static partial class LiquidPages
         Color secondary = PanelTheme.ColorOf("textSecondary"), tertiary = PanelTheme.ColorOf("textTertiary");
         return new Layer(pixels, width, height, x, y, w, h, c.TopLeft * Scale, c.BottomLeft * Scale, island.ShoulderRadius * Scale, deck.ShadowHost.Opacity > 0,
             PanelTheme.ColorOf("textPrimary"), page != Page.Capsule, Runs(root, deck.Stage, width, height, secondary, tertiary), secondary, tertiary,
-            deck.GlassOpenness(), deck.GlassTextRegions() is { } regions ? [.. regions.SelectMany(r => new[] { (float)(r.Left * Scale), (float)(r.Top * Scale), (float)(r.Right * Scale), (float)(r.Bottom * Scale) })] : null);
+            deck.GlassOpenness(), deck.GlassTextRegions() is { } regions ? [.. regions.SelectMany(r => new[] { (float)(r.Left * Scale), (float)(r.Top * Scale), (float)(r.Right * Scale), (float)(r.Bottom * Scale) })] : null, deck.GlassContentArea());
     }
 
     // The secondary and tertiary text runs: every TextBlock shown whose brush (its own or inherited) is the theme's secondary
@@ -316,6 +316,9 @@ internal static partial class LiquidPages
         // How far the panel is open, as the app gives it to the glass (MainWindow.GlassOpenness): its frost and calmer backdrop.
         var frame = LiquidFrame.Preset(dark, layer.W, layer.H, (float)layer.CornerTop, (float)layer.CornerBottom, (float)layer.Shoulder, (float)Scale)
             with { Open = (float)layer.Open, TextRects = layer.TextRects };
+        // The collapsed row (GlassBackdrop.ContentArea, round 15): the app hands it to the glass on every frame, so the pages do too.
+        if (layer.ContentRow is { } row)
+            frame = frame with { ContentLeft = (float)(row.Left * Scale), ContentTop = (float)(row.Top * Scale), ContentRight = (float)(row.Right * Scale), ContentBottom = (float)(row.Bottom * Scale) };
         if (Environment.GetEnvironmentVariable("LIQUID_DEBUG") == "1") Console.WriteLine($"NOTE: {name}: {layer.TextRects?.Length / 4 ?? -1} text regions, open {layer.Open:0.00}, island {layer.W}x{layer.H}: " + (layer.TextRects is { } tr ? string.Join(" ", Enumerable.Range(0, tr.Length / 4).Select(i => $"[{tr[i * 4]:0},{tr[i * 4 + 1]:0},{tr[i * 4 + 2]:0},{tr[i * 4 + 3]:0}]")) : ""));
         var glass = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H), frame, (int)Math.Ceiling(48 * Scale));
         var under = (byte[])desktop.Clone();
@@ -527,7 +530,10 @@ internal static partial class LiquidPages
                 int alpha = layer.Pixels[l + 3];
                 if (alpha < 64) continue;
                 int lr = layer.Pixels[l + 2] * 255 / alpha, lg = layer.Pixels[l + 1] * 255 / alpha, lb = layer.Pixels[l] * 255 / alpha;
-                bool primary = Math.Abs(lr - layer.Text.R) <= 24 && Math.Abs(lg - layer.Text.G) <= 24 && Math.Abs(lb - layer.Text.B) <= 24;
+                // Round 15: primary text only on a page with text (as the contrast check): on the collapsed capsule, at 200 %, a few
+                // dark pixels of the island's own outline at its lower corners matched the text color, and the boxes grown round
+                // them weighed the rim's refraction as "behind the text" (comfort 13, masked contrast 49 %), with no glyph there.
+                bool primary = layer.HasText && Math.Abs(lr - layer.Text.R) <= 24 && Math.Abs(lg - layer.Text.G) <= 24 && Math.Abs(lb - layer.Text.B) <= 24;
                 if (primary || layer.Runs[(layer.Y + y) * layer.Width + layer.X + x] > 0) text[y * w + x] = true;
             }
         var box = new bool[w * h];
@@ -537,6 +543,16 @@ internal static partial class LiquidPages
                     for (int yy = Math.Max(0, y - grow); yy <= Math.Min(h - 1, y + grow); yy++)
                         for (int xx = Math.Max(0, x - grow); xx <= Math.Min(w - 1, x + grow); xx++) box[yy * w + xx] = true;
         double L(byte[] p, int x, int y) { int d = ((gy + y) * dw + gx + x) * 4; return Lightness(p, d); }
+        if (Environment.GetEnvironmentVariable("LIQUID_COMFORT_MASK") is { Length: > 0 } maskDir)
+        {
+            var mask = new byte[w * h * 4];
+            for (int i = 0; i < w * h; i++) { mask[i * 4 + 3] = 255; mask[i * 4 + 2] = text[i] ? (byte)255 : (byte)0; mask[i * 4 + 1] = box[i] ? (byte)160 : (byte)0; }
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, mask, w * 4)));
+            Directory.CreateDirectory(maskDir);
+            using var file = File.Create(Path.Combine(maskDir, name.Replace(' ', '_') + ".png"));
+            encoder.Save(file);
+        }
         double behind = 0, signal = 0; int count = 0;
         for (int y = 0; y < h - 1; y++)
             for (int x = 0; x < w - 1; x++)
