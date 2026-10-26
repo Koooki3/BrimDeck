@@ -364,6 +364,7 @@ internal static class Program
         foreach (var theme in PanelThemes.BuiltIns)
         {
             var palette = PanelThemes.Resolve(theme);
+            bool bubbles = palette.Motion.Particles == ParticleFx.Bubble;
             var scene = Build(palette);
             var fx = scene.Fx;
             var origin = scene.Content.TransformToAncestor(scene.Island).Transform(new Point());
@@ -409,9 +410,10 @@ internal static class Program
                         // Glow dots and particles are soft and round on purpose.
                         if (pen is null && (g.Brush is RadialGradientBrush || e.RadiusX < 3)) return;
                         // So are bubbles, a thin round outline (2 to 4 DIP) swaying as it rises after a completed press: only their pen
-                        // is checked. They rise after the release, so a small round mark while hovered or pressed is still checked in full.
+                        // is checked. A theme may let them live long (particleMs), so they can still be rising in the phase after the
+                        // release; only a theme with bubbles has them, and no control mark is a circle that small.
                         if (pen is not null && g.Brush is null && e.RadiusX <= 4 && e.RadiusX == e.RadiusY && matrix.M11 == 1 && matrix.M22 == 1
-                            && (where.Contains(" release ", StringComparison.Ordinal) || where.Contains(" leave ", StringComparison.Ordinal)))
+                            && bubbles)
                         {
                             Width(pen, where + " bubble");
                             return;
