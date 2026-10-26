@@ -63,7 +63,10 @@ public sealed partial class SettingsWindow
         var arrow = ChevronButton(Loc.T("展开 " + entry.Name + " 配额配置", "Show " + entry.Name + " quota configuration"), () => ToggleSourceRow(entry.InstanceId));
         arrow.HorizontalAlignment = HorizontalAlignment.Right; arrow.VerticalAlignment = VerticalAlignment.Center;
         AutomationProperties.SetAutomationId(arrow, "expand-source-" + entry.InstanceId.ToString("N"));
-        row.Children.Add(arrow);
+        // Right after the drag handle, so Tab reaches the arrow at the row's left before the row's other controls (SW-05). The two
+        // share the first column side by side (22 + 18 DIP), so the order changes nothing on screen.
+        int handle = row.Children.OfType<UIElement>().ToList().FindIndex(child => child is GripHandle);
+        row.Children.Insert(handle + 1, arrow);
         var detail = SourceDetails(entry); Grid.SetRow(detail, 1); Grid.SetColumnSpan(detail, 9);
         bool open = _expandedSource == entry.InstanceId;
         detail.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
