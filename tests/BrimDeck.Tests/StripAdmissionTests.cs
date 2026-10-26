@@ -14,6 +14,7 @@ static class StripAdmissionTests
     {
         FirstLoad(check);
         Missing(check);
+        OnlyLater(check);
         Presence(check);
     }
 
@@ -64,6 +65,30 @@ static class StripAdmissionTests
         check("Strip admission: only the drive joins on a machine without temperatures", drivesOnly.Rebuilds == 1 && drivesOnly.Arrivals.Single() == Storage_ && drivesOnly.Hidden == Temperature);
         var lost = Run([(Snapshot(48, true), None, Found, Found), (Snapshot(null, true), None, None, Found)]);
         check("Strip admission: a reading leaves only once its sensor is known to be missing", lost.Rebuilds == 2 && lost.Hidden == Temperature && lost.Arrivals[1] == CompactMonitorItems.None);
+    }
+
+    // After a restart with only the temperature, or only the system drive, chosen for the row: before their first figures the row
+    // shows nothing, yet the system must be read for it (Awaits), or the first figure would never come. Once it has come the
+    // reading joins; on a machine without the sensor the row stops asking.
+    private static void OnlyLater(Action<string, bool> check)
+    {
+        foreach (var (chosen, name) in new[] { (Temperature, "temperature"), (Storage_, "system drive"), (Later, "both") })
+        {
+            var admission = new StripAdmission();
+            var shownNow = chosen & ~admission.Hidden;
+            check($"Strip admission ({name} only, after a restart): the row shows nothing yet", shownNow == CompactMonitorItems.None);
+            check($"Strip admission ({name} only): the system is still read for it", admission.Awaits(chosen, Unknown, Unknown, Unknown)
+                && admission.Awaits(chosen, None, Unknown, Unknown));
+            var (hidden, arriving) = admission.Update(Snapshot(48, true), None, Found, Found);
+            check($"Strip admission ({name} only): the first figure arrives and the reading joins", (hidden & chosen) == CompactMonitorItems.None && (arriving & chosen) == chosen
+                && !admission.Awaits(chosen, None, Found, Found));
+        }
+        var bare = new StripAdmission();
+        bare.Update(Snapshot(null, false), None, None, None);
+        check("Strip admission: without the sensors the row stops asking for readings", !bare.Awaits(Later, None, None, None) && !bare.Awaits(Temperature, None, None, Found));
+        check("Strip admission: other readings do not wait", !new StripAdmission().Awaits(CompactMonitorItems.Cpu | CompactMonitorItems.Memory, Unknown, Unknown, Unknown));
+        check("Strip admission: the battery waits for the devices, not for the system readings",
+            !new StripAdmission().Awaits(CompactMonitorItems.Battery, Unknown, Unknown, Unknown));
     }
 
     // The row's presence: a reading that arrives comes in from nothing and eases to its place; one the settings choose shows at once;
