@@ -122,6 +122,18 @@ public sealed class FollowEase : EasingFunctionBase
     protected override double EaseInCore(double normalizedTime) => Curves.Follow(normalizedTime);
 }
 
+// liquid-glass-web's spring (xiaofangstudio, MIT): springEase(t) = 1 - e^(-5t) cos 9t over t in 0..1, one overshoot and back,
+// as its glass springs back from a press. The source's curve ends at 1.0061, not 1 (the browser then drops the transform); here
+// it is divided by that end so it lands exactly where it is going and nothing is left held off by a fraction. See BezierEase for
+// the mode.
+public sealed class SpringEase : EasingFunctionBase
+{
+    private static readonly double End = 1 - Math.Exp(-5) * Math.Cos(9);
+    public SpringEase() { EasingMode = EasingMode.EaseIn; }
+    protected override Freezable CreateInstanceCore() => new SpringEase();
+    protected override double EaseInCore(double normalizedTime) => (1 - Math.Exp(-5 * normalizedTime) * Math.Cos(9 * normalizedTime)) / End;
+}
+
 // Curves.Bounce as a WPF easing; see BezierEase for the mode.
 public sealed class BounceEase : EasingFunctionBase
 {

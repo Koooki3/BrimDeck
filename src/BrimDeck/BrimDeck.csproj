@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\BrimDeck.Core\BrimDeck.Core.csproj" />
@@ -9,7 +9,21 @@
     <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="System.Management" Version="10.0.0" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <Resource Include="Assets\Fonts\*.ttf" />
+    <EmbeddedResource Include="LiquidGlass\Liquid.hlsl" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl" />
+    <EmbeddedResource Include="LiquidGlass\Liquid.vs.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.vs.cso" />
+    <EmbeddedResource Include="LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" />
+    <EmbeddedResource Include="LiquidGlass\Liquid.zoned.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.zoned.cso" />
+    <EmbeddedResource Include="LiquidGlass\Liquid.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl.sha256" />
+    <EmbeddedResource Include="LiquidGlass\Frost.hlsl" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl" />
+    <EmbeddedResource Include="LiquidGlass\Frost.down.cso" LogicalName="BrimDeck.LiquidGlass.Frost.down.cso" />
+    <EmbeddedResource Include="LiquidGlass\Frost.up.cso" LogicalName="BrimDeck.LiquidGlass.Frost.up.cso" />
+    <EmbeddedResource Include="LiquidGlass\Frost.band.cso" LogicalName="BrimDeck.LiquidGlass.Frost.band.cso" />
+    <EmbeddedResource Include="LiquidGlass\Frost.stats.cso" LogicalName="BrimDeck.LiquidGlass.Frost.stats.cso" />
+    <EmbeddedResource Include="LiquidGlass\Frost.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl.sha256" />
     <Content Include="ThirdPartyNotices.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
@@ -21,6 +35,11 @@
     <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
+    <!-- Every package, transitive ones too, restored at the version recorded in packages.lock.json. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- The release is published for win-x64 (scripts/Publish-Release.ps1): restored for it always, so the lock file is the same
+         with or without a runtime. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>

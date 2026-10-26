@@ -6,10 +6,15 @@
     <PlatformTarget>x64</PlatformTarget>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Every package, transitive ones too, restored at the version recorded in packages.lock.json. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\BrimDeck.Core\BrimDeck.Core.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <Compile Include="..\..\src\BrimDeck\Native\PdhQuery.cs" Link="PdhQuery.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\TemperatureSensors.cs" Link="TemperatureSensors.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\StorageReader.cs" Link="StorageReader.cs" />
@@ -17,7 +22,25 @@
     <Compile Include="..\..\src\BrimDeck\Native\ProcessLoopbackCapture.cs" Link="ProcessLoopbackCapture.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\WindowsHost.cs" Link="WindowsHost.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeProtection.cs" Link="NoticeProtection.cs" />
+    <Compile Include="..\..\src\BrimDeck\LiquidGlass\*.cs" LinkBase="LiquidGlass" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.hlsl" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.vs.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.vs.cso" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.zoned.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.zoned.cso" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl.sha256" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.down.cso" LogicalName="BrimDeck.LiquidGlass.Frost.down.cso" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.up.cso" LogicalName="BrimDeck.LiquidGlass.Frost.up.cso" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.band.cso" LogicalName="BrimDeck.LiquidGlass.Frost.band.cso" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.stats.cso" LogicalName="BrimDeck.LiquidGlass.Frost.stats.cso" />
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl.sha256" />
     <Compile Include="..\..\src\BrimDeck\Native\GpuProvider.cs" Link="GpuProvider.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\Hid.cs" Link="Hid.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\HidBatteries.cs" Link="HidBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\BluetoothBatteries.cs" Link="BluetoothBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\GamingBatteries.cs" Link="GamingBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\AppleBatteries.cs" Link="AppleBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\DeviceBatteries.cs" Link="DeviceBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Why.cs" Link="Why.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeBannerRegistry.cs" Link="NoticeBannerRegistry.cs" />
     <Compile Include="..\..\src\BrimDeck\NoticeBannerKeeper.cs" Link="NoticeBannerKeeper.cs" />

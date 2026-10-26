@@ -488,6 +488,22 @@ internal sealed class NoticeCenter : IDisposable
         });
     }
 
+    // A device's battery fell to the low threshold (LowBatteryWatch, once per discharge): BrimDeck's own notice, which the next
+    // one for the same device replaces. It never goes to Windows either.
+    public const string DevicesAppKey = "brimdeck:devices";
+    public void SendDeviceLow(DeviceBattery device)
+    {
+        if (!_enabled) return;
+        Receive(new NoticeInput
+        {
+            Origin = NoticeOrigin.BrimDeck, AppKey = DevicesAppKey, AppName = Loc.T("设备", "Devices"), InstanceKey = "battery:" + device.Key + ":" + DateTimeOffset.UtcNow.Ticks,
+            ReplaceKey = "battery:" + device.Key,
+            Title = Loc.T($"{device.Name} 电量低", $"{device.Name} battery low"),
+            Body = Loc.T($"剩余 {Devices.Figure(device.Lowest)}，请及时充电。", $"{Devices.Figure(device.Lowest)} left. Charge it soon."),
+            Category = NoticeCategory.Warning
+        });
+    }
+
     // ----- Time-kind notices -----
 
     // Waits for the next reminder, at most DueRecheck at a time. Nothing runs while nothing is due.

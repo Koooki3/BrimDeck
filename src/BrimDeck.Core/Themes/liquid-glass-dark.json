@@ -8,16 +8,18 @@
   "id": "liquid-glass-dark",
   "name": "液态玻璃（深色）",
   "nameEn": "Liquid Glass (dark)",
-  "description": "烟熏色的玻璃：模糊岛下方的桌面（系统不支持时为清透玻璃），冷色镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的石墨底色。",
-  "descriptionEn": "Smoked glass that blurs the desktop behind the island (clear where Windows cannot), with a cool glint gliding along its rim; opaque graphite when Windows turns transparency off.",
+  "description": "烟熏色的玻璃：模糊岛下方的桌面（系统不支持时为清透玻璃），冷色镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的石墨底色。开启液态玻璃时，用 DXGI 桌面复制录屏的软件录不到岛。",
+  "descriptionEn": "Smoked glass that blurs the desktop behind the island (clear where Windows cannot), with a cool glint gliding along its rim; opaque graphite when Windows turns transparency off. While liquid glass is on, recorders that use DXGI desktop duplication do not capture the island.",
   "author": "BrimDeck",
   "license": "Apache-2.0",
   "base": "dark",
   "colors": {
-    "surface": "#1A1C21",
+    // The opaque surface (transparency effects off, high contrast, the blur's fallback): Windows' dark acrylic fallback
+    // color (microsoft-ui-xaml, MIT), so the island matches the system's flyouts and Start menu then.
+    "surface": "#2C2C2C",
     "textPrimary": "#F6F7F9",
     "textSecondary": "#E8EDEFF5",
-    "textTertiary": "#8FEDEFF5",
+    "textTertiary": "#99EDEFF5",
     "accent": "#7DC1FF",
     "onAccent": "#03111F",
     "danger": "#FFA9AF",
@@ -72,9 +74,10 @@
     // A cool specular rim: brightest at the top left, a faint line along the long edges, a second catch at the bottom right.
     "rimGradient": ["#C7FFFFFF", "#4DFFFFFF", "#24FFFFFF", "#2EFFFFFF", "#8CFFFFFF"],
     "rimWidth": 1.25,
-    "shadowBlur": 24,
-    "shadowDepth": 6,
-    "shadowOpacity": 0.42,
+    // The shadow of liquid-glass-web's glass (box-shadow: 0 4px 8px rgba(0,0,0,.22); MIT), kept while the panel is open.
+    "shadowBlur": 12,
+    "shadowDepth": 4,
+    "shadowOpacity": 0.22,
     // Over Windows' blur the backdrop is held dark (at most 28 % brightness) with its colors half again as saturated, so the
     // tint keeps under a sixth of its alpha there and what lies behind glows through as deep color.
     "glass": { "tint": "#C8121419", "edge": 0.45, "highlight": "#E8F2FF", "blurOpacity": 0.15, "backdrop": [0, 0.28], "saturation": 1.5 }

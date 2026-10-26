@@ -211,6 +211,15 @@ public partial class MainWindow
         var (_, panelWork, _) = Native.WindowsHost.MonitorScreen(MonitorHandle) ?? Native.WindowsHost.PrimaryScreen();
         var work = new Rect(transform.Transform(panelWork.TopLeft), transform.Transform(panelWork.BottomRight));
         popup.Left = Math.Clamp(point.X - popup.Width, work.Left, Math.Max(work.Left, work.Right - popup.Width)); popup.Top = point.Y + 3;
+        // A pop-up taller than the room left below its button (the date range's calendar under a short page) hung past the
+        // panel's bottom edge over the window below (live check X-05). The panel grows to hold it, as far as its window allows,
+        // and goes back once the pop-up has closed. The panel hangs from the top, so the button, and the pop-up, stay put.
+        if (double.IsFinite(popup.Height) && PresentationSource.FromVisual(Island) is not null)
+        {
+            double islandTop = transform.Transform(Island.PointToScreen(new Point())).Y;
+            double needed = Math.Ceiling(popup.Top + popup.Height + 8 - islandTop);
+            if (needed > Island.ActualHeight + .5) { _popupFloor = needed; SetExpanded(true); }
+        }
         popup.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { popup.Close(); SetExpanded(false, keyboard: true); e.Handled = true; } };
         // Closing an active owned window also raises Deactivated. Do not close it
         // again from that nested native activation message.
@@ -236,6 +245,7 @@ public partial class MainWindow
         popup.Closed += (_, _) =>
         {
             if (ReferenceEquals(_detailPopup, popup)) _detailPopup = null;
+            if (_popupFloor > 0 && _detailPopup is null) { _popupFloor = 0; if (_expanded) SetExpanded(true); }
             // A pop-up that faded out had the page brought up to date when it began to leave.
             if (!left) RenderUsage();
             if (_expanded && !IsMouseOver) PointerChanged(false);

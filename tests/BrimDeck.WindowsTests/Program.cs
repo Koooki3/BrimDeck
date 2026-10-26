@@ -17,7 +17,14 @@ internal static class Program
             Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
             CheckWindowChrome();
             CheckSettledClip();
+            CheckIslandTakesClicks();
             NoticeProtectionTests.Run(Check);
+            ShaderTests.Run(Check);
+            DesktopSourceTests.Run(Check);
+            GlanceTests.Run(Check);
+            CaptureExclusionTests.Run(Check);
+            SourceStartTests.Run(Check);
+            LiquidIdleTests.Run(Check);
             CheckPageToolTips();
             var bannerRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-WindowsTests-" + Guid.NewGuid().ToString("N"));
             try { NoticeBannerRegistryTests.Run(bannerRoot, Check); NoticeBannerKeeperTests.Run(System.IO.Path.Combine(bannerRoot, "keeper"), Check); }
@@ -29,6 +36,7 @@ internal static class Program
             Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
                 && work.Width > 0 && work.Height > 0 && scale > 0);
             TemperatureChecks.Run(Check);
+            DeviceChecks.Run(Check);
 
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))
             {
@@ -99,6 +107,31 @@ internal static class Program
                 }
     }
 
+    // Windows passes a click on a layered window through wherever its pixel is fully transparent (live check X-01). Under liquid
+    // glass the island's surface steps aside (its brush at opacity 0) and the open panel showed only its text: clicks between
+    // the words fell through to the window below. Whatever the surface's opacity, every pixel inside the outline stays the
+    // island's (alpha above 0), as with an opaque surface, and nothing is drawn outside it.
+    private static void CheckIslandTakesClicks()
+    {
+        foreach (var (name, corners, shoulder) in new[] { ("open panel", new CornerRadius(0, 0, 16, 16), 0d), ("notch", new CornerRadius(0, 0, 12, 12), 16d), ("capsule", new CornerRadius(18), 0d) })
+            foreach (double surface in new[] { 0d, .5, 1 })
+            {
+                var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(0xC8, 0x12, 0x14, 0x19)) { Opacity = surface };
+                var island = new BrimDeck.IslandBorder { Width = 300, Height = 120, Background = brush, CornerRadius = corners, ShoulderRadius = shoulder, MaterialOpacity = 1, RimWidth = 0, ClipToBounds = true };
+                island.Measure(new Size(300, 120)); island.Arrange(new Rect(0, 0, 300, 120)); island.UpdateLayout();
+                var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(300, 120, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                bitmap.Render(island);
+                var pixels = new byte[300 * 120 * 4];
+                bitmap.CopyPixels(pixels, 300 * 4, 0);
+                // The body inside the corners and shoulders, where every pixel must take the click.
+                int holes = 0;
+                for (int y = 2; y < 120 - 20; y++)
+                    for (int x = 20 + (int)shoulder; x < 300 - 20 - (int)shoulder; x++)
+                        if (pixels[(y * 300 + x) * 4 + 3] == 0) holes++;
+                Check($"the {name} takes clicks over its whole body with the surface at opacity {surface:0.0} ({holes} click-through pixels)", holes == 0);
+            }
+    }
+
     // A page left without the pointer moving closes the tooltips opened over it, and only those (BrimDeck.PageToolTips).
     private static void CheckPageToolTips()
     {
@@ -139,9 +172,9 @@ internal static class Program
         foreach (var gpu in gpus)
             Console.WriteLine($"GPU: {gpu.Name ?? "(unnamed)"} [{gpu.Kind}] usage {gpu.Usage:P0}, dedicated {Gigabytes(gpu.DedicatedBytes)} of {(gpu.DedicatedTotal is { } total ? $"{total / 1e9:0.0} GB" : "?")}, "
                 + $"shared {Gigabytes(gpu.SharedBytes)}, key {gpu.Key}, {GpuReadings.LuidText(gpu.Luid)}, engines {string.Join(" ", gpu.Engines.Select(e => $"{e.Kind} {e.Usage:P0}"))}");
-        var (adapters, described) = GpuAdapters.Read();
+        var (adapters, described, _) = GpuAdapters.Read();
         foreach (var adapter in adapters.Values)
-            Console.WriteLine($"DXGI: {adapter.Name} [{adapter.Kind}{(adapter.Software ? ", software" : "")}] {adapter.DedicatedTotal / 1e9:0.0} GB, key {adapter.Key}, {GpuReadings.LuidText(adapter.Luid)}");
+            Console.WriteLine($"DXGI: {adapter.Name} [{adapter.Kind}{(adapter.Software ? ", software" : "")}] {adapter.DedicatedTotal / 1e9:0.0} GB, at {adapter.Location ?? "?"}, key {adapter.Key}, {GpuReadings.LuidText(adapter.Luid)}");
         Check("GPU readings keep only the hardware adapters DXGI describes", gpus.All(gpu => described ? adapters.TryGetValue(gpu.Luid, out var adapter) && !adapter.Software : gpu.Name is null));
         Check("GPU readings give each adapter its own key", gpus.Select(gpu => gpu.Key).Distinct().Count() == gpus.Count);
         if (gpus.Any(gpu => gpu.Kind == GpuKind.Discrete))

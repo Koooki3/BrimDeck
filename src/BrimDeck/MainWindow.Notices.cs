@@ -347,7 +347,7 @@ public partial class MainWindow
     {
         SubscribeNotices();
         RefreshStatus();
-        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
+        UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
         ApplyHeader(Settings.UsagePage ? UsageHeader(_usageWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
         double offset = NoticesContent.Children.OfType<DockPanel>().FirstOrDefault()?.Children.OfType<ScrollViewer>().FirstOrDefault()?.VerticalOffset ?? 0;
@@ -437,7 +437,7 @@ public partial class MainWindow
         var plate = NoticePlate(notice, 34);
         plate.VerticalAlignment = VerticalAlignment.Top; plate.Margin = new Thickness(0, 1, 10, 0);
         grid.Children.Add(plate);
-        var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
+        var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin is NoticeOrigin.Test or NoticeOrigin.BrimDeck ? 1 : .78 };
         var textColumn = new SteppedWidth { Child = texts, Stepping = _stretch.Active };
         Grid.SetColumn(textColumn, 1); grid.Children.Add(textColumn);
         texts.Children.Add(NoticeWindow.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold)));
@@ -449,7 +449,7 @@ public partial class MainWindow
             if (open) { body.TextWrapping = TextWrapping.Wrap; body.TextTrimming = TextTrimming.None; }
             texts.Children.Add(body);
         }
-        string meta = notice.AppName + " · " + NoticeText.OriginName(notice.Origin, notice.Distro) + (notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? "" : Loc.T(" · 来源已关闭", " · closed at source"));
+        string meta = notice.AppName + " · " + NoticeText.OriginName(notice.Origin, notice.Distro) + (notice.SourcePresent || notice.Origin is NoticeOrigin.Test or NoticeOrigin.BrimDeck ? "" : Loc.T(" · 来源已关闭", " · closed at source"));
         texts.Children.Add(UI.Fixed(meta, 10.5, 16, UI.Tertiary));
         if (notice.Progress is { } progress)
         {

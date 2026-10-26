@@ -284,6 +284,7 @@ public partial class MainWindow
         // second during the drag, and once more when it ends (FinishResize saves the size).
         bool stretched = _resizePage == DeckPage.Notices && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout();
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
+        else if (_resizePage == DeckPage.Devices) RenderDevices();
         else if (!stretched && Environment.TickCount64 - _resizeRendered >= 40)
         {
             _resizeRendered = Environment.TickCount64;

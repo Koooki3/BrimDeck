@@ -32,9 +32,12 @@ internal sealed class AmbientGlow : IMotionClient
     // When the light was paused (Eased time), so it goes on from the same moment of its cycle when it runs again.
     private double? _pausedAt;
 
-    public AmbientGlow(IslandBorder island, Panel content, Func<MotionConditions> conditions, Func<bool> open)
+    // liquid: whether liquid glass is shown under the island, which draws its own rim light (following the pointer): the
+    // island's painted rim steps aside then (MainWindow.LiquidEdge), and its drift would only redraw the window for nothing.
+    private readonly Func<bool> _liquid;
+    public AmbientGlow(IslandBorder island, Panel content, Func<MotionConditions> conditions, Func<bool> open, Func<bool>? liquid = null)
     {
-        _island = island; _conditions = conditions; _open = open;
+        _island = island; _conditions = conditions; _open = open; _liquid = liquid ?? (() => false);
         // Behind everything on the surface, above its own layers.
         content.Children.Insert(0, _sweep);
     }
@@ -135,8 +138,9 @@ internal sealed class AmbientGlow : IMotionClient
 
     // Over a live blur (GlassBackdrop) each frame of the open panel's large layered window costs more, and the drifting light
     // alone kept the open panel at 7.5 % of a core against 2.7 % with it at rest (measured). There the light rests while the
-    // panel is open and moves on the small collapsed island only.
-    private bool HeldForBlur => _open() && GlassBackdrop.Available;
+    // panel is open and moves on the small collapsed island only. Over liquid glass it rests always: the glass draws its own
+    // rim light, and the painted rim it would move is not drawn.
+    private bool HeldForBlur => _open() && GlassBackdrop.Available || _liquid();
 
     // Slow light needs few frames: fewer still on the small collapsed island, a few more while a scan line moves.
     private int Interval(double sweep) => sweep >= 0 ? SweepMs : _open() ? OpenMs : CollapsedMs;

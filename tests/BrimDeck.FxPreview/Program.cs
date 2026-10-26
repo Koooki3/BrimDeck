@@ -30,6 +30,22 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // The real panel's pages over liquid glass (LiquidPages): --liquid-pages <backgrounds> <output folder>. It needs BrimDeck's own
+        // App (never run) instead of a plain Application, so it starts before one is made.
+        // [--scale <percent>] (or BRIMDECK_PAGES_SCALE) draws them at another display scale than 150 percent.
+        if (args.Length > 2 && args[0] == "--liquid-pages")
+        {
+            if (LiquidPages.ScaleFrom(args) is not { } pagesScale) { Console.WriteLine("FAIL: --scale (or BRIMDECK_PAGES_SCALE) wants a display scale such as 100, 125, 150 or 175"); return 1; }
+            // --focus: the keyboard focus pass instead of the page sheets (LiquidPages.Focus.cs).
+            return args.Contains("--focus") ? LiquidPages.RunFocus(args[1], args[2], pagesScale) : LiquidPages.Run(args[1], args[2], pagesScale);
+        }
+        // The glass's answers to the pointer and its accessibility (GlassAccess): hover and press, the content row, transparency
+        // effects off and animations off, on the real panel offscreen: --glass-access.
+        if (args.Length > 0 && args[0] == "--glass-access") return GlassAccess.Run();
+        // What the island's shadow costs while the panel opens and closes over liquid glass (ShadowCost): --shadow-cost [cycles].
+        if (args.Length > 0 && args[0] == "--shadow-cost") return ShadowCost.Run(args.Length > 1 && int.TryParse(args[1], out int cycles) ? cycles : 6);
+        // What liquid glass costs against the blur, collapsed with music, open and animating (PerfCost): --perf [seconds] [rounds] [--hidden].
+        if (args.Length > 0 && args[0] == "--perf") return PerfCost.Run(args);
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         foreach (var key in new[] { "PanelKeyboardFocus", "PanelWideKeyboardFocus", "PanelOutsetKeyboardFocus" }) app.Resources[key] = new Style();
         app.Resources["AppTextFont"] = new FontFamily("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
@@ -40,6 +56,49 @@ internal static class Program
 
         // The date range picker's strips (DatePreview): --date <output folder>.
         if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
+        // The liquid glass sheets (LiquidPreview): --liquid <output folder>.
+        if (args.Length > 1 && args[0] == "--liquid") return LiquidPreview.Run(args[1]);
+        // The same over top-of-screen backgrounds, for the comparison with the references: --liquid-bg <backgrounds> <output folder>.
+        if (args.Length > 2 && args[0] == "--liquid-bg") return LiquidPreview.RunBackgrounds(args[1], args[2]);
+        // The port proof (the glass as liquid-glass-web draws it): --liquid-port <backgrounds> <output folder> [--island].
+        if (args.Length > 2 && args[0] == "--liquid-port") return LiquidPreview.RunPort(args[1], args[2], !args.Contains("--island"));
+        // Every state of the glass (shapes, opening frames, pressed, hovered, the pages' sizes): --liquid-states <backgrounds> <output folder>.
+        if (args.Length > 2 && args[0] == "--liquid-states") return LiquidPreview.RunStates(args[1], args[2]);
+        // The liquid glass shaders compiled ahead into src/BrimDeck/LiquidGlass (Liquid.vs.cso, Liquid.ps.cso, Liquid.hlsl.sha256):
+        // --compile-liquid <the LiquidGlass folder>. Run it after every change to Liquid.hlsl; WindowsTests checks it was.
+        if (args.Length > 1 && args[0] == "--compile-liquid")
+        {
+            var source = File.ReadAllBytes(System.IO.Path.Combine(args[1], "Liquid.hlsl"));
+            var (vertex, pixel, zoned) = BrimDeck.LiquidGlass.LiquidRenderer.Compiled(source);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.vs.cso"), vertex);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.ps.cso"), pixel);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Liquid.zoned.cso"), zoned);
+            File.WriteAllText(System.IO.Path.Combine(args[1], "Liquid.hlsl.sha256"), BrimDeck.LiquidGlass.LiquidRenderer.SourceHash(source) + "\n");
+            Console.WriteLine($"Compiled Liquid.hlsl: vertex {vertex.Length} bytes, pixel {pixel.Length} bytes, zoned {zoned.Length} bytes");
+            // The frost's pyramid and stats (Frost.hlsl), alike.
+            var frost = File.ReadAllBytes(System.IO.Path.Combine(args[1], "Frost.hlsl"));
+            var (down, up, band, stats) = BrimDeck.LiquidGlass.LiquidRenderer.CompiledFrost(frost);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.down.cso"), down);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.up.cso"), up);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.band.cso"), band);
+            File.WriteAllBytes(System.IO.Path.Combine(args[1], "Frost.stats.cso"), stats);
+            File.WriteAllText(System.IO.Path.Combine(args[1], "Frost.hlsl.sha256"), BrimDeck.LiquidGlass.LiquidRenderer.SourceHash(frost) + "\n");
+            Console.WriteLine($"Compiled Frost.hlsl: down {down.Length} bytes, up {up.Length} bytes, band {band.Length} bytes, stats {stats.Length} bytes");
+            return 0;
+        }
+        // Only the GPU timing of a liquid glass frame: --liquid-time.
+        if (args.Length > 0 && args[0] == "--liquid-time") return LiquidPreview.TimeOnly();
+        // The frost's temporal stability over a moving page (FrostCheck): --frost-check <output folder>.
+        if (args.Length > 1 && args[0] == "--frost-check") return FrostCheck.Run(args[1]);
+        // The frost's levels' deviations (LiquidRenderer.LevelSigma): --frost-calibrate.
+        if (args.Length > 0 && args[0] == "--frost-calibrate") return FrostCheck.Calibrate();
+        // The backdrop's stats per tile, as images and tables: --frost-stats <backgrounds> <output folder>.
+        if (args.Length > 2 && args[0] == "--frost-stats") return FrostCheck.Stats(args[1], args[2]);
+        // Automatic liquid glass turning light and dark over a split background: --liquid-auto <output folder>.
+        if (args.Length > 1 && args[0] == "--liquid-auto") return LiquidPreview.RunAuto(args[1]);
+        // Automatic liquid glass's decision over video-like backdrops, in both Windows app modes, against the round-11 decision:
+        // --liquid-looks.
+        if (args.Length > 0 && args[0] == "--liquid-looks") return LiquidLooks.Run();
         // The collapse pictures (CollapsePreview): --collapse <output folder> [--themes id,id,...].
         if (args.Length > 1 && args[0] == "--collapse")
         {
@@ -47,6 +106,10 @@ internal static class Program
             if (step > 0 && step + 1 < args.Length) CollapsePreview.FrameStep = double.Parse(args[step + 1], CultureInfo.InvariantCulture) / 1000;
             return CollapsePreview.Run(args[1], at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null) == 0 ? 0 : 1;
         }
+        // The devices page in every theme (DevicesSheet): --devices <output folder>; the devices on this PC, read only: --devices-probe.
+        if (args.Length > 1 && args[0] == "--devices") return DevicesSheet.Run(args[1]);
+        if (args.Length > 0 && args[0] == "--devices-cost") return DevicesSheet.Cost(args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 60);
+        if (args.Length > 0 && args[0] == "--devices-probe") return DevicesSheet.Probe(args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 12);
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
         if (args.Length > 1 && args[0] == "--sheet")
         {

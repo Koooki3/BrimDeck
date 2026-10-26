@@ -57,13 +57,18 @@ try
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);
     StripAdmissionTests.Run(Check);
+    DevicesTests.Run(Check);
+    DeviceProtocolTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
+    GlassFeedbackTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
+    DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     GpuAdapterTests.Run(root, Check);
+    GpuIdentityTests.Run(Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
     await AppUpdateTests.Run(root, Check);
@@ -734,6 +739,8 @@ try
     retired.Normalize();
     Check("Retired split Claude statistics return to Claude while later sources keep their saved numbers",
         retired.Apps.Select(app => app.UsageSource).SequenceEqual([ProviderId.Claude, ProviderId.Claude, ProviderId.ZCode]));
+    // Last: it gives this process a test scope for good.
+    AppInstanceTests.Run(Check);
     Console.WriteLine($"\n{passed} checks passed.");
 }
 

@@ -20,13 +20,15 @@ namespace BrimDeck;
 internal sealed class MonitorStrip : FrameworkElement
 {
     private readonly StripPresence _presence;
-    private readonly CompactMonitorItems _shown, _values;
+    private readonly CompactMonitorItems _shown, _values, _chosen;
     // The shown readings left to right, as the settings' table orders them.
     private readonly CompactMonitorItems[] _order;
     private readonly bool _centered;
     private readonly StripColors _colors;
     private readonly double _scale, _font, _dial, _gap, _row, _inner, _arrow, _stroke;
     private MonitorSnapshot? _snapshot;
+    // The lowest battery among the devices shown (MainWindow.LowestBattery), for the battery reading.
+    private BatteryReading? _battery;
     // Where the row placed each reading that shows, from the strip's left, in _order; null while the strip places them itself.
     private double[]? _placed;
     // How present the row placed each of them, which a reading is drawn at (less than its own while the row is short).
@@ -39,7 +41,8 @@ internal sealed class MonitorStrip : FrameworkElement
         CompactMonitorItems unavailable = CompactMonitorItems.None)
     {
         _presence = presence; _colors = colors; _centered = centered;
-        _shown = CompactMonitor.Shown(readings) & ~unavailable; _values = CompactMonitor.Values(readings);
+        _chosen = CompactMonitor.Shown(readings);
+        _shown = _chosen & ~unavailable; _values = CompactMonitor.Values(readings);
         _order = [.. readings.Select(reading => reading.Item).Concat(CompactMonitor.Order).Distinct().Where(item => (_shown & item) != 0)];
         _scale = CompactMusicLayout.SafeScale(scale);
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
@@ -94,6 +97,7 @@ internal sealed class MonitorStrip : FrameworkElement
         CompactMonitorItems.Download or CompactMonitorItems.Upload => Math.Ceiling(ArrowInk + _inner) + (figure is null ? WidestRates.Max(FigureText) : FigureText(figure)),
         CompactMonitorItems.Temperature => GlyphSize + Math.Round(2 * _scale) + FigureText(figure ?? "125°"),
         CompactMonitorItems.Storage => GlyphSize + Math.Round(3 * _scale) + FigureText(figure ?? "100%"),
+        CompactMonitorItems.Battery => BatteryWidth + Math.Round(3 * _scale) + FigureText(figure ?? "100%"),
         _ => 0
     };
     // The widest each reading gets, so the row's choice of readings never changes with the figures.
@@ -104,7 +108,7 @@ internal sealed class MonitorStrip : FrameworkElement
 
     private static string GaugeFigure(double? share) => share is { } v ? MonitorFormat.Percent(v) + "%" : "—";
     private static string RateFigure(double? rate) => rate is { } r ? MonitorFormat.CompactRate(r) is var q ? q.Number + q.Unit : "" : "—";
-    private static string Figure(CompactMonitorItems item, MonitorSnapshot? s) => item switch
+    private string Figure(CompactMonitorItems item, MonitorSnapshot? s) => item switch
     {
         CompactMonitorItems.Cpu => GaugeFigure(s?.Cpu.OrDefault?.Usage),
         CompactMonitorItems.Memory => GaugeFigure(s?.Memory.OrDefault?.UsedFraction),
@@ -113,6 +117,7 @@ internal sealed class MonitorStrip : FrameworkElement
         CompactMonitorItems.Upload => RateFigure(s?.Network.OrDefault?.UpBytesPerSecond),
         CompactMonitorItems.Temperature => TemperatureFigure(Temperatures.Hottest(s)?.Celsius),
         CompactMonitorItems.Storage => GaugeFigure(SystemDrive(s)?.UsedFraction),
+        CompactMonitorItems.Battery => Devices.Figure(_battery?.Percent),
         _ => ""
     };
     // Whole degrees with the degree sign, the unit left out for room: "62°". Made once for every degree a reading can have.
@@ -175,6 +180,18 @@ internal sealed class MonitorStrip : FrameworkElement
     public bool Showing(double now) => _admitted is not { } admitted || admitted != CompactMonitorItems.None || _presence.Any(now);
     public bool Moving(double now) => _presence.Moving(now);
 
+    // Whether the settings choose the battery reading, shown yet or not (StripAdmission); and whether any reading other than the
+    // battery is chosen, which the system sampler reads.
+    public bool ChoosesBattery => (_chosen & CompactMonitorItems.Battery) != 0;
+    public bool NeedsSystem => (_chosen & ~CompactMonitorItems.Battery) != 0;
+    // A new lowest battery: its figure may change the reading's width, as a new snapshot's figures do.
+    public void SetBattery(BatteryReading? battery)
+    {
+        if (_battery == battery) return;
+        _battery = battery; InvalidateVisual();
+        if (battery is not null && _presence.Measure((_values, _scale), Shown, item => FigureWidth(item, Figure(item, _snapshot)), true, Motion.Enabled)) { Motion.Start(this, Step); Relayout(); }
+    }
+
     public void Update(MonitorSnapshot? snapshot)
     {
         _snapshot = snapshot; InvalidateVisual();
@@ -229,7 +246,7 @@ internal sealed class MonitorStrip : FrameworkElement
             }
             double left = Snap(x);
             // Each reading in the color of its level (ReadingLevels); the core columns take theirs column by column.
-            var level = ReadingLevels.Of(item, s);
+            var level = item == CompactMonitorItems.Battery ? _battery?.Level ?? MemoryLevel.Normal : ReadingLevels.Of(item, s);
             string color = _colors.At(item, level);
             switch (item)
             {
@@ -243,6 +260,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Temperature: Temperature(drawing, left, center, Temperatures.Hottest(s)?.Celsius, color, level, ppd); break;
                 case CompactMonitorItems.Storage: Drive(drawing, left, center, SystemDrive(s)?.UsedFraction, color, level, ppd); break;
+                case CompactMonitorItems.Battery: Battery(drawing, left, center, _battery, color, level, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
             x += (width + _gap) * advance;
@@ -322,6 +340,29 @@ internal sealed class MonitorStrip : FrameworkElement
         MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Thermometer, celsius is null ? UI.Tertiary : color);
         var text = MonitorDraw.Text(TemperatureFigure(celsius), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + size + Math.Round(2 * _scale), Math.Round(center + _font * .36));
+    }
+
+    // A small battery on its side, as tall as the drive glyph beside it and outlined in the reading's color as the drive is, filled
+    // to the lowest charge, with a bolt while that device charges; then the figure: "15%". On whole device pixels.
+    private double BatteryWidth => Math.Round(17 * _scale);
+    private void Battery(DrawingContext drawing, double x, double center, BatteryReading? battery, string color, MemoryLevel level, double ppd)
+    {
+        double Snap(double value) => Math.Round(value * ppd) / ppd;
+        double width = BatteryWidth, height = Snap(9 * _scale), tip = Snap(Math.Max(1, 1.5 * _scale)), stroke = Math.Max(1, Math.Round(1.2 * _scale * ppd)) / ppd;
+        var body = new Rect(Snap(x) + stroke / 2, Snap(center - height / 2) + stroke / 2, Snap(width - tip - 1) - stroke, height - stroke);
+        string ink = battery is null ? UI.Tertiary : color;
+        double radius = PanelTheme.Corner(1.5 * _scale);
+        drawing.DrawRoundedRectangle(null, ArcPen(ink, stroke), body, radius, radius);
+        drawing.DrawRectangle(UI.Brush(ink), null, new Rect(Snap(body.Right + stroke / 2 + 1 / ppd), Snap(center - height * .2), tip, Snap(height * .4)));
+        if (battery is { } b)
+        {
+            double inset = stroke + 1 / ppd, room = Math.Max(0, body.Width - 2 * inset + stroke);
+            double fill = Snap(Math.Max(Math.Min(room, 1.5 * _scale), room * Math.Clamp(b.Percent / 100.0, 0, 1)));
+            drawing.DrawRectangle(UI.Brush(color), null, new Rect(body.X - stroke / 2 + inset, body.Y - stroke / 2 + inset, fill, Math.Max(1, body.Height + stroke - 2 * inset)));
+            if (b.Charging) DeviceGlyphs.Bolt(drawing, body, UI.Primary);
+        }
+        var text = MonitorDraw.Text(Devices.Figure(battery?.Percent), _font, FigureColor(level, color), ppd);
+        MonitorDraw.Baseline(drawing, text, x + width + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 
     // The pens depend only on the strip's size and colors, which a strip keeps; they are made on its first drawing, one per color

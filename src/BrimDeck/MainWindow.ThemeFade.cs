@@ -26,7 +26,7 @@ public partial class MainWindow
     {
         // Pictures still fading are left to finish on their own, under the new ones.
         _themeFade = null; _materialFade = null;
-        if (!IsVisible || !Soft.Enabled || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;
+        if (!IsVisible || !Soft.Enabled || LiquidTheme.SkipsFade || _preview || Island.ActualWidth < 1 || Island.ActualHeight < 1 || PresentationSource.FromVisual(Island) is null) return;
         if (Island.Child is not Panel content) return;
         double width = Island.ActualWidth, height = Island.ActualHeight;
         // The material: a copy of the island's own shape, dressed as it is now, without its content.

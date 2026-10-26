@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     // Checks run every 40 ms near the surface. Farther away the interval grows with the distance, assuming the cursor
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
     private const double TrackNear = 40, TrackFar = 160, ApproachSpeed = 10;
+    // How far into the opening the content may start over liquid glass: three frames, the glass's lag and its drawing.
+    private const double LiquidLeadMs = 50;
     private readonly WindowsHost _host;
     // Null for the main panel. The panels of other monitors take their usage data from it instead of reading their own.
     private readonly MainWindow? _lead;
@@ -61,6 +63,9 @@ public partial class MainWindow : Window
     // A preview from the settings window either holds the panel open or keeps it collapsed while a collapsed size is adjusted.
     private bool _previewExpanded;
     private Rect? _popupReturnArea;
+    // The island's height a pop-up of the usage details needs to lie within the open panel (ShowModelPopup), 0 for none: the
+    // panel grows to it while the pop-up is open and goes back once it has closed.
+    private double _popupFloor;
     private int _days = 1;
     private bool _details;
     // Lets the old content of a rebuilt usage or media page leave while the new one arrives.
@@ -121,6 +126,7 @@ public partial class MainWindow : Window
         _handover = new PageHandover(LeavingContent);
         InitializeMusic();
         InitializeMonitor();
+        InitializeDevices();
         InitializeResize();
         Island.Background = _surface;
         InitializeShadow();
@@ -229,7 +235,7 @@ public partial class MainWindow : Window
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
-        var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
+        var (bounds, work, scale) = Screen();
         UpdateCollapsedGeometry(bounds, work, scale);
         double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
         _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
@@ -277,7 +283,8 @@ public partial class MainWindow : Window
         else
         {
             bool appearing = !IsVisible;
-            if (!IsVisible) Show();
+            // Drawn offscreen (MainWindow.Offscreen.cs), the window is never shown.
+            if (!IsVisible && _offscreen is null) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
             // Settings apply at once, except over a closing still under way: a change that gives the collapsed surface a new
             // width (a reading switched on or off) carries the closing on to it (MoveTurn.Carried) rather than ending it in one
@@ -311,7 +318,7 @@ public partial class MainWindow : Window
     // and work-area changes call (see the window hook in the constructor and App.DisplaysChanged).
     private void UpdateCollapsedGeometry()
     {
-        var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
+        var (bounds, work, scale) = Screen();
         UpdateCollapsedGeometry(bounds, work, scale);
     }
     private void UpdateCollapsedGeometry(Rect bounds, Rect work, double scale)
@@ -406,7 +413,8 @@ public partial class MainWindow : Window
     // ApplySettings runs next. Pop-ups are closed rather than repainted.
     private void ApplyTheme()
     {
-        double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
+        // The stage's scale is the window's; drawn offscreen, the stage lies in a source of its own (MainWindow.Offscreen.cs).
+        double dpi = PresentationSource.FromVisual(Stage) is null ? 1 : VisualTreeHelper.GetDpi(Stage).DpiScaleX;
         if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi && _glassShown == PanelTheme.GlassShown) return;
         // A new scale alone only redraws the scan lines, which are laid out in device pixels.
         bool sameTheme = _themeGeneration == PanelTheme.Generation && _glassShown == PanelTheme.GlassShown;
@@ -434,6 +442,7 @@ public partial class MainWindow : Window
     {
         System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
+        System.Windows.Automation.AutomationProperties.SetName(DevicesPageButton, Loc.T("设备", "Devices"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
         System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("最近通知", "Recent notices"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
@@ -599,11 +608,14 @@ public partial class MainWindow : Window
         bool line = style == CompactStyle.Line, indicator = !expanded && line;
         double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height;
         var panel = PanelFor(wantedHeight);
+        if (!expanded) _popupFloor = 0;
+        else if (_popupFloor > panel.HeaderExtra + wantedHeight) { wantedHeight = _popupFloor - panel.HeaderExtra; panel = PanelFor(wantedHeight); }
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);
         double width = expanded ? _pageWidth : shape.Surface.Width;
         // A floating panel is taller than its page by headerExtra, the space above its header.
         double height = expanded ? pageHeight + headerExtra : shape.Surface.Height;
+        if (expanded) _glassOpenHeight = height;
         // Every compact style opens into the same panel, hanging from the screen edge or, below a lowered capsule, rounded all round.
         double panelRadius = PanelHeader.PanelRadius;
         var radius = expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)
@@ -723,6 +735,9 @@ public partial class MainWindow : Window
         bool bounce = !booting && expanded && !reshaping && !keyboard && duration > 0 && HasRoomToBounce(width, height, left, gap);
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Drawer;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
+        // Over liquid glass the content never leads the glass: the glass follows the island's shape a couple of frames late
+        // (GlassBackdrop.Lag), so opening, the content starts no earlier than LiquidLeadMs in (live check 10-26, LG-02).
+        if (expanded && duration > 0 && LiquidTheme.Shown(_glass)) content = content with { Start = Math.Max(content.Start, Math.Min(.5, LiquidLeadMs / duration)) };
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         if (collapseShot is not null)
         {
@@ -772,7 +787,12 @@ public partial class MainWindow : Window
         Animate(CompactScale, ScaleTransform.ScaleYProperty, compactGone ? Soft.Shrunk : 1, duration, compact, easeOut);
         // The line's playback progress, hidden while the surface was the boot's dot, comes back with the compact content.
         Animate(MusicIndicator, OpacityProperty, 1, duration, compact, easeOut);
-        Animate(ShadowHost, OpacityProperty, !expanded && !line ? 1 : 0, duration, shadow, easeOut);
+        // Liquid glass keeps its shadow open too, as the glass it is ported from does: over a flat page it is what lifts it.
+        // While it opens or closes the shadow is out, as without liquid glass: it comes back once the open panel is at rest, or as
+        // the island lands (ShadowAtRest).
+        bool shadowShown = (!expanded || LiquidGlassShown) && !line;
+        if (shadowShown && turning && LiquidGlassShown && duration > 0) ShadowAtRest(expanded, duration, shadow, easeOut);
+        else Animate(ShadowHost, OpacityProperty, shadowShown ? 1 : 0, duration, shadow, easeOut);
         // The surface stays opaque throughout; it loses its rim and turns grey only once it has the indicator's shape.
         Animate(Island, IslandBorder.MaterialOpacityProperty, indicator ? 0 : 1, duration, rim, easeOut);
         var tone = indicator ? PanelTheme.ColorOf("indicator") : expanded ? PanelTheme.PanelSurfaceColor : PanelTheme.SurfaceColor;
@@ -846,6 +866,7 @@ public partial class MainWindow : Window
         // win2: a pointer reaching the island means someone is at the screen: the display is on (C-L13), and a notice is
         // looked for briskly again (C-L8).
         if (inside && !_pointerInside) { MotionEnvironment.InputSeen(); BrimDeck.Native.WindowsNoticeSource.Interacted(); }
+        if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
         if (inside) { ReleaseHotkeyPin(); ReplayCompactTitle(); }
         if (inside)

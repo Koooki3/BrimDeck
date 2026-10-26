@@ -9,16 +9,18 @@
   "id": "liquid-glass-light",
   "name": "液态玻璃（浅色）",
   "nameEn": "Liquid Glass (light)",
-  "description": "乳白色的玻璃：模糊岛下方的桌面（系统不支持时为清透玻璃），镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的磨砂底色。",
-  "descriptionEn": "Milky glass that blurs the desktop behind the island (clear where Windows cannot), with a specular glint gliding along its rim; opaque frost when Windows turns transparency off.",
+  "description": "乳白色的玻璃：模糊岛下方的桌面（系统不支持时为清透玻璃），镜面高光沿边缘缓缓流动；系统关闭透明效果时改为不透明的磨砂底色。开启液态玻璃时，用 DXGI 桌面复制录屏的软件录不到岛。",
+  "descriptionEn": "Milky glass that blurs the desktop behind the island (clear where Windows cannot), with a specular glint gliding along its rim; opaque frost when Windows turns transparency off. While liquid glass is on, recorders that use DXGI desktop duplication do not capture the island.",
   "author": "BrimDeck",
   "license": "Apache-2.0",
   "base": "light",
   "colors": {
-    "surface": "#F1F4F8",
+    // The opaque surface (transparency effects off, high contrast, the blur's fallback): Windows' light acrylic fallback
+    // color (microsoft-ui-xaml, MIT), so the island matches the system's flyouts and Start menu then.
+    "surface": "#F9F9F9",
     "textPrimary": "#101217",
-    "textSecondary": "#AD000000",
-    "textTertiary": "#85000000",
+    "textSecondary": "#C6000000",
+    "textTertiary": "#A0000000",
     "accent": "#0057AE",
     "onAccent": "#FFFFFF",
     "danger": "#94142A",
@@ -41,7 +43,7 @@
     "coverOutline": "#1F000000",
     "scrollThumb": "#A9AEB8",
     "rim": "#B3FFFFFF",
-    "shadow": "#1B2A44",
+    "shadow": "#000000",
     "indicator": "#A4A8B0",
     "indicatorProgress": "#33363C",
     "switchFill": "#0D000000",
@@ -73,9 +75,10 @@
     // A specular rim: bright where light strikes the top left, dim along the long edges, catching again at the bottom right.
     "rimGradient": ["#F2FFFFFF", "#80FFFFFF", "#4DFFFFFF", "#59FFFFFF", "#D9FFFFFF"],
     "rimWidth": 1.25,
-    "shadowBlur": 22,
+    // The shadow of liquid-glass-web's glass (box-shadow: 0 4px 8px rgba(0,0,0,.22); MIT), kept while the panel is open.
+    "shadowBlur": 12,
     "shadowDepth": 4,
-    "shadowOpacity": 0.2,
+    "shadowOpacity": 0.22,
     // Over Windows' blur the backdrop is held bright (85 % to full brightness) and its colors doubled in saturation, so the tint
     // keeps a fifth of its alpha there: what lies behind shows through as soft color, never darker than the glass over black.
     "glass": { "tint": "#E0F8FAFD", "edge": 0.6, "highlight": "#FFFFFF", "blurOpacity": 0.2, "backdrop": [0.85, 1], "saturation": 2 }

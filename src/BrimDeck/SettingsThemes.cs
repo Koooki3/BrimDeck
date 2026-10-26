@@ -42,13 +42,13 @@ public sealed partial class SettingsWindow
         var users = PanelTheme.UserThemes;
         ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
-            .. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)], chosen);
+            .. WithGlassAuto([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)])], chosen);
         ThemeSection(Loc.T("主题扩展", "Theme extensions"));
         ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Extension).Select(Card)], chosen);
         CustomSection(users, chosen);
         _themeDetails = Collect(() => ThemeDetails(chosen, users)); _content.Children.Add(_themeDetails);
         // Miniatures of cards no longer on the page (a theme file renamed or removed) are let go.
-        var cards = new[] { PanelThemes.SystemId }.Concat(PanelThemes.BuiltIns.Select(t => t.Id)).Concat(users.Where(t => t.Usable).Select(t => t.Id)).ToHashSet();
+        var cards = new[] { PanelThemes.SystemId, LiquidTheme.Auto }.Concat(PanelThemes.BuiltIns.Select(t => t.Id)).Concat(users.Where(t => t.Usable).Select(t => t.Id)).ToHashSet();
         foreach (var key in _themePreviews.Keys.Where(key => !cards.Contains(key.Card) || key.Language != Loc.Language).ToList()) _themePreviews.Remove(key);
         static (string Id, string Name, PanelThemeInfo Theme) Card(PanelThemeInfo theme) => (theme.Id, theme.DisplayName, theme);
     }
@@ -125,14 +125,18 @@ public sealed partial class SettingsWindow
     {
         bool kept = PanelTheme.KeptLastGood;
         var theme = kept ? PanelTheme.ShownTheme : PanelTheme.Find(chosen);
-        bool missing = !kept && chosen != PanelThemes.SystemId && !PanelThemes.IsBuiltIn(chosen) && users.All(t => !t.Usable || t.Id != chosen);
+        bool missing = !kept && chosen != PanelThemes.SystemId && !LiquidTheme.IsAuto(chosen) && !PanelThemes.IsBuiltIn(chosen) && users.All(t => !t.Usable || t.Id != chosen);
         SectionTitle(Loc.T("当前主题", "Current theme"));
         var rows = new List<FrameworkElement>();
-        string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")") : theme.DisplayName;
-        rows.Add(Row(Loc.T("名称", "Name"), TextLine(title, 12, TextSecondary)));
-        string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.") : theme.DisplayDescription;
+        string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")")
+            : LiquidTheme.IsAuto(chosen) ? GlassTitle(theme) : theme.DisplayName;
+        var name = TextLine(title, 12, TextSecondary);
+        rows.Add(Row(Loc.T("名称", "Name"), name));
+        string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.")
+            : LiquidTheme.IsAuto(chosen) ? GlassDescription : theme.DisplayDescription;
         if (description.Length > 0) rows.Add(Row(Loc.T("说明", "About"), Wrapped(description, false)));
         if (theme.File.Night is not null) rows.AddRange(DaylightRows(theme.File));
+        GlassAutoDetails(chosen, name, rows);
         // Glass needs Windows' transparency effects; without them it is drawn opaque, and the page says why.
         if (PanelThemes.Resolve(theme).IsGlass && (!MotionEnvironment.Transparency || SystemParameters.HighContrast))
             rows.Add(Row(Loc.T("提示", "Note"), Wrapped(SystemParameters.HighContrast

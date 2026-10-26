@@ -63,6 +63,9 @@ internal sealed class SystemSampler : IDisposable
     // The newest readings while the sampler runs; null once it has paused. Raised on the UI thread.
     public MonitorSnapshot? Latest { get; private set; }
     public event Action<MonitorSnapshot>? Updated;
+    // The saved choice of graphics adapter was found under an older key (the first) and is to be saved under its key now (the
+    // second). Raised on the UI thread.
+    public event Action<string, string>? GpuKeyUpgraded;
     // While set, rows already in the process lists keep their rank (the pointer is over a list).
     public bool HoldProcesses { get => _processes.Hold; set => _processes.Hold = value; }
 
@@ -232,7 +235,10 @@ internal sealed class SystemSampler : IDisposable
     private MonitorSnapshot WithGpu(MonitorSnapshot snapshot, ulong previousAuto, out bool automatic)
     {
         var (key, name) = _gpuChoice();
-        return GpuChoice.Resolve(snapshot.Gpus, key, name, previousAuto, out automatic) is { } gpu ? snapshot with { Gpu = gpu, GpuHistory = gpu.History } : snapshot;
+        if (GpuChoice.Resolve(snapshot.Gpus, key, name, previousAuto, out automatic, out var upgrade) is not { } gpu) return snapshot;
+        // A choice found by an older mark (a key saved before adapters had a location) is saved again under the adapter's key.
+        if (upgrade is not null) _dispatcher.BeginInvoke(DispatcherPriority.Background, () => GpuKeyUpgraded?.Invoke(key!, upgrade));
+        return snapshot with { Gpu = gpu, GpuHistory = gpu.History };
     }
     // Shows the newest readings again for a new choice of graphics adapter, at once instead of with the next reading.
     public void ShowGpuChoice()

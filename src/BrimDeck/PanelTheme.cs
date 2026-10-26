@@ -61,8 +61,8 @@ internal static class PanelTheme
         _loaded = true;
     }
 
-    // The theme an id stands for now, "system" following the Windows app theme.
-    public static PanelThemeInfo Find(string id) => PanelThemes.Find(id, PanelThemes.NormalizeId(id) == PanelThemes.SystemId && SettingsPalette.IsDark(SettingsTheme.System), UserThemes);
+    // The theme an id stands for now, "system" following the Windows app theme (automatic liquid glass its look, LiquidTheme.Look).
+    public static PanelThemeInfo Find(string id) => PanelThemes.Find(LiquidTheme.Look(id), PanelThemes.NormalizeId(id) == PanelThemes.SystemId && SettingsPalette.IsDark(SettingsTheme.System), UserThemes);
 
     // Resolves the theme the settings choose and, when it differs from the one in use, makes it current. Returns whether it changed.
     // Theme files change only through a reload, so the same choice resolves to the same palette unless Windows has switched

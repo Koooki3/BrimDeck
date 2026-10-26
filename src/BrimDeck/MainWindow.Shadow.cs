@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -23,10 +23,12 @@ public partial class MainWindow
     private void InitializeShadow()
     {
         _shadowCache = ShadowHost.CacheMode as BitmapCache;
-        _shadowSettle = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
+        _shadowSettle = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(ShadowSettleMs) };
         _shadowSettle.Tick += (_, _) => { _shadowSettle.Stop(); if (ShadowHost.Opacity > 0) ShadowHost.CacheMode = _shadowCache; };
         // The host's size follows the island's margin as well (the island sinks into place as the panel closes).
-        IslandShadow.SizeChanged += (_, _) => ShadowChanging(); ShadowHost.SizeChanged += (_, _) => ShadowChanging();
+        // Under liquid glass the shadow's size follows the island's too (ShadowSizeChanged, MainWindow.ShadowLook).
+        IslandShadow.SizeChanged += (_, _) => { ShadowChanging(); ShadowSizeChanged(); };
+        ShadowHost.SizeChanged += (_, _) => ShadowChanging();
         // The color, corners and shoulders the shadow takes from the island; Changed is raised on each frame of a color animation.
         _surface.Changed += (_, _) => ShadowChanging();
         var corners = DependencyPropertyDescriptor.FromProperty(Border.CornerRadiusProperty, typeof(IslandBorder));
@@ -36,10 +38,13 @@ public partial class MainWindow
         corners.AddValueChanged(Island, ShapeChanged);
         shoulders.AddValueChanged(Island, ShapeChanged);
         // Hidden (the open panel, the line), the picture is let go; shown again, it is kept at once unless a change is under way.
+        // Coming back at rest after the panel opened over liquid glass, the picture may be kept at once (ShadowShowing,
+        // MainWindow.ShadowLook).
         void OpacityChanged(object? sender, EventArgs e)
         {
-            if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
-            else if (ShadowHost.CacheMode is null && !_shadowSettle.IsEnabled) ShadowHost.CacheMode = _shadowCache;
+            if (ShadowHost.Opacity <= 0) { ShadowHost.CacheMode = null; return; }
+            ShadowShowing();
+            if (ShadowHost.CacheMode is null && _shadowSettle?.IsEnabled == false) ShadowHost.CacheMode = _shadowCache;
         }
         opacity.AddValueChanged(ShadowHost, OpacityChanged);
         if (ShadowHost.Opacity <= 0) ShadowHost.CacheMode = null;
@@ -52,8 +57,16 @@ public partial class MainWindow
             opacity.RemoveValueChanged(ShadowHost, OpacityChanged);
             _shadowSettle.Stop();
             _shadowSettle = null;
+            ShadowClosed();
         };
     }
+
+    private const int ShadowSettleMs = 250;
+    // The liquid glass shadow's hooks (MainWindow.ShadowLook); without it (the WindowsTests' minimal window) they are nothing.
+    partial void ShadowSizeChanged();
+    partial void ShadowShowing();
+    partial void ShadowClosed();
+    partial void ShadowScaleSeen(double scale);
 
     private void ShadowChanging()
     {
@@ -70,6 +83,7 @@ public partial class MainWindow
     {
         if (_shadowCache is not { } cache || IslandShadow.Effect is not DropShadowEffect effect || !(scale > 0)) return;
         double render = scale / SystemScale;
+        ShadowScaleSeen(scale);
         if (cache.RenderAtScale != render) cache.RenderAtScale = render;
         double reach = Math.Ceiling((effect.BlurRadius + effect.ShadowDepth + 2) * scale) / scale;
         var margin = new Thickness(-reach);

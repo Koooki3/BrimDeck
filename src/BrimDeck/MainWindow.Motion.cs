@@ -22,7 +22,7 @@ public partial class MainWindow
     private void InitializeMotion()
     {
         var content = (Panel)Island.Child;
-        _ambient = new AmbientGlow(Island, content, MotionState, () => _expanded);
+        _ambient = new AmbientGlow(Island, content, MotionState, () => _expanded, () => LiquidGlassShown);
         _fx = InteractionFx.Island(this, Island, content, () => _expanded && !_preview);
         _collapse = new CollapseTexture();
         content.Children.Insert(content.Children.IndexOf(ExpandedContent) + 1, _collapse);
