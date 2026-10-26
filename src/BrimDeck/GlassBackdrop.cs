@@ -158,7 +158,7 @@ internal sealed class GlassBackdrop : IDisposable
     // of looks a second at what lies around the island, never in the frame's path. It rises at once when the text needs more
     // and comes down only after the backdrop stayed calmer for ProbeDwellMs (a video's flashes never make it pump); automatic
     // liquid glass's look takes the same reading through GlassAppearance (its prior, hysteresis, dwell and video hold).
-    private double _luminosity = GlassEffect.LuminosityBase;
+    private double _luminosity = GlassEffect.LuminosityCapsule, _luminosityShown = GlassEffect.LuminosityBase;
     private long _lowerSince = -1;
     private DispatcherTimer? _probe;
     private GlassAppearance? _probeLook;
@@ -445,6 +445,9 @@ internal sealed class GlassBackdrop : IDisposable
             // The acrylic body covers the island's whole outline as liquid glass did (its surface steps aside), and the rim
             // lies along that outline.
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
+            // The luminosity layer for the text (the probe's) and the thickness for the island's size (GlassEffect.Shown).
+            double shownLuminosity = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0);
+            if (shownLuminosity != _luminosityShown) { _luminosityShown = shownLuminosity; _brushFor = null; }
             Dress();
             // Its top follows the island's top corners continuously (live check 10-26: expanding, the top edge flickered - the
             // blur's clip jumped from a rounded top at the island's edge to a square one reaching above the screen the frame
@@ -818,7 +821,7 @@ internal sealed class GlassBackdrop : IDisposable
         if (AcrylicBody)
             try
             {
-                _sprite.Brush = GlassEffect.Acrylic(compositor, (PanelTheme.Current.IsDark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = _luminosity });
+                _sprite.Brush = GlassEffect.Acrylic(compositor, (PanelTheme.Current.IsDark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = _luminosityShown });
                 return;
             }
             catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or InvalidCastException) { }
@@ -961,7 +964,12 @@ internal sealed class GlassBackdrop : IDisposable
         }
         else _probeLook = null;
 
-        void Redress() { _brushFor = null; Dress(); }
+        void Redress()
+        {
+            double shown = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0);
+            if (shown == _luminosityShown) return;
+            _luminosityShown = shown; _brushFor = null; Dress();
+        }
     }
 
     // No blur now, the window kept for the next time.

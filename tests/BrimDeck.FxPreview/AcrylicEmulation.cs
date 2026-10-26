@@ -13,7 +13,7 @@ internal static class AcrylicEmulation
     // The luminosity opacity of the last drawing (for the page notes).
     internal static double Luminosity { get; private set; }
 
-    internal static byte[] Draw(byte[] desktop, int dw, int dh, int gx, int gy, int w, int h, byte[] coverage, bool dark, double scale)
+    internal static byte[] Draw(byte[] desktop, int dw, int dh, int gx, int gy, int w, int h, byte[] coverage, bool dark, double scale, double openness)
     {
         // The luminosity layer as the app's probe sets it (AcrylicProbe): from the ring left, right and below the island, 24 to
         // 64 DIPs outside it.
@@ -33,7 +33,7 @@ internal static class AcrylicEmulation
         Ring(gx - gap - band, gy + h + gap, gx + w + gap + band, gy + h + gap + band);
         ring.Sort();
         double bright = ring.Count > 0 ? ring[(int)(ring.Count * .9)] : .5, darkest = ring.Count > 0 ? ring[(int)(ring.Count * .1)] : .5;
-        Luminosity = GlassEffect.LuminosityFor(dark, bright, darkest);
+        Luminosity = GlassEffect.Shown(GlassEffect.LuminosityFor(dark, bright, darkest), openness);
         var look = (dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = Luminosity };
         var m = GlassEffect.AcrylicMatrix(look);
         // The blurred desktop over the island and a margin as wide as the blur reaches.
