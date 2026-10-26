@@ -13,7 +13,9 @@ public enum NoticeGlyph
     // Sources.
     Desktop, Terminal, Linux, Phone, Browser, Assistant, Build,
     // Application types.
-    Game, Music, Video, Cloud, Code
+    Game, Music, Video, Cloud, Code,
+    // Devices, for BrimDeck's own device notices (the devices page's icons, DeviceIcons), and a low battery state.
+    Mouse, Keyboard, Headphones, Earbuds, Controller, Pen, Speaker, Device, BatteryLow
 }
 
 // How a glyph is colored: with the text colors, the accent, or the state colors, all made readable on the theme's surface.
@@ -62,7 +64,15 @@ public static class NoticeGlyphs
         [NoticeGlyph.Video] = "M3.75,5 H12.25 Q13.5,5 13.5,6.25 V13.75 Q13.5,15 12.25,15 H3.75 Q2.5,15 2.5,13.75 V6.25 Q2.5,5 3.75,5 Z M13.5,8.5 L17.5,6.25 V13.75 L13.5,11.5",
         [NoticeGlyph.Cloud] = "M6,15.5 Q2.5,15.5 2.5,12.25 Q2.5,9.25 5.5,9 Q6,4.75 10.25,4.75 Q14,4.75 14.75,8.5 Q17.5,8.75 17.5,12 Q17.5,15.5 14,15.5 Z",
         [NoticeGlyph.Code] = "M7,6 L3,10 L7,14 M13,6 L17,10 L13,14 M11.25,4.5 L8.75,15.5",
+        [NoticeGlyph.Mouse] = OfDevice(DeviceKind.Mouse), [NoticeGlyph.Keyboard] = OfDevice(DeviceKind.Keyboard),
+        [NoticeGlyph.Headphones] = OfDevice(DeviceKind.Headphones), [NoticeGlyph.Earbuds] = OfDevice(DeviceKind.Earbuds),
+        [NoticeGlyph.Controller] = OfDevice(DeviceKind.Controller), [NoticeGlyph.Pen] = OfDevice(DeviceKind.Pen),
+        [NoticeGlyph.Speaker] = OfDevice(DeviceKind.Speaker), [NoticeGlyph.Device] = OfDevice(DeviceKind.Other),
+        [NoticeGlyph.BatteryLow] = "M3.75,6 H14.5 Q15.75,6 15.75,7.25 V12.75 Q15.75,14 14.5,14 H3.75 Q2.5,14 2.5,12.75 V7.25 Q2.5,6 3.75,6 Z M17.5,8.5 V11.5 M5,8.5 V11.5",
     };
+
+    // A device's icon from its 24 unit grid onto this one: 2..22 becomes 2..18, the span the glyphs keep their lines in.
+    private static string OfDevice(DeviceKind kind) => DeviceIcons.Scaled(kind, .8, .4);
 
     // The bare marks drawn inside a small round badge, where an outline around them would only crowd it. Stroked MarkStroke wide.
     private static readonly Dictionary<NoticeGlyph, string> Marks = new()
@@ -72,6 +82,8 @@ public static class NoticeGlyphs
         [NoticeGlyph.Warning] = "M10,4.75 V11 M10,15 V15.01",
         [NoticeGlyph.Info] = "M10,9 V15 M10,5.25 V5.26",
         [NoticeGlyph.Progress] = "M10,4.5 A5.5,5.5 0 1 1 4.5,10",
+        // An empty battery: the level is the notice's to say.
+        [NoticeGlyph.BatteryLow] = "M3.5,6.5 H14.5 V13.5 H3.5 Z M17,9 V11",
     };
 
     public static IReadOnlyCollection<NoticeGlyph> All { get; } = Enum.GetValues<NoticeGlyph>();
@@ -97,6 +109,10 @@ public static class NoticeGlyphs
         ["linux"] = NoticeGlyph.Linux, ["phone"] = NoticeGlyph.Phone, ["browser"] = NoticeGlyph.Browser, ["web"] = NoticeGlyph.Browser,
         ["assistant"] = NoticeGlyph.Assistant, ["agent"] = NoticeGlyph.Assistant, ["ai"] = NoticeGlyph.Assistant,
         ["build"] = NoticeGlyph.Build, ["ci"] = NoticeGlyph.Build, ["game"] = NoticeGlyph.Game, ["cloud"] = NoticeGlyph.Cloud, ["code"] = NoticeGlyph.Code,
+        ["mouse"] = NoticeGlyph.Mouse, ["keyboard"] = NoticeGlyph.Keyboard, ["headphones"] = NoticeGlyph.Headphones, ["headset"] = NoticeGlyph.Headphones,
+        ["earbuds"] = NoticeGlyph.Earbuds, ["controller"] = NoticeGlyph.Controller, ["gamepad"] = NoticeGlyph.Controller, ["pen"] = NoticeGlyph.Pen,
+        ["stylus"] = NoticeGlyph.Pen, ["speaker"] = NoticeGlyph.Speaker, ["device"] = NoticeGlyph.Device,
+        ["battery-low"] = NoticeGlyph.BatteryLow, ["low-battery"] = NoticeGlyph.BatteryLow,
     };
     public static NoticeGlyph? Kind(string? name) => name is { Length: > 0 } && Kinds.TryGetValue(name.Trim(), out var glyph) ? glyph : null;
 
@@ -110,7 +126,7 @@ public static class NoticeGlyphs
     public static NoticeGlyphTone Tone(NoticeGlyph glyph) => glyph switch
     {
         NoticeGlyph.Success => NoticeGlyphTone.Success, NoticeGlyph.Warning => NoticeGlyphTone.Warning, NoticeGlyph.Error => NoticeGlyphTone.Danger,
-        NoticeGlyph.Info => NoticeGlyphTone.Info, NoticeGlyph.Progress or NoticeGlyph.Task or NoticeGlyph.Download or NoticeGlyph.Upload or NoticeGlyph.Update
+        NoticeGlyph.Info => NoticeGlyphTone.Info, NoticeGlyph.BatteryLow => NoticeGlyphTone.Warning, NoticeGlyph.Progress or NoticeGlyph.Task or NoticeGlyph.Download or NoticeGlyph.Upload or NoticeGlyph.Update
             or NoticeGlyph.Alarm or NoticeGlyph.Timer or NoticeGlyph.Countdown or NoticeGlyph.Calendar or NoticeGlyph.Meeting or NoticeGlyph.Call => NoticeGlyphTone.Accent,
         _ => NoticeGlyphTone.Primary
     };
@@ -125,6 +141,28 @@ public static class NoticeGlyphs
         NoticeOrigin.Windows when IsWebApp(appKey) => NoticeGlyph.Browser,
         _ => null
     };
+
+    // The glyph a device's notice shows in place of an application icon.
+    public static NoticeGlyph Device(DeviceKind kind) => kind switch
+    {
+        DeviceKind.Mouse => NoticeGlyph.Mouse, DeviceKind.Keyboard => NoticeGlyph.Keyboard, DeviceKind.Headphones => NoticeGlyph.Headphones,
+        DeviceKind.Earbuds => NoticeGlyph.Earbuds, DeviceKind.Controller => NoticeGlyph.Controller, DeviceKind.Pen => NoticeGlyph.Pen,
+        DeviceKind.Speaker => NoticeGlyph.Speaker, _ => NoticeGlyph.Device
+    };
+
+    public static bool IsDevice(NoticeGlyph glyph) => glyph is >= NoticeGlyph.Mouse and <= NoticeGlyph.Device;
+
+    // BrimDeck's own notices name their icon as a glyph ("glyph:Mouse") rather than an image. Only those: a sender's icon is
+    // always a file (NoticeIntake.IconRef), so no one else can borrow BrimDeck's glyphs this way.
+    public const string GlyphRefPrefix = "glyph:";
+    public static string GlyphRef(NoticeGlyph glyph) => GlyphRefPrefix + glyph;
+    public static bool IsGlyphRef(string? iconRef) => iconRef?.StartsWith(GlyphRefPrefix, StringComparison.Ordinal) == true;
+    public static NoticeGlyph? Own(NoticeOrigin origin, string? iconRef)
+        => origin == NoticeOrigin.BrimDeck && IsGlyphRef(iconRef) && Enum.TryParse<NoticeGlyph>(iconRef![GlyphRefPrefix.Length..], out var glyph)
+            && Enum.IsDefined(glyph) && !char.IsDigit(iconRef[GlyphRefPrefix.Length]) ? glyph : null;
+
+    // The glyph a notice's plate shows when it has no image: BrimDeck's own glyph, else the kind of application.
+    public static NoticeGlyph? Plate(Notice notice) => Own(notice.Origin, notice.IconRef) ?? App(notice.AppKey, notice.AppName, notice.Origin);
 
     // A web app installed from a browser (its notices come through the browser under the app's own name).
     public static bool IsWebApp(string appKey) => appKey.Contains("_crx_", StringComparison.OrdinalIgnoreCase);
@@ -204,7 +242,10 @@ public static class NoticeGlyphs
         NoticeGlyph.Linux => "WSL", NoticeGlyph.Phone => Loc.T("手机", "Phone"), NoticeGlyph.Browser => Loc.T("网页应用", "Web app"),
         NoticeGlyph.Assistant => Loc.T("AI 助手", "AI assistant"), NoticeGlyph.Build => Loc.T("构建", "Build"), NoticeGlyph.Game => Loc.T("游戏", "Game"),
         NoticeGlyph.Music => Loc.T("音乐", "Music"), NoticeGlyph.Video => Loc.T("视频", "Video"), NoticeGlyph.Cloud => Loc.T("云存储", "Cloud storage"),
-        NoticeGlyph.Code => Loc.T("代码", "Code"), _ => glyph.ToString()
+        NoticeGlyph.Code => Loc.T("代码", "Code"), NoticeGlyph.Mouse => Loc.T("鼠标", "Mouse"), NoticeGlyph.Keyboard => Loc.T("键盘", "Keyboard"),
+        NoticeGlyph.Headphones => Loc.T("耳机", "Headphones"), NoticeGlyph.Earbuds => Loc.T("入耳式耳机", "Earbuds"), NoticeGlyph.Controller => Loc.T("手柄", "Controller"),
+        NoticeGlyph.Pen => Loc.T("触控笔", "Pen"), NoticeGlyph.Speaker => Loc.T("音箱", "Speaker"), NoticeGlyph.Device => Loc.T("设备", "Device"),
+        NoticeGlyph.BatteryLow => Loc.T("电量低", "Low battery"), _ => glyph.ToString()
     };
 }
 

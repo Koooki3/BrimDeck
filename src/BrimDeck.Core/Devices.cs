@@ -7,6 +7,48 @@ namespace BrimDeck.Core;
 // What a device is, for its icon and its place in the order. Not saved.
 public enum DeviceKind { Mouse, Keyboard, Headphones, Earbuds, Controller, Pen, Speaker, Other }
 
+// The devices' icons on a 24 unit grid, line drawings meant to be stroked with round caps and never filled. The devices page
+// draws them as they are; the notice glyphs take the same drawings onto their 20 unit grid (Scaled), so a device's notice
+// shows the icon its card does.
+public static class DeviceIcons
+{
+    public const double Grid = 24;
+
+    private static readonly Dictionary<DeviceKind, string> Paths = new()
+    {
+        [DeviceKind.Mouse] = "M12,3 C8.1,3 6,5.6 6,9.5 V14.5 C6,18.4 8.6,21 12,21 C15.4,21 18,18.4 18,14.5 V9.5 C18,5.6 15.9,3 12,3 Z M12,3 V10 M6,10 H18",
+        [DeviceKind.Keyboard] = "M3.5,6.5 H20.5 A1.5,1.5 0 0 1 22,8 V16 A1.5,1.5 0 0 1 20.5,17.5 H3.5 A1.5,1.5 0 0 1 2,16 V8 A1.5,1.5 0 0 1 3.5,6.5 Z M6,10 H6.01 M9.3,10 H9.31 M12.6,10 H12.61 M15.9,10 H15.91 M18.2,10 H18.21 M7.5,14 H16.5",
+        [DeviceKind.Headphones] = "M4,15 V12 A8,8 0 0 1 20,12 V15 M4,14.5 H6.5 A1,1 0 0 1 7.5,15.5 V19 A1,1 0 0 1 6.5,20 H5 A1,1 0 0 1 4,19 Z M20,14.5 H17.5 A1,1 0 0 0 16.5,15.5 V19 A1,1 0 0 0 17.5,20 H19 A1,1 0 0 0 20,19 Z",
+        [DeviceKind.Earbuds] = "M7.5,4.5 A3,3 0 1 1 7.5,10.5 A3,3 0 1 1 7.5,4.5 Z M9.2,9.9 L10,19.5 M16.5,4.5 A3,3 0 1 0 16.5,10.5 A3,3 0 1 0 16.5,4.5 Z M14.8,9.9 L14,19.5",
+        [DeviceKind.Controller] = "M7.5,7 H16.5 C19.5,7 21.5,9.5 21.8,13 L22.2,16.5 C22.4,18.5 20,19.6 18.6,18 L16.5,15.6 H7.5 L5.4,18 C4,19.6 1.6,18.5 1.8,16.5 L2.2,13 C2.5,9.5 4.5,7 7.5,7 Z M7,10 V13 M5.5,11.5 H8.5 M16,10.6 H16.01 M17.6,12.4 H17.61",
+        [DeviceKind.Pen] = "M16.5,3.5 L20.5,7.5 L8.5,19.5 L3.5,20.5 L4.5,15.5 Z M14.5,5.5 L18.5,9.5",
+        [DeviceKind.Speaker] = "M7,3 H17 A1.5,1.5 0 0 1 18.5,4.5 V19.5 A1.5,1.5 0 0 1 17,21 H7 A1.5,1.5 0 0 1 5.5,19.5 V4.5 A1.5,1.5 0 0 1 7,3 Z M12,10.5 A3.5,3.5 0 1 1 12,17.5 A3.5,3.5 0 1 1 12,10.5 Z M12,6.5 H12.01",
+        [DeviceKind.Other] = "M12,3 L20,7.5 V16.5 L12,21 L4,16.5 V7.5 Z M12,12 L20,7.5 M12,12 L4,7.5 M12,12 V21",
+    };
+
+    public static string PathData(DeviceKind kind) => Paths.TryGetValue(kind, out var data) ? data : Paths[DeviceKind.Other];
+
+    // The icon with every point p moved to p * scale + offset (arc radii scaled, rotations and flags kept). Only the absolute
+    // commands the icons use (M L H V C Q A Z).
+    public static string Scaled(DeviceKind kind, double scale, double offset)
+    {
+        var tokens = System.Text.RegularExpressions.Regex.Matches(PathData(kind), @"[A-Za-z]|-?\d*\.?\d+").Select(match => match.Value).ToList();
+        var text = new System.Text.StringBuilder();
+        char command = 'M';
+        int at = 0;
+        foreach (var token in tokens)
+        {
+            if (char.IsLetter(token[0])) { command = token[0]; at = 0; text.Append(text.Length > 0 ? " " : "").Append(command); continue; }
+            double value = double.Parse(token, System.Globalization.CultureInfo.InvariantCulture);
+            int arity = command switch { 'H' or 'V' => 1, 'C' => 6, 'Q' => 4, 'A' => 7, _ => 2 };
+            int index = at++ % arity;
+            value = command == 'A' ? index switch { < 2 => value * scale, < 5 => value, _ => value * scale + offset } : value * scale + offset;
+            text.Append(index == 0 ? " " : ",").Append(Math.Round(value, 3).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        return text.ToString();
+    }
+}
+
 // Where a reading comes from, roughly from the most to the least exact. A device seen by more than one source keeps the
 // reading of the first in this order that has a percentage (DeviceRoster.Merge).
 public enum DeviceSource { Logitech, Razer, SteelSeries, HyperX, Sony, Apple, Gatt, Gaming, Hid, Bluetooth }

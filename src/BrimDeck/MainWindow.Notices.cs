@@ -621,7 +621,7 @@ public partial class MainWindow
     private FrameworkElement NoticePlate(Notice notice, double size)
     {
         var plate = new Grid { Width = size, Height = size };
-        if (!FillPlate(plate, notice) && notice.IconRef is { } iconRef)
+        if (!FillPlate(plate, notice) && notice.IconRef is { } iconRef && !NoticeGlyphs.IsGlyphRef(iconRef))
         {
             if (!_waitingPlates.TryGetValue(iconRef, out var plates)) _waitingPlates[iconRef] = plates = [];
             plates.Add((plate, notice));
@@ -644,7 +644,7 @@ public partial class MainWindow
             var name = notice.AppName.Trim();
             plate.Children.Add(new TextBlock { Text = name.Length == 0 ? "?" : char.IsSurrogate(name[0]) && name.Length > 1 ? name[..2] : name[..1].ToUpper(Loc.Culture), FontFamily = UI.DisplayFont, FontSize = Math.Round(size * .48), FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(color), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         }
-        NoticeBadges.Decorate(plate, notice, size, NoticeLook.Current().Glow, image is null ? NoticeGlyphs.App(notice.AppKey, notice.AppName, notice.Origin) : null);
+        NoticeBadges.Decorate(plate, notice, size, NoticeLook.Current().Glow, image is null ? NoticeGlyphs.Plate(notice) : null);
         return image is not null;
     }
 

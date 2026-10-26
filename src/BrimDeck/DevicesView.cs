@@ -322,20 +322,11 @@ internal sealed class DevicesView : FrameworkElement
     }
 }
 
-// The devices' icons on a 24 unit grid, stroked as the page switch's icons are, and the marks drawn inside the battery.
+// The devices' icons (DeviceIcons, shared with the device notices), stroked as the page switch's icons are, and the marks
+// drawn inside the battery.
 internal static class DeviceGlyphs
 {
-    private static readonly Dictionary<DeviceKind, Geometry> Icons = new()
-    {
-        [DeviceKind.Mouse] = Frozen("M12,3 C8.1,3 6,5.6 6,9.5 V14.5 C6,18.4 8.6,21 12,21 C15.4,21 18,18.4 18,14.5 V9.5 C18,5.6 15.9,3 12,3 Z M12,3 V10 M6,10 H18"),
-        [DeviceKind.Keyboard] = Frozen("M3.5,6.5 H20.5 A1.5,1.5 0 0 1 22,8 V16 A1.5,1.5 0 0 1 20.5,17.5 H3.5 A1.5,1.5 0 0 1 2,16 V8 A1.5,1.5 0 0 1 3.5,6.5 Z M6,10 H6.01 M9.3,10 H9.31 M12.6,10 H12.61 M15.9,10 H15.91 M18.2,10 H18.21 M7.5,14 H16.5"),
-        [DeviceKind.Headphones] = Frozen("M4,15 V12 A8,8 0 0 1 20,12 V15 M4,14.5 H6.5 A1,1 0 0 1 7.5,15.5 V19 A1,1 0 0 1 6.5,20 H5 A1,1 0 0 1 4,19 Z M20,14.5 H17.5 A1,1 0 0 0 16.5,15.5 V19 A1,1 0 0 0 17.5,20 H19 A1,1 0 0 0 20,19 Z"),
-        [DeviceKind.Earbuds] = Frozen("M7.5,4.5 A3,3 0 1 1 7.5,10.5 A3,3 0 1 1 7.5,4.5 Z M9.2,9.9 L10,19.5 M16.5,4.5 A3,3 0 1 0 16.5,10.5 A3,3 0 1 0 16.5,4.5 Z M14.8,9.9 L14,19.5"),
-        [DeviceKind.Controller] = Frozen("M7.5,7 H16.5 C19.5,7 21.5,9.5 21.8,13 L22.2,16.5 C22.4,18.5 20,19.6 18.6,18 L16.5,15.6 H7.5 L5.4,18 C4,19.6 1.6,18.5 1.8,16.5 L2.2,13 C2.5,9.5 4.5,7 7.5,7 Z M7,10 V13 M5.5,11.5 H8.5 M16,10.6 H16.01 M17.6,12.4 H17.61"),
-        [DeviceKind.Pen] = Frozen("M16.5,3.5 L20.5,7.5 L8.5,19.5 L3.5,20.5 L4.5,15.5 Z M14.5,5.5 L18.5,9.5"),
-        [DeviceKind.Speaker] = Frozen("M7,3 H17 A1.5,1.5 0 0 1 18.5,4.5 V19.5 A1.5,1.5 0 0 1 17,21 H7 A1.5,1.5 0 0 1 5.5,19.5 V4.5 A1.5,1.5 0 0 1 7,3 Z M12,10.5 A3.5,3.5 0 1 1 12,17.5 A3.5,3.5 0 1 1 12,10.5 Z M12,6.5 H12.01"),
-        [DeviceKind.Other] = Frozen("M12,3 L20,7.5 V16.5 L12,21 L4,16.5 V7.5 Z M12,12 L20,7.5 M12,12 L4,7.5 M12,12 V21"),
-    };
+    private static readonly Dictionary<DeviceKind, Geometry> Icons = Enum.GetValues<DeviceKind>().ToDictionary(kind => kind, kind => Frozen(DeviceIcons.PathData(kind)));
     private static readonly Geometry BoltShape = Frozen("M13.5,0.5 L4.5,13.5 H11 L10,23.5 L19.5,9.5 H13 Z");
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
 
@@ -365,7 +356,7 @@ internal static class DeviceGlyphs
 
     public static void Draw(DrawingContext drawing, DeviceKind kind, Rect at, string color)
     {
-        drawing.PushTransform(Placed(at.Width / 24, at.X, at.Y));
+        drawing.PushTransform(Placed(at.Width / DeviceIcons.Grid, at.X, at.Y));
         drawing.DrawGeometry(null, Stroke(color, 1.65), Icon(kind));
         drawing.Pop();
     }

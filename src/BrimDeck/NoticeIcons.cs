@@ -36,7 +36,8 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
     public BitmapSource? Get(string? iconRef, out Color? accent)
     {
         accent = null;
-        if (string.IsNullOrEmpty(iconRef)) return null;
+        // BrimDeck's own glyphs are drawn, not loaded (NoticeGlyphs.Own).
+        if (string.IsNullOrEmpty(iconRef) || NoticeGlyphs.IsGlyphRef(iconRef)) return null;
         if (_cache.TryGetValue(iconRef, out var entry))
         {
             _order.Remove(entry.Node); _order.AddFirst(entry.Node);

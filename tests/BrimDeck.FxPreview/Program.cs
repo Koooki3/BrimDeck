@@ -101,6 +101,8 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--liquid-looks") return LiquidLooks.Run();
         // The devices page in every theme (DevicesSheet): --devices <output folder>; the devices on this PC, read only: --devices-probe.
         if (args.Length > 1 && args[0] == "--devices") return DevicesSheet.Run(args[1]);
+        // A device's low battery notice in every theme (DeviceNoticeSheet): --device-notice <output folder>.
+        if (args.Length > 1 && args[0] == "--device-notice") return DeviceNoticeSheet.Run(args[1]);
         if (args.Length > 0 && args[0] == "--devices-cost") return DevicesSheet.Cost(args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 60);
         if (args.Length > 0 && args[0] == "--devices-probe") return DevicesSheet.Probe(args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 12);
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
