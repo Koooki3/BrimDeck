@@ -43,8 +43,9 @@ internal sealed partial class FxSurface
         _lastBurst = now;
         uint seed = (uint)mark.Serial * 2654435761u;
         double Next() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed & 0xFFFFFF) / (double)0x1000000; }
-        // The theme's pace alone, as every answer to the pointer (motion-review C5).
-        double scale = Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
+        // The theme's pace alone, as every answer to the pointer (motion-review C5), or the theme's own length for its particles
+        // in place of the style's (Life), each particle keeping its own spread around it.
+        double scale = _motion.ParticleMs > 0 ? _motion.ParticleMs / 1000.0 / Life(_motion.Particles) : Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
         switch (_motion.Particles)
         {
             case ParticleFx.Star:
@@ -78,14 +79,19 @@ internal sealed partial class FxSurface
                 break;
             case ParticleFx.Rain:
                 // Three or four streaks 1 x 6 DIP from just below the bottom edge, falling a little aslant (the wallpaper's
-                // wind, mostly its downward part) for half a second. Vx and Vy are how far each falls across and down.
+                // wind, mostly its downward part) 22 to 28 DIP over about a second, slowly enough to follow. Vx and Vy are how
+                // far each falls across and down.
                 for (int i = 0, n = 3 + (int)(Next() * 2); i < n; i++)
-                    Spawn(r.Left + r.Width * ((i + .5 + .5 * (Next() - .5)) / n), r.Bottom + 2 + 2 * Next(), RainSlant * 16, 14 + 4 * Next(), .5, 6, false);
+                {
+                    double fall = 22 + 6 * Next();
+                    Spawn(r.Left + r.Width * ((i + .5 + .5 * (Next() - .5)) / n), r.Bottom + 2 + 2 * Next(), RainSlant * fall, fall, .9 + .2 * Next(), 6, false);
+                }
                 break;
             case ParticleFx.Bubble:
-                // Three to five bubbles 2 to 4 DIP across from the bottom edge, rising 18 to 28 DIP over 0.8 to 1.2 s and swaying.
+                // Three to five bubbles 2 to 4 DIP across from the bottom edge, rising 22 to 32 DIP over 0.8 to 1.2 s (or the
+                // theme's particleMs) and swaying.
                 for (int i = 0, n = 3 + (int)(Next() * 3); i < n; i++)
-                    Spawn(r.Left + r.Width * (.15 + .7 * (i + Next()) / n), r.Bottom - 2, 0, -(18 + 10 * Next()), .8 + .4 * Next(), 2 + 2 * Next(), i % 2 == 1);
+                    Spawn(r.Left + r.Width * (.15 + .7 * (i + Next()) / n), r.Bottom - 2, 0, -(22 + 10 * Next()), .8 + .4 * Next(), 2 + 2 * Next(), i % 2 == 1);
                 break;
         }
 
@@ -99,6 +105,13 @@ internal sealed partial class FxSurface
 
     // Rain falls this far across for each DIP down: mostly straight down, leaning with the wind.
     private const double RainSlant = .26;
+
+    // A style's own typical life in seconds, which a theme's particleMs replaces.
+    private static double Life(ParticleFx style) => style switch
+    {
+        ParticleFx.Star => .8, ParticleFx.Firefly => 1.25, ParticleFx.Dust => .65, ParticleFx.Pixel => .7, ParticleFx.Spark => .35,
+        ParticleFx.Neon => .5, ParticleFx.Rain => 1, ParticleFx.Bubble => 1, _ => 1
+    };
 
     // Whether any particle is still alive.
     private bool StepParticles(double now)
@@ -158,10 +171,11 @@ internal sealed partial class FxSurface
                     break;
                 case ParticleFx.Rain:
                 {
-                    // Falling faster as it goes, a streak along its own way down; at most a quarter opaque.
+                    // Falling faster as it goes, a streak along its own way down; at most a quarter opaque, held so until well into
+                    // its fall and only then fading, so it can be followed.
                     double fall = t * (.6 + .4 * t);
                     double hx = m.X + m.Vx * fall, hy = m.Y + m.Vy * fall, length = m.Size / Math.Sqrt(1 + RainSlant * RainSlant);
-                    double a = Math.Min(.25, strength) * Math.Min(1, t / .12) * (1 - t);
+                    double a = Math.Min(.25, strength) * Math.Min(1, t / .12) * (1 - CollapseFx.SmoothStep(.55, 1, t));
                     if (a > .001) { dc.PushOpacity(a); dc.DrawLine(_highLine, new Point(hx - RainSlant * length, hy - length), new Point(hx, hy)); dc.Pop(); }
                     break;
                 }

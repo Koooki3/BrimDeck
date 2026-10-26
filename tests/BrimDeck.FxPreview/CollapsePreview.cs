@@ -20,6 +20,9 @@ internal static class CollapsePreview
     // How long starting the last measured picture took: the snapshot, its pixels and the first frame.
     private static double _startMs;
     private static double _now;
+    // --step: frames this many seconds apart across the picture (0: ten frames); the theme whose motion is shown.
+    public static double FrameStep;
+    private static ThemeMotion _motion = ThemeMotion.Default;
 
     public static int Run(string folder, HashSet<string>? only)
     {
@@ -106,22 +109,25 @@ internal static class CollapsePreview
         var from = Bounds(s, s.Notice);
         s.Notice.Visibility = Visibility.Hidden;
         s.Stage.UpdateLayout();
-        s.Layer.Play(style, snapshot, from, Bounds(s, s.Island), 1, Colors.White, aberration, ended);
-        return CollapseFx.Length(style, 1);
+        double length = CollapseFx.Length(style, _motion.Pace, _motion.CollapseMs);
+        s.Layer.Play(style, snapshot, from, Bounds(s, s.Island), length, Colors.White, aberration, ended);
+        return length;
     }
 
     private static (List<(BitmapSource Image, string Label)> Shots, (int Frames, double Mean, double Max, double Render) Cost) Strip(PanelPalette palette, CollapseStyle style, double scale, bool panel = false)
     {
         PanelTheme.Show(palette);
+        _motion = palette.Motion;
         var s = Build(palette, scale, panel);
         var shots = new List<(BitmapSource, string)>();
         _now = 0;
         shots.Add((Render(s, scale), "before"));
         double length = Start(s, style);
-        // Ten frames across the picture and the frame after its end.
-        for (int i = 0; i <= 10; i++)
+        // Ten frames across the picture (or one every FrameStep) and the frame after its end.
+        int count = FrameStep > 0 ? (int)Math.Ceiling(length / FrameStep) : 10;
+        for (int i = 0; i <= count; i++)
         {
-            _now = length * i / 10.0 - (i == 10 ? 1e-4 : 0);
+            _now = FrameStep > 0 ? Math.Min(i * FrameStep, length - 1e-4) : length * i / 10.0 - (i == 10 ? 1e-4 : 0);
             s.Layer.Frame(_now);
             shots.Add((Render(s, scale), $"{_now * 1000:0} ms"));
         }
@@ -189,7 +195,7 @@ internal static class CollapsePreview
     private static void Save(List<(BitmapSource Image, string Label)> shots, PanelPalette palette, string title, string file)
     {
         const double gap = 6, label = 16, top = 26;
-        const int columns = 4;
+        int columns = FrameStep > 0 ? 6 : 4;
         double cellWidth = shots.Max(s => s.Image.PixelWidth), cellHeight = shots.Max(s => s.Image.PixelHeight);
         int rows = (shots.Count + columns - 1) / columns;
         double width = gap + columns * (cellWidth + gap), height = top + rows * (cellHeight + label + gap) + gap;

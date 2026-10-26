@@ -236,6 +236,9 @@ internal sealed partial class FxSurface : FrameworkElement
         }
         // The theme's pace and steps, worked out once; the panel's animation length plays no part (motion-review C5).
         _timing = MotionTiming.For(_motion.Pace, _motion.Steps);
+        // A theme's own lengths for lock's slice and scan line.
+        if (_motion.SliceMs > 0) _timing = _timing with { Glitch = _motion.SliceMs };
+        if (_motion.ScanMs > 0) _timing = _timing with { Scan = _motion.ScanMs };
     }
 
     // ----- Pointer -----

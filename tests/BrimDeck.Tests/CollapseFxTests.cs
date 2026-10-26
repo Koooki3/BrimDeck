@@ -16,6 +16,33 @@ internal static class CollapseFxTests
         Budget(check);
         Effects(check, Palette, Custom);
         Covered(check, Palette);
+        Lengths(check, Custom);
+    }
+
+    // A theme's own lengths: read in milliseconds, held to their ranges, 0 for the built-in ones.
+    private static void Lengths(Action<string, bool> check, Func<string, PanelPalette> custom)
+    {
+        var slow = custom("""{ "base": "dark", "motion": { "collapse": "glitch", "collapseMs": 480, "particleMs": 1000, "sliceMs": 120, "scanMs": 300 } }""").Motion;
+        check("Lengths: collapseMs, particleMs, sliceMs and scanMs are read and inherited",
+            slow is { CollapseMs: 480, ParticleMs: 1000, SliceMs: 120, ScanMs: 300 } && ThemeMotion.Default is { CollapseMs: 0, ParticleMs: 0, SliceMs: 0, ScanMs: 0 });
+        var wild = custom("""{ "base": "dark", "motion": { "collapseMs": 5000, "particleMs": 10, "sliceMs": 999, "scanMs": -4 } }""").Motion;
+        check("Lengths: held to 200-630, 300-2400, 50-160 and 100-400 ms (0 or less keeps the built-in)",
+            wild is { CollapseMs: 630, ParticleMs: 300, SliceMs: 160, ScanMs: 0 });
+        check("Lengths: splashMs is read and held to 300-800 ms",
+            custom("""{ "base": "dark", "motion": { "press": "splash", "splashMs": 620 } }""").Motion.SplashMs == 620
+            && custom("""{ "base": "dark", "motion": { "splashMs": 2000 } }""").Motion.SplashMs == 800 && ThemeMotion.Default.SplashMs == 0);
+        check("Lengths: a theme's collapseMs replaces the style's length, whatever its pace",
+            CollapseFx.Length(CollapseStyle.Glitch, .8, 480) == .48 && CollapseFx.Length(CollapseStyle.Glitch, .8) == .24 && CollapseFx.Length(CollapseStyle.Fade, 1, 480) == 0);
+        check("Lengths: the theme template writes them out", PanelThemes.FillTemplate("t", custom("""{ "base": "dark", "motion": { "collapseMs": 480, "scanMs": 300 } }""")) is var t
+            && t.Contains("\"collapseMs\": 480") && t.Contains("\"scanMs\": 300"));
+        // lock's slice and scan line take the theme's lengths; the scan line keeps the press alive until it has passed.
+        var timing = MotionTiming.For(.8, 3) with { Glitch = 120, Scan = 300 };
+        var press = new PressTrack();
+        press.Press(0, 0, glitch: true);
+        bool slice = press.At(.11, timing, 3).GlitchOn && !press.At(.13, timing, 3).GlitchOn;
+        press.Release(.2, inside: true, scan: true, timing, 3);
+        check("Lengths: lock's slice holds sliceMs and its scan line passes over scanMs",
+            slice && press.At(.2 + .29, timing, 3).ScanAt >= 0 && press.At(.2 + .31, timing, 3).ScanAt < 0 && press.Alive(.2 + .29, timing));
     }
 
     // One thing at a time: the ambient loop stops while a maximized or full-screen window is in front on the island's monitor.
@@ -113,7 +140,15 @@ internal static class CollapseFxTests
         }
         check($"Glitch: rows tear at most ±5% and jitter ±1.25% of the width ({limit} px of {w}), inside the canvas margin", within);
         // Three hard steps of the seed over the collapse (and the end frame's own seed): never a smooth slide.
-        check($"Glitch: the tears jump in three steps, not smoothly ({patterns.Count} patterns)", patterns.Count is >= 3 and <= 4);
+        check($"Glitch: the tears jump in three steps, not smoothly ({patterns.Count} patterns)", patterns.Count == 3);
+        // Each step holds a third of the picture: at the cyberpunk theme's 480 ms, 160 ms each, and the tears jump twice,
+        // under three changes in any second.
+        int jumps = 0; int last = GlitchCollapse.Seed(0);
+        for (double t = 0; t <= .48; t += .001) { int seed = GlitchCollapse.Seed(t / .48); if (seed != last) { jumps++; last = seed; } }
+        check("Glitch: each step holds a third of the length and the tears jump twice (under 3 a second)",
+            jumps == 2 && GlitchCollapse.Seed(.33) == 0 && GlitchCollapse.Seed(.34) == 1 && GlitchCollapse.Seed(.67) == 2 && GlitchCollapse.Seed(1) == 2);
+        check("Glitch: it breaks up and fades only in the last third",
+            GlitchCollapse.BreakupAt(.66) == 0 && GlitchCollapse.BreakupAt(1) == 1 && Math.Abs(GlitchCollapse.BreakupAt(5 / 6.0) - .5) < 1e-9);
         int active = Enumerable.Range(0, 200).Count(line => CollapseFx.GlitchHash(line, 0) >= GlitchCollapse.Threshold);
         check($"Glitch: about 45% of the bands tear ({active / 2.0:0}%)", active is > 70 and < 110);
 
@@ -129,8 +164,9 @@ internal static class CollapseFxTests
             rowsIntact &= row.SequenceEqual(source);
         }
         check("Glitch: the first frame is the whole picture, each row only moved sideways", Drawn(0) == whole && rowsIntact);
-        double share = Drawn(.5) / (double)whole, cut = 1 - CollapseFx.SmoothStep(0, 1, .5) * GlitchCollapse.Breakup;
-        check($"Glitch: it breaks up pixel by pixel (1 - 0.92p kept: {share:P0} against {cut:P0})", Math.Abs(share - cut) < .06);
+        check("Glitch: through the first two steps the whole picture shows, torn but unbroken", Drawn(.5) == whole && Drawn(.6) == whole);
+        double share = Drawn(5 / 6.0) / (double)whole, cut = 1 - CollapseFx.SmoothStep(0, 1, .5) * GlitchCollapse.Breakup;
+        check($"Glitch: in the last third it breaks up pixel by pixel (1 - 0.92p kept: {share:P0} against {cut:P0})", Math.Abs(share - cut) < .06);
         check("Glitch: nothing is left at the end", Drawn(1) == 0 && Drawn(.995) == 0);
     }
 

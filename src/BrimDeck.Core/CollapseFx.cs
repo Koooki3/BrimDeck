@@ -29,9 +29,15 @@ public static class CollapseFx
     // The chromatic pulse a theme may add (ThemeMotion.Aberration): this long at most, red and blue this many DIP apart at the
     // edges and none at the centre.
     public const double AberrationLength = .12, AberrationMin = 1, AberrationMax = 1.5;
+    // A theme's own length for its collapse (ThemeMotion.CollapseMs), in milliseconds: within the user's desktop's own
+    // window motion, from a quick 200 ms to the 630 ms of its close animation.
+    public const int CollapseMsMin = 200, CollapseMsMax = 630;
 
-    public static double Length(CollapseStyle style, double pace)
+    // The picture's length in seconds: the theme's own (milliseconds, 0 for the style's) or the style's at the theme's pace.
+    public static double Length(CollapseStyle style, double pace, int milliseconds = 0)
     {
+        if (style == CollapseStyle.Fade) return 0;
+        if (milliseconds > 0) return Math.Clamp(milliseconds, CollapseMsMin, CollapseMsMax) / 1000.0;
         double p = double.IsFinite(pace) ? Math.Clamp(pace, MotionSafety.PaceMin, MotionSafety.PaceMax) : 1;
         return style switch
         {
@@ -103,6 +109,9 @@ public static class CollapseFx
 }
 
 // The glitch on one snapshot. The canvas is wider than the snapshot by Margin on either side, room for the tears.
+// Its time runs in three equal steps (the cyberpunk theme's steps:3): the tears jump at the start of each and hold for a
+// third of the length, so each can be read, and the picture only breaks up and fades in the last third, on the original's
+// own curves run over that third. The tears thus jump twice in a picture of 480 ms or more: under three changes a second.
 public sealed class GlitchCollapse
 {
     public const double Threshold = .55, Tear = .10, Jitter = .025, Breakup = .92;
@@ -126,10 +135,14 @@ public sealed class GlitchCollapse
     }
 
     // How far a row moves sideways at a progress, in pixels (the original's tear plus micro-jitter).
+    // The step a progress lies in: 0, 1 or 2.
+    public static int Seed(double progress) => Math.Clamp((int)Math.Floor(Math.Clamp(progress, 0, 1) * SeedSteps), 0, SeedSteps - 1);
+    // How far through the breakup, the last step, a progress is: 0 before it, 1 at the end.
+    public static double BreakupAt(double progress) => Math.Clamp((Math.Clamp(progress, 0, 1) - (SeedSteps - 1.0) / SeedSteps) * SeedSteps, 0, 1);
+
     public int Shift(int y, double progress)
     {
-        double p = CollapseFx.SmoothStep(0, 1, progress);
-        int seed = (int)Math.Floor(p * SeedSteps);
+        int seed = Seed(progress);
         // The jitter lines are as much finer than the bands as the original's 220 are than its 70.
         int microLines = (int)Math.Round(Bands * 220 / 70.0);
         int lineId = (int)((double)y / Height * Bands);
@@ -143,10 +156,11 @@ public sealed class GlitchCollapse
     public void Render(double progress, uint[] canvas, double aberration = 0)
     {
         Array.Clear(canvas);
-        double p = CollapseFx.SmoothStep(0, 1, Math.Clamp(progress, 0, 1));
+        // The original's breakup and fade, over the last step only.
+        double p = CollapseFx.SmoothStep(0, 1, BreakupAt(progress));
         double alpha = (1 - CollapseFx.SmoothStep(0, 1, p)) * (1 - CollapseFx.SmoothStep(.55, 1, p));
         if (alpha <= .01) return;
-        int seed = (int)Math.Floor(p * SeedSteps);
+        int seed = Seed(progress);
         double cut = 1 - p * Breakup;
         // Until about a tenth of the way nothing breaks up, as in the original.
         bool whole = cut >= Breakup;
