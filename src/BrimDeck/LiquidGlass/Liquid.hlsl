@@ -128,8 +128,8 @@ SamplerState Smooth : register(s0);
 static const float GrainAmount = .006;
 // Round 12b: the masked contrast reached behind text (a share of the opaque theme's), the busy-ness reference (unfrosted band
 // RMS, linear Y), and the body's depth: its fall toward the edges and its top light.
-// Round 13b: the light look reaches .9 of the opaque theme's masked contrast (its text carries a halo and a target of 75 %).
-static const float ReachLight = .9;
+// Round 13b: the light look reaches .93 of the opaque theme's masked contrast (its text carries a halo and a target of 75 %).
+static const float ReachLight = .93;
 static const float BodyCover = .35, DensityGain = 3, GlyphHelp = .35;
 static const float Reach = .96, BusyRef = .03, EdgeFall = .05, Sheen = .06, SheenDip = 36;
 // Round 13's slab: its tint (Lens' roles: small .12, panel .14), absorption per unit thickness (light: barely, cool; dark:
@@ -749,10 +749,10 @@ float3 Slab(float2 p, float sd, float2 outward)
     // Thin specular lines along the slope: one facing the key light, its pair opposite, each a narrow line a little in from
     // the rim (no white ring), coloured by the backdrop lifted in lightness (its hue kept).
     float d = -sd;
-    float line = exp(-pow((d - 1.6 * Scale) / (.7 * Scale), 2));
+    float lines = exp(-pow((d - 1.6 * Scale) / (.7 * Scale), 2));
     float facing = pow(saturate(dot(outward, key)), 2) + .5 * pow(saturate(dot(outward, -key)), 2);
     float3 lifted = lerp(SetLum(saturate(backdrop), min(1, Lum(backdrop) + .45)), 1, .3);
-    c = lerp(c, lifted, saturate(line * facing * .55 * live * (1 - .6 * text)));
+    c = lerp(c, lifted, saturate(lines * facing * .55 * live * (1 - .6 * text)));
     // The broad directional term, weaker now (the lines carry the edge): where the glass is frosted denser behind text its
     // surface scatters, the highlight there spreads out and dims (rough glass).
     float3 glare = lerp(1, saturate(backdrop * 1.6 + .25), .5);

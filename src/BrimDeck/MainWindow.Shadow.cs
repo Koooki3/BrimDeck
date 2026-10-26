@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -140,8 +140,8 @@ public partial class MainWindow
     // GlassBackdrop.Measured, low-passed): deeper over a busy backdrop (text, a photo, a video), lighter over a plain light
     // one, where the same shadow reads heavier (Apple: shadows deepen over text and lighten over plain light surfaces).
     private readonly record struct ShadowLook(double Blur, double Depth, double Opacity);
-    private static readonly ShadowLook AmbientCapsule = new(12, 3, .24), AmbientOpen = new(30, 8, .14),
-        ContactCapsule = new(3, 1, .24), ContactOpen = new(6, 2, .10);
+    private static readonly ShadowLook AmbientCapsule = new(12, 4, .28), AmbientOpen = new(30, 8, .14),
+        ContactCapsule = new(3, 1, .26), ContactOpen = new(6, 2, .10);
     // The tone: 1 + ShadowBusy over a busy backdrop, 1 - ShadowPlain over a plain light one; low-passed over ShadowToneMs.
     private const double ShadowBusy = .25, ShadowPlain = .3, ShadowToneMs = 1200, ShadowToneStep = .04;
     private bool _shadowLook;
