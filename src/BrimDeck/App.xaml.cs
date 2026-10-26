@@ -119,7 +119,8 @@ public partial class App : Application
             if (StartGlance() != PanelTheme.Current.IsDark) PanelTheme.Use(Settings, systemChanged: true);
             MatchGlassGradient();
         }
-        else if (LiquidTheme.Renders && LiquidPossible && GlanceRegion() is { } region) LiquidGlass.SourceStart.Prepare(region, measure: false);
+        // (Only for the refraction renderer: the acrylic body, the default, makes no capture and no device at all.)
+        else if (LiquidTheme.Renders && GlassBackdrop.Refraction && LiquidPossible && GlanceRegion() is { } region) LiquidGlass.SourceStart.Prepare(region, measure: false);
         MotionEnvironment.Changed += GlassEnvironmentChanged;
         GlassBackdrop.LiquidFailed += GlassEnvironmentChanged;
         Deck = new MainWindow(this); MainWindow = Deck;
@@ -315,6 +316,16 @@ public partial class App : Application
         // A glass already captures: what it last measured decides now, and it goes on deciding.
         if (LiquidPossible && LiquidGlass.DesktopSource.OpenCount > 0 && !double.IsNaN(GlassBackdrop.SeenLuma)) dark = GlassAppearance.FirstLook(GlassBackdrop.SeenLuma, LiquidTheme.AppDark);
         LiquidTheme.Dark = dark;
+        // The acrylic body (the default): the first look from a glance of GDI at what lies around the island (AcrylicProbe, a
+        // few milliseconds on this thread), no capture device.
+        if (LiquidPossible && !GlassBackdrop.Refraction && GlanceRegion() is { } around)
+        {
+            double scale = Deck is null ? 1 : System.Windows.Media.VisualTreeHelper.GetDpi(Deck).DpiScaleX;
+            if (LiquidGlass.AcrylicProbe.Read(around, (int)(24 * scale), (int)(40 * scale)) is { } reading)
+                LiquidTheme.Dark = dark = GlassAppearance.FirstLook(reading.Mean, LiquidTheme.AppDark);
+            GlanceEnded();
+            return dark;
+        }
         if (!LiquidPossible || LiquidGlass.DesktopSource.OpenCount > 0 || GlanceRegion() is not { } region) { GlanceEnded(); return dark; }
         // Our panels already on screen (the theme chosen in the settings) are left out, as the live glass leaves them out; and
         // the island, shown meanwhile, too (CaptureExclusion's hook).
