@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Media.Animation;
 using BrimDeck.Core;
+using BrimDeck.Native;
 
 namespace BrimDeck;
 
@@ -16,7 +17,7 @@ public partial class MainWindow
     private readonly StripPresence _stripPresence = new();
     // When the temperature and the system drive join the collapsed row: only once their first figures arrive (StripAdmission).
     private readonly StripAdmission _stripAdmission = new();
-    private bool _monitorShowing, _stripShowing, _monitorFade;
+    private bool _monitorShowing, _monitorShown, _stripShowing, _monitorFade;
 
     private void InitializeMonitor()
     {
@@ -28,14 +29,19 @@ public partial class MainWindow
     // Asked whenever the panel opens, closes, changes page or is hidden, and whenever the collapsed row is built.
     private void UpdateMonitorDemand()
     {
-        bool page = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
-        bool strip = !_expanded && _compactStrip is not null && IsVisible && !IsSuppressed && _alert is null && EffectiveStyle != CompactStyle.Line;
-        if (!page)
+        // Nothing is read for a display that is off (DisplayPower), nor for a row whose readings got no room (RenderCompactMusic).
+        // A page left open while the display is off stays as it was (its card, the list held under the pointer); it only stops
+        // being read, and takes the current readings when the display is back.
+        bool shown = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
+        bool page = shown && !DisplayPower.Off;
+        bool strip = !_expanded && _compactStrip is not null && IsVisible && !IsSuppressed && !DisplayPower.Off && _alert is null && EffectiveStyle != CompactStyle.Line;
+        if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
-            if (_monitorShowing && _app.Monitor is { } monitor) monitor.HoldProcesses = false;
+            if (_monitorShown && _app.Monitor is { } monitor) monitor.HoldProcesses = false;
             _monitorView?.CloseCard();
         }
+        _monitorShown = shown;
         _app.PresentMonitor(this, page, strip);
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
