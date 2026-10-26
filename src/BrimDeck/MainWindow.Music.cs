@@ -1009,7 +1009,7 @@ public partial class MainWindow
         bool needed = IsVisible && !IsSuppressed && !ScreenOff && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
         bool bars = animations && MusicAudioActive && musicVisible;
-        _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? 33 : 250);
+        _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? BarsMs : 250);
         // While the collapsed title glides, WPF draws a frame every refresh for it; the bars move on those frames (MusicFrame), so
         // the timer's own frames, which fell between them, are not drawn as well. In its rests, and when it does not scroll, the
         // timer runs as before.
@@ -1028,6 +1028,10 @@ public partial class MainWindow
     }
     // The pointer came over the island: a collapsed title that has rested scrolls its laps again.
     private void ReplayCompactTitle() { if (_compactMarquee is not null) _compactMarquee.Replay(); else _compactScroll.Replay(); }
+    // How often the bars move: 30 times a second on the music page; 20 on the collapsed row, where each move redraws the whole
+    // layered island and the bars are a few device pixels tall (measured: the row's bars and title cost about 50 ms of CPU a
+    // second while music played, the largest part of the idle panel).
+    private int BarsMs => _expanded ? 33 : 50;
     private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
     // The bars on the display's frames (Motion), keyed by an element of their own so a row built again never adds a second step.
     // _musicFrameAt is the frame time (Motion.FrameTime) the bars last moved at.
@@ -1042,7 +1046,7 @@ public partial class MainWindow
         if (!_barsOnFrames) return false;
         if (!TitleGliding) { _barsOnFrames = false; UpdateMusicTimer(); return _barsOnFrames; }
         double time = Motion.FrameTime;
-        if (time - _musicFrameAt >= .033 - .004 || time < _musicFrameAt) { _musicFrameAt = time; TickMusic(); }
+        if (time - _musicFrameAt >= BarsMs / 1000d - .004 || time < _musicFrameAt) { _musicFrameAt = time; TickMusic(); }
         return _barsOnFrames;
     }
     private void UpdateLyricScrolling() => _lyricCurrent?.SetScrolling(MusicMotion && MusicAudioActive && IsVisible && !IsSuppressed && _expanded && IsMusicPage);
