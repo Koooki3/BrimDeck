@@ -18,7 +18,9 @@ internal sealed class AmbientGlow : IMotionClient
     // Collapsed, every changed frame redraws the whole layered island, and the light's own rhythm dominated the idle panel: 10
     // frames a second, 30 while a scan line passed (2.4 s in every 16), about 13 a second on average and 20 ms of CPU a second
     // (measured, collapsed cyberpunk island). The faint scan line and the slow drift lose nothing at 15 and 5 a second there.
-    private const int CollapsedMs = 200, OpenMs = 40, SweepMs = 33, CollapsedSweepMs = 66;
+    // Open, the drift and the breathing at 25 a second kept the whole panel drawing between the monitor page's readings (20 more
+    // frames a second than 1.2.1 there); 15 a second still moves the rim's colors by a few pixels a step.
+    private const int CollapsedMs = 200, OpenMs = 66, SweepMs = 33, CollapsedSweepMs = 66;
     // A change is drawn only once it shows: the drift and the scan line once they have moved this many device pixels, the
     // breathing once the rim's opacity has changed by one step of eight bits (two on the collapsed island).
     private const double MinPixels = .75, MinOpacity = 1 / 255d, CollapsedMinOpacity = 2 / 255d;
