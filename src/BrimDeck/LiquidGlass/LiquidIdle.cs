@@ -81,11 +81,11 @@ internal sealed class LiquidIdle
     public bool Frame(DesktopSource source, RECT region, in LiquidFrame frame, Func<ID3D11Texture2D, bool> render, long now)
     {
         bool same = _holds && frame == _drawn && region == _drawnOver;
-        // E18: the pointer's light, the press and the glass's presence (its fade) are shading over the same backdrop: drawn
-        // again over the last capture at the frame rate, the desktop still looked at no oftener than PollMs - as long as the
-        // last look found the desktop still (a video or a window moving behind keeps being looked at on every frame).
+        // E18: the pointer's light, the press, the glass's presence (its fade) and its eased plainness are shading over the same
+        // backdrop: drawn again over the last capture at the frame rate, the desktop still looked at no oftener than PollMs - as
+        // long as the last look found the desktop still (a video or a window moving behind keeps being looked at every frame).
         bool shading = !same && _holds && region == _drawnOver && !_lastChanged
-            && frame with { PointerX = _drawn.PointerX, PointerY = _drawn.PointerY, Hover = _drawn.Hover, Press = _drawn.Press, Presence = _drawn.Presence } == _drawn;
+            && frame with { PointerX = _drawn.PointerX, PointerY = _drawn.PointerY, Hover = _drawn.Hover, Press = _drawn.Press, Presence = _drawn.Presence, Plain = _drawn.Plain } == _drawn;
         bool changed = false, looked = false;
         if ((!same && !shading) || now - _lookedAt >= PollMs)
         {

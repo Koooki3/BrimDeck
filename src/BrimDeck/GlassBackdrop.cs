@@ -459,7 +459,7 @@ internal sealed class GlassBackdrop : IDisposable
             // D13: the glass's presence is the island's opacity as it comes in and goes, its material's blend included (the
             // indicator's, a notice's handoff), in steps of 1/64 so a held opacity draws nothing more; its refraction, rim light
             // and edge grow with it.
-            var next = Pointered(preset, width, height, scale) with { Presence = (float)(Math.Round(opacity * 64) / 64), Plain = double.IsNaN(_plain) ? -1 : (float)(Math.Round(_plain * 64) / 64) };
+            var next = Pointered(preset, width, height, scale) with { Presence = (float)(Math.Round(opacity * 64) / 64), Plain = PlainShown() };
             // Drawn again only when the glass changed (its shape, place, look, the press) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),
             // the desktop is looked at no oftener than the idle poll's PollMs.
@@ -560,6 +560,8 @@ internal sealed class GlassBackdrop : IDisposable
     public static double SeenLuma { get; private set; } = double.NaN;
     private double _plain = double.NaN, _plainTarget;
     private long _plainAt;
+    // The plainness as drawn: in steps of 1/64 (-1 before any measure: the shader takes it from the band).
+    private float PlainShown() => double.IsNaN(_plain) ? -1 : (float)(Math.Round(_plain * 64) / 64);
     // Each new measure of what lies behind this island (read only): the 2nd and 98th percentiles of its luma (LiquidRenderer.Band).
     // The island's shadow under liquid glass deepens over a busy backdrop and lightens over a plain light one (MainWindow.Shadow).
     public event Action<float, float>? Measured;
@@ -595,7 +597,8 @@ internal sealed class GlassBackdrop : IDisposable
         if (measured) Measured?.Invoke(renderer.Band.Low, renderer.Band.High);
         // How plain the backdrop is (the open panel's even cover, Liquid.hlsl), eased toward the latest measure's over about
         // DarkFadeMs, independent of the frame rate: a backdrop near the threshold or a low-contrast video does not pump it.
-        // With some hysteresis: a new target only once it is a fifth away from the one held, or plainly one end.
+        // With some hysteresis: a new target only once it is a fifth away from the one held, or plainly one end (a plainness
+        // drifting in smaller steps keeps the target held until then: harmless, the cover between the two is alike).
         if (measured && LiquidFrame.PlainOf(renderer.Band.Low, renderer.Band.High) is var plain
             && (Math.Abs(plain - _plainTarget) > .2 || plain is 0 or 1)) _plainTarget = plain;
         if (double.IsNaN(_plain)) _plain = _plainTarget;
@@ -681,7 +684,13 @@ internal sealed class GlassBackdrop : IDisposable
                     if (_host.Idle.Settling) _host.Idle.Settled();
                     else if (!_host.Tick(_liquidRegion, _pad, _liquidFrame, Environment.TickCount64)) { _poll!.Stop(); Follow(0); return; }
                     ReportBackdrop();
+                    // The eased plainness (Liquid.hlsl's even cover) is drawn on the poll too, so it eases while the island holds
+                    // still rather than jumping at the next followed frame; the poll keeps at least PollMs's pace until it is there.
+                    float plain = PlainShown();
+                    if (plain != _liquidFrame.Plain && _host.Frame(_liquidRegion, _pad, _liquidFrame with { Plain = plain }, Environment.TickCount64))
+                        _liquidFrame = _liquidFrame with { Plain = plain };
                     var interval = PollInterval();
+                    if (Math.Abs(_plain - _plainTarget) > 1 / 128d && interval > TimeSpan.FromMilliseconds(LiquidIdle.PollMs)) interval = TimeSpan.FromMilliseconds(LiquidIdle.PollMs);
                     if (_poll!.Interval != interval) _poll.Interval = interval;
                 }
                 catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotSupportedException or SharpGen.Runtime.SharpGenException)
