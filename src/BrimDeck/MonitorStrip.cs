@@ -33,7 +33,8 @@ internal sealed class MonitorStrip : FrameworkElement
     private double[]? _shares;
 
     // dpi is kept in the signature for the callers; the row rounds the readings' places itself (CompactRow).
-    // unavailable: readings this machine has none of (SystemSampler's sensor states), left out rather than shown as a dash.
+    // unavailable: readings left out (StripAdmission.Hidden): the temperature and the system drive until their first figures, and
+    // for good on a machine without the sensor, so the row never shows a dash for them.
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi = 1,
         CompactMonitorItems unavailable = CompactMonitorItems.None)
     {
@@ -132,7 +133,7 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         _admitted = CompactMonitor.First(Shown, count);
         ClipToBounds = false;
-        if (_presence.Set(Shown, _admitted.Value)) Motion.Start(this, Step);
+        if (_presence.Set(Shown, _admitted.Value, Motion.Enabled)) Motion.Start(this, Step);
     }
     // The readings present now, left to right, each with its width and how present it is.
     public IReadOnlyList<(double Width, double Presence)> Readings(double now)
@@ -187,7 +188,7 @@ internal sealed class MonitorStrip : FrameworkElement
     protected override Size ArrangeOverride(Size finalSize)
     {
         var fitting = _admitted ?? CompactMonitor.Fit(Shown, ItemWidth, _gap, finalSize.Width);
-        if (_presence.Set(Shown, fitting) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
+        if (_presence.Set(Shown, fitting, Motion.Enabled) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
         return finalSize;
     }
     private bool Step(double now) { InvalidateVisual(); if (_placed is not null) Relayout(); return _presence.Moving(now); }
@@ -332,56 +333,4 @@ internal sealed class MonitorStrip : FrameworkElement
         return pen;
     }
     private static Pen Frozen(Pen pen) { pen.Freeze(); return pen; }
-}
-
-// How present each reading of the collapsed row is, 0 to 1, easing as readings come and go, and how wide each is as its figure
-// changes. Owned by the panel, so that it outlives the row, which is built again whenever its width changes.
-internal sealed class StripPresence
-{
-    private readonly Dictionary<CompactMonitorItems, Eased> _items = [];
-    private readonly Dictionary<CompactMonitorItems, (HeldWidth Held, Eased Width)> _widths = [];
-    private CompactMonitorItems _chosen = CompactMonitorItems.None;
-    private (CompactMonitorItems, double) _sizes;
-
-    // Returns whether anything moves. A new choice of readings (the settings) shows at once.
-    public bool Set(CompactMonitorItems chosen, CompactMonitorItems fitting)
-    {
-        bool motion = Motion.Enabled && chosen == _chosen && _items.Count > 0, moving = false;
-        _chosen = chosen;
-        foreach (var item in CompactMonitor.Order)
-        {
-            if ((chosen & item) == 0) { _items.Remove(item); continue; }
-            var eased = _items.TryGetValue(item, out var known) ? known : new Eased((fitting & item) != 0 ? 1 : 0, Eased.Seconds * .8);
-            moving |= eased.Set((fitting & item) != 0 ? 1 : 0, motion);
-            _items[item] = eased;
-        }
-        return moving;
-    }
-
-    // Each chosen reading's width for its figure now (width), held a while when it narrows (HeldWidth). A reading measured for
-    // the first time takes its width at once; placeholders (figures false, before the first reading) never change a width the
-    // panel already knows. Returns whether any width moves.
-    public bool Measure((CompactMonitorItems Values, double Scale) sizes, CompactMonitorItems chosen, Func<CompactMonitorItems, double> width, bool figures, bool motion)
-    {
-        // Widths measured for other sizes (a new height, or rings that show or hide their figures) are measured again.
-        if (sizes != _sizes) { _widths.Clear(); _sizes = sizes; }
-        double now = Eased.Now; bool moving = false;
-        foreach (var item in CompactMonitor.Order)
-        {
-            if ((chosen & item) == 0) continue;
-            bool known = _widths.TryGetValue(item, out var entry);
-            if (known && !figures) continue;
-            double target = entry.Held.Update(width(item), now);
-            if (!known) entry.Width = new Eased(target, Eased.Seconds);
-            else moving |= entry.Width.Set(target, motion, now);
-            _widths[item] = entry;
-        }
-        return moving;
-    }
-
-    public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
-    public double? Width(CompactMonitorItems item, double now) => _widths.TryGetValue(item, out var entry) ? Math.Max(0, entry.Width.At(now)) : null;
-    // Whether any reading still shows, even fading out.
-    public bool Any(double now) => _items.Values.Any(eased => eased.At(now) > 0 || eased.Target > 0);
-    public bool Moving(double now) => _items.Values.Any(eased => eased.Moving(now)) || _widths.Values.Any(entry => entry.Width.Moving(now));
 }
