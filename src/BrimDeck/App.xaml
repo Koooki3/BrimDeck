@@ -9,7 +9,7 @@
         <SolidColorBrush x:Key="PanelSurface" Color="#000000"/>
         <SolidColorBrush x:Key="PanelPrimary" Color="#F5F5F7"/>
         <SolidColorBrush x:Key="PanelSecondary" Color="#9EEBEBF5"/>
-        <SolidColorBrush x:Key="PanelTertiary" Color="#61EBEBF5"/>
+        <SolidColorBrush x:Key="PanelTertiary" Color="#8CEBEBF5"/>
         <SolidColorBrush x:Key="PanelAccent" Color="#0A84FF"/>
         <SolidColorBrush x:Key="PanelTrack" Color="#1FFFFFFF"/>
         <SolidColorBrush x:Key="PanelRingTrack" Color="#29FFFFFF"/>
