@@ -557,6 +557,11 @@ internal sealed class DesktopSource : IDisposable
 
     // ---------------------------------------------------------------- devices and outputs
 
+    // How many Direct3D devices captures made in this process, and how many are alive now (the tests: the acrylic body makes
+    // none, and a theme without liquid glass keeps none).
+    private static int _devicesMade, _devicesAlive;
+    public static int DevicesMade => _devicesMade;
+    public static int DevicesAlive => _devicesAlive;
     private bool CreateDevice(Luid adapterLuid)
     {
         try
@@ -570,6 +575,7 @@ internal sealed class DesktopSource : IDisposable
                         [FeatureLevel.Level_11_1, FeatureLevel.Level_11_0, FeatureLevel.Level_10_1, FeatureLevel.Level_10_0], out ID3D11Device device, out ID3D11DeviceContext context);
                     if (result.Failure || device is null) return false;
                     _device = device; _context = context; _adapter = adapterLuid;
+                    Interlocked.Increment(ref _devicesMade); Interlocked.Increment(ref _devicesAlive);
                     // The constructor's device is the first; every later one replaces one (raised as Update returns).
                     if (Generation++ > 0) _deviceMade = true;
                     return true;
@@ -651,7 +657,9 @@ internal sealed class DesktopSource : IDisposable
         _desktopView?.Dispose(); _desktop?.Dispose(); _desktopView = null; _desktop = null;
         _differQuery?.Dispose(); _fillParameters?.Dispose(); _differShader?.Dispose(); _fillShader?.Dispose(); _vertexShader?.Dispose();
         _differQuery = null; _fillParameters = null; _differShader = null; _fillShader = null; _vertexShader = null; _shadersTried = false;
-        _context?.ClearState(); _context?.Dispose(); _device?.Dispose();
+        // Everything unbound and the deferred destruction flushed, so the driver lets the device go now, its threads with it.
+        _context?.ClearState(); _context?.Flush(); _context?.Dispose();
+        if (_device is not null) { _device.Dispose(); Interlocked.Decrement(ref _devicesAlive); }
         _context = null; _device = null;
     }
 

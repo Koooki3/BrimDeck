@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -149,11 +149,6 @@ internal sealed class GlassBackdrop : IDisposable
     private CompositionLinearGradientBrush? _lightBrush;
     private CompositionColorGradientStop? _lightTop, _lightFade;
     private bool? _rimDark;
-    // The acrylic body's noise (AcrylicNoise): a grid of tiles sharing one brush, inside the body's clip, made for the window's
-    // size and again only when the window grows.
-    private Windows.UI.Composition.ContainerVisual? _noise;
-    private CompositionSurfaceBrush? _noiseBrush;
-    private (int Columns, int Rows) _noiseGrid;
     // The pointer's soft light over the acrylic body (round 16, step 6): a radial glow following the pointer at hover, a little
     // brighter while pressed (GlassFeedback's eased hover and press), inside the body's clip; only its properties change.
     // The notch's shoulders over acrylic (round 16, step 8): the body is the rounded rectangle of the island's body, and each
@@ -475,14 +470,12 @@ internal sealed class GlassBackdrop : IDisposable
             _clip.CornerRadius = new Vector2((float)round);
             clipTop = acrylicTop;
             Rim(bodyLeft, acrylicTop, bodyRight, outerBottom, round, opacity);
-            Noise(opacity);
             Glow(shown, opacity);
             Probe(true);
         }
         else
         {
             if (_rim is not null) _rim.IsVisible = false;
-            if (_noise is not null) _noise.IsVisible = false;
             if (_glow is not null) _glow.IsVisible = false;
             if (_shoulderLeft is not null) _shoulderLeft.IsVisible = false;
             if (_shoulderRight is not null) _shoulderRight.IsVisible = false;
@@ -947,36 +940,6 @@ internal sealed class GlassBackdrop : IDisposable
         _glow.IsVisible = true;
     }
 
-    private void Noise(double opacity)
-    {
-        if (_noise is null || _windowRect is not { } window || Composition.Compositor is not { } compositor) return;
-        if (_noiseBrush is null)
-        {
-            if (LiquidGlass.AcrylicNoise.Surface(compositor) is not { } surface) return;
-            _noiseBrush = compositor.CreateSurfaceBrush(surface);
-            _noiseBrush.Stretch = CompositionStretch.None;
-            _noiseBrush.HorizontalAlignmentRatio = 0; _noiseBrush.VerticalAlignmentRatio = 0;
-        }
-        int tile = LiquidGlass.AcrylicNoise.Tile;
-        var grid = ((window.Width + tile - 1) / tile, (window.Height + tile - 1) / tile);
-        if (grid.Item1 > _noiseGrid.Columns || grid.Item2 > _noiseGrid.Rows)
-        {
-            _noise.Children.RemoveAll();
-            for (int row = 0; row < grid.Item2; row++)
-                for (int column = 0; column < grid.Item1; column++)
-                {
-                    var sprite = compositor.CreateSpriteVisual();
-                    sprite.Size = new Vector2(tile, tile);
-                    sprite.Offset = new Vector3(column * tile, row * tile, 0);
-                    sprite.Brush = _noiseBrush;
-                    _noise.Children.InsertAtTop(sprite);
-                }
-            _noiseGrid = grid;
-        }
-        _noise.Opacity = (float)opacity;
-        _noise.IsVisible = true;
-    }
-
     private (double, double, double, double, double, double, bool)? _rimFor;
     private void Rim(double left, double top, double right, double bottom, double radius, double opacity)
     {
@@ -1114,9 +1077,6 @@ internal sealed class GlassBackdrop : IDisposable
             _clip = compositor.CreateRoundedRectangleGeometry();
             _sprite.Clip = compositor.CreateGeometricClip(_clip);
             root.Children.InsertAtTop(_sprite);
-            _noise = compositor.CreateContainerVisual(); _noise.RelativeSizeAdjustment = Vector2.One; _noise.IsVisible = false;
-            _noise.Clip = compositor.CreateGeometricClip(_clip);
-            root.Children.InsertAtTop(_noise);
             _shoulderLeft = compositor.CreateSpriteVisual(); _shoulderLeft.IsVisible = false; root.Children.InsertAtTop(_shoulderLeft);
             _shoulderRight = compositor.CreateSpriteVisual(); _shoulderRight.IsVisible = false; root.Children.InsertAtTop(_shoulderRight);
             MakeGlow(compositor, root);
@@ -1175,7 +1135,6 @@ internal sealed class GlassBackdrop : IDisposable
         foreach (var shoulderSprite in new[] { _shoulderLeft, _shoulderRight }) { if (shoulderSprite?.Brush is CompositionMaskBrush mask) { GlassEffect.Release(mask.Source); mask.Mask?.Dispose(); mask.Dispose(); } shoulderSprite?.Dispose(); }
         _shoulderLeft = _shoulderRight = null;
         _glow?.Clip?.Dispose(); _glow?.Dispose(); _glow = null; _glowBrush?.Dispose(); _glowBrush = null; _glowCentre?.Dispose(); _glowCentre = null;
-        _noise?.Clip?.Dispose(); _noise?.Dispose(); _noise = null; _noiseBrush?.Dispose(); _noiseBrush = null; _noiseGrid = default;
         _rim?.Dispose(); _rimHair?.Dispose(); _rimLight?.Dispose(); _hairShape?.Dispose(); _lightShape?.Dispose();
         _hairBrush?.Dispose(); _lightBrush?.Dispose(); _lightTop?.Dispose(); _lightFade?.Dispose();
         _rim = null; _rimHair = _rimLight = null; _hairShape = _lightShape = null; _hairBrush = null; _lightBrush = null; _lightTop = _lightFade = null; _rimDark = null;

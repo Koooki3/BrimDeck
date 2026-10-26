@@ -58,10 +58,6 @@ internal static class AcrylicEmulation
         var inside = Distance(coverage, w, h);
         float hair = (float)Math.Max(1, .75 * scale), light = (float)(1.25 * scale);
         var output = new byte[w * h * 4];
-        // The noise as the app lays it over (AcrylicNoise: one tile repeated from the window's corner).
-        var noise = BrimDeck.LiquidGlass.AcrylicNoise.Pixels();
-        int tile = BrimDeck.LiquidGlass.AcrylicNoise.Tile;
-        double noiseAlpha = noise[3] / 255.0;
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
@@ -82,9 +78,7 @@ internal static class AcrylicEmulation
                     double fade = Math.Clamp(1 - y / (h * .5), 0, 1), k = (dark ? 64 : 150) / 255.0 * fade;
                     or += (1 - or) * k; og += (1 - og) * k; ob += (1 - ob) * k;
                 }
-                int n = (((gy + y) % tile) * tile + (gx + x) % tile) * 4;
-                double grain = noise[n] / 255.0;
-                or = or * (1 - noiseAlpha) + grain; og = og * (1 - noiseAlpha) + grain; ob = ob * (1 - noiseAlpha) + grain;
+                // (The noise is the island's own pattern, AcrylicNoise.Brush: in the render of the panel over this.)
                 output[i * 4 + 2] = (byte)Math.Clamp(Math.Round(Math.Clamp(or, 0, 1) * 255 * a), 0, 255);
                 output[i * 4 + 1] = (byte)Math.Clamp(Math.Round(Math.Clamp(og, 0, 1) * 255 * a), 0, 255);
                 output[i * 4] = (byte)Math.Clamp(Math.Round(Math.Clamp(ob, 0, 1) * 255 * a), 0, 255);

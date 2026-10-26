@@ -18,6 +18,9 @@ using BrimDeck.LiquidGlass;
 //   the shadow after opening (R3 NEW-8): back from the first frame or two after the island comes to rest, kept as a picture
 //     (its cache) from the fade's first frame, whole Soft.Quick later.
 //   animations off: no jelly, no morph, hover and press and the openness (the frost) at their end at once.
+//   the acrylic body (the default) makes no Direct3D device at all, and liquid glass then the dark theme leaves none alive,
+//     the process's threads and commit back near where they were before the liquid theme (the memory session's finding: a
+//     device kept, about 16 driver threads and 40 MB more, after liquid glass was used once);
 //   transparency effects off (simulated: MotionEnvironment.SimulateTransparency, the setting is not touched): no glass, the
 //     island's surface solid and whole, and a GlassBackdrop on a real (off-screen) window makes neither a window nor a capture.
 // Animations on needs Windows' own "animation effects" on; with them off those checks are skipped (NOTE).
@@ -96,6 +99,8 @@ internal static class GlassAccess
             open = deck.GlassOpenness();
             Report(open == 0, $"animations off: closed at once (openness {open:0.00})");
             app.Settings.Animations = true;
+
+            Devices(app, deck, root);
 
             // ----- Transparency effects off -----
             MotionEnvironment.SimulateTransparency(false);
@@ -215,6 +220,41 @@ internal static class GlassAccess
             window.Close();
             Console.WriteLine($"  the off-screen window lived {clock.ElapsedMilliseconds} ms");
         }
+    }
+
+    // Dark, then liquid glass (the panel opened and closed on it), then dark again, twice: the acrylic body makes no device,
+    // none is alive on the dark theme, and the second round leaves the threads and the commit where the first one did (a kept
+    // device: about 16 more driver threads and 40 MB after the first).
+    private static void Devices(App app, MainWindow deck, System.Windows.Controls.Grid root)
+    {
+        var dark = new List<(int Threads, double Commit)>();
+        void Look(string look) { LiquidPages.UseLook(app, deck, root, look); Frame(deck, root); deck.SetExpanded(true, instant: true); Frame(deck, root); deck.SetExpanded(false, instant: true); Frame(deck, root); Wait(600); }
+        for (int round = 0; round < 3; round++)
+        {
+            Look(PanelThemes.Dark);
+            dark.Add(Footprint());
+            if (round == 1) Report(!AcrylicNoise.Is(deck.Island.Pattern), $"the dark theme: the island's pattern is the theme's again, not the acrylic's noise ({deck.Island.Pattern?.GetType().Name ?? "none"})");
+            Look(PanelThemes.GlassLight);
+            if (round == 1) Report(GlassBackdrop.Refraction || AcrylicNoise.Is(deck.Island.Pattern), "liquid glass: the acrylic's noise is the island's pattern (WPF draws it, no device)");
+            Report(GlassBackdrop.Refraction || DesktopSource.DevicesMade == 0,
+                $"round {round + 1}: the acrylic body makes no Direct3D device ({DesktopSource.DevicesMade} made; refraction renderer {GlassBackdrop.Refraction})");
+        }
+        Look(PanelThemes.Dark);
+        dark.Add(Footprint());
+        Console.WriteLine("  on the dark theme, between rounds of liquid glass: " + string.Join(" -> ", dark.Select(d => $"{d.Threads} threads {d.Commit:0} MB")));
+        Report(DesktopSource.DevicesAlive == 0 && !LiquidTheme.Renders, $"liquid glass then the dark theme: no device alive ({DesktopSource.DevicesAlive})");
+        // The first round warms WPF's own caches (the theme's brushes, the glass's composition objects): from it on, flat.
+        var (threads, commit) = (dark[^1].Threads - dark[1].Threads, dark[^1].Commit - dark[1].Commit);
+        Report(threads <= 2 && commit <= 8,
+            $"rounds of liquid glass leave the dark theme's threads and commit where they were ({threads:+0;-0;0} threads, {commit:+0.0;-0.0;0} MB over two rounds; at most +2 and +8)");
+    }
+
+    // The process's threads and committed private bytes (MB), after a collection (WPF's and our own managed garbage aside).
+    private static (int Threads, double Commit) Footprint()
+    {
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        using var process = Process.GetCurrentProcess();
+        return (process.Threads.Count, process.PrivateMemorySize64 / 1048576.0);
     }
 
     private static void Frame(MainWindow deck, System.Windows.Controls.Grid root)

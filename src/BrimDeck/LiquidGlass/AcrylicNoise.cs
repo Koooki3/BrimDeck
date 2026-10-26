@@ -1,23 +1,20 @@
-using Vortice.Direct3D;
-using Vortice.Direct3D11;
-using Vortice.DXGI;
-using Windows.UI.Composition;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace BrimDeck.LiquidGlass;
 
 // Round 16, step 1: the acrylic body's noise, as Windows' Acrylic lays it over (microsoft-ui-xaml, MIT: AcrylicBrush's noise
 // texture at 2 %): a fine grey grain that keeps a wide, smooth blur from banding and gives it the frosted surface's texture.
-// One tile of Tile x Tile device pixels, made once for the run in a small composition swap chain of its own (no Win2D in a WPF
-// app; the swap chain is the one way the desktop compositor takes pixels of ours), drawn once and never again. GlassBackdrop
-// lays it over the body in a grid of sprites sharing its brush, inside the body's clip. Seeded, so the offscreen sheets draw
-// the same grain (Pixels).
+// One tile of Tile x Tile device pixels, repeated, drawn by the island itself (its pattern layer, IslandBorder.Pattern) over the
+// glass in its exact outline. WPF draws it: no device of ours (an earlier cut kept a Direct3D 11 device and a composition swap
+// chain alive for it, with their driver threads, for as long as the app ran). Seeded, so the offscreen sheets draw the same
+// grain (Pixels).
 internal static class AcrylicNoise
 {
     public const int Tile = 256;
     public const double Opacity = .02;
-    private static ID3D11Device? _device;
-    private static IDXGISwapChain1? _swapChain;
-    private static bool _failed;
+    private static readonly Dictionary<double, Brush> Brushes = [];
 
     // The tile's premultiplied BGRA pixels: a grey of random lightness at Opacity, from the middle half of the range (the
     // whole range at 200 % weighed on the page checks' reading comfort as detail behind the text, 1.10 to 1.12).
@@ -35,36 +32,24 @@ internal static class AcrylicNoise
         return pixels;
     }
 
-    // The tile's surface for this compositor; null where it cannot be made (no Direct3D, a failure: the body goes without).
-    public static ICompositionSurface? Surface(Compositor compositor)
+    // The tiled brush for a display scale: one texel to a device pixel, from the island's corner. Made once per scale, frozen.
+    public static Brush Brush(double dpiScale)
     {
-        if (_failed) return null;
-        try
+        double scale = dpiScale > 0 ? dpiScale : 1;
+        if (Brushes.TryGetValue(scale, out var made)) return made;
+        var bitmap = BitmapSource.Create(Tile, Tile, 96 * scale, 96 * scale, PixelFormats.Pbgra32, null, Pixels(), Tile * 4);
+        bitmap.Freeze();
+        var brush = new ImageBrush(bitmap)
         {
-            if (_swapChain is null)
-            {
-                var result = D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport,
-                    [FeatureLevel.Level_11_0, FeatureLevel.Level_10_1, FeatureLevel.Level_10_0], out ID3D11Device device, out ID3D11DeviceContext context);
-                if (result.Failure || device is null) { _failed = true; return null; }
-                _device = device;
-                using var dxgi = device.QueryInterface<IDXGIDevice>();
-                using var adapter = dxgi.GetAdapter();
-                using var factory = adapter.GetParent<IDXGIFactory2>();
-                var description = new SwapChainDescription1(Tile, Tile, Format.B8G8R8A8_UNorm, false, Usage.RenderTargetOutput, 2, Scaling.Stretch,
-                    SwapEffect.FlipSequential, Vortice.DXGI.AlphaMode.Premultiplied);
-                _swapChain = factory.CreateSwapChainForComposition(device, description);
-                using (var buffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
-                    context.UpdateSubresource(Pixels(), buffer, 0, Tile * 4, 0);
-                _swapChain.Present(0, PresentFlags.None);
-                context.Dispose();
-            }
-            return LiquidRenderer.CreateSurface(compositor, _swapChain.NativePointer);
-        }
-        catch (Exception ex) when (ex is SharpGen.Runtime.SharpGenException or System.Runtime.InteropServices.COMException or InvalidOperationException or DllNotFoundException)
-        {
-            _failed = true;
-            _swapChain?.Dispose(); _swapChain = null; _device?.Dispose(); _device = null;
-            return null;
-        }
+            TileMode = TileMode.Tile, Stretch = Stretch.Fill, ViewportUnits = BrushMappingMode.Absolute,
+            Viewport = new Rect(0, 0, Tile / scale, Tile / scale),
+        };
+        RenderOptions.SetBitmapScalingMode(brush, BitmapScalingMode.NearestNeighbor);
+        brush.Freeze();
+        Brushes[scale] = brush;
+        return brush;
     }
+
+    // Whether a brush is one of these (the island's pattern to hand back to the theme's).
+    public static bool Is(Brush? brush) => brush is not null && Brushes.ContainsValue(brush);
 }
