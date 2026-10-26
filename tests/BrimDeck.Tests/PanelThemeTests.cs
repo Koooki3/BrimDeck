@@ -305,6 +305,15 @@ internal static class PanelThemeTests
         check("A theme made from another keeps its clock gradient, and the template's placeholder otherwise",
             PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", glow, "night-owl"))).Clock is { Style: "neon", Color: "gradient" } copiedClock
             && copiedClock.Gradient!.SequenceEqual(glow.Clock!.Gradient!) && PanelThemes.Parse(PanelThemes.FillTemplate("copy", nightOwl)).Clock!.Custom == "#B9A8FF");
+        // Tektur came last, so the styles saved before it keep their numbers; a theme file names it like any other style.
+        var tekturFile = PanelThemes.LoadFolder(Folder("tektur", ("tektur.json", """{ "formatVersion": 1, "id": "tektur", "base": "night-owl", "clock": { "style": "Tektur" } }"""))).Single();
+        var tektur = PanelThemes.Build("tektur", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "tektur" } });
+        var tekturSettings = new DeckSettings();
+        PanelThemes.ApplyClock(tektur, tekturSettings);
+        check("The Tektur clock style is read from a theme file and comes back from the template",
+            (int)ClockStyle.Tektur == 10 && (int)ClockStyle.Pixel == 9 && tekturFile.Error is null && tekturSettings.ClockStyle == ClockStyle.Tektur
+            && PanelThemes.Parse(PanelThemes.FillTemplate("copy", tektur, "night-owl")).Clock is { Style: "tektur" }
+            && PanelThemes.Template.Contains("condensed, pixel, tektur", StringComparison.Ordinal));
 
         // Clock, swatches and what choosing a theme changes.
         bool clockColors = true, pickers = true;

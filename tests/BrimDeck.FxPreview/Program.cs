@@ -63,6 +63,13 @@ internal static class Program
             PixelChecks();
             StairChecks();
         }
+        // A bundled face that fails to load falls back to another font without an error, so each must be the file's own face.
+        Check("The clock's bundled fonts load from BrimDeck's resources", new[]
+        {
+            ("Orbitron", FontWeights.SemiBold, "Orbitron SemiBold"), ("Unbounded", FontWeights.SemiBold, "Unbounded SemiBold"),
+            ("Bebas Neue", FontWeights.Normal, "Bebas Neue"), ("Tektur", FontWeights.Medium, "Tektur Medium")
+        }.All(font => new Typeface(ClockFace.Bundled(font.Item1), FontStyles.Normal, font.Item2, FontStretches.Normal).TryGetGlyphTypeface(out var face)
+            && face.Win32FamilyNames.Values.Contains(font.Item3)));
         _dpi = stripDpi;
         if (folder is not null)
         {
