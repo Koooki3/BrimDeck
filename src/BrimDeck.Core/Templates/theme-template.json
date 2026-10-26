@@ -15,7 +15,7 @@
   "license": "",
   "homepage": "",
   "base": "dark",                   // Any built-in theme: dark, light, one-dark-pro, github-dark, github-light, dracula, night-owl,
-                                    // pixel-blocks, cyberpunk-edgerunners
+                                    // island-holiday, pixel-blocks, cyberpunk-edgerunners (a base's night look is not inherited)
 
   "colors": {
     "surface": "#000000",           // The notch, capsule and panel. Always drawn opaque.

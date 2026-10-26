@@ -82,6 +82,7 @@ public partial class App : Application
         Store = new SettingsStore(folder); Settings = Store.Load();
         UseLanguage();
         PanelTheme.Use(Settings);
+        ScheduleDaylight();
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         // The language a first start takes from Windows is kept, even if the display language changes later.
@@ -185,6 +186,7 @@ public partial class App : Application
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
         PanelTheme.Use(settings);
+        ScheduleDaylight();
         AssignDisplays();
         foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
         QueueSave();
@@ -209,10 +211,28 @@ public partial class App : Application
     internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false)
     {
         var previous = PanelTheme.Current;
-        if (!PanelTheme.Use(Settings, reload, systemChanged)) return;
+        bool changed = PanelTheme.Use(Settings, reload, systemChanged);
+        ScheduleDaylight();
+        if (!changed) return;
         if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         if (!reload) _settingsWindow?.PanelThemeChanged();
+    }
+    // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
+    // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch
+    // carries a preset clock gradient over, as Windows switching "system" between dark and light does.
+    private DispatcherTimer? _daylight;
+    internal void ScheduleDaylight()
+    {
+        if (PanelTheme.NextDaylightChange(Settings) is not { } next) { _daylight?.Stop(); return; }
+        if (_daylight is null)
+        {
+            _daylight = new DispatcherTimer(DispatcherPriority.Background);
+            _daylight.Tick += (_, _) => { _daylight.Stop(); if (!Exiting) ApplyPanelTheme(systemChanged: true); };
+        }
+        var wait = next - DateTime.Now;
+        _daylight.Interval = TimeSpan.FromMilliseconds(Math.Clamp(wait.TotalMilliseconds + 500, 1000, TimeSpan.FromMinutes(10).TotalMilliseconds));
+        _daylight.Stop(); _daylight.Start();
     }
     // A panel reports display changes (monitors added or removed, the primary changed, a work area or scale changed).
     // Each panel receives the same messages, so they are handled once, after Windows has moved the windows to the new layout.
