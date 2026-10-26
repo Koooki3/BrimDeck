@@ -83,6 +83,8 @@ public partial class MainWindow
         label.ClearValue(TextBlock.ForegroundProperty); label.ClearValue(TextBlock.FontWeightProperty);
         var button = new Button { Content = content is null ? label : content(label), Height = height, Padding = new Thickness(icon ? 6 : 9, 0, icon ? 6 : 9, 0),
             Style = (Style)FindResource(style), Tag = active ? "Selected" : null, ToolTip = toolTip ? name : null };
+        // The toolbar look's 6 DIP corner comes from its style's own resources, which a theme does not replace: square in a pixel theme.
+        if (style == "ToolbarActionButton") button.Resources["SegmentCorner"] = new CornerRadius(PanelTheme.Corner(6));
         AutomationProperties.SetName(button, name); button.Click += (_, _) => click(); return button;
     }
 
@@ -111,7 +113,7 @@ public partial class MainWindow
             button.Padding = new Thickness(stage >= 2 ? 5 : 8, 0, stage >= 2 ? 5 : 8, 0);
             strip.Children.Add(button);
         }
-        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
     }
 
     private Button ModelDateButton(bool iconOnly)
@@ -183,7 +185,7 @@ public partial class MainWindow
     {
         var stack = new StackPanel();
         var popup = new Window { Title = Loc.T("筛选应用", "Filter apps"), Width = 210, SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.None,
-            ResizeMode = ResizeMode.NoResize, AllowsTransparency = true, Background = Brushes.Transparent, ShowInTaskbar = false, Topmost = true };
+            ResizeMode = ResizeMode.NoResize, AllowsTransparency = true, Background = Brushes.Transparent, ShowInTaskbar = false, Topmost = true }; PanelTheme.Text(popup);
         foreach (var app in apps)
         {
             Button button = null!;
@@ -191,7 +193,7 @@ public partial class MainWindow
             { ToggleModelApp(app); button.Tag = _modelApps.Contains(app) ? "Selected" : null; }, _modelApps.Contains(app), toolTip: false);
             button.Margin = new Thickness(0, 3, 0, 3); stack.Children.Add(button);
         }
-        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(10), Padding = new Thickness(8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
+        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
         ShowModelPopup(popup, ModelToolbar);
     }
 

@@ -20,6 +20,7 @@ try
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
+    PixelBlocksTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);

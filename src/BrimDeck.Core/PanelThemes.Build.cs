@@ -51,7 +51,7 @@ public static partial class PanelThemes
         colors["tooltip"] = colors["tooltip"].Over(surface);
         colors["bubble"] = colors["bubble"].Over(surface);
         var values = EffectValues(effects);
-        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface))];
+        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. TextureStops(values, colors, surface)];
 
         var adjustments = new List<PanelThemeAdjustment>();
         var popup = colors["popup"].Over(surface);
@@ -89,6 +89,16 @@ public static partial class PanelThemes
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
             .OfType<ThemeColor>().Take(12).ToList();
         return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps) { IsNight = night };
+    }
+
+    // A texture's lightest and darkest squares (PanelTheme.Texture draws them in the primary text color and in black, at most the
+    // texture's opacity), which text must read on as on the surface.
+    internal static IEnumerable<ThemeColor> TextureStops(PanelThemeEffectValues values, IReadOnlyDictionary<string, ThemeColor> colors, ThemeColor surface)
+    {
+        if (values.Texture <= 0) yield break;
+        var light = colors["textPrimary"]; var alpha = (byte)Math.Round(255 * values.Texture);
+        yield return new ThemeColor(alpha, light.R, light.G, light.B).Over(surface);
+        yield return new ThemeColor(alpha, 0, 0, 0).Over(surface);
     }
 
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.
@@ -130,6 +140,8 @@ public static partial class PanelThemes
         merged.ShadowDepth = layer.ShadowDepth ?? merged.ShadowDepth;
         merged.ShadowOpacity = layer.ShadowOpacity ?? merged.ShadowOpacity;
         merged.Scanlines = layer.Scanlines ?? merged.Scanlines;
+        merged.Pixel = layer.Pixel ?? merged.Pixel;
+        merged.Texture = layer.Texture ?? merged.Texture;
     }
 
     // The effects in their ranges; a gradient needs two stops and keeps at most eight.
@@ -138,26 +150,30 @@ public static partial class PanelThemes
         var surfaceGradient = Stops(effects.SurfaceGradient);
         var rimGradient = Stops(effects.RimGradient);
         double Value(string key) { var (min, max, fallback) = EffectRange(key); return Fit(Effect(effects, key), min, max, fallback); }
+        // The pixel size is whole DIP, a half rounding up as the device pixels do (PixelStairs.Step). The texture is part of
+        // pixel art: without blocks there is nothing to mottle.
+        double pixel = Math.Round(Value("pixel"), MidpointRounding.AwayFromZero);
         return new(surfaceGradient.Count >= 2 ? surfaceGradient : [], rimGradient.Count >= 2 ? rimGradient : [],
-            Value("rimWidth"), Value("shadowBlur"), Value("shadowDepth"), Value("shadowOpacity"), Value("scanlines"));
+            Value("rimWidth"), Value("shadowBlur"), Value("shadowDepth"), Value("shadowOpacity"), Value("scanlines"), pixel, pixel > 0 ? Value("texture") : 0);
     }
 
     // The numeric effects by their names in the file, with their ranges and the values used when no theme sets them.
-    public static readonly IReadOnlyList<string> EffectKeys = ["rimWidth", "shadowBlur", "shadowDepth", "shadowOpacity", "scanlines"];
+    public static readonly IReadOnlyList<string> EffectKeys = ["rimWidth", "shadowBlur", "shadowDepth", "shadowOpacity", "scanlines", "pixel", "texture"];
     public static (double Min, double Max, double Fallback) EffectRange(string key) => key switch
     {
         "rimWidth" => (0, 3, 1), "shadowBlur" => (0, 40, 14), "shadowDepth" => (0, 12, 4), "shadowOpacity" => (0, 1, .28), "scanlines" => (0, .12, 0),
+        "pixel" => (0, 4, 0), "texture" => (0, .12, 0),
         _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
     };
     public static double? Effect(PanelThemeEffects? effects, string key) => key switch
     {
         "rimWidth" => effects?.RimWidth, "shadowBlur" => effects?.ShadowBlur, "shadowDepth" => effects?.ShadowDepth,
-        "shadowOpacity" => effects?.ShadowOpacity, "scanlines" => effects?.Scanlines, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
+        "shadowOpacity" => effects?.ShadowOpacity, "scanlines" => effects?.Scanlines, "pixel" => effects?.Pixel, "texture" => effects?.Texture, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
     };
     public static double Effect(PanelThemeEffectValues values, string key) => key switch
     {
         "rimWidth" => values.RimWidth, "shadowBlur" => values.ShadowBlur, "shadowDepth" => values.ShadowDepth,
-        "shadowOpacity" => values.ShadowOpacity, "scanlines" => values.Scanlines, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
+        "shadowOpacity" => values.ShadowOpacity, "scanlines" => values.Scanlines, "pixel" => values.Pixel, "texture" => values.Texture, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
     };
     private static void SetEffect(PanelThemeEffects effects, string key, double value)
     {
@@ -168,6 +184,8 @@ public static partial class PanelThemes
             case "shadowDepth": effects.ShadowDepth = value; break;
             case "shadowOpacity": effects.ShadowOpacity = value; break;
             case "scanlines": effects.Scanlines = value; break;
+            case "pixel": effects.Pixel = value; break;
+            case "texture": effects.Texture = value; break;
             default: throw new ArgumentException("Unknown effect: " + key, nameof(key));
         }
     }

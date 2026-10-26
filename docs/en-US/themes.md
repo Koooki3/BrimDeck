@@ -5,12 +5,12 @@ The Notch, Capsule and Indicator, the quota notice, the expanded panel and its p
 | Kind | Themes |
 | --- | --- |
 | Basics | System, Dark (the default: the original pure black look), Light |
-| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Cyberpunk: Edgerunners (the demo) |
+| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
 | Custom | The theme files in the themes folder, which can be created, edited and deleted in settings |
 
 Each theme remembers the theme, warning and critical colors of the app columns and the clock's style and color you change while using it: they are saved when you switch to another theme and come back when you return. A theme chosen for the first time uses its own colors and suggested clock. Restoring defaults in "Quotas and usage" or "Collapsed view" restores the current theme's defaults.
 
-The theme extensions are ported from open-source VS Code themes and use their colors under each theme's MIT License: [One Dark Pro](https://github.com/Binaryify/OneDark-Pro), [GitHub Theme](https://github.com/primer/github-vscode-theme), [Dracula Official](https://github.com/dracula/visual-studio-code) and [Night Owl](https://github.com/sdras/night-owl-vscode-theme). The copyright and license notices of these projects ship with BrimDeck in `ThirdPartyNotices.txt`.
+One Dark Pro, GitHub Dark, GitHub Light, Dracula Official and Night Owl are ported from open-source VS Code themes and use their colors under each theme's MIT License: [One Dark Pro](https://github.com/Binaryify/OneDark-Pro), [GitHub Theme](https://github.com/primer/github-vscode-theme), [Dracula Official](https://github.com/dracula/visual-studio-code) and [Night Owl](https://github.com/sdras/night-owl-vscode-theme). The copyright and license notices of these projects ship with BrimDeck in `ThirdPartyNotices.txt`.
 
 ## Changing colors in settings
 
@@ -84,7 +84,7 @@ The clock style and color that suit the theme. Choosing the theme in settings sw
 "clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
 ```
 
-`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`; `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
+`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`, `pixel` (a block dot matrix, suggested by Pixel Blocks); `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
 
 ### Picker swatches (swatches)
 
@@ -99,6 +99,8 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `rimWidth` | Rim width | 0–3 |
 | `shadowBlur` `shadowDepth` `shadowOpacity` | Blur, offset and opacity of the shadow | 0–40, 0–12, 0–1 |
 | `scanlines` | Horizontal scan lines in the primary text color at this opacity | 0–0.12 |
+| `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels), the panel's rounded corners become square and its text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right | 0, or 1–4 |
+| `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain. Its lightest and darkest squares are checked for contrast like gradient stops; without `pixel` it has no effect | 0–0.12 |
 
 ### Day and night looks (night, daylight)
 
@@ -118,7 +120,7 @@ A night look belongs to the file that writes it and is not inherited through `ba
 
 A theme decides how the panel looks, never whether it can be read:
 
-1. Every color with a minimum is checked against the surface, each gradient stop and the pop-up surface before it is used.
+1. Every color with a minimum is checked against the surface, each gradient stop, the lightest and darkest squares of a texture and the pop-up surface before it is used.
 2. A color below its minimum is lightened or darkened along its own hue, in whichever direction needs the smaller change, just far enough to pass. A color that passes is used as written. A translucent color that has to move comes back opaque, as it looked over the surface. When the backgrounds are both light and dark and no lightness passes them all, the lightness with the best worst case is used (never worse than the color as written), and the settings page says the minimum could not be met.
 3. Colors chosen elsewhere, such as app colors, clock colors and the cover color, get the same treatment against the current surface, so a pale warning color or a lime clock stays clear on a light theme.
 4. "Current theme › Readability" on the settings page lists every adjustment. A theme file that cannot be used is listed with the reason (invalid JSON, an unknown color, a duplicate id, …) and cannot be chosen.
@@ -138,6 +140,10 @@ The demo theme was made in these five steps.
 ## The newer themes
 
 **Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock, a shoreline rim (turquoise, sky, sand) and a faintly sea-green shadow. By night, a moonlit sea from navy into teal, a lantern-gold clock, a moonlit shoreline along the rim and, instead of a shadow, a soft teal glow under the island. Neither look needs any readability adjustment.
+
+## Pixel Blocks
+
+An unofficial pixel-art look inspired by block sandbox games, using no artwork, fonts, textures or logos from any game: everything is drawn from colors and squares. A deep slate surface with a 5% block grain (`texture`), 2 DIP stepped corners (`pixel`), a bevel rim lit at the top left and shaded at the bottom right, and a hard shadow with no blur; the text on the island and in the panel's pop-ups is drawn unsmoothed and the panel's rounded corners become square. Chat-style colors: white text, a yellow block clock (the `pixel` clock style), a green accent and a green experience-bar indicator; violet menus with a violet frame. The settings window follows Windows' light or dark mode, not the panel theme.
 
 ## Demo: Cyberpunk: Edgerunners
 

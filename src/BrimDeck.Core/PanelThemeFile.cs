@@ -38,7 +38,7 @@ public sealed class PanelThemeDaylight
 
 public sealed class PanelThemeClock
 {
-    // A ClockStyle name: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed.
+    // A ClockStyle name: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel.
     public string Style { get; set; } = "";
     // "default" (the theme's clock color), amber, cyan, pink, lime, custom, gradient or cover.
     public string Color { get; set; } = "";
@@ -71,4 +71,9 @@ public sealed class PanelThemeEffects
     public double? ShadowOpacity { get; set; }
     // Horizontal scan lines over the surface, as an opacity of the primary text color.
     public double? Scanlines { get; set; }
+    // Pixel art: corners become steps of this many DIP (1 to 4), the rim a bevel and the text unsmoothed. 0 turns it off.
+    public double? Pixel { get; set; }
+    // A pixel theme's block texture: squares of the pixel size a little lighter or darker than the surface, at most this opacity
+    // (0 to 0.12), as a stone or dirt block is mottled. Without pixel art there are no blocks to mottle, so it is ignored.
+    public double? Texture { get; set; }
 }
