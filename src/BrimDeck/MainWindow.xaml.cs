@@ -29,8 +29,9 @@ public partial class MainWindow : Window
     // Checks run every 40 ms near the surface. Farther away the interval grows with the distance, assuming the cursor
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
     private const double TrackNear = 40, TrackFar = 160, ApproachSpeed = 10;
-    // How far into the opening the content may start over liquid glass: three frames, the glass's lag and its drawing.
-    private const double LiquidLeadMs = 50;
+    // How far into the opening the content may start over liquid glass: five frames, the glass's lag and its drawing (live
+    // check 10-26: at 50 ms the first frames of a fast opening still showed the content below the glass).
+    private const double LiquidLeadMs = 80;
     private readonly WindowsHost _host;
     // Null for the main panel. The panels of other monitors take their usage data from it instead of reading their own.
     private readonly MainWindow? _lead;

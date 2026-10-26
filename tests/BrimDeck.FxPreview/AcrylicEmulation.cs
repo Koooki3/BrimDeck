@@ -10,10 +10,31 @@ internal static class AcrylicEmulation
 {
     // Windows' acrylic blurs with a Gaussian of 30 (AcrylicBrush's blur amount): taken here as 30 DIPs of deviation.
     internal const double AcrylicBlurDip = 30;
+    // The luminosity opacity of the last drawing (for the page notes).
+    internal static double Luminosity { get; private set; }
 
     internal static byte[] Draw(byte[] desktop, int dw, int dh, int gx, int gy, int w, int h, byte[] coverage, bool dark, double scale)
     {
-        var look = dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight;
+        // The luminosity layer as the app's probe sets it (AcrylicProbe): from the ring left, right and below the island, 24 to
+        // 64 DIPs outside it.
+        int gap = (int)Math.Round(24 * scale), band = (int)Math.Round(40 * scale);
+        var ring = new List<double>();
+        void Ring(int l, int t, int r, int b)
+        {
+            for (int y = Math.Max(0, t); y < Math.Min(dh, b); y += 2)
+                for (int x = Math.Max(0, l); x < Math.Min(dw, r); x += 2)
+                {
+                    int o = (y * dw + x) * 4;
+                    ring.Add((.2126 * desktop[o + 2] + .7152 * desktop[o + 1] + .0722 * desktop[o]) / 255);
+                }
+        }
+        Ring(gx - gap - band, gy, gx - gap, gy + h + gap);
+        Ring(gx + w + gap, gy, gx + w + gap + band, gy + h + gap);
+        Ring(gx - gap - band, gy + h + gap, gx + w + gap + band, gy + h + gap + band);
+        ring.Sort();
+        double bright = ring.Count > 0 ? ring[(int)(ring.Count * .9)] : .5, darkest = ring.Count > 0 ? ring[(int)(ring.Count * .1)] : .5;
+        Luminosity = GlassEffect.LuminosityFor(dark, bright, darkest);
+        var look = (dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = Luminosity };
         var m = GlassEffect.AcrylicMatrix(look);
         // The blurred desktop over the island and a margin as wide as the blur reaches.
         int reach = (int)Math.Ceiling(AcrylicBlurDip * scale * 3);

@@ -323,7 +323,11 @@ internal static partial class LiquidPages
         var glass = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H), frame, (int)Math.Ceiling(48 * Scale));
         // Round 16: the acrylic body (the default; the refraction renderer only with BRIMDECK_LIQUID_REFRACT=1), drawn in the
         // outline the renderer covered.
-        if (!GlassBackdrop.Refraction) glass = AcrylicEmulation.Draw(desktop, dw, dh, gx, gy, layer.W, layer.H, glass, dark, Scale);
+        if (!GlassBackdrop.Refraction)
+        {
+            glass = AcrylicEmulation.Draw(desktop, dw, dh, gx, gy, layer.W, layer.H, glass, dark, Scale);
+            Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: acrylic luminosity {AcrylicEmulation.Luminosity:0.00}"));
+        }
         var under = (byte[])desktop.Clone();
         for (int y = 0; y < layer.H; y++)
             for (int x = 0; x < layer.W; x++)

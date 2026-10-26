@@ -45,11 +45,29 @@ internal static class GlassEffect
     // for the dark look and its light counterpart (#F3F3F3). Its luminosity layer of .3 suits Explorer over the user's dark
     // wallpaper only: over a white page it leaves the dark glass mid-grey and its light text unreadable (the page checks: 97
     // failures). The luminosity layer moves only the lightness - the backdrop's hue and saturation stay, so its colours still
-    // glow through - so it is set as Windows' own acrylic sets it, high enough for the text over any backdrop: .8 (Windows .96
-    // dark, .85 light), which keeps the panel's lightness within about .3 of the tint's whatever lies behind.
+    // glow through. Its base is .55, halfway between the Explorer's .3 and the first prototype's .8 (the user: "介于现在这版和资源
+    // 管理器的透明度是合适的"); a brighter backdrop (a darker one for the light look) raises it just as far as the text needs
+    // (LuminosityFor, from what lies around the island, AcrylicProbe).
     public readonly record struct AcrylicLook(double Saturation, double LuminosityOpacity, double Luminosity, double TintR, double TintG, double TintB, double TintOpacity);
-    public static readonly AcrylicLook AcrylicDark = new(1.3, .8, .1373, .1373, .1373, .1373, .23);
-    public static readonly AcrylicLook AcrylicLight = new(1.3, .8, .953, .953, .953, .953, .25);
+    public const double LuminosityBase = .55, LuminosityMost = .95;
+    public static readonly AcrylicLook AcrylicDark = new(1.3, LuminosityBase, .1373, .1373, .1373, .1373, .23);
+    public static readonly AcrylicLook AcrylicLight = new(1.3, LuminosityBase, .953, .953, .953, .953, .25);
+    // The lightness the body may reach for the looks' text: the dark look's light text over at most DarkMost, the light look's
+    // dark text over at least LightLeast (sRGB luma; 4.5:1 and more with the text's own colours, #F6F7F9 and #101217).
+    public const double DarkMost = .27, LightLeast = .82;
+
+    // The luminosity opacity the text needs over a backdrop whose brightest tenth reaches bright (the dark look) or whose
+    // darkest tenth reaches dark (the light look), from the recipe's lightness ((1 - L) b + L t)(1 - k) + k t: never under
+    // LuminosityBase, at most LuminosityMost. In steps of .05, so a brush is made again only for a real change.
+    public static double LuminosityFor(bool darkLook, double bright, double dark)
+    {
+        var look = darkLook ? AcrylicDark : AcrylicLight;
+        double t = look.TintOpacity, target = look.Luminosity, b = darkLook ? bright : dark;
+        double need = darkLook
+            ? (b - target) * (1 - t) <= 1e-4 ? 0 : ((1 - t) * b + t * target - DarkMost) / ((1 - t) * (b - target))
+            : (target - b) * (1 - t) <= 1e-4 ? 0 : (LightLeast - (1 - t) * b - t * target) / ((1 - t) * (target - b));
+        return Math.Ceiling(Math.Clamp(need, LuminosityBase, LuminosityMost) * 20 - 1e-9) / 20;
+    }
     private static readonly Dictionary<AcrylicLook, CompositionEffectFactory> AcrylicFactories = [];
 
     public static CompositionBrush Acrylic(Compositor compositor, AcrylicLook look)
