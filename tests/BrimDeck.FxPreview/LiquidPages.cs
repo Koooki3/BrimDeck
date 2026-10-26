@@ -343,7 +343,9 @@ internal static partial class LiquidPages
             for (int y = 0; y < layer.H; y++)
                 for (int x = 0; x < layer.W; x++)
                     Over(bare, (y * layer.W + x) * 4, freeUnder, ((gy + y) * dw + gx + x) * 4);
-            CoverSeam.Measure(name, under, freeUnder, glass, dw, gx, gy, layer.W, layer.H, Scale);
+            double peak = CoverSeam.Measure(name, under, freeUnder, glass, dw, gx, gy, layer.W, layer.H, Scale);
+            if (!double.IsNaN(peak))
+                Report(peak <= CoverSeam.PeakLimit, FormattableString.Invariant($"{name}: cover seam: the cover's steepest ramp {peak:0.00} L*/DIP (at most {CoverSeam.PeakLimit}: no patch round a label)"));
         }
         // The tile: the island and its shadow with a margin, the background around it.
         int margin = (int)Math.Round(36 * Scale);

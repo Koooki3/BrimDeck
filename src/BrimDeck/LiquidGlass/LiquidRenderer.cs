@@ -39,6 +39,8 @@ namespace BrimDeck.LiquidGlass;
 //   BodyLight: the light look's luminosity opacity between the text regions (0: DefaultBodyLight); only the sweep sets it.
 //   Presence (D13, round 15): how far the glass has come into being, 0..1 (the island's entrance and exit, its opacity): the
 //     slab's refraction and its rim's light grow with it, so the glass condenses as it fades in rather than only fading.
+//   Plain (round 15): how plain the backdrop is (nothing in it: the open panel's light look then grows denser evenly), eased by
+//     the caller (GlassBackdrop) over a measure's changes; -1 has the shader take it from this frame's band at once (previews).
 //   ContentLeft..ContentBottom: the collapsed island's content row (its text and glyphs), device pixels from the island's
 //     top-left; all 0 for none. Behind it the backdrop's contrast is capped, with a light local frost (Liquid.hlsl).
 //   LinearFilters: the backdrop filtered in linear light, as the browser draws the source (see Liquid.hlsl); off, in sRGB.
@@ -63,7 +65,7 @@ internal readonly record struct LiquidFrame(
     bool LinearMap = false, bool LinearFilters = true, float CssWidth = 0, float CssHeight = 0,
     float FilterWidth = 0, float FilterHeight = 0,
     float ContentLeft = 0, float ContentTop = 0, float ContentRight = 0, float ContentBottom = 0, float Sigma0 = 0,
-    float[]? TextRects = null, float BodyLight = 0, bool Zoned = false, float ReachLight = 0, bool Probe = false, float Presence = 1)
+    float[]? TextRects = null, float BodyLight = 0, bool Zoned = false, float ReachLight = 0, bool Probe = false, float Presence = 1, float Plain = -1)
 {
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
@@ -89,6 +91,10 @@ internal readonly record struct LiquidFrame(
 
     // Between two looks (light glass to dark as automatic liquid glass turns), t from a to b: every look's value in between,
     // the shape and the pointer a's.
+    // How plain a backdrop is from its band (the 2nd and 98th percentiles of its luma): 1 when they lie within 2 levels in a
+    // hundred, 0 from 8 on (a page of text, frosted, still spans about 10). Liquid.hlsl takes the same when given none.
+    public static float PlainOf(float low, float high) => Math.Clamp(1 - (high - low - .02f) / .06f, 0, 1);
+
     public static LiquidFrame Blend(in LiquidFrame a, in LiquidFrame b, float t)
     {
         t = Math.Clamp(t, 0, 1);
@@ -305,7 +311,7 @@ internal sealed class LiquidRenderer : IDisposable
     private (int Cols, int Rows) _textMaskSize;
     private (float[]? Rects, int Width, int Height, float Tile) _textMaskFor;
     private byte[] _textCells = [], _textPair = [];
-    private float[] _textField = [], _textSpare = [], _textNear = [];
+    private float[] _textField = [], _textSpare = [], _textNear = [], _textWeight = [];
     // Round 15: the wide field three box passes of 11 cells (about a Gaussian of 46 DIPs), the near one two of 3 (about 11).
     private const int TextBlurCells = 11, TextBlurPasses = 3, TextNearCells = 3;
     // A box blur of radius cells each side along rows (horizontal) or columns, from one grid into another.
@@ -352,7 +358,7 @@ internal sealed class LiquidRenderer : IDisposable
             if (_textCells.Length < cols * rows)
             {
                 int room = Math.Max(cols * rows, _textCells.Length * 3 / 2);
-                _textCells = new byte[room]; _textField = new float[room]; _textSpare = new float[room]; _textNear = new float[room];
+                _textCells = new byte[room]; _textField = new float[room]; _textSpare = new float[room]; _textNear = new float[room]; _textWeight = new float[room];
             }
             if (_textPair.Length < textureCols * textureRows * 2) _textPair = new byte[Math.Max(textureCols * textureRows * 2, _textPair.Length * 3 / 2)];
             Array.Clear(_textCells, 0, cols * rows);
@@ -372,8 +378,15 @@ internal sealed class LiquidRenderer : IDisposable
             // The density field (round 14, widened in round 15): the cells' coverage blurred wide into a low-frequency field (red),
             // so the glass grows denser smoothly over a block of text and its edge is a long ramp, never a patch round a glyph;
             // and a nearer one (green, about 11 DIPs) for the little help a lone label still wants.
-            for (int i = 0; i < cols * rows; i++) _textField[i] = _textCells[i] / 255f;
-            for (int pass = 0; pass < TextBlurPasses; pass++) { Box(_textField, _textSpare, cols, rows, true, TextBlurCells); Box(_textSpare, _textField, cols, rows, false, TextBlurCells); }
+            // The wide field normalised by the grid's own share of each blur (normalised convolution): text near the panel's edge
+            // gets the density text in the middle gets, and an empty margin stays empty (nothing is assumed past the edge).
+            for (int i = 0; i < cols * rows; i++) { _textField[i] = _textCells[i] / 255f; _textWeight[i] = 1; }
+            for (int pass = 0; pass < TextBlurPasses; pass++)
+            {
+                Box(_textField, _textSpare, cols, rows, true, TextBlurCells); Box(_textSpare, _textField, cols, rows, false, TextBlurCells);
+                Box(_textWeight, _textSpare, cols, rows, true, TextBlurCells); Box(_textSpare, _textWeight, cols, rows, false, TextBlurCells);
+            }
+            for (int i = 0; i < cols * rows; i++) _textField[i] /= MathF.Max(_textWeight[i], 1e-3f);
             for (int i = 0; i < cols * rows; i++) _textNear[i] = _textCells[i] / 255f;
             for (int pass = 0; pass < 2; pass++) { Box(_textNear, _textSpare, cols, rows, true, TextNearCells); Box(_textSpare, _textNear, cols, rows, false, TextNearCells); }
             Array.Clear(_textPair, 0, textureCols * textureRows * 2);
@@ -813,7 +826,7 @@ internal sealed class LiquidRenderer : IDisposable
             Sigma0 = f.Sigma0 > 0 ? f.Sigma0 : DefaultSigma0,
             TextTile = _textInfo.Tile, TextInverseX = _textInfo.InverseX, TextInverseY = _textInfo.InverseY, TextOn = _textInfo.On,
             BodyLight = f.BodyLight > 0 ? f.BodyLight : DefaultBodyLight, Zoned = f.Zoned ? 1 : 0, ReachLight = f.ReachLight, Probe = f.Probe ? 1 : 0,
-            Presence = Math.Clamp(f.Presence, 0, 1)
+            Presence = Math.Clamp(f.Presence, 0, 1), Plain = f.Plain < 0 ? -1 : Math.Clamp(f.Plain, 0, 1)
         };
         for (int k = 0; k < MostLevels; k++) Unsafe.Add(ref c.Level0, k) = Unsafe.Add(ref _pass.Level0, k);
         _context.UpdateSubresource(in c, _constants);
@@ -990,7 +1003,7 @@ internal sealed class LiquidRenderer : IDisposable
         public System.Numerics.Vector4 Level0, Level1, Level2, Level3, Level4, Level5, Level6, Level7;
         public float TextTile, TextInverseX, TextInverseY, TextOn;
         public float BodyLight, Zoned, ReachLight, Probe;
-        public float Presence, Spare0, Spare1, Spare2;
+        public float Presence, Plain, Spare1, Spare2;
     }
 
     // The frost passes' constant buffer (Frost.hlsl, FrostPass), in its order.

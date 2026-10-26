@@ -459,7 +459,7 @@ internal sealed class GlassBackdrop : IDisposable
             // D13: the glass's presence is the island's opacity as it comes in and goes, its material's blend included (the
             // indicator's, a notice's handoff), in steps of 1/64 so a held opacity draws nothing more; its refraction, rim light
             // and edge grow with it.
-            var next = Pointered(preset, width, height, scale) with { Presence = (float)(Math.Round(opacity * 64) / 64) };
+            var next = Pointered(preset, width, height, scale) with { Presence = (float)(Math.Round(opacity * 64) / 64), Plain = double.IsNaN(_plain) ? -1 : (float)(Math.Round(_plain * 64) / 64) };
             // Drawn again only when the glass changed (its shape, place, look, the press) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),
             // the desktop is looked at no oftener than the idle poll's PollMs.
@@ -558,6 +558,8 @@ internal sealed class GlassBackdrop : IDisposable
     // The last brightness any liquid glass measured behind its island (NaN before one): automatic liquid glass chosen while
     // another glass theme shows takes its first look from it at once (App.StartGlance).
     public static double SeenLuma { get; private set; } = double.NaN;
+    private double _plain = double.NaN, _plainTarget;
+    private long _plainAt;
     // Each new measure of what lies behind this island (read only): the 2nd and 98th percentiles of its luma (LiquidRenderer.Band).
     // The island's shadow under liquid glass deepens over a busy backdrop and lightens over a plain light one (MainWindow.Shadow).
     public event Action<float, float>? Measured;
@@ -591,6 +593,14 @@ internal sealed class GlassBackdrop : IDisposable
         }
         // A new measure is in: its band (the 2nd and 98th percentiles of the luma behind the island) for the island's shadow.
         if (measured) Measured?.Invoke(renderer.Band.Low, renderer.Band.High);
+        // How plain the backdrop is (the open panel's even cover, Liquid.hlsl), eased toward the latest measure's over about
+        // DarkFadeMs, independent of the frame rate: a backdrop near the threshold or a low-contrast video does not pump it.
+        // With some hysteresis: a new target only once it is a fifth away from the one held, or plainly one end.
+        if (measured && LiquidFrame.PlainOf(renderer.Band.Low, renderer.Band.High) is var plain
+            && (Math.Abs(plain - _plainTarget) > .2 || plain is 0 or 1)) _plainTarget = plain;
+        if (double.IsNaN(_plain)) _plain = _plainTarget;
+        else _plain += (_plainTarget - _plain) * (1 - Math.Exp(-Math.Clamp(now - _plainAt, 0, 1000) / (DarkFadeMs / 2)));
+        _plainAt = now;
         if (LiquidDebug && (turn || now - _debugAt >= DebugEveryMs))
         {
             _debugAt = now;

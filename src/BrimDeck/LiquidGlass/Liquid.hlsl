@@ -113,7 +113,8 @@ cbuffer Frame : register(b0)
     float4 TextInfo;      // the open panel's text regions (t3): cell (device pixels), 1 / columns, 1 / rows, 1 when given
     float4 LookInfo;      // x: the light look's luminosity opacity between the text regions; y: 1 for round 12's zones;
                           // z: the light look's reach of the opaque theme's masked contrast (0: ReachLight)
-    float4 PresenceInfo;  // x: how far the glass has come into being (D13: the entrance and exit), 0..1
+    float4 PresenceInfo;  // x: how far the glass has come into being (D13: the entrance and exit), 0..1; y: how plain the
+                          // backdrop is, eased by the caller (-1: from this frame's band, LiquidFrame.PlainOf)
 };
 
 Texture2D Background : register(t0);
@@ -133,7 +134,7 @@ static const float GrainAmount = .006;
 // Round 15: .82 over a light backdrop (Adapt raises it toward .95 over a dark one): the cover's lift no larger than the page
 // check's 75 % needs, so it reads as the same glass grown denser, not a white layer.
 static const float ReachLight = .82;
-static const float BodyCover = .1, DensityGain = 2.8, GlyphHelp = .6;
+static const float BodyCover = .1, DensityGain = 2, GlyphHelp = .6;
 static const float Reach = .96, BusyRef = .03, EdgeFall = .05, Sheen = .06, SheenDip = 36;
 // Round 13's slab: its tint (Lens' roles: small .12, panel .14), absorption per unit thickness (light: barely, cool; dark:
 // deeper), the frost of its body with no text over it (DIP, collapsed; the open panel's is half its text frost), the light's
@@ -658,6 +659,14 @@ float TextFeathered(float2 p)
     float2 cell = TextCells.SampleLevel(Smooth, p / TextInfo.x * TextInfo.yz, 0).rg;
     return saturate(max(cell.r * DensityGain, cell.g * GlyphHelp));
 }
+// The same, its two parts apart (the wide field's density, the near field's help), so a dark backdrop's boost speeds the
+// wide field alone and the near field's help stays a small swell (Slab).
+float2 TextParts(float2 p)
+{
+    if (TextInfo.w < .5) return float2(1, 0);
+    float2 cell = TextCells.SampleLevel(Smooth, p / TextInfo.x * TextInfo.yz, 0).rg;
+    return float2(cell.r * DensityGain, saturate(cell.g * GlyphHelp));
+}
 
 float3 Slab(float2 p, float sd, float2 outward)
 {
@@ -746,13 +755,15 @@ float3 Slab(float2 p, float sd, float2 outward)
         // The density eases in and out of the open panel's text field (smoothstep: no knee where it reaches its full, round
         // 15). Over a backdrop with almost nothing in it (its 2nd to 98th percentile within a few levels: a plain colour, a
         // still second screen) there is no structure for a local cover to hide its edge in, so there the open panel grows
-        // denser evenly - one glass, not white clouds with grey gaps.
+        // denser evenly - one glass, not white clouds with grey gaps. How plain is eased by the caller (PresenceInfo.y).
         // Where the backdrop asks for more (much darker than the light look) the field reaches its full sooner, still eased.
         float dim = saturate((.5 - Stats(p).x) / .3);
-        float flat = saturate(1 - (BandB - BandA - .04) / .16) * opened;
+        float flat = (PresenceInfo.y >= 0 ? PresenceInfo.y : saturate(1 - (BandB - BandA - .02) / .06)) * opened;
         // (The collapsed row keeps its own ramp from the rim, as round 14 tuned it.)
-        float boost = 1 + 1.2 * dim, field = opened * max(TextFeathered(p), CoverDark());
-        float dense = max(max(saturate(row * boost), smoothstep(0, 1, saturate(field * boost))), flat);
+        float2 parts = TextParts(p);
+        float boost = 1 + 1.2 * dim;
+        float field = opened * max(max(smoothstep(0, 1, saturate(parts.x * boost)), parts.y), CoverDark());
+        float dense = max(max(saturate(row * (1 + 1.2 * dim)), field), flat);
         c = lerp(c, SetLum(c, Lum(target)), max(a * dense, BodyCover * opened * thickness));
         c = lerp(c, target, AcrylicTintDark * turned * text);
     }

@@ -5,13 +5,18 @@ using System;
 // 85 % of its strong value), the low-frequency gradient it adds, |grad D|, is set against the glass's own natural variation,
 // the mean |grad N| over the panel, both in CIELAB L* and C* and both at the feather's scale (boxes of 3 DIPs, central
 // differences across 6). A seam no stronger than the glass's own variation scores at most 1; over a backdrop with nothing in
-// it (a plain colour) that ratio means little, so the peak |grad D| is given too, in L* per DIP. The cover's strength is
+// it (a plain colour) that ratio means little, so the steepest ramp the cover adds to what is seen is given too: the peak
+// of |grad T| beyond |grad N|, in L* per DIP (where the cover flattens an edge of the backdrop, D is steep but T is not). The cover's strength is
 // |D| (a cover may darken as well as lighten). Next to it, the covered zone (|D| above 70 %) against the uncovered glass
 // within a 24 DIP box of it: their mean colours' Delta E 2000 and chroma ratio, for T and for N (N's are the backdrop's own
-// difference there; the cover's share is T's less N's). A note, not a check.
+// difference there; the cover's share is T's less N's). A note, but for the steepest ramp, which fails past PeakLimit.
 internal static class CoverSeam
 {
-    internal static void Measure(string name, byte[] covered, byte[] free, byte[] alpha, int stride, int gx, int gy, int w, int h, double scale)
+    // The one gate (round 15 review): the cover's steepest ramp, in L* per DIP. Over the varied backdrops it stays near 1 to 2
+    // (larger at 200 %, where the lift is larger); a patch round a lone label (round 15's first cut, near the panel's edge)
+    // reached 2.5 at 150 % and 3.1 at 200 %.
+    internal const double PeakLimit = 2.5;
+    internal static double Measure(string name, byte[] covered, byte[] free, byte[] alpha, int stride, int gx, int gy, int w, int h, double scale)
     {
         int inset = (int)Math.Round(20 * scale), r = (int)Math.Max(1, Math.Round(1.5 * scale)), s = (int)Math.Max(1, Math.Round(3 * scale));
         var tl = new double[w * h]; var tc = new double[w * h]; var nl = new double[w * h]; var nc = new double[w * h];
@@ -27,20 +32,20 @@ internal static class CoverSeam
             }
         var dl = new double[w * h]; var dc = new double[w * h];
         for (int i = 0; i < w * h; i++) { dl[i] = tl[i] - nl[i]; dc[i] = tc[i] - nc[i]; }
-        var sdl = Smooth(dl, w, h, r); var sdc = Smooth(dc, w, h, r); var snl = Smooth(nl, w, h, r); var snc = Smooth(nc, w, h, r);
+        var sdl = Smooth(dl, w, h, r); var stl = Smooth(tl, w, h, r); var sdc = Smooth(dc, w, h, r); var snl = Smooth(nl, w, h, r); var snc = Smooth(nc, w, h, r);
         // The cover's strength: |D| in L* smoothed wider (4 DIPs), against its 95th percentile inside.
         var magnitude = new double[w * h];
         for (int i = 0; i < w * h; i++) magnitude[i] = Math.Abs(dl[i]);
         var wide = Smooth(magnitude, w, h, (int)Math.Round(4 * scale));
         var values = new System.Collections.Generic.List<double>();
         for (int i = 0; i < w * h; i++) if (inside[i]) values.Add(wide[i]);
-        if (values.Count < 100) return;
+        if (values.Count < 100) return double.NaN;
         values.Sort();
         double strong = values[(int)(values.Count * .95)];
         if (strong < 1)
         {
             Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: cover seam: the cover adds under 1 L* here ({strong:0.00})"));
-            return;
+            return double.NaN;
         }
         double Grad(double[] f, int x, int y)
         {
@@ -57,7 +62,9 @@ internal static class CoverSeam
                 if (!inside[i]) continue;
                 double k = wide[i] / strong;
                 natL += Grad(snl, x, y); natC += Grad(snc, x, y); all++;
-                if (k > .15 && k < .85) { double g = Grad(sdl, x, y); bandL += g; bandC += Grad(sdc, x, y); band++; peak = Math.Max(peak, g); }
+                // The peak: the ramp the cover adds to what is seen, |grad T| beyond |grad N| (where the cover flattens an edge of
+                // the backdrop, D is steep but T is not: that is no seam).
+                if (k > .15 && k < .85) { bandL += Grad(sdl, x, y); bandC += Grad(sdc, x, y); band++; peak = Math.Max(peak, Grad(stl, x, y) - Grad(snl, x, y)); }
                 zone[i] = (sbyte)(k > .7 ? 1 : k < .15 ? -1 : 0);
             }
         // The uncovered glass next to the covered: within 24 DIPs of it.
@@ -90,6 +97,24 @@ internal static class CoverSeam
         }
         double seamL = band == 0 ? 0 : bandL / band / Math.Max(natL / all, 1e-3), seamC = band == 0 ? 0 : bandC / band / Math.Max(natC / all, 1e-3);
         Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: cover seam: L* {seamL:0.00}, C* {seamC:0.00} of the glass's own variation, peak {peak:0.00} L*/DIP (cover up to {strong:0.0} L*; natural {natL / all:0.00} L*/DIP, {natC / all:0.00} C*/DIP); {zones}"));
+        if (Environment.GetEnvironmentVariable("LIQUID_SEAM_DUMP") is { Length: > 0 } dump)
+        {
+            // Debug: D's L* (grey, 128 = none, 4 levels a step) and the band (red), the panel's own size.
+            var px = new byte[w * h * 4];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = y * w + x; byte v = (byte)Math.Clamp(128 + sdl[i] * 4, 0, 255);
+                    double k = wide[i] / strong; bool inBand = inside[i] && k > .15 && k < .85 && Grad(stl, x, y) - Grad(snl, x, y) > PeakLimit * .8;
+                    px[i * 4] = v; px[i * 4 + 1] = v; px[i * 4 + 2] = inBand ? (byte)255 : v; px[i * 4 + 3] = 255;
+                }
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(System.Windows.Media.Imaging.BitmapSource.Create(w, h, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null, px, w * 4)));
+            System.IO.Directory.CreateDirectory(dump);
+            using var file = System.IO.File.Create(System.IO.Path.Combine(dump, string.Concat(name.Select(ch => char.IsLetterOrDigit(ch) || ch == '-' ? ch : '_')) + ".png"));
+            encoder.Save(file);
+        }
+        return peak;
     }
 
     private static double[] Smooth(double[] f, int w, int h, int r)
