@@ -2,7 +2,7 @@
   <PopupAnimation x:Key="{x:Static SystemParameters.ToolTipPopupAnimationKey}">None</PopupAnimation>
   <Style TargetType="ToolTip" BasedOn="{StaticResource BrimDeckToolTip}">
     <!-- The settings follow Windows, not the panel theme: their tooltips keep the rounded corner a pixel theme squares. -->
-    <Style.Resources><CornerRadius x:Key="PanelR6">6</CornerRadius></Style.Resources>
+    <Style.Resources><CornerRadius x:Key="PanelRadiusMd">6</CornerRadius></Style.Resources>
     <Setter Property="Foreground" Value="{DynamicResource SettingsTextPrimary}"/>
     <Setter Property="Background" Value="{DynamicResource SettingsPopup}"/>
     <Setter Property="BorderBrush" Value="{DynamicResource SettingsBorder}"/>
@@ -453,7 +453,7 @@
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
       <Grid>
         <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
-          <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chrome" Background="{DynamicResource SettingsInput}" BorderBrush="{DynamicResource SettingsInputBorder}" BorderThickness="1" CornerRadius="6"><TextBlock Text="&#xE96E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource SettingsTextSecondary}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,9,0"/></Border></ControlTemplate></ToggleButton.Template>
+          <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chrome" Background="{DynamicResource SettingsInput}" BorderBrush="{DynamicResource SettingsInputBorder}" BorderThickness="1" CornerRadius="6"><TextBlock Text="&#xE96E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource SettingsTextSecondary}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0"/></Border></ControlTemplate></ToggleButton.Template>
         </ToggleButton>
         <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" Margin="10,0,28,0" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" IsHitTestVisible="False"/>
         <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">

@@ -31,7 +31,7 @@ public sealed partial class SettingsWindow
 
     private void CollapsedSizeOptions(CompactStyle style)
     {
-        var reset = KeepPreview(ActionButton(Loc.T("恢复默认尺寸", "Reset to default size"), () => ResetCollapsedSize(style))); reset.FontSize = 11;
+        var reset = KeepPreview(ActionButton(Loc.T("恢复默认尺寸", "Reset to default size"), () => ResetCollapsedSize(style))); reset.FontSize = TextSize.Caption;
         AutomationProperties.SetName(reset, Loc.T("恢复" + StyleName(style) + "的默认尺寸", "Reset " + StyleName(style) + " to default size"));
         SectionTitle(Loc.T("尺寸与位置 · ", "Size and position · ") + StyleName(style), reset, () => DragWidthHint(style));
         switch (style)
@@ -201,15 +201,15 @@ public sealed partial class SettingsWindow
         var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), Width = 44, Text = Text(slider.Value), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(slider, title); AutomationProperties.SetName(input, Loc.T(title + "数值", title + " value"));
         var line = new StackPanel { Orientation = Orientation.Horizontal }; line.Children.Add(input);
-        var units = TextLine("DIP", 10, TextTertiary); units.Margin = new Thickness(4, 0, 6, 0); units.VerticalAlignment = VerticalAlignment.Center; line.Children.Add(units);
+        var units = TextLine("DIP", TextSize.Caption, TextTertiary); units.Margin = new Thickness(Space.S4, 0, Space.Tight, 0); units.VerticalAlignment = VerticalAlignment.Center; line.Children.Add(units);
         var minus = new RepeatButton { Style = (Style)FindResource("SettingsStepper"), Content = "−" };
         var plus = new RepeatButton { Style = (Style)FindResource("SettingsStepper"), Content = "+" };
         AutomationProperties.SetName(minus, Loc.T("减少" + title, "Decrease " + title)); AutomationProperties.SetName(plus, Loc.T("增加" + title, "Increase " + title));
-        line.Children.Add(new Border { Width = 1, Background = UI.Brush(Divider), Margin = new Thickness(2, 5, 3, 5) }); line.Children.Add(minus); line.Children.Add(plus);
+        line.Children.Add(new Border { Width = 1, Background = UI.Brush(Divider), Margin = new Thickness(Space.Hair, Space.S4, 3, Space.S4) }); line.Children.Add(minus); line.Children.Add(plus);
         var chip = KeepPreview(new Border
         {
             Child = line, Height = 30, CornerRadius = new CornerRadius(6), Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.InputBorder),
-            BorderThickness = new Thickness(1), Padding = new Thickness(7, 0, 2, 0), VerticalAlignment = VerticalAlignment.Center
+            BorderThickness = new Thickness(1), Padding = new Thickness(Space.S8, 0, Space.Hair, 0), VerticalAlignment = VerticalAlignment.Center
         });
         FieldFocus(chip, input, () => UI.Brush(_palette.InputBorder));
 
@@ -219,8 +219,8 @@ public sealed partial class SettingsWindow
         row.Children.Add(SettingLabel(title, help is null ? null : () => help));
         Grid.SetColumn(slider, 1); row.Children.Add(slider);
         Grid.SetColumn(chip, 2); row.Children.Add(chip);
-        var note = TextLine(hint ?? "", 10.5, hint is null ? TextSecondary : TextTertiary);
-        note.TextWrapping = TextWrapping.Wrap; note.Margin = new Thickness(8, -6, 18, 10); note.Visibility = hint is null ? Visibility.Collapsed : Visibility.Visible;
+        var note = TextLine(hint ?? "", TextSize.Caption, hint is null ? TextSecondary : TextTertiary);
+        note.TextWrapping = TextWrapping.Wrap; note.Margin = new Thickness(Space.S8, -6, 18, 10); note.Visibility = hint is null ? Visibility.Collapsed : Visibility.Visible;
         AutomationProperties.SetLiveSetting(note, AutomationLiveSetting.Polite);
         Grid.SetRow(note, 1); Grid.SetColumn(note, 1); row.Children.Add(note);
         var control = new SizeControl { Row = row, Slider = slider, Note = note };

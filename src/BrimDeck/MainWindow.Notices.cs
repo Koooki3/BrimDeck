@@ -261,7 +261,7 @@ public partial class MainWindow
 
     // What the page's frame was built for: the settings (each change replaces them), its size and the theme.
     private (DeckSettings? Settings, int Theme, double Width, double Height, double UsageWidth) NoticeLayout()
-        => (Settings, PanelTheme.Generation, ContentCanvas.Width, ContentCanvas.Height, _usageWidth);
+        => (Settings, PanelTheme.Generation, ContentCanvas.Width, ContentCanvas.Height, UsageLayoutWidth);
 
     // RenderUsage on the recent notices page (N50-2). Closed, the page is not drawn at all: SetExpanded builds it as the panel
     // opens, with what arrived meanwhile. Open with the page already on screen for the same theme, a data refresh or the
@@ -356,7 +356,7 @@ public partial class MainWindow
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
-        ApplyHeader(Settings.UsagePage ? UsageHeader(_usageWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
+        ApplyHeader(Settings.UsagePage ? UsageHeader(UsageLayoutWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
         double offset = fresh ? 0 : NoticesContent.Children.OfType<DockPanel>().FirstOrDefault()?.Children.OfType<ScrollViewer>().FirstOrDefault()?.VerticalOffset ?? 0;
         // Worked from the keyboard, the page keeps the focus on the same notice when it is built again (an Enter, a new notice).
         string? refocus = NoticesContent.IsKeyboardFocusWithin ? _focusedNotice : null;
@@ -369,7 +369,7 @@ public partial class MainWindow
         var notices = center.Hub.Notices;
         var page = new DockPanel();
         NoticesContent.Children.Add(page);
-        var head = new DockPanel { Margin = new Thickness(0, 2, 0, 6), LastChildFill = true };
+        var head = new DockPanel { Margin = new Thickness(0, Space.Hair, 0, Space.Tight), LastChildFill = true };
         DockPanel.SetDock(head, Dock.Top); page.Children.Add(head);
         var tools = new StackPanel { Orientation = Orientation.Horizontal };
         DockPanel.SetDock(tools, Dock.Right); head.Children.Add(tools);
@@ -378,7 +378,7 @@ public partial class MainWindow
         if (notices.Count > 0) tools.Children.Add(PageButton(Loc.T("清空", "Clear"), () => { center.Clear(); _expandedNotice = null; RenderNotices(); }));
         // The tools take the pointer 30 DIP tall, within the gaps above and below the head (HitArea).
         foreach (var tool in tools.Children.OfType<Button>()) HitArea.Grow(tool, 2, 6);
-        head.Children.Add(UI.Fixed(Status(center, notices.Count), 11.5, 22, UI.Tertiary));
+        head.Children.Add(UI.Fixed(Status(center, notices.Count), TextSize.Body, 22, UI.Tertiary));
         _pageKey = NoticePageKey(center); _noticeLayout = NoticeLayout();
         if (notices.Count == 0) { page.Children.Add(_pageEmpty = Empty(center)); WatchPageLive(); return; }
         var list = new StackPanel();
@@ -412,7 +412,7 @@ public partial class MainWindow
     private void AddEarlierButton(StackPanel list)
     {
         var more = PageButton(Loc.T("显示更早的通知", "Show earlier notices"), () => { _noticeRows += NoticePageStep; RenderNotices(); });
-        more.HorizontalAlignment = HorizontalAlignment.Center; more.Margin = new Thickness(0, 6, 0, 2);
+        more.HorizontalAlignment = HorizontalAlignment.Center; more.Margin = new Thickness(0, Space.Tight, 0, Space.Hair);
         list.Children.Add(more);
     }
 
@@ -468,16 +468,16 @@ public partial class MainWindow
     private FrameworkElement Empty(NoticeCenter center)
     {
         var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = EmptyWidth };
-        var bell = new Viewbox { Width = 24, Height = 24, Margin = new Thickness(0, 0, 0, 8), Child = new Path { Data = Geometry.Parse("M12,3 C8.7,3 6.5,5.6 6.5,8.8 V12.6 L4.8,15.6 H19.2 L17.5,12.6 V8.8 C17.5,5.6 15.3,3 12,3 Z M9.6,17.6 A2.4,2.4 0 0 0 14.4,17.6"), Stroke = UI.Brush(UI.Secondary), StrokeThickness = 1.5, Width = 24, Height = 24 } };
+        var bell = new Viewbox { Width = 24, Height = 24, Margin = new Thickness(0, 0, 0, Space.S8), Child = new Path { Data = Geometry.Parse("M12,3 C8.7,3 6.5,5.6 6.5,8.8 V12.6 L4.8,15.6 H19.2 L17.5,12.6 V8.8 C17.5,5.6 15.3,3 12,3 Z M9.6,17.6 A2.4,2.4 0 0 0 14.4,17.6"), Stroke = UI.Brush(UI.Secondary), StrokeThickness = 1.5, Width = 24, Height = 24 } };
         empty.Children.Add(bell);
-        empty.Children.Add(UI.Fixed(Loc.T("暂无通知", "No notices"), 14, 22, UI.Secondary));
+        empty.Children.Add(UI.Fixed(Loc.T("暂无通知", "No notices"), TextSize.Strong, 22, UI.Secondary));
         string hint = center.WindowsState switch
         {
             NoticeSourceState.NeedsAccess => Loc.T("在设置的“灵动提示”中允许读取 Windows 通知。", "Allow access to Windows notifications under Live notices in the settings."),
             NoticeSourceState.Denied => Loc.T("Windows 已拒绝通知访问，可在系统隐私设置中开启。", "Windows denies access to notifications; it can be allowed in Windows' privacy settings."),
             _ => Loc.T("应用的新通知会出现在这里，保留 " + Settings.NoticeHistoryHours + " 小时。", "New notices from your apps appear here and are kept for " + Settings.NoticeHistoryHours + " h.")
         };
-        var line = UI.Line(hint, 11.5, UI.Tertiary); line.TextWrapping = TextWrapping.Wrap; line.TextAlignment = TextAlignment.Center; line.Margin = new Thickness(0, 4, 0, 0);
+        var line = UI.Line(hint, TextSize.Body, UI.Tertiary); line.TextWrapping = TextWrapping.Wrap; line.TextAlignment = TextAlignment.Center; line.Margin = new Thickness(0, Space.S4, 0, 0);
         empty.Children.Add(line);
         return empty;
     }
@@ -487,7 +487,7 @@ public partial class MainWindow
         var center = _app.Notices;
         bool open = _expandedNotice == notice.Id;
         // Read as a list item named for the notice; invoking it opens or closes it, as a click does.
-        var row = new SpokenBorder(AutomationControlType.ListItem, () => { _expandedNotice = open ? null : notice.Id; RenderNotices(); }) { CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8, 7, 8, 7), Margin = new Thickness(0, 0, 0, 2), Background = UI.Brush(open ? UI.Fill : "Transparent"), Cursor = Cursors.Hand };
+        var row = new SpokenBorder(AutomationControlType.ListItem, () => { _expandedNotice = open ? null : notice.Id; RenderNotices(); }) { CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Lg)), Padding = new Thickness(Space.S8, Space.S8, Space.S8, Space.S8), Margin = new Thickness(0, 0, 0, Space.Hair), Background = UI.Brush(open ? UI.Fill : "Transparent"), Cursor = Cursors.Hand };
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -499,36 +499,36 @@ public partial class MainWindow
         var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin is NoticeOrigin.Test or NoticeOrigin.BrimDeck ? 1 : .78 };
         var textColumn = new SteppedWidth { Child = texts, Stepping = _stretch.Active };
         Grid.SetColumn(textColumn, 1); grid.Children.Add(textColumn);
-        texts.Children.Add(NoticeWindow.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold)));
+        texts.Children.Add(NoticeWindow.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, TextSize.Body, 18, UI.Primary, FontWeights.SemiBold)));
         if (NoticeTimeLine(notice, now) is { } timeLine) texts.Children.Add(timeLine);
         if (notice.Body.Length > 0)
         {
-            var body = NoticeWindow.Directed(UI.Line(open ? notice.Body : NoticeText.Summary(notice.Body), 11.5, UI.Secondary));
+            var body = NoticeWindow.Directed(UI.Line(open ? notice.Body : NoticeText.Summary(notice.Body), TextSize.Body, UI.Secondary));
             body.FontFamily = UI.PanelFont;
             if (open) { body.TextWrapping = TextWrapping.Wrap; body.TextTrimming = TextTrimming.None; }
             texts.Children.Add(body);
         }
         string meta = notice.AppName + " · " + NoticeText.OriginName(notice.Origin, notice.Distro) + (notice.SourcePresent || notice.Origin is NoticeOrigin.Test or NoticeOrigin.BrimDeck ? "" : Loc.T(" · 来源已关闭", " · closed at source"));
-        texts.Children.Add(UI.Fixed(meta, 10.5, 16, UI.Tertiary));
+        texts.Children.Add(UI.Fixed(meta, TextSize.Caption, 16, UI.Tertiary));
         if (notice.Progress is { } progress)
         {
             // The fill is a share of the track, which is as wide as the row's texts: a fixed 200 DIP left a finished task
             // two thirds full.
             double done = Math.Clamp(progress, 0, 1);
-            var track = new Grid { Height = 3, Margin = new Thickness(0, 4, 0, 0), MinWidth = 3 };
+            var track = new Grid { Height = 3, Margin = new Thickness(0, Space.S4, 0, 0), MinWidth = 3 };
             var doneColumn = new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 3 };
             var leftColumn = new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) };
             track.ColumnDefinitions.Add(doneColumn); track.ColumnDefinitions.Add(leftColumn);
             _rowProgress.AddOrUpdate(row, new RowProgress(doneColumn, leftColumn));
-            var rail = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(PanelTheme.Corner(1.5)) };
+            var rail = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Xs)) };
             Grid.SetColumnSpan(rail, 2);
             track.Children.Add(rail);
-            track.Children.Add(new Border { Background = UI.Brush(UI.Accent), CornerRadius = new CornerRadius(PanelTheme.Corner(1.5)) });
+            track.Children.Add(new Border { Background = UI.Brush(UI.Accent), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Xs)) });
             texts.Children.Add(track);
         }
         if (open)
         {
-            var actions = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+            var actions = new WrapPanel { Margin = new Thickness(0, Space.Tight, 0, 0) };
             if (center.CanOpen(notice)) actions.Children.Add(PageButton(Loc.T("打开应用", "Open app"), () => _ = OpenFromPage(notice)));
             if ((notice.Capabilities & NoticeCapabilities.Actions) != 0)
                 foreach (var action in notice.Actions.Where(a => a.Key != "default").Take(3))
@@ -538,11 +538,11 @@ public partial class MainWindow
             actions.Children.Add(PageButton(Loc.T("删除", "Delete"), () => { center.Delete(notice); _expandedNotice = null; RenderNotices(); }));
             texts.Children.Add(actions);
         }
-        var side = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(8, 1, 0, 0) };
+        var side = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(Space.S8, 1, 0, 0) };
         Grid.SetColumn(side, 2); grid.Children.Add(side);
-        side.Children.Add(UI.Fixed(NoticeText.Relative(notice.ReceivedAt, now), 10.5, 16, UI.Tertiary));
+        side.Children.Add(UI.Fixed(NoticeText.Relative(notice.ReceivedAt, now), TextSize.Caption, 16, UI.Tertiary));
         if (_freshNotices.Contains(notice.Id))
-            side.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(PanelTheme.Hex("danger")), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 4, 2, 0) });
+            side.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(PanelTheme.Hex("danger")), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, Space.S4, Space.Hair, 0) });
         row.MouseEnter += (_, _) => { if (!open) row.Background = UI.Brush(UI.Fill); };
         row.MouseLeave += (_, _) => { if (!open) row.Background = UI.Brush("Transparent"); };
         row.MouseLeftButtonUp += (_, e) =>
@@ -606,7 +606,7 @@ public partial class MainWindow
     private void MessageHint(string text)
     {
         if (NoticesContent.Children.OfType<DockPanel>().FirstOrDefault() is not { } page) return;
-        var hint = UI.Line(text, 11, PanelTheme.Hex("danger")); hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0, 0, 0, 4);
+        var hint = UI.Line(text, TextSize.Caption, PanelTheme.Hex("danger")); hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0, 0, 0, Space.S4);
         DockPanel.SetDock(hint, Dock.Top);
         page.Children.Insert(1, hint);
     }
@@ -655,8 +655,8 @@ public partial class MainWindow
     // A small flat button of the panel's kind.
     private static Button PageButton(string text, Action click)
     {
-        var face = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Background = UI.Brush(UI.Fill), Padding = new Thickness(9, 0, 9, 0), Height = 22, Margin = new Thickness(4, 0, 0, 0) };
-        face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 11.5, Foreground = UI.Brush(UI.Secondary), VerticalAlignment = VerticalAlignment.Center };
+        var face = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Background = UI.Brush(UI.Fill), Padding = new Thickness(Space.S8, 0, Space.S8, 0), Height = 22, Margin = new Thickness(Space.S4, 0, 0, 0) };
+        face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = TextSize.Body, Foreground = UI.Brush(UI.Secondary), VerticalAlignment = VerticalAlignment.Center };
         // The face is 22 DIP tall; a button may take the pointer taller around it (HitArea, the page's tools).
         var hit = new FrameworkElementFactory(typeof(Border));
         hit.SetValue(Border.BackgroundProperty, Brushes.Transparent);

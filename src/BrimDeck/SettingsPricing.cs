@@ -31,9 +31,9 @@ public sealed partial class SettingsWindow
     {
         // Sits directly under the page title, closer to it than the usual gap below a title.
         var description=TextLine(Loc.T("面板和模型明细中的费用按这里的单价估算。价格每天从 OpenRouter 更新，手动添加的价格优先。",
-            "Costs in the panel and model details are estimated with these unit prices. Prices are updated daily from OpenRouter; prices added by hand take precedence."),12,TextSecondary);
-        description.TextWrapping=TextWrapping.Wrap;description.Margin=new Thickness(0,-8,0,14);_content.Children.Add(description);
-        var toolbar=new DockPanel {Margin=new Thickness(0,0,0,20)};
+            "Costs in the panel and model details are estimated with these unit prices. Prices are updated daily from OpenRouter; prices added by hand take precedence."),TextSize.Body,TextSecondary);
+        description.TextWrapping=TextWrapping.Wrap;description.Margin=new Thickness(0, -8, 0, 14);_content.Children.Add(description);
+        var toolbar=new DockPanel {Margin=new Thickness(0, 0, 0, 20)};
         var refresh=ActionButton(Loc.T("更新价格", "Update prices"),()=>{});refresh.BorderBrush=UI.Brush(_palette.Border);refresh.Background=UI.Brush(_palette.Input);
         AutomationProperties.SetName(refresh,Loc.T("更新价格", "Update prices"));DockPanel.SetDock(refresh,Dock.Right);toolbar.Children.Add(refresh);
         refresh.Click+=async(_,_)=>
@@ -43,11 +43,11 @@ public sealed partial class SettingsWindow
             catch(OperationCanceledException) { }
             finally {refresh.IsEnabled=true;refresh.Content=Loc.T("更新价格", "Update prices");}
         };
-        _priceUpdated=TextLine("",11,TextTertiary);_priceUpdated.VerticalAlignment=VerticalAlignment.Center;toolbar.Children.Add(_priceUpdated);_content.Children.Add(toolbar);
-        _priceSearch=new TextBox {Style=(Style)FindResource("SettingsField"),MaxLength=200,Margin=new Thickness(0,0,0,16)};
+        _priceUpdated=TextLine("",TextSize.Caption,TextTertiary);_priceUpdated.VerticalAlignment=VerticalAlignment.Center;toolbar.Children.Add(_priceUpdated);_content.Children.Add(toolbar);
+        _priceSearch=new TextBox {Style=(Style)FindResource("SettingsField"),MaxLength=200,Margin=new Thickness(0, 0, 0, Space.S16)};
         AutomationProperties.SetName(_priceSearch,Loc.T("搜索模型", "Search models"));_priceSearch.ToolTip=Loc.T("按模型 ID 搜索", "Search by model ID");
-        var search=new DockPanel();var searchLabel=TextLine(Loc.T("搜索模型", "Search models"),12,TextSecondary);searchLabel.Margin=new Thickness(0,8,16,0);DockPanel.SetDock(searchLabel,Dock.Left);search.Children.Add(searchLabel);search.Children.Add(_priceSearch);_content.Children.Add(search);
-        _priceTable=new DataGrid {Style=(Style)FindResource("SettingsPriceTable"),Height=Math.Max(220,ActualHeight-PriceTableReserve),FontSize=12,FontFamily=UI.PanelFont};
+        var search=new DockPanel();var searchLabel=TextLine(Loc.T("搜索模型", "Search models"),TextSize.Body,TextSecondary);searchLabel.Margin=new Thickness(0, Space.S8, Space.S16, 0);DockPanel.SetDock(searchLabel,Dock.Left);search.Children.Add(searchLabel);search.Children.Add(_priceSearch);_content.Children.Add(search);
+        _priceTable=new DataGrid {Style=(Style)FindResource("SettingsPriceTable"),Height=Math.Max(220,ActualHeight-PriceTableReserve),FontSize=TextSize.Body,FontFamily=UI.PanelFont};
         _priceTable.Resources[typeof(ScrollViewer)]=new Style(typeof(ScrollViewer));
         AutomationProperties.SetName(_priceTable,Loc.T("模型单价", "Model unit prices"));
         var numericHeader=new Style(typeof(DataGridColumnHeader),_priceTable.ColumnHeaderStyle);
@@ -66,7 +66,7 @@ public sealed partial class SettingsWindow
             _priceTable.Columns.Add(new DataGridTextColumn {Header=new TextBlock {Text=column.Item1,TextWrapping=TextWrapping.NoWrap},Binding=new Binding(column.Item2),Width=new DataGridLength(column.Item3,DataGridLengthUnitType.Star),ElementStyle=style,
                 HeaderStyle=column.Item2==nameof(PriceRow.Name)?_priceTable.ColumnHeaderStyle:numericHeader});
         }
-        var factory=new FrameworkElementFactory(typeof(Button));factory.SetValue(StyleProperty,FindResource("SettingsButton"));factory.SetValue(ContentControl.ContentProperty,Loc.T("编辑", "Edit"));factory.SetValue(FontSizeProperty,11d);factory.SetValue(Control.PaddingProperty,new Thickness(4,5,4,5));
+        var factory=new FrameworkElementFactory(typeof(Button));factory.SetValue(StyleProperty,FindResource("SettingsButton"));factory.SetValue(ContentControl.ContentProperty,Loc.T("编辑", "Edit"));factory.SetValue(FontSizeProperty,11d);factory.SetValue(Control.PaddingProperty,new Thickness(Space.S4, Space.S4, Space.S4, Space.S4));
         factory.SetValue(AutomationProperties.NameProperty,Loc.T("编辑模型价格", "Edit model price"));
         factory.AddHandler(Button.ClickEvent,new RoutedEventHandler((sender,_)=>{if(((FrameworkElement)sender).DataContext is PriceRow item)CreatePriceEditor(item.Model).ShowDialog();}));
         _priceTable.Columns.Add(new DataGridTemplateColumn {Width=50,CellTemplate=new DataTemplate {VisualTree=factory}});
@@ -78,11 +78,11 @@ public sealed partial class SettingsWindow
         };
         _priceTable.MouseDoubleClick+=(_,e)=>{if(_priceTable.SelectedItem is PriceRow item&&e.OriginalSource is FrameworkElement element&&FindVisualParent<DataGridRow>(element) is not null)CreatePriceEditor(item.Model).ShowDialog();};
         _content.Children.Add(_priceTable);
-        var tail=new DockPanel {Margin=new Thickness(0,16,0,0),HorizontalAlignment=HorizontalAlignment.Left};
+        var tail=new DockPanel {Margin=new Thickness(0, Space.S16, 0, 0),HorizontalAlignment=HorizontalAlignment.Left};
         var add=ActionButton(Loc.T("+  添加模型", "+  Add model"),()=>CreatePriceEditor(null).ShowDialog());add.BorderBrush=UI.Brush(_palette.Border);add.Background=UI.Brush(_palette.Input);AutomationProperties.SetName(add,Loc.T("添加模型", "Add model"));DockPanel.SetDock(add,Dock.Left);tail.Children.Add(add);
-        var details=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,0,2)};
-        var units=TextLine(Loc.T("单价单位：美元 / 百万 Token", "Unit prices in US dollars per million tokens"),11,TextTertiary);units.Margin=new Thickness(16,0,16,0);details.Children.Add(units);
-        _priceCount=TextLine("",11,TextTertiary);details.Children.Add(_priceCount);tail.Children.Add(details);_content.Children.Add(tail);
+        var details=new StackPanel {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0, 0, 0, Space.Hair)};
+        var units=TextLine(Loc.T("单价单位：美元 / 百万 Token", "Unit prices in US dollars per million tokens"),TextSize.Caption,TextTertiary);units.Margin=new Thickness(Space.S16, 0, Space.S16, 0);details.Children.Add(units);
+        _priceCount=TextLine("",TextSize.Caption,TextTertiary);details.Children.Add(_priceCount);tail.Children.Add(details);_content.Children.Add(tail);
         var table=_priceTable;
         table.Loaded+=(_,_)=>
         {
@@ -128,35 +128,35 @@ public sealed partial class SettingsWindow
         Native.SettingsChrome.Apply(dialog);dialog.ResizeMode=ResizeMode.NoResize;
         dialog.SourceInitialized+=(_,_)=>Native.SettingsChrome.SetTheme(dialog,_palette.Dark);
         // The title and the button stay put; on a screen too short for the fields, the fields scroll between them.
-        var panel=new DockPanel {Margin=new Thickness(26,18,26,24)};var body=new StackPanel();
-        var head=new DockPanel {Margin=new Thickness(0,0,0,22)};
+        var panel=new DockPanel {Margin=new Thickness(Space.S24, 18, Space.S24, Space.S24)};var body=new StackPanel();
+        var head=new DockPanel {Margin=new Thickness(0, 0, 0, Space.S24)};
         var close=ActionButton("",dialog.Close);close.Content=CaptionIcon("close");close.Width=30;close.Height=30;close.Padding=new Thickness(0);close.ToolTip=Loc.T("关闭", "Close");AutomationProperties.SetName(close,Loc.T("关闭价格编辑", "Close price editor"));WindowChromeVisible(close);DockPanel.SetDock(close,Dock.Right);head.Children.Add(close);
-        head.Children.Add(TextLine(dialog.Title,20,TextPrimary,FontWeights.SemiBold));DockPanel.SetDock(head,Dock.Top);panel.Children.Add(head);
-        body.Children.Add(TextLine(Loc.T("模型 ID", "Model ID"),12,TextSecondary));
-        var id=new TextBox {Style=(Style)dialog.FindResource("SettingsField"),Text=model?.Model??"",MaxLength=200,IsReadOnly=!adding,Margin=new Thickness(0,7,0,18)};
+        head.Children.Add(TextLine(dialog.Title,TextSize.Figure,TextPrimary,FontWeights.SemiBold));DockPanel.SetDock(head,Dock.Top);panel.Children.Add(head);
+        body.Children.Add(TextLine(Loc.T("模型 ID", "Model ID"),TextSize.Body,TextSecondary));
+        var id=new TextBox {Style=(Style)dialog.FindResource("SettingsField"),Text=model?.Model??"",MaxLength=200,IsReadOnly=!adding,Margin=new Thickness(0, Space.S8, 0, 18)};
         AutomationProperties.SetName(id,Loc.T("模型 ID", "Model ID"));body.Children.Add(id);
-        var units=TextLine(Loc.T("美元 / 百万 Token", "US dollars per million tokens"),11,TextTertiary);units.Margin=new Thickness(0,0,0,14);body.Children.Add(units);
+        var units=TextLine(Loc.T("美元 / 百万 Token", "US dollars per million tokens"),TextSize.Caption,TextTertiary);units.Margin=new Thickness(0, 0, 0, 14);body.Children.Add(units);
         var fields=new Dictionary<string,TextBox>();var grid=new Grid();grid.ColumnDefinitions.Add(new());grid.ColumnDefinitions.Add(new());
         var values=new (string Name,decimal? Value)[]{(Loc.T("输入", "Input"),model?.Prices.Input),(Loc.T("输出", "Output"),model?.Prices.Output),(Loc.T("缓存读取", "Cache read"),model?.Prices.CacheRead),
             (Loc.T("缓存写入", "Cache write"),model?.Prices.CacheWrite),(Loc.T("缓存写入（1 小时）", "Cache write (1 hour)"),model?.Prices.CacheWriteHour)};
         for(int i=0;i<values.Length;i++)
         {
             if(i%2==0)grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto});
-            var cell=new StackPanel {Margin=new Thickness(i%2==0?0:9,0,i%2==0?9:0,16)};cell.Children.Add(TextLine(values[i].Name,12,TextSecondary));
-            var input=new TextBox {Style=(Style)dialog.FindResource("SettingsField"),Text=values[i].Value is {} v?(v*1_000_000m).ToString("0.############################",CultureInfo.InvariantCulture):"",Margin=new Thickness(0,7,0,0),MaxLength=40};
+            var cell=new StackPanel {Margin=new Thickness(i%2==0?0:9,0,i%2==0?9:0,16)};cell.Children.Add(TextLine(values[i].Name,TextSize.Body,TextSecondary));
+            var input=new TextBox {Style=(Style)dialog.FindResource("SettingsField"),Text=values[i].Value is {} v?(v*1_000_000m).ToString("0.############################",CultureInfo.InvariantCulture):"",Margin=new Thickness(0, Space.S8, 0, 0),MaxLength=40};
             AutomationProperties.SetName(input,Loc.T(values[i].Name+"单价", values[i].Name+" price"));fields.Add(values[i].Name,input);
             if(i<2)cell.Children.Add(input);
             else
             {
                 // Cache prices may stay blank; the hint sits where typed text starts (border 1 + padding 10 + text inset 2).
-                var hint=TextLine(i switch {2=>Loc.T("留空按 0 计算", "Empty counts as 0"),3=>Loc.T("留空按输入价格计算", "Empty uses the input price"),_=>Loc.T("留空按缓存写入价格计算", "Empty uses the cache write price")},13,TextTertiary);hint.IsHitTestVisible=false;hint.VerticalAlignment=VerticalAlignment.Center;hint.Margin=new Thickness(13,7,0,0);
+                var hint=TextLine(i switch {2=>Loc.T("留空按 0 计算", "Empty counts as 0"),3=>Loc.T("留空按输入价格计算", "Empty uses the input price"),_=>Loc.T("留空按缓存写入价格计算", "Empty uses the cache write price")},TextSize.Strong,TextTertiary);hint.IsHitTestVisible=false;hint.VerticalAlignment=VerticalAlignment.Center;hint.Margin=new Thickness(Space.S12, Space.S8, 0, 0);
                 void Hint()=>hint.Visibility=input.Text.Length==0?Visibility.Visible:Visibility.Collapsed;
                 input.TextChanged+=(_,_)=>Hint();Hint();
                 var overlay=new Grid();overlay.Children.Add(input);overlay.Children.Add(hint);cell.Children.Add(overlay);
             }Grid.SetColumn(cell,i%2);Grid.SetRow(cell,i/2);grid.Children.Add(cell);
         }
         body.Children.Add(grid);
-        var error=TextLine("",12,_palette.Dark?"#F0A6AA":"#B12E3A");error.TextWrapping=TextWrapping.Wrap;error.Visibility=Visibility.Collapsed;AutomationProperties.SetLiveSetting(error,AutomationLiveSetting.Assertive);body.Children.Add(error);
+        var error=TextLine("",TextSize.Body,_palette.Dark?"#F0A6AA":"#B12E3A");error.TextWrapping=TextWrapping.Wrap;error.Visibility=Visibility.Collapsed;AutomationProperties.SetLiveSetting(error,AutomationLiveSetting.Assertive);body.Children.Add(error);
         bool Commit()
         {
             var prices=new List<decimal?>();
@@ -176,7 +176,7 @@ public sealed partial class SettingsWindow
         }
         // Existing rows commit valid edits on focus loss. Creating a new identity is explicit.
         if(!adding)foreach(var field in fields.Values)field.LostKeyboardFocus+=(_,_)=>Commit();
-        var done=ActionButton(adding?Loc.T("添加模型", "Add model"):Loc.T("完成", "Done"),()=>{if(Commit())dialog.Close();},true);done.Margin=new Thickness(0,10,0,0);done.HorizontalAlignment=HorizontalAlignment.Right;done.MinWidth=84;AutomationProperties.SetName(done,adding?Loc.T("确认添加模型", "Confirm adding the model"):Loc.T("完成价格编辑", "Finish editing the price"));DockPanel.SetDock(done,Dock.Bottom);panel.Children.Add(done);
+        var done=ActionButton(adding?Loc.T("添加模型", "Add model"):Loc.T("完成", "Done"),()=>{if(Commit())dialog.Close();},true);done.Margin=new Thickness(0, 10, 0, 0);done.HorizontalAlignment=HorizontalAlignment.Right;done.MinWidth=84;AutomationProperties.SetName(done,adding?Loc.T("确认添加模型", "Confirm adding the model"):Loc.T("完成价格编辑", "Finish editing the price"));DockPanel.SetDock(done,Dock.Bottom);panel.Children.Add(done);
         panel.Children.Add(new ScrollViewer {Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Focusable=false});
         // Opened over the settings window, on its screen; the dialog grows with its content up to that screen's work area.
         var screen=Native.WindowsHost.WindowScreen(this);dialog.MaxHeight=screen.Work.Height/screen.Scale-24;

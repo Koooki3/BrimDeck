@@ -90,7 +90,7 @@ public sealed partial class SettingsWindow
     // Claude and Grok Bot need no site or key; the expanded row holds this row's own switch for reading the quota online.
     private FrameworkElement OnlineQuotaDetails(AppEntry entry)
     {
-        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12);
+        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, Space.S12);
         bool grokBot = entry.QuotaSource == ProviderId.GrokBot;
         string title = Loc.T("联网获取额度", "Fetch quota online");
         string help = grokBot
@@ -102,13 +102,13 @@ public sealed partial class SettingsWindow
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition());
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center };
-        var caption = TextLine(title, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(Space.S16, 0, Space.S16, 0), VerticalAlignment = VerticalAlignment.Center };
+        var caption = TextLine(title, TextSize.Body, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
         heading.Children.Add(caption);
         // The same help mark as the column headings of the application list.
         var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
         // The 12 DIP mark takes the pointer 24 DIP square (SW-08); the negative margin keeps its place.
-        var info = new HelpMark { Width = 24, Height = 24, Background = Brushes.Transparent, Margin = new Thickness(4 - 6, -6, -6, -6),
+        var info = new HelpMark { Width = 24, Height = 24, Background = Brushes.Transparent, Margin = new Thickness(Space.S4 - 6, -6, -6, -6),
             VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
             FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
         AttachSettingHelp(info, title, () => help);
@@ -124,7 +124,7 @@ public sealed partial class SettingsWindow
             Change(s => s.Entry(entry.InstanceId)!.QuotaOnline = online);
         }
         toggle.Checked += (_, _) => Set(true); toggle.Unchecked += (_, _) => Set(false);
-        line.Margin = new Thickness(0, 5, 0, 5);
+        line.Margin = new Thickness(0, Space.S4, 0, Space.S4);
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetColumn(line, 1); Grid.SetColumnSpan(line, 6); grid.Children.Add(line);
         return grid;
@@ -135,8 +135,8 @@ public sealed partial class SettingsWindow
     private FrameworkElement SourceDetails(AppEntry entry)
     {
         if (ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) return OnlineQuotaDetails(entry);
-        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12); Grid.SetIsSharedSizeScope(grid, true);
-        var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };
+        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, Space.S12); Grid.SetIsSharedSizeScope(grid, true);
+        var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(Space.Tight, Space.S4, Space.Tight, Space.S4) };
         Func<bool> commitSite = () => true;
         Action commitScript = () => { };
         void InvalidateTest() { result.Visibility = Visibility.Collapsed; _sourceTestCancellation?.Cancel(); }
@@ -146,11 +146,11 @@ public sealed partial class SettingsWindow
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
             line.ColumnDefinitions.Add(new ColumnDefinition());
             // A minimum width keeps fields of different sources starting on the same line.
-            var caption = TextLine(label, 12, TextSecondary); caption.Margin = new Thickness(16, 0, 16, 0); caption.VerticalAlignment = VerticalAlignment.Center; caption.MinWidth = 52;
+            var caption = TextLine(label, TextSize.Body, TextSecondary); caption.Margin = new Thickness(Space.S16, 0, Space.S16, 0); caption.VerticalAlignment = VerticalAlignment.Center; caption.MinWidth = 52;
             // An unlabeled line still shares the label width but adds no height of its own.
             if (label.Length == 0) caption.Visibility = Visibility.Collapsed;
             line.Children.Add(caption);
-            control.Margin = new Thickness(0, 5, 0, 5); Grid.SetColumn(control, 1); line.Children.Add(control);
+            control.Margin = new Thickness(0, Space.S4, 0, Space.S4); Grid.SetColumn(control, 1); line.Children.Add(control);
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Grid.SetRow(line, grid.RowDefinitions.Count - 1); Grid.SetColumn(line, 1); Grid.SetColumnSpan(line, span); grid.Children.Add(line);
             return label.Length > 0 ? caption : null;
@@ -161,18 +161,18 @@ public sealed partial class SettingsWindow
             var content = new Grid();
             content.ColumnDefinitions.Add(new ColumnDefinition()); content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             // Typed text starts 2 in from the input's edge; the hint starts 5 in, so the caret stands just before it rather than on it.
-            hint.VerticalAlignment = VerticalAlignment.Center; hint.IsHitTestVisible = false; hint.TextTrimming = TextTrimming.CharacterEllipsis; hint.Margin = new Thickness(5, 0, 0, 0);
+            hint.VerticalAlignment = VerticalAlignment.Center; hint.IsHitTestVisible = false; hint.TextTrimming = TextTrimming.CharacterEllipsis; hint.Margin = new Thickness(Space.S4, 0, 0, 0);
             content.Children.Add(hint); content.Children.Add(input);
             if (trailing is not null) { Grid.SetColumn(trailing, 1); content.Children.Add(trailing); }
-            var field = new Border { Child = content, Height = 34, CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 0, 4, 0),
+            var field = new Border { Child = content, Height = 34, CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 0, Space.S4, 0),
                 Background = UI.Brush(_palette.Input), BorderBrush = UI.Brush(_palette.InputBorder), BorderThickness = new Thickness(1) };
             FieldFocus(field, field, () => UI.Brush(_palette.InputBorder));
             return field;
         }
         TextBox Plain(string id, string name)
         {
-            var box = new TextBox { Style = (Style)FindResource("SettingsNumber"), TextAlignment = TextAlignment.Left, FontSize = 12.5,
-                VerticalAlignment = VerticalAlignment.Center, MaxLength = 2000, Margin = new Thickness(0, 0, 6, 0) };
+            var box = new TextBox { Style = (Style)FindResource("SettingsNumber"), TextAlignment = TextAlignment.Left, FontSize = TextSize.Body,
+                VerticalAlignment = VerticalAlignment.Center, MaxLength = 2000, Margin = new Thickness(0, 0, Space.Tight, 0) };
             AutomationProperties.SetAutomationId(box, id + "-" + entry.InstanceId.ToString("N")); AutomationProperties.SetName(box, name);
             return box;
         }
@@ -183,10 +183,10 @@ public sealed partial class SettingsWindow
             var site = Plain("site", Loc.T("站点地址", "Site address")); site.Text = entry.Site;
             string usage = custom ? Loc.T("可选，作为 ctx.site 传给脚本", "Optional. Passed to the script as ctx.site")
                 : Loc.T("末尾的 /、/v1 和控制台路径会自动去掉", "A trailing /, /v1 or console path is removed automatically");
-            var hint = TextLine(usage, 12.5, TextTertiary);
+            var hint = TextLine(usage, TextSize.Body, TextTertiary);
             // An HTTP address the row does not allow (one saved by an earlier version included) is not read; the line under
             // the field says why, apart from the hint inside it.
-            var warning = TextLine(ProviderCatalog.HttpsRequired, 12, PanelTheme.WarningDefault); warning.TextWrapping = TextWrapping.Wrap;
+            var warning = TextLine(ProviderCatalog.HttpsRequired, TextSize.Body, PanelTheme.WarningDefault); warning.TextWrapping = TextWrapping.Wrap;
             bool AllowsHttp() => S.Entry(entry.InstanceId)?.AllowHttp == true;
             void Hint()
             {
@@ -230,7 +230,7 @@ public sealed partial class SettingsWindow
             AutomationProperties.SetName(allow, allowTitle); AutomationProperties.SetHelpText(allow, allowHelp);
             AutomationProperties.SetAutomationId(allow, "allow-http-" + entry.InstanceId.ToString("N"));
             var allowLine = new StackPanel { Orientation = Orientation.Horizontal };
-            var allowInfo = HelpIcon(allowTitle, () => allowHelp, 14); allowInfo.Margin = new Thickness(8, 0, 0, 0);
+            var allowInfo = HelpIcon(allowTitle, () => allowHelp, 14); allowInfo.Margin = new Thickness(Space.S8, 0, 0, 0);
             allowLine.Children.Add(allow); allowLine.Children.Add(allowInfo);
             void SetAllowHttp(bool value)
             {
@@ -245,9 +245,9 @@ public sealed partial class SettingsWindow
             Hint();
         }
 
-        var password = new PasswordBox { FontSize = 12.5, MaxLength = 4096, Padding = new Thickness(0), BorderThickness = new Thickness(0),
+        var password = new PasswordBox { FontSize = TextSize.Body, MaxLength = 4096, Padding = new Thickness(0), BorderThickness = new Thickness(0),
             Background = Brushes.Transparent, Foreground = UI.Brush(TextPrimary), CaretBrush = UI.Brush(_palette.Accent),
-            VerticalAlignment = VerticalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+            VerticalAlignment = VerticalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Space.Tight, 0) };
         AutomationProperties.SetAutomationId(password, "secret-" + entry.InstanceId.ToString("N")); AutomationProperties.SetName(password, Loc.T("API 密钥", "API key"));
         var visible = Plain("secret-text", Loc.T("API 密钥", "API key")); visible.MaxLength = 4096; visible.Visibility = Visibility.Collapsed;
         string emptyHint = entry.QuotaSource switch
@@ -259,7 +259,7 @@ public sealed partial class SettingsWindow
             _ => Loc.T("填写 API 密钥，加密保存在本机", "Enter the API key; it is stored encrypted on this PC")
         };
         string savedHint = Loc.T("已加密保存在本机，输入新密钥以更换", "Stored encrypted on this PC. Enter a new key to replace it");
-        var keyHint = TextLine(entry.SecretRevision != Guid.Empty ? savedHint : emptyHint, 12.5, TextTertiary);
+        var keyHint = TextLine(entry.SecretRevision != Guid.Empty ? savedHint : emptyHint, TextSize.Body, TextTertiary);
         var inputs = new Grid(); inputs.Children.Add(password); inputs.Children.Add(visible);
         // The icon shows the current state: struck through while the key is dots, open while it is plain text.
         const string eye = "M 1,6 C 3.5,0.5 12.5,0.5 15,6 C 12.5,11.5 3.5,11.5 1,6 Z M 8,4 A 2,2 0 1 1 8,8 A 2,2 0 1 1 8,4 Z";
@@ -340,8 +340,8 @@ public sealed partial class SettingsWindow
             code.IsKeyboardFocusWithinChanged += (_, _) => { if (!code.IsKeyboardFocusWithin) SaveCode(); };
             code.TextChanged += (_, _) => InvalidateTest();
             // The code reaches across to the show switch: the switch is 38 wide and centred in its 50-wide column, so the frame stops 6 short of it.
-            var codeLabel = Line(Loc.T("代码", "Code"), frame, 7)!; codeLabel.VerticalAlignment = VerticalAlignment.Top; codeLabel.Margin = new Thickness(16, 13, 16, 0);
-            frame.Margin = new Thickness(0, 5, 6, 5);
+            var codeLabel = Line(Loc.T("代码", "Code"), frame, 7)!; codeLabel.VerticalAlignment = VerticalAlignment.Top; codeLabel.Margin = new Thickness(Space.S16, Space.S12, Space.S16, 0);
+            frame.Margin = new Thickness(0, Space.S4, Space.Tight, Space.S4);
         }
 
         var test = ActionButton(Loc.T("测试连接", "Test connection"), () => { }); test.Style = (Style)FindResource("SettingsOutlineButton");
@@ -363,15 +363,15 @@ public sealed partial class SettingsWindow
                 if (cancellation.IsCancellationRequested || S.Entry(entry.InstanceId)?.ConfigurationKey != configuration) return;
                 result.Children.Clear(); result.Visibility = Visibility.Visible;
                 var snapshot = response.Snapshot;
-                result.Children.Add(TextLine(snapshot.StatusLabel + Loc.T($" · {response.Seconds:0.0} 秒", $" · {response.Seconds:0.0} s"), 12, TextPrimary, FontWeights.SemiBold));
+                result.Children.Add(TextLine(snapshot.StatusLabel + Loc.T($" · {response.Seconds:0.0} 秒", $" · {response.Seconds:0.0} s"), TextSize.Body, TextPrimary, FontWeights.SemiBold));
                 // The first line already names the state, so only the extra explanation is shown below it.
                 string separator = Loc.T("；", "; ");
                 var explanation = snapshot.Status.StartsWith(snapshot.StatusLabel + separator, StringComparison.Ordinal) ? snapshot.Status[(snapshot.StatusLabel.Length + separator.Length)..] : snapshot.Status;
                 if (explanation.Length > 0 && explanation != snapshot.StatusLabel)
-                { var description = TextLine(explanation, 11.5, TextSecondary); description.TextWrapping = TextWrapping.Wrap; description.Margin = new Thickness(0, 3, 0, 0); result.Children.Add(description); }
+                { var description = TextLine(explanation, TextSize.Body, TextSecondary); description.TextWrapping = TextWrapping.Wrap; description.Margin = new Thickness(0, 3, 0, 0); result.Children.Add(description); }
                 if (snapshot.LiveQuota && snapshot.Details.Count > 0)
-                { var details = TextLine(string.Join("\n", snapshot.Details.Select(p => p.Key + Loc.T("：", ": ") + p.Value)), 11.5, TextSecondary); details.TextWrapping = TextWrapping.Wrap; result.Children.Add(details); }
-                if (response.Logs.Count > 0) { var logs = TextLine(string.Join("\n", response.Logs), 11.5, TextSecondary); logs.TextWrapping = TextWrapping.Wrap; result.Children.Add(logs); }
+                { var details = TextLine(string.Join("\n", snapshot.Details.Select(p => p.Key + Loc.T("：", ": ") + p.Value)), TextSize.Body, TextSecondary); details.TextWrapping = TextWrapping.Wrap; result.Children.Add(details); }
+                if (response.Logs.Count > 0) { var logs = TextLine(string.Join("\n", response.Logs), TextSize.Body, TextSecondary); logs.TextWrapping = TextWrapping.Wrap; result.Children.Add(logs); }
             }
             catch (OperationCanceledException) { }
             finally { test.Content = Loc.T("测试连接", "Test connection"); test.IsEnabled = true; if (_sourceTestCancellation == cancellation) _sourceTestCancellation = null; cancellation.Dispose(); }

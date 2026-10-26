@@ -70,8 +70,8 @@ public sealed partial class SettingsWindow
         // The box keeps one size and place in every state: the text on the left, trimmed before the clear button, which
         // always holds its slot on the right and is only dimmed while nothing is set. The record button spans the whole
         // box (so its focus ring rings the box); the clear button sits above it and takes its own clicks.
-        var text = TextLine("", 12, TextPrimary);
-        text.VerticalAlignment = VerticalAlignment.Center; text.TextTrimming = TextTrimming.CharacterEllipsis; text.Margin = new Thickness(10, 0, 32, 0);
+        var text = TextLine("", TextSize.Body, TextPrimary);
+        text.VerticalAlignment = VerticalAlignment.Center; text.TextTrimming = TextTrimming.CharacterEllipsis; text.Margin = new Thickness(10, 0, Space.S32, 0);
         var box = new Button
         {
             Template = HotkeyBoxTemplate, Content = text, HorizontalContentAlignment = HorizontalAlignment.Stretch, Cursor = Cursors.Hand,
@@ -97,9 +97,9 @@ public sealed partial class SettingsWindow
             BorderBrush = UI.Brush(_palette.InputBorder), BorderThickness = new Thickness(1), VerticalAlignment = VerticalAlignment.Center
         };
         // Messages fill the space between the label and the box (at most 300 DIP wide and two lines), so neither the box nor the row height moves.
-        var note = TextLine("", 11.5, _palette.Dark ? "#F0A6AA" : "#B12E3A");
+        var note = TextLine("", TextSize.Body, _palette.Dark ? "#F0A6AA" : "#B12E3A");
         note.TextWrapping = TextWrapping.Wrap; note.TextTrimming = TextTrimming.CharacterEllipsis; note.MaxWidth = 300; note.MaxHeight = 34; note.HorizontalAlignment = HorizontalAlignment.Right;
-        note.TextAlignment = TextAlignment.Right; note.Margin = new Thickness(0, 0, 12, 0);
+        note.TextAlignment = TextAlignment.Right; note.Margin = new Thickness(0, 0, Space.S12, 0);
         note.VerticalAlignment = VerticalAlignment.Center; note.Visibility = Visibility.Hidden;
         AutomationProperties.SetLiveSetting(note, AutomationLiveSetting.Assertive);
 
@@ -198,7 +198,7 @@ public sealed partial class SettingsWindow
         // Like Row, but the message takes the middle column, so a narrow window shrinks the message instead of pushing into the label.
         var row = new Grid { MinHeight = 44 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var label = SettingLabel(title, () => help); label.Margin = new Thickness(0, 0, 12, 0); row.Children.Add(label);
+        var label = SettingLabel(title, () => help); label.Margin = new Thickness(0, 0, Space.S12, 0); row.Children.Add(label);
         Grid.SetColumn(note, 1); row.Children.Add(note);
         Grid.SetColumn(chrome, 2); row.Children.Add(chrome);
         Action refresh = () => { if (!recording) Show(); };

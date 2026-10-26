@@ -187,7 +187,7 @@ public partial class MainWindow
     private (double Width, double Height, IReadOnlyList<ProviderSnapshot> Snapshots, DeckSettings Settings, PanelHeader Header)? _usageHeader;
     private PanelHeader CachedUsageHeader()
     {
-        double width = _usageWidth, height = UsagePageHeight;
+        double width = UsageLayoutWidth, height = UsagePageHeight;
         if (_usageHeader is { } known && known.Width == width && known.Height == height && ReferenceEquals(known.Snapshots, Snapshots) && ReferenceEquals(known.Settings, Settings))
             return known.Header;
         var header = UsageHeader(width, height);

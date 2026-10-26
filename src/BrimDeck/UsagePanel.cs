@@ -209,10 +209,10 @@ public partial class MainWindow
         {
             _usageForm = "empty";
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            empty.Children.Add(UI.Fixed(Settings.UsagePage ? Loc.T("未选择应用", "No apps selected") : Loc.T("AI 用量已关闭", "AI usage is off"), 14, 20, UI.Secondary));
+            empty.Children.Add(UI.Fixed(Settings.UsagePage ? Loc.T("未选择应用", "No apps selected") : Loc.T("AI 用量已关闭", "AI usage is off"), TextSize.Strong, 20, UI.Secondary));
             var openText = Loc.T("打开设置", "Open settings");
             var open = Segmented([new(openText, openText, false, _app.OpenSettings)], 12, 22, 12, centerText: true);
-            open.Margin = new Thickness(0, 12, 0, 0); open.HorizontalAlignment = HorizontalAlignment.Center;
+            open.Margin = new Thickness(0, Space.S12, 0, 0); open.HorizontalAlignment = HorizontalAlignment.Center;
             empty.Children.Add(open); UsageContent.Children.Add(empty);
             return;
         }
@@ -241,11 +241,11 @@ public partial class MainWindow
             AutomationProperties.SetName(button, item.Name);
             strip.Children.Add(button);
         }
-        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
+        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Padding = new Thickness(1) };
         // motion-review F8: the fill is laid out once at its new width; a change of width is drawn by stretching it from its
         // left edge, so the glide lays nothing out again.
         var shift = new TranslateTransform(); var stretch = new ScaleTransform();
-        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(PanelTheme.Corner(5)), HorizontalAlignment = HorizontalAlignment.Left,
+        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Sm)), HorizontalAlignment = HorizontalAlignment.Left,
             IsHitTestVisible = false, RenderTransform = new TransformGroup { Children = { stretch, shift } }, Visibility = Visibility.Hidden };
         var host = new Grid { Children = { fill, strip } };
         int chosen = items.ToList().FindIndex(item => item.Active);
@@ -266,7 +266,7 @@ public partial class MainWindow
                 stretch.BeginAnimation(ScaleTransform.ScaleXProperty, widen);
             }
         };
-        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
+        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Padding = new Thickness(1) };
     }
     // Where each gliding strip's fill was last, by its key.
     private static readonly Dictionary<string, (double X, double Width, long At)> SegmentFills = [];
@@ -284,7 +284,7 @@ public partial class MainWindow
         var pages = sets.SelectMany(set => set.Chunk(capacity)).Select(x => x.ToList()).ToList();
         if (pages.Count == 0) pages.Add([]);
         // Sized for the fullest page the column can switch to.
-        int slots = Math.Clamp(pages.Max(x => x.Count), 1, capacity);
+        int slots = Awaiting(snapshot) ? capacity : Math.Clamp(pages.Max(x => x.Count), 1, capacity);
         int page = Math.Clamp(_quotaPages.GetValueOrDefault(entry.InstanceId), 0, pages.Count - 1);
         return new QuotaView(pages[page], pages.Count, page, slots);
     }
@@ -301,10 +301,10 @@ public partial class MainWindow
             {
                 var button = ModelAction(label, name, () => { _applicationPage += step; _usageHandover = step > 0 ? Handover.Forward : Handover.Back; RenderUsage(); }, toolTip: false);
                 button.IsEnabled = step < 0 ? _applicationPage > 0 : _applicationPage + 1 < pages;
-                button.Padding = new Thickness(6, 0, 6, 0); return button;
+                button.Padding = new Thickness(Space.Tight, 0, Space.Tight, 0); return button;
             }
             controls.Children.Add(PageButton("‹", Loc.T("上一页应用", "Previous apps"), -1));
-            var page = UI.Centered($"{_applicationPage + 1}/{pages}", 11, UI.Secondary); page.Margin = new Thickness(4, 0, 4, 0);
+            var page = UI.Centered($"{_applicationPage + 1}/{pages}", TextSize.Caption, UI.Secondary); page.Margin = new Thickness(Space.S4, 0, Space.S4, 0);
             page.ToolTip = Loc.T($"共 {columns.Count} 项应用", $"{columns.Count} apps in total"); controls.Children.Add(page);
             controls.Children.Add(PageButton("›", Loc.T("下一页应用", "Next apps"), 1));
             ApplicationPages.Children.Add(controls); ApplicationPages.Visibility = Visibility.Visible;
@@ -326,9 +326,17 @@ public partial class MainWindow
         UsageContent.Children.Add(grid);
     }
 
+    // Before its first reading a quota has its defaults: nothing read, no time, and the label and the detail alike.
+    private static bool Awaiting(ProviderSnapshot snapshot) => snapshot.Metrics.Count == 0 && !snapshot.LiveQuota && snapshot.QuotaTime is null && snapshot.Status == snapshot.StatusLabel;
+
     private FrameworkElement Column(AppEntry entry, ProviderSnapshot snapshot, ProviderSnapshot usage, QuotaView view, Layout layout, bool inline, bool wide, bool center, bool separator, double innerWidth)
     {
-        bool off = view.Quotas.Count == 0;
+        // Waiting for its first reading, the column shows its quotas' places in the same layout (SkeletonBlock), so the readings
+        // fill in where they will stay instead of the whole column changing when they arrive.
+        bool awaiting = Awaiting(snapshot);
+        int blocks = awaiting ? view.Slots : view.Quotas.Count;
+        FrameworkElement Block(int i) => awaiting ? SkeletonBlock(entry, layout, i) : QuotaBlock(entry, view.Quotas[i], layout, i);
+        bool off = blocks == 0;
         // Only this column changes: it comes up from faint while the others stay as they are.
         void NextQuotaPage() { _quotaPages[entry.InstanceId] = (view.Page + 1) % view.Pages; _flippedColumn = entry.InstanceId; RenderUsage(); }
         var column = new Grid();
@@ -362,15 +370,13 @@ public partial class MainWindow
         FrameworkElement body;
         if (off)
         {
-            // No readings yet: what the state is, why, and a way to sync now. Before the first reading the label and the detail
-            // say the same, so they become what is missing and why.
-            bool first = snapshot.Status == snapshot.StatusLabel;
+            // No readings: what the state is, why, and a way to sync now.
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            status.Children.Add(UI.Fixed(first ? Loc.T("还没有读数", "No reading yet") : snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold));
-            var detail = UI.Text(first ? Loc.T("首次同步中，完成后自动显示。", "Syncing for the first time; it shows here once done.") : snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
+            status.Children.Add(UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold));
+            var detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
             detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.MaxHeight = 34; detail.TextTrimming = TextTrimming.CharacterEllipsis;
             status.Children.Add(detail);
-            var sync = EmptyAction(Loc.T("立即同步", "Sync now"), 24); sync.HorizontalAlignment = HorizontalAlignment.Left; sync.Margin = new Thickness(0, 6, 0, 0);
+            var sync = EmptyAction(Loc.T("立即同步", "Sync now"), 24); sync.HorizontalAlignment = HorizontalAlignment.Left; sync.Margin = new Thickness(0, Space.Tight, 0, 0);
             AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
             sync.Click += (_, _) => _ = RefreshAsync();
             status.Children.Add(sync); body = status;
@@ -378,13 +384,13 @@ public partial class MainWindow
         else if (wide)
         {
             // A page with fewer quotas keeps the width of a full page's quotas instead of widening them, and is centered.
-            int cells = Math.Max(view.Quotas.Count, view.Slots);
-            if (view.Quotas.Count < cells)
+            int cells = Math.Max(blocks, view.Slots);
+            if (blocks < cells)
             {
                 var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                for (int i = 0; i < view.Quotas.Count; i++)
+                for (int i = 0; i < blocks; i++)
                 {
-                    var block = QuotaBlock(entry, view.Quotas[i], layout, i);
+                    var block = Block(i);
                     block.Width = Math.Max(0, innerWidth / cells - 18);
                     row.Children.Add(block);
                 }
@@ -400,9 +406,9 @@ public partial class MainWindow
             else
             {
                 var row = new UniformGrid { Rows = 1, Columns = cells, VerticalAlignment = VerticalAlignment.Center };
-                for (int i = 0; i < view.Quotas.Count; i++)
+                for (int i = 0; i < blocks; i++)
                 {
-                    var block = QuotaBlock(entry, view.Quotas[i], layout, i);
+                    var block = Block(i);
                     block.Margin = new Thickness(i > 0 ? 18 : 0, 0, i < cells - 1 ? 18 : 0, 0);
                     row.Children.Add(block);
                 }
@@ -413,9 +419,9 @@ public partial class MainWindow
         {
             // A page with fewer quotas is centered like a column that has only one quota; type sizes and spacing do not change.
             var stack = new StackPanel { VerticalAlignment = center ? VerticalAlignment.Center : VerticalAlignment.Top };
-            for (int i = 0; i < view.Quotas.Count; i++)
+            for (int i = 0; i < blocks; i++)
             {
-                var block = QuotaBlock(entry, view.Quotas[i], layout, i);
+                var block = Block(i);
                 if (i > 0) block.Margin = new Thickness(0, layout.QuotaGap, 0, 0);
                 stack.Children.Add(block);
             }
@@ -469,10 +475,33 @@ public partial class MainWindow
         var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, UI.Tertiary);
         return new Border
         {
-            Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(4)),
-            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(6, 0, 0, 0),
+            Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Sm)),
+            Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(Space.Tight, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center
         };
+    }
+
+    // A quota's place before its first reading, in QuotaBlock's three rows: the first says it is being read and the others hold
+    // a neutral bar where the period's name goes, the share is a dash, and the track is empty. The track is the quota's own bar
+    // (same key), so the first reading eases it up from nothing.
+    private static Grid SkeletonBlock(AppEntry entry, Layout layout, int slot)
+    {
+        var block = new Grid();
+        foreach (double height in new[] { layout.LabelRow, layout.RowGap, layout.NumberRow, layout.RowGap, layout.Track })
+            block.RowDefinitions.Add(new RowDefinition { Height = new GridLength(height) });
+        FrameworkElement label = slot == 0 ? UI.Fixed(Loc.T("正在读取…", "Reading…"), layout.Label, layout.LabelRow, UI.Tertiary)
+            : new Border { Width = Math.Round(layout.Label * 3.5), Height = Math.Max(4, Math.Round(layout.Label * .7)), CornerRadius = new CornerRadius(PanelTheme.Corner(3)),
+                Background = UI.Brush(UI.Fill), VerticalAlignment = VerticalAlignment.Center };
+        label.HorizontalAlignment = HorizontalAlignment.Left;
+        block.Children.Add(label);
+        var number = new TextBlock { FontFamily = UI.DisplayFont, LineHeight = layout.NumberRow, LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Height = layout.NumberRow,
+            TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+        number.Inlines.Add(new Run("—%") { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(UI.Tertiary) });
+        Grid.SetRow(number, 2); block.Children.Add(number);
+        var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", 0, PanelTheme.AppTheme(entry)); Grid.SetRow(track, 4);
+        block.Children.Add(track);
+        AutomationProperties.SetName(block, Loc.T("正在读取配额", "Reading the quota"));
+        return block;
     }
 
     // Three rows per quota: the period name, the used share with its reset countdown, and the track.
@@ -496,7 +525,7 @@ public partial class MainWindow
             TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         // A custom item without a value leaves the row empty; the row keeps its height so blocks stay aligned.
         if (quota.ValueText.Length > 0) number.Inlines.Add(new Run(quota.ValueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
-        if (layout.UsedWord && quota.ValueSuffix.Length > 0) number.Inlines.Add(new Run(" " + quota.ValueSuffix) { FontSize = 11, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
+        if (layout.UsedWord && quota.ValueSuffix.Length > 0) number.Inlines.Add(new Run(" " + quota.ValueSuffix) { FontSize = TextSize.Caption, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
         number.ToolTip = quota.Kind switch
         {
             MetricKind.Balance => Loc.T("可用 " + quota.ValueText, quota.ValueText + " available")
@@ -519,7 +548,7 @@ public partial class MainWindow
         if (upperText.Length > 0)
         {
             var reset = UI.Fixed(upperText, layout.Reset, layout.LabelRow, UI.Tertiary);
-            reset.HorizontalAlignment = HorizontalAlignment.Right; reset.Margin = new Thickness(6, 0, 0, 0);
+            reset.HorizontalAlignment = HorizontalAlignment.Right; reset.Margin = new Thickness(Space.Tight, 0, 0, 0);
             reset.ToolTip = text ? null : expiryAbove ? quota.ExpiresAt!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
                 : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
             Grid.SetColumn(reset, 1); labelRow.Children.Add(reset);
@@ -531,7 +560,7 @@ public partial class MainWindow
             right.FontFamily = UI.PanelFont;
             right.ToolTip = text ? null : (quota.ResetAt ?? quota.ExpiresAt)!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
             right.VerticalAlignment = VerticalAlignment.Bottom; right.HorizontalAlignment = HorizontalAlignment.Right;
-            right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
+            right.Margin = new Thickness(Space.Tight, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
         block.Children.Add(numbers);
         var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", used / 100, color); Grid.SetRow(track, 4);
@@ -569,9 +598,9 @@ public partial class MainWindow
     // page's own buttons are, so it reads as a button rather than as text (V-01).
     private Button EmptyAction(string text, double height)
     {
-        var button = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(12, 2, 12, 2), Height = height,
+        var button = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(Space.S12, Space.Hair, Space.S12, Space.Hair), Height = height,
             Content = text, Background = UI.Brush(UI.Fill) };
-        button.Loaded += (_, _) => { if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelTheme.Corner(8)); };
+        button.Loaded += (_, _) => { if (button.Template?.FindName("Chrome", button) is Border chrome) chrome.CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)); };
         return button;
     }
 
@@ -586,7 +615,7 @@ public partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         // Captions end on one vertical line, so "今日" and "七日" stack cleanly and both figures start at the same distance.
         var caption = new JustifiedText(label, layout.Foot, UI.Tertiary, captionWidth)
-        { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Space.S8, 0) };
         row.Children.Add(caption);
         // Each row prices its records once; the figure and its tooltip share the result.
         long total = entries.Sum(x => x.Total);
@@ -608,7 +637,7 @@ public partial class MainWindow
         Grid.SetColumn(arrow, 3); row.Children.Add(arrow);
         var link = DetailLink(row, Loc.T($"查看 {entry.Name} {label}明细", $"Show {entry.Name} {label.ToLowerInvariant()} details"), () => OpenModelDetails(snapshot.Id, days));
         // Extend the highlight into the column inset without shifting the aligned totals.
-        link.Padding = new Thickness(6, 0, 6, 0);
+        link.Padding = new Thickness(Space.Tight, 0, Space.Tight, 0);
         link.Margin = new Thickness(-6, 0, -6, 0);
         AutomationProperties.SetAutomationId(link, $"usage-{days}-{entry.InstanceId:N}");
         return link;

@@ -52,7 +52,7 @@ public partial class MainWindow
     private DeckPage _resizePage;
     private long _resizeRendered;
     // The widest a page can be on this monitor, and the limits of the page being resized.
-    private double PageMaxWidth => Math.Max(DeckPages.MinWidth, Math.Min(DeckPages.MaxWidth, WorkDip.Width - 24));
+    private double PageMaxWidth => Math.Max(DeckPages.MinWidth, Math.Min(DeckPages.MaxWidth, (WorkDip.Width - 24) / Zoom));
     private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimits
     {
         get { var (minWidth, _, minHeight, maxHeight) = DeckPages.Limits(Settings, _resizePage); return (minWidth, Math.Max(minWidth, PageMaxWidth), minHeight, maxHeight); }
@@ -152,6 +152,8 @@ public partial class MainWindow
         var cursor = WindowsHost.Cursor();
         double scale = _pixelsPerDip > 0 ? _pixelsPerDip : 1;
         double dx = (cursor.X - _resizeStart.X) / scale, dy = (cursor.Y - _resizeStart.Y) / scale;
+        // A page's size is its own, without the text size the open panel is drawn larger by (Zoom).
+        if (!_resizeCompact) { dx /= Zoom; dy /= Zoom; }
         // Both sides move, so the width changes by twice the pointer's move.
         double width = _resizeFrom.Width + (_resizeEdge.HasFlag(ResizeEdges.Right) ? 2 * dx : _resizeEdge.HasFlag(ResizeEdges.Left) ? -2 * dx : 0);
         if (_resizeCompact)
@@ -280,8 +282,8 @@ public partial class MainWindow
         _resizeChanged = true;
         if (_resizePage == DeckPage.Notices) FollowRows();
         DeckPages.SetSize(Settings, _resizePage, width, height);
-        _pageWidth = width;
-        if (_resizePage == DeckPage.Usage) _usageWidth = width;
+        _pageWidth = width * Zoom;
+        if (_resizePage == DeckPage.Usage) _usageWidth = width * Zoom;
         SetExpanded(true, instant: true);
         // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
         // layout step and stretch in between, so they follow too; the notices page stretches as it is, its header and margins

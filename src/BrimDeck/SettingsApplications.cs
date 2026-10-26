@@ -14,13 +14,13 @@ public sealed partial class SettingsWindow
     private Border AppNameField(AppEntry? entry)
     {
         var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), TextAlignment = TextAlignment.Left,
-            FontSize = 12.5, MaxLength = 64, VerticalAlignment = VerticalAlignment.Center, IsEnabled = entry is not null };
+            FontSize = TextSize.Body, MaxLength = 64, VerticalAlignment = VerticalAlignment.Center, IsEnabled = entry is not null };
         AutomationProperties.SetAutomationId(input, "display-name-" + entry?.InstanceId.ToString("N"));
         string help = Loc.T("显示在看板上的名称；浅色文字为默认名称，点击后可直接输入，留空恢复配额来源名称",
             "The name shown on the panel. Light text is the default name; click to type a new one, or leave it empty to use the quota source's name");
         AutomationProperties.SetHelpText(input, help);
         var field = new Border { Child = input, Height = 34, CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 0, 10, 0),
-            Margin = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center, Background = UI.Brush(_palette.Input),
+            Margin = new Thickness(Space.Tight, 0, Space.Tight, 0), VerticalAlignment = VerticalAlignment.Center, Background = UI.Brush(_palette.Input),
             BorderBrush = UI.Brush(_palette.InputBorder), BorderThickness = new Thickness(1) };
         bool showingDefault = false;
         void Refresh()

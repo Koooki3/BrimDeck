@@ -2,7 +2,7 @@
   <!-- WPF displays this adorner for keyboard navigation, not initial or mouse focus. -->
   <Style x:Key="ControlDialogKeyboardFocus" TargetType="Control">
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Control">
-      <Border Margin="-3" CornerRadius="{DynamicResource PanelR9}" BorderThickness="2" BorderBrush="{DynamicResource SettingsAccent}"/>
+      <Border Margin="-3" CornerRadius="{DynamicResource PanelRadiusLg}" BorderThickness="2" BorderBrush="{DynamicResource SettingsAccent}"/>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="ControlDialogButton" TargetType="Button">
@@ -13,7 +13,7 @@
     <Setter Property="Background" Value="{DynamicResource SettingsInset}"/>
     <Setter Property="FocusVisualStyle" Value="{StaticResource ControlDialogKeyboardFocus}"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-      <Border x:Name="Chrome" CornerRadius="{DynamicResource PanelR7}" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+      <Border x:Name="Chrome" CornerRadius="{DynamicResource PanelRadiusMd}" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Border>
       <ControlTemplate.Triggers>
@@ -27,7 +27,7 @@
     <Setter Property="Foreground" Value="White"/><Setter Property="FontWeight" Value="SemiBold"/>
     <Setter Property="Background" Value="{DynamicResource SettingsAccentFill}"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-      <Border x:Name="Chrome" CornerRadius="{DynamicResource PanelR7}" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+      <Border x:Name="Chrome" CornerRadius="{DynamicResource PanelRadiusMd}" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Border>
       <ControlTemplate.Triggers>

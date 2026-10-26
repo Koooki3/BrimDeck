@@ -27,12 +27,12 @@ public sealed partial class SettingsWindow
                 "When a notice arrives, the notch, capsule or indicator briefly opens to show the application's icon, title and summary; hover for details. Windows' own banners and notification center stay as they are. Everything is processed on this PC, without any cloud service.")));
         if (!S.NoticesEnabled)
         {
-            var note = TextLine(Loc.T("开启后可选择接收 Windows 应用通知、WSL 中的通知以及 brim-notify 命令发送的提示。", "Once on, you can receive Windows app notifications, notices from WSL and those sent with the brim-notify command."), 12, TextSecondary);
+            var note = TextLine(Loc.T("开启后可选择接收 Windows 应用通知、WSL 中的通知以及 brim-notify 命令发送的提示。", "Once on, you can receive Windows app notifications, notices from WSL and those sent with the brim-notify command."), TextSize.Body, TextSecondary);
             note.TextWrapping = TextWrapping.Wrap; Target.Children.Add(note);
             return;
         }
         // A long page (SW-10): links at its top go to its sections.
-        var anchors = new WrapPanel { Margin = new Thickness(0, -6, 0, 22) };
+        var anchors = new WrapPanel { Margin = new Thickness(0, -Space.Tight, 0, Space.S24) };
         Target.Children.Add(anchors);
         void Section(string name, Action build)
         {
@@ -47,7 +47,7 @@ public sealed partial class SettingsWindow
                 _scroll.ScrollToVerticalOffset(Math.Max(0, y - 4));
             });
             link.Style = (Style)FindResource("SettingsLink"); link.Foreground = UI.Brush(_palette.Accent);
-            link.Margin = new Thickness(anchors.Children.Count == 0 ? 0 : 16, 0, 0, 0);
+            link.Margin = new Thickness(anchors.Children.Count == 0 ? 0 : Space.S16, 0, 0, 0);
             AutomationProperties.SetName(link, Loc.T("转到", "Go to ") + name);
             anchors.Children.Add(link);
         }
@@ -68,7 +68,7 @@ public sealed partial class SettingsWindow
     // spelled out, since the setting is Windows' own and undocumented.
     private void NoticeBannerRow(NoticeCenter center)
     {
-        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NoticeHideBanners, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NoticeHideBanners, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Space.S12, 0, 0, 0) };
         string title = Loc.T("统一关闭其他应用的通知横幅", "Turn off other apps' notification banners");
         AutomationProperties.SetName(toggle, title);
         toggle.Checked += (_, _) => Change(s => s.NoticeHideBanners = true);
@@ -104,8 +104,8 @@ public sealed partial class SettingsWindow
 
     private TextBlock StatusLine(Func<(string Text, bool Problem)> read)
     {
-        var line = TextLine("", 11.5, TextSecondary);
-        line.TextWrapping = TextWrapping.Wrap; line.TextTrimming = TextTrimming.None; line.Margin = new Thickness(0, 2, 0, 0);
+        var line = TextLine("", TextSize.Body, TextSecondary);
+        line.TextWrapping = TextWrapping.Wrap; line.TextTrimming = TextTrimming.None; line.Margin = new Thickness(0, Space.Hair, 0, 0);
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Polite);
         // An empty line takes no room, so a line whose state may come later (the local channel failing) can always be on the page.
         void Update() { var (text, problem) = read(); line.Text = text; line.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed; line.Foreground = UI.Brush(problem ? _palette.Dark ? "#F0A6AA" : "#B12E3A" : TextSecondary); }
@@ -120,7 +120,7 @@ public sealed partial class SettingsWindow
         // Windows: access, then the event log or the timed reading.
         var access = ActionButton(Loc.T("允许访问", "Allow access"), async () => { await center.RequestWindowsAccessAsync(); });
         var privacy = ActionButton(Loc.T("打开系统设置", "Open Windows settings"), () => UI.OpenUrl("ms-settings:privacy-notifications"));
-        var windowsToggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NoticeWindowsSource, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        var windowsToggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.NoticeWindowsSource, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Space.S12, 0, 0, 0) };
         AutomationProperties.SetName(windowsToggle, Loc.T("Windows 应用通知", "Windows app notifications"));
         windowsToggle.Checked += (_, _) => Change(s => s.NoticeWindowsSource = true);
         windowsToggle.Unchecked += (_, _) => Change(s => s.NoticeWindowsSource = false);
@@ -163,8 +163,8 @@ public sealed partial class SettingsWindow
         }
         if (rows.Count == 0)
         {
-            var none = TextLine(Loc.T("未检测到 WSL 发行版。", "No WSL distribution was found."), 12, TextSecondary);
-            rows.Add(new Border { Child = none, MinHeight = 44, Padding = new Thickness(0, 13, 0, 13) });
+            var none = TextLine(Loc.T("未检测到 WSL 发行版。", "No WSL distribution was found."), TextSize.Body, TextSecondary);
+            rows.Add(new Border { Child = none, MinHeight = 44, Padding = new Thickness(0, Space.S12, 0, Space.S12) });
         }
         SectionTitle("WSL", help: () => Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。代理运行时发行版和 WSL 虚拟机不会自动停止，所以发行版中你的程序（终端、后台任务等）全部结束 5 分钟后，代理会自行退出，让 WSL 照常停止发行版并释放内存，发行版下次运行时再自动接入。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
             "Once a distribution is on, BrimDeck copies its notice agent to ~/.local/share/brimdeck there and adds ~/.local/bin/brim-notify. The agent starts only while the distribution runs; a distribution is never started for notices. While the agent runs, WSL does not stop the distribution or its virtual machine, so the agent ends by itself 5 minutes after the last of your programs there (terminals, background jobs) ended; WSL then stops the distribution and frees its memory as usual, and the agent connects again the next time it runs. Without a notification service, the agent becomes the session's standard desktop notification service (notify-send and others work as usual); with one, it watches it, and where the bus does not allow watching only brim-notify works."));
@@ -175,7 +175,7 @@ public sealed partial class SettingsWindow
         // The command line, for Windows and for scripts.
         var helper = WslNoticeBridge.HelperPath;
         var copy = ActionButton(Loc.T("复制路径", "Copy path"), () => { try { Clipboard.SetText(helper); } catch (System.Runtime.InteropServices.ExternalException) { } });
-        var example = TextLine("BrimDeck.Notify.exe \"" + Loc.T("构建完成", "Build finished") + "\" --body \"" + Loc.T("测试已通过", "Tests passed") + "\"  ·  BrimDeck.Notify.exe run -- dotnet test", 11.5, TextSecondary);
+        var example = TextLine("BrimDeck.Notify.exe \"" + Loc.T("构建完成", "Build finished") + "\" --body \"" + Loc.T("测试已通过", "Tests passed") + "\"  ·  BrimDeck.Notify.exe run -- dotnet test", TextSize.Body, TextSecondary);
         example.TextWrapping = TextWrapping.Wrap; example.TextTrimming = TextTrimming.None; example.FontFamily = new FontFamily("Cascadia Mono, Consolas");
         Group(Row(Loc.T("命令行 brim-notify", "Command line: brim-notify"), copy, example,
             () => Loc.T("Windows 上使用 BrimDeck 安装目录中的 BrimDeck.Notify.exe；WSL 中开启发行版后使用 brim-notify。run 会运行命令并在结束后提示结果；同一 --replace 键会更新同一条提示。",
@@ -212,7 +212,7 @@ public sealed partial class SettingsWindow
         foreach (var source in NoticeTimeSources.All)
         {
             bool received = source.AppIds.Any(id => seen.Contains(NoticeKeys.Windows(id)));
-            var status = TextLine(Loc.T("正在检测…", "Checking…"), 12, TextSecondary);
+            var status = TextLine(Loc.T("正在检测…", "Checking…"), TextSize.Body, TextSecondary);
             void Show(bool installed) => status.Text = installed
                 ? received ? Loc.T("已安装 · 收到过通知", "Installed · notices received") : Loc.T("已安装", "Installed")
                 : received ? Loc.T("收到过通知", "Notices received") : Loc.T("未安装", "Not installed");
@@ -227,13 +227,13 @@ public sealed partial class SettingsWindow
                 NoticeTimeRole.Reminders => Loc.T("任务提醒，到点时像闹钟一样弹出", "Task reminders, shown like an alarm when due"),
                 NoticeTimeRole.Meetings => Loc.T("会议提醒和开始；其他消息照常", "Meeting reminders and starts; other messages as usual"),
                 _ => Loc.T("新邮件、日程提醒", "New mail, event reminders")
-            }, 11.5, TextSecondary);
+            }, TextSize.Body, TextSecondary);
             kinds.TextWrapping = TextWrapping.Wrap; kinds.TextTrimming = TextTrimming.None;
             rows.Add(Row(source.DisplayName, status, kinds));
         }
-        var native = TextLine("brim-notify timer 25m · stopwatch · event --at 15:00", 11.5, TextSecondary);
+        var native = TextLine("brim-notify timer 25m · stopwatch · event --at 15:00", TextSize.Body, TextSecondary);
         native.FontFamily = new FontFamily("Cascadia Mono, Consolas");
-        rows.Add(Row(Loc.T("BrimDeck 计时器", "BrimDeck timers"), TextLine(Loc.T("始终可用", "Always available"), 12, TextSecondary), native,
+        rows.Add(Row(Loc.T("BrimDeck 计时器", "BrimDeck timers"), TextLine(Loc.T("始终可用", "Always available"), TextSize.Body, TextSecondary), native,
             () => Loc.T("用 brim-notify 设倒计时、秒表或日程提醒（Windows 和 WSL 都可用），由 BrimDeck 自己计时：倒计时到点和日程开始前会提醒，可取消、停止或 5 分钟后再提醒。",
                 "Set a countdown, stopwatch or event reminder with brim-notify (on Windows and in WSL); BrimDeck keeps the time itself: it reminds when a countdown ends and before an event starts, and they can be cancelled, stopped or snoozed for 5 minutes.")));
         Group([.. rows]);
@@ -274,7 +274,7 @@ public sealed partial class SettingsWindow
     // An explanation set between a section's title and its rows.
     private void Note(string text)
     {
-        var note = TextLine(text, 11.5, TextSecondary);
+        var note = TextLine(text, TextSize.Body, TextSecondary);
         note.TextWrapping = TextWrapping.Wrap; note.TextTrimming = TextTrimming.None; note.Margin = new Thickness(0, -2, 0, 10);
         Target.Children.Add(note);
     }
@@ -286,10 +286,10 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("外观", "Look"));
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         var theme = ActionButton(Loc.T("更改主题", "Change theme"), () => ShowPage(ThemePage));
-        var test = ActionButton(Loc.T("发送测试通知", "Send a test notice"), center.SendTest); test.Margin = new Thickness(8, 0, 0, 0);
+        var test = ActionButton(Loc.T("发送测试通知", "Send a test notice"), center.SendTest); test.Margin = new Thickness(Space.S8, 0, 0, 0);
         buttons.Children.Add(theme); buttons.Children.Add(test);
         var note = TextLine(Loc.T($"跟随面板主题“{PanelTheme.ShownTheme.DisplayName}”：通知与刘海、胶囊、指示条和展开面板使用同一套底色、边缘、辉光与文字颜色。",
-            $"Follows the panel theme \"{PanelTheme.ShownTheme.DisplayName}\": notices share the surface, rim, glow and text colors of the notch, capsule, indicator and open panel."), 11.5, TextSecondary);
+            $"Follows the panel theme \"{PanelTheme.ShownTheme.DisplayName}\": notices share the surface, rim, glow and text colors of the notch, capsule, indicator and open panel."), TextSize.Body, TextSecondary);
         note.TextWrapping = TextWrapping.Wrap; note.TextTrimming = TextTrimming.None;
         Group(Row(Loc.T("通知外观", "Notice look"), buttons, note));
     }
@@ -326,9 +326,9 @@ public sealed partial class SettingsWindow
             .Where(app => app.Key != NoticeCenter.TestAppKey).ToList();
         if (apps.Count == 0)
         {
-            var none = TextLine(Loc.T("收到通知后，来源应用会列在这里，可分别设置静音、优先级和隐私。", "Apps appear here once their notices arrive; each can be muted, raised or kept private."), 12, TextSecondary);
+            var none = TextLine(Loc.T("收到通知后，来源应用会列在这里，可分别设置静音、优先级和隐私。", "Apps appear here once their notices arrive; each can be muted, raised or kept private."), TextSize.Body, TextSecondary);
             none.TextWrapping = TextWrapping.Wrap;
-            Group(new Border { Child = none, Padding = new Thickness(0, 13, 0, 13) });
+            Group(new Border { Child = none, Padding = new Thickness(0, Space.S12, 0, Space.S12) });
             return;
         }
         var rows = new List<FrameworkElement>();
@@ -359,7 +359,7 @@ public sealed partial class SettingsWindow
             privacy.SelectionChanged += (_, _) => Edit(r => r.Privacy = privacy.SelectedIndex <= 0 ? null : (NoticePrivacy)(privacy.SelectedIndex - 1));
             var controls = new StackPanel { Orientation = Orientation.Horizontal };
             controls.Children.Add(SegmentBorder(choices)); controls.Children.Add(privacy);
-            var subtitle = TextLine(origin.Length > 0 ? origin : key, 11, TextTertiary);
+            var subtitle = TextLine(origin.Length > 0 ? origin : key, TextSize.Caption, TextTertiary);
             rows.Add(Row(name, controls, subtitle));
         }
         // Past five apps the rest wait behind one link (SW-10), until it is opened for this visit of the page.
@@ -370,7 +370,7 @@ public sealed partial class SettingsWindow
         {
             more = ActionButton(Loc.T($"显示其余 {rows.Count - Shown} 个应用", $"Show {rows.Count - Shown} more apps"), () => { });
             more.Style = (Style)FindResource("SettingsLink"); more.Foreground = UI.Brush(_palette.Accent); more.HorizontalAlignment = HorizontalAlignment.Left;
-            rows.Add(new Border { Child = more, Padding = new Thickness(0, 12, 0, 12) });
+            rows.Add(new Border { Child = more, Padding = new Thickness(0, Space.S12, 0, Space.S12) });
         }
         Group([.. rows]);
         if (!folded || ((Border)Target.Children[^1]).Child is not StackPanel panel) return;
@@ -403,7 +403,7 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(autoClear, Loc.T("定期清空", "Clear automatically"));
         // Choosing a schedule starts its count now, so switching it on never clears at once.
         autoClear.SelectionChanged += (_, _) => { if (autoClear.SelectedIndex >= 0) Change(s => { s.NoticeAutoClear = (NoticeAutoClear)autoClear.SelectedIndex; s.NoticeLastCleared = DateTimeOffset.UtcNow; }); };
-        var where = TextLine(folder, 11, TextTertiary); where.TextTrimming = TextTrimming.CharacterEllipsis; where.ToolTip = folder;
+        var where = TextLine(folder, TextSize.Caption, TextTertiary); where.TextTrimming = TextTrimming.CharacterEllipsis; where.ToolTip = folder;
         var folderButtons = new StackPanel { Orientation = Orientation.Horizontal };
         folderButtons.Children.Add(ActionButton(Loc.T("更改…", "Change…"), () =>
         {
@@ -413,7 +413,7 @@ public sealed partial class SettingsWindow
         if (S.NoticeHistoryFolder.Length > 0)
         {
             var reset = ActionButton(Loc.T("默认位置", "Default"), () => { Change(s => s.NoticeHistoryFolder = ""); ShowPage(NoticesSettingsPage); });
-            reset.Margin = new Thickness(8, 0, 0, 0); folderButtons.Children.Add(reset);
+            reset.Margin = new Thickness(Space.S8, 0, 0, 0); folderButtons.Children.Add(reset);
         }
         // Deletes the history, so it is red and asks first (SW-09).
         var clear = ActionButton(Loc.T("清空通知历史", "Clear notice history"), () =>
@@ -431,9 +431,9 @@ public sealed partial class SettingsWindow
                 help: Loc.T("保存时使用 Windows 为当前用户提供的加密，最多 500 条；关闭后只保留在内存中，重启即清空。不保存原始通知内容、附件或头像，诊断日志不记录标题和正文。",
                     "Saved with the encryption Windows provides for the current user, at most 500 notices; when off they are kept in memory only and are gone after a restart. Raw notification content, attachments and pictures are never saved, and diagnostic logs never contain titles or bodies.")),
             Row(Loc.T("保留时间", "Keep for"), retention),
-            Row(Loc.T("定期清空", "Clear automatically"), autoClear, TextLine(Loc.T("在保留时间之外，按所选频率清空整个通知历史列表。", "Besides the retention, empties the whole notice history on the chosen schedule."), 11, TextTertiary)),
+            Row(Loc.T("定期清空", "Clear automatically"), autoClear, TextLine(Loc.T("在保留时间之外，按所选频率清空整个通知历史列表。", "Besides the retention, empties the whole notice history on the chosen schedule."), TextSize.Caption, TextTertiary)),
             Row(Loc.T("保存位置", "Location"), folderButtons, where),
-            Row(Loc.T("通知历史", "Notice history"), clear, TextLine(Loc.T($"{center.Hub.Notices.Count} 条 · 只清除 BrimDeck 中的记录，Windows 通知中心不受影响。", $"{center.Hub.Notices.Count} kept · clears BrimDeck's list only; Windows' notification center is not affected."), 11, TextTertiary))
+            Row(Loc.T("通知历史", "Notice history"), clear, TextLine(Loc.T($"{center.Hub.Notices.Count} 条 · 只清除 BrimDeck 中的记录，Windows 通知中心不受影响。", $"{center.Hub.Notices.Count} kept · clears BrimDeck's list only; Windows' notification center is not affected."), TextSize.Caption, TextTertiary))
         };
         Button Rebuild() => ActionButton(Loc.T("清空并重建", "Clear and start again"), () => { center.ResetHistory(); ShowPage(NoticesSettingsPage); });
         // The folder's own refusal (a link, another account's, open to others) says which; otherwise the file's state does.
@@ -441,7 +441,7 @@ public sealed partial class SettingsWindow
         if (center.HistoryState == NoticeHistoryState.Unreadable
             // A notices file that is a link, in a folder BrimDeck may use: clearing removes the link itself.
             || center.HistoryState == NoticeHistoryState.Refused && center.HistoryRefusal is null)
-            rows.Add(Row(Loc.T("无法读取已保存的通知", "Saved notices unreadable"), Rebuild(), TextLine(Reason(), 11, _palette.Dark ? "#F0A6AA" : "#B12E3A")));
+            rows.Add(Row(Loc.T("无法读取已保存的通知", "Saved notices unreadable"), Rebuild(), TextLine(Reason(), TextSize.Caption, _palette.Dark ? "#F0A6AA" : "#B12E3A")));
         // Not reachable for now, not readable by this account, or a folder BrimDeck will not use: said, and only a file this
         // account cannot read may be cleared from here (C-L15); an unreachable one may be fine.
         else if (center.HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Refused or NoticeHistoryState.Denied)
@@ -450,7 +450,7 @@ public sealed partial class SettingsWindow
             var reason = StatusLine(() => center.HistoryState is NoticeHistoryState.Unavailable or NoticeHistoryState.Refused or NoticeHistoryState.Denied
                 ? (Reason(), true) : (Loc.T("已读取。", "Read."), false));
             var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-            void Add(Button button) { if (buttons.Children.Count > 0) button.Margin = new Thickness(8, 0, 0, 0); buttons.Children.Add(button); }
+            void Add(Button button) { if (buttons.Children.Count > 0) button.Margin = new Thickness(Space.S8, 0, 0, 0); buttons.Children.Add(button); }
             string title;
             if (center.HistoryState == NoticeHistoryState.Refused)
             {
@@ -474,7 +474,7 @@ public sealed partial class SettingsWindow
 
     private void NoticeSizeControls()
     {
-        var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
+        var dimensions = new Grid { Margin = new Thickness(0, Space.S8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
         var width = Dimension(Loc.T("宽度", "Width"), S.NoticesWidth, 440, 1200, value => Resize(s => s.NoticesWidth = value, DeckPage.Notices)); width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
         var height = Dimension(Loc.T("高度", "Height"), S.NoticesHeight, 140, 400, value => Resize(s => s.NoticesHeight = value, DeckPage.Notices)); height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
         Target.Children.Add(dimensions);

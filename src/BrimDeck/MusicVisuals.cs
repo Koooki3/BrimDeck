@@ -396,7 +396,14 @@ internal sealed class QuotaCarousel : Grid
     public TimeSpan Elapsed => Rotates ? TimeSpan.FromSeconds(At(Eased.Now)) : _elapsed;
     // For screen readers: its name, every ring's tooltip line, rotating or not.
     protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
-    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
+    // The first letter or digit of an application's name, upper case, for the middle of its ring; empty without one.
+    internal static string Letter(string name)
+    {
+        foreach (char c in name ?? "") if (char.IsLetterOrDigit(c)) return char.ToUpperInvariant(c).ToString();
+        return "";
+    }
+
+    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip, string Letter)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
     {
         // The region is the layout's ring width in whole device pixels; rings sit in fixed slots from its left edge and its
         // right edge cuts whichever ring it falls on. Rotation only moves the rings through the region, never resizes it.
@@ -418,6 +425,13 @@ internal sealed class QuotaCarousel : Grid
         for (int i = 0; i < items.Count; i++)
         {
             var ring = UI.Ring(items[i].Used, items[i].Color, layout.RingSize, layout.RingThickness);
+            if (items[i].Letter.Length > 0)
+            {
+                // The letter inside, at the size the system readings' dials carry theirs for this height, in the secondary text color.
+                var letter = new TextBlock { Text = items[i].Letter, FontFamily = UI.PanelFont, FontWeight = FontWeights.SemiBold, FontSize = Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * layout.Scale)),
+                    Foreground = UI.Brush(UI.Secondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center };
+                ring.Children.Add(letter);
+            }
             Canvas.SetLeft(ring, edge + i * step); _strip.Children.Add(ring);
         }
         // A Canvas measures the strip at its full width. Inside the Grid the strip would be

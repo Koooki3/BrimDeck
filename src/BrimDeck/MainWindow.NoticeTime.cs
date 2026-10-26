@@ -15,7 +15,7 @@ public partial class MainWindow
     private TextBlock? NoticeTimeLine(Notice notice, DateTimeOffset now)
     {
         if (NoticeClock.Live(notice.Timing, now, TimeZoneInfo.Local) is not { } words) return null;
-        var line = UI.Line(words, 11.5, UI.Accent);
+        var line = UI.Line(words, TextSize.Body, UI.Accent);
         line.FontFamily = UI.PanelFont;
         if (NoticeClock.IsLive(notice.Timing, now)) _liveRows.Add((line, notice));
         return line;

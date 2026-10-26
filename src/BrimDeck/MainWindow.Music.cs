@@ -393,11 +393,11 @@ public partial class MainWindow
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var source = new TextBlock { Text = Loc.Label(track.Source), FontSize = 12.5, Foreground = UI.Brush(UI.Primary), MaxWidth = 100,
-                TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, 6, 0) };
-            var title = new MusicMarquee { Text = track.Title, FontSize = 12, Foreground = UI.Brush(PanelTheme.Hex("menuDetail")),
-                CenterWhenFits = false, IsHitTestVisible = false, Height = 28, Margin = new Thickness(0, 0, 12, 0) };
-            var status = new TextBlock { Text = state, FontSize = 11, Foreground = UI.Brush(UI.Tertiary), TextWrapping = TextWrapping.NoWrap };
+            var source = new TextBlock { Text = Loc.Label(track.Source), FontSize = TextSize.Body, Foreground = UI.Brush(UI.Primary), MaxWidth = 100,
+                TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, Space.Tight, 0) };
+            var title = new MusicMarquee { Text = track.Title, FontSize = TextSize.Body, Foreground = UI.Brush(PanelTheme.Hex("menuDetail")),
+                CenterWhenFits = false, IsHitTestVisible = false, Height = 28, Margin = new Thickness(0, 0, Space.S12, 0) };
+            var status = new TextBlock { Text = state, FontSize = TextSize.Caption, Foreground = UI.Brush(UI.Tertiary), TextWrapping = TextWrapping.NoWrap };
             foreach (var text in new FrameworkElement[] { source, title, status }) text.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(title, 1); Grid.SetColumn(status, 2); row.Children.Add(source); row.Children.Add(title); row.Children.Add(status);
             var item = new MenuItem { Style = (Style)FindResource("MediaSourceMenuItem"), Header = row, IsCheckable = true, IsChecked = track.Id == _mediaTrack?.Id };
@@ -410,7 +410,7 @@ public partial class MainWindow
         if (FullControlEntryShown)
         {
             menu.Items.Add(new Separator { Style = (Style)FindResource("MediaSourceMenuSeparator") });
-            var label = new TextBlock { Text = FullControlEntryLabel, FontSize = 12.5, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.NoWrap,
+            var label = new TextBlock { Text = FullControlEntryLabel, FontSize = TextSize.Body, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.NoWrap,
                 TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
             var entry = new MenuItem { Style = (Style)FindResource("MediaSourceMenuItem"), Header = label, Tag = "action", IsEnabled = _media?.RestartingNetease != true };
             AutomationProperties.SetName(entry, FullControlEntryLabel);
@@ -472,7 +472,7 @@ public partial class MainWindow
         CurrentMusicLayout = layout;
         var c = layout.Metrics;
         // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
-        ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(UsageHeader(_usageWidth, UsagePageHeight)) : PanelHeader.Music(c));
+        ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(UsageHeader(UsageLayoutWidth, UsagePageHeight)) : PanelHeader.Music(c));
         bool animate = Soft.Enabled;
         string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
@@ -507,19 +507,19 @@ public partial class MainWindow
         {
             MusicContent.Children.Clear(); _musicControls = null; _musicFullControl = null; _musicSmtcHint = null; _musicControlButtons.Clear();
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = Math.Max(200, w - 60) };
-            var icon = MusicVisuals.Icon("music", 26); icon.Margin = new Thickness(0, 0, 0, 8); empty.Children.Add(icon);
+            var icon = MusicVisuals.Icon("music", 26); icon.Margin = new Thickness(0, 0, 0, Space.S8); empty.Children.Add(icon);
             // The whole block is centred: the title, the hint and the button (V-02).
-            var heading = UI.Fixed(Loc.T("没有正在播放的媒体", "Nothing is playing"), 14, 22, UI.Secondary); heading.HorizontalAlignment = HorizontalAlignment.Center;
+            var heading = UI.Fixed(Loc.T("没有正在播放的媒体", "Nothing is playing"), TextSize.Strong, 22, UI.Secondary); heading.HorizontalAlignment = HorizontalAlignment.Center;
             empty.Children.Add(heading);
             // Why the page is empty, and where to go next: the players BrimDeck follows are chosen in the settings.
             var hint = UI.Line(_media?.Error ?? Loc.T("打开网易云音乐、QQ 音乐、Spotify 等播放器并开始播放后，会在这里显示。", "Start playing in NetEase Cloud Music, QQ Music, Spotify or another player and it shows here."),
-                11.5, UI.Tertiary);
+                TextSize.Body, UI.Tertiary);
             hint.TextWrapping = TextWrapping.Wrap; hint.TextAlignment = TextAlignment.Center; hint.HorizontalAlignment = HorizontalAlignment.Center;
             // A hint that wraps is cut into lines of even length, so its last line is never a stray word or two (V-02).
             double room = Math.Min(360, Math.Max(200, w - 60)), whole = UI.TextWidth(hint);
             if (whole > room) hint.MaxWidth = Math.Ceiling(whole / Math.Ceiling(whole / room)) + 14;
             empty.Children.Add(hint);
-            var players = EmptyAction(Loc.T("选择播放器", "Choose players"), 26); players.HorizontalAlignment = HorizontalAlignment.Center; players.Margin = new Thickness(0, 8, 0, 0);
+            var players = EmptyAction(Loc.T("选择播放器", "Choose players"), 26); players.HorizontalAlignment = HorizontalAlignment.Center; players.Margin = new Thickness(0, Space.S8, 0, 0);
             players.Click += (_, _) => _app.OpenSettings(SettingsWindow.PlayersPage);
             empty.Children.Add(players);
             MusicContent.Children.Add(empty); _handover.Release(empty, motion); return;
@@ -767,7 +767,7 @@ public partial class MainWindow
         {
             if (_musicFullControl is null)
             {
-                _musicFullControl = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2),
+                _musicFullControl = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(Space.Tight, Space.Hair, Space.Tight, Space.Hair),
                     Height = 26, HorizontalContentAlignment = HorizontalAlignment.Right };
                 AutomationProperties.SetName(_musicFullControl, MusicLayout.FullControlLabels[0]);
                 _musicFullControl.Click += async (_, _) => { if (_mediaTrack?.IsAppleMusic == true) EnableAppleMusicControl(); else await EnableNeteaseControl(); };
@@ -931,7 +931,9 @@ public partial class MainWindow
                 if (text.Length == 0) text = _mediaTrack!.Caption;
             }
         }
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
+        // A quota ring with nothing read yet would be an empty grey circle that says nothing: it is left out until its quota has
+        // a reading (QuotaRings).
+        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
         // The clock keeps its own width at the right; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         // The system readings offer each chosen reading, in the order of the settings' table and in the scheme's colors; the row
@@ -951,7 +953,7 @@ public partial class MainWindow
         // can show, the title in its fixed slot (CompactMusicLayout.AutoWidth). Neither follows the width the surface has now, nor
         // the track notice or the lyric's changing length, so the width changes only when the content itself does and never
         // feeds back on itself. A new width builds the row again.
-        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
+        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count(HasQuotaReading) : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
         double wanted = CompactMusicLayout.AutoWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.Candidates ?? [], strip?.Gap ?? 0);
         double required = layout.Required > 0 ? Math.Ceiling(layout.Required) + 1 : 0;
@@ -1008,15 +1010,18 @@ public partial class MainWindow
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
-    // One ring per application: the highest used share among its quotas, with every quota in the tooltip.
-    private (double Used, string Color, string Tip)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
+    // Whether an application's quota has anything read, which its collapsed ring needs.
+    private bool HasQuotaReading(AppEntry entry) => DashboardUsage.Quota(entry, Snapshots).Metrics.Count > 0;
+    // One ring per application: the highest used share among its quotas, with every quota in the tooltip, and the application's
+    // letter inside so the rings are told apart by more than their color.
+    private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
     {
         var snapshot = DashboardUsage.Quota(entry, Snapshots);
         var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
         double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
         string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-        return (used, PanelTheme.AppTheme(entry), tip);
+        return (used, PanelTheme.AppTheme(entry), tip, QuotaCarousel.Letter(entry.Name));
     }).ToArray();
     private void UpdateMusicTimer()
     {

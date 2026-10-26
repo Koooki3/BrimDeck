@@ -8,8 +8,8 @@
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
       <!-- The face is drawn inside the hit area's inset (HitArea); the edge around it only takes the pointer. -->
       <Grid Background="Transparent"><Grid x:Name="Face" Margin="{TemplateBinding local:HitArea.Inset}">
-        <Border x:Name="HoverLayer" Background="{DynamicResource PanelFill}" CornerRadius="{DynamicResource PanelR5}" Opacity="0"/>
-        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
+        <Border x:Name="HoverLayer" Background="{DynamicResource PanelFill}" CornerRadius="{DynamicResource PanelRadiusSm}" Opacity="0"/>
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelRadiusSm}" Padding="{TemplateBinding Padding}">
           <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
         </Border>
       </Grid></Grid>
@@ -24,9 +24,9 @@
     <Setter Property="local:Feedback.Fade" Value="True"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
       <Grid>
-        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource PanelR8}"/>
-        <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource PanelR8}" Opacity="0"/>
-        <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{DynamicResource PanelR8}" Opacity="0"/>
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource PanelRadiusMd}"/>
+        <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource PanelRadiusMd}" Opacity="0"/>
+        <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{DynamicResource PanelRadiusMd}" Opacity="0"/>
         <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
       </Grid>
     </ControlTemplate></Setter.Value></Setter>

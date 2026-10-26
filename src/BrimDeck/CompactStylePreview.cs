@@ -37,7 +37,7 @@ internal static class CompactStylePreview
         if (style == CompactStyle.Line)
         {
             screen.Children.Add(new Border { Background = UI.Brush(Hex("indicator")), Width = 29, Height = 2.5,
-                CornerRadius = new CornerRadius(1.25), Margin = new Thickness(0, 4, 0, 0),
+                CornerRadius = new CornerRadius(1.25), Margin = new Thickness(0, Space.S4, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top });
         }
         else
@@ -68,7 +68,7 @@ internal static class CompactStylePreview
             {
                 // With the clock on, the time sits at the right end and the rings take the rest, as on the real island.
                 var row = new DockPanel { Margin = new Thickness(notch ? 11 : 7, 0, notch ? 11 : 7, 0), VerticalAlignment = VerticalAlignment.Center };
-                var time = new TextBlock { Text = "14:32", FontFamily = UI.PanelFont, FontSize = 5.5, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(Hex("clock")), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 0, 0) };
+                var time = new TextBlock { Text = "14:32", FontFamily = UI.PanelFont, FontSize = 5.5, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(Hex("clock")), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Space.Hair, 0, 0, 0) };
                 DockPanel.SetDock(time, Dock.Right); row.Children.Add(time); row.Children.Add(detail);
                 island.Child = row;
             }
@@ -102,7 +102,7 @@ internal static class CompactStylePreview
             if (rings.Children.Count > 0) arc.Margin = new Thickness(gap, 0, 0, 0);
             rings.Children.Add(arc);
         }
-        var time = new TextBlock { Text = "14:32", FontFamily = UI.PanelFont, FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(Hex("clock")),
+        var time = new TextBlock { Text = "14:32", FontFamily = UI.PanelFont, FontSize = TextSize.Body, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(Hex("clock")),
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(gap, 0, 0, 0) };
         var row = new DockPanel { Margin = new Thickness(inset, 0, inset, 0), VerticalAlignment = VerticalAlignment.Center };
         DockPanel.SetDock(time, Dock.Right); row.Children.Add(time); row.Children.Add(rings);
@@ -120,7 +120,7 @@ internal static class CompactStylePreview
         corner.Children.Add(Bar(22, 8, "accent", new Thickness(96, 15, 0, 0)));
         var panel = new IslandBorder
         {
-            MaterialOpacity = 1, Width = 136, Height = 64, CornerRadius = new CornerRadius(12), Background = UI.Brush(palette.Effects.Glass?.Tint.ToString() ?? Hex("surface")),
+            MaterialOpacity = 1, Width = 136, Height = 64, CornerRadius = new CornerRadius(Radius.Lg), Background = UI.Brush(palette.Effects.Glass?.Tint.ToString() ?? Hex("surface")),
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -14, -26), Child = corner
         };
         PanelTheme.Dress(panel, palette);

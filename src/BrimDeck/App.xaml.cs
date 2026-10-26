@@ -259,6 +259,8 @@ public partial class App : Application
         Dispatcher.BeginInvoke(() =>
         {
             if (Exiting) return;
+            // Windows' text size changed: the open panel is drawn at the new size (TextScale, MainWindow.Zoom).
+            if (TextScale.Refresh()) foreach (var deck in Decks.ToList()) deck.ApplySettings();
             // Automatic liquid glass's prior follows the Windows app mode (GlassAppearance.Prior: it may turn at once).
             LiquidTheme.ReadAppMode();
             // A theme whose day and night looks follow Windows' mode changes over like the dusk does (PanelThemes.LookAt).
