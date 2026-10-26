@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using BrimDeck.Core;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -30,7 +31,7 @@ public sealed partial class SettingsWindow
         if (size != 14) icon.LayoutTransform = new ScaleTransform(size / 14, size / 14);
         // Measured ink: beside a 13pt label the circle's center sat 1 DIP above the center of the label's glyphs.
         if (nudge != 0) icon.RenderTransform = new TranslateTransform(0, nudge);
-        var info = new Border
+        var info = new HelpMark
         {
             Width = size + 8, Height = 24, Margin = new Thickness(3, 0, 0, 0), Background = Brushes.Transparent,
             VerticalAlignment = VerticalAlignment.Center, Focusable = true, Cursor = Cursors.Help,
@@ -38,6 +39,15 @@ public sealed partial class SettingsWindow
         };
         AttachSettingHelp(info, title, help);
         return info;
+    }
+
+    // An info mark (ⓘ). A Border has no automation peer, so a screen reader would find the mark's name and description empty:
+    // this one reads as a button named for its setting ("开机自启动说明") with the description as its help text (AttachSettingHelp),
+    // and invoking it opens or closes the description, as hovering or focusing it does.
+    private sealed class HelpMark : Border
+    {
+        protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button, () => AutomationProperties.GetName(this),
+            () => { if (ToolTip is ToolTip tip) tip.IsOpen = !tip.IsOpen; });
     }
 
     private static void AttachSettingHelp(FrameworkElement info, string title, Func<string> help)
@@ -64,6 +74,21 @@ public sealed partial class SettingsWindow
         info.LostKeyboardFocus += (_, _) => tooltip.IsOpen = false;
         info.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { tooltip.IsOpen = false; e.Handled = true; } };
         info.Unloaded += (_, _) => tooltip.IsOpen = false;
+    }
+
+    // A text field's keyboard focus (SW-02): the field draws no outline of its own (FocusVisualStyle is off in SettingsNumber), so its
+    // frame turns to the accent color and 2 DIP thick while input has the focus, its padding giving the extra DIP back so the text
+    // does not move. rest: the frame's color without focus.
+    private void FieldFocus(Border frame, UIElement input, Func<Brush> rest)
+    {
+        var padding = frame.Padding;
+        void Show(bool focused)
+        {
+            frame.BorderBrush = focused ? UI.Brush(_palette.Accent) : rest();
+            frame.BorderThickness = new Thickness(focused ? 2 : 1);
+            frame.Padding = focused ? new Thickness(Math.Max(0, padding.Left - 1), padding.Top, Math.Max(0, padding.Right - 1), padding.Bottom) : padding;
+        }
+        input.IsKeyboardFocusWithinChanged += (_, _) => Show(input.IsKeyboardFocusWithin);
     }
 
     // Where each segmented control's highlight stood when the user last pressed it, so a page rebuilt by that
@@ -127,8 +152,7 @@ public sealed partial class SettingsWindow
         AutomationProperties.SetName(minus,Loc.T("减少"+title, "Decrease "+title));AutomationProperties.SetName(plus,Loc.T("增加"+title, "Increase "+title));
         line.Children.Add(new Border {Width=1,Background=UI.Brush(Divider),Margin=new Thickness(2,5,3,5)});line.Children.Add(minus);line.Children.Add(plus);
         var chip=new Border {Child=line,Height=30,CornerRadius=new CornerRadius(6),Background=UI.Brush(_palette.Input),BorderBrush=UI.Brush(_palette.Border),BorderThickness=new Thickness(1),Padding=new Thickness(7,0,2,0)};
-        input.GotKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Accent);
-        input.LostKeyboardFocus+=(_,_)=>chip.BorderBrush=UI.Brush(_palette.Border);
+        FieldFocus(chip, input, () => UI.Brush(_palette.Border));
         void Set(double number)
         {
             var next=Math.Clamp(Math.Round(number),min,max);
