@@ -19,6 +19,7 @@ internal sealed class ThermalZones(PdhQuery? pdh)
     private const string WholePath = @"\Thermal Zone Information(*)\Temperature";
     private readonly SteadyZones _steady = new();
     private bool _added, _available;
+    private double _firstRead = double.NaN;
     private volatile SensorState _state = pdh is null ? SensorState.None : SensorState.Unknown;
     public SensorState State => _state;
 
@@ -39,10 +40,13 @@ internal sealed class ThermalZones(PdhQuery? pdh)
         }
         if (!_available || !collected) return null;
         var zones = Temperatures.Zones(pdh.Read(PrecisePath), pdh.Read(WholePath));
-        // Found once a zone gives a temperature (it has moved, SteadyZones); None without any zone. Zones that have not moved yet
-        // leave it Unknown, and the page keeps no room for a processor temperature until one shows.
+        // Found once a zone gives a temperature (it has moved, SteadyZones); None without any zone, or when no zone has moved for
+        // SteadySeconds since the first reading (only fixed values: not a sensor). Until then it stays Unknown, and the page keeps
+        // no room for a processor temperature until one shows.
         var cpu = _steady.Choose(zones, now);
-        if (cpu is not null) _state = SensorState.Found; else if (zones.Count == 0 && _state == SensorState.Unknown) _state = SensorState.None;
+        if (double.IsNaN(_firstRead)) _firstRead = now;
+        if (cpu is not null) _state = SensorState.Found;
+        else if (_state == SensorState.Unknown && (zones.Count == 0 || now - _firstRead >= SteadyZones.SteadySeconds)) _state = SensorState.None;
         return cpu;
     }
 }
@@ -59,7 +63,10 @@ internal sealed class GpuTemperatures : IDisposable
     private const int PerfDataSize = 64, TemperatureOffset = 56, AdapterPerfData = 62;
     private const uint NotSupported = 0xC00000BB, InvalidParameter = 0xC000000D;
     private const double FirstPause = 5, LongestPause = 300, ZeroPause = 5;
-    private sealed class Adapter { public uint Handle; public bool Never; public double RetryAt = double.NegativeInfinity, Pause; }
+    // How long an adapter may answer with zero before it is taken for one without a sensor (one waking up reports a temperature
+    // within seconds).
+    private const double ZeroLimit = 60;
+    private sealed class Adapter { public uint Handle; public bool Never; public double RetryAt = double.NegativeInfinity, Pause, ZeroSince = double.NaN; }
     private readonly Dictionary<string, Adapter> _adapters = new(StringComparer.OrdinalIgnoreCase);
     private readonly IntPtr _data = Marshal.AllocHGlobal(PerfDataSize);
     private string? _last, _shown;
@@ -81,9 +88,11 @@ internal sealed class GpuTemperatures : IDisposable
         if (_last is { } last && last != shown && adapters.Contains(last, StringComparer.OrdinalIgnoreCase) && Read(last, now) is { } kept) return Found(kept, last);
         foreach (var adapter in adapters)
             if (adapter != shown && adapter != _last && Read(adapter, now) is { } other) return Found(other, adapter);
-        // Only adapters whose drivers say they do not report the data make it None: one that gave no temperature for now (an
-        // adapter waking up reports zero) may still give one, and the page keeps room for it meanwhile.
-        if (_state == SensorState.Unknown && adapters.Count > 0 && adapters.All(adapter => _adapters.TryGetValue(adapter, out var known) && known.Never)) _state = SensorState.None;
+        // It is None once every adapter asked has said it does not report the data, or has answered zero for ZeroLimit seconds:
+        // an adapter waking up reports zero for a moment only, and the page keeps room for it meanwhile. One that gives a temperature
+        // later makes it Found again.
+        if (_state == SensorState.Unknown && _adapters.Count > 0
+            && _adapters.Values.All(known => known.Never || !double.IsNaN(known.ZeroSince) && now - known.ZeroSince >= ZeroLimit)) _state = SensorState.None;
         return null;
     }
     private (double, string) Found(double celsius, string adapter) { _last = adapter; _state = SensorState.Found; return (celsius, adapter); }
@@ -102,7 +111,8 @@ internal sealed class GpuTemperatures : IDisposable
         catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException) { Debug.WriteLine(ex); adapter.Never = true; return null; }
         if (status == 0)
         {
-            if (Temperatures.FromDeciCelsius((uint)Marshal.ReadInt32(_data, TemperatureOffset)) is { } celsius) { adapter.Pause = 0; return celsius; }
+            if (Temperatures.FromDeciCelsius((uint)Marshal.ReadInt32(_data, TemperatureOffset)) is { } celsius) { adapter.Pause = 0; adapter.ZeroSince = double.NaN; return celsius; }
+            if (double.IsNaN(adapter.ZeroSince)) adapter.ZeroSince = now;
             // An answer without a temperature is no failure: asked again shortly, without growing the pause.
             adapter.RetryAt = now + ZeroPause;
             return null;
