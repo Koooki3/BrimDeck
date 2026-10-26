@@ -754,7 +754,7 @@ public sealed partial class SettingsWindow : Window
         var row = AppColumns();
         row.RowDefinitions.Add(new RowDefinition { Height = new GridLength(68) });
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var handle = new Border { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll,
+        var handle = new GripHandle { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll,
             HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
         row.Children.Add(handle);
         string name = entry.Name;
@@ -772,7 +772,7 @@ public sealed partial class SettingsWindow : Window
         AutomationProperties.SetName(toggle, Loc.T("显示 ", "Show ") + name); AutomationProperties.SetAutomationId(toggle, "enabled-" + entry.InstanceId.ToString("N"));
         toggle.Checked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = true); toggle.Unchecked += (_, _) => Change(s => s.Entry(entry.InstanceId)!.Enabled = false);
         Grid.SetColumn(toggle, 7); row.Children.Add(toggle);
-        AttachDrag(handle);
+        AttachDrag(handle, name);
         var remove = ActionButton("", () =>
         {
             Change(s => s.Apps.RemoveAll(app => app.InstanceId == entry.InstanceId));

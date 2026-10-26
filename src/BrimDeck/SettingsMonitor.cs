@@ -322,7 +322,7 @@ public sealed partial class SettingsWindow
     {
         string name = ReadingName(item);
         var row = ReadingColumns();
-        var handle = new Border { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
+        var handle = new GripHandle { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
         row.Children.Add(handle);
         var label = TextLine(name, 13, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(6, 0, 6, 0);
         Grid.SetColumn(label, 2); row.Children.Add(label);
@@ -371,7 +371,7 @@ public sealed partial class SettingsWindow
         Grid.SetColumn(shown, 4); row.Children.Add(shown);
 
         // Dropped in a new place, the strip takes the new order at once.
-        AttachDrag(handle, () => rows, ReadingRowHeight, list =>
+        AttachDrag(handle, name, () => rows, ReadingRowHeight, list =>
         {
             var order = list.Children.OfType<Border>().Where(b => b.Tag is CompactMonitorItems).Select(b => (CompactMonitorItems)b.Tag).ToArray();
             // The system drive and the temperature are not in the table; they keep their places after its readings.
