@@ -54,6 +54,8 @@ try
     await ZCodeUsageTests.Run(root, Check);
     await DshUsageTests.Run(root, Check);
     await KimiUsageTests.Run(root, Check);
+    await OpenCodeUsageTests.Run(root, Check);
+    await OfficialPriceTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
     await CursorUsageTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
