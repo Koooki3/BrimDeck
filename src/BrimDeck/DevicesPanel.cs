@@ -84,7 +84,8 @@ public partial class MainWindow
         var old = shown ? _devicesView : null;
         _devicesView = new DevicesView(layout, MonitorThemeColors.For(Settings), Settings.DeviceLowPercent);
         _devicesView.Update(ShownDevices, DevicesSettled, motion: false);
-        if (old is not null) MonitorCrossfade.Swap(DevicesContent, _devicesView, old, Soft.Enabled);
+        // As the monitor page: a drag across a step swaps at once instead of crossfading (live check X-02).
+        if (old is not null) MonitorCrossfade.Swap(DevicesContent, _devicesView, old, Soft.Enabled && !Resizing);
         else { DevicesContent.Children.Clear(); DevicesContent.Children.Add(_devicesView); }
     }
 }
