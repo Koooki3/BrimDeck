@@ -482,8 +482,8 @@ internal sealed class NoticeCenter : IDisposable
         Receive(new NoticeInput
         {
             Origin = NoticeOrigin.Test, AppKey = TestAppKey, AppName = "BrimDeck", InstanceKey = "test:" + Guid.NewGuid().ToString("N"),
-            Title = Loc.T("灵动提示测试", "Dynamic notice test"),
-            Body = Loc.T("通知会以当前主题在这里出现。悬停查看详情，点击“查看全部”打开最近通知。", "Notices appear here in the current theme. Hover for details; \"View all\" opens the recent notices."),
+            Title = Loc.T("灵动提示测试", "Live notice test"),
+            Body = Loc.T("通知会以当前主题在这里出现。悬停查看详情，点击“查看全部”打开通知历史。", "Notices appear here in the current theme. Hover for details; \"View all\" opens the notice history."),
             Category = NoticeCategory.Info
         });
     }

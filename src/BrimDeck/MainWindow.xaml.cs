@@ -416,7 +416,7 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(AIUsageButton, Loc.T("AI 用量", "AI usage"));
         System.Windows.Automation.AutomationProperties.SetName(MonitorPageButton, Loc.T("系统监控", "System monitor"));
         System.Windows.Automation.AutomationProperties.SetName(MusicPageButton, Loc.T("音乐", "Music"));
-        System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("最近通知", "Recent notices"));
+        System.Windows.Automation.AutomationProperties.SetName(NoticesPageButton, Loc.T("通知历史", "Notice history"));
         System.Windows.Automation.AutomationProperties.SetName(SettingsButton, Loc.T("设置", "Settings"));
     }
     public void Preview(bool enabled, bool expanded = true)
