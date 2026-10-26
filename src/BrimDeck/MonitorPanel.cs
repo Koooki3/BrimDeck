@@ -14,6 +14,8 @@ public partial class MainWindow
     private MonitorStrip? _compactStrip;
     // Which readings the collapsed row shows and how far each has come in or gone out, kept while the row is built again.
     private readonly StripPresence _stripPresence = new();
+    // When the temperature and the system drive join the collapsed row: only once their first figures arrive (StripAdmission).
+    private readonly StripAdmission _stripAdmission = new();
     private bool _monitorShowing, _stripShowing, _monitorFade;
 
     private void InitializeMonitor()
@@ -41,16 +43,9 @@ public partial class MainWindow
         if (strip && !_stripShowing) _compactStrip?.Update(_app.Monitor?.Latest);
         _monitorShowing = page; _stripShowing = strip;
     }
-    // The collapsed readings this machine has none of: the temperature once neither the processor nor the graphics adapter has a
-    // sensor, the drive once no internal drive was found. The row is built without them rather than show a dash.
+    // The collapsed readings the row was last built without (StripAdmission.Hidden): the temperature and the system drive until
+    // their first figures, and for good on a machine without the sensor.
     private CompactMonitorItems _stripUnavailable;
-    private CompactMonitorItems StripUnavailable()
-    {
-        var monitor = _app.Monitor;
-        if (monitor is null) return CompactMonitorItems.None;
-        return (Temperatures.Readable(monitor.CpuSensor, monitor.GpuSensor) ? CompactMonitorItems.None : CompactMonitorItems.Temperature)
-            | (monitor.StorageState == SensorState.None ? CompactMonitorItems.Storage : CompactMonitorItems.None);
-    }
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
     private bool MonitorMotion => Settings.Animations && SystemParameters.ClientAreaAnimation;
@@ -58,10 +53,14 @@ public partial class MainWindow
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
         Motion.Enabled = MonitorMotion;
+        var monitor = _app.Monitor;
+        var (hidden, arriving) = _stripAdmission.Update(snapshot, monitor?.CpuSensor ?? SensorState.Unknown, monitor?.GpuSensor ?? SensorState.Unknown,
+            monitor?.StorageState ?? SensorState.Unknown);
         if (!_expanded)
         {
-            // A reading this machine turns out not to have (no temperature sensor, no internal drive) leaves the row.
-            if (_compactStrip is not null && StripUnavailable() != _stripUnavailable) { RenderCompact(); return; }
+            // The temperature or the system drive got its first figure: the row is built again with it, and it comes in with the
+            // row's own entrance while the others slide aside. Until then the row did not show it, so nothing else changes.
+            if (_compactStrip is not null && hidden != _stripUnavailable) { _stripPresence.Arrive(arriving); RenderCompact(); return; }
             _compactStrip?.Update(snapshot); return;
         }
         if (!IsMonitorPage || _monitorView is null) return;

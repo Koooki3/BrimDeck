@@ -31,7 +31,8 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly List<(CompactMonitorItems Item, double X, double Width, double Presence)> _arranged = [];
     private double _now;
 
-    // unavailable: readings this machine has none of (SystemSampler's sensor states), left out rather than shown as a dash.
+    // unavailable: readings left out (StripAdmission.Hidden): the temperature and the system drive until their first figures, and
+    // for good on a machine without the sensor, so the row never shows a dash for them.
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi,
         CompactMonitorItems unavailable = CompactMonitorItems.None)
     {
@@ -128,7 +129,7 @@ internal sealed class MonitorStrip : FrameworkElement
     // carries it on, as the old row no longer draws.
     protected override Size ArrangeOverride(Size finalSize)
     {
-        if (_presence.Set(Shown, CompactMonitor.Fit(Shown, _itemWidth, _gap, finalSize.Width)) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
+        if (_presence.Set(Shown, CompactMonitor.Fit(Shown, _itemWidth, _gap, finalSize.Width), Motion.Enabled) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
         return finalSize;
     }
     private bool Step(double now) { InvalidateVisual(); return _presence.Moving(now); }
@@ -243,36 +244,5 @@ internal sealed class MonitorStrip : FrameworkElement
         MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Thermometer, celsius is null ? UI.Tertiary : color);
         var text = MonitorDraw.Text(TemperatureFigure(celsius), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + size + Math.Round(2 * _scale), Math.Round(center + _font * .36));
-    }
-}
-
-// How present each reading of the collapsed row is, 0 to 1, easing as readings come and go. Owned by the panel, so that it
-// outlives the row, which is built again whenever its width changes.
-internal sealed class StripPresence
-{
-    private readonly Dictionary<CompactMonitorItems, Eased> _items = [];
-    private CompactMonitorItems _chosen = CompactMonitorItems.None;
-
-    // Returns whether anything moves. A new choice of readings (the settings) shows at once.
-    public bool Set(CompactMonitorItems chosen, CompactMonitorItems fitting)
-    {
-        bool motion = Motion.Enabled && chosen == _chosen && _items.Count > 0, moving = false;
-        _chosen = chosen;
-        foreach (var item in CompactMonitor.Order)
-        {
-            if ((chosen & item) == 0) { _items.Remove(item); continue; }
-            var eased = _items.TryGetValue(item, out var known) ? known : new Eased((fitting & item) != 0 ? 1 : 0, Eased.Seconds * .8);
-            moving |= eased.Set((fitting & item) != 0 ? 1 : 0, motion);
-            _items[item] = eased;
-        }
-        return moving;
-    }
-
-    public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
-    public bool Moving(double now)
-    {
-        // Asked on every frame of a transition; the dictionary's own enumerator allocates nothing.
-        foreach (var eased in _items.Values) if (eased.Moving(now)) return true;
-        return false;
     }
 }
