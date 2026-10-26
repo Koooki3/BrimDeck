@@ -59,13 +59,19 @@ static class StorageTests
 
     private static void Lines(Action<string, bool> check)
     {
-        check("Storage lines: room by the readings' height", MonitorLayout.StorageRoom(140) == 1 && MonitorLayout.StorageRoom(170) == 2 && MonitorLayout.StorageRoom(300) == 3);
-        check("Storage lines: as many as the drives, within the room", MonitorLayout.For(600, 170, true, 1).StorageLines == 1 && MonitorLayout.For(600, 170, true, 5).StorageLines == 2
-            && MonitorLayout.For(700, 330, true, 5).StorageLines == 3 && MonitorLayout.For(600, 170, true).StorageLines == 0 && MonitorLayout.For(440, 110, false, 3).StorageLines == 1);
-        check("Storage lines: drives take their room before memory and network", MonitorLayout.For(600, 170, true).Metrics == MetricsMode.Lines
-            && MonitorLayout.For(600, 170, true, 2).Metrics == MetricsMode.Line && MonitorLayout.For(700, 330, true).Metrics == MetricsMode.Blocks
-            && MonitorLayout.For(700, 300, true, 3).Metrics == MetricsMode.Lines && MonitorLayout.For(700, 400, true, 3).Metrics == MetricsMode.Blocks);
-        check("Storage lines: the list below keeps its readings' height", MonitorLayout.For(440, 380, true, 3) is { List: ListPlacement.Below, StorageLines: 2, Metrics: MetricsMode.Line });
+        // At each size, as many lines as leave the core columns MinimumGraph of height: none on the smallest page, one at the
+        // default size, three on a tall one.
+        check("Storage lines: room by what the readings leave", MonitorLayout.For(440, 110, false, 3).StorageLines == 0 && MonitorLayout.For(600, 170, true, 5).StorageLines == 1
+            && MonitorLayout.For(620, 160, true, 2).StorageLines == 1 && MonitorLayout.For(700, 290, true, 2).StorageLines == 2 && MonitorLayout.For(700, 330, true, 5).StorageLines == 3
+            && MonitorLayout.For(600, 170, true).StorageLines == 0 && MonitorLayout.For(440, 380, true, 3) is { List: ListPlacement.Below, StorageLines: 1 });
+        check("Storage lines: memory and network keep their room, so their sparklines keep their width", new[] { 110.0, 160, 170, 249, 250, 290, 400 }
+            .All(height => MonitorLayout.For(700, height, true, 3).Metrics == MonitorLayout.For(700, height, true).Metrics) && MonitorLayout.For(700, 290, true, 2).Metrics == MetricsMode.Blocks);
+        check("Storage lines: the core columns keep their least height with the drives' lines", new[] { 110.0, 140, 160, 200, 249, 250, 290, 330, 400 }.All(height =>
+        {
+            var layout = MonitorLayout.For(700, height, true, 3);
+            return layout.StorageLines == MonitorLayout.StorageRoom(height, layout.Metrics, layout.Figure, layout.Body, layout.RowHeight)
+                && layout.StorageLines is >= 0 and <= 3;
+        }));
         var one = Storage.Group([(Volume("C:", 300, 50), 0)], Disks);
         check("Storage lines: one drive, one line", Storage.Rows(one, 3) is [{ Label: "C:", Others: false }]);
         var split = Storage.Group([(Volume("C:", 300, 50), 0), (Volume("D:", 100, 50), 0)], Disks);

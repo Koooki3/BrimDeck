@@ -57,7 +57,7 @@ internal static class TemperatureChecks
             // Whichever adapter is the busiest, the temperature comes from one with a sensor and stays with it.
             var readings = keys.Select(shown => temperatures.ReadFor(shown, keys, 2)).ToList();
             check("graphics adapters: an adapter without a sensor does not take the temperature away", found.Count == 0
-                ? readings.All(reading => reading is null) && temperatures.State == SensorState.None
+                ? readings.All(reading => reading is null) && temperatures.State != SensorState.Found
                 : readings.All(reading => reading is { } r && found.Contains(r.Adapter)) && temperatures.State == SensorState.Found);
             var without = keys.Except(found).ToList();
             if (found.Count > 0 && without.Count > 0)

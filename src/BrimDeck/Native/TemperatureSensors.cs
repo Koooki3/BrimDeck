@@ -72,7 +72,9 @@ internal sealed class GpuTemperatures : IDisposable
         if (_last is { } last && last != shown && adapters.Contains(last, StringComparer.OrdinalIgnoreCase) && Read(last, now) is { } kept) return Found(kept, last);
         foreach (var adapter in adapters)
             if (adapter != shown && adapter != _last && Read(adapter, now) is { } other) return Found(other, adapter);
-        if (_state == SensorState.Unknown && adapters.Count > 0) _state = SensorState.None;
+        // Only adapters whose drivers say they do not report the data make it None: one that gave no temperature for now (an
+        // adapter waking up reports zero) may still give one, and the page keeps room for it meanwhile.
+        if (_state == SensorState.Unknown && adapters.Count > 0 && adapters.All(adapter => _adapters.TryGetValue(adapter, out var known) && known.Never)) _state = SensorState.None;
         return null;
     }
     private (double, string) Found(double celsius, string adapter) { _last = adapter; _state = SensorState.Found; return (celsius, adapter); }

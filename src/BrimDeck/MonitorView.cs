@@ -81,7 +81,7 @@ internal sealed class MonitorView : Grid
         // The gauge shown small takes a fixed width at the right: a wide block for the GPU, thin columns for the processor. Its
         // line is wider than the column under it, and wider still with a temperature after the figure.
         double mini = cpuMain ? Math.Round(Math.Clamp(layout.Figure * 3.4, 54, 84)) : Math.Round(Math.Clamp(layout.Figure * 5, 80, 120));
-        double headMini = Math.Max(mini, Math.Round(layout.Figure * (temperatures && smallTemperature ? 5.8 : 4.6)));
+        double headMini = Math.Max(mini, temperatures && smallTemperature ? SmallLine(layout) : Math.Round(layout.Figure * 4.6));
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(headMini) });
@@ -168,6 +168,16 @@ internal sealed class MonitorView : Grid
     }
 
     public bool CardOpen => _card is not null;
+
+    // The small gauge's widest line with a temperature, "(G) 100 % 105 °C", as FigureGauge lays it out (its dial, the gaps, the
+    // figure in the display face, the unit and the detail), so no reading is ever cut.
+    private static double SmallLine(MonitorLayout layout)
+    {
+        double figure = layout.Body + 1, gap = Math.Round(figure * .4);
+        double Width(string text, double size, bool display = false) => MonitorDraw.Text(text, size, UI.Primary, 1, display: display).WidthIncludingTrailingWhitespace;
+        return Math.Ceiling(Math.Round(figure + 3) + gap + Width("100", figure, display: true) + 2 + Width("%", layout.Caption)
+            + gap + Width(Temperatures.Detail(Temperatures.Highest - 20), layout.Caption) + 2);
+    }
 
     // The list beside the readings fills whole rows from its top, so its last row usually ends above the page's foot; the readings
     // stop there too, their graph giving up the difference. When a resize adds or takes a row the readings' foot eases to the
