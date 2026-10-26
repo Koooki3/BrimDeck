@@ -70,8 +70,10 @@
                    placed where the old content was: the next page's header row may be taller or shorter. -->
               <Grid Grid.Row="0" Grid.RowSpan="2" x:Name="LeavingContent"/>
             </Grid>
-              <!-- Keep the toolbar outside the fixed page layout so neither resize direction clips its controls. -->
-              <Grid x:Name="Toolbar" Height="{Binding Height.Value, ElementName=ToolbarRow}" VerticalAlignment="Top">
+              <!-- Keep the toolbar outside the fixed page layout so neither resize direction clips its controls. It lies after the
+                   page so that it draws over it, yet Tab reaches it first (TabIndex 0 against the default) and then the page. -->
+              <Grid x:Name="Toolbar" Height="{Binding Height.Value, ElementName=ToolbarRow}" VerticalAlignment="Top"
+                    KeyboardNavigation.TabNavigation="Local" KeyboardNavigation.TabIndex="0">
                 <!-- The clock is centered on the whole panel; the switches and the settings button sit inside their own insets. -->
                 <TextBlock x:Name="ClockLabel" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="12" Foreground="{DynamicResource PanelTertiary}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
                 <Border x:Name="PageSwitch" Background="{DynamicResource PanelSwitchFill}" CornerRadius="{DynamicResource PanelR8}" Padding="2" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0">

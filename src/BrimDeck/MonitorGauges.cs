@@ -36,7 +36,7 @@ internal sealed class FigureGauge : FrameworkElement
     public FigureGauge(string letter, string color, double figure, double small, bool right = false, string? button = null)
     {
         _letter = letter; _color = color; _figure = figure; _small = small; _right = right; _button = button is not null;
-        Height = Math.Ceiling(figure * 1.4); Focusable = false;
+        Height = Math.Ceiling(figure * 1.4);
         Button = button;
     }
 
@@ -50,6 +50,7 @@ internal sealed class FigureGauge : FrameworkElement
             _buttonName = value;
             if (!(_button = value is not null)) { _pressed = false; Hover(false); }
             Cursor = _button ? Cursors.Hand : null;
+            KeyboardPress.Take(this, _button);
             AutomationProperties.SetName(this, value ?? "");
         }
     }
@@ -134,6 +135,7 @@ internal sealed class FigureGauge : FrameworkElement
         if (!_button || !_pressed) return;
         _pressed = false; InvalidateVisual(); e.Handled = true; Clicked?.Invoke();
     }
+    protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); if (_button && KeyboardPress.Pressed(e)) Clicked?.Invoke(); }
 }
 
 // One column of a graph: its value (0..1), an optional tick (0..1, the core's frequency), its color and group (a gap separates
@@ -161,7 +163,7 @@ internal sealed class ColumnGraph : FrameworkElement
     {
         _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null;
         ClipToBounds = true; SnapsToDevicePixels = true;
-        if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); }
+        if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); KeyboardPress.Take(this, true); }
         else ToolTipService.SetPlacement(this, System.Windows.Controls.Primitives.PlacementMode.Mouse);
     }
 
@@ -258,6 +260,7 @@ internal sealed class ColumnGraph : FrameworkElement
         ToolTip = index < 0 ? null : _tip;
     }
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) { base.OnMouseLeftButtonUp(e); if (_button) { e.Handled = true; Clicked?.Invoke(); } }
+    protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); if (_button && KeyboardPress.Pressed(e)) Clicked?.Invoke(); }
 }
 
 // One wide column, as ftop draws the GPU beside the cores: the fill is usage, the line its memory in use against its size.
@@ -268,7 +271,7 @@ internal sealed class BlockGauge : FrameworkElement
     private bool _hasTick;
     public event Action? Clicked;
 
-    public BlockGauge(string color, string button) { _color = color; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true; }
+    public BlockGauge(string color, string button) { _color = color; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true; KeyboardPress.Take(this, true); }
 
     public void Set(double value, double? tick, string tip, bool motion)
     {
@@ -301,6 +304,7 @@ internal sealed class BlockGauge : FrameworkElement
     protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); if (e.StylusDevice is null) Hover(true); }
     protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); Hover(false); }
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e) { base.OnMouseLeftButtonUp(e); e.Handled = true; Clicked?.Invoke(); }
+    protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); if (KeyboardPress.Pressed(e)) Clicked?.Invoke(); }
 }
 
 // Memory: the badge with its arc and the figure, then a bar of the memory in use and, lighter, the file cache, its color the
