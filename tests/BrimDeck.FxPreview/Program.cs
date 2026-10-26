@@ -40,6 +40,12 @@ internal static class Program
 
         // The date range picker's strips (DatePreview): --date <output folder>.
         if (args.Length > 1 && args[0] == "--date") return DatePreview.Run(args[1]) == 0 ? 0 : 1;
+        // The collapse pictures (CollapsePreview): --collapse <output folder> [--themes id,id,...].
+        if (args.Length > 1 && args[0] == "--collapse")
+        {
+            int at = Array.IndexOf(args, "--themes");
+            return CollapsePreview.Run(args[1], at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null) == 0 ? 0 : 1;
+        }
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
         if (args.Length > 1 && args[0] == "--sheet")
         {

@@ -140,6 +140,9 @@
     "pace": 1,                      // 0.6 to 1.6: scales the pace of hover, press and focus feedback
     "steps": 0,                     // 0 (smooth) or 2 to 8: moves in that many hard steps, for a mechanical feel
     "spring": "default",            // firm, default, jelly: how much the springs give (damping 0.85, 0.70, 0.50), always at 16 rad/s
+    "collapse": "fade",             // fade, glitch, foam, genie: how a notice or the open panel goes back into the island
+                                    // (glitch: torn bands in three steps, ~270 ms; foam: a noise dissolve with a 1 px foam
+                                    // edge, ~330 ms; genie: drawn into the island along the lamp curve, ~450 ms)
     "color": "accent",              // The main mark: a color key above, a "#RRGGBB" color, or "system" (the Windows accent color)
     "secondary": "accent",          // Its second tone: a gradient's end, a shadow, a ghost or a neutral bar
     "highlight": "accent"           // The color of the moment of a press: an indicator, a selection, a scan line, sparkles

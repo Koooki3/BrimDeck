@@ -152,7 +152,10 @@ internal sealed partial class FxSurface : FrameworkElement
     // A fixed handful, so nothing is allocated; when all are taken the faintest gives way.
     private readonly FxMark?[] _leaving = new FxMark?[3];
     private readonly PressTrack _press = new();
-    private readonly FlashBudget _flashes = new();
+    // The app's flashes are shared by every window (FlashBudget.Shared: a collapse picture spends from it too); a preview, on its
+    // own clock, keeps its own.
+    private readonly FlashBudget _flashes = new(FlashBudget.Shared), _previewFlashes = new();
+    private FlashBudget Flashes => Preview is null ? _flashes : _previewFlashes;
     private double _focusAt = double.NaN;
     private readonly FocusAccentGate _focusGate = new();
     private int _serial;
@@ -414,7 +417,7 @@ internal sealed partial class FxSurface : FrameworkElement
         Unwatch();
         _pressed = mark;
         mark.Serial = ++_serial;
-        bool glitch = _motion.Press == PressFx.Lock && _flashes.TryTake(now);
+        bool glitch = _motion.Press == PressFx.Lock && Flashes.TryTake(now);
         _press.Press(now, from, glitch);
         if (glitch) PrepareGlitch(mark);
         mark.Control.LostMouseCapture += CaptureLost;
@@ -432,7 +435,7 @@ internal sealed partial class FxSurface : FrameworkElement
         bool byKey = _keyPress;
         _keyPress = false;
         Unwatch();
-        bool scan = inside && _motion.Press == PressFx.Lock && _flashes.TryTake(now);
+        bool scan = inside && _motion.Press == PressFx.Lock && Flashes.TryTake(now);
         _press.Release(now, inside, scan, _timing, _motion.Steps);
         if (_press.Committed && !byKey && _motion.Particles != ParticleFx.None && _motion.ParticleStrength > 0 && _pressed.Valid) Burst(_pressed, now);
         Wake();
@@ -546,7 +549,7 @@ internal sealed partial class FxSurface : FrameworkElement
         Unwatch();
         _hover = _pressed = _focus = null;
         Array.Clear(_leaving);
-        _press.Clear(); _flashes.Clear(); _focusGate.Clear(); _slice.Visual = null; _keyPress = false;
+        _press.Clear(); _flashes.Clear(); _previewFlashes.Clear(); _focusGate.Clear(); _slice.Visual = null; _keyPress = false;
         _lastSource = null; _lastTarget = null;
         ClearParticles();
         Sleep(); WatchLayout(false);

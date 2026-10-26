@@ -42,6 +42,7 @@ public static class MotionStyles
     public static FocusFx Focus(string? value, FocusFx fallback) => Parse(value, FocusAliases, fallback);
     public static ParticleFx Particles(string? value, ParticleFx fallback) => Parse(value, null, fallback);
     public static SpringTier Spring(string? value, SpringTier fallback) => Parse(value, null, fallback);
+    public static CollapseStyle Collapse(string? value, CollapseStyle fallback) => Parse(value, null, fallback);
 
     // A name only: numbers ("7") are not styles, whatever the enum would make of them.
     private static T Parse<T>(string? value, Dictionary<string, T>? aliases, T fallback) where T : struct, Enum
@@ -114,10 +115,11 @@ public readonly record struct AmbientFrame(double Rim, double Drift, double Swee
 // Highlight the color of the moment of a press (a scan line, an indicator, a selection, sparkles, fireflies).
 // ParticleStrength is how strongly the particles a completed press leaves show (0: none); the theme file calls it "trail".
 // Pace scales every interaction duration. Steps quantizes the motion into that many hard steps (0: smooth), for a mechanical
-// theme. Spring is how much the theme's springs give (SpringTier), always at the monitor page's frequency.
+// theme. Spring is how much the theme's springs give (SpringTier), always at the monitor page's frequency. Collapse is how a
+// notice or the open panel goes back into the island (CollapseFx); fade, the panel's own closing, unless the theme asks.
 public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double HoverStrength, PressFx Press, double PressStrength,
     double ParticleStrength, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent",
-    SpringTier Spring = SpringTier.Default)
+    SpringTier Spring = SpringTier.Default, CollapseStyle Collapse = CollapseStyle.Fade)
 {
     public const string SystemAccent = "system";
     // Without a motion section anywhere in the base chain, nothing is drawn over the controls: they keep their own hover and
@@ -126,15 +128,15 @@ public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double Ho
     public bool AnyInteraction => Hover != HoverFx.None && HoverStrength > 0 || Press != PressFx.None && PressStrength > 0 || ParticleStrength > 0 && Particles != ParticleFx.None || Focus != FocusFx.None;
 
     // "system" follows Windows: its accent color and the quiet Fluent answers (a light theme's lift and sink stay), with no
-    // ambient light, particles or steps. The base theme's strengths and pace stay, and a base without answers (the default dark
-    // and light themes) keeps none.
+    // ambient light, particles, steps or collapse pictures. The base theme's strengths and pace stay, and a base without answers
+    // (the default dark and light themes) keeps none.
     public ThemeMotion ForSystem() => this with
     {
         Ambient = AmbientMotion.None,
         Hover = Hover switch { HoverFx.None => HoverFx.None, HoverFx.Lift => HoverFx.Lift, _ => HoverFx.Reveal },
         Press = Press switch { PressFx.None => PressFx.None, PressFx.Sink => PressFx.Sink, _ => PressFx.Shade },
         ParticleStrength = 0, Particles = ParticleFx.None, Steps = 0, Focus = Focus == FocusFx.None ? FocusFx.None : FocusFx.Ring, Spring = SpringTier.Default,
-        Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
+        Collapse = CollapseStyle.Fade, Color = SystemAccent, Secondary = Hover == HoverFx.Lift ? Secondary : SystemAccent, Highlight = SystemAccent
     };
 
     // A motion color as the palette draws it: a key of the palette, a color, or the Windows accent (systemAccent; the palette's
@@ -287,17 +289,23 @@ public static class MotionCurve
     public static double HoverOut(double t, int steps) { double e = Ease(t, steps); return e > 1 - 1e-9 ? 1 : e; }
 }
 
-// Rations what reads as a flash (a glitch slice, a scan line): at most MotionSafety.PressFlashes start in any one second,
-// however fast the clicks come; the others are left out and the press still answers with its steady marks.
+// Rations what reads as a flash (a glitch slice, a scan line, a collapse picture): at most MotionSafety.PressFlashes start in
+// any one second, however fast the clicks come; the others are left out and the press still answers with its steady marks,
+// a collapse with the default fade. Shared is the app's own budget, which every window's flashes also spend, so two windows
+// together stay within it; a budget made over it takes from both or from neither, and clearing it leaves Shared alone.
 public sealed class FlashBudget
 {
+    public static FlashBudget Shared { get; } = new();
     private readonly double[] _starts = new double[MotionSafety.PressFlashes];
+    private readonly FlashBudget? _shared;
     private int _next;
-    public FlashBudget() => Array.Fill(_starts, double.NegativeInfinity);
+    public FlashBudget(FlashBudget? shared = null) { _shared = shared; Array.Fill(_starts, double.NegativeInfinity); }
+    // The oldest of the last few starts must be over a second ago.
+    public bool Available(double now) => now - _starts[_next] >= 1 && (_shared?.Available(now) ?? true);
     public bool TryTake(double now)
     {
-        // The oldest of the last few starts must be over a second ago.
-        if (now - _starts[_next] < 1) return false;
+        if (!Available(now)) return false;
+        _shared?.TryTake(now);
         _starts[_next] = now;
         _next = (_next + 1) % _starts.Length;
         return true;
@@ -406,6 +414,8 @@ public sealed class PanelThemeMotion
     public string? Highlight { get; set; }
     // firm, default, jelly (SpringTier): how much the springs give, damping 0.85, 0.70 or 0.50 at 16 rad/s
     public string? Spring { get; set; }
+    // fade, glitch, foam, genie (CollapseStyle): how a notice or the open panel goes back into the island
+    public string? Collapse { get; set; }
 }
 
 public sealed class PanelThemeAmbient
@@ -452,7 +462,8 @@ public static partial class PanelThemes
                 Color = motion.Color is { Length: > 0 } color ? color.Trim() : m.Color,
                 Secondary = motion.Secondary is { Length: > 0 } secondary ? secondary.Trim() : m.Secondary,
                 Highlight = motion.Highlight is { Length: > 0 } highlight ? highlight.Trim() : m.Highlight,
-                Spring = MotionStyles.Spring(motion.Spring, m.Spring)
+                Spring = MotionStyles.Spring(motion.Spring, m.Spring),
+                Collapse = MotionStyles.Collapse(motion.Collapse, m.Collapse)
             };
         }
         return m with { Ambient = a };
