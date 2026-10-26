@@ -16,6 +16,13 @@ internal static class KeyboardResizeTests
             && HotkeyText.PlanArrows("Arrows", Key, "", "").Status == HotkeyStatus.Invalid
             && HotkeyText.PlanArrows("Ctrl+Alt+Left", Key, "", "").Status == HotkeyStatus.Invalid
             && HotkeyText.PlanArrows("", Key, "", "").Status == HotkeyStatus.Unset);
+        // Shift, Ctrl and Win with the arrow keys select and move through text or arrange windows in every program.
+        check("Resize shortcut: Alt and one more modifier, never the system's own arrow shortcuts",
+            HotkeyText.TryParseArrows("Ctrl+Alt+Arrows", out _) && HotkeyText.TryParseArrows("Alt+Shift+Arrows", out _) && HotkeyText.TryParseArrows("Alt+Win+Arrows", out _)
+            && !HotkeyText.TryParseArrows("Alt+Arrows", out _) && !HotkeyText.TryParseArrows("Shift+Arrows", out _) && !HotkeyText.TryParseArrows("Ctrl+Arrows", out _)
+            && !HotkeyText.TryParseArrows("Ctrl+Shift+Arrows", out _) && !HotkeyText.TryParseArrows("Win+Arrows", out _) && !HotkeyText.TryParseArrows("Ctrl+Win+Arrows", out _)
+            && HotkeyText.PlanArrows("Shift+Arrows", Key, "", "").Status == HotkeyStatus.Invalid
+            && HotkeyText.Combinations("Arrows").Length == 0);
         check("Resize shortcut: it stands for its four arrow keys, Left, Right, Up, Down",
             HotkeyText.Combinations("Ctrl+Alt+Arrows").SequenceEqual(["Ctrl+Alt+Left", "Ctrl+Alt+Right", "Ctrl+Alt+Up", "Ctrl+Alt+Down"])
             && HotkeyText.Combinations("ctrl+k").SequenceEqual(["Ctrl+k"]) && HotkeyText.Combinations("").Length == 0);
@@ -25,7 +32,10 @@ internal static class KeyboardResizeTests
             && HotkeyText.PlanArrows("Ctrl+Alt+Arrows", Key, "Ctrl+Alt+Up", "") == (HotkeyStatus.Duplicate, "Ctrl+Alt+Arrows")
             && HotkeyText.PlanArrows("Ctrl+Alt+Arrows", Key, "", "Ctrl+Alt+Left") == (HotkeyStatus.Duplicate, "Ctrl+Alt+Arrows")
             && HotkeyText.PlanArrows("Ctrl+Alt+Arrows", Key, "Ctrl+Alt+K", "Ctrl+Shift+Left") == (null, "Ctrl+Alt+Arrows")
-            && HotkeyText.Plan(HotkeyKind.Expand, "", "Ctrl+Alt+Left", Key) == (null, "Ctrl+Alt+Left"));
+            && HotkeyText.Plan(HotkeyKind.Expand, "", "Ctrl+Alt+Left", Key) == (null, "Ctrl+Alt+Left")
+            && HotkeyText.Plan(HotkeyKind.Hide, "Ctrl+Alt+Up", "", Key) == (null, "Ctrl+Alt+Up"));
+        check("Resize shortcut: a shortcut that cannot be registered takes nothing from it",
+            HotkeyText.PlanArrows("Ctrl+Alt+Arrows", Key, "Ctrl+Alt+5", "Ctrl+") == (null, "Ctrl+Alt+Arrows"));
 
         check("Resize shortcut: the arrows map to narrower, wider, shorter, taller",
             KeyboardResize.Of(0) == KeyboardResize.Direction.Narrower && KeyboardResize.Of(1) == KeyboardResize.Direction.Wider

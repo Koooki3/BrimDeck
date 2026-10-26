@@ -50,12 +50,15 @@ public sealed partial class SettingsWindow
         {
             HotkeyKind.Hide => Loc.T("按下快捷键即可隐藏刘海、胶囊或指示条，再按一次恢复显示。", "Press the shortcut to hide the notch, capsule or indicator bar; press it again to show it."),
             HotkeyKind.Expand => Loc.T("按下快捷键即可展开面板，再按一次收起。", "Press the shortcut to expand the panel; press it again to collapse it."),
-            _ => Loc.T("按住修饰键再按方向键调整大小：展开时 ←/→ 改面板宽度、↑/↓ 改高度；收起时 ←/→ 改刘海、胶囊或指示条的宽度。按住可连续调整，范围与拖动边缘相同。录制时按下修饰键和任意一个方向键。",
-                "Hold the modifiers and press an arrow key to resize: open, ←/→ change the panel's width and ↑/↓ its height; collapsed, ←/→ change the notch, capsule or indicator bar's width. Hold a key to keep going; the limits are those of dragging an edge. To record, press the modifiers with any arrow key.")
+            _ => Loc.T("按住 Alt 和另一个修饰键（例如 Ctrl+Alt）再按方向键调整大小：展开时 ←/→ 改面板宽度、↑/↓ 改高度；收起时 ←/→ 改刘海、胶囊或指示条的宽度。按住可连续调整，范围与拖动边缘相同。录制时按下修饰键和任意一个方向键。",
+                "Hold Alt and one more modifier (for example Ctrl+Alt) and press an arrow key to resize. When the panel is open, ← and → change its width and ↑ and ↓ its height; when it is collapsed, ← and → change the width of the notch, capsule or indicator bar. Hold a key to keep going, within the same limits as dragging an edge. To record, press the modifiers with any arrow key.")
         };
         string Saved() => SavedHotkey(S, kind);
-        // The other shortcuts, with the names a clash message gives them.
-        IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>().Where(other => other != kind).Select(other => (SavedHotkey(S, other), HotkeyName(other)));
+        // The other shortcuts, with the names a clash message gives them. The resize shortcut yields to the others (App.Hotkeys), so
+        // only its own row speaks of a clash with them.
+        IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>()
+            .Where(other => other != kind && (kind == HotkeyKind.Resize || other != HotkeyKind.Resize))
+            .Select(other => (SavedHotkey(S, other), HotkeyName(other)));
 
         // The box keeps one size and place in every state: the text on the left, trimmed before the clear button, which
         // always holds its slot on the right and is only dimmed while nothing is set. The record button spans the whole
@@ -145,9 +148,11 @@ public sealed partial class SettingsWindow
                 text.Text = Loc.T("请按下组合键…", "Press a combination…"); text.Foreground = UI.Brush(TextSecondary);
                 return;
             }
-            if (kind == HotkeyKind.Resize && !IsArrowKey(key))
+            if (kind == HotkeyKind.Resize && (!IsArrowKey(key) || !HotkeyText.ArrowModifiersAllowed(HotkeyGesture.FromWpf(modifiers))))
             {
-                Note(Loc.T("请按下修饰键和一个方向键（←→↑↓）。", "Press the modifiers with an arrow key (←→↑↓)."));
+                Note(IsArrowKey(key)
+                    ? Loc.T("请按住 Alt 和另一个修饰键（例如 Ctrl+Alt）。Shift、Ctrl、Win 加方向键是系统的文字和窗口操作。", "Hold Alt and one more modifier (for example Ctrl+Alt). Shift, Ctrl and Win with the arrow keys move through text and windows everywhere.")
+                    : Loc.T("请按下修饰键和一个方向键（←→↑↓）。", "Press the modifiers with an arrow key (←→↑↓)."));
                 text.Text = Loc.T("请按下组合键…", "Press a combination…"); text.Foreground = UI.Brush(TextSecondary);
                 return;
             }
@@ -201,8 +206,8 @@ public sealed partial class SettingsWindow
     // The app raises HotkeysChanged on the UI thread after registering again.
     private void AppHotkeysChanged() { foreach (var refresh in _hotkeyRows.ToList()) refresh(); }
 
-    // What is wrong with a saved shortcut, or "" when nothing is: the same combination as the other shortcut, or a
-    // registration the app could not complete.
+    // What is wrong with a saved shortcut, or "" when nothing is: a combination another shortcut has, or a registration the app
+    // could not complete.
     private string HotkeyProblem(HotkeyKind kind, string saved, IEnumerable<(string Text, string Name)> others)
     {
         if (saved.Length == 0) return "";
@@ -241,7 +246,7 @@ public sealed partial class SettingsWindow
     private static string HotkeyDisplay(string saved)
     {
         if (HotkeyText.TryParseArrows(saved, out var arrowModifiers))
-            return HotkeyText.Format(arrowModifiers, HotkeyText.Arrows)[..^HotkeyText.Arrows.Length] + Loc.T("方向键", "Arrow keys");
+            return HotkeyText.Format(arrowModifiers, Loc.T("方向键", "Arrow keys"));
         if (!ParseHotkey(saved, out var modifiers, out var key)) return saved;
         string name = key switch
         {

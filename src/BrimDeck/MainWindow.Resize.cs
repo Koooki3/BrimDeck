@@ -53,9 +53,11 @@ public partial class MainWindow
     private long _resizeRendered;
     // The widest a page can be on this monitor, and the limits of the page being resized.
     private double PageMaxWidth => Math.Max(DeckPages.MinWidth, Math.Min(DeckPages.MaxWidth, WorkDip.Width - 24));
-    private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimits
+    private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimits => PageLimitsOf(_resizePage);
+    private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimitsOf(DeckPage page)
     {
-        get { var (minWidth, _, minHeight, maxHeight) = DeckPages.Limits(Settings, _resizePage); return (minWidth, Math.Max(minWidth, PageMaxWidth), minHeight, maxHeight); }
+        var (minWidth, _, minHeight, maxHeight) = DeckPages.Limits(Settings, page);
+        return (minWidth, Math.Max(minWidth, PageMaxWidth), minHeight, maxHeight);
     }
 
     private void InitializeResize()
@@ -183,24 +185,37 @@ public partial class MainWindow
             if (style == CompactStyle.Line) fitted.LineLength = CollapsedLimits.LineLengthDefault; else fitted.SetCompactAutoWidth(style, true);
             _app.UpdateSettings(fitted); return;
         }
-        // A press while the surface still settles picks it up where it is heading.
-        bool settling = _resizeSettling && _resizeCompact == compact;
-        // The other form still settling: its size is saved first.
-        if (_resizeSettling && !settling) { StopSpring(); FinishResize(); }
-        if (!compact) { _monitorView?.CloseCard(); _detailPopup?.Close(); }
-        if (settling) _resizeFrom = (_springWidth.Target, _springHeight.Target);
-        else
-        {
-            _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : DeckPages.Size(Settings, CurrentPage);
-            _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
-            _resizeChanged = false;
-        }
-        _resizeCompact = compact; _resizeStyle = style; _resizePage = CurrentPage; _resizeSettling = false; _resizeByKey = false; Island.SettledClip = false;
+        BeginResize(compact);
+        _resizeSettling = false; _resizeByKey = false;
         _resizeEdge = edge; _resizeStart = WindowsHost.Cursor();
         SetHoverEdge(edge);
         _grips.Light(edge, true, SizeLabel(_resizeFrom.Width, _resizeFrom.Height));
         _grips.CaptureMouse();
     }
+
+    // Starts resizing the open page or the collapsed surface, for a drag's press or the resize shortcut. A start while the same
+    // form still settles picks it up where it is heading; the other form still settling is saved first. A page starts from the
+    // size it shows, which a smaller monitor may hold below the saved one. Returns whether it picked up a settling resize.
+    private bool BeginResize(bool compact)
+    {
+        bool settling = SettlingHere(compact);
+        if (_resizeSettling && !settling) { StopSpring(); FinishResize(); }
+        if (!compact) { _monitorView?.CloseCard(); _detailPopup?.Close(); }
+        if (settling) _resizeFrom = (_springWidth.Target, _springHeight.Target);
+        else
+        {
+            var (minWidth, maxWidth, minHeight, maxHeight) = PageLimitsOf(CurrentPage);
+            var (width, height) = DeckPages.Size(Settings, CurrentPage);
+            _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : (Math.Clamp(width, minWidth, maxWidth), Math.Clamp(height, minHeight, maxHeight));
+            _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
+            _resizeChanged = false;
+        }
+        _resizeCompact = compact; _resizeStyle = EffectiveStyle; _resizePage = CurrentPage; Island.SettledClip = false;
+        return settling;
+    }
+
+    // A resize of this form, and of the page or style still shown, is settling.
+    private bool SettlingHere(bool compact) => _resizeSettling && _resizeCompact == compact && (compact ? EffectiveStyle == _resizeStyle : CurrentPage == _resizePage);
 
     private string SizeLabel(double width, double height) => _resizeCompact ? $"{width:0}" : $"{width:0} × {height:0}";
 
@@ -296,25 +311,21 @@ public partial class MainWindow
         bool horizontal = KeyboardResize.Horizontal(direction);
         if (Dragging || (compact ? !CompactResizable || !horizontal : !PanelResizable)) return;
         // A press while the surface still settles moves on from where it is heading, as holding a key repeats.
-        bool settling = _resizeSettling && _resizeCompact == compact && (compact ? EffectiveStyle == _resizeStyle : CurrentPage == _resizePage);
-        if (_resizeSettling && !settling) { StopSpring(); FinishResize(); }
-        if (!settling)
-        {
-            if (!compact) { _monitorView?.CloseCard(); _detailPopup?.Close(); }
-            _resizeFrom = compact ? (Collapsed.Surface.Width, 0) : DeckPages.Size(Settings, CurrentPage);
-            _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
-            _resizeChanged = false;
-            _resizeCompact = compact; _resizeStyle = EffectiveStyle; _resizePage = CurrentPage;
-            _keyEdges = ResizeEdges.None;
-        }
-        _resizeSettling = true; _resizeByKey = true; Island.SettledClip = false;
+        bool settling = SettlingHere(compact);
+        var limits = PageLimitsOf(CurrentPage);
+        var (min, max) = !horizontal ? (limits.MinHeight, limits.MaxHeight)
+            : compact ? CollapsedGeometry.WidthRange(EffectiveStyle, MonitorBoundsDip, WorkDip) : (limits.MinWidth, limits.MaxWidth);
+        double current = settling ? horizontal ? _springWidth.Target : _springHeight.Target
+            : Math.Clamp(compact ? Collapsed.Surface.Width : horizontal ? DeckPages.Size(Settings, CurrentPage).Width : DeckPages.Size(Settings, CurrentPage).Height, min, max);
+        double next = KeyboardResize.Next(current, direction, min, max);
+        // At a limit nothing moves and nothing is saved: a key held there costs nothing, and a collapsed surface that widens to
+        // its content keeps doing so.
+        if (next == current) return;
+        // A drag still settling keeps its own ending (KeyboardResize only moves its target on).
+        if (!BeginResize(compact)) { _resizeByKey = true; _keyEdges = ResizeEdges.None; }
+        _resizeSettling = true;
         _keyEdges |= horizontal ? ResizeEdges.Left | ResizeEdges.Right : ResizeEdges.Bottom;
-        if (horizontal)
-        {
-            var (min, max) = compact ? CollapsedGeometry.WidthRange(EffectiveStyle, MonitorBoundsDip, WorkDip) : (PageLimits.MinWidth, PageLimits.MaxWidth);
-            _springWidth.Target = KeyboardResize.Next(_springWidth.Target, direction, min, max);
-        }
-        else _springHeight.Target = KeyboardResize.Next(_springHeight.Target, direction, PageLimits.MinHeight, PageLimits.MaxHeight);
+        if (horizontal) _springWidth.Target = next; else _springHeight.Target = next;
         StartSpring();
     }
 
@@ -343,9 +354,12 @@ public partial class MainWindow
         var cursor = WindowsHost.Cursor();
         SetHoverEdge(TrackGrips(cursor));
         _grips.Light(_hoverEdge, false, "");
-        // The keyboard moved nothing under the pointer: the panel stays as the pointer left it.
-        if (compact || byKey) return;
+        // A panel closed meanwhile (the expand hotkey, overtaking the resize) stays closed, even with the pointer over it.
+        if (compact || !_expanded) return;
         if (Island.IsMouseOver || InsideOpenPanel(cursor)) { PointerChanged(true); return; }
+        // The resize shortcut used with the pointer outside: the panel closes after the usual delay, as it would have without it
+        // (one the expand hotkey opened stays, held by its pin until the pointer has been in it).
+        if (byKey) { PointerChanged(false); return; }
         // A drag that made the panel larger usually ends with the pointer ahead of the edge, past the panel: the panel stays a
         // moment for the pointer to come back (TrackPointer takes it as an entry), and closes only if it does not.
         _pointerInside = false; _hover.Stop();
