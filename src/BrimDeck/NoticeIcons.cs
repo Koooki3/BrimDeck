@@ -107,8 +107,15 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
         {
             string icon = iconRef[(5 + distro.Length)..];
             if (!distributionRunning(distro)) return null;
+            string root = @"\\wsl.localhost\" + distro;
             foreach (var path in WslCandidates(icon))
-                if (ReadImageFile(@"\\wsl.localhost\" + distro + path.Replace('/', '\\')) is { } found) return found;
+            {
+                string full = root + path.Replace('/', '\\');
+                // A folder on the way that is a link is refused as on a local drive (any process in the distribution can make
+                // one, and Windows would follow it); looked at only for a file that is there, as most candidates are not.
+                if (!File.Exists(full) || ThroughLinks(full, root)) continue;
+                if (ReadImageFile(full) is { } found) return found;
+            }
         }
         return null;
     }
@@ -127,12 +134,14 @@ internal sealed class NoticeIcons(System.Windows.Threading.Dispatcher dispatcher
     public static IEnumerable<string> WslCandidates(string icon)
         => NoticeIntake.IsLinuxIcon(icon) ? LinuxIcons.Candidates(icon) : [];
 
-    // Whether a folder on the way to the file is a link or junction; a folder link may lead to a network share.
-    private static bool ThroughLinks(string path)
+    // Whether a folder on the way to the file is a link or junction; a folder link may lead to a network share. Folders are
+    // looked at up to the drive's root, or up to root (a distribution's \\wsl.localhost share).
+    private static bool ThroughLinks(string path, string? root = null)
     {
         try
         {
-            for (var folder = Path.GetDirectoryName(Path.GetFullPath(path)); folder is not null && folder.Length > 3; folder = Path.GetDirectoryName(folder))
+            int top = root?.Length ?? 3;
+            for (var folder = Path.GetDirectoryName(Path.GetFullPath(path)); folder is not null && folder.TrimEnd('\\').Length > top; folder = Path.GetDirectoryName(folder))
                 if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0) return true;
             return false;
         }

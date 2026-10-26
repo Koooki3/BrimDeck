@@ -23,6 +23,8 @@ try
     NoticeCoreTests.Run(root, Check);
     NoticeWindowsAppTests.Run(Check);
     NoticeTimeTests.Run(Check);
+    NoticeEventLogTests.Run(Check);
+    NoticeBannerTests.Run(root, Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     EqualizerSignalTests.Run(Check);
@@ -49,11 +51,19 @@ try
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
+    TemperatureTests.Run(Check);
+    StorageTests.Run(Check);
+    StripAdmissionTests.Run(Check);
+    ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
     GlassFeedbackTests.Run(Check);
     IdleCostTests.Run(Check);
+    MusicCostTests.Run(Check);
+    DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
+    GpuAdapterTests.Run(root, Check);
+    GpuIdentityTests.Run(Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
     await AppUpdateTests.Run(root, Check);
@@ -66,6 +76,7 @@ try
     await DshUsageTests.Run(root, Check);
     await KimiUsageTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
+    await CursorUsageTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[

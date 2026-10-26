@@ -92,7 +92,7 @@ internal sealed partial class NoticeWindow : Window
         PreviewKeyDown += KeyPressed;
         Deactivated += (_, _) => { if (_keyboard) EndKeyboard(); };
         _app.Notices.Icons.Loaded += IconLoaded;
-        Closed += (_, _) => { _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
+        Closed += (_, _) => { if (_hiding) { CompositionTarget.Rendering -= BlankFrame; _hiding = false; } _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _announceLater?.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
         // ui-3: moved to a monitor with another scale while it shows, the material is made again for that scale.
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
@@ -108,7 +108,9 @@ internal sealed partial class NoticeWindow : Window
 
     public void Present(AttentionItem item)
     {
-        bool continuing = IsVisible;
+        // Still on screen only to draw its empty frame before it hides (Finish): this notice starts afresh, from the island.
+        bool continuing = IsVisible && !_hiding;
+        StopHiding();
         _item = item; _leaving = false; _openFailed = false;
         int generation = ++_generation;
         _showingDetail = false; _keyboard = false; _detailFor = null; _keyMove = false;
@@ -245,13 +247,39 @@ internal sealed partial class NoticeWindow : Window
     // so it never plays on over a hidden panel and the island it covers draws back into the dot in sight.
     public void Vanish() { if (IsVisible) HandOver(); }
 
+    // A layered window keeps its last picture while hidden and puts it up again for a frame when it is next shown, before WPF
+    // draws it anew. Hidden while it showed the details (the panel opened from "View all", or was hidden), the next notice
+    // flashed that card first. The window is emptied and hides once the empty frame has been drawn, so what it keeps is nothing.
+    private bool _hiding;
+    private int _blankFrames;
+    private void HideBlank()
+    {
+        if (!IsVisible) return;
+        _stage.Opacity = 0;
+        if (_hiding) return;
+        _hiding = true; _blankFrames = 0;
+        CompositionTarget.Rendering += BlankFrame;
+    }
+    // The first frame after emptying draws it; by the second that frame is on screen.
+    private void BlankFrame(object? sender, EventArgs e)
+    {
+        if (++_blankFrames < 2) return;
+        StopHiding();
+        Hide();
+    }
+    private void StopHiding()
+    {
+        if (_hiding) { CompositionTarget.Rendering -= BlankFrame; _hiding = false; }
+        _stage.Opacity = 1;
+    }
+
     private void Finish(bool reveal = false)
     {
         _leaving = false; _showingDetail = false; _detailFor = null;
         // The notice ended in the island's outline and material: the island shows again in the same frame as the window hides,
         // and its own content lands as it does when the panel closes.
         _deck.SetIslandCovered(false, reveal);
-        Hide();
+        HideBlank();
         // The surface keeps no stale animations, so the next notice starts from the island again.
         foreach (var property in new[] { Canvas.LeftProperty, Canvas.TopProperty, WidthProperty, HeightProperty })
         { _surface.BeginAnimation(property, null); _glow.BeginAnimation(property, null); }
@@ -889,7 +917,8 @@ internal sealed partial class NoticeWindow : Window
     private void ViewAll()
     {
         var deck = _deck;
-        bool byKey = InputManager.Current.MostRecentInputDevice is KeyboardDevice;
+        // Chosen from the keyboard, the panel takes the keyboard on as the notices hotkey gives it; Dismiss ends it here.
+        bool byKey = _keyboard;
         Dismiss(false);
         deck.OpenNoticesPage(byKey);
     }
@@ -953,6 +982,9 @@ internal sealed partial class NoticeWindow : Window
         _escape?.SetEnabled(false);
         var own = new WindowInteropHelper(this).Handle;
         if (NoticeNative.Foreground() is var previous && previous != own) _previousForeground = previous;
+        // While this notice holds the foreground, the user's application has not changed (WindowsHost.Detect): the island
+        // keeps its context, as it does for a panel that takes the keyboard (MainWindow.Hotkeys.cs).
+        BrimDeck.Native.WindowsHost.KeyboardPanel = own;
         NoticeNative.SetActivatable(own, true);
         Activate();
         Dispatcher.BeginInvoke(() => (_actions?.Children.OfType<Button>().LastOrDefault() ?? FirstButton(_detail))?.Focus(), System.Windows.Threading.DispatcherPriority.Input);
@@ -966,6 +998,7 @@ internal sealed partial class NoticeWindow : Window
         // At once, not after the notice's way out: keys typed meanwhile go to where the user was (review 7a).
         NoticeNative.ReturnForeground(own, _previousForeground);
         _previousForeground = IntPtr.Zero;
+        if (BrimDeck.Native.WindowsHost.KeyboardPanel == own) BrimDeck.Native.WindowsHost.KeyboardPanel = IntPtr.Zero;
         if (_item is not null && !_surface.IsMouseOver) { LeaveDetail(); Center.Hold(_deck, false); }
     }
 

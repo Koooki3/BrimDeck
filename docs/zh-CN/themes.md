@@ -10,7 +10,7 @@ BrimDeck 的刘海、胶囊、指示条、配额提示、展开面板及其弹�
 
 每个主题会分别记住你在它下面修改的应用列主题、预警、告警颜色和时间的样式与配色：切换到其他主题时保存，切换回来时恢复。第一次选择的主题使用它自己的配色和推荐的时间样式。在“配额与统计”“收起外观”中恢复默认，恢复的是当前主题的默认配色。
 
-主题扩展移植自开源的 VS Code 主题，配色按各自的 MIT 许可证使用：[One Dark Pro](https://github.com/Binaryify/OneDark-Pro)、[GitHub Theme](https://github.com/primer/github-vscode-theme)、[Dracula Official](https://github.com/dracula/visual-studio-code)、[Night Owl](https://github.com/sdras/night-owl-vscode-theme)。各项目的版权与许可声明随程序附在 `ThirdPartyNotices.txt` 中。
+One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植自开源的 VS Code 主题，配色按各自的 MIT 许可证使用：[One Dark Pro](https://github.com/Binaryify/OneDark-Pro)、[GitHub Theme](https://github.com/primer/github-vscode-theme)、[Dracula Official](https://github.com/dracula/visual-studio-code)、[Night Owl](https://github.com/sdras/night-owl-vscode-theme)。各项目的版权与许可声明随程序附在 `ThirdPartyNotices.txt` 中。
 
 ## 在设置中修改颜色
 

@@ -171,7 +171,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _clipSettle?.Stop(); _hotkeyRehide?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseWheel += PanelWheel;
@@ -233,6 +233,9 @@ public partial class MainWindow : Window
         UpdateCollapsedGeometry(bounds, work, scale);
         double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
         _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
+        // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
+        // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
+        _widestPage = Fit(DeckPages.Largest(Settings).Width);
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
         // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is
@@ -277,7 +280,11 @@ public partial class MainWindow : Window
             // Drawn offscreen (MainWindow.Offscreen.cs), the window is never shown.
             if (!IsVisible && _offscreen is null) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
-            SetExpanded(_expanded, !animatePage || !wasVisible);
+            // Settings apply at once, except over a closing still under way: a change that gives the collapsed surface a new
+            // width (a reading switched on or off) carries the closing on to it (MoveTurn.Carried) rather than ending it in one
+            // frame.
+            bool closing = !_expanded && _turn.Underway(Environment.TickCount64, opening: false);
+            SetExpanded(_expanded, !wasVisible || !animatePage && !closing);
         }
         UpdatePointerTracking();
         RenderUsage();
@@ -414,6 +421,8 @@ public partial class MainWindow : Window
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
         FitShadowCache(dpi);
         ApplyThemeMotion();
+        // A theme whose scan line crosses the whole surface keeps the rounded clip (SettleClip).
+        if (ThemeSweeps) Island.SettledClip = false;
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
         SetImmediate(_surface, SolidColorBrush.ColorProperty, !_expanded && Collapsed.Style == CompactStyle.Line ? PanelTheme.ColorOf("indicator") : _expanded ? PanelTheme.PanelSurfaceColor : PanelTheme.SurfaceColor);
         ApplyMaterial();
@@ -530,10 +539,33 @@ public partial class MainWindow : Window
     }
 
     private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
+    // corners and shoulders, and a rounded clip made every frame of the title and the bars cost a quarter more. The rounded clip
+    // comes back before anything changes the surface; the rectangle only once the closing has had its whole length. A theme whose
+    // scan line passes across the whole surface (AmbientGlow) keeps the rounded clip, which shapes that line at the corners.
+    private DispatcherTimer? _clipSettle;
+    private void SettleClip(int after)
+    {
+        if (_clipSettle is null)
+        {
+            _clipSettle = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
+            _clipSettle.Tick += (_, _) =>
+            {
+                _clipSettle.Stop();
+                if (!_expanded && !_poweringOff && !_booting && !_bootWaiting && !_bootDot && !Resizing && !ThemeSweeps) Island.SettledClip = true;
+            };
+        }
+        _clipSettle.Stop();
+        _clipSettle.Interval = TimeSpan.FromMilliseconds(Math.Max(1, after) + 100);
+        _clipSettle.Start();
+    }
+    private static bool ThemeSweeps => PanelTheme.Current.Motion.Ambient is { Sweep: > 0, SweepOpacity: > 0 };
     // keyboard: a hotkey or Escape asked for it (motion-review C4), so the move is quicker and has no give.
     public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
     {
         if (expanded && IsSuppressed || _poweringOff) return;
+        // Whatever this changes, the surface moves under its rounded clip; a collapse settles again below (SettleClip).
+        Island.SettledClip = false; _clipSettle?.Stop();
         if (expanded && !_expanded) EndBoot();
         // Only the panel under the pointer is open; the others close at once and give up the Escape key.
         if (expanded && !_preview)
@@ -546,7 +578,9 @@ public partial class MainWindow : Window
         if (expanded) _noticeWindow?.Abort();
         bool wasExpanded = _expanded;
         _expanded = expanded;
-        // The coordinator hears of it after this call: it may start a waiting alert, which lays the island out again.
+        // The coordinator hears of it after this call: it may start a waiting alert, which lays the island out again. A notice
+        // that arrives before it does already waits for the closing (DeckLeaving).
+        if (wasExpanded && !expanded && !_preview) _app.Notices?.DeckLeaving(this, true);
         if (wasExpanded != expanded && !_preview) Dispatcher.BeginInvoke(() => _app.Notices?.DeckExpanded(this, _expanded));
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
@@ -569,11 +603,13 @@ public partial class MainWindow : Window
             : new CornerRadius(shape.TopRadius, shape.TopRadius, shape.BottomRadius, shape.BottomRadius);
         double gap = expanded ? panelTop : shape.Surface.Y;
         // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor. A
-        // panel opened by hovering a surface wider than itself centres on where the pointer was instead, as far as the surface's
-        // ends allow, and keeps that centre while open (page switches, resizing) without following the pointer.
+        // panel opened by hovering a surface wider than every shown page centres on where the pointer was instead, as far as the
+        // surface's ends allow, and keeps that centre while open (page switches, resizing) without following the pointer. The
+        // choice is the same for every page: decided per page, a capsule that the music widens past the narrow pages but not the
+        // wide ones put some pages at the pointer and others at the middle, so switching pages moved the panel sideways.
         if (!expanded) _openCentre = null;
         double panelCentre = shape.Surface.X + shape.Surface.Width / 2;
-        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > _pageWidth)
+        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > Math.Max(_pageWidth, _widestPage))
             panelCentre = Math.Clamp(pointer, shape.Surface.X + _pageWidth / 2, shape.Surface.Right - _pageWidth / 2);
         double panelLeft = Math.Clamp(panelCentre - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
         double left = (expanded ? panelLeft : shape.Surface.X) - _windowOffset;
@@ -590,13 +626,13 @@ public partial class MainWindow : Window
         ContentCanvas.Height = ExpandedContent.Height;
         // The recent notices page is drawn only while it shows (NoticesChanged), so notices that arrived while the panel was
         // closed are not on it yet: it is drawn again before the panel opens, and what it lists counts as seen as on a page
-        // switch (the notices hotkey does that itself once open).
+        // switch, the notices hotkey's opening too.
         if (expanded && !wasExpanded && !_preview && CurrentPage == DeckPage.Notices && _app.Notices is not null)
         {
             // Marking the list seen raises Changed; the page is drawn here once, not again at background priority mid-opening.
             bool queued = _noticesRenderQueued;
             _noticesRenderQueued = true;
-            try { if (!_keepPageOnOpen) NoticesPageShown(); RenderNotices(); }
+            try { NoticesPageShown(); RenderNotices(); }
             finally { _noticesRenderQueued = queued; }
         }
         // motion-review C1, C4: closing takes three quarters of the set time; a move the keyboard asked for takes 0.6 of it.
@@ -609,6 +645,10 @@ public partial class MainWindow : Window
         long now = Environment.TickCount64;
         bool redirect = turning && duration > 0 && fromNotice is null && _turn.Turns(now, expanded);
         if (redirect) duration = (int)Math.Round(duration * _turn.Share(now, expanded, Island.Width, Island.Height, width, height));
+        // The collapsed surface laid out again while it is still closing (its content asked for a new width) carries the closing
+        // on, on the same drawer curve, rather than holding for the closing's delay and starting a whole new move.
+        int carried = !turning && !expanded ? _turn.Carried(now, false, duration) : 0;
+        if (carried > 0) duration = carried;
         ExpandedContent.IsHitTestVisible = expanded;
         if (expanded) ExpandedContent.Visibility = Visibility.Visible;
         // The indicator has no content: it fades out with the other tracks and is hidden once gone.
@@ -639,11 +679,17 @@ public partial class MainWindow : Window
         _booting = false; _morphingShape = false;
         if (booting) duration = (int)(duration * BootSwell);
         if (morphing) duration = (int)(duration * 1.3);
-        if (turning) _turn.Started(now, duration, expanded, width, height);
+        // How long the panel's closing runs: a notice that arrives meanwhile waits for it (MainWindow.Notices.cs). A closing
+        // carried on to a new collapsed width runs until the carried move ends.
+        if (expanded) _collapseEnds = 0;
+        else if (wasExpanded || carried > 0) _collapseEnds = duration > 0 ? now + duration : 0;
+        if (!expanded) SettleClip(duration);
+        if (turning || carried > 0) _turn.Started(now, duration, expanded, width, height);
         // The opening and closing tracks are NoticeMotion's Panel* (a notice moves on the same ones); the boot's, the style
         // morph's and the indicator's own variations stay here.
         Track content = expanded ? NoticeMotion.PanelOpenContent : NoticeMotion.PanelCloseContent;
-        Track surface = reshaping || morphing || booting || expanded ? NoticeMotion.PanelOpenSurface : line ? new(redirect ? 0 : .12, .92) : NoticeMotion.ReturnSurfaceFor(redirect);
+        bool atOnce = redirect || carried > 0;
+        Track surface = reshaping || morphing || booting || expanded ? NoticeMotion.PanelOpenSurface : line ? new(atOnce ? 0 : .12, .92) : NoticeMotion.ReturnSurfaceFor(atOnce);
         // Between forms the corners turn early: a notch becoming a capsule rounds its flat top long before it has its new size,
         // rather than showing a square top over round bottom corners for most of the move.
         Track cornerTrack = morphing ? new(0, .4) : surface;
@@ -782,12 +828,15 @@ public partial class MainWindow : Window
         // win2: a pointer reaching the island means someone is at the screen: the display is on (C-L13), and a notice is
         // looked for briskly again (C-L8).
         if (inside && !_pointerInside) { MotionEnvironment.InputSeen(); BrimDeck.Native.WindowsNoticeSource.Interacted(); }
+        if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
-        if (inside) ReleaseHotkeyPin();
+        if (inside) { ReleaseHotkeyPin(); ReplayCompactTitle(); }
         if (inside)
         {
             _popupReturnArea = null;
-            _leave.Stop(); if (_expanded || IsSuppressed) return;
+            _leave.Stop();
+            if (_expanded && !_preview) _app.Notices?.DeckLeaving(this, false);
+            if (_expanded || IsSuppressed) return;
             _hover.Stop(); _hover.Interval = TimeSpan.FromMilliseconds(Math.Max(1, Settings.OpenDelay)); _hover.Start();
         }
         else
@@ -795,6 +844,8 @@ public partial class MainWindow : Window
             _hover.Stop(); if (!_expanded || _preview || _pageSwitchHold.IsEnabled || _detailPopup is not null || MediaSourceButton.ContextMenu?.IsOpen == true) return;
             int delay = Math.Max(_popupReturnArea is null ? 1 : 50, Settings.CloseDelay);
             _leftAt = Environment.TickCount64;
+            // Notices arriving from now on show from the island once the panel has closed, not only on its page.
+            _app.Notices?.DeckLeaving(this, true);
             _leave.Stop(); _leave.Interval = TimeSpan.FromMilliseconds(delay); _leave.Start();
         }
     }

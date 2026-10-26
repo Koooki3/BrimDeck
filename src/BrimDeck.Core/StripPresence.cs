@@ -1,0 +1,86 @@
+namespace BrimDeck.Core;
+
+// How present each reading of the collapsed row is, 0 to 1, easing as readings come and go, and how wide each is as its figure
+// changes. Owned by the panel, so that it outlives the row, which is built again whenever its width changes.
+public sealed class StripPresence
+{
+    private readonly Dictionary<CompactMonitorItems, Eased> _items = [];
+    private readonly Dictionary<CompactMonitorItems, (HeldWidth Held, Eased Width)> _widths = [];
+    private CompactMonitorItems _chosen = CompactMonitorItems.None, _arriving = CompactMonitorItems.None;
+    private (CompactMonitorItems, double) _sizes;
+
+    // Readings that join the row because their first figures arrived (StripAdmission), not because the settings chose them: the
+    // next Set brings them in from nothing with the row's own entrance, while the others slide aside.
+    public void Arrive(CompactMonitorItems items) => _arriving |= items;
+
+    // Returns whether anything moves. A new choice of readings (the settings) shows at once; motion: whether the row eases at all
+    // (the app's animations).
+    public bool Set(CompactMonitorItems chosen, CompactMonitorItems fitting, bool motion = true)
+    {
+        var arriving = _arriving & chosen;
+        bool settled = motion && (chosen & ~arriving) == (_chosen & ~arriving) && _items.Count > 0, moving = false;
+        _arriving = CompactMonitorItems.None;
+        _chosen = chosen;
+        foreach (var item in CompactMonitor.Order)
+        {
+            if ((chosen & item) == 0) { _items.Remove(item); continue; }
+            bool fits = (fitting & item) != 0, arrives = (arriving & item) != 0 && !_items.ContainsKey(item);
+            var eased = _items.TryGetValue(item, out var known) ? known : new Eased(fits && !(arrives && motion) ? 1 : 0, Eased.Seconds * .8);
+            moving |= eased.Set(fits ? 1 : 0, settled || arrives && motion);
+            _items[item] = eased;
+        }
+        return moving;
+    }
+
+    // Each chosen reading's width for its figure now (width), held a while when it narrows (HeldWidth). A reading measured for
+    // the first time takes its width at once; placeholders (figures false, before the first reading) never change a width the
+    // panel already knows. Returns whether any width moves.
+    public bool Measure((CompactMonitorItems Values, double Scale) sizes, CompactMonitorItems chosen, Func<CompactMonitorItems, double> width, bool figures, bool motion)
+    {
+        // Widths measured for other sizes (a new height, or rings that show or hide their figures) are measured again.
+        if (sizes != _sizes) { _widths.Clear(); _sizes = sizes; }
+        double now = Eased.Now; bool moving = false;
+        foreach (var item in CompactMonitor.Order)
+        {
+            if ((chosen & item) == 0) continue;
+            bool known = _widths.TryGetValue(item, out var entry);
+            if (known && !figures) continue;
+            double target = entry.Held.Update(width(item), now);
+            if (!known) entry.Width = new Eased(target, Eased.Seconds);
+            else moving |= entry.Width.Set(target, motion, now);
+            _widths[item] = entry;
+        }
+        return moving;
+    }
+
+    public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
+    public double? Width(CompactMonitorItems item, double now) => _widths.TryGetValue(item, out var entry) ? Math.Max(0, entry.Width.At(now)) : null;
+    // Whether any reading still shows, even fading out.
+    public bool Any(double now) => _items.Values.Any(eased => eased.At(now) > 0 || eased.Target > 0);
+    public bool Moving(double now) => _items.Values.Any(eased => eased.Moving(now)) || _widths.Values.Any(entry => entry.Width.Moving(now));
+}
+
+// Which of the collapsed row's later readings (the temperature, the system drive) it leaves out, and when they join. Neither joins
+// before its first figure arrives, so the row never shows a dash for a sensor still being read, nor builds itself again when the
+// sensor turns out to be missing: a machine without one never shows the reading at all. Once a reading has shown it stays
+// (a figure missing for a moment shows a dash) until its sensor is known to be missing.
+public sealed class StripAdmission
+{
+    public const CompactMonitorItems Later = CompactMonitorItems.Temperature | CompactMonitorItems.Storage;
+    private CompactMonitorItems _seen = CompactMonitorItems.None;
+    // The readings left out of the row as it was last built; all of them until the first figures.
+    public CompactMonitorItems Hidden { get; private set; } = Later;
+
+    // The readings to leave out for this snapshot and the sensors' states, and those that join now (Hidden before, not now).
+    public (CompactMonitorItems Hidden, CompactMonitorItems Arriving) Update(MonitorSnapshot? latest, SensorState cpu, SensorState gpu, SensorState storage)
+    {
+        if (Temperatures.Hottest(latest) is not null) _seen |= CompactMonitorItems.Temperature;
+        if (latest is not null && Storage.System(latest.Storage, Storage.WindowsLetter) is not null) _seen |= CompactMonitorItems.Storage;
+        var hidden = Later & ~_seen;
+        if (!Temperatures.Readable(cpu, gpu)) hidden |= CompactMonitorItems.Temperature;
+        if (storage == SensorState.None) hidden |= CompactMonitorItems.Storage;
+        var arriving = Hidden & ~hidden;
+        Hidden = hidden;
+        return (hidden, arriving);
+    }
+}

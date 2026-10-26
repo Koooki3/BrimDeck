@@ -26,8 +26,15 @@ public partial class MainWindow
     private HashSet<string> _freshNotices = [];
     // The rows the page lists, with the revision each was built from, and what else the page was built from (see UpdateNoticeRows).
     private StackPanel? _pageList;
-    private readonly List<(Notice Notice, int Revision, FrameworkElement Row)> _pageRows = [];
+    private readonly List<(Notice Notice, int Revision, string Key, FrameworkElement Row)> _pageRows = [];
     private string _pageKey = "";
+    // The settings, size and theme the page was last built for (NoticeLayout).
+    private (DeckSettings? Settings, int Theme, double Width, double Height, double UsageWidth) _noticeLayout;
+    // The empty page's text block, whose width follows the page's (FitNoticeLayout).
+    private FrameworkElement? _pageEmpty;
+    // A drag of the page's edges is being saved (FinishResize): the settings that come back are a copy of those the page was
+    // fitted to during the drag, so it is not built again for them.
+    private bool _noticeResizeSaved;
 
     // The coordinator's name for this panel: the main panel's stays the same when its monitor changes.
     internal string NoticeLane => _lead is null ? "main" : "display:" + (Display?.Id ?? "");
@@ -64,7 +71,9 @@ public partial class MainWindow
                 if (!CanShowNotices) { _app.Notices.Dismiss(this, reportToSource: false); return; }
                 // ui-2: one that arrives while the panel boots (the summary of what came in while BrimDeck was quiet) waits for
                 // the boot to play; covering the island then would hide the boot, and the island would show in the wrong shape.
-                if (BootHoldsPointer) { ShowAfterBoot(item); return; }
+                // Likewise while the panel is still closing: the notice would take the island's final shape in one frame and the
+                // half-closed panel would vanish under it (N50-4).
+                if (HoldsNotices) { ShowAfterBoot(item); return; }
                 (_noticeWindow ??= new NoticeWindow(this, _app)).Present(item);
                 break;
             case AttentionKind.Quota when item.Payload is CompactAlertInfo alert:
@@ -108,8 +117,13 @@ public partial class MainWindow
     // session) holds it no longer than BootNoticeLimit; the notice then shows over whatever the island is.
     private long _bootNoticeSince;
     private const int BootNoticeLimit = 10_000;
+    // When the panel's closing ends (SetExpanded); 0 when it is not closing.
+    private long _collapseEnds;
+    // A notice waits for the boot to play and for the panel to finish closing.
+    private bool HoldsNotices => BootHoldsPointer || Environment.TickCount64 < _collapseEnds;
 
-    // Shows the item once the boot has played; ended or updated meanwhile (AttentionEnded, AttentionUpdated), the latest wins.
+    // Shows the item once the boot has played and the panel has closed; ended or updated meanwhile (AttentionEnded,
+    // AttentionUpdated), the latest wins.
     private void ShowAfterBoot(AttentionItem item)
     {
         _noticeAfterBoot = item;
@@ -119,9 +133,9 @@ public partial class MainWindow
             _bootNotice.Tick += (_, _) =>
             {
                 long now = Environment.TickCount64;
-                if (BootHoldsPointer && _noticeAfterBoot is not null && now - _bootNoticeSince < BootNoticeLimit)
+                if (HoldsNotices && _noticeAfterBoot is not null && now - _bootNoticeSince < BootNoticeLimit)
                 {
-                    // Once the boot has started its end is known: the next look is then, not every 100 ms.
+                    // Once the boot has started (or the closing) its end is known: the next look is then, not every 100 ms.
                     _bootNotice.Interval = BootNoticeWait(now);
                     return;
                 }
@@ -137,10 +151,12 @@ public partial class MainWindow
         _bootNotice.Start();
     }
 
-    // Until the boot's end, or a short look while it still waits for an idle dispatcher (Boot), never past the limit.
+    // Until the boot's or the closing's end, or a short look while the boot still waits for an idle dispatcher (Boot), never
+    // past the limit.
     private TimeSpan BootNoticeWait(long now)
     {
-        long wait = _bootWaiting || _bootEnds <= now ? 100 : _bootEnds - now + 1;
+        long ends = Math.Max(_bootEnds, _collapseEnds);
+        long wait = _bootWaiting || ends <= now ? 100 : ends - now + 1;
         return TimeSpan.FromMilliseconds(Math.Clamp(wait, 1, Math.Max(1, _bootNoticeSince + BootNoticeLimit - now)));
     }
 
@@ -205,9 +221,10 @@ public partial class MainWindow
         if (!DeckPages.Shown(Settings, DeckPage.Notices)) return;
         if (_expanded) { SelectPage(DeckPage.Notices); return; }
         SelectPage(DeckPage.Notices, remember: false);
+        // Opening marks the list seen before it draws the page (SetExpanded): marked here afterwards, the page was built a second
+        // time in the middle of the opening.
         _keepPageOnOpen = true;
         try { OpenFromHotkey(byKey); } finally { _keepPageOnOpen = false; }
-        if (_expanded) NoticesPageShown();
     }
 
     private void NoticesPage_Click(object sender, RoutedEventArgs e) => SelectPage(DeckPage.Notices);
@@ -238,28 +255,64 @@ public partial class MainWindow
 
     // What the page shows besides its rows; a change of it builds the whole page again.
     private string NoticePageKey(NoticeCenter center) => string.Join('|', Status(center, center.Hub.Notices.Count), center.Paused, center.Epoch, _noticeRows,
-        _expandedNotice, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_freshNotices), Loc.Language);
+        _expandedNotice, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_freshNotices), Loc.Language, center.WindowsState);
+
+    // What the page's frame was built for: the settings (each change replaces them), its size and the theme.
+    private (DeckSettings? Settings, int Theme, double Width, double Height, double UsageWidth) NoticeLayout()
+        => (Settings, PanelTheme.Generation, ContentCanvas.Width, ContentCanvas.Height, _usageWidth);
+
+    // RenderUsage on the recent notices page (N50-2). Closed, the page is not drawn at all: SetExpanded builds it as the panel
+    // opens, with what arrived meanwhile. Open with the page already on screen for the same theme, a data refresh or the
+    // minute's tick builds again only the rows that changed, which keeps the pointer's hover and the scroll, and a new size
+    // only fits the page (FitNoticeLayout); the switch to the page, a new theme and a change of settings build it whole.
+    private void RenderNoticesPage()
+    {
+        if (!_expanded && !_preview) return;
+        if (NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout() && UpdateNoticeRows()) { RefreshStatus(); return; }
+        RenderNotices();
+    }
+
+    // Whether the page on screen was built for these settings and this theme, and fits it to a new size if that is all that
+    // changed. Its rows stretch with the page, as the monitor page's content does, so a drag of the panel's edges only fits the
+    // header and the margins again: building all the rows anew at every step of the drag made the page lag behind the pointer.
+    private bool FitNoticeLayout()
+    {
+        var layout = NoticeLayout();
+        if (_noticeLayout == layout) return true;
+        bool sameSettings = ReferenceEquals(_noticeLayout.Settings, layout.Settings) || _noticeResizeSaved;
+        if (!sameSettings || _noticeLayout.Theme != layout.Theme || _noticeLayout.UsageWidth != layout.UsageWidth) return false;
+        // With the usage page shown the header follows that page's size, which this drag does not change.
+        if (!Settings.UsagePage) ApplyHeader(UnfittedHeader(ContentCanvas.Height));
+        NoticesContent.Margin = new Thickness(_header.Side, 0, _header.Side, 10);
+        if (_pageEmpty is { } empty) empty.MaxWidth = EmptyWidth;
+        _noticeLayout = layout;
+        return true;
+    }
 
     // While the page lists the same notices in the same order, only the rows of notices that changed are built again: a
-    // task's progress no longer rebuilds the whole page on every step (perf-7). False when the page needs building whole.
+    // task's progress no longer rebuilds the whole page on every step (perf-7), nor the minute's tick, which builds again only
+    // the rows whose relative time it changed. False when the page needs building whole.
     private bool UpdateNoticeRows()
     {
         var center = _app.Notices;
         var notices = center.Hub.Notices;
-        if (_pageList is not { } list || _pageKey != NoticePageKey(center) || Math.Min(notices.Count, _noticeRows) != _pageRows.Count) return false;
+        if (_pageKey != NoticePageKey(center) || Math.Min(notices.Count, _noticeRows) != _pageRows.Count) return false;
+        // The empty page holds no rows; the key above covers all it shows.
+        if (_pageList is not { } list) return notices.Count == 0 && NoticesContent.Children.Count > 0;
         for (int i = 0; i < _pageRows.Count; i++)
             if (!ReferenceEquals(notices[i], _pageRows[i].Notice)) return false;
         var now = DateTimeOffset.UtcNow;
         for (int i = 0; i < _pageRows.Count; i++)
         {
-            var (notice, revision, old) = _pageRows[i];
-            if (notice.Revision == revision) continue;
+            var (notice, revision, key, old) = _pageRows[i];
+            string current = RowKey(notice, now);
+            if (notice.Revision == revision && current == key) continue;
             // A task's progress alone moves the row's track: replacing the row under the pointer lost clicks on its buttons.
-            if (_rowProgress.TryGetValue(old, out var shown) && shown.Key == RowKey(notice, now) && notice.Progress is { } progress)
+            if (current == key && _rowProgress.TryGetValue(old, out var shown) && notice.Progress is { } progress)
             {
                 double done = Math.Clamp(progress, 0, 1);
                 shown.Done.Width = new GridLength(done, GridUnitType.Star); shown.Left.Width = new GridLength(1 - done, GridUnitType.Star);
-                _pageRows[i] = (notice, notice.Revision, old);
+                _pageRows[i] = (notice, notice.Revision, key, old);
                 continue;
             }
             int index = list.Children.IndexOf(old);
@@ -268,8 +321,10 @@ public partial class MainWindow
             // The old row's plates no longer wait for an icon (review 10: they piled up with every rebuilt row).
             foreach (var plates in _waitingPlates.Values) plates.RemoveAll(waiting => ReferenceEquals(waiting.Notice, notice));
             var row = Row(notice, now);
+            // The row under the pointer keeps its hover fill (it is drawn on MouseEnter, which the new row has not had).
+            if (old.IsMouseOver && _expandedNotice != notice.Id && row is Border face) face.Background = UI.Brush(UI.Fill);
             list.Children.RemoveAt(index); list.Children.Insert(index, row);
-            _pageRows[i] = (notice, notice.Revision, row);
+            _pageRows[i] = (notice, notice.Revision, current, row);
         }
         WatchPageLive();
         return true;
@@ -299,7 +354,7 @@ public partial class MainWindow
         NoticesContent.Children.Clear();
         _waitingPlates.Clear();
         _liveRows.Clear();
-        _pageRows.Clear(); _pageList = null;
+        _pageRows.Clear(); _pageList = null; _pageEmpty = null; _stretch.Forget();
         NoticesContent.Margin = new Thickness(_header.Side, 0, _header.Side, 10);
         var center = _app.Notices;
         var notices = center.Hub.Notices;
@@ -313,7 +368,8 @@ public partial class MainWindow
             () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); RenderNotices(); }));
         if (notices.Count > 0) tools.Children.Add(PageButton(Loc.T("清空", "Clear"), () => { center.Clear(); _expandedNotice = null; RenderNotices(); }));
         head.Children.Add(UI.Fixed(Status(center, notices.Count), 11.5, 22, UI.Tertiary));
-        if (notices.Count == 0) { page.Children.Add(Empty(center)); WatchPageLive(); return; }
+        _pageKey = NoticePageKey(center); _noticeLayout = NoticeLayout();
+        if (notices.Count == 0) { page.Children.Add(_pageEmpty = Empty(center)); WatchPageLive(); return; }
         var list = new StackPanel();
         // Up and Down move between the rows and their buttons; Tab goes through them in order.
         KeyboardNavigation.SetDirectionalNavigation(list, KeyboardNavigationMode.Contained);
@@ -322,9 +378,9 @@ public partial class MainWindow
         {
             var row = Row(notice, now);
             list.Children.Add(row);
-            _pageRows.Add((notice, notice.Revision, row));
+            _pageRows.Add((notice, notice.Revision, RowKey(notice, now), row));
         }
-        _pageList = list; _pageKey = NoticePageKey(center);
+        _pageList = list;
         if (refocus is not null && _pageRows.FirstOrDefault(r => r.Notice.Id == refocus).Row is { } focused)
             Dispatcher.BeginInvoke(() => focused.Focus(), System.Windows.Threading.DispatcherPriority.Input);
         if (notices.Count > _noticeRows)
@@ -347,9 +403,11 @@ public partial class MainWindow
         return text;
     }
 
+    private double EmptyWidth => Math.Max(200, ContentCanvas.Width - 60);
+
     private FrameworkElement Empty(NoticeCenter center)
     {
-        var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = Math.Max(200, ContentCanvas.Width - 60) };
+        var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = EmptyWidth };
         var bell = new Viewbox { Width = 24, Height = 24, Margin = new Thickness(0, 0, 0, 8), Child = new Path { Data = Geometry.Parse("M12,3 C8.7,3 6.5,5.6 6.5,8.8 V12.6 L4.8,15.6 H19.2 L17.5,12.6 V8.8 C17.5,5.6 15.3,3 12,3 Z M9.6,17.6 A2.4,2.4 0 0 0 14.4,17.6"), Stroke = UI.Brush(UI.Secondary), StrokeThickness = 1.5, Width = 24, Height = 24 } };
         empty.Children.Add(bell);
         empty.Children.Add(UI.Fixed(Loc.T("暂无通知", "No notices"), 14, 22, UI.Secondary));
@@ -378,7 +436,8 @@ public partial class MainWindow
         plate.VerticalAlignment = VerticalAlignment.Top; plate.Margin = new Thickness(0, 1, 10, 0);
         grid.Children.Add(plate);
         var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
-        Grid.SetColumn(texts, 1); grid.Children.Add(texts);
+        var textColumn = new SteppedWidth { Child = texts, Stepping = _stretch.Active };
+        Grid.SetColumn(textColumn, 1); grid.Children.Add(textColumn);
         texts.Children.Add(NoticeWindow.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold)));
         if (NoticeTimeLine(notice, now) is { } timeLine) texts.Children.Add(timeLine);
         if (notice.Body.Length > 0)
@@ -399,7 +458,7 @@ public partial class MainWindow
             var doneColumn = new ColumnDefinition { Width = new GridLength(done, GridUnitType.Star), MinWidth = 3 };
             var leftColumn = new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) };
             track.ColumnDefinitions.Add(doneColumn); track.ColumnDefinitions.Add(leftColumn);
-            _rowProgress.AddOrUpdate(row, new RowProgress(RowKey(notice, now), doneColumn, leftColumn));
+            _rowProgress.AddOrUpdate(row, new RowProgress(doneColumn, leftColumn));
             var rail = new Border { Background = UI.Brush(UI.Track), CornerRadius = new CornerRadius(PanelTheme.Corner(1.5)) };
             Grid.SetColumnSpan(rail, 2);
             track.Children.Add(rail);
@@ -444,8 +503,18 @@ public partial class MainWindow
         return row;
     }
 
-    // The rows that show a task's progress, with what else they show (RowKey) and their track's columns (UpdateNoticeRows).
-    private sealed record RowProgress(string Key, ColumnDefinition Done, ColumnDefinition Left);
+    // The rows while the panel's edges are dragged on this page (NoticeRowStretch).
+    private readonly NoticeRowStretch _stretch = new();
+
+    private void FollowRows() { if (_pageList is { } list) _stretch.Follow(list, RowTexts()); }
+
+    private void ReleaseRows() => _stretch.Release(RowTexts());
+
+    private IEnumerable<SteppedWidth> RowTexts()
+        => _pageRows.Select(row => row.Row).OfType<Border>().Select(row => row.Child).OfType<Grid>().SelectMany(grid => grid.Children.OfType<SteppedWidth>());
+
+    // The rows that show a task's progress, with their track's columns (UpdateNoticeRows).
+    private sealed record RowProgress(ColumnDefinition Done, ColumnDefinition Left);
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, RowProgress> _rowProgress = [];
 
     // Everything a row shows apart from a task's progress.

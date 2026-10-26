@@ -5,8 +5,8 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, CPU,
-// memory and GPU each as a dial with its letter inside, with its figure after it or alone (narrower), and download and upload, in
-// the order and the colors set in the settings' table (CompactReading). It offers each reading's widest width (Candidates) and
+// memory and GPU each as a dial with its letter inside, with its figure after it or alone (narrower), download and upload, and,
+// when chosen, the system drive's space with a drive and the temperature with a thermometer, in the order and the colors set in the settings' table (CompactReading). It offers each reading's widest width (Candidates) and
 // the collapsed row admits the readings that fit whole (Admit, CompactMusicLayout); on its own it shows what fits the width it
 // gets (CompactMonitor.Fit). Either way it never cuts through a figure.
 // Each reading takes the room its figure needs, with every digit as wide as the widest one, so figures of one length take one
@@ -33,10 +33,13 @@ internal sealed class MonitorStrip : FrameworkElement
     private double[]? _shares;
 
     // dpi is kept in the signature for the callers; the row rounds the readings' places itself (CompactRow).
-    public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi = 1)
+    // unavailable: readings left out (StripAdmission.Hidden): the temperature and the system drive until their first figures, and
+    // for good on a machine without the sensor, so the row never shows a dash for them.
+    public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi = 1,
+        CompactMonitorItems unavailable = CompactMonitorItems.None)
     {
         _presence = presence; _colors = colors; _centered = centered;
-        _shown = CompactMonitor.Shown(readings); _values = CompactMonitor.Values(readings);
+        _shown = CompactMonitor.Shown(readings) & ~unavailable; _values = CompactMonitor.Values(readings);
         _order = [.. readings.Select(reading => reading.Item).Concat(CompactMonitor.Order).Distinct().Where(item => (_shown & item) != 0)];
         _scale = CompactMusicLayout.SafeScale(scale);
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
@@ -80,6 +83,8 @@ internal sealed class MonitorStrip : FrameworkElement
     }
     // A rate has at most five characters (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
     private static readonly string[] WidestRates = ["999K", "99.9M", "999M", "99.9G", "999G"];
+    // The drive and the thermometer are a little larger than the arrows, with their own space before the figure.
+    private double GlyphSize => Math.Round(11 * _scale);
 
     // A reading's width with this figure; the widest it can be when figure is null. A dial without its figure is the dial alone.
     private double FigureWidth(CompactMonitorItems item, string? figure) => item switch
@@ -87,6 +92,8 @@ internal sealed class MonitorStrip : FrameworkElement
         CompactMonitorItems.Columns => ColumnsWidth(Environment.ProcessorCount),
         CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu => (_values & item) != 0 ? _dial + _inner + FigureText(figure ?? "100%") : _dial,
         CompactMonitorItems.Download or CompactMonitorItems.Upload => Math.Ceiling(ArrowInk + _inner) + (figure is null ? WidestRates.Max(FigureText) : FigureText(figure)),
+        CompactMonitorItems.Temperature => GlyphSize + Math.Round(2 * _scale) + FigureText(figure ?? "125°"),
+        CompactMonitorItems.Storage => GlyphSize + Math.Round(3 * _scale) + FigureText(figure ?? "100%"),
         _ => 0
     };
     // The widest each reading gets, so the row's choice of readings never changes with the figures.
@@ -104,8 +111,13 @@ internal sealed class MonitorStrip : FrameworkElement
         CompactMonitorItems.Gpu => GaugeFigure(s?.Gpu.OrDefault?.Usage),
         CompactMonitorItems.Download => RateFigure(s?.Network.OrDefault?.DownBytesPerSecond),
         CompactMonitorItems.Upload => RateFigure(s?.Network.OrDefault?.UpBytesPerSecond),
+        CompactMonitorItems.Temperature => TemperatureFigure(Temperatures.Hottest(s)?.Celsius),
+        CompactMonitorItems.Storage => GaugeFigure(SystemDrive(s)?.UsedFraction),
         _ => ""
     };
+    // Whole degrees with the degree sign, the unit left out for room: "62°". Made once for every degree a reading can have.
+    private static readonly string[] Degrees = [.. Enumerable.Range(0, (int)Temperatures.Highest + 1).Select(degrees => Temperatures.Format(degrees) + "°")];
+    private static string TemperatureFigure(double? celsius) => celsius is { } c ? Degrees[(int)Math.Clamp(Math.Round(c, MidpointRounding.AwayFromZero), 0, Temperatures.Highest)] : "—";
 
     private CompactMonitorItems Shown => _shown;
     public double PreferredWidth => CompactMonitor.Width(Shown, ItemWidth, _gap);
@@ -121,7 +133,7 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         _admitted = CompactMonitor.First(Shown, count);
         ClipToBounds = false;
-        if (_presence.Set(Shown, _admitted.Value)) Motion.Start(this, Step);
+        if (_presence.Set(Shown, _admitted.Value, Motion.Enabled)) Motion.Start(this, Step);
     }
     // The readings present now, left to right, each with its width and how present it is.
     public IReadOnlyList<(double Width, double Presence)> Readings(double now)
@@ -176,7 +188,7 @@ internal sealed class MonitorStrip : FrameworkElement
     protected override Size ArrangeOverride(Size finalSize)
     {
         var fitting = _admitted ?? CompactMonitor.Fit(Shown, ItemWidth, _gap, finalSize.Width);
-        if (_presence.Set(Shown, fitting) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
+        if (_presence.Set(Shown, fitting, Motion.Enabled) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
         return finalSize;
     }
     private bool Step(double now) { InvalidateVisual(); if (_placed is not null) Relayout(); return _presence.Moving(now); }
@@ -229,6 +241,8 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, color, level, "G", (_values & item) != 0, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
+                case CompactMonitorItems.Temperature: Temperature(drawing, left, center, Temperatures.Hottest(s)?.Celsius, color, level, ppd); break;
+                case CompactMonitorItems.Storage: Drive(drawing, left, center, SystemDrive(s)?.UsedFraction, color, level, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
             x += (width + _gap) * advance;
@@ -289,6 +303,27 @@ internal sealed class MonitorStrip : FrameworkElement
         MonitorDraw.Baseline(drawing, text, x + Math.Ceiling(ArrowInk + _inner), Math.Round(center + _font * .36));
     }
 
+    // The drive holding Windows (Storage.System), whose space the collapsed row shows.
+    private static StorageDrive? SystemDrive(MonitorSnapshot? snapshot) => snapshot is null ? null : Storage.System(snapshot.Storage, Storage.WindowsLetter);
+
+    // A drive and the share of its space in use: "45%".
+    private void Drive(DrawingContext drawing, double x, double center, double? share, string color, MemoryLevel level, double ppd)
+    {
+        double size = GlyphSize;
+        MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Drive, share is null ? UI.Tertiary : color);
+        var text = MonitorDraw.Text(GaugeFigure(share), _font, FigureColor(level, color), ppd);
+        MonitorDraw.Baseline(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
+    }
+
+    // A thermometer and the hotter of the processor's and the graphics adapter's temperatures (Temperatures.Hottest): "62°".
+    private void Temperature(DrawingContext drawing, double x, double center, double? celsius, string color, MemoryLevel level, double ppd)
+    {
+        double size = GlyphSize;
+        MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Thermometer, celsius is null ? UI.Tertiary : color);
+        var text = MonitorDraw.Text(TemperatureFigure(celsius), _font, FigureColor(level, color), ppd);
+        MonitorDraw.Baseline(drawing, text, x + size + Math.Round(2 * _scale), Math.Round(center + _font * .36));
+    }
+
     // The pens depend only on the strip's size and colors, which a strip keeps; they are made on its first drawing, one per color
     // (a reading changes color with its level).
     private readonly Dictionary<string, Pen> _arrows = [], _arcs = [];
@@ -298,56 +333,4 @@ internal sealed class MonitorStrip : FrameworkElement
         return pen;
     }
     private static Pen Frozen(Pen pen) { pen.Freeze(); return pen; }
-}
-
-// How present each reading of the collapsed row is, 0 to 1, easing as readings come and go, and how wide each is as its figure
-// changes. Owned by the panel, so that it outlives the row, which is built again whenever its width changes.
-internal sealed class StripPresence
-{
-    private readonly Dictionary<CompactMonitorItems, Eased> _items = [];
-    private readonly Dictionary<CompactMonitorItems, (HeldWidth Held, Eased Width)> _widths = [];
-    private CompactMonitorItems _chosen = CompactMonitorItems.None;
-    private (CompactMonitorItems, double) _sizes;
-
-    // Returns whether anything moves. A new choice of readings (the settings) shows at once.
-    public bool Set(CompactMonitorItems chosen, CompactMonitorItems fitting)
-    {
-        bool motion = Motion.Enabled && chosen == _chosen && _items.Count > 0, moving = false;
-        _chosen = chosen;
-        foreach (var item in CompactMonitor.Order)
-        {
-            if ((chosen & item) == 0) { _items.Remove(item); continue; }
-            var eased = _items.TryGetValue(item, out var known) ? known : new Eased((fitting & item) != 0 ? 1 : 0, Eased.Seconds * .8);
-            moving |= eased.Set((fitting & item) != 0 ? 1 : 0, motion);
-            _items[item] = eased;
-        }
-        return moving;
-    }
-
-    // Each chosen reading's width for its figure now (width), held a while when it narrows (HeldWidth). A reading measured for
-    // the first time takes its width at once; placeholders (figures false, before the first reading) never change a width the
-    // panel already knows. Returns whether any width moves.
-    public bool Measure((CompactMonitorItems Values, double Scale) sizes, CompactMonitorItems chosen, Func<CompactMonitorItems, double> width, bool figures, bool motion)
-    {
-        // Widths measured for other sizes (a new height, or rings that show or hide their figures) are measured again.
-        if (sizes != _sizes) { _widths.Clear(); _sizes = sizes; }
-        double now = Eased.Now; bool moving = false;
-        foreach (var item in CompactMonitor.Order)
-        {
-            if ((chosen & item) == 0) continue;
-            bool known = _widths.TryGetValue(item, out var entry);
-            if (known && !figures) continue;
-            double target = entry.Held.Update(width(item), now);
-            if (!known) entry.Width = new Eased(target, Eased.Seconds);
-            else moving |= entry.Width.Set(target, motion, now);
-            _widths[item] = entry;
-        }
-        return moving;
-    }
-
-    public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
-    public double? Width(CompactMonitorItems item, double now) => _widths.TryGetValue(item, out var entry) ? Math.Max(0, entry.Width.At(now)) : null;
-    // Whether any reading still shows, even fading out.
-    public bool Any(double now) => _items.Values.Any(eased => eased.At(now) > 0 || eased.Target > 0);
-    public bool Moving(double now) => _items.Values.Any(eased => eased.Moving(now)) || _widths.Values.Any(entry => entry.Width.Moving(now));
 }

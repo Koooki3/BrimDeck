@@ -301,7 +301,15 @@ public sealed class DeckSettings
     public bool MonitorProcesses { get; set; } = true;
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }
+    // The graphics adapter the monitor shows, by its key (GpuSample.Key), and its name to find it by should its ids change and to
+    // name it while it is not connected; null for 自动 (GpuChoice.Auto). Files saved before there was a choice read as 自动.
+    public string? MonitorGpu { get; set; }
+    public string? MonitorGpuName { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
+    // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it.
+    public bool MonitorTemperatures { get; set; } = true;
+    // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
+    public bool MonitorStorage { get; set; } = true;
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
@@ -339,6 +347,8 @@ public sealed class DeckSettings
     // Dynamic notices (see Notices/). Off until the user switches them on; each source has its own switch.
     public bool NoticesEnabled { get; set; }
     public bool NoticeWindowsSource { get; set; } = true;
+    // Turns off other applications' own Windows banners while BrimDeck shows their notices (NoticeBanners); off by default.
+    public bool NoticeHideBanners { get; set; }
     // The WSL distributions whose notices are received (by name). None by default: not every PC has WSL, and the agent is
     // copied into a distribution only once the user chooses it.
     public List<string> NoticeWslDistros { get; set; } = [];
@@ -487,6 +497,8 @@ public sealed class DeckSettings
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
+        MonitorGpu = string.IsNullOrWhiteSpace(MonitorGpu) ? null : MonitorGpu.Trim();
+        MonitorGpuName = MonitorGpu is null || string.IsNullOrWhiteSpace(MonitorGpuName) ? null : MonitorGpuName.Trim();
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;

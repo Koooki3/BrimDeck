@@ -10,10 +10,22 @@ public sealed class MarqueeScroll
     public const double Hold = 1.5;
     // The longest step one frame may take: after a stalled frame the line goes on from where it stood instead of jumping ahead.
     public const double MaxStep = .1;
+    // How many whole cycles (rest, glide, rest, back to the start) a Limited line scrolls before it rests at its start.
+    public const int Laps = 3;
     private enum Phase { Start, Glide, End }
     private Phase _phase;
     private double _offset, _rested, _last = double.NaN;
     private bool _waiting;
+    private int _laps;
+
+    // The collapsed row's title scrolls Laps cycles and then rests at its start, with no fade on the left and the right fade over
+    // the hidden text: a song plays for minutes, and the glide's frames were most of what the row cost while it played. A new
+    // line (Follow) or Replay lets it scroll again; the open page's lyric is not limited.
+    public bool Limited { get; init; }
+    // The whole cycles scrolled since the line last started.
+    public int LapsDone => _laps;
+    // Whether a Limited line has scrolled its laps: it then stays at its start and Advance moves it no more.
+    public bool Rested => Limited && _laps >= Laps;
 
     // The line this place belongs to.
     public string Key { get; private set; } = "";
@@ -26,7 +38,17 @@ public sealed class MarqueeScroll
         return true;
     }
 
-    public void Restart() { _phase = Phase.Start; _offset = 0; _rested = 0; _last = double.NaN; _waiting = false; }
+    public void Restart() { Home(); _laps = 0; }
+    private void Home() { _phase = Phase.Start; _offset = 0; _rested = 0; _last = double.NaN; _waiting = false; }
+
+    // Lets a line that has rested scroll its laps again from its start (the pointer came over the island). Returns whether it was
+    // resting.
+    public bool Replay()
+    {
+        if (!Rested) return false;
+        Restart();
+        return true;
+    }
 
     // Stops counting time; the next frame goes on from where the line stands.
     public void Pause() { _last = double.NaN; _waiting = false; }
@@ -46,7 +68,9 @@ public sealed class MarqueeScroll
     // Moves the line on to the given frame time, in seconds. Several views of the same line in one frame move it once.
     public double Advance(double time, double overflow, double speed)
     {
-        if (!(overflow > 0) || !(speed > 0) || !double.IsFinite(time)) { Restart(); return 0; }
+        if (Rested) { Home(); return 0; }
+        // The laps counted so far stay: the same line in a wider region scrolls only what is left of them.
+        if (!(overflow > 0) || !(speed > 0) || !double.IsFinite(time)) { Home(); return 0; }
         if (!double.IsNaN(_last) && time <= _last) return At(overflow);
         double step = double.IsNaN(_last) ? 0 : Math.Min(time - _last, MaxStep + (_waiting ? RestLeft : 0));
         _last = time; _waiting = false;
@@ -67,7 +91,12 @@ public sealed class MarqueeScroll
             if (step < rest) { _rested += step; step = 0; continue; }
             step -= rest; _rested = 0;
             if (_phase == Phase.Start) _phase = Phase.Glide;
-            else { _phase = Phase.Start; _offset = 0; }
+            else
+            {
+                _phase = Phase.Start; _offset = 0; _laps++;
+                // Its laps done, the line rests at its start; the time left over is not counted.
+                if (Rested) { _last = double.NaN; break; }
+            }
         }
         return At(overflow);
     }

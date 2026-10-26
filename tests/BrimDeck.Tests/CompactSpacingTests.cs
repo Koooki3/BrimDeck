@@ -7,6 +7,10 @@ internal static class CompactSpacingTests
 {
     // At the default height: the readings' widest widths in priority order (CPU, memory, core columns, download, GPU, upload).
     private static readonly double[] Readings = [44, 44, 56, 41, 44, 41];
+    // The six usage and rate readings the widths above are for, as the Full preset shows them; temperature and storage are
+    // chosen on their own and left out here.
+    private static readonly List<CompactMonitorItems> Usage = [.. CompactMonitor.Order.Where(item => (CompactMonitorItems.All & item) != 0)];
+    private static readonly List<CompactMonitorItems> UsagePriority = [.. CompactMonitor.Priority.Where(item => (CompactMonitorItems.All & item) != 0)];
     private static readonly double[] Dpis = [1, 1.25, 1.5, 1.75, 2];
 
     public static void Run(Action<string, bool> check)
@@ -43,12 +47,12 @@ internal static class CompactSpacingTests
                 var l = CompactMusicLayout.Calculate(row, 1, true, 2, true, clock, readings, gap);
                 var shown = CompactMonitor.First(CompactMonitorItems.All, l.MonitorItems);
                 // Readings offered in Priority order; placed in Order.
-                double Offered(CompactMonitorItems item) => readings[CompactMonitor.Priority.ToList().IndexOf(item)];
-                bool[] wanted = [l.CoverWidth > 0, l.RingWidth > 0, l.TextWidth > 0, .. CompactMonitor.Order.Select(item => (shown & item) != 0), l.EqualizerWidth > 0, l.ClockWidth > 0];
+                double Offered(CompactMonitorItems item) => readings[UsagePriority.IndexOf(item)];
+                bool[] wanted = [l.CoverWidth > 0, l.RingWidth > 0, l.TextWidth > 0, .. Usage.Select(item => (shown & item) != 0), l.EqualizerWidth > 0, l.ClockWidth > 0];
                 for (int i = 0; i < presence.Length; i++)
                     presence[i] = !started ? (wanted[i] ? 1 : 0) : Math.Clamp(presence[i] + (wanted[i] ? fade : -fade), 0, 1);
                 started = true;
-                double[] widths = [20, Math.Max(l.RingWidth, 12), 0, .. CompactMonitor.Order.Select(Offered), 18, clock];
+                double[] widths = [20, Math.Max(l.RingWidth, 12), 0, .. Usage.Select(Offered), 18, clock];
                 var parts = widths.Select((v, i) => new CompactSpacing.Part(v, presence[i])).ToArray();
                 var p = CompactSpacing.Arrange(parts, 2, title, row, gap, 1, dpi);
                 string at = $"dpi{dpi} step{step} fade{fade} {(narrowing ? "narrowing" : "widening")} w{w}";

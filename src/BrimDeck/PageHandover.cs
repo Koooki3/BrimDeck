@@ -71,7 +71,9 @@ internal sealed class PageHandover
         if (_held.Count == 0 || motion == Handover.None || !Soft.Enabled) { _held.Clear(); return; }
         var leaving = _held.ToList();
         _held.Clear();
-        Begin(leaving, _margin, content, motion);
+        // A rebuild while the page was still arriving (the usage page's own panel is what arrives): its elements leave from the
+        // opacity and shift the page had, not from fully in place.
+        Begin(leaving, _margin, content, motion, content.Opacity, (content.RenderTransform as TranslateTransform)?.X ?? 0);
     }
 
     // A picture of a page as it is on screen, to leave in its place; null for a page that is not laid out.
@@ -123,7 +125,7 @@ internal sealed class PageHandover
     // started at once lost its first part to them and jumped. Until then the old content stays as it was and the new one out
     // of sight. Timing and curve are the system monitor's (Soft.Follow): what leaves goes in about a fifth of a second, what
     // arrives takes the short swap (motion-review C8; it took the monitor's move, 420 ms).
-    private void Begin(List<UIElement> leaving, Thickness margin, FrameworkElement content, Handover motion)
+    private void Begin(List<UIElement> leaving, Thickness margin, FrameworkElement content, Handover motion, double opacity = 1, double x = 0)
     {
         // A page switch lets what is still leaving finish; anything else starts afresh (a rebuild while dragging would pile up).
         if (motion is Handover.Forward or Handover.Back) Settle(); else Drop();
@@ -137,7 +139,7 @@ internal sealed class PageHandover
         }
         else
         {
-            var batch = new Grid { Margin = margin, IsHitTestVisible = false };
+            var batch = new Grid { Margin = margin, IsHitTestVisible = false, Opacity = opacity, RenderTransform = new TranslateTransform(x, 0) };
             foreach (var child in leaving) batch.Children.Add(child);
             _layer.Children.Add(batch);
             _waiting = batch;
@@ -151,14 +153,13 @@ internal sealed class PageHandover
             if (_waiting is not { } batch) return;
             _waiting = null;
             int leave = motion == Handover.Morph ? Soft.Hover : 200;
-            var away = Soft.Fade(1, 0, leave, Soft.Follow);
+            var away = Soft.Fade(opacity, 0, leave, Soft.Follow);
             away.Completed += (_, _) => Remove(batch);
             batch.BeginAnimation(UIElement.OpacityProperty, away);
             content.BeginAnimation(UIElement.OpacityProperty, Arrival(0, 1, Soft.Short));
             if (motion == Handover.Morph) return;
             double direction = motion == Handover.Back ? -1 : 1;
-            var batchShift = new TranslateTransform(); batch.RenderTransform = batchShift;
-            batchShift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(0, -direction * Travel, leave, Soft.Follow));
+            batch.RenderTransform.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(x, x - direction * Travel, leave, Soft.Follow));
             shift.BeginAnimation(TranslateTransform.XProperty, Arrival(direction * Travel, 0, Soft.Short));
         });
     }

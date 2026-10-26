@@ -323,6 +323,18 @@ public static class NoticeFrames
         return NoticeProtocol.Deserialize(payload) ?? throw new InvalidDataException("A frame did not hold a notice message.");
     }
 
+    // Hands each message to handle until the stream ends. One that handle throws on is dropped (failed hears why) and the
+    // next is read, so a single message from outside cannot end the reader; a broken frame still throws, as the stream can no
+    // longer be followed after it.
+    public static async Task ReadEachAsync(Stream stream, Action<NoticeMessage> handle, Action<Exception> failed, CancellationToken cancellation = default)
+    {
+        while (await ReadMessageAsync(stream, cancellation).ConfigureAwait(false) is { } message)
+        {
+            try { handle(message); }
+            catch (Exception ex) { failed(ex); }
+        }
+    }
+
     // One message and its reply, within wait. Reply is null when the exchange failed or ran out of time; Written says whether
     // the whole message had gone out by then. Once it has, the receiver may act on it even without answering in time, so the
     // sender must not send it again another way, which would show the notice twice or start a second timer (W3).

@@ -20,6 +20,7 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BrimDeck.Notify", "src\BrimDeck.Notify\BrimDeck.Notify.csproj", "{ECE965B1-83AD-46FF-A3AB-FCB4EBAB74AC}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BrimDeck.WslAgent", "src\BrimDeck.WslAgent\BrimDeck.WslAgent.csproj", "{70BD2BE0-651C-480D-A7E8-70BCDF9151D8}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BrimDeck.WindowsTests", "tests\BrimDeck.WindowsTests\BrimDeck.WindowsTests.csproj", "{966304DB-7E85-49FD-B445-B7B682209157}"
 EndProject
 Global
