@@ -59,6 +59,17 @@ public partial class MainWindow
     internal (double X, double Y) OffscreenJelly => _jelly is null ? (1, 1)
         : ((double)_jelly.GetAnimationBaseValue(System.Windows.Media.ScaleTransform.ScaleXProperty), (double)_jelly.GetAnimationBaseValue(System.Windows.Media.ScaleTransform.ScaleYProperty));
     internal GlassBackdrop? OffscreenGlassBackdrop => _glass;
+    // What lies behind the island, as the glass's measure would report it (GlassBackdrop.Measured: the 2nd and 98th percentiles
+    // of its luma), taken at once; the shadow's tone and its two effects (ambient, contact: blur / depth / opacity) as now.
+    internal double OffscreenBackdrop(float low, float high)
+    {
+        _shadowTone = _shadowToneTarget = ShadowTone(low, high);
+        ApplyShadowLook();
+        return _shadowTone;
+    }
+    internal string OffscreenShadowLook => IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect a && IslandContact.Effect is System.Windows.Media.Effects.DropShadowEffect c
+        ? FormattableString.Invariant($"ambient {a.BlurRadius:0.#}/{a.ShadowDepth:0.#}/{a.Opacity:0.000}, contact {(IslandContact.Visibility == System.Windows.Visibility.Visible ? FormattableString.Invariant($"{c.BlurRadius:0.#}/{c.ShadowDepth:0.#}/{c.Opacity:0.000}") : "off")}")
+        : "-";
 
     // A frame of the glass, decided by GlassBackdrop through the stand-in: after every theme change or relayout, as the next
     // frame would in the app.

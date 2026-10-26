@@ -76,6 +76,8 @@ internal static partial class LiquidPages
         AppInstance.ForTest();
         // LIQUID_R13: round 13 as it was (whole-leaf text regions, no halo), for the comparisons.
         if (Environment.GetEnvironmentVariable("LIQUID_R13") == "1") { MainWindow.GlassRegionsWhole = true; MainWindow.GlassHaloOff = true; }
+        // LIQUID_SHADOW_R13: the island's shadow under liquid glass as before round 14 (the theme's one shadow), for the comparisons.
+        if (Environment.GetEnvironmentVariable("LIQUID_SHADOW_R13") == "1") MainWindow.ShadowLookOff = true;
         var app = new App();
         app.InitializeComponent();
         var settings = new DeckSettings
@@ -137,19 +139,8 @@ internal static partial class LiquidPages
         using var device = LiquidPreview.CreateDevice();
         using var renderer = new LiquidRenderer(device);
 
-        // Every page in both looks, drawn once; laid over each background below.
-        var layers = new Dictionary<(Page, string), Layer>();
-        foreach (var look in Looks)
-        {
-            UseLook(app, deck, root, look);
-            if (!PanelTheme.GlassShown) Console.WriteLine($"NOTE: {look}: glass is not shown (transparency effects off or high contrast).");
-            foreach (var (page, _) in Pages)
-            {
-                layers[(page, look)] = Draw(deck, root, page, track, cover, snapshot);
-                Console.WriteLine($"Drew {look} {page}");
-            }
-        }
-
+        // Every page in both looks over each background: drawn again for each, since the island's shadow under liquid glass
+        // follows what lies behind it (the glass's measure, MainWindow.OffscreenBackdrop).
         foreach (var file in files)
         {
             string name = Path.GetFileNameWithoutExtension(file);
@@ -158,14 +149,25 @@ internal static partial class LiquidPages
             var background = new byte[bw * bh * 4];
             decoded.CopyPixels(background, bw * 4, 0);
             var tiles = new List<(string Label, BitmapSource Tile, int Column, int Row)>();
-            for (int row = 0; row < Pages.Length; row++)
-                for (int column = 0; column < Looks.Length; column++)
+            for (int column = 0; column < Looks.Length; column++)
+            {
+                string look = Looks[column];
+                UseLook(app, deck, root, look);
+                if (!PanelTheme.GlassShown) Console.WriteLine($"NOTE: {look}: glass is not shown (transparency effects off or high contrast).");
+                for (int row = 0; row < Pages.Length; row++)
                 {
                     var (page, label) = Pages[row];
-                    string look = Looks[column];
-                    var tile = Compose(device, renderer, background, bw, bh, layers[(page, look)], look == PanelThemes.GlassDark, $"{name} {look} {page}");
+                    var layer = Draw(deck, root, page, track, cover, snapshot, (background, bw, bh), $"{name} {look} {page}");
+                    var tile = Compose(device, renderer, background, bw, bh, layer, look == PanelThemes.GlassDark, $"{name} {look} {page}");
+                    // LIQUID_TILES=<folder>: each tile saved on its own as well (the shadow's before and after crops).
+                    if (Environment.GetEnvironmentVariable("LIQUID_TILES") is { Length: > 0 } tiled)
+                    {
+                        Directory.CreateDirectory(tiled);
+                        LiquidPreview.Save(tile, Path.Combine(tiled, $"{name}-{look}-{page}{(Math.Abs(Scale - 1.5) < .001 ? "" : $"-at{Scale * 100:0}")}.png"));
+                    }
                     tiles.Add(($"{label} · {(look == PanelThemes.GlassDark ? "liquid dark" : "liquid light")}", tile, column, row));
                 }
+            }
             var sheet = Sheet(name, tiles);
             string sheetName = Math.Abs(Scale - 1.5) < .001 ? $"pages-{name}.png" : $"pages-{name}-at{Scale * 100:0}.png";
             LiquidPreview.Save(sheet, Path.Combine(folder, sheetName));
@@ -208,9 +210,28 @@ internal static partial class LiquidPages
         Redraw(root);
     }
 
-    private static Layer Draw(MainWindow deck, Grid root, Page page, MediaTrack track, BitmapSource cover, MonitorSnapshot snapshot)
+    private static Layer Draw(MainWindow deck, Grid root, Page page, MediaTrack track, BitmapSource cover, MonitorSnapshot snapshot,
+        (byte[] Pixels, int Width, int Height) background, string name)
     {
         Show(deck, root, page, track, cover, snapshot);
+        // What lies behind the island where Compose places it (the top centre), as the glass measures it: the 2nd and 98th
+        // percentiles of its luma (LiquidRenderer.Band; the renderer reads a downsample, so its band can be a little narrower).
+        {
+            int iw = (int)Math.Round(deck.Island.ActualWidth * Scale), ih = (int)Math.Round(deck.Island.ActualHeight * Scale);
+            int iy = (int)Math.Round(deck.Island.TranslatePoint(new Point(), root).Y * Scale), ix = (int)Math.Round((background.Width - iw) / 2.0);
+            var lumas = new List<float>(iw * ih);
+            for (int by = iy; by < iy + ih; by++)
+                for (int bx = Math.Max(0, ix); bx < Math.Min(background.Width, ix + iw); bx++)
+                {
+                    int d = (Math.Clamp(by, 0, background.Height - 1) * background.Width + bx) * 4;
+                    lumas.Add((float)((.0722 * background.Pixels[d] + .7152 * background.Pixels[d + 1] + .2126 * background.Pixels[d + 2]) / 255));
+                }
+            lumas.Sort();
+            float low = lumas.Count == 0 ? 0 : lumas[(int)(lumas.Count * .02)], high = lumas.Count == 0 ? 1 : lumas[Math.Min(lumas.Count - 1, (int)(lumas.Count * .98))];
+            double tone = deck.OffscreenBackdrop(low, high);
+            Settle(root, deck);
+            Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: backdrop band {low:0.00}..{high:0.00}, shadow tone {tone:0.00}: {deck.OffscreenShadowLook}"));
+        }
 
         // The XAML's theme brushes (DynamicResource) follow the theme on the stage as in the window: the toolbar's clock.
         var clock = (deck.ClockLabel.Foreground as SolidColorBrush)?.Color;
@@ -462,7 +483,7 @@ internal static partial class LiquidPages
         Contrast(name, "secondary", secondary, 4.5, 3);
         Contrast(name, "tertiary", tertiary, 3, 2);
         // The shadow: below the island's bottom edge, outside it, between the bottom corners, the composed image is darker than
-        // the glass alone over the background (0 4px 12px black at .22 in both liquid themes).
+        // the glass alone over the background (round 14: an ambient and a contact shadow, by size and backdrop, MainWindow.Shadow).
         {
             double darker = 0, lightness = 0; int count = 0;
             int y0 = gy + layer.H + (int)Math.Round(2 * Scale), y1 = gy + layer.H + (int)Math.Round(7 * Scale);

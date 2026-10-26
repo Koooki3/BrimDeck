@@ -555,6 +555,9 @@ internal sealed class GlassBackdrop : IDisposable
     // The last brightness any liquid glass measured behind its island (NaN before one): automatic liquid glass chosen while
     // another glass theme shows takes its first look from it at once (App.StartGlance).
     public static double SeenLuma { get; private set; } = double.NaN;
+    // Each new measure of what lies behind this island (read only): the 2nd and 98th percentiles of its luma (LiquidRenderer.Band).
+    // The island's shadow under liquid glass deepens over a busy backdrop and lightens over a plain light one (MainWindow.Shadow).
+    public event Action<float, float>? Measured;
 
     // A step of automatic liquid glass's look: the latest measure of what lies behind, once its answer is in, or the last one.
     // The look shown is the one the glass is turning to, if it is (Lead). Nothing turns while the panel is open or opening
@@ -567,18 +570,24 @@ internal sealed class GlassBackdrop : IDisposable
         bool auto = AutoLook?.Invoke() == true;
         bool current = _lead ?? PanelTheme.Current.IsDark;
         bool turn = false, instant = false;
+        bool measured;
         if (auto)
         {
             bool held = Openness?.Invoke() > .001 || _pointerDown || _feedback.Press > .01;
             _look.AppDark = LiquidTheme.AppDark;
+            int measures = _look.Measures;
             turn = _look.Step(renderer, now, current, out instant, _host.Source, held);
+            measured = _look.Measures != measures;
             if (!double.IsNaN(_look.Middle)) SeenLuma = _look.Middle;
         }
         else
         {
             _look.Forget();
-            if (renderer.TryBackdrop(out _) && GlassAppearance.RangeMean(renderer.Histogram) is var middle && double.IsFinite(middle)) SeenLuma = middle;
+            measured = renderer.TryBackdrop(out _);
+            if (measured && GlassAppearance.RangeMean(renderer.Histogram) is var middle && double.IsFinite(middle)) SeenLuma = middle;
         }
+        // A new measure is in: its band (the 2nd and 98th percentiles of the luma behind the island) for the island's shadow.
+        if (measured) Measured?.Invoke(renderer.Band.Low, renderer.Band.High);
         if (LiquidDebug && (turn || now - _debugAt >= DebugEveryMs))
         {
             _debugAt = now;
