@@ -282,6 +282,9 @@ internal static class PanelThemeTests
         var sea = deepSea.Effects.Decor!.Horizon!.Sea.Over(deepSea.Surface);
         check("Text is held over the sea the horizon lays under it", deepSea.SurfaceStops.Contains(sea)
             && deepSea["textPrimary"].MinimumContrast([sea]) >= 4.5 - .001 && deepSea.Adjustments.Count > 0);
+        var dusky = PanelThemes.Build("dusky", PanelThemes.Parse("""{ "formatVersion": 1, "id": "dusky", "base": "light", "effects": { "surfaceGradient": ["#00FFFFFF", "#FF8FB8C8"], "decor": { "horizon": { "sea": "#A000A6A6" } } } }"""));
+        var duskySea = dusky.Effects.Decor!.Horizon!.Sea.Over(dusky.Effects.SurfaceGradient[1].Over(dusky.Surface));
+        check("The sea is measured over the gradient it lies on", dusky.SurfaceStops.Contains(duskySea) && dusky["textPrimary"].MinimumContrast([duskySea]) >= 7 - .001);
         var badDecor = PanelThemes.LoadFolder(Folder("decor-bad", ("sea.json", """{ "formatVersion": 1, "id": "sea", "effects": { "decor": { "horizon": { "sea": "teal" } } } }"""),
             ("hud.json", """{ "formatVersion": 1, "id": "hud", "effects": { "decor": { "hud": { "color": "#12345" } } } }""")));
         check("A motif color that is not a color is refused", badDecor.Count == 2 && badDecor.All(theme => theme.Error is not null));

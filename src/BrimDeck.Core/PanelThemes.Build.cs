@@ -106,8 +106,12 @@ public static partial class PanelThemes
     internal static IEnumerable<ThemeColor> DecorStops(PanelThemeEffectValues values, ThemeColor surface)
     {
         if (values.Decor is not { } decor) yield break;
-        var grounds = new List<ThemeColor> { surface };
-        if (decor.Horizon is { } horizon) { var sea = horizon.Sea.Over(surface); grounds.Add(sea); yield return sea; }
+        // The sea lies over the gradient's lower part, so it is measured over every stop of it.
+        var surfaces = new List<ThemeColor> { surface };
+        surfaces.AddRange(values.SurfaceGradient.Select(stop => stop.Over(surface)));
+        var grounds = new List<ThemeColor>(surfaces);
+        if (decor.Horizon is { } horizon)
+            foreach (var ground in surfaces) { var sea = horizon.Sea.Over(ground); grounds.Add(sea); yield return sea; }
         foreach (var tint in new[] { decor.Caustics, decor.Palm })
             if (tint is { } color)
                 foreach (var ground in grounds) yield return color.Over(ground);
