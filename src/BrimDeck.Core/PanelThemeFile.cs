@@ -49,7 +49,7 @@ public sealed class PanelThemeDaylight
 
 public sealed class PanelThemeClock
 {
-    // A ClockStyle name: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel, tektur.
+    // A ClockStyle name: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel, tektur, rounded.
     public string Style { get; set; } = "";
     // "default" (the theme's clock color), amber, cyan, pink, lime, custom, gradient or cover.
     public string Color { get; set; } = "";

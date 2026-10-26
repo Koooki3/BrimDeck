@@ -75,7 +75,7 @@
   },
 
   // The clock that suits the theme. Choosing the theme in settings switches the clock to it; the clock can still be changed after.
-  // style: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel, tektur
+  // style: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel, tektur, rounded
   // color: default (the "clock" color above), amber, cyan, pink, lime, custom, gradient, cover (the playing song's cover)
   // custom is used when color is "custom"; gradient, exactly three colors, when color is "gradient".
   // palette: the colors of the amber, cyan, pink and lime swatches in this theme. At least 4.5:1 against the surface.

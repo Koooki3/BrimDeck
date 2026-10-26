@@ -311,6 +311,12 @@ internal static class PanelThemeTests
             islandCopy.Night is not null && islandCopy.Daylight is { Day: "06:30", Night: "18:30" } && nightCopy.Adjustments.Count == 0
             && nightOriginal.Colors.All(pair => nightCopy[pair.Key] == pair.Value) && nightOriginal.Effects.SurfaceGradient.SequenceEqual(nightCopy.Effects.SurfaceGradient)
             && nightOriginal.Motion == nightCopy.Motion && PanelThemes.Build("copy", islandCopy).Colors.All(pair => PanelThemes.Resolve(island)[pair.Key] == pair.Value));
+        // The night look turns the palm off with a transparent color.
+        check("The island's motifs differ by look and a copy keeps each one", new[] { DaylightLook.Day, DaylightLook.Dusk, DaylightLook.Night }.All(look =>
+                PanelThemes.Resolve(island, look).Effects.Decor is { Horizon: not null, Caustics: not null } decor && (decor.Palm is null) == (look == DaylightLook.Night)
+                && PanelThemes.Build("copy", islandCopy, look).Effects.Decor == decor)
+            && PanelThemes.Resolve(island, DaylightLook.Dusk).Effects.Decor != PanelThemes.Resolve(island).Effects.Decor
+            && PanelThemes.Resolve(island, true).Effects.Decor != PanelThemes.Resolve(island).Effects.Decor);
         var nightOwl = BuiltIn("night-owl");
         // No built-in theme suggests a gradient clock, so a theme of its own carries one.
         var glow = PanelThemes.Build("glow", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "neon", Color = "gradient", Gradient = ["#C792EA", "#82AAFF", "#7FDBCA"] } });
@@ -323,9 +329,9 @@ internal static class PanelThemeTests
         var tekturSettings = new DeckSettings();
         PanelThemes.ApplyClock(tektur, tekturSettings);
         check("The Tektur clock style is read from a theme file and comes back from the template",
-            (int)ClockStyle.Tektur == 10 && (int)ClockStyle.Pixel == 9 && tekturFile.Error is null && tekturSettings.ClockStyle == ClockStyle.Tektur
+            (int)ClockStyle.Tektur == 10 && (int)ClockStyle.Rounded == 11 && (int)ClockStyle.Pixel == 9 && tekturFile.Error is null && tekturSettings.ClockStyle == ClockStyle.Tektur
             && PanelThemes.Parse(PanelThemes.FillTemplate("copy", tektur, "night-owl")).Clock is { Style: "tektur" }
-            && PanelThemes.Template.Contains("condensed, pixel, tektur", StringComparison.Ordinal));
+            && PanelThemes.Template.Contains("condensed, pixel, tektur, rounded", StringComparison.Ordinal));
 
         // Clock, swatches and what choosing a theme changes.
         bool clockColors = true, pickers = true;
