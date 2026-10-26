@@ -74,6 +74,8 @@ internal static partial class LiquidPages
         // Its instance names are this process's own besides (AppInstance.ForTest): even an App that started could not reach the
         // user's BrimDeck.
         AppInstance.ForTest();
+        // LIQUID_R13: round 13 as it was (whole-leaf text regions, no halo), for the comparisons.
+        if (Environment.GetEnvironmentVariable("LIQUID_R13") == "1") { MainWindow.GlassRegionsWhole = true; MainWindow.GlassHaloOff = true; }
         var app = new App();
         app.InitializeComponent();
         var settings = new DeckSettings
@@ -308,12 +310,52 @@ internal static partial class LiquidPages
                 Over(layer.Pixels, (y * layer.Width + lx) * 4, composed, (y * dw + x) * 4);
             }
         Check(name, layer, glass, under, composed, dw, gx, gy);
+        Body(name, layer, glass, under, desktop, dw, gx, gy);
         // The tile: the island and its shadow with a margin, the background around it.
         int margin = (int)Math.Round(36 * Scale);
         int tx = Math.Max(0, gx - margin), tw = Math.Min(dw, gx + layer.W + margin) - tx, th = Math.Min(dh, gy + layer.H + margin);
         var tile = new byte[tw * th * 4];
         for (int y = 0; y < th; y++) Buffer.BlockCopy(composed, (y * dw + tx) * 4, tile, y * tw * 4, tw * 4);
         return BitmapSource.Create(tw, th, 96, 96, PixelFormats.Bgra32, null, tile, tw * 4);
+    }
+
+    // Round 13b: the open panel's body between its text (the glass, not within 8 DIPs of any glyph run, where the page draws
+    // nothing): its mean luma and luma std ("whiteness"), and its chroma against the backdrop's there. A note, not a check.
+    private static void Body(string name, Layer layer, byte[] glass, byte[] under, byte[] desktop, int dw, int gx, int gy)
+    {
+        if (layer.Open < .5) return;
+        int w = layer.W, h = layer.H, grow = (int)Math.Round(8 * Scale);
+        // Near content: within 8 DIPs of anything the page draws (text, icons, covers, bars), whichever regions the glass covers.
+        var sum2 = new int[(w + 1) * (h + 1)];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int drawn = layer.Pixels[((layer.Y + y) * layer.Width + layer.X + x) * 4 + 3] > 8 ? 1 : 0;
+                sum2[(y + 1) * (w + 1) + x + 1] = drawn + sum2[y * (w + 1) + x + 1] + sum2[(y + 1) * (w + 1) + x] - sum2[y * (w + 1) + x];
+            }
+        var near = new bool[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int x0 = Math.Max(0, x - grow), x1 = Math.Min(w, x + grow + 1), y0 = Math.Max(0, y - grow), y1 = Math.Min(h, y + grow + 1);
+                near[y * w + x] = sum2[y1 * (w + 1) + x1] - sum2[y0 * (w + 1) + x1] - sum2[y1 * (w + 1) + x0] + sum2[y0 * (w + 1) + x0] > 0;
+            }
+        double sum = 0, squares = 0, chroma = 0, back = 0; int n = 0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                if (near[y * w + x] || glass[(y * w + x) * 4 + 3] < 250) continue;
+                int l = ((layer.Y + y) * layer.Width + layer.X + x) * 4;
+                if (layer.Pixels[l + 3] > 8) continue;
+                int d = ((gy + y) * dw + gx + x) * 4;
+                double luma = Lightness(under, d);
+                sum += luma; squares += luma * luma; n++;
+                chroma += Math.Max(under[d], Math.Max(under[d + 1], under[d + 2])) - Math.Min(under[d], Math.Min(under[d + 1], under[d + 2]));
+                back += Math.Max(desktop[d], Math.Max(desktop[d + 1], desktop[d + 2])) - Math.Min(desktop[d], Math.Min(desktop[d + 1], desktop[d + 2]));
+            }
+        if (n < 100) { Console.WriteLine($"NOTE: {name}: body: too little of it between the text ({n} pixels)"); return; }
+        double mean = sum / n, std = Math.Sqrt(Math.Max(0, squares / n - mean * mean));
+        Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: body: {n * 100.0 / (w * h):0}% of the panel, mean luma {mean:0.0}, std {std:0.0}, chroma kept {chroma / Math.Max(back, 1):0.00}"));
     }
 
     // Premultiplied source over an opaque destination.
@@ -487,7 +529,9 @@ internal static partial class LiquidPages
         double opaque = Apca(yt, yt > .4 ? ApcaY(0x2C, 0x2C, 0x2C) : ApcaY(0xF9, 0xF9, 0xF9));
         double s0 = double.TryParse(Environment.GetEnvironmentVariable("LIQUID_SIGMA0"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : LiquidRenderer.DefaultSigma0;
         double masked = Apca(yt, mean) / Math.Sqrt(1 + sigma / s0 * (sigma / s0));
-        Report(masked >= opaque * .9, FormattableString.Invariant($"{name}: masked contrast: Lc {masked:0.0} (sigma {sigma:0.0000} linear Y, Sigma0 {s0:0.000}) against the opaque theme's {opaque:0.0}: {masked / opaque:P0} (wanted at least 90 %)"));
+        // Round 13b: the light look (dark text) wants 75 % of the opaque theme's and APCA's body text Lc 75; the dark look 90 %.
+        double share = yt > .4 ? .9 : .75;
+        Report(masked >= opaque * share && masked >= 75, FormattableString.Invariant($"{name}: masked contrast: Lc {masked:0.0} (sigma {sigma:0.0000} linear Y, Sigma0 {s0:0.000}) against the opaque theme's {opaque:0.0}: {masked / opaque:P0} (wanted at least {share:P0} and Lc 75)"));
     }
 
     // APCA's Y and |Lc| (its published formula, SAPC 0.0.98G; written from the formula alone), as Liquid.hlsl has them.

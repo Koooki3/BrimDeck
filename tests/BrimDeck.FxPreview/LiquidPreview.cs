@@ -265,6 +265,8 @@ internal static class LiquidPreview
         if (float.TryParse(Environment.GetEnvironmentVariable("LIQUID_BODY"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var body)) frame = frame with { BodyLight = body };
         // LIQUID_ZONED: round 12's zones (clear rim, Acrylic inside) instead of the slab, for the comparisons (round 13).
         if (Environment.GetEnvironmentVariable("LIQUID_ZONED") == "1") frame = frame with { Zoned = true };
+        // LIQUID_R13: round 13 as it was (the light look reaching .96, whole-leaf text regions, no halo), for the comparisons.
+        if (Environment.GetEnvironmentVariable("LIQUID_R13") == "1") frame = frame with { ReachLight = .96f };
         // LIQUID_TEXTFREE: an open panel with no text on it (the body alone), for the show-through numbers (round 13).
         if (Environment.GetEnvironmentVariable("LIQUID_TEXTFREE") == "1" && frame.TextRects is null) frame = frame with { TextRects = [] };
         // The padded region, the desktop's edge rows repeated where it runs off the screen (as at the top for the notch).

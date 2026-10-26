@@ -111,7 +111,8 @@ cbuffer Frame : register(b0)
     float Sigma0;         // the masking constant of the material's adaptivity (linear Y; see Material)
     float4 FrostLevel[8]; // per level: its atlas region's top-left (pixels), its texel (device pixels), its Gaussian deviation
     float4 TextInfo;      // the open panel's text regions (t3): cell (device pixels), 1 / columns, 1 / rows, 1 when given
-    float4 LookInfo;      // x: the light look's luminosity opacity between the text regions; y: 1 for round 12's zones
+    float4 LookInfo;      // x: the light look's luminosity opacity between the text regions; y: 1 for round 12's zones;
+                          // z: the light look's reach of the opaque theme's masked contrast (0: ReachLight)
 };
 
 Texture2D Background : register(t0);
@@ -127,6 +128,9 @@ SamplerState Smooth : register(s0);
 static const float GrainAmount = .006;
 // Round 12b: the masked contrast reached behind text (a share of the opaque theme's), the busy-ness reference (unfrosted band
 // RMS, linear Y), and the body's depth: its fall toward the edges and its top light.
+// Round 13b: the light look reaches .87 of the opaque theme's masked contrast (its text carries a halo and a target of 75 %).
+static const float ReachLight = .87;
+static const float BodyCover = .35;
 static const float Reach = .96, BusyRef = .03, EdgeFall = .05, Sheen = .06, SheenDip = 36;
 // Round 13's slab: its tint (Lens' roles: small .12, panel .14), absorption per unit thickness (light: barely, cool; dark:
 // deeper), the frost of its body with no text over it (DIP, collapsed; the open panel's is half its text frost), the light's
@@ -600,7 +604,7 @@ float Adapt(float2 p, float base, out float busy)
     {
         float a = (lo + hi) * .5, s = (1 - a) * sigma / max(Sigma0, 1e-4);
         float lc = Apca(yt, lerp(y, yTint, a)) / sqrt(1 + s * s);
-        if (lc >= target * Reach) hi = a; else lo = a;
+        if (lc >= target * lerp(LookInfo.z > 0 ? LookInfo.z : ReachLight, Reach, dark)) hi = a; else lo = a;
     }
     busy = saturate((hi - base) / max(1 - base, 1e-3));
     return hi;
@@ -642,11 +646,17 @@ static const float TextFeatherDip = 8;
 float TextFeathered(float2 p)
 {
     if (TextInfo.w < .5) return 1;
-    // Grown, not averaged: whole over the regions themselves, fading over the feather outside them.
-    float f = TextFeatherDip * Scale, h = f * .5;
+    // Whole over the regions themselves, falling away softly over two feathers outside them (grown, so a glyph's own box is
+    // always whole); and where text lies close together, a broad soft average fills between it, so a text-dense page reads
+    // as one denser stretch of glass rather than as patches.
+    float f = TextFeatherDip * Scale, h = f * .5, g = f * 2;
     float near = max(max(TextCover(p + float2(h, 0)), TextCover(p - float2(h, 0))), max(TextCover(p + float2(0, h)), TextCover(p - float2(0, h))));
     float far = max(max(TextCover(p + float2(f, 0)), TextCover(p - float2(f, 0))), max(TextCover(p + float2(0, f)), TextCover(p - float2(0, f))));
-    return max(TextCover(p), max(near * .75, far * .4));
+    float wide = max(max(TextCover(p + float2(g, 0)), TextCover(p - float2(g, 0))), max(TextCover(p + float2(0, g)), TextCover(p - float2(0, g))));
+    float d = g * .7071;
+    float broad = (TextCover(p + float2(d, d)) + TextCover(p - float2(d, d)) + TextCover(p + float2(d, -d)) + TextCover(p - float2(d, -d))
+        + TextCover(p + float2(g, 0)) + TextCover(p - float2(g, 0)) + TextCover(p + float2(0, g)) + TextCover(p - float2(0, g))) / 8;
+    return max(TextCover(p), max(max(near * .85, far * .6), max(wide * .3, saturate(broad * 1.6) * .8)));
 }
 
 float3 Slab(float2 p, float sd, float2 outward)
@@ -676,7 +686,8 @@ float3 Slab(float2 p, float sd, float2 outward)
         float2 inside = min(p - (Content.xy - float2(RowReach * Scale, 0)), (Content.zw + float2(RowReach * Scale, 0)) - p);
         row = saturate(min(inside.x, inside.y) / (TextFeatherDip * Scale) + 1);
     }
-    float text = max(row, opened * TextFeathered(p));
+    // The dark look covers the whole open panel (one even dark glass, as round 13 had it); the light look only behind text.
+    float text = max(row, opened * max(TextFeathered(p), CoverDark()));
     float calm = 1 - Busy(p);
     float bodyFrost = lerp(BodyFrostDip, FrostRadius / Scale * .5, opened) * Scale * lerp(.6, 1, 1 - calm);
     float frost = max(bodyFrost * thickness, max(ContentFrost * row, FrostRadius * opened * TextFeathered(p)) * saturate(thickness * 2));
@@ -697,12 +708,14 @@ float3 Slab(float2 p, float sd, float2 outward)
     c *= exp(-lerp(AbsorbLight, AbsorbDark, dark) * thickness);
 
     // Behind text: Acrylic's luminosity blend, as far as the text needs (Adapt), feathered (no box).
-    [branch] if (text > .001 && (Low > 0 || High < 1))
+    [branch] if ((text > .001 || opened > 0) && (Low > 0 || High < 1))
     {
         float turned = CoverDark(), busy, base = lerp(SlabCoverLight, AcrylicLumDark, turned);
         float a = Adapt(p, base, busy);
         float3 target = lerp(AcrylicLight, AcrylicDark, turned);
-        c = lerp(c, SetLum(c, Lum(target)), a * text);
+        // Between text the light look's body carries a little of it too (BodyCover), so the cover reads as the glass growing
+        // denser, not as a plate laid on it.
+        c = lerp(c, SetLum(c, Lum(target)), max(a * text, BodyCover * opened * thickness));
         c = lerp(c, target, AcrylicTintDark * turned * text);
     }
     // Colour no more than the backdrop's own (D14).

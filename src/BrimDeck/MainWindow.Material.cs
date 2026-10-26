@@ -94,7 +94,7 @@ public partial class MainWindow
     // translucent between them), in the island's DIPs, grown by TextGrow: every leaf of the visual tree shown (a text, an icon,
     // a cover, a custom drawing), a text block as a whole. Walked again after a layout pass, at most every TextRegionsMs; a
     // new list only when the regions changed (the glass draws again only then).
-    private const double TextGrow = 3, TextRegionsMs = 100;
+    private const double TextGrow = 6, TextRegionsMs = 100;
     private readonly List<Rect> _textRegions = [];
     private Rect[]? _textShown;
     private bool _textStale = true;
@@ -117,24 +117,87 @@ public partial class MainWindow
         {
             if (node is UIElement { IsVisible: false } or UIElement { Opacity: < .01 }) return;
             int count = VisualTreeHelper.GetChildrenCount(node);
-            // A leaf: no children, a text block, or an element drawing its own visuals (a page's drawn text and gauges).
-            bool drawn = count > 0;
-            for (int i = 0; drawn && i < count; i++) drawn = VisualTreeHelper.GetChild(node, i) is not UIElement;
-            // (Covering only what carries text, not the icons, covers and bars, was tried in round 13: the drawn pages' text then
-            // went uncovered and the masked contrast fell to 70 %.)
-            if (node is FrameworkElement element && (count == 0 || drawn || element is TextBlock))
+            if (GlassRegionsWhole)
             {
-                if (element.ActualWidth <= 0 || element.ActualHeight <= 0) return;
-                // A whole drawn page (a canvas of drawn visuals as large as the panel) is no region: a third of the island or
-                // more is taken as background, not text.
-                if (drawn && element.ActualWidth * element.ActualHeight > Island.ActualWidth * Island.ActualHeight / 3) return;
-                var box = element.TransformToAncestor(Island).TransformBounds(new Rect(element.RenderSize));
-                box.Inflate(TextGrow, TextGrow);
-                _textRegions.Add(box);
+                // Round 13's rule (kept for the comparisons): every leaf as a whole.
+                bool drawn = count > 0;
+                for (int i = 0; drawn && i < count; i++) drawn = VisualTreeHelper.GetChild(node, i) is not UIElement;
+                if (node is FrameworkElement element && (count == 0 || drawn || element is TextBlock))
+                {
+                    if (element.ActualWidth <= 0 || element.ActualHeight <= 0) return;
+                    if (drawn && element.ActualWidth * element.ActualHeight > Island.ActualWidth * Island.ActualHeight / 3) return;
+                    var box = element.TransformToAncestor(Island).TransformBounds(new Rect(element.RenderSize));
+                    box.Inflate(TextGrow, TextGrow);
+                    _textRegions.Add(box);
+                    return;
+                }
+                for (int i = 0; i < count; i++) Leaves(VisualTreeHelper.GetChild(node, i));
                 return;
+            }
+            // Round 13b: only the text and the glyphs themselves - every run of glyphs a visual draws (text blocks and the pages'
+            // drawn text alike, read off the visual's own drawing) and the icons (paths) - so the glass between and around
+            // them keeps its translucency. Covers, plates, tracks and bars are left to the glass.
+            if (node is Visual visual)
+            {
+                if (node is System.Windows.Shapes.Path { ActualWidth: > 0, ActualHeight: > 0 } icon)
+                    Add(icon.TransformToAncestor(Island).TransformBounds(new Rect(icon.RenderSize)));
+                else if (VisualTreeHelper.GetDrawing(visual) is { } drawing)
+                {
+                    GeneralTransform? toIsland = null;
+                    Glyphs(drawing, Matrix.Identity, ref toIsland, visual);
+                }
             }
             for (int i = 0; i < count; i++) Leaves(VisualTreeHelper.GetChild(node, i));
         }
+
+        void Glyphs(Drawing drawing, Matrix within, ref GeneralTransform? toIsland, Visual owner)
+        {
+            switch (drawing)
+            {
+                case GlyphRunDrawing run:
+                    var bounds = run.Bounds;
+                    if (bounds.IsEmpty) return;
+                    bounds.Transform(within);
+                    toIsland ??= owner.TransformToAncestor(Island);
+                    Add(toIsland.TransformBounds(bounds));
+                    return;
+                case DrawingGroup group:
+                    var inner = group.Transform is { } transform ? Matrix.Multiply(transform.Value, within) : within;
+                    foreach (var child in group.Children) Glyphs(child, inner, ref toIsland, owner);
+                    return;
+            }
+        }
+
+        void Add(Rect box)
+        {
+            if (box.IsEmpty || box.Width <= 0 || box.Height <= 0) return;
+            box.Inflate(TextGrow, TextGrow);
+            _textRegions.Add(box);
+        }
+    }
+
+    // Round 13's whole-leaf regions instead of round 13b's glyphs (the comparisons only, FxPreview).
+    internal static bool GlassRegionsWhole { get; set; }
+
+    // Round 13b: the text on the glass carries its own legibility, as Apple's vibrant text does: a soft halo about a pixel wide in
+    // the glass's own tint behind every glyph (white on the light look, the dark tint on the dark), so the glass behind need not
+    // be whitened to keep it legible. One effect over the panel's and the row's content, only while liquid glass shows.
+    internal static bool GlassHaloOff { get; set; }
+    private System.Windows.Media.Effects.DropShadowEffect? _halo;
+    private void GlassHalo(bool shown)
+    {
+        if (!shown || GlassHaloOff)
+        {
+            if (ExpandedContent.Effect == _halo && _halo is not null) ExpandedContent.ClearValue(EffectProperty);
+            if (Compact.Effect == _halo && _halo is not null) Compact.ClearValue(EffectProperty);
+            return;
+        }
+        bool dark = PanelTheme.Current.IsDark;
+        _halo ??= new System.Windows.Media.Effects.DropShadowEffect { ShadowDepth = 0, BlurRadius = 3, RenderingBias = System.Windows.Media.Effects.RenderingBias.Quality };
+        _halo.Color = dark ? Color.FromRgb(0x12, 0x14, 0x19) : Colors.White;
+        _halo.Opacity = dark ? .45 : .7;
+        ExpandedContent.Effect = _halo;
+        Compact.Effect = _halo;
     }
 
     // The pointer over the island (DIP, island coordinates; null when it left) and whether its button is down: the glass's
@@ -269,6 +332,7 @@ public partial class MainWindow
     private bool _liquidEdge;
     private void LiquidEdge(bool shown)
     {
+        GlassHalo(shown);
         LiquidShadow(shown);
         if (shown)
         {
