@@ -5,7 +5,9 @@ using BrimDeck.Core;
 // sensor never shows them, and nothing is built again for it.
 static class StripAdmissionTests
 {
-    private const CompactMonitorItems Temperature = CompactMonitorItems.Temperature, Storage_ = CompactMonitorItems.Storage, Later = StripAdmission.Later;
+    private const CompactMonitorItems Temperature = CompactMonitorItems.Temperature, Storage_ = CompactMonitorItems.Storage,
+        // The battery reading joins by the devices, not by the system readings (DevicesTests); these runs leave it aside.
+        Later = StripAdmission.Later & ~CompactMonitorItems.Battery;
     private const SensorState Unknown = SensorState.Unknown, Found = SensorState.Found, None = SensorState.None;
 
     public static void Run(Action<string, bool> check)
@@ -25,11 +27,12 @@ static class StripAdmissionTests
     private static (int Rebuilds, List<CompactMonitorItems> Arrivals, CompactMonitorItems Hidden) Run(IEnumerable<(MonitorSnapshot? Snapshot, SensorState Cpu, SensorState Gpu, SensorState Storage)> ticks)
     {
         var admission = new StripAdmission();
-        var built = admission.Hidden;
+        var built = admission.Hidden & Later;
         int rebuilds = 0; var arrivals = new List<CompactMonitorItems>();
         foreach (var (snapshot, cpu, gpu, storage) in ticks)
         {
             var (hidden, arriving) = admission.Update(snapshot, cpu, gpu, storage);
+            hidden &= Later; arriving &= Later;
             if (hidden == built) continue;
             rebuilds++; arrivals.Add(arriving); built = hidden;
         }
@@ -38,7 +41,7 @@ static class StripAdmissionTests
 
     private static void FirstLoad(Action<string, bool> check)
     {
-        check("Strip admission: both later readings are left out before any figure", new StripAdmission().Hidden == Later);
+        check("Strip admission: both later readings are left out before any figure", (new StripAdmission().Hidden & Later) == Later);
         // The sampler starting: no snapshot, then snapshots before the sensors answer, then the first temperature, then the drive.
         var ticks = new List<(MonitorSnapshot?, SensorState, SensorState, SensorState)>
         {

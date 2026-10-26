@@ -57,6 +57,8 @@ try
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);
     StripAdmissionTests.Run(Check);
+    DevicesTests.Run(Check);
+    DeviceProtocolTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
     GlassFeedbackTests.Run(Check);

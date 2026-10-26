@@ -35,6 +35,12 @@
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.stats.cso" LogicalName="BrimDeck.LiquidGlass.Frost.stats.cso" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl.sha256" />
     <Compile Include="..\..\src\BrimDeck\Native\GpuProvider.cs" Link="GpuProvider.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\Hid.cs" Link="Hid.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\HidBatteries.cs" Link="HidBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\BluetoothBatteries.cs" Link="BluetoothBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\GamingBatteries.cs" Link="GamingBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\AppleBatteries.cs" Link="AppleBatteries.cs" />
+    <Compile Include="..\..\src\BrimDeck\Native\DeviceBatteries.cs" Link="DeviceBatteries.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\Why.cs" Link="Why.cs" />
     <Compile Include="..\..\src\BrimDeck\Native\NoticeBannerRegistry.cs" Link="NoticeBannerRegistry.cs" />
     <Compile Include="..\..\src\BrimDeck\NoticeBannerKeeper.cs" Link="NoticeBannerKeeper.cs" />

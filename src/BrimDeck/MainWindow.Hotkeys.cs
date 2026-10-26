@@ -66,7 +66,7 @@ public partial class MainWindow
     private void FocusPanelStart()
     {
         if (CurrentPage == DeckPage.Notices && _pageRows.Count > 0) { _pageRows[0].Row.Focus(); return; }
-        var button = CurrentPage switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Notices => NoticesPageButton, _ => AIUsageButton };
+        var button = CurrentPage switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Devices => DevicesPageButton, DeckPage.Notices => NoticesPageButton, _ => AIUsageButton };
         Keyboard.Focus(button);
     }
 
