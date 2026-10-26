@@ -12,8 +12,8 @@ internal static class ThemeMotionTests
         // Every built-in theme but the default dark and light ones (which keep BrimDeck's own control looks) has its own answers
         // to the pointer; ambient light is for the cyberpunk demo, the glass themes' drifting glint and the island's swell.
         string[] builtIns = ["dark", "light", PanelThemes.GlassLight, PanelThemes.GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl",
-            PanelThemes.IslandHoliday, PanelThemes.PixelBlocks, PanelThemes.Demo];
-        string[] ambient = [PanelThemes.Demo, PanelThemes.GlassLight, PanelThemes.GlassDark, PanelThemes.IslandHoliday];
+            PanelThemes.IslandHoliday, PanelThemes.IslandHoliday2, PanelThemes.PixelBlocks, PanelThemes.Demo];
+        string[] ambient = [PanelThemes.Demo, PanelThemes.GlassLight, PanelThemes.GlassDark, PanelThemes.IslandHoliday, PanelThemes.IslandHoliday2];
         check("Every built-in theme is listed for motion", PanelThemes.BuiltIns.Select(theme => theme.Id).Order().SequenceEqual(builtIns.Order()));
         check("Every built-in theme answers the pointer except the default dark and light, which draw nothing over the controls",
             builtIns.All(id => Palette(id).Motion.AnyInteraction == id is not ("dark" or "light")));
@@ -22,9 +22,14 @@ internal static class ThemeMotionTests
             new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion is { Hover: HoverFx.Lens, Particles: ParticleFx.None, Steps: 0 } m
                 && m.Ambient is { Drift: >= 20, Breathe: 0, Sweep: 0, Flicker: 0 })
             && new[] { PanelThemes.GlassLight, PanelThemes.GlassDark }.All(id => Palette(id).Motion.Press == PressFx.Jelly));
-        var islandDay = Palette(PanelThemes.IslandHoliday).Motion;
-        var islandNight = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!, true).Motion;
-        check("Island holiday: a swell and waves; a splash of water, bubbles by day and glowing plankton by night",
+        var firstDay = Palette(PanelThemes.IslandHoliday).Motion;
+        var firstNight = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!, true).Motion;
+        check("Island holiday: a swell and waves; sun glints by day, glowing plankton by night",
+            firstDay is { Hover: HoverFx.Wave, Press: PressFx.Sparkle, Particles: ParticleFx.Star, ParticleStrength: > 0, Steps: 0 } && firstDay.Ambient is { Breathe: > 0, Drift: > 0, Sweep: > 0 }
+            && firstNight is { Hover: HoverFx.Wave, Press: PressFx.Ember, Particles: ParticleFx.Firefly, ParticleStrength: > 0 } && firstNight.Ambient.Breathe > firstDay.Ambient.Breathe);
+        var islandDay = Palette(PanelThemes.IslandHoliday2).Motion;
+        var islandNight = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.IslandHoliday2)!, true).Motion;
+        check("Island holiday 2: a swell and waves; a splash of water, bubbles by day and glowing plankton by night",
             islandDay is { Hover: HoverFx.Wave, Press: PressFx.Splash, Particles: ParticleFx.Bubble, ParticleStrength: > 0, Steps: 0, Spring: SpringTier.Default } && islandDay.Ambient is { Breathe: > 0, Drift: > 0, Sweep: > 0 }
             && islandNight is { Hover: HoverFx.Wave, Press: PressFx.Splash, Particles: ParticleFx.Firefly, ParticleStrength: > 0 } && islandNight.Ambient.Breathe > islandDay.Ambient.Breathe
             && islandNight.Pace == islandDay.Pace);

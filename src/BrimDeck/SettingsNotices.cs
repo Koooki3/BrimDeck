@@ -22,7 +22,7 @@ public sealed partial class SettingsWindow
     {
         var center = _app.Notices;
         _noticeStatusLines.Clear();
-        Group(Toggle(Loc.T("启用灵动提示", "Turn on dynamic notices"), S.NoticesEnabled, value => { Change(s => s.NoticesEnabled = value); ShowPage(NoticesSettingsPage); },
+        Group(Toggle(Loc.T("启用灵动提示", "Turn on live notices"), S.NoticesEnabled, value => { Change(s => s.NoticesEnabled = value); ShowPage(NoticesSettingsPage); },
             help: Loc.T("收到通知时，刘海、胶囊或指示条短暂展开，显示应用图标、标题和摘要；悬停查看详情。Windows 自己的横幅和通知中心保持不变。全部在本机处理，不使用云端服务。",
                 "When a notice arrives, the notch, capsule or indicator briefly opens to show the application's icon, title and summary; hover for details. Windows' own banners and notification center stay as they are. Everything is processed on this PC, without any cloud service.")));
         if (!S.NoticesEnabled)
@@ -70,7 +70,7 @@ public sealed partial class SettingsWindow
                 "The banner record notice-banners.json (and its backup) cannot be read. BrimDeck changed nothing more, but banners it turned off earlier may still be off: turn \"Show notification banners\" back on for the apps you want in Windows Settings › System › Notifications, then delete notice-banners.json and notice-banners.json.bak in the data folder."), true);
         if (!S.NoticeHideBanners) return ("", false);
         if (!banners.Holding)
-            return (Loc.T("灵动提示或 Windows 应用通知未在接收，Windows 横幅保持原样。", "Dynamic notices or Windows app notifications are not being received, so Windows' banners are left as they are."), false);
+            return (Loc.T("灵动提示或 Windows 应用通知未在接收，Windows 横幅保持原样。", "Live notices or Windows app notifications are not being received, so Windows' banners are left as they are."), false);
         if (banners.Listing) return (Loc.T("正在读取应用列表…", "Reading the app list…"), false);
         int off = banners.States.Values.Count(state => state == BannerState.TurnedOff);
         int failed = banners.States.Values.Count(state => state == BannerState.Failed);
@@ -145,9 +145,10 @@ public sealed partial class SettingsWindow
             var none = TextLine(Loc.T("未检测到 WSL 发行版。", "No WSL distribution was found."), 12, TextSecondary);
             rows.Add(new Border { Child = none, MinHeight = 44, Padding = new Thickness(0, 13, 0, 13) });
         }
-        SectionTitle(Loc.T("WSL（默认关闭）", "WSL (off by default)"));
-        Note(Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。代理运行时发行版和 WSL 虚拟机不会自动停止，所以发行版中你的程序（终端、后台任务等）全部结束 5 分钟后，代理会自行退出，让 WSL 照常停止发行版并释放内存，发行版下次运行时再自动接入。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
+        SectionTitle(Loc.T("WSL（默认关闭）", "WSL (off by default)"), help: () => Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。代理运行时发行版和 WSL 虚拟机不会自动停止，所以发行版中你的程序（终端、后台任务等）全部结束 5 分钟后，代理会自行退出，让 WSL 照常停止发行版并释放内存，发行版下次运行时再自动接入。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
             "Once a distribution is on, BrimDeck copies its notice agent to ~/.local/share/brimdeck there and adds ~/.local/bin/brim-notify. The agent starts only while the distribution runs; a distribution is never started for notices. While the agent runs, WSL does not stop the distribution or its virtual machine, so the agent ends by itself 5 minutes after the last of your programs there (terminals, background jobs) ended; WSL then stops the distribution and frees its memory as usual, and the agent connects again the next time it runs. Without a notification service, the agent becomes the session's standard desktop notification service (notify-send and others work as usual); with one, it watches it, and where the bus does not allow watching only brim-notify works."));
+        Note(Loc.T("在 WSL 里运行的程序也能把通知发到这里；开启发行版后可使用 brim-notify 和 notify-send。",
+            "Programs in WSL can send notices here too; once a distribution is on, brim-notify and notify-send work there."));
         Group([.. rows]);
 
         // The command line, for Windows and for scripts.
@@ -166,9 +167,9 @@ public sealed partial class SettingsWindow
     // The time-kind applications this PC has (read only): their alarms, mail and reminders are recognized automatically.
     private void NoticeTimeSection(NoticeCenter center)
     {
-        SectionTitle(Loc.T("时间类通知", "Time notices"));
-        Note(Loc.T("闹钟、计时器、邮件和日程提醒会自动识别：倒计时实时显示剩余时间，闹钟和日程提醒优先显示。下列应用的提醒来自 Windows 通知，需要开启“Windows 应用通知”；BrimDeck 不读取邮箱或日历内容。",
+        SectionTitle(Loc.T("时间类通知", "Time notices"), help: () => Loc.T("闹钟、计时器、邮件和日程提醒会自动识别：倒计时实时显示剩余时间，闹钟和日程提醒优先显示。下列应用的提醒来自 Windows 通知，需要开启“Windows 应用通知”；BrimDeck 不读取邮箱或日历内容。",
             "Alarms, timers, mail and event reminders are recognized automatically: countdowns show the time left as it runs, and alarms and event reminders come first. The apps below remind through Windows notifications, so \"Windows app notifications\" needs to be on; BrimDeck does not read mailboxes or calendars."));
+        Note(Loc.T("闹钟、计时器和日程提醒会显示倒计时；需要开启“Windows 应用通知”。", "Alarms, timers and reminders show their countdown; \"Windows app notifications\" needs to be on."));
         var rows = new List<FrameworkElement>();
         var seen = center.Hub.KnownApps.Select(app => app.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var detected = TimeSourceDetection.InstalledAsync();
@@ -261,7 +262,7 @@ public sealed partial class SettingsWindow
         // A pause that runs out while the page is open turns the button back as the status line changes.
         _noticeStatusLines.Add(() => pause.Content = PauseLabel(center));
         var pauseStatus = StatusLine(() => center.Paused && S.NoticesPausedUntil is { } until
-            ? (Loc.T($"已暂停至 {until.ToLocalTime():HH:mm}，期间的通知只进入最近通知。", $"Paused until {until.ToLocalTime():HH:mm}; notices meanwhile only go to the recent notices."), false)
+            ? (Loc.T($"已暂停至 {until.ToLocalTime():HH:mm}，期间的通知只进入通知历史。", $"Paused until {until.ToLocalTime():HH:mm}; notices meanwhile only go to the notice history."), false)
             : center.Quiet ? (Loc.T("Windows 正处于专注、演示或锁定状态，提示暂时不显示。", "Windows is in focus, presentation or locked state; notices are held back for now."), false) : ("", false));
         Group(SliderRow(Loc.T("停留时间", "Shown for"), S.NoticeDuration, 2, 30, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeDuration = (int)Math.Round(value))),
             SliderRow(Loc.T("高优先级停留", "High priority shown for"), S.NoticeHighDuration, 2, 60, 1, Loc.T(" 秒", " s"), value => Change(s => s.NoticeHighDuration = (int)Math.Round(value))),
@@ -326,7 +327,7 @@ public sealed partial class SettingsWindow
 
     private void NoticeHistorySection(NoticeCenter center)
     {
-        SectionTitle(Loc.T("最近通知与隐私", "Recent notices and privacy"));
+        SectionTitle(Loc.T("通知历史与隐私", "Notice history and privacy"));
         int[] hours = [1, 6, 12, 24, 72, 168];
         var retention = new ComboBox { Width = 120, Style = (Style)FindResource("SettingsCombo"), IsEnabled = S.NoticeHistory,
             ItemsSource = hours.Select(h => h < 24 ? Loc.T($"{h} 小时", $"{h} h") : Loc.T($"{h / 24} 天", Loc.Count(h / 24, "day", "days"))).ToList(),
@@ -344,7 +345,7 @@ public sealed partial class SettingsWindow
         var folderButtons = new StackPanel { Orientation = Orientation.Horizontal };
         folderButtons.Children.Add(ActionButton(Loc.T("更改…", "Change…"), () =>
         {
-            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = Loc.T("选择保存最近通知的文件夹", "Choose the folder for the recent notices"), InitialDirectory = Directory.Exists(folder) ? folder : "" };
+            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = Loc.T("选择保存通知历史的文件夹", "Choose the folder for the notice history"), InitialDirectory = Directory.Exists(folder) ? folder : "" };
             if (dialog.ShowDialog(this) == true) { Change(s => s.NoticeHistoryFolder = dialog.FolderName); ShowPage(NoticesSettingsPage); }
         }));
         if (S.NoticeHistoryFolder.Length > 0)
@@ -352,16 +353,16 @@ public sealed partial class SettingsWindow
             var reset = ActionButton(Loc.T("默认位置", "Default"), () => { Change(s => s.NoticeHistoryFolder = ""); ShowPage(NoticesSettingsPage); });
             reset.Margin = new Thickness(8, 0, 0, 0); folderButtons.Children.Add(reset);
         }
-        var clear = ActionButton(Loc.T("清空最近通知", "Clear recent notices"), () => { center.Clear(); ShowPage(NoticesSettingsPage); });
+        var clear = ActionButton(Loc.T("清空通知历史", "Clear notice history"), () => { center.Clear(); ShowPage(NoticesSettingsPage); });
         var rows = new List<FrameworkElement>
         {
-            Toggle(Loc.T("在本机保存最近通知", "Keep recent notices on this PC"), S.NoticeHistory, value => { Change(s => s.NoticeHistory = value); ShowPage(NoticesSettingsPage); },
+            Toggle(Loc.T("在本机保存通知历史", "Keep notice history on this PC"), S.NoticeHistory, value => { Change(s => s.NoticeHistory = value); ShowPage(NoticesSettingsPage); },
                 help: Loc.T("保存时使用 Windows 为当前用户提供的加密，最多 500 条；关闭后只保留在内存中，重启即清空。不保存原始通知内容、附件或头像，诊断日志不记录标题和正文。",
                     "Saved with the encryption Windows provides for the current user, at most 500 notices; when off they are kept in memory only and are gone after a restart. Raw notification content, attachments and pictures are never saved, and diagnostic logs never contain titles or bodies.")),
             Row(Loc.T("保留时间", "Keep for"), retention),
-            Row(Loc.T("定期清空", "Clear automatically"), autoClear, TextLine(Loc.T("在保留时间之外，按所选频率清空整个最近通知列表。", "Besides the retention, empties the whole recent list on the chosen schedule."), 11, TextTertiary)),
+            Row(Loc.T("定期清空", "Clear automatically"), autoClear, TextLine(Loc.T("在保留时间之外，按所选频率清空整个通知历史列表。", "Besides the retention, empties the whole notice history on the chosen schedule."), 11, TextTertiary)),
             Row(Loc.T("保存位置", "Location"), folderButtons, where),
-            Row(Loc.T("最近通知", "Recent notices"), clear, TextLine(Loc.T($"{center.Hub.Notices.Count} 条 · 只清除 BrimDeck 中的记录，Windows 通知中心不受影响。", $"{center.Hub.Notices.Count} kept · clears BrimDeck's list only; Windows' notification center is not affected."), 11, TextTertiary))
+            Row(Loc.T("通知历史", "Notice history"), clear, TextLine(Loc.T($"{center.Hub.Notices.Count} 条 · 只清除 BrimDeck 中的记录，Windows 通知中心不受影响。", $"{center.Hub.Notices.Count} kept · clears BrimDeck's list only; Windows' notification center is not affected."), 11, TextTertiary))
         };
         Button Rebuild() => ActionButton(Loc.T("清空并重建", "Clear and start again"), () => { center.ResetHistory(); ShowPage(NoticesSettingsPage); });
         // The folder's own refusal (a link, another account's, open to others) says which; otherwise the file's state does.

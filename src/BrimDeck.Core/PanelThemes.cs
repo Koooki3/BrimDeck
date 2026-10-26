@@ -33,15 +33,16 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 public static partial class PanelThemes
 {
     public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
-    public const string GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", IslandHoliday = "island-holiday", PixelBlocks = "pixel-blocks";
-    public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2;
+    public const string GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2", PixelBlocks = "pixel-blocks";
+    public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2, ThumbContrast = 2;
 
     public static readonly IReadOnlyList<PanelThemeToken> Tokens =
     [
         new("surface", "面板底色", "Panel surface"),
         new("textPrimary", "主要文字", "Primary text", StrongTextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("textSecondary", "次要文字", "Secondary text", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
-        new("textTertiary", "辅助文字", "Tertiary text", GraphicContrast, PanelThemeBackdrop.SurfaceAndPopup),
+        // Tertiary text is small real text (the clock, "used", times, a notice's source), so it is held to the body-text minimum.
+        new("textTertiary", "辅助文字", "Tertiary text", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("accent", "强调色（键盘焦点、选中日期）", "Accent (keyboard focus, chosen dates)", GraphicContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("onAccent", "强调色上的文字（选中的日期、通知主按钮）", "Text on the accent (chosen dates, a notice's main button)", TextContrast, PanelThemeBackdrop.Accent),
         new("danger", "错误与暂停同步", "Errors and paused sync", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
@@ -62,7 +63,7 @@ public static partial class PanelThemes
         new("rangeFill", "日期范围底色", "Date range fill"),
         new("coverPlaceholder", "无封面占位", "Missing cover"),
         new("coverOutline", "封面描边", "Cover outline"),
-        new("scrollThumb", "滚动条", "Scroll bar"),
+        new("scrollThumb", "滚动条", "Scroll bar", ThumbContrast, PanelThemeBackdrop.Surface),
         new("rim", "边缘描线", "Rim"),
         new("shadow", "阴影或辉光", "Shadow or glow"),
         new("indicator", "指示条", "Indicator"),
@@ -112,7 +113,7 @@ public static partial class PanelThemes
     private const string ThemeResources = ".Themes.";
     // Dark and light first, then the ported editor themes, then the custom demo.
     // The base glass themes come right after dark and light: like them they are materials rather than palettes.
-    private static readonly string[] BuiltInOrder = [Dark, Light, GlassLight, GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, PixelBlocks, Demo];
+    private static readonly string[] BuiltInOrder = [Dark, Light, GlassLight, GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, IslandHoliday2, PixelBlocks, Demo];
     private static (string Id, string Resource)[]? _builtInIndex;
     private static (string Id, string Resource)[] BuiltInIndex => _builtInIndex ??= [.. typeof(PanelThemes).Assembly.GetManifestResourceNames()
         .Where(name => name.Contains(ThemeResources, StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))

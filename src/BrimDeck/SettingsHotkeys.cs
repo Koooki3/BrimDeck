@@ -55,8 +55,8 @@ public sealed partial class SettingsWindow
         {
             HotkeyKind.Hide => Loc.T("按下快捷键即可隐藏刘海、胶囊或指示条，再按一次恢复显示。", "Press the shortcut to hide the notch, capsule or indicator bar; press it again to show it."),
             HotkeyKind.Expand => Loc.T("按下快捷键即可展开面板，再按一次收起。", "Press the shortcut to expand the panel; press it again to collapse it."),
-            HotkeyKind.Notices => Loc.T("有提示时打开它的详情并可用键盘操作（Tab 切换、Enter 确认、Esc 关闭）；没有提示时打开最近通知。默认不设置，避免与其他程序冲突。",
-                "With a notice on screen, opens its details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise opens the recent notices. Unset by default, to avoid clashing with other programs."),
+            HotkeyKind.Notices => Loc.T("有提示时打开它的详情并可用键盘操作（Tab 切换、Enter 确认、Esc 关闭）；没有提示时打开通知历史。默认不设置，避免与其他程序冲突。",
+                "With a notice on screen, opens its details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise opens the notice history. Unset by default, to avoid clashing with other programs."),
             _ => Loc.T("按住修饰键再按方向键调整大小：展开时 ←/→ 改面板宽度、↑/↓ 改高度；收起时 ←/→ 改刘海、胶囊或指示条的宽度。按住可连续调整，范围与拖动边缘相同。录制时按下修饰键和任意一个方向键。",
                 "Hold the modifiers and press an arrow key to resize: open, ←/→ change the panel's width and ↑/↓ its height; collapsed, ←/→ change the notch, capsule or indicator bar's width. Hold a key to keep going; the limits are those of dragging an edge. To record, press the modifiers with any arrow key.")
         };

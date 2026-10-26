@@ -362,10 +362,19 @@ public partial class MainWindow
         FrameworkElement body;
         if (off)
         {
+            // No readings yet: what the state is, why, and a way to sync now. Before the first reading the label and the detail
+            // say the same, so they become what is missing and why.
+            bool first = snapshot.Status == snapshot.StatusLabel;
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            status.Children.Add(UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold));
-            var detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary); detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.MaxHeight = 34; detail.TextTrimming = TextTrimming.CharacterEllipsis;
-            status.Children.Add(detail); body = status;
+            status.Children.Add(UI.Fixed(first ? Loc.T("还没有读数", "No reading yet") : snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold));
+            var detail = UI.Text(first ? Loc.T("首次同步中，完成后自动显示。", "Syncing for the first time; it shows here once done.") : snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
+            detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.MaxHeight = 34; detail.TextTrimming = TextTrimming.CharacterEllipsis;
+            status.Children.Add(detail);
+            var sync = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2), Height = 24,
+                HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-6, 4, 0, 0), Content = Loc.T("立即同步", "Sync now") };
+            AutomationProperties.SetName(sync, Loc.T("立即同步用量", "Sync usage now"));
+            sync.Click += (_, _) => _ = RefreshAsync();
+            status.Children.Add(sync); body = status;
         }
         else if (wide)
         {

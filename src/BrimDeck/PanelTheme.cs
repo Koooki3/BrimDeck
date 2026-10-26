@@ -18,6 +18,9 @@ internal static class PanelTheme
     public static bool KeptLastGood { get; private set; }
     // Which look the theme on screen shows (PanelThemeFile.Night, PanelThemeFile.Dusk).
     public static DaylightLook Look { get; private set; }
+    // Whether Windows' high contrast is shown: the system's colors on the whole panel, whatever theme is chosen
+    // (PanelThemes.HighContrast).
+    public static bool HighContrast { get; private set; }
     // When the theme on screen changes look by the clock next, or null for a theme without a night look or one that follows
     // Windows' dark and light mode.
     public static DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
@@ -71,7 +74,8 @@ internal static class PanelTheme
     {
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
         // New hours or a new mode for the day and night looks count as a change too.
-        if (!reload && !systemChanged && _loaded && chosen == _chosen && LookOf(ShownTheme.File, settings) == Look) return false;
+        bool high = SystemParameters.HighContrast;
+        if (!reload && !systemChanged && _loaded && chosen == _chosen && LookOf(ShownTheme.File, settings) == Look && high == HighContrast) return false;
         if (reload || !_loaded) Reload();
         _chosen = chosen;
         var theme = Find(chosen);
@@ -84,9 +88,10 @@ internal static class PanelTheme
         // A theme with a night look shows it by the local clock or by Windows' mode (PanelThemes.LookAt).
         var look = LookOf(theme.File, settings);
         // The same theme as now (the common case for "system") needs no new palette.
-        if (!reload && ReferenceEquals(theme, ShownTheme) && look == Look && _signature.Length > 0) return false;
-        ShownTheme = theme; Look = look;
-        var palette = PanelThemes.Resolve(theme, look);
+        // Under high contrast the system's colors may have changed with the same theme chosen, so its palette is always made anew.
+        if (!reload && !high && !HighContrast && ReferenceEquals(theme, ShownTheme) && look == Look && _signature.Length > 0) return false;
+        ShownTheme = theme; Look = look; HighContrast = high;
+        var palette = high ? SystemPalette() : PanelThemes.Resolve(theme, look);
         var signature = Signature(theme, palette);
         if (signature == _signature) return false;
         // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade). Moving into or
@@ -97,6 +102,13 @@ internal static class PanelTheme
         _readable.Clear(); _readableColors.Clear();
         Publish(Application.Current?.Resources);
         return true;
+    }
+
+    private static PanelPalette SystemPalette()
+    {
+        static ThemeColor C(Color color) => new(color.A, color.R, color.G, color.B);
+        return PanelThemes.HighContrast(C(SystemColors.WindowColor), C(SystemColors.WindowTextColor), C(SystemColors.GrayTextColor),
+            C(SystemColors.HighlightColor), C(SystemColors.HighlightTextColor));
     }
 
     // For the previews (tests/BrimDeck.FxPreview): makes a palette current without settings or files, as Use would.

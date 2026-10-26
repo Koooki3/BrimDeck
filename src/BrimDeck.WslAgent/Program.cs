@@ -26,7 +26,7 @@ internal static class Program
         }
         var command = NotifyCommandLine.Parse(args is ["notify", .. var rest] ? rest : args);
         return await NotifyCli.RunAsync(command, new NotifySender(Version, SendAsync, Start,
-            Unreachable: "BrimDeck could not be reached (is it running, with this distribution switched on under dynamic notices?).",
+            Unreachable: "BrimDeck could not be reached (is it running, with this distribution switched on under live notices?).",
             NotReceiving: "BrimDeck is not receiving notices from this distribution."));
     }
 

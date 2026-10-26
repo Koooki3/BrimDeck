@@ -18,6 +18,8 @@ namespace BrimDeck;
 public sealed partial class SettingsWindow
 {
     internal const int ThemePage = 8, MonitorSettingsPage = 9;
+    // The players page, which the music page opens when nothing is playing.
+    internal const int PlayersPage = 6;
     private FileSystemWatcher? _themeWatcher;
     private DispatcherTimer? _themeReload;
     // The themes folder as last read (file names, sizes and times), so a watcher event that changed nothing reloads nothing.

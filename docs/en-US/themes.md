@@ -5,7 +5,7 @@ The Notch, Capsule and Indicator, the quota notice, the expanded panel and its p
 | Kind | Themes |
 | --- | --- |
 | Basics | System, Dark (the default: the original pure black look), Light, Liquid Glass (light), Liquid Glass (dark) |
-| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
+| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Island Holiday 2, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
 | Custom | The theme files in the themes folder, which can be created, edited and deleted in settings |
 
 Each theme remembers the theme, warning and critical colors of the app columns and the clock's style and color you change while using it: they are saved when you switch to another theme and come back when you return. A theme chosen for the first time uses its own colors and suggested clock. Restoring defaults in "Quotas and usage" or "Collapsed view" restores the current theme's defaults.
@@ -57,7 +57,7 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 | `surface` | The notch, capsule and expanded panel; always opaque |
 | `textPrimary` | Titles and figures (7:1) |
 | `textSecondary` | Labels (4.5:1) |
-| `textTertiary` | Reset times and notes (3:1) |
+| `textTertiary` | Reset times, notes and other small text (4.5:1) |
 | `accent` / `onAccent` | Keyboard focus and chosen dates (3:1) / text on them, such as a notice's main button (4.5:1) |
 | `danger` | Errors and paused sync (4.5:1) |
 | `liked` | A liked song (3:1) |
@@ -65,7 +65,7 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 | `equalizer` | The equalizer when it does not follow the cover (3:1) |
 | `hairline` `track` `ringTrack` `fill` `fillSelected` `hover` `pressed` `outline` | Dividers, tracks, joined switches, hover and pressed states, outlines |
 | `popup` `popupBorder` `input` `rangeFill` | Menus and pop-ups, date fields and date ranges |
-| `coverPlaceholder` `coverOutline` `scrollThumb` | A missing cover, the cover outline, scroll bars |
+| `coverPlaceholder` `coverOutline` `scrollThumb` | A missing cover, the cover outline, scroll bars (the thumb 2:1 on the surface) |
 | `rim` `shadow` | The line along the surface's inner edge; the collapsed shadow (a bright color with no depth is a glow) |
 | `indicator` `indicatorProgress` | The Indicator and the playback progress on it (2:1) |
 | `switchFill` `seekRail` `rowDivider` `rowHover` | The toolbar page switch, the seek bar track, model detail row dividers and hover |
@@ -74,7 +74,7 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 
 ### App colors (apps)
 
-The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `kimi`, `manual` (every source entered by hand), `other`, and `warning` and `critical`. A color chosen for a column in "Quotas and usage" takes precedence.
+The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `kimi`, `manual` (every source entered by hand), `other`, and `warning` and `critical` (these two are also text, so 4.5:1). A color chosen for a column in "Quotas and usage" takes precedence.
 
 ### Clock
 
@@ -186,14 +186,16 @@ The demo theme was made in these five steps.
 1. **Collect references**: frames of the work or brand; note the light and dark, the main and accent colors, and the shapes that recur.
 2. **Assign roles**: the surface (the largest area), three text levels, the accent, the semantic colors (warning, critical, error) and the decoration (rim, shadow, gradient, texture).
 3. **Surface and text first**: the surface sets every contrast; space the text levels at 7 : 4.5 : 3.
-4. **Then accents and app colors**: app colors must be told apart and reach 3:1 on the surface; warning and critical should read as yellow and red.
+4. **Then accents and app colors**: app colors must be told apart and reach 3:1 on the surface (warning and critical, which are also text, 4.5:1); warning and critical should read as yellow and red.
 5. **Check**: look at the collapsed and expanded panel, the notice and the pop-ups, and make sure "Readability" is empty or acceptable; otherwise go back to step 3.
 
 ## The newer themes
 
 **Liquid Glass (light / dark)**: after Apple's Liquid Glass, liquid-glass-react and the "transparent island" concept, and the clear mode leaked for Xiaomi HyperOS 4. The desktop under the island is blurred (see "Glass" above). The light glass is a milky tint (`#C2F7F9FC`), the dark one graphite (`#C8121419`), just dense enough for body text to keep 7:1 over a black or a white desktop. The specular rim is brightest at the top left and catches again at the bottom right, and travels around the edge in about half a minute (`drift`); the inner edge light makes the edge read as thick glass. Hover is `lens`, press `jelly` (after the jelly press of xiaofangstudio/liquid-glass-web: squashed 1.05 x 0.93, shaded only at the bottom, springing back); no particles.
 
-**Island Holiday**: a postcard of an island. By day, a clear sky (`#A8E1F8`) fading into the warm haze of the horizon, and below a horizon about two thirds down a turquoise lagoon (`decor.horizon`) with a line of sunlight along it, the soft net of light a sunlit sea throws (`decor.caustics`) and a palm frond's shade in the open panel's corner (`decor.palm`); deep-sea text, a lagoon accent, a sunburnt coral clock in the rounded Fredoka face (the `rounded` style), a mango Indicator, hibiscus for liked songs and a shore rim (lagoon, sky, sand, coral). At dusk, the hour before night, the sky turns peach over a sea warmed by the low sun, with a gold horizon and a sunset rim. By night, a deep ocean navy (`#001E3C`) over a dark teal sea under a horizon lit in moon gold, moonlight playing faintly on the water, a lantern-gold clock and a soft glow under the island. The small collapsed island keeps the plain sky, so the horizon never crosses the clock. The rim breathes like a swell and its colors flow like water; a glint of sun crosses now and then by day, a rarer moonlight by night. A small wave rolls in along a hovered control; a press spreads a ring of water from the control (`splash`), and a completed one lets bubbles rise by day (`bubble`) and glowing plankton at night (`firefly`).
+**Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock and a shoreline rim (turquoise, sky, sand). By night, a moonlit sea from navy into teal, a lantern-gold clock and a soft glow under the island. The rim breathes like a swell and its colors flow like water; a glint of sun crosses now and then by day, a rarer moonlight by night. A small wave rolls in along a hovered control; a press leaves sun glints by day (`sparkle` + `star`) and lets glowing plankton rise at night (`ember` + `firefly`).
+
+**Island Holiday 2**: the same island as a postcard, kept alongside the first. By day, a clear sky (`#A8E1F8`) fading into the warm haze of the horizon, and below a horizon about two thirds down a turquoise lagoon (`decor.horizon`) with a line of sunlight along it, the soft net of light a sunlit sea throws (`decor.caustics`) and a palm frond's shade in the open panel's corner (`decor.palm`); deep-sea text, a lagoon accent, a sunburnt coral clock in the rounded Fredoka face (the `rounded` style), a mango Indicator, hibiscus for liked songs and a shore rim (lagoon, sky, sand, coral). At dusk, the hour before night, the sky turns peach over a sea warmed by the low sun, with a gold horizon and a sunset rim. By night, a deep ocean navy (`#001E3C`) over a dark teal sea under a horizon lit in moon gold, moonlight playing faintly on the water, a lantern-gold clock and a soft glow under the island. The small collapsed island keeps the plain sky, so the horizon never crosses the clock. The rim breathes like a swell and its colors flow like water; a glint of sun crosses now and then by day, a rarer moonlight by night. A small wave rolls in along a hovered control; a press spreads a ring of water from the control (`splash`), and a completed one lets bubbles rise by day (`bubble`) and glowing plankton at night (`firefly`).
 
 **Pixel Blocks**: an unofficial pixel-art look inspired by block sandbox games, using no artwork, fonts, textures or logos from any game: everything is drawn from colors and squares. A deep slate surface with a 5% block grain (`texture`), 2 DIP stepped corners (`pixel`), a bevel rim lit at the top left and shaded at the bottom right, and a hard shadow with no blur; the text on the island and in the panel's pop-ups is drawn unsmoothed and the panel's rounded corners become square. Chat-style colors: white text, a yellow block clock (the `pixel` clock style), a green accent and a green experience-bar indicator; violet menus with a violet frame. The settings window follows Windows' light or dark mode, not the panel theme. Everything moves in four hard steps: `slot` on hover, `bevel` on press, square particles after; no ambient light, so it costs nothing while idle.
 

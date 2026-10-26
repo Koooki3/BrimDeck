@@ -87,11 +87,11 @@ You can choose the quota providers and set the quota and usage source of each co
 
 Works with players that use Windows media controls, with extra support for some players. See [Supported players](docs/en-US/music-players.md).
 
-### Dynamic notices
+### Live notices
 
 - When a notification arrives, the notch, capsule or indicator grows out of its place with the application's icon, title and summary; hover for the details, open the application or use the notice's buttons, and it returns to its shape. Notices take the panel theme.
 - Receives Windows app notifications, desktop notifications in WSL (off by default, per distribution) and notices sent with `brim-notify`, such as `brim-notify run -- dotnet test`, which reports the result when the command ends.
-- Never takes the focus or interrupts the open panel; nothing pops up while locked, in full screen, in a focus session or presenting, with one summary afterwards; recent notices are kept encrypted on this PC for 24 hours, which can be switched off. Off by default; see [Dynamic notices](docs/en-US/notices.md).
+- Never takes the focus or interrupts the open panel; nothing pops up while locked, in full screen, in a focus session or presenting, with one summary afterwards; notice history is kept encrypted on this PC for 24 hours, which can be switched off. Off by default; see [Live notices](docs/en-US/notices.md).
 
 ### System monitor
 
@@ -109,7 +109,7 @@ The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT
 
 - Shows the battery of the connected wireless keyboards, mice, headphones, controllers and pens; AirPods show each bud and the case. A low battery changes color and carries a mark; a charging one shows a bolt.
 - Reads the Bluetooth battery Windows reads (as Windows Settings shows it), Logitech Unifying, Bolt and Lightspeed receivers, Razer wireless mice, SteelSeries and HyperX wireless headsets, 2.4 GHz mice by ATK, VXE, VGN, MCHOSE and others, and Xbox and PlayStation controllers. Read only: nothing on the devices or in Windows is changed.
-- The notch or capsule can show the device with the lowest charge; with dynamic notices on, a battery falling below the threshold (15% by default) notices once. Devices can be switched off one by one under Settings › Devices.
+- The notch or capsule can show the device with the lowest charge; with live notices on, a battery falling below the threshold (15% by default) notices once. Devices can be switched off one by one under Settings › Devices.
 - Parts of the protocols are ported from [device-battery-viewer](https://github.com/CharlesGool/device-battery-viewer), [razer-battery-report](https://github.com/xzeldon/razer-battery-report), [ATK-A9-Battery](https://github.com/Lkig/ATK-A9-Battery), [atkctl](https://github.com/cobanov/atkctl) and [InphicBatteryTray](https://github.com/Tan-TanZi/InphicBatteryTray) (all MIT License; see ThirdPartyNotices.txt).
 
 ### Panel themes

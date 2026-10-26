@@ -116,6 +116,9 @@ internal static class ThemeCoverageTests
         // "system" resolves to one of these; both of its sides are covered above, but it is named so a change to Find shows here.
         yield return ("system-dark", PanelThemes.Resolve(PanelThemes.Find(PanelThemes.SystemId, true, [])));
         yield return ("system-light", PanelThemes.Resolve(PanelThemes.Find(PanelThemes.SystemId, false, [])));
+        // Windows' high contrast in its black and white schemes, as the panel shows it whatever theme is chosen.
+        yield return ("high-contrast-black", PanelThemes.HighContrast(ThemeColor.Parse("#000000"), ThemeColor.Parse("#FFFFFF"), ThemeColor.Parse("#3FF23F"), ThemeColor.Parse("#1AEBFF"), ThemeColor.Parse("#000000")));
+        yield return ("high-contrast-white", PanelThemes.HighContrast(ThemeColor.Parse("#FFFFFF"), ThemeColor.Parse("#000000"), ThemeColor.Parse("#600000"), ThemeColor.Parse("#37006E"), ThemeColor.Parse("#FFFFFF")));
     }
 
     // A backdrop as drawn: its layers composited bottom up over the bottom layer, which is opaque. A surface with a gradient
@@ -153,6 +156,28 @@ internal static class ThemeCoverageTests
                 if (ratio < pair.Minimum - .005) failures.Add($"{id}: {pair.Where} {ratio:0.00} < {pair.Minimum}");
             }
         check("Every theme keeps contrast on every pair the panel draws" + (failures.Count > 0 ? ": " + string.Join("; ", failures) : ""), failures.Count == 0);
+        // The text roles, the warning and critical colors (also text) and the scroll thumb, each at its worst over everything the
+        // surface can show (gradient stops, texture squares, glass extremes, motifs) and, for text, the pop-ups.
+        var roles = new List<string>();
+        foreach (var (id, palette) in palettes)
+        {
+            var popup = palette["popup"].Over(palette.Surface);
+            foreach (var (name, color, minimum, backgrounds) in new (string, ThemeColor, double, IReadOnlyList<ThemeColor>)[]
+            {
+                ("textPrimary", palette["textPrimary"], PanelThemes.StrongTextContrast, [.. palette.SurfaceStops, popup]),
+                ("textSecondary", palette["textSecondary"], PanelThemes.TextContrast, [.. palette.SurfaceStops, popup]),
+                ("textTertiary", palette["textTertiary"], PanelThemes.TextContrast, [.. palette.SurfaceStops, popup]),
+                ("warning", palette.Apps["warning"], PanelThemes.TextContrast, palette.SurfaceStops),
+                ("critical", palette.Apps["critical"], PanelThemes.TextContrast, palette.SurfaceStops),
+                ("scrollThumb", palette["scrollThumb"], PanelThemes.ThumbContrast, palette.SurfaceStops)
+            })
+            {
+                double ratio = color.MinimumContrast(backgrounds);
+                if (report) Console.WriteLine($"  {id,-22} {"role " + name,-44} {ratio,5:0.00} (min {minimum})");
+                if (ratio < minimum - .005) roles.Add($"{id}: {name} {ratio:0.00} < {minimum}");
+            }
+        }
+        check("Every theme's text roles, warning and critical reach 4.5:1 (primary 7:1) and its scroll thumb 2:1" + (roles.Count > 0 ? ": " + string.Join("; ", roles) : ""), roles.Count == 0);
         SettingsPalette(check, report);
         if (report)
             foreach (var (id, palette) in palettes)

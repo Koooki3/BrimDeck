@@ -9,7 +9,7 @@
         <SolidColorBrush x:Key="PanelSurface" Color="#000000"/>
         <SolidColorBrush x:Key="PanelPrimary" Color="#F5F5F7"/>
         <SolidColorBrush x:Key="PanelSecondary" Color="#9EEBEBF5"/>
-        <SolidColorBrush x:Key="PanelTertiary" Color="#61EBEBF5"/>
+        <SolidColorBrush x:Key="PanelTertiary" Color="#8CEBEBF5"/>
         <SolidColorBrush x:Key="PanelAccent" Color="#0A84FF"/>
         <SolidColorBrush x:Key="PanelTrack" Color="#1FFFFFFF"/>
         <SolidColorBrush x:Key="PanelRingTrack" Color="#29FFFFFF"/>
@@ -153,7 +153,19 @@
         <ControlTemplate TargetType="ScrollBar">
           <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="Vertical" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}" ViewportSize="{TemplateBinding ViewportSize}">
             <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
-            <Track.Thumb><Thumb MinHeight="22"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="{DynamicResource PanelScrollThumb}" CornerRadius="{DynamicResource PanelR3}" Margin="1,2"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+            <!-- At rest a thin, faint handle that keeps out of the text's way; under the pointer, or while dragged, it widens and
+                 strengthens. The bar keeps its width, so nothing moves when the handle changes. -->
+            <Track.Thumb><Thumb MinHeight="22"><Thumb.Template><ControlTemplate TargetType="Thumb">
+              <Border Background="Transparent">
+                <Border x:Name="Handle" Width="3" HorizontalAlignment="Right" Background="{DynamicResource PanelScrollThumb}" CornerRadius="{DynamicResource PanelR3}" Margin="0,2,1,2" Opacity="0.55"/>
+              </Border>
+              <ControlTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Value="True">
+                  <Setter TargetName="Handle" Property="Width" Value="6"/><Setter TargetName="Handle" Property="Opacity" Value="1"/>
+                </DataTrigger>
+                <Trigger Property="IsDragging" Value="True"><Setter TargetName="Handle" Property="Width" Value="6"/><Setter TargetName="Handle" Property="Opacity" Value="1"/></Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
             <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
           </Track>
         </ControlTemplate>

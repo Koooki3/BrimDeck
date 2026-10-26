@@ -647,8 +647,8 @@ internal static class Program
         ("upgrade-rain", """{ "base": "cyberpunk-edgerunners", "motion": { "particles": "rain", "trail": 0.4, "highlight": "#B0D0F0" } }"""),
         // The built-in theme itself, as it ships.
         ("cyberpunk-edgerunners", ""),
-        ("island-holiday", ""),
-        ("island-holiday-night", "night"),
+        ("island-holiday-2", ""),
+        ("island-holiday-2-night", "night"),
     ];
     // --step: frames this many seconds apart from the press to the end of what it leaves (0: the strip's own beats).
     private static double _step;

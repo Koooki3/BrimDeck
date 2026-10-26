@@ -72,7 +72,7 @@ public partial class MainWindow
     // (a resize drag does that every frame), so like the readings' StripPresence they belong to the panel and outlive each row.
     private readonly EqualizerBars _compactBars = new();
     // The collapsed title scrolls its laps once per line (MarqueeScroll.Limited); a row built again for the same line keeps it
-    // resting, until the line changes or the pointer comes over the island (ReplayCompactTitle).
+    // resting, until the line changes or the panel closes (ReplayCompactTitle).
     private readonly MarqueeScroll _compactScroll = new() { Limited = true };
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
@@ -505,10 +505,14 @@ public partial class MainWindow
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = Math.Max(200, w - 60) };
             var icon = MusicVisuals.Icon("music", 26); icon.Margin = new Thickness(0, 0, 0, 8); empty.Children.Add(icon);
             empty.Children.Add(UI.Fixed(Loc.T("没有正在播放的媒体", "Nothing is playing"), 14, 22, UI.Secondary));
-            if (_media?.Error is { } error)
-            {
-                var hint = UI.Line(error, 11.5, UI.Tertiary); hint.TextWrapping = TextWrapping.Wrap; hint.TextAlignment = TextAlignment.Center; empty.Children.Add(hint);
-            }
+            // Why the page is empty, and where to go next: the players BrimDeck follows are chosen in the settings.
+            var hint = UI.Line(_media?.Error ?? Loc.T("打开网易云音乐、QQ 音乐、Spotify 等播放器并开始播放后，会在这里显示。", "Start playing in NetEase Cloud Music, QQ Music, Spotify or another player and it shows here."),
+                11.5, UI.Tertiary);
+            hint.TextWrapping = TextWrapping.Wrap; hint.TextAlignment = TextAlignment.Center; empty.Children.Add(hint);
+            var players = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2), Height = 26,
+                HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0), Content = Loc.T("选择播放器", "Choose players") };
+            players.Click += (_, _) => _app.OpenSettings(SettingsWindow.PlayersPage);
+            empty.Children.Add(players);
             MusicContent.Children.Add(empty); _handover.Release(empty, motion); return;
         }
         var body = new Grid();
@@ -1012,7 +1016,7 @@ public partial class MainWindow
         bool needed = IsVisible && !IsSuppressed && !ScreenOff && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
         bool bars = animations && MusicAudioActive && musicVisible;
-        _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? 33 : 250);
+        _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? BarsMs : 250);
         // While the collapsed title glides, WPF draws a frame every refresh for it; the bars move on those frames (MusicFrame), so
         // the timer's own frames, which fell between them, are not drawn as well. In its rests, and when it does not scroll, the
         // timer runs as before.
@@ -1029,8 +1033,13 @@ public partial class MainWindow
         }
         if (_expanded || EffectiveStyle != CompactStyle.Line || !Settings.MusicIndicatorProgress || _mediaTrack is not { HasTimeline: true, State: not MediaState.Stopped }) MusicIndicator.Visibility = Visibility.Collapsed;
     }
-    // The pointer came over the island: a collapsed title that has rested scrolls its laps again.
+    // The panel closed: a collapsed title that has rested scrolls its laps again, as the row comes back into view. (Reaching
+    // the island opens the panel, so the collapsed title is not seen while the pointer is on it.)
     private void ReplayCompactTitle() { if (_compactMarquee is not null) _compactMarquee.Replay(); else _compactScroll.Replay(); }
+    // How often the bars move: 30 times a second on the music page; 20 on the collapsed row, where each move redraws the whole
+    // layered island and the bars are a few device pixels tall (measured: the row's bars and title cost about 50 ms of CPU a
+    // second while music played, the largest part of the idle panel).
+    private int BarsMs => _expanded ? 33 : 50;
     private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
     // The bars on the display's frames (Motion), keyed by an element of their own so a row built again never adds a second step.
     // _musicFrameAt is the frame time (Motion.FrameTime) the bars last moved at.
@@ -1045,7 +1054,7 @@ public partial class MainWindow
         if (!_barsOnFrames) return false;
         if (!TitleGliding) { _barsOnFrames = false; UpdateMusicTimer(); return _barsOnFrames; }
         double time = Motion.FrameTime;
-        if (time - _musicFrameAt >= .033 - .004 || time < _musicFrameAt) { _musicFrameAt = time; TickMusic(); }
+        if (time - _musicFrameAt >= BarsMs / 1000d - .004 || time < _musicFrameAt) { _musicFrameAt = time; TickMusic(); }
         return _barsOnFrames;
     }
     private void UpdateLyricScrolling() => _lyricCurrent?.SetScrolling(MusicMotion && MusicAudioActive && IsVisible && !IsSuppressed && _expanded && IsMusicPage);
