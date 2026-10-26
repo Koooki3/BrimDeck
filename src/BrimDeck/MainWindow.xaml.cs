@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     // Checks run every 40 ms near the surface. Farther away the interval grows with the distance, assuming the cursor
     // approaches at no more than 10 physical pixels per millisecond, so it still arrives within one short interval.
     private const double TrackNear = 40, TrackFar = 160, ApproachSpeed = 10;
+    // How far into the opening the content may start over liquid glass: three frames, the glass's lag and its drawing.
+    private const double LiquidLeadMs = 50;
     private readonly WindowsHost _host;
     // Null for the main panel. The panels of other monitors take their usage data from it instead of reading their own.
     private readonly MainWindow? _lead;
@@ -731,6 +733,9 @@ public partial class MainWindow : Window
         bool bounce = !booting && expanded && !reshaping && !keyboard && duration > 0 && HasRoomToBounce(width, height, left, gap);
         IEasingFunction easeOut = Soft.Out, easeInOut = Soft.InOut, corners = morphing ? Soft.Follow : reshaping ? Soft.InOut : expanded || booting ? Soft.Out : Soft.Drawer;
         IEasingFunction settle = bounce ? Soft.Bounce : corners;
+        // Over liquid glass the content never leads the glass: the glass follows the island's shape a couple of frames late
+        // (GlassBackdrop.Lag), so opening, the content starts no earlier than LiquidLeadMs in (live check 10-26, LG-02).
+        if (expanded && duration > 0 && LiquidTheme.Shown(_glass)) content = content with { Start = Math.Max(content.Start, Math.Min(.5, LiquidLeadMs / duration)) };
         Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         // motion-review F13: what leaves eases out as what arrives does; InOut is for what changes in place.
         Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, easeOut);

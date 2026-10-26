@@ -38,9 +38,18 @@ public partial class MainWindow
     private Point _contentAreaMiddle;
     private (double X, double Y) _contentAreaScale;
     private bool _contentAreaStale = true;
+    // Live check 10-26 (LG-02): while the panel opens or closes, the row last shown is kept (the glass crossfades its cover from
+    // the row's to the text regions' with the opening, Liquid.hlsl), so the glass between never goes without one.
+    private Rect? _rowShown;
     internal Rect? GlassContentArea()
     {
-        if (_expanded || Compact.Visibility != Visibility.Visible || Compact.Opacity < .01 || !Island.IsVisible) return null;
+        if (_expanded || Compact.Visibility != Visibility.Visible || Compact.Opacity < .01 || !Island.IsVisible)
+            return Island.IsVisible && GlassOpenness() < .999 ? _rowShown : null;
+        return _rowShown = RowNow();
+    }
+
+    private Rect? RowNow()
+    {
         double sx = CompactScale.ScaleX, sy = CompactScale.ScaleY;
         if (_contentAreaStale || !(Math.Abs(_contentAreaScale.X) > .01 && Math.Abs(_contentAreaScale.Y) > .01))
         {
@@ -115,7 +124,10 @@ public partial class MainWindow
 
         void Leaves(DependencyObject node)
         {
-            if (node is UIElement { IsVisible: false } or UIElement { Opacity: < .01 }) return;
+            // What is laid out counts, whatever its opacity now: the content fades in as the panel opens (and out as pages
+            // change), and opacity changes no layout, so regions skipped while faded were never walked again (live check 10-26,
+            // LG-01/02: the light panel stood uncovered at rest, grey blotches behind its text, and dark while it opened).
+            if (node is UIElement { IsVisible: false }) return;
             int count = VisualTreeHelper.GetChildrenCount(node);
             if (GlassRegionsWhole)
             {
