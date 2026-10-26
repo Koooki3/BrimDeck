@@ -143,7 +143,7 @@ internal sealed class IslandDecor
         return new GeometryDrawing(fill, null, geometry);
     }
 
-    // HUD marks: a 45-degree cut across the top-right and bottom-left corners, each led in by a short straight run along the
+    // HUD marks: a 45-degree cut across the top-right (or bottom-right) and bottom-left corners, each led in by a short straight run along the
     // edge, and two small hexagons beside each cut, as on the heads-up displays the theme borrows from. One DIP lines.
     private static Drawing Hud(Color color, double chamfer, double w, double h, CornerRadius corners)
     {
@@ -170,8 +170,10 @@ internal sealed class IslandDecor
                     Hexagon(g, centre, 2.4);
                 }
             }
-            // Only corners that are drawn round; a square corner (the notch's top) is the screen's edge.
+            // Only corners that are drawn round; a square corner (the notch's top) is the screen's edge, so an island hanging from
+            // it takes the second cut at its bottom-right instead.
             if (corners.TopRight > 2) Corner(new Point(w, 0), new Vector(1, 0), new Vector(0, 1), corners.TopRight);
+            else if (corners.BottomRight > 2) Corner(new Point(w, h), new Vector(1, 0), new Vector(0, -1), corners.BottomRight);
             if (corners.BottomLeft > 2) Corner(new Point(0, h), new Vector(-1, 0), new Vector(0, -1), corners.BottomLeft);
         }
         geometry.Freeze();

@@ -124,7 +124,7 @@ internal static class PanelThemeTests
         }
         var demo = BuiltIn(PanelThemes.Demo);
         check("The demo theme is listed with the extensions, leaving the custom section to the user", PanelThemes.BuiltIn(PanelThemes.Demo)!.Kind == PanelThemeKind.Extension);
-        check("The demo theme carries its effects", demo.HasOverlay && demo.Effects.RimGradient.Count == 3 && demo.Effects.ShadowDepth == 0 && demo.Effects.Scanlines > 0);
+        check("The demo theme carries its effects", demo.HasOverlay && demo.Effects.RimGradient.Count == 4 && demo.Effects.ShadowDepth == 0 && demo.Effects.Scanlines > 0 && demo.Effects.Decor is { Hud: not null });
         check("System follows the Windows app theme", PanelThemes.Find("system", true, []).Id == "dark" && PanelThemes.Find("SYSTEM", false, []).Id == "light");
         check("An unknown theme shows as dark", PanelThemes.Find("gone", false, []).Id == "dark");
 
