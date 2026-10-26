@@ -15,10 +15,13 @@ namespace BrimDeck;
 internal sealed class AmbientGlow : IMotionClient
 {
     // The collapsed island ticks slowest: the light is slow, and every changed frame redraws the layered window.
-    private const int CollapsedMs = 100, OpenMs = 40, SweepMs = 33;
+    // Collapsed, every changed frame redraws the whole layered island, and the light's own rhythm dominated the idle panel: 10
+    // frames a second, 30 while a scan line passed (2.4 s in every 16), about 13 a second on average and 20 ms of CPU a second
+    // (measured, collapsed cyberpunk island). The faint scan line and the slow drift lose nothing at 15 and 5 a second there.
+    private const int CollapsedMs = 200, OpenMs = 40, SweepMs = 33, CollapsedSweepMs = 66;
     // A change is drawn only once it shows: the drift and the scan line once they have moved this many device pixels, the
-    // breathing once the rim's opacity has changed by one step of eight bits.
-    private const double MinPixels = .75, MinOpacity = 1 / 255d;
+    // breathing once the rim's opacity has changed by one step of eight bits (two on the collapsed island).
+    private const double MinPixels = .75, MinOpacity = 1 / 255d, CollapsedMinOpacity = 2 / 255d;
     private readonly IslandBorder _island;
     private readonly Func<MotionConditions> _conditions;
     private readonly Func<bool> _open;
@@ -125,12 +128,14 @@ internal sealed class AmbientGlow : IMotionClient
         // in 1.3 heights of the island.
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
         double width = Math.Max(1, _island.ActualWidth * scale), height = Math.Max(1, _island.ActualHeight * scale);
-        if (Math.Abs(frame.Rim - _rimShown) >= MinOpacity) _rim.Opacity = _rimShown = frame.Rim;
+        // The small collapsed island takes two steps of opacity at a time: a single one does not show there, yet cost a frame.
+        double step = _open() ? MinOpacity : CollapsedMinOpacity;
+        if (Math.Abs(frame.Rim - _rimShown) >= step) _rim.Opacity = _rimShown = frame.Rim;
         if (Math.Abs(frame.Drift - _driftShown) * width >= MinPixels) _drift.X = _driftShown = frame.Drift;
         if (frame.Sweep >= 0)
         {
             if (Math.Abs(frame.Sweep - _sweepShown) * 1.3 * height >= MinPixels) { _sweepShown = frame.Sweep; _sweepShift.Y = -.65 + 1.3 * frame.Sweep; }
-            if (Math.Abs(frame.SweepOpacity - _sweepOpacityShown) >= MinOpacity) _sweep.Opacity = _sweepOpacityShown = frame.SweepOpacity;
+            if (Math.Abs(frame.SweepOpacity - _sweepOpacityShown) >= step) _sweep.Opacity = _sweepOpacityShown = frame.SweepOpacity;
         }
         else if (_sweepShown >= 0) { _sweepShown = -1; _sweepOpacityShown = 0; _sweep.Opacity = 0; }
         return Interval(frame.Sweep);
@@ -143,5 +148,5 @@ internal sealed class AmbientGlow : IMotionClient
     private bool HeldForBlur => _open() && GlassBackdrop.Available || _liquid();
 
     // Slow light needs few frames: fewer still on the small collapsed island, a few more while a scan line moves.
-    private int Interval(double sweep) => sweep >= 0 ? SweepMs : _open() ? OpenMs : CollapsedMs;
+    private int Interval(double sweep) => _open() ? sweep >= 0 ? SweepMs : OpenMs : sweep >= 0 ? CollapsedSweepMs : CollapsedMs;
 }
