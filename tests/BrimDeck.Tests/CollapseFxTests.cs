@@ -155,10 +155,10 @@ internal static class CollapseFxTests
                 {
                     if (canvas[y * w + x] != white) continue;
                     foamed = true;
-                    // A foam pixel lies within its edge width of a pixel that has dissolved.
+                    // A foam pixel's block touches a block that has dissolved.
                     bool near = false;
-                    for (int dy = -foam.Edge; dy <= foam.Edge && !near; dy++)
-                        for (int dx = -foam.Edge; dx <= foam.Edge && !near; dx++)
+                    for (int dy = 1 - 2 * foam.Edge; dy < 2 * foam.Edge && !near; dy++)
+                        for (int dx = 1 - 2 * foam.Edge; dx < 2 * foam.Edge && !near; dx++)
                         {
                             int xx = x + dx, yy = y + dy;
                             near = xx >= 0 && yy >= 0 && xx < w && yy < h && (p - foam.StartOf(xx, yy)) / FoamCollapse.LifeSpan >= 1;

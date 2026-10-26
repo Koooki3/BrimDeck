@@ -179,10 +179,11 @@ public sealed class GlitchCollapse
     }
 }
 
-// The foam dissolve on one snapshot, drawn in place (the canvas is the snapshot's size).
+// The foam dissolve on one snapshot, drawn in place (the canvas is the snapshot's size). As in the original, the field is
+// worked out per block, here one DIP square (Block device pixels), so a panel at 200 percent costs about what it does at 100.
 public sealed class FoamCollapse
 {
-    // windows-animations' Perlin Dissolve: every pixel starts dissolving at 0.9 times three octaves of value noise and is gone
+    // windows-animations' Perlin Dissolve: every block starts dissolving at 0.9 times three octaves of value noise and is gone
     // a LifeSpan of the progress later.
     public const double LifeSpan = .15, StartScale = .9;
     private readonly uint[] _source;
@@ -190,10 +191,12 @@ public sealed class FoamCollapse
     private readonly byte[] _gone, _near;
     private readonly uint[] _scratch;
     private readonly uint _foam;
+    private readonly int _columns, _rows;
     public int Width { get; }
     public int Height { get; }
-    // The foam's width in device pixels (1 DIP).
-    public int Edge { get; }
+    // The block's side in device pixels: 1 DIP. The foam is one block wide.
+    public int Block { get; }
+    public int Edge => Block;
     public double NoiseScale { get; }
 
     // scale: device pixels per DIP. foam: the foam's color, straight (not premultiplied) BGRA with its alpha.
@@ -201,31 +204,50 @@ public sealed class FoamCollapse
     {
         if (width < 1 || height < 1 || source.Length < width * height) throw new ArgumentException("The snapshot does not match its size.");
         _source = source; Width = width; Height = height; _foam = foam;
-        Edge = Math.Max(1, (int)Math.Round(scale));
+        Block = Math.Max(1, (int)Math.Round(scale));
+        _columns = (width + Block - 1) / Block; _rows = (height + Block - 1) / Block;
         // The original's 150 px cells suit a whole window; here a cell is half the snapshot's shorter side, so a notice and a
         // panel both dissolve in a few large islands rather than in dust.
         NoiseScale = Math.Max(4, Math.Min(width, height) * .5);
-        _start = new float[width * height];
-        _gone = new byte[width * height];
-        _near = new byte[width * height];
+        _start = new float[_columns * _rows];
+        _gone = new byte[_start.Length];
+        _near = new byte[_start.Length];
         _scratch = new uint[width];
+        // As the original, each lattice row's hashes are worked out once and shared by the blocks between it and the next.
         double amplitude = .5;
+        var ux = new double[_columns];
+        var ix = new int[_columns];
         for (int octave = 0; octave < 3; octave++)
         {
             double cell = NoiseScale / (1 << octave);
-            for (int y = 0; y < height; y++)
+            for (int bx = 0; bx < _columns; bx++)
             {
-                double ty = y / cell;
+                double tx = bx * Block / cell;
+                ix[bx] = (int)Math.Floor(tx);
+                double fx = tx - ix[bx];
+                ux[bx] = fx * fx * (3 - 2 * fx);
+            }
+            int lattice = ix[^1] + 2;
+            var upper = new double[lattice];
+            var lower = new double[lattice];
+            int cached = int.MinValue;
+            for (int by = 0; by < _rows; by++)
+            {
+                double ty = by * Block / cell;
                 int iy = (int)Math.Floor(ty);
                 double fy = ty - iy, uy = fy * fy * (3 - 2 * fy);
-                int i = y * width;
-                for (int x = 0; x < width; x++, i++)
+                if (iy != cached)
                 {
-                    double tx = x / cell;
-                    int ix = (int)Math.Floor(tx);
-                    double fx = tx - ix, ux = fx * fx * (3 - 2 * fx);
-                    double top = Hash(ix, iy) * (1 - ux) + Hash(ix + 1, iy) * ux;
-                    double bottom = Hash(ix, iy + 1) * (1 - ux) + Hash(ix + 1, iy + 1) * ux;
+                    for (int x = 0; x < lattice; x++) { upper[x] = Hash(x, iy); lower[x] = Hash(x, iy + 1); }
+                    cached = iy;
+                }
+                int i = by * _columns;
+                for (int bx = 0; bx < _columns; bx++, i++)
+                {
+                    int x = ix[bx];
+                    double u = ux[bx];
+                    double top = upper[x] * (1 - u) + upper[x + 1] * u;
+                    double bottom = lower[x] * (1 - u) + lower[x + 1] * u;
                     _start[i] += (float)(amplitude * (top * (1 - uy) + bottom * uy));
                 }
             }
@@ -237,54 +259,59 @@ public sealed class FoamCollapse
     // windows-animations' pseudo_hash, to the bit.
     public static double Hash(int x, int y) => unchecked((uint)x * 73856093u ^ (uint)y * 19349663u) % 10000 / 10000.0;
 
-    public float StartOf(int x, int y) => _start[y * Width + x];
+    // When the block holding a pixel starts to dissolve.
+    public float StartOf(int x, int y) => _start[y / Block * _columns + x / Block];
 
-    // One frame into `canvas` (Width x Height). A pixel fades over its LifeSpan; one still there within Edge of a pixel that
-    // has gone turns to foam. The foam itself fades in the last tenth.
+    // One frame into `canvas` (Width x Height). A block fades over its LifeSpan; one still there next to a block that has gone
+    // turns to foam. The foam itself fades in the last tenth.
     public void Render(double progress, uint[] canvas, double aberration = 0)
     {
         double p = Math.Clamp(progress, 0, 1);
-        int w = Width, h = Height;
         // Gone wherever the noise has passed, inside the shape or not: the shape's own transparent surroundings foam only once
         // the dissolve reaches them, so its outline does not foam from the first frame.
         for (int i = 0; i < _start.Length; i++) _gone[i] = (byte)((p - _start[i]) / LifeSpan >= 1 ? 1 : 0);
-        Dilate(w, h);
+        Dilate();
         double foamFade = 1 - CollapseFx.SmoothStep(.9, 1, p);
         uint foamAlpha = (uint)Math.Round((_foam >> 24) * foamFade);
         uint foam = foamAlpha == 0 ? 0 : Premultiply(_foam & 0xFFFFFF | foamAlpha << 24);
-        for (int i = 0; i < _start.Length; i++)
+        int w = Width;
+        for (int y = 0; y < Height; y++)
         {
-            uint c = _source[i];
-            if (_gone[i] != 0 || c >> 24 == 0) { canvas[i] = 0; continue; }
-            if (_near[i] != 0 && foam != 0) { canvas[i] = foam; continue; }
-            double local = (p - _start[i]) / LifeSpan;
-            canvas[i] = local <= 0 ? c : GlitchCollapse.Scale(c, (uint)Math.Round((1 - local) * 256));
+            int blockRow = y / Block * _columns, row = y * w;
+            for (int x = 0; x < w; x++)
+            {
+                int b = blockRow + x / Block, i = row + x;
+                uint c = _source[i];
+                if (_gone[b] != 0 || c >> 24 == 0) { canvas[i] = 0; continue; }
+                if (_near[b] != 0 && foam != 0) { canvas[i] = foam; continue; }
+                double local = (p - _start[b]) / LifeSpan;
+                canvas[i] = local <= 0 ? c : GlitchCollapse.Scale(c, (uint)Math.Round((1 - local) * 256));
+            }
         }
         if (aberration >= .5)
-            for (int y = 0; y < h; y++) CollapseFx.Aberrate(canvas.AsSpan(y * w, w), _scratch, aberration);
+            for (int y = 0; y < Height; y++) CollapseFx.Aberrate(canvas.AsSpan(y * w, w), _scratch, aberration);
     }
 
-    // _near: within Edge pixels of a gone one (a square neighbourhood), in two passes.
-    private void Dilate(int w, int h)
+    // _near: a block next to a gone one (its eight neighbours).
+    private void Dilate()
     {
-        int r = Edge;
-        // Across: _near holds whether a gone pixel lies within r in the row.
-        for (int y = 0; y < h; y++)
-        {
-            int row = y * w, last = int.MinValue / 2;
-            for (int x = 0; x < w; x++) { if (_gone[row + x] != 0) last = x; _near[row + x] = (byte)(x - last <= r ? 1 : 0); }
-            last = int.MaxValue / 2;
-            for (int x = w - 1; x >= 0; x--) { if (_gone[row + x] != 0) last = x; if (last - x <= r) _near[row + x] = 1; }
-        }
-        // Down: a column pass over that, into _gone's spare bit.
-        for (int x = 0; x < w; x++)
-        {
-            int last = int.MinValue / 2;
-            for (int y = 0; y < h; y++) { int i = y * w + x; if ((_near[i] & 1) != 0) last = y; if (y - last <= r) _gone[i] |= 2; }
-            last = int.MaxValue / 2;
-            for (int y = h - 1; y >= 0; y--) { int i = y * w + x; if ((_near[i] & 1) != 0) last = y; if (last - y <= r) _gone[i] |= 2; }
-        }
-        for (int i = 0; i < _gone.Length; i++) { _near[i] = (byte)(_gone[i] >> 1); _gone[i] &= 1; }
+        int c = _columns, r = _rows;
+        for (int y = 0; y < r; y++)
+            for (int x = 0; x < c; x++)
+            {
+                byte near = 0;
+                for (int dy = -1; dy <= 1 && near == 0; dy++)
+                {
+                    int yy = y + dy;
+                    if ((uint)yy >= (uint)r) continue;
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        int xx = x + dx;
+                        if ((uint)xx < (uint)c && _gone[yy * c + xx] != 0) { near = 1; break; }
+                    }
+                }
+                _near[y * c + x] = near;
+            }
     }
 
     private static uint Premultiply(uint c)

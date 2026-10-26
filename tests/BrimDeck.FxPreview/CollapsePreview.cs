@@ -17,12 +17,14 @@ internal static class CollapsePreview
 {
     private const double Width = 420, Height = 150;
     private static int _failures;
+    // How long starting the last measured picture took: the snapshot, its pixels and the first frame.
+    private static double _startMs;
     private static double _now;
 
     public static int Run(string folder, HashSet<string>? only)
     {
         Directory.CreateDirectory(folder);
-        var timing = new List<string> { "effect,theme,scale,frames,mean_ms,max_ms,render_mean_ms" };
+        var timing = new List<string> { "effect,theme,scale,frames,mean_ms,max_ms,render_mean_ms,start_ms" };
         var styles = new[] { CollapseStyle.Glitch, CollapseStyle.Foam, CollapseStyle.Genie };
         foreach (var scale in new[] { 1.0, 2.0 })
             foreach (var theme in PanelThemes.BuiltIns.Where(t => only is null || only.Contains(t.Id)))
@@ -32,16 +34,27 @@ internal static class CollapsePreview
                 {
                     var (shots, cost) = Strip(palette, style, scale);
                     Save(shots, palette, $"{style} · {theme.Id} · {scale * 100:0}%", Path.Combine(folder, $"{style.ToString().ToLowerInvariant()}-{theme.Id}-{scale * 100:0}.png"));
-                    timing.Add(string.Join(",", style.ToString().ToLowerInvariant(), theme.Id, (scale * 100).ToString("0", CultureInfo.InvariantCulture),
-                        cost.Frames, cost.Mean.ToString("0.00", CultureInfo.InvariantCulture), cost.Max.ToString("0.00", CultureInfo.InvariantCulture), cost.Render.ToString("0.00", CultureInfo.InvariantCulture)));
+                    timing.Add(Row(style, theme.Id, scale, cost));
                 }
             }
+        // An open panel's size (760 x 300 DIP) at 200 percent: the heaviest picture a collapse takes.
+        foreach (var style in styles)
+        {
+            var palette = PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.Dark)!);
+            var (_, cost) = Strip(palette, style, 2, panel: true);
+            timing.Add(Row(style, "panel-760x300", 2, cost));
+        }
         File.WriteAllLines(Path.Combine(folder, "collapse-timing.csv"), timing);
         Interruptions();
         Console.WriteLine($"Wrote collapse strips to {Path.GetFullPath(folder)}");
         Console.WriteLine(_failures == 0 ? "PASS: all collapse checks" : $"{_failures} collapse checks failed");
         return _failures;
     }
+
+    private static string Row(CollapseStyle style, string id, double scale, (int Frames, double Mean, double Max, double Render) cost)
+        => string.Join(",", style.ToString().ToLowerInvariant(), id, (scale * 100).ToString("0", CultureInfo.InvariantCulture), cost.Frames,
+            cost.Mean.ToString("0.00", CultureInfo.InvariantCulture), cost.Max.ToString("0.00", CultureInfo.InvariantCulture),
+            cost.Render.ToString("0.00", CultureInfo.InvariantCulture), _startMs.ToString("0.00", CultureInfo.InvariantCulture));
 
     private static void Check(string name, bool ok)
     {
@@ -58,15 +71,16 @@ internal static class CollapsePreview
     }
 
     // A dark desktop (the user's wallpaper anchors), the collapsed island at the top and a notice grown out of it.
-    private static Scene Build(PanelPalette palette, double scale)
+    private static Scene Build(PanelPalette palette, double scale, bool panel = false)
     {
+        double Width = panel ? 800 : CollapsePreview.Width, Height = panel ? 340 : CollapsePreview.Height;
         var stage = new Grid { Width = Width, Height = Height, Background = new LinearGradientBrush(Color.FromRgb(0x10, 0x10, 0x30), Color.FromRgb(0x10, 0x30, 0x50), 90), UseLayoutRounding = true };
         Brush Surface() => palette.Effects.SurfaceGradient.Count >= 2
             ? new LinearGradientBrush(C(palette.Effects.SurfaceGradient[0]), C(palette.Effects.SurfaceGradient[^1]), 90)
             : new SolidColorBrush(C(palette.Surface));
         var island = new Border { Width = 190, Height = 32, CornerRadius = new CornerRadius(0, 0, 12, 12), Background = Surface(), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top };
         island.Child = new TextBlock { Text = "12:45  ·  42%", Foreground = new SolidColorBrush(C(palette["textPrimary"])), FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var notice = new Border { Width = 340, Height = 92, CornerRadius = new CornerRadius(0, 0, 18, 18), Background = Surface(), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, ClipToBounds = true };
+        var notice = new Border { Width = panel ? 760 : 340, Height = panel ? 300 : 92, CornerRadius = new CornerRadius(0, 0, 18, 18), Background = Surface(), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, ClipToBounds = true };
         var text = new StackPanel { Margin = new Thickness(16, 14, 16, 0) };
         text.Children.Add(new TextBlock { Text = "Claude Code", FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(C(palette["textPrimary"])) });
         text.Children.Add(new TextBlock { Text = "任务完成：已提交 3 个文件，测试全部通过。", FontSize = 12, Margin = new Thickness(0, 4, 0, 0), Foreground = new SolidColorBrush(C(palette["textSecondary"])) });
@@ -96,10 +110,10 @@ internal static class CollapsePreview
         return CollapseFx.Length(style, 1);
     }
 
-    private static (List<(BitmapSource Image, string Label)> Shots, (int Frames, double Mean, double Max, double Render) Cost) Strip(PanelPalette palette, CollapseStyle style, double scale)
+    private static (List<(BitmapSource Image, string Label)> Shots, (int Frames, double Mean, double Max, double Render) Cost) Strip(PanelPalette palette, CollapseStyle style, double scale, bool panel = false)
     {
         PanelTheme.Show(palette);
-        var s = Build(palette, scale);
+        var s = Build(palette, scale, panel);
         var shots = new List<(BitmapSource, string)>();
         _now = 0;
         shots.Add((Render(s, scale), "before"));
@@ -117,7 +131,9 @@ internal static class CollapsePreview
         // The cost of a frame at 60 Hz over a second picture: the work on the UI thread (LastFrameMs) and a full render.
         s.Notice.Visibility = Visibility.Visible; s.Stage.UpdateLayout();
         _now = 0;
+        long setup = System.Diagnostics.Stopwatch.GetTimestamp();
         length = Start(s, style);
+        _startMs = (System.Diagnostics.Stopwatch.GetTimestamp() - setup) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         var work = new List<double>(); var render = new List<double>();
         for (double t = 0; t < length; t += 1 / 60.0)
         {
@@ -164,7 +180,7 @@ internal static class CollapsePreview
 
     private static BitmapSource Render(Scene s, double scale)
     {
-        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(Width * scale), (int)Math.Ceiling(Height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(s.Stage.Width * scale), (int)Math.Ceiling(s.Stage.Height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
         bitmap.Render(s.Stage);
         bitmap.Freeze();
         return bitmap;
