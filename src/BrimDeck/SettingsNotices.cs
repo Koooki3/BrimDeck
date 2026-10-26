@@ -145,9 +145,10 @@ public sealed partial class SettingsWindow
             var none = TextLine(Loc.T("未检测到 WSL 发行版。", "No WSL distribution was found."), 12, TextSecondary);
             rows.Add(new Border { Child = none, MinHeight = 44, Padding = new Thickness(0, 13, 0, 13) });
         }
-        SectionTitle(Loc.T("WSL（默认关闭）", "WSL (off by default)"));
-        Note(Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。代理运行时发行版和 WSL 虚拟机不会自动停止，所以发行版中你的程序（终端、后台任务等）全部结束 5 分钟后，代理会自行退出，让 WSL 照常停止发行版并释放内存，发行版下次运行时再自动接入。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
+        SectionTitle(Loc.T("WSL（默认关闭）", "WSL (off by default)"), help: () => Loc.T("开启某个发行版后，BrimDeck 会把通知代理复制到它的 ~/.local/share/brimdeck，并添加 ~/.local/bin/brim-notify。代理只在发行版已运行时启动，不会为接收通知而启动发行版。代理运行时发行版和 WSL 虚拟机不会自动停止，所以发行版中你的程序（终端、后台任务等）全部结束 5 分钟后，代理会自行退出，让 WSL 照常停止发行版并释放内存，发行版下次运行时再自动接入。没有通知服务时，代理作为该会话的标准桌面通知服务（notify-send 等可直接使用）；已有通知服务时改为旁路观察，若总线不允许监视则只支持 brim-notify。",
             "Once a distribution is on, BrimDeck copies its notice agent to ~/.local/share/brimdeck there and adds ~/.local/bin/brim-notify. The agent starts only while the distribution runs; a distribution is never started for notices. While the agent runs, WSL does not stop the distribution or its virtual machine, so the agent ends by itself 5 minutes after the last of your programs there (terminals, background jobs) ended; WSL then stops the distribution and frees its memory as usual, and the agent connects again the next time it runs. Without a notification service, the agent becomes the session's standard desktop notification service (notify-send and others work as usual); with one, it watches it, and where the bus does not allow watching only brim-notify works."));
+        Note(Loc.T("在 WSL 里运行的程序也能把通知发到这里；开启发行版后可使用 brim-notify 和 notify-send。",
+            "Programs in WSL can send notices here too; once a distribution is on, brim-notify and notify-send work there."));
         Group([.. rows]);
 
         // The command line, for Windows and for scripts.
