@@ -263,15 +263,18 @@ public partial class MainWindow
         height = Math.Clamp(height, minHeight, maxHeight);
         if ((width, height) == DeckPages.Size(Settings, _resizePage)) return;
         _resizeChanged = true;
+        if (_resizePage == DeckPage.Notices) FollowRows();
         DeckPages.SetSize(Settings, _resizePage, width, height);
         _pageWidth = width;
         if (_resizePage == DeckPage.Usage) _usageWidth = width;
         SetExpanded(true, instant: true);
         // The surface follows every frame. The monitor page and the usage page's columns are built again only where they cross a
-        // layout step and stretch in between, so they follow too; the model details and the media page are built again whole,
-        // about 25 times a second during the drag, and once more when it ends (FinishResize saves the size).
+        // layout step and stretch in between, so they follow too; the notices page stretches as it is, its header and margins
+        // following the size (FitNoticeLayout); the model details and the media page are built again whole, about 25 times a
+        // second during the drag, and once more when it ends (FinishResize saves the size).
+        bool stretched = _resizePage == DeckPage.Notices && NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout();
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
-        else if (Environment.TickCount64 - _resizeRendered >= 40)
+        else if (!stretched && Environment.TickCount64 - _resizeRendered >= 40)
         {
             _resizeRendered = Environment.TickCount64;
             // Columns that stay within their size step stretch; nothing else in the panel changes meanwhile.
@@ -296,8 +299,12 @@ public partial class MainWindow
         bool compact = _resizeCompact;
         _resizeSettling = false; _resizeCompact = false;
         // Saved like any change from the settings window, which applies it to every panel and fits the window again. A press that
-        // moved nothing only fits the window again.
-        if (_resizeChanged) _app.UpdateSettings(Settings.Copy()); else ApplySettings();
+        // moved nothing only fits the window again. The notices page's rows take the exact width again, and the page is not built
+        // anew for what is only a copy of the settings it was fitted to (FitNoticeLayout).
+        ReleaseRows();
+        _noticeResizeSaved = !compact && _resizePage == DeckPage.Notices;
+        try { if (_resizeChanged) _app.UpdateSettings(Settings.Copy()); else ApplySettings(); }
+        finally { _noticeResizeSaved = false; }
         _resizeChanged = false;
         // The label leaves; the edge stays lit while the pointer is still on it.
         _hoverEdge = ResizeEdges.None;

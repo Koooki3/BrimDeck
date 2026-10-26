@@ -30,6 +30,11 @@ public partial class MainWindow
     private string _pageKey = "";
     // The settings, size and theme the page was last built for (NoticeLayout).
     private (DeckSettings? Settings, int Theme, double Width, double Height, double UsageWidth) _noticeLayout;
+    // The empty page's text block, whose width follows the page's (FitNoticeLayout).
+    private FrameworkElement? _pageEmpty;
+    // A drag of the page's edges is being saved (FinishResize): the settings that come back are a copy of those the page was
+    // fitted to during the drag, so it is not built again for them.
+    private bool _noticeResizeSaved;
 
     // The coordinator's name for this panel: the main panel's stays the same when its monitor changes.
     internal string NoticeLane => _lead is null ? "main" : "display:" + (Display?.Id ?? "");
@@ -257,14 +262,31 @@ public partial class MainWindow
         => (Settings, PanelTheme.Generation, ContentCanvas.Width, ContentCanvas.Height, _usageWidth);
 
     // RenderUsage on the recent notices page (N50-2). Closed, the page is not drawn at all: SetExpanded builds it as the panel
-    // opens, with what arrived meanwhile. Open with the page already on screen at the same size and theme, a data refresh or
-    // the minute's tick builds again only the rows that changed, which keeps the pointer's hover and the scroll; the switch to
-    // the page, a new size or theme and a change of settings build it whole.
+    // opens, with what arrived meanwhile. Open with the page already on screen for the same theme, a data refresh or the
+    // minute's tick builds again only the rows that changed, which keeps the pointer's hover and the scroll, and a new size
+    // only fits the page (FitNoticeLayout); the switch to the page, a new theme and a change of settings build it whole.
     private void RenderNoticesPage()
     {
         if (!_expanded && !_preview) return;
-        if (NoticesContent.Visibility == Visibility.Visible && _noticeLayout == NoticeLayout() && UpdateNoticeRows()) { RefreshStatus(); return; }
+        if (NoticesContent.Visibility == Visibility.Visible && FitNoticeLayout() && UpdateNoticeRows()) { RefreshStatus(); return; }
         RenderNotices();
+    }
+
+    // Whether the page on screen was built for these settings and this theme, and fits it to a new size if that is all that
+    // changed. Its rows stretch with the page, as the monitor page's content does, so a drag of the panel's edges only fits the
+    // header and the margins again: building all the rows anew at every step of the drag made the page lag behind the pointer.
+    private bool FitNoticeLayout()
+    {
+        var layout = NoticeLayout();
+        if (_noticeLayout == layout) return true;
+        bool sameSettings = ReferenceEquals(_noticeLayout.Settings, layout.Settings) || _noticeResizeSaved;
+        if (!sameSettings || _noticeLayout.Theme != layout.Theme || _noticeLayout.UsageWidth != layout.UsageWidth) return false;
+        // With the usage page shown the header follows that page's size, which this drag does not change.
+        if (!Settings.UsagePage) ApplyHeader(UnfittedHeader(ContentCanvas.Height));
+        NoticesContent.Margin = new Thickness(_header.Side, 0, _header.Side, 10);
+        if (_pageEmpty is { } empty) empty.MaxWidth = EmptyWidth;
+        _noticeLayout = layout;
+        return true;
     }
 
     // While the page lists the same notices in the same order, only the rows of notices that changed are built again: a
@@ -332,7 +354,7 @@ public partial class MainWindow
         NoticesContent.Children.Clear();
         _waitingPlates.Clear();
         _liveRows.Clear();
-        _pageRows.Clear(); _pageList = null;
+        _pageRows.Clear(); _pageList = null; _pageEmpty = null; _stretch.Forget();
         NoticesContent.Margin = new Thickness(_header.Side, 0, _header.Side, 10);
         var center = _app.Notices;
         var notices = center.Hub.Notices;
@@ -347,7 +369,7 @@ public partial class MainWindow
         if (notices.Count > 0) tools.Children.Add(PageButton(Loc.T("清空", "Clear"), () => { center.Clear(); _expandedNotice = null; RenderNotices(); }));
         head.Children.Add(UI.Fixed(Status(center, notices.Count), 11.5, 22, UI.Tertiary));
         _pageKey = NoticePageKey(center); _noticeLayout = NoticeLayout();
-        if (notices.Count == 0) { page.Children.Add(Empty(center)); WatchPageLive(); return; }
+        if (notices.Count == 0) { page.Children.Add(_pageEmpty = Empty(center)); WatchPageLive(); return; }
         var list = new StackPanel();
         // Up and Down move between the rows and their buttons; Tab goes through them in order.
         KeyboardNavigation.SetDirectionalNavigation(list, KeyboardNavigationMode.Contained);
@@ -381,9 +403,11 @@ public partial class MainWindow
         return text;
     }
 
+    private double EmptyWidth => Math.Max(200, ContentCanvas.Width - 60);
+
     private FrameworkElement Empty(NoticeCenter center)
     {
-        var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = Math.Max(200, ContentCanvas.Width - 60) };
+        var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = EmptyWidth };
         var bell = new Viewbox { Width = 24, Height = 24, Margin = new Thickness(0, 0, 0, 8), Child = new Path { Data = Geometry.Parse("M12,3 C8.7,3 6.5,5.6 6.5,8.8 V12.6 L4.8,15.6 H19.2 L17.5,12.6 V8.8 C17.5,5.6 15.3,3 12,3 Z M9.6,17.6 A2.4,2.4 0 0 0 14.4,17.6"), Stroke = UI.Brush(UI.Secondary), StrokeThickness = 1.5, Width = 24, Height = 24 } };
         empty.Children.Add(bell);
         empty.Children.Add(UI.Fixed(Loc.T("暂无通知", "No notices"), 14, 22, UI.Secondary));
@@ -412,7 +436,8 @@ public partial class MainWindow
         plate.VerticalAlignment = VerticalAlignment.Top; plate.Margin = new Thickness(0, 1, 10, 0);
         grid.Children.Add(plate);
         var texts = new StackPanel { Opacity = notice.SourcePresent || notice.Origin == NoticeOrigin.Test ? 1 : .78 };
-        Grid.SetColumn(texts, 1); grid.Children.Add(texts);
+        var textColumn = new SteppedWidth { Child = texts, Stepping = _stretch.Active };
+        Grid.SetColumn(textColumn, 1); grid.Children.Add(textColumn);
         texts.Children.Add(NoticeWindow.Directed(UI.Fixed(notice.Title.Length > 0 ? notice.Title : notice.AppName, 12.5, 18, UI.Primary, FontWeights.SemiBold)));
         if (NoticeTimeLine(notice, now) is { } timeLine) texts.Children.Add(timeLine);
         if (notice.Body.Length > 0)
@@ -477,6 +502,16 @@ public partial class MainWindow
         AutomationProperties.SetName(row, notice.AppName + ", " + notice.Title + ", " + NoticeText.Relative(notice.ReceivedAt, now));
         return row;
     }
+
+    // The rows while the panel's edges are dragged on this page (NoticeRowStretch).
+    private readonly NoticeRowStretch _stretch = new();
+
+    private void FollowRows() { if (_pageList is { } list) _stretch.Follow(list, RowTexts()); }
+
+    private void ReleaseRows() => _stretch.Release(RowTexts());
+
+    private IEnumerable<SteppedWidth> RowTexts()
+        => _pageRows.Select(row => row.Row).OfType<Border>().Select(row => row.Child).OfType<Grid>().SelectMany(grid => grid.Children.OfType<SteppedWidth>());
 
     // The rows that show a task's progress, with their track's columns (UpdateNoticeRows).
     private sealed record RowProgress(ColumnDefinition Done, ColumnDefinition Left);
