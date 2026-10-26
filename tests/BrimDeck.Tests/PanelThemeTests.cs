@@ -42,7 +42,7 @@ internal static class PanelThemeTests
 
         // Built-in themes.
         check("Built-in themes are listed in order and Monokai Pro is not among them",
-            PanelThemes.BuiltIns.Select(theme => theme.Id).SequenceEqual(["dark", "light", "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", "island-holiday", "pixel-blocks", "cyberpunk-edgerunners"]));
+            PanelThemes.BuiltIns.Select(theme => theme.Id).SequenceEqual(["dark", "light", "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", "island-holiday", "island-holiday-2", "pixel-blocks", "cyberpunk-edgerunners"]));
         check("A built-in theme's id is its file name", PanelThemes.BuiltIns.All(theme => PanelThemes.NormalizeId(theme.File.Id) == theme.Id));
         check("Every built-in theme names an open license", PanelThemes.BuiltIns.All(theme => theme.File.License is "MIT" or "Apache-2.0"));
         bool allValid = true; var adjusted = new List<string>();
@@ -299,11 +299,16 @@ internal static class PanelThemeTests
             && PanelThemes.Build("copy", holidayCopy).Colors.All(pair => PanelThemes.Resolve(holidayTheme)[pair.Key] == pair.Value));
         check("The copied night look writes only what it sets", holidayCopy.Night is { Id: "", Name: "", Base: "", Swatches: null, Night: null, Daylight: null } && holidayCopy.Night.Clock is { Style: "", Color: "" }
             && !holidayCopyText.Contains("displayName", StringComparison.OrdinalIgnoreCase) && PanelThemes.LoadFolder(Folder("holiday-copy", ("copy.json", holidayCopyText))).Single().Usable);
-        // The island's night look turns the palm off with a transparent color.
-        check("The island's motifs differ by look and a copy keeps each one", new[] { false, true }.All(night =>
-                PanelThemes.Resolve(holidayTheme, night).Effects.Decor is { Horizon: not null, Caustics: not null } decor && (decor.Palm is null) == night
-                && PanelThemes.Build("copy", holidayCopy, night).Effects.Decor == decor)
-            && PanelThemes.Resolve(holidayTheme, true).Effects.Decor != PanelThemes.Resolve(holidayTheme).Effects.Decor);
+        // Island holiday 2 draws motifs, and its night look turns the palm off with a transparent color; the first island draws none.
+        var holiday2 = PanelThemes.BuiltIn(PanelThemes.IslandHoliday2)!;
+        var holiday2Copy = PanelThemes.Parse(PanelThemes.FillTemplate("copy", PanelThemes.Resolve(holiday2), PanelThemes.IslandHoliday2, holiday2.File));
+        check("Island holiday 2's motifs differ by look and a copy keeps each one", new[] { false, true }.All(night =>
+                PanelThemes.Resolve(holiday2, night).Effects.Decor is { Horizon: not null, Caustics: not null } decor && (decor.Palm is null) == night
+                && PanelThemes.Build("copy", holiday2Copy, night).Effects.Decor == decor && PanelThemes.Build("copy", holiday2Copy, night).Adjustments.Count == 0)
+            && PanelThemes.Resolve(holiday2, true).Effects.Decor != PanelThemes.Resolve(holiday2).Effects.Decor
+            && holiday2Copy.Daylight is { Day: "06:30", Night: "18:30" } && holiday2.Kind == PanelThemeKind.Extension);
+        check("The first island holiday is left as it was: no motifs and its serif clock",
+            PanelThemes.Resolve(holidayTheme).Effects.Decor is null && PanelThemes.Resolve(holidayTheme, true).Effects.Decor is null && PanelThemes.Resolve(holidayTheme).Clock?.Style == "serif");
         check("A theme without a night look gets none from the template",
             PanelThemes.Parse(PanelThemes.FillTemplate("plain", BuiltIn("dracula"), "dracula", PanelThemes.BuiltIn("dracula")!.File)) is { Night: null, Daylight: null });
         var nightOwl = BuiltIn("night-owl");
@@ -321,7 +326,7 @@ internal static class PanelThemeTests
         check("The rounded clock style is read from a theme file and comes back from the template",
             (int)ClockStyle.Rounded == 10 && (int)ClockStyle.Pixel == 9 && roundedFile.Error is null && roundedSettings.ClockStyle == ClockStyle.Rounded
             && PanelThemes.Parse(PanelThemes.FillTemplate("copy", rounded, "night-owl")).Clock is { Style: "rounded" }
-            && PanelThemes.Template.Contains("condensed, pixel, rounded", StringComparison.Ordinal) && BuiltIn(PanelThemes.IslandHoliday).Clock?.Style == "rounded");
+            && PanelThemes.Template.Contains("condensed, pixel, rounded", StringComparison.Ordinal) && BuiltIn(PanelThemes.IslandHoliday2).Clock?.Style == "rounded");
 
         // Clock, swatches and what choosing a theme changes.
         bool clockColors = true, pickers = true;
