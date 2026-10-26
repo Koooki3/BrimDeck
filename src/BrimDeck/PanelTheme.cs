@@ -18,6 +18,9 @@ internal static class PanelTheme
     public static bool KeptLastGood { get; private set; }
     // Whether the theme on screen shows its night look (PanelThemeFile.Night).
     public static bool Night { get; private set; }
+    // Whether Windows' high contrast is shown: the system's colors on the whole panel, whatever theme is chosen
+    // (PanelThemes.HighContrast).
+    public static bool HighContrast { get; private set; }
     // When the theme on screen changes between its day and night looks next, or null for a theme without a night look.
     public static DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
     public static int Generation { get; private set; }
@@ -61,7 +64,8 @@ internal static class PanelTheme
     {
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
         // The hour reaching the other look, or new hours for it, counts as a change too.
-        if (!reload && !systemChanged && _loaded && chosen == _chosen && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night) return false;
+        bool high = SystemParameters.HighContrast;
+        if (!reload && !systemChanged && _loaded && chosen == _chosen && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night && high == HighContrast) return false;
         if (reload || !_loaded) Reload();
         _chosen = chosen;
         var theme = Find(chosen);
@@ -74,9 +78,10 @@ internal static class PanelTheme
         // A theme with a night look shows it by the local clock (PanelThemes.IsNight).
         bool night = PanelThemes.IsNight(theme.File, DateTime.Now, settings.ThemeDaylight);
         // The same theme and look as now (the common case for "system") needs no new palette.
-        if (!reload && ReferenceEquals(theme, ShownTheme) && night == Night && _signature.Length > 0) return false;
-        ShownTheme = theme; Night = night;
-        var palette = PanelThemes.Resolve(theme, night);
+        // Under high contrast the system's colors may have changed with the same theme chosen, so its palette is always made anew.
+        if (!reload && !high && !HighContrast && ReferenceEquals(theme, ShownTheme) && night == Night && _signature.Length > 0) return false;
+        ShownTheme = theme; Night = night; HighContrast = high;
+        var palette = high ? SystemPalette() : PanelThemes.Resolve(theme, night);
         var signature = Signature(theme, palette);
         if (signature == _signature) return false;
         // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade).
@@ -86,6 +91,13 @@ internal static class PanelTheme
         _readable.Clear(); _readableColors.Clear();
         Publish(Application.Current?.Resources);
         return true;
+    }
+
+    private static PanelPalette SystemPalette()
+    {
+        static ThemeColor C(Color color) => new(color.A, color.R, color.G, color.B);
+        return PanelThemes.HighContrast(C(SystemColors.WindowColor), C(SystemColors.WindowTextColor), C(SystemColors.GrayTextColor),
+            C(SystemColors.HighlightColor), C(SystemColors.HighlightTextColor));
     }
 
     // Everything a palette draws, by value: a file theme is built anew for every reading, so an edit shows as a new signature.
