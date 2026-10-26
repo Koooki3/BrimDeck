@@ -80,7 +80,7 @@ internal sealed class CollapseLayer : FrameworkElement
         var motion = PanelTheme.Motion;
         var style = CollapseFx.Choose(motion.Collapse, MotionEnvironment.Conditions(), FlashBudget.Shared, Eased.Now);
         if (style == CollapseStyle.Fade) return false;
-        Play(style, snapshot, source, island, motion.Pace, FoamColor(motion), motion.Aberration, ended);
+        Play(style, snapshot, source, island, CollapseFx.Length(style, motion.Pace, motion.CollapseMs), FoamColor(motion), motion.Aberration, ended);
         return true;
     }
 
@@ -94,7 +94,7 @@ internal sealed class CollapseLayer : FrameworkElement
 
     // Plays `style` on the snapshot lying at `source` (layer DIP) into the island at `island`. foam: the foam's color.
     // aberration: the theme's red and blue split in DIP (0: none). ended runs once the picture is over, never after Stop.
-    public void Play(CollapseStyle style, BitmapSource snapshot, Rect source, Rect island, double pace, Color foam, double aberration, Action? ended)
+    public void Play(CollapseStyle style, BitmapSource snapshot, Rect source, Rect island, double length, Color foam, double aberration, Action? ended)
     {
         Stop();
         if (style == CollapseStyle.Fade || source.IsEmpty || source.Width < 1 || source.Height < 1) { ended?.Invoke(); return; }
@@ -114,7 +114,7 @@ internal sealed class CollapseLayer : FrameworkElement
             _frame = new uint[w * h];
             _canvas = new WriteableBitmap(w, h, 96 * _scale, 96 * _scale, PixelFormats.Pbgra32, null);
         }
-        _playback.Start(style, Clock(), CollapseFx.Length(style, pace));
+        _playback.Start(style, Clock(), length);
         Frame(Clock());
         if (_hooked) return;
         _hooked = true;

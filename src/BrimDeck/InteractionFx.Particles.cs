@@ -43,8 +43,9 @@ internal sealed partial class FxSurface
         _lastBurst = now;
         uint seed = (uint)mark.Serial * 2654435761u;
         double Next() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed & 0xFFFFFF) / (double)0x1000000; }
-        // The theme's pace alone, as every answer to the pointer (motion-review C5).
-        double scale = Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
+        // The theme's pace alone, as every answer to the pointer (motion-review C5), or the theme's own length for its particles
+        // in place of the style's (Life), each particle keeping its own spread around it.
+        double scale = _motion.ParticleMs > 0 ? _motion.ParticleMs / 1000.0 / Life(_motion.Particles) : Math.Clamp(_motion.Pace, MotionSafety.PaceMin, MotionSafety.PaceMax);
         switch (_motion.Particles)
         {
             case ParticleFx.Star:
@@ -78,9 +79,13 @@ internal sealed partial class FxSurface
                 break;
             case ParticleFx.Rain:
                 // Three or four streaks 1 x 6 DIP from just below the bottom edge, falling a little aslant (the wallpaper's
-                // wind, mostly its downward part) for half a second. Vx and Vy are how far each falls across and down.
+                // wind, mostly its downward part) 22 to 28 DIP over about a second, slowly enough to follow. Vx and Vy are how
+                // far each falls across and down.
                 for (int i = 0, n = 3 + (int)(Next() * 2); i < n; i++)
-                    Spawn(r.Left + r.Width * ((i + .5 + .5 * (Next() - .5)) / n), r.Bottom + 2 + 2 * Next(), RainSlant * 16, 14 + 4 * Next(), .5, 6, false);
+                {
+                    double fall = 22 + 6 * Next();
+                    Spawn(r.Left + r.Width * ((i + .5 + .5 * (Next() - .5)) / n), r.Bottom + 2 + 2 * Next(), RainSlant * fall, fall, .9 + .2 * Next(), 6, false);
+                }
                 break;
             case ParticleFx.Bubble:
                 // Three to five bubbles 2 to 4 DIP across from the bottom edge, rising 18 to 28 DIP over 0.8 to 1.2 s and swaying.
@@ -99,6 +104,13 @@ internal sealed partial class FxSurface
 
     // Rain falls this far across for each DIP down: mostly straight down, leaning with the wind.
     private const double RainSlant = .26;
+
+    // A style's own typical life in seconds, which a theme's particleMs replaces.
+    private static double Life(ParticleFx style) => style switch
+    {
+        ParticleFx.Star => .8, ParticleFx.Firefly => 1.25, ParticleFx.Dust => .65, ParticleFx.Pixel => .7, ParticleFx.Spark => .35,
+        ParticleFx.Neon => .5, ParticleFx.Rain => 1, ParticleFx.Bubble => 1, _ => 1
+    };
 
     // Whether any particle is still alive.
     private bool StepParticles(double now)
