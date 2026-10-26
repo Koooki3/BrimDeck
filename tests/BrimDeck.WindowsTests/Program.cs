@@ -17,6 +17,7 @@ internal static class Program
             Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
             CheckWindowChrome();
             CheckSettledClip();
+            CheckIslandTakesClicks();
             NoticeProtectionTests.Run(Check);
             ShaderTests.Run(Check);
             DesktopSourceTests.Run(Check);
@@ -104,6 +105,31 @@ internal static class Program
                     Check($"the {name}{(look.Length > 0 ? " with a " + look : "")} at rest draws nothing past its rounded outline at {scale * 100:0}% ({outside} faint edge pixels, strongest alpha {strongest})",
                         strongest <= 64 && outside <= 16);
                 }
+    }
+
+    // Windows passes a click on a layered window through wherever its pixel is fully transparent (live check X-01). Under liquid
+    // glass the island's surface steps aside (its brush at opacity 0) and the open panel showed only its text: clicks between
+    // the words fell through to the window below. Whatever the surface's opacity, every pixel inside the outline stays the
+    // island's (alpha above 0), as with an opaque surface, and nothing is drawn outside it.
+    private static void CheckIslandTakesClicks()
+    {
+        foreach (var (name, corners, shoulder) in new[] { ("open panel", new CornerRadius(0, 0, 16, 16), 0d), ("notch", new CornerRadius(0, 0, 12, 12), 16d), ("capsule", new CornerRadius(18), 0d) })
+            foreach (double surface in new[] { 0d, .5, 1 })
+            {
+                var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(0xC8, 0x12, 0x14, 0x19)) { Opacity = surface };
+                var island = new BrimDeck.IslandBorder { Width = 300, Height = 120, Background = brush, CornerRadius = corners, ShoulderRadius = shoulder, MaterialOpacity = 1, RimWidth = 0, ClipToBounds = true };
+                island.Measure(new Size(300, 120)); island.Arrange(new Rect(0, 0, 300, 120)); island.UpdateLayout();
+                var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(300, 120, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                bitmap.Render(island);
+                var pixels = new byte[300 * 120 * 4];
+                bitmap.CopyPixels(pixels, 300 * 4, 0);
+                // The body inside the corners and shoulders, where every pixel must take the click.
+                int holes = 0;
+                for (int y = 2; y < 120 - 20; y++)
+                    for (int x = 20 + (int)shoulder; x < 300 - 20 - (int)shoulder; x++)
+                        if (pixels[(y * 300 + x) * 4 + 3] == 0) holes++;
+                Check($"the {name} takes clicks over its whole body with the surface at opacity {surface:0.0} ({holes} click-through pixels)", holes == 0);
+            }
     }
 
     // A page left without the pointer moving closes the tooltips opened over it, and only those (BrimDeck.PageToolTips).

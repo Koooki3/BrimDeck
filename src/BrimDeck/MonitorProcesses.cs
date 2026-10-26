@@ -48,6 +48,8 @@ internal sealed class ProcessListView : FrameworkElement
         _chosen = new Eased((int)sort, Eased.Seconds * .75);
         AutomationProperties.SetName(this, Loc.T("进程列表", "Process list"));
         ClipToBounds = true;
+        // From the keyboard the list is one stop whose sort Enter or Space switches, and the arrows choose (CPU left, memory right).
+        KeyboardPress.Take(this, true);
     }
 
     private (int Rows, int Columns) Grid => MonitorLayout.ListGrid(ActualWidth, ActualHeight, _layout.RowHeight);
@@ -304,6 +306,15 @@ internal sealed class ProcessListView : FrameworkElement
         bool same = sample?.Id == _pressed;
         _pressed = null; _press.Set(0, Motion.Enabled); Motion.Start(this, Step); e.Handled = true;
         if (same && sample is not null) _open(sample, box);
+    }
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        ProcessSort? wanted = KeyboardPress.Pressed(e) ? _sort == ProcessSort.Cpu ? ProcessSort.Memory : ProcessSort.Cpu
+            : Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Left ? ProcessSort.Cpu : Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Right ? ProcessSort.Memory : null;
+        if (wanted is not { } sort) return;
+        e.Handled = true;
+        if (sort != _sort) _sortChanged(sort);
     }
 }
 

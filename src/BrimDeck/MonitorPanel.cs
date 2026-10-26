@@ -159,7 +159,9 @@ public partial class MainWindow
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
             Settings.MonitorTemperatures, _monitorSensors.Small);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
-        if (old is not null) MonitorCrossfade.Swap(MonitorContent, _monitorView, old, MonitorMotion);
+        // A drag across a layout step (and the spring settling after it) swaps at once: the page follows the pointer, and a
+        // crossfade there laid both layouts over each other for most of its length (live check X-02).
+        if (old is not null) MonitorCrossfade.Swap(MonitorContent, _monitorView, old, MonitorMotion && !Resizing);
         else
         {
             MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
