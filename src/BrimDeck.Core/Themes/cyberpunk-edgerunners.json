@@ -7,7 +7,7 @@
   //   Neon only where it is thin: cyan and magenta for the rim, the focus and the tracks, the two colors of Lucy's hair and
   //   the signs; the signature yellow for the indicator and warnings. The clock is the pale cyan of a lit window, in Tektur,
   //   the squared HUD face of the taskbar clock.
-  //   HUD cuts across two corners with hexagonal ticks, CRT scan lines and a magenta glow under the collapsed notch.
+  //   HUD cuts across two corners with a hexagonal tick beside each, CRT scan lines and a magenta glow under the collapsed notch.
   "formatVersion": 1,
   "id": "cyberpunk-edgerunners",
   "name": "赛博朋克：边缘行者",
@@ -39,7 +39,7 @@
     "popup": "#10102A",
     "popupBorder": "#8000F0FF",
     "input": "#08081A",
-    "rangeFill": "#40FCEE0A",
+    "rangeFill": "#2EF090F0",
     "coverPlaceholder": "#1AF0D0F0",
     "coverOutline": "#6600F0FF",
     "scrollThumb": "#3A4C78",
@@ -82,8 +82,9 @@
     "shadowDepth": 0,
     "shadowOpacity": 0.5,
     "scanlines": 0.035,
-    // HUD cuts across the top-right and bottom-left corners with hexagonal ticks, in a dim cyan so they frame without glowing.
-    "decor": { "hud": { "color": "#5C00F0FF", "chamfer": 6 } }
+    // HUD cuts across the bottom corners (the top-right on a floating island) with a hexagonal tick beside each, in a half-lit
+    // cyan so they frame without glowing.
+    "decor": { "hud": { "color": "#8000F0FF", "chamfer": 10 } }
   },
   // Living neon: the rim breathes over 6.5 s, the rim's cyan and magenta drift along it, a faint scan line
   // passes every 16 s and the tube sags softly about once in 41 s; never faster than one change a second. The pointer is

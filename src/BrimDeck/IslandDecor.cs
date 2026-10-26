@@ -6,68 +6,109 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // A theme's motifs drawn into the island's surface, under its content (PanelDecor): a sea below a horizon, the caustics a sea
-// throws, a palm frond's shadow in the open panel's corner, HUD cuts and ticks in the corners. They are drawn once for a size
-// and kept; the caustics' tile is drawn once for the theme. Nothing here moves: a theme's motion (AmbientGlow) may drift
-// them later, but the picture itself is still.
+// throws, a palm frond's shadow in the open panel's corner, HUD cuts and ticks in the corners. Nothing here moves: a theme's
+// motion (AmbientGlow) may drift them later, but the picture itself is still.
+// The island animates its size every frame while it opens and closes, so what does not depend on the size is made once: the
+// sea's and the line's brushes, the palm's shape in unit coordinates and the caustics' tile (shared by every island of a
+// color, and made the first time a sea is drawn). A size only places them, in a small group kept until the size changes.
 internal sealed class IslandDecor
 {
-    // The open panel shows the palm; the small collapsed island has no room for it.
-    private const double PalmMinHeight = 90, HudMinHeight = 40;
+    // The open panel shows the sea and the palm; on the small collapsed island the horizon would cross the clock like a
+    // strikethrough, so it keeps the plain surface. Between the two heights they fade in, so an opening island grows into
+    // them rather than having them appear on one frame.
+    private const double SeaMinHeight = 90, SeaFullHeight = 140, HudMinHeight = 40, HudFullHeight = 60;
+    // The caustics' tile, in DIP: lines a few DIP wide, far enough apart to read as light, not as a pattern.
+    private const double Tile = 150;
+    private static readonly Dictionary<Color, Brush> CausticTiles = [];
     private readonly PanelDecor _decor;
-    private readonly Brush? _caustics;
-    private (Size Size, CornerRadius Corners)? _for;
+    private readonly Brush? _water, _glint;
+    private readonly Drawing? _palm;
+    private (Size Size, CornerRadius Corners, double Shoulder)? _for;
     private DrawingGroup? _drawing;
 
     public IslandDecor(PanelDecor decor)
     {
         _decor = decor;
-        if (decor.Caustics is { } color) _caustics = Caustics(ToColor(color));
+        if (decor.Horizon is { } horizon)
+        {
+            // The sea is lightest at the horizon, where the sky's light lies on it, and deepens toward the bottom. Its top fades
+            // in, so where the horizon falls between a row's text and its bar it reads as a haze, not a cut through the row.
+            Color shallow = ToColor(horizon.Sea), deep = ToColor(horizon.Deep);
+            _water = Frozen(new LinearGradientBrush(new GradientStopCollection
+            {
+                new(Color.FromArgb(0, shallow.R, shallow.G, shallow.B), 0), new(shallow, .08), new(deep, 1)
+            }, new Point(0, 0), new Point(0, 1)));
+            if (horizon.Line is { } line)
+            {
+                // A line of light along the horizon, brightest in the middle, as the sun lays on the water far off.
+                var light = ToColor(line);
+                _glint = Frozen(new LinearGradientBrush(new GradientStopCollection
+                {
+                    new(Color.FromArgb(0, light.R, light.G, light.B), 0), new(light, .5), new(Color.FromArgb(0, light.R, light.G, light.B), 1)
+                }, new Point(0, 0), new Point(1, 0)));
+            }
+        }
+        if (decor.Palm is { } palm) _palm = Palm(ToColor(palm));
     }
 
     public static IslandDecor? For(PanelPalette palette) => palette.Effects.Decor is { } decor ? new IslandDecor(decor) : null;
 
-    public void Draw(DrawingContext dc, Size size, CornerRadius corners, Geometry outline)
+    public void Draw(DrawingContext dc, Size size, CornerRadius corners, double shoulder, Geometry outline)
     {
         if (size.Width < 2 || size.Height < 2) return;
-        if (_for != (size, corners) || _drawing is null) { _drawing = Build(size, corners); _for = (size, corners); }
+        if (_for != (size, corners, shoulder) || _drawing is null) { _drawing = Build(size, corners, shoulder); _for = (size, corners, shoulder); }
+        if (_drawing.Children.Count == 0) return;
         dc.PushClip(outline);
         dc.DrawDrawing(_drawing);
         dc.Pop();
     }
 
-    private DrawingGroup Build(Size size, CornerRadius corners)
+    private DrawingGroup Build(Size size, CornerRadius corners, double shoulder)
     {
         var group = new DrawingGroup();
         double w = size.Width, h = size.Height;
-        double seaTop = 0;
-        if (_decor.Horizon is { } horizon)
+        if (h >= SeaMinHeight)
         {
-            // The horizon sits a little lower on a short island, where a sea across most of it would read as a band of color.
-            seaTop = Math.Round(h * horizon.At);
-            var sea = ToColor(horizon.Sea);
-            var deep = Color.FromArgb(sea.A, (byte)(sea.R * .82), (byte)(sea.G * .86), (byte)(sea.B * .9));
-            // The sea is lightest at the horizon, where the sky's light lies on it, and deepens toward the bottom.
-            var water = new LinearGradientBrush(new GradientStopCollection { new(sea, 0), new(deep, 1) }, new Point(0, 0), new Point(0, 1));
-            water.Freeze();
-            group.Children.Add(new GeometryDrawing(water, null, new RectangleGeometry(new Rect(0, seaTop, w, h - seaTop))));
-            if (horizon.Line is { } line)
+            var scene = new DrawingGroup { Opacity = Math.Min(1, (h - SeaMinHeight) / (SeaFullHeight - SeaMinHeight)) };
+            double seaTop = 0;
+            if (_decor.Horizon is not null)
             {
-                // A line of light along the horizon, brightest in the middle, as the sun lays on the water far off.
-                var light = ToColor(line);
-                var glint = new LinearGradientBrush(new GradientStopCollection
+                seaTop = Math.Round(h * _decor.Horizon.At);
+                scene.Children.Add(new GeometryDrawing(_water, null, new RectangleGeometry(new Rect(0, seaTop, w, h - seaTop))));
+                if (_glint is not null)
                 {
-                    new(Color.FromArgb(0, light.R, light.G, light.B), 0), new(light, .5), new(Color.FromArgb(0, light.R, light.G, light.B), 1)
-                }, new Point(0, 0), new Point(1, 0));
-                glint.Freeze();
-                group.Children.Add(new GeometryDrawing(glint, null, new RectangleGeometry(new Rect(0, seaTop - .5, w, 1))));
+                    // On whole device pixels, so the line stays one sharp line at any scale.
+                    scene.GuidelineSet = new GuidelineSet(null, [seaTop - .5, seaTop + .5]);
+                    scene.Children.Add(new GeometryDrawing(_glint, null, new RectangleGeometry(new Rect(0, seaTop - .5, w, 1))));
+                }
             }
+            if (_decor.Caustics is { } caustics)
+            {
+                // Without a horizon the caustics cover the whole surface. The tile is anchored at the island's centre, which
+                // stays put while the island widens around it, so the light does not slide as the island opens.
+                double dx = w / 2 % Tile;
+                scene.Children.Add(new DrawingGroup
+                {
+                    Transform = new TranslateTransform(dx, 0),
+                    Children = { new GeometryDrawing(Caustics(ToColor(caustics)), null, new RectangleGeometry(new Rect(-dx, seaTop, w, h - seaTop))) }
+                });
+            }
+            if (_palm is not null)
+            {
+                // At most 120 DIP, set partly beyond the top-right corner, so it stays in the corner and clear of the clock
+                // column below it.
+                double frond = Math.Min(120, h * .5);
+                scene.Children.Add(new DrawingGroup { Transform = new MatrixTransform(frond, 0, 0, frond, w - frond * .8, -frond * .12), Children = { _palm } });
+            }
+            if (scene.Children.Count > 0) group.Children.Add(scene);
         }
-        if (_caustics is not null)
-            group.Children.Add(new GeometryDrawing(_caustics, null, new RectangleGeometry(new Rect(0, seaTop, w, h - seaTop))));
-        if (_decor.Palm is { } palm && h >= PalmMinHeight)
-            group.Children.Add(Palm(ToColor(palm), w, h));
         if (_decor.Hud is { } hud && h >= HudMinHeight)
-            group.Children.Add(Hud(ToColor(hud.Color), hud.Chamfer, w, h, corners));
+        {
+            // The marks fade in too, so they do not appear on one frame as the island grows past the collapsed height.
+            var color = ToColor(hud.Color);
+            color.A = (byte)Math.Round(color.A * Math.Min(1, (h - HudMinHeight) / (HudFullHeight - HudMinHeight)));
+            group.Children.Add(Hud(color, hud.Chamfer, w, h, corners, Math.Clamp(shoulder, 0, Math.Min(w / 4, h / 2))));
+        }
         group.Freeze();
         return group;
     }
@@ -76,6 +117,7 @@ internal sealed class IslandDecor
     // in the loose net sunlight draws on a sandy bottom. The tile wraps (whole periods), so it repeats without a seam.
     private static Brush Caustics(Color color)
     {
+        if (CausticTiles.TryGetValue(color, out var cached)) return cached;
         const int size = 192;
         var pixels = new byte[size * size * 4];
         for (int y = 0; y < size; y++)
@@ -95,18 +137,17 @@ internal sealed class IslandDecor
             }
         var bitmap = BitmapSource.Create(size, size, 96, 96, PixelFormats.Pbgra32, null, pixels, size * 4);
         bitmap.Freeze();
-        // About 120 DIP across: lines a few DIP wide, wide apart enough to read as light, not as a pattern.
-        var brush = new ImageBrush(bitmap) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, 120, 120), ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
+        // About 150 DIP across: lines a few DIP wide, wide apart enough to read as light, not as a pattern.
+        var brush = new ImageBrush(bitmap) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, Tile, Tile), ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
         RenderOptions.SetCachingHint(brush, CachingHint.Cache);
         brush.Freeze();
-        return brush;
+        return CausticTiles[color] = brush;
     }
 
     // A palm frond's shadow: a curved stem from beyond the top-right corner, with long narrow leaflets falling from it on both
-    // sides, as the shade of a palm overhead falls on the sand. Sized to the panel's height, at most 170 DIP.
-    private static Drawing Palm(Color color, double w, double h)
+    // sides, as the shade of a palm overhead falls on the sand. In unit coordinates; Build sizes and places it.
+    private static Drawing Palm(Color color)
     {
-        double size = Math.Min(170, h * .9);
         var geometry = new StreamGeometry();
         using (var g = geometry.Open())
         {
@@ -136,16 +177,16 @@ internal sealed class IslandDecor
             for (int i = 1; i <= 10; i++) g.LineTo(Stem(i / 10.0) + new Vector(0, -.012 * (1 - i / 10.0)), true, true);
             for (int i = 10; i >= 0; i--) g.LineTo(Stem(i / 10.0) + new Vector(0, .012 * (1 - i / 10.0)), true, true);
         }
-        geometry.Transform = new MatrixTransform(size, 0, 0, size, w - size, 0);
         geometry.Freeze();
-        var fill = new SolidColorBrush(color);
-        fill.Freeze();
-        return new GeometryDrawing(fill, null, geometry);
+        var drawing = new GeometryDrawing(Frozen(new SolidColorBrush(color)), null, geometry);
+        drawing.Freeze();
+        return drawing;
     }
 
-    // HUD marks: a 45-degree cut across the top-right (or bottom-right) and bottom-left corners, each led in by a short straight run along the
-    // edge, and two small hexagons beside each cut, as on the heads-up displays the theme borrows from. One DIP lines.
-    private static Drawing Hud(Color color, double chamfer, double w, double h, CornerRadius corners)
+    // HUD marks: a 45-degree cut across the top-right (or bottom-right) and bottom-left corners, each led in by a short straight
+    // run along the edge, and a small hexagon beside each cut, as on the heads-up displays the theme borrows from. One DIP
+    // lines. A notch's body stands in from its shoulders, so the bottom corners do too.
+    private static Drawing Hud(Color color, double chamfer, double w, double h, CornerRadius corners, double shoulder)
     {
         var geometry = new StreamGeometry();
         double inset = 3.5, lead = 14;
@@ -163,26 +204,22 @@ internal sealed class IslandDecor
                 var end = corner - across * inset + down * (c + inset + lead);
                 g.BeginFigure(start, false, false);
                 g.LineTo(cutTop, true, true); g.LineTo(cutSide, true, true); g.LineTo(end, true, true);
-                // Two hexagonal ticks just inside the cut.
-                for (int k = 0; k < 2; k++)
-                {
-                    var centre = corner - across * (c + inset + 9 + k * 7) + down * (inset + 7);
-                    Hexagon(g, centre, 2.4);
-                }
+                // One hexagonal tick just inside the cut, large enough to read as a hexagon.
+                Hexagon(g, corner - across * (c + inset + 14) + down * (inset + 9), 6);
             }
             // Only corners that are drawn round; a square corner (the notch's top) is the screen's edge, so an island hanging from
             // it takes the second cut at its bottom-right instead.
             if (corners.TopRight > 2) Corner(new Point(w, 0), new Vector(1, 0), new Vector(0, 1), corners.TopRight);
-            else if (corners.BottomRight > 2) Corner(new Point(w, h), new Vector(1, 0), new Vector(0, -1), corners.BottomRight);
-            if (corners.BottomLeft > 2) Corner(new Point(0, h), new Vector(-1, 0), new Vector(0, -1), corners.BottomLeft);
+            else if (corners.BottomRight > 2) Corner(new Point(w - shoulder, h), new Vector(1, 0), new Vector(0, -1), corners.BottomRight);
+            if (corners.BottomLeft > 2) Corner(new Point(shoulder, h), new Vector(-1, 0), new Vector(0, -1), corners.BottomLeft);
         }
         geometry.Freeze();
-        var pen = new Pen(new SolidColorBrush(color), 1) { StartLineCap = PenLineCap.Flat, EndLineCap = PenLineCap.Flat, LineJoin = PenLineJoin.Miter };
-        pen.Freeze();
+        var pen = Frozen(new Pen(new SolidColorBrush(color), 1) { StartLineCap = PenLineCap.Flat, EndLineCap = PenLineCap.Flat, LineJoin = PenLineJoin.Miter });
         return new GeometryDrawing(null, pen, geometry);
     }
 
     private static Color ToColor(ThemeColor color) => Color.FromArgb(color.A, color.R, color.G, color.B);
+    private static T Frozen<T>(T freezable) where T : Freezable { freezable.Freeze(); return freezable; }
 
     private static void Hexagon(StreamGeometryContext g, Point centre, double radius)
     {

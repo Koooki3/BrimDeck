@@ -102,7 +102,7 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `glass` | Glass: `tint` is a translucent color laid over the desktop (its opacity strictly between 0 and 1), `edge` the light gathered along the inner edge (0–1), `highlight` its color. See "Glass" below | |
 | `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels) and the island's text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right. Not with `glass`, also from the base theme: such a file is refused | 0, or 1–4 |
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain | 0–0.12 |
-| `decor` | Quiet pictures drawn into the surface under the content, each part inherited on its own: `horizon` a sea (`sea`) below `at` of the height with a line of light (`line`) along it; `caustics` a net of soft light lines below the horizon; `palm` a palm frond's shadow in the open panel's top-right corner; `hud` 45-degree cuts across the top-right and bottom-left corners (`chamfer`) with hexagonal ticks. Text is held to its minimums over the sea and the motifs | `at` 0.3–0.9, caustics and palm alpha ≤ 0.12, `chamfer` 0–10 |
+| `decor` | Quiet pictures drawn into the surface under the content, each value inherited on its own (a night look that names only `sea` keeps the day's `at` and `line`): `horizon` a sea (`sea`) below `at` of the height with a line of light (`line`) along it; `caustics` a net of soft light lines below the horizon (over the whole surface without one); `palm` a palm frond's shadow in the open panel's top-right corner; `hud` 45-degree cuts across the bottom-left and the top-right corner (the bottom-right on an island hanging from the screen's edge, `chamfer`) with a hexagonal tick beside each. A fully transparent color turns a part off, e.g. in a night look. Text is held to its minimums over the sea (at the horizon and at its deepest), the line and the motifs | `at` 0.3–0.9, caustics and palm alpha ≤ 0.12, `chamfer` 0–10 |
 
 #### Glass
 
@@ -193,7 +193,8 @@ An unofficial fan palette. It uses colors only, no artwork, logos or fonts from 
 | Cyberpunk yellow | `#FCEE0A` | Indicator, warning, the clock's amber preset |
 | Rebecca's mint | `#3DFFB0` | The Codex column |
 | Neon gradient | cyan → violet → the signs' pale pink halo → magenta | Rim |
-| HUD frames | dim cyan 45° cuts with hexagonal ticks | `decor.hud`, two corners |
+| The signs' pale pink halo | `#F090F0` | A faint tint on chosen date ranges |
+| HUD frames | half-lit cyan 45° cuts with a hexagonal tick | `decor.hud`, two corners |
 | CRT screens | 3.5% scan lines | Surface texture |
 
 **Check.** Primary text is above 15:1 on every gradient stop and tertiary text above 5.5:1; the pale clock is about 14:1 and the yellow warning about 13.8:1; the magenta progress is about 3:1 on the yellow Indicator. Every rule passes the first time, with no adjustment.

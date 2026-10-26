@@ -80,7 +80,7 @@ public sealed class PanelThemeEffects
     // A pixel theme's block texture: squares of the pixel size a little lighter or darker than the surface, at most this opacity
     // (0 to 0.12), as a stone or dirt block is mottled.
     public double? Texture { get; set; }
-    // Quiet pictures drawn into the surface, under the content (PanelThemeDecor). Each part is inherited on its own.
+    // Quiet pictures drawn into the surface, under the content (PanelThemeDecor). Each value is inherited on its own.
     public PanelThemeDecor? Decor { get; set; }
 }
 
@@ -89,8 +89,9 @@ public sealed class PanelThemeEffects
 //     "line" of light along the horizon;
 //   caustics: the light a sunlit (or moonlit) sea throws, a net of soft bright lines in "color" (its alpha at most 0.12);
 //   palm: the shadow of a palm frond reaching into the top-right corner of the open panel, in "color" (alpha at most 0.12);
-//   hud: HUD marks, a 45-degree cut drawn across the top-right and bottom-left corners ("chamfer", 0 to 10 DIP) and hexagonal
-//     ticks beside them, in "color".
+//   hud: HUD marks, a 45-degree cut drawn across the bottom-left and the top-right corner (the bottom-right on an island hanging
+//     from the screen's edge), "chamfer" 0 to 10 DIP, with a hexagonal tick beside each, in "color".
+// A fully transparent color turns a part off, so a night or dusk look can drop a motif the day has.
 // Text is held to its minimums over every color the motifs can lay under it (PanelThemes.DecorStops).
 public sealed class PanelThemeDecor
 {

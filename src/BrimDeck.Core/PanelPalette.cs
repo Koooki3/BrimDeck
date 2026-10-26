@@ -29,7 +29,11 @@ public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, The
 {
     public bool Any => Horizon is not null || Caustics is not null || Palm is not null || Hud is not null;
 }
-public sealed record PanelHorizon(double At, ThemeColor Sea, ThemeColor? Line);
+public sealed record PanelHorizon(double At, ThemeColor Sea, ThemeColor? Line)
+{
+    // The sea deepens from Sea at the horizon to this at the bottom, as open water does away from the light.
+    public ThemeColor Deep => Sea with { R = (byte)(Sea.R * .9), G = (byte)(Sea.G * .92), B = (byte)(Sea.B * .95) };
+}
 public sealed record PanelHud(ThemeColor Color, double Chamfer);
 
 // The glass a theme's surface is made of (PanelThemeGlass, fitted): the tint over the backdrop, the strength of the light along

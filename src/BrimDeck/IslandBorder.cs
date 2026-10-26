@@ -91,7 +91,7 @@ public sealed class IslandBorder : Border
         bool fading = MaterialOpacity < 1;
         if (fading) drawingContext.PushOpacity(Math.Clamp(MaterialOpacity, 0, 1));
         if (Gradient is { } gradient) drawingContext.DrawGeometry(gradient, null, outline);
-        Decor?.Draw(drawingContext, RenderSize, CornerRadius, outline);
+        Decor?.Draw(drawingContext, RenderSize, CornerRadius, ShoulderRadius, outline);
         if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
         if (EdgeBrush is { } edge)
         {

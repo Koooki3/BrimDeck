@@ -111,7 +111,12 @@ public static partial class PanelThemes
         surfaces.AddRange(values.SurfaceGradient.Select(stop => stop.Over(surface)));
         var grounds = new List<ThemeColor>(surfaces);
         if (decor.Horizon is { } horizon)
-            foreach (var ground in surfaces) { var sea = horizon.Sea.Over(ground); grounds.Add(sea); yield return sea; }
+            foreach (var ground in surfaces)
+            {
+                // The sea from its color at the horizon to its deep color at the bottom, and the line of light along its top.
+                foreach (var water in new[] { horizon.Sea, horizon.Deep }) { var sea = water.Over(ground); grounds.Add(sea); yield return sea; }
+                if (horizon.Line is { } line) { yield return line.Over(ground); yield return line.Over(horizon.Sea.Over(ground)); }
+            }
         foreach (var tint in new[] { decor.Caustics, decor.Palm })
             if (tint is { } color)
                 foreach (var ground in grounds) yield return color.Over(ground);
@@ -160,11 +165,16 @@ public static partial class PanelThemes
         merged.Texture = layer.Texture ?? merged.Texture;
         if (layer.Decor is { } decor)
         {
-            merged.Decor ??= new PanelThemeDecor();
-            merged.Decor.Horizon = decor.Horizon ?? merged.Decor.Horizon;
-            merged.Decor.Caustics = decor.Caustics ?? merged.Decor.Caustics;
-            merged.Decor.Palm = decor.Palm ?? merged.Decor.Palm;
-            merged.Decor.Hud = decor.Hud ?? merged.Decor.Hud;
+            // Field by field, into new parts, so a layer that moves only the horizon keeps the sea it inherits and the base's own
+            // parts are never changed.
+            var below = merged.Decor;
+            merged.Decor = new PanelThemeDecor
+            {
+                Horizon = decor.Horizon is { } h ? new PanelThemeHorizon { At = h.At ?? below?.Horizon?.At, Sea = h.Sea ?? below?.Horizon?.Sea, Line = h.Line ?? below?.Horizon?.Line } : below?.Horizon,
+                Caustics = decor.Caustics is { } c ? new PanelThemeMotif { Color = c.Color ?? below?.Caustics?.Color } : below?.Caustics,
+                Palm = decor.Palm is { } p ? new PanelThemeMotif { Color = p.Color ?? below?.Palm?.Color } : below?.Palm,
+                Hud = decor.Hud is { } u ? new PanelThemeHud { Color = u.Color ?? below?.Hud?.Color, Chamfer = u.Chamfer ?? below?.Hud?.Chamfer } : below?.Hud
+            };
         }
         if (layer.Glass is { } glass)
         {

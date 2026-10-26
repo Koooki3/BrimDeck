@@ -274,17 +274,22 @@ internal static class PanelThemeTests
             Decor("""{ "horizon": { "at": 0.5 }, "palm": { "color": "#00000000" }, "hud": { "color": "#FF00F0FF" } }""").Effects.Decor is { Horizon: null, Palm: null, Hud: { Chamfer: 6 } }
             && Decor("""{ "horizon": { "at": 0.5 } }""").Effects.Decor is null && BuiltIn("dark").Effects.Decor is null);
         // The night look names only a sea; the day's palm stays.
-        var layered = PanelThemes.Parse("""{ "formatVersion": 1, "id": "layered", "base": "light", "effects": { "decor": { "palm": { "color": "#20002010" } } }, "night": { "effects": { "decor": { "horizon": { "sea": "#3000A6A6" } } } } }""");
-        check("Each motif is inherited on its own", PanelThemes.Build("layered", layered).Effects.Decor is { Palm: not null, Horizon: null }
-            && PanelThemes.Build("layered", layered, night: true).Effects.Decor is { Palm: not null, Horizon.At: .62 });
+        // The night look names only a sea and a chamfer: the day's horizon height, line, palm and HUD color stay.
+        var layered = PanelThemes.Parse("""{ "formatVersion": 1, "id": "layered", "base": "light", "effects": { "decor": { "palm": { "color": "#20002010" }, "horizon": { "at": 0.5, "sea": "#2000A6A6", "line": "#80FFFFFF" }, "hud": { "color": "#4000F0FF" } } }, "night": { "effects": { "decor": { "horizon": { "sea": "#3000A6A6" }, "hud": { "chamfer": 3 } } } } }""");
+        check("Each motif value is inherited on its own", PanelThemes.Build("layered", layered).Effects.Decor is { Palm: not null, Horizon: { At: .5, Sea.A: 0x20 }, Hud.Chamfer: 6 }
+            && PanelThemes.Build("layered", layered, night: true).Effects.Decor is { Palm: not null, Horizon: { At: .5, Sea.A: 0x30, Line: not null }, Hud: { Chamfer: 3, Color.A: 0x40 } }
+            && layered.Effects!.Decor!.Horizon!.Sea == "#2000A6A6");
         // A deep lagoon under dark text: the text is darkened until it reads over the sea too.
         var deepSea = Decor("""{ "horizon": { "at": 0.4, "sea": "#A000A6A6" } }""");
         var sea = deepSea.Effects.Decor!.Horizon!.Sea.Over(deepSea.Surface);
-        check("Text is held over the sea the horizon lays under it", deepSea.SurfaceStops.Contains(sea)
+        check("Text is held over the sea the horizon lays under it, at the horizon and at its deepest", deepSea.SurfaceStops.Contains(sea)
+            && deepSea.SurfaceStops.Contains(deepSea.Effects.Decor!.Horizon!.Deep.Over(deepSea.Surface))
             && deepSea["textPrimary"].MinimumContrast([sea]) >= 4.5 - .001 && deepSea.Adjustments.Count > 0);
         var dusky = PanelThemes.Build("dusky", PanelThemes.Parse("""{ "formatVersion": 1, "id": "dusky", "base": "light", "effects": { "surfaceGradient": ["#00FFFFFF", "#FF8FB8C8"], "decor": { "horizon": { "sea": "#A000A6A6" } } } }"""));
         var duskySea = dusky.Effects.Decor!.Horizon!.Sea.Over(dusky.Effects.SurfaceGradient[1].Over(dusky.Surface));
         check("The sea is measured over the gradient it lies on", dusky.SurfaceStops.Contains(duskySea) && dusky["textPrimary"].MinimumContrast([duskySea]) >= 7 - .001);
+        var lit = Decor("""{ "horizon": { "sea": "#2000A6A6", "line": "#FFFFC24B" } }""");
+        check("The horizon's line is measured too", lit.SurfaceStops.Contains(ThemeColor.Parse("#FFFFC24B")));
         var badDecor = PanelThemes.LoadFolder(Folder("decor-bad", ("sea.json", """{ "formatVersion": 1, "id": "sea", "effects": { "decor": { "horizon": { "sea": "teal" } } } }"""),
             ("hud.json", """{ "formatVersion": 1, "id": "hud", "effects": { "decor": { "hud": { "color": "#12345" } } } }""")));
         check("A motif color that is not a color is refused", badDecor.Count == 2 && badDecor.All(theme => theme.Error is not null));
