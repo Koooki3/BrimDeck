@@ -58,6 +58,7 @@ try
     CurvesTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
+    DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
     GpuAdapterTests.Run(root, Check);

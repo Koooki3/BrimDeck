@@ -820,6 +820,7 @@ public partial class MainWindow : Window
         // win2: a pointer reaching the island means someone is at the screen: the display is on (C-L13), and a notice is
         // looked for briskly again (C-L8).
         if (inside && !_pointerInside) { MotionEnvironment.InputSeen(); BrimDeck.Native.WindowsNoticeSource.Interacted(); }
+        if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
         if (inside) { ReleaseHotkeyPin(); ReplayCompactTitle(); }
         if (inside)
