@@ -32,8 +32,12 @@ public sealed record CoreSample(int Id, int Group, CoreTier Tier, int Number, do
     public double? FrequencyFraction => FrequencyMhz.TryGet(out var mhz) && MaxFrequencyMhz is { } top && top > 0 ? Math.Clamp(mhz / top, 0, 1) : null;
 }
 
+// Temperature is the processor's from the ACPI thermal zones in degrees Celsius, TemperatureZone the zone it came from; null
+// where no zone gives one (Temperatures.Cpu).
 public sealed record CpuSample(IReadOnlyList<CoreSample> Cores, Reading<double> FrequencyMhz)
 {
+    public double? Temperature { get; init; }
+    public string? TemperatureZone { get; init; }
     // By index, as Average and Max add up: both are read on every redraw of the collapsed readings, which allocate nothing.
     public double Usage
     {
@@ -104,6 +108,8 @@ public static class ReadingLevels
         CompactMonitorItems.Gpu => snapshot?.Gpu.OrDefault is { } gpu ? OfShare(gpu.Usage) : MemoryLevel.Normal,
         CompactMonitorItems.Download => snapshot?.Network.OrDefault is { } down ? OfRate(down.DownBytesPerSecond) : MemoryLevel.Normal,
         CompactMonitorItems.Upload => snapshot?.Network.OrDefault is { } up ? OfRate(up.UpBytesPerSecond) : MemoryLevel.Normal,
+        CompactMonitorItems.Temperature => Temperatures.Hottest(snapshot)?.Level ?? MemoryLevel.Normal,
+        CompactMonitorItems.Storage => snapshot is not null && Core.Storage.System(snapshot.Storage, Core.Storage.WindowsLetter) is { } drive ? OfShare(drive.UsedFraction) : MemoryLevel.Normal,
         _ => MemoryLevel.Normal
     };
 
@@ -125,6 +131,11 @@ public sealed record GpuEngine(string Kind, double Usage);
 // null where the system does not give them.
 public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
 {
+    // In degrees Celsius as Task Manager reads it; null without a sensor. TemperatureFrom names the adapter it was read from
+    // when that is not this one (this adapter has no sensor and another has), and TemperatureKind says its kind ("独显").
+    public double? Temperature { get; init; }
+    public string? TemperatureFrom { get; init; }
+    public string? TemperatureKind { get; init; }
     public IReadOnlyList<GpuEngine> Engines { get; init; } = [];
     public Reading<ulong> SharedBytes { get; init; } = Reading<ulong>.Unavailable("");
     public string? Name { get; init; }
@@ -216,6 +227,9 @@ public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors,
     public IReadOnlyList<double> UpHistory { get; init; } = [];
     public IReadOnlyList<double> CpuHistory { get; init; } = [];
     public IReadOnlyList<double> GpuHistory { get; init; } = [];
+    // The internal drives with their lettered volumes (Storage), each with its temperature while drive temperatures are read;
+    // empty while storage is not read.
+    public IReadOnlyList<StorageDrive> Storage { get; init; } = [];
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,
         Reading<CpuSample>.Unavailable(reason), Reading<MemorySample>.Unavailable(reason), Reading<NetworkSample>.Unavailable(reason),
         Reading<GpuSample>.Unavailable(reason), Reading<ProcessList>.Unavailable(reason));

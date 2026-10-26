@@ -297,6 +297,10 @@ public sealed class DeckSettings
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
+    // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it.
+    public bool MonitorTemperatures { get; set; } = true;
+    // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
+    public bool MonitorStorage { get; set; } = true;
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
