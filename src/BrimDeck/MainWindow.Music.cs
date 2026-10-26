@@ -28,7 +28,7 @@ public partial class MainWindow
         EventManager.RegisterClassHandler(typeof(FrameworkContentElement), ToolTipService.ToolTipOpeningEvent, new ToolTipEventHandler(Suppress), true);
     }
     private DeckPage _page;
-    private double _pageWidth = 760, _usageWidth = 760;
+    private double _pageWidth = 760, _usageWidth = 760, _widestPage = 760;
     private MediaSessions? _media => _app.Media;
     private MediaTrack? _mediaTrack;
     private IReadOnlyList<MediaTrack> _mediaTracks = [];
@@ -114,7 +114,7 @@ public partial class MainWindow
     {
         if (!DeckPages.Shown(Settings, page)) return;
         bool changed = CurrentPage != page;
-        if (changed) CloseSourceMenu();
+        if (changed) { CloseSourceMenu(); PageToolTips.CloseWithin(PageContent(CurrentPage)); }
         if (changed && _expanded && !_preview)
         {
             // Start before resizing: the shrinking surface can immediately fire MouseLeave.
