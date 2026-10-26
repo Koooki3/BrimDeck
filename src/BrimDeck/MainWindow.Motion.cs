@@ -9,7 +9,8 @@ namespace BrimDeck;
 
 // The theme's motion on this panel: the island's ambient light (AmbientGlow) and the answers to the pointer over the open panel
 // (InteractionFx). Both follow the global animation settings; the ambient light also stops while the panel is hidden, powering
-// off, shown as the indicator line, or while the session is locked, the display is off or battery saver is on. The music and
+// off, shown as the indicator line, while a maximized or full-screen window is in front on its monitor (the context the
+// window rules read, WindowsHost), or while the session is locked, the display is off or battery saver is on. The music and
 // the readings in the collapsed row follow the same environment (MotionEnvironment).
 public partial class MainWindow
 {
@@ -44,7 +45,8 @@ public partial class MainWindow
         UpdateAmbient(); UpdateMusicTimer(); UpdateMonitorDemand();
     }
 
-    private MotionConditions MotionState() => MotionEnvironment.Conditions(IsVisible, IsSuppressed, _poweringOff, _expanded || EffectiveStyle != CompactStyle.Line);
+    private MotionConditions MotionState() => MotionEnvironment.Conditions(IsVisible, IsSuppressed, _poweringOff, _expanded || EffectiveStyle != CompactStyle.Line,
+        covered: !_preview && _context != ScreenContext.Desktop);
 
     // After the theme has dressed the island: the light takes the new theme, and whatever the pointer had lit ends.
     private void ApplyThemeMotion() { _ambient?.Apply(); _fx?.Reset(); }

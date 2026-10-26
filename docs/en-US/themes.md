@@ -113,7 +113,7 @@ Where Windows can, the desktop under the glass is blurred: BrimDeck puts a windo
 
 ### Motion (motion)
 
-How the theme moves on BrimDeck's own windows: slow ambient light on the island, and how the pointer and the keyboard are answered. Like the effects, the section is merged key by key along the base chain, so a theme only writes what it changes. Every value is held to the range below (a value outside it is moved to its nearest end), so no theme file can make anything flash: brightness never changes more than three times a second. Nothing moves while animations are off in BrimDeck's settings or in Windows, or in high contrast; the ambient light also stops while the island is hidden or powering off, the session is locked, or battery saver is on. The settings window keeps its own hover and focus styles.
+How the theme moves on BrimDeck's own windows: slow ambient light on the island, and how the pointer and the keyboard are answered. Like the effects, the section is merged key by key along the base chain, so a theme only writes what it changes. Every value is held to the range below (a value outside it is moved to its nearest end), so no theme file can make anything flash: brightness never changes more than three times a second. Nothing moves while animations are off in BrimDeck's settings or in Windows, or in high contrast; the ambient light also stops while the island is hidden or powering off, the session is locked, battery saver is on, or a maximized or full-screen window is in front on the island's monitor (as a live wallpaper pauses); the particles a press left go at once when the panel closes. The settings window keeps its own hover and focus styles.
 
 `ambient`: periods are seconds, and 0 turns an effect off.
 

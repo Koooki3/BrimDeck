@@ -230,9 +230,10 @@ public static class MotionSafety
 // Whether motion may run now. Animations, SystemAnimations and HighContrast make the app-wide rule (Soft.Enabled): BrimDeck's
 // setting, Windows' "animation effects", and no motion in high contrast. Ambient light is a loop, so it also needs the island
 // on screen, the session in front of the user with its display on, and power to spare; the answers to the pointer only need
-// motion to be allowed.
+// motion to be allowed. Covered: a maximized or full-screen window is in front on the island's monitor, where the user's
+// wallpaper pauses too (7c-6), so the loop stops there as well.
 public readonly record struct MotionConditions(bool Animations, bool SystemAnimations, bool HighContrast, bool Visible, bool Suppressed,
-    bool PoweringOff, bool Locked, bool BatterySaver, bool HasMaterial, bool DisplayOff = false)
+    bool PoweringOff, bool Locked, bool BatterySaver, bool HasMaterial, bool DisplayOff = false, bool Covered = false)
 {
     public bool MotionAllowed => Allowed(Animations, SystemAnimations, HighContrast);
     // The rule itself, for Soft.Enabled and these conditions alike.
@@ -243,7 +244,7 @@ public static class MotionGate
 {
     public static bool Interaction(in MotionConditions c, ThemeMotion motion) => c.MotionAllowed && motion.AnyInteraction;
     public static bool Ambient(in MotionConditions c, ThemeMotion motion) => c.MotionAllowed
-        && c.Visible && !c.Suppressed && !c.PoweringOff && !c.Locked && !c.DisplayOff && !c.BatterySaver && c.HasMaterial && motion.Ambient.Any;
+        && c.Visible && !c.Suppressed && !c.PoweringOff && !c.Locked && !c.DisplayOff && !c.BatterySaver && !c.Covered && c.HasMaterial && motion.Ambient.Any;
 }
 
 // The interaction durations in milliseconds, from the animation length chosen in settings (100 to 1000 ms, 360 by default) and

@@ -566,6 +566,7 @@ public partial class MainWindow : Window
         // the pointer's marks and particles, which end with it (one thing moves at a time, ux #7); opening again ends a
         // picture still playing at once.
         bool closing = _expanded && !expanded;
+        if (closing) _fx?.EndParticles();
         bool picture = closing && !instant && !_preview && CollapseLayer.CanPlay;
         if (picture) _fx?.Reset();
         var collapseShot = picture ? _collapse?.Capture(Island) : null;

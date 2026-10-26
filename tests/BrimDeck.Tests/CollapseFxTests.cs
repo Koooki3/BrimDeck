@@ -15,6 +15,17 @@ internal static class CollapseFxTests
         Playback(check);
         Budget(check);
         Effects(check, Palette, Custom);
+        Covered(check, Palette);
+    }
+
+    // One thing at a time: the ambient loop stops while a maximized or full-screen window is in front on the island's monitor.
+    private static void Covered(Action<string, bool> check, Func<string, PanelPalette> palette)
+    {
+        var motion = palette("cyberpunk-edgerunners").Motion;
+        var shown = new MotionConditions(true, true, false, true, false, false, false, false, true);
+        check("Covered: the ambient light runs on the desktop and stops under a maximized or full-screen window; the answers to the pointer stay",
+            motion.Ambient.Any && MotionGate.Ambient(shown, motion) && !MotionGate.Ambient(shown with { Covered = true }, motion)
+            && MotionGate.Interaction(shown with { Covered = true }, motion) && !shown.Covered);
     }
 
     // The new answers to the pointer: splash, rain, bubbles and the chromatic pulse, all chosen by a theme file only.

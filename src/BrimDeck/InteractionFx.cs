@@ -545,6 +545,15 @@ internal sealed partial class FxSurface : FrameworkElement
         if (!_hover.Valid || _hover.Box != before) Wake();
     }
 
+    // The panel closes: what the presses left goes at once rather than flying on over the closing (one thing moves at a time,
+    // ux #7); with a collapse picture everything else ends too (MainWindow.SetExpanded).
+    public void EndParticles()
+    {
+        if (_detached || !StepParticles(Clock())) return;
+        ClearParticles();
+        Wake();
+    }
+
     // Ends everything at once, as if nothing had been shown, and leaves no frame callback or handler behind.
     public void Reset()
     {
