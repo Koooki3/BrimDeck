@@ -37,6 +37,60 @@ internal static class GlassEffect
         return brush;
     }
 
+    // Round 16: the system acrylic's recipe over the same host backdrop (DWM's blur of what lies behind), the body of liquid glass
+    // without any capture. Windows' Acrylic (microsoft-ui-xaml, MIT: AcrylicBrush) saturates the blur, blends the tint's
+    // luminosity in at the luminosity opacity (the backdrop's hue and saturation kept), lays the tint over at its opacity and
+    // adds a little noise; every step but the noise is linear, so here they are one color matrix (Acrylic, below). The looks:
+    // the user's shell acrylic (ZenDesktop's numbers, user-setup-reference 1.4: the tint #232323 at 23 %, the saturation kept)
+    // for the dark look and its light counterpart (#F3F3F3). Its luminosity layer of .3 suits Explorer over the user's dark
+    // wallpaper only: over a white page it leaves the dark glass mid-grey and its light text unreadable (the page checks: 97
+    // failures). The luminosity layer moves only the lightness - the backdrop's hue and saturation stay, so its colours still
+    // glow through - so it is set as Windows' own acrylic sets it, high enough for the text over any backdrop: .8 (Windows .96
+    // dark, .85 light), which keeps the panel's lightness within about .3 of the tint's whatever lies behind.
+    public readonly record struct AcrylicLook(double Saturation, double LuminosityOpacity, double Luminosity, double TintR, double TintG, double TintB, double TintOpacity);
+    public static readonly AcrylicLook AcrylicDark = new(1.3, .8, .1373, .1373, .1373, .1373, .23);
+    public static readonly AcrylicLook AcrylicLight = new(1.3, .8, .953, .953, .953, .953, .25);
+    private static readonly Dictionary<AcrylicLook, CompositionEffectFactory> AcrylicFactories = [];
+
+    public static CompositionBrush Acrylic(Compositor compositor, AcrylicLook look)
+    {
+        if (!AcrylicFactories.TryGetValue(look, out var factory))
+            AcrylicFactories[look] = factory = compositor.CreateEffectFactory(Create(AcrylicMatrix(look), new CompositionEffectSourceParameter("backdrop")));
+        var brush = factory.CreateBrush();
+        brush.SetSourceParameter("backdrop", compositor.CreateHostBackdropBrush());
+        return brush;
+    }
+
+    // The recipe as one D2D1_MATRIX_5X4_F (rows by input channel, the fifth the offset): saturation about the luma (Rec. 709),
+    // then the luminosity blend (each channel moved by opacity x (target - luma), which keeps the hue and the chroma: W3C's
+    // SetLum without its clip), then the tint laid over at its opacity.
+    internal static float[] AcrylicMatrix(AcrylicLook look)
+    {
+        double[] w = [.2126, .7152, .0722];
+        var a = new double[3, 3];
+        for (int i = 0; i < 3; i++)
+            for (int o = 0; o < 3; o++)
+                a[i, o] = (1 - look.Saturation) * w[i] + (i == o ? look.Saturation : 0);
+        // Luminosity: out_o = in_o - L (sum_k w_k in_k) + L target.
+        var b = new double[3, 3];
+        for (int i = 0; i < 3; i++)
+            for (int o = 0; o < 3; o++)
+            {
+                double sum = 0;
+                for (int k = 0; k < 3; k++) sum += a[i, k] * ((k == o ? 1 : 0) - look.LuminosityOpacity * w[k]);
+                b[i, o] = sum;
+            }
+        double t = look.TintOpacity;
+        double[] tint = [look.TintR, look.TintG, look.TintB];
+        var m = new float[20];
+        for (int i = 0; i < 3; i++)
+            for (int o = 0; o < 3; o++)
+                m[i * 4 + o] = (float)(b[i, o] * (1 - t));
+        m[15] = 1;
+        for (int o = 0; o < 3; o++) m[16 + o] = (float)(look.LuminosityOpacity * look.Luminosity * (1 - t) + t * tint[o]);
+        return m;
+    }
+
     // Lets a blur window's brush go, with the backdrop brush inside a held one.
     public static void Release(CompositionBrush? brush)
     {

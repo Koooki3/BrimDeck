@@ -321,6 +321,9 @@ internal static partial class LiquidPages
             frame = frame with { ContentLeft = (float)(row.Left * Scale), ContentTop = (float)(row.Top * Scale), ContentRight = (float)(row.Right * Scale), ContentBottom = (float)(row.Bottom * Scale) };
         if (Environment.GetEnvironmentVariable("LIQUID_DEBUG") == "1") Console.WriteLine($"NOTE: {name}: {layer.TextRects?.Length / 4 ?? -1} text regions, open {layer.Open:0.00}, island {layer.W}x{layer.H}: " + (layer.TextRects is { } tr ? string.Join(" ", Enumerable.Range(0, tr.Length / 4).Select(i => $"[{tr[i * 4]:0},{tr[i * 4 + 1]:0},{tr[i * 4 + 2]:0},{tr[i * 4 + 3]:0}]")) : ""));
         var glass = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H), frame, (int)Math.Ceiling(48 * Scale));
+        // Round 16: the acrylic body (the default; the refraction renderer only with BRIMDECK_LIQUID_REFRACT=1), drawn in the
+        // outline the renderer covered.
+        if (!GlassBackdrop.Refraction) glass = AcrylicEmulation.Draw(desktop, dw, dh, gx, gy, layer.W, layer.H, glass, dark, Scale);
         var under = (byte[])desktop.Clone();
         for (int y = 0; y < layer.H; y++)
             for (int x = 0; x < layer.W; x++)
@@ -336,7 +339,7 @@ internal static partial class LiquidPages
         Check(name, layer, glass, under, composed, dw, gx, gy);
         Body(name, layer, glass, under, desktop, dw, gx, gy);
         // Round 15: the cover seam (CoverSeam), on the light look's open panels: the same frame without its text cover.
-        if (!dark && layer.Open >= .5 && layer.TextRects is { Length: > 0 })
+        if (GlassBackdrop.Refraction && !dark && layer.Open >= .5 && layer.TextRects is { Length: > 0 })
         {
             var bare = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H), frame with { TextRects = [] }, (int)Math.Ceiling(48 * Scale));
             var freeUnder = (byte[])desktop.Clone();
@@ -412,7 +415,19 @@ internal static partial class LiquidPages
                 bs += v; bq += v * v; bn++;
             }
         double blotch = bn == 0 ? 0 : Math.Sqrt(Math.Max(0, bq / bn - bs / bn * (bs / bn)));
-        Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: body: {n * 100.0 / (w * h):0}% of the panel, mean luma {mean:0.0}, std {std:0.0}, chroma kept {chroma / Math.Max(back, 1):0.00}, blotchiness {blotch:0.00}"));
+        // Round 16: the residue - what of the backdrop's fine detail (glyph strokes, edges) is left in the glass: the luma at a
+        // glyph's scale (a box of 1 DIP less one of 4), its std over the same body. A fully dissolved backdrop leaves only noise.
+        int one = Math.Max(1, (int)Math.Round(Scale)), four = (int)Math.Round(4 * Scale);
+        double rs = 0, rq = 0; int rn = 0;
+        for (int y = inset; y < h - inset; y += 2)
+            for (int x = inset; x < w - inset; x += 2)
+            {
+                if (glass[(y * w + x) * 4 + 3] < 250) continue;
+                double v = Box(x, y, one) - Box(x, y, four);
+                rs += v; rq += v * v; rn++;
+            }
+        double residue = rn == 0 ? 0 : Math.Sqrt(Math.Max(0, rq / rn - rs / rn * (rs / rn)));
+        Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: body: {n * 100.0 / (w * h):0}% of the panel, mean luma {mean:0.0}, std {std:0.0}, chroma kept {chroma / Math.Max(back, 1):0.00}, blotchiness {blotch:0.00}, residue {residue:0.00}"));
     }
 
     // Premultiplied source over an opaque destination.

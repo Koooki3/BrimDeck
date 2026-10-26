@@ -134,6 +134,21 @@ internal sealed class GlassBackdrop : IDisposable
     public static double SurfaceOpacity(bool aside, double held, double alpha) => aside ? 1 - held : 1 + held * (PanelTheme.HeldOpacity(alpha) - 1);
 
     private static readonly bool LiquidOff = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID") == "0";
+    // Round 16: the liquid glass themes' body is the system acrylic's recipe over DWM's own blur (GlassEffect.Acrylic) with a
+    // light rim drawn over it (the rim visuals below), no capture. The refraction renderer of rounds 5 to 15 (DesktopSource,
+    // LiquidRenderer) stays reachable for comparison behind BRIMDECK_LIQUID_REFRACT=1.
+    internal static bool Refraction { get; set; } = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_REFRACT") == "1";
+    private bool AcrylicBody => LiquidTint is not null && !LiquidOff && !Refraction && LiquidTheme.Renders;
+    // Whether the liquid glass themes' glass is shown now: the acrylic body (its surface stepped aside for it), or the
+    // refraction renderer's.
+    public bool BodyShown => LiquidShown || SurfaceAside && AcrylicBody;
+    private ShapeVisual? _rim;
+    private CompositionRoundedRectangleGeometry? _rimHair, _rimLight;
+    private CompositionSpriteShape? _hairShape, _lightShape;
+    private CompositionColorBrush? _hairBrush;
+    private CompositionLinearGradientBrush? _lightBrush;
+    private CompositionColorGradientStop? _lightTop, _lightFade;
+    private bool? _rimDark;
     private LiquidHost? _host;
     private SpriteVisual? _liquid;
     private CompositionRoundedRectangleGeometry? _liquidClip;
@@ -230,8 +245,9 @@ internal sealed class GlassBackdrop : IDisposable
     private void StandInFrame()
     {
         if (!PanelTheme.GlassShown) { ShowLiquid(false); SurfaceAside = false; Report(0, always: false); return; }
-        bool liquid = ShowLiquid(LiquidTint is not null && !LiquidOff && LiquidTheme.Renders && StandIn!());
-        Decided(liquid, Math.Clamp(_shape().Material, 0, 1));
+        bool acrylic = AcrylicBody;
+        bool liquid = ShowLiquid(!acrylic && LiquidTint is not null && !LiquidOff && LiquidTheme.Renders && StandIn!());
+        Decided(liquid || acrylic, Math.Clamp(_shape().Material, 0, 1));
     }
 
     // Follows the island frame by frame for at least the given milliseconds, and after that until it holds still: for motion
@@ -403,10 +419,23 @@ internal sealed class GlassBackdrop : IDisposable
         _clip.CornerRadius = new Vector2((float)corner);
         // Liquid glass covers the whole outline, shoulders too (its shader draws the shape), inside the same recent shapes.
         double outerLeft = left - shoulder - inset, outerRight = right + shoulder + inset, outerBottom = bottom + inset;
-        bool liquid = Liquid(shown, outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
+        bool acrylic = AcrylicBody;
+        bool liquid = !acrylic && Liquid(shown, outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
+        if (acrylic)
+        {
+            // The acrylic body covers the island's whole outline as liquid glass did (its surface steps aside), and the rim
+            // lies along that outline.
+            if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
+            Dress();
+            _clip.Offset = new Vector2((float)outerLeft, (float)clipTop);
+            _clip.Size = new Vector2((float)Math.Max(0, outerRight - outerLeft), (float)Math.Max(0, outerBottom - clipTop));
+            _clip.CornerRadius = new Vector2((float)radius);
+            Rim(outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
+        }
+        else if (_rim is not null) _rim.IsVisible = false;
         _sprite!.Opacity = liquid ? 0 : (float)opacity;
-        Decided(liquid, frame.Material);
-        if (liquid) { left = outerLeft; right = outerRight; bottom = outerBottom; corner = radius; }
+        Decided(liquid || acrylic, frame.Material);
+        if (liquid || acrylic) { left = outerLeft; right = outerRight; bottom = outerBottom; corner = radius; }
         // The window region: the clip's rectangle, rounded alike, so the window takes no clicks and shows nothing outside it.
         // A square top reaches above the window, as the clip does, so the region's rounded top corners fall outside it.
         var region = ((int)Math.Floor(left), (int)Math.Floor(clipTop), (int)Math.Ceiling(right), (int)Math.Ceiling(bottom), (int)Math.Round(corner));
@@ -753,6 +782,13 @@ internal sealed class GlassBackdrop : IDisposable
         var previous = _sprite.Brush;
         _sprite.Brush = null;
         GlassEffect.Release(previous);
+        if (AcrylicBody)
+            try
+            {
+                _sprite.Brush = GlassEffect.Acrylic(compositor, PanelTheme.Current.IsDark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight);
+                return;
+            }
+            catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or InvalidCastException) { }
         if (glass is { Held: true })
             try
             {
@@ -762,6 +798,64 @@ internal sealed class GlassBackdrop : IDisposable
             }
             catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or InvalidCastException) { }
         _sprite.Brush = compositor.CreateHostBackdropBrush();
+    }
+
+    // ----- Round 16: the rim over the acrylic body (no capture) -----
+    // A hairline just inside the outline (about a third of round 14's, round 14b's strength: light on the dark look, dark on the
+    // light one) and a Fresnel light along the top edge fading down the sides, as the light from above catches the glass's edge
+    // (Lens, liquid-glass-studio: the light's place fixed, the rim brightest where the surface turns toward it). Both are
+    // composition shapes in the blur's window, set only when the outline or the look changes.
+    private void MakeRim(Compositor compositor, Windows.UI.Composition.ContainerVisual root)
+    {
+        try
+        {
+            _rim = compositor.CreateShapeVisual(); _rim.RelativeSizeAdjustment = Vector2.One;
+            _rimHair = compositor.CreateRoundedRectangleGeometry(); _rimLight = compositor.CreateRoundedRectangleGeometry();
+            _hairBrush = compositor.CreateColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            _lightBrush = compositor.CreateLinearGradientBrush();
+            _lightBrush.StartPoint = new Vector2(0, 0); _lightBrush.EndPoint = new Vector2(0, 1);
+            _lightTop = compositor.CreateColorGradientStop(0, Windows.UI.Color.FromArgb(0, 255, 255, 255));
+            _lightFade = compositor.CreateColorGradientStop(.5f, Windows.UI.Color.FromArgb(0, 255, 255, 255));
+            _lightBrush.ColorStops.Add(_lightTop); _lightBrush.ColorStops.Add(_lightFade);
+            _hairShape = compositor.CreateSpriteShape(_rimHair); _hairShape.StrokeBrush = _hairBrush;
+            _lightShape = compositor.CreateSpriteShape(_rimLight); _lightShape.StrokeBrush = _lightBrush;
+            _rim.Shapes.Add(_hairShape); _rim.Shapes.Add(_lightShape);
+            _rim.IsVisible = false;
+            root.Children.InsertAtTop(_rim);
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException) { _rim = null; }
+    }
+
+    private (double, double, double, double, double, double, bool)? _rimFor;
+    private void Rim(double left, double top, double right, double bottom, double radius, double opacity)
+    {
+        if (_rim is null || _rimHair is null || _rimLight is null || _hairShape is null || _lightShape is null) return;
+        bool dark = PanelTheme.Current.IsDark;
+        _rim.Opacity = (float)opacity;
+        _rim.IsVisible = true;
+        if (_rimFor == (left, top, right, bottom, radius, VisualTreeHelper.GetDpi(_island).DpiScaleX, dark)) return;
+        double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
+        _rimFor = (left, top, right, bottom, radius, scale, dark);
+        if (_rimDark != dark)
+        {
+            _rimDark = dark;
+            // The hairline: about a third of round 14's (.05 light, .09 dark of the glass's own edge).
+            _hairBrush!.Color = dark ? Windows.UI.Color.FromArgb(26, 255, 255, 255) : Windows.UI.Color.FromArgb(20, 0, 0, 0);
+            _lightTop!.Color = Windows.UI.Color.FromArgb((byte)(dark ? 64 : 150), 255, 255, 255);
+        }
+        // 0.75 pt for the hairline (a device pixel at least), a little over a DIP for the light just inside it.
+        float hair = (float)Math.Max(1, .75 * scale), light = (float)(1.25 * scale);
+        Set(_rimHair, hair, 0); Set(_rimLight, light, hair);
+        _hairShape.StrokeThickness = hair; _lightShape.StrokeThickness = light;
+
+        void Set(CompositionRoundedRectangleGeometry geometry, float stroke, float inset)
+        {
+            // A stroke is centred on its path: the path lies half a stroke (and the inset) inside the outline.
+            float off = stroke / 2 + inset;
+            geometry.Offset = new Vector2((float)left + off, (float)top + off);
+            geometry.Size = new Vector2((float)Math.Max(0, right - left - 2 * off), (float)Math.Max(0, bottom - top - 2 * off));
+            geometry.CornerRadius = new Vector2((float)Math.Max(0, radius - off));
+        }
     }
 
     // No blur now, the window kept for the next time.
@@ -812,6 +906,7 @@ internal sealed class GlassBackdrop : IDisposable
             _clip = compositor.CreateRoundedRectangleGeometry();
             _sprite.Clip = compositor.CreateGeometricClip(_clip);
             root.Children.InsertAtTop(_sprite);
+            MakeRim(compositor, root);
             _target.Root = root;
             return true;
         }
@@ -863,6 +958,9 @@ internal sealed class GlassBackdrop : IDisposable
         SurfaceAside = false;
         // The composition objects are let go with the window: a panel made again (a monitor added, settings applied) starts afresh.
         if (_sprite is not null) { GlassEffect.Release(_sprite.Brush); _sprite.Clip?.Dispose(); _sprite.Dispose(); }
+        _rim?.Dispose(); _rimHair?.Dispose(); _rimLight?.Dispose(); _hairShape?.Dispose(); _lightShape?.Dispose();
+        _hairBrush?.Dispose(); _lightBrush?.Dispose(); _lightTop?.Dispose(); _lightFade?.Dispose();
+        _rim = null; _rimHair = _rimLight = null; _hairShape = _lightShape = null; _hairBrush = null; _lightBrush = null; _lightTop = _lightFade = null; _rimDark = null;
         _clip?.Dispose(); _root?.Dispose();
         _target?.Dispose(); _target = null; _sprite = null; _clip = null; _root = null;
         _window?.Dispose(); _window = null;
