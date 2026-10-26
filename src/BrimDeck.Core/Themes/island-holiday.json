@@ -88,8 +88,8 @@
     // a palm frond's shade in the open panel's corner.
     "decor": {
       "horizon": { "at": 0.655, "sea": "#4038CFE0", "line": "#E6FFFFFF" },
-      "caustics": { "color": "#1FFFFFFF" },
-      "palm": { "color": "#140F5A3C" }
+      "caustics": { "color": "#33FFFFFF" },
+      "palm": { "color": "#1F08402A" }
     }
   },
   // A slow swell (the rim dims a little every 9 s), the shoreline's colors flowing along the rim and a glint of sun crossing
@@ -108,8 +108,8 @@
       "rimGradient": ["#FF8A65", "#FFB627", "#FFE3A3", "#C2185B", "#FF8A65"],
       "decor": {
         "horizon": { "at": 0.655, "sea": "#29F07A4A", "line": "#99FFC24B" },
-        "caustics": { "color": "#1AFFD27A" },
-        "palm": { "color": "#122A1A10" }
+        "caustics": { "color": "#33FFD27A" },
+        "palm": { "color": "#1F2A1A10" }
       }
     }
   },
@@ -179,7 +179,7 @@
       // A dark teal sea under a horizon lit in moon gold, moonlight playing faintly on it.
       "decor": {
         "horizon": { "at": 0.655, "sea": "#990A4A5E", "line": "#14FFD27A" },
-        "caustics": { "color": "#069FE8FF" },
+        "caustics": { "color": "#0C9FE8FF" },
         // No palm at night: its shade would only smudge the dark water.
         "palm": { "color": "#00000000" }
       }
