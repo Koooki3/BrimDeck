@@ -12,9 +12,11 @@ internal static class DeviceChecks
     public static void Run(Action<string, bool> check)
     {
         PathFilters(check);
-        var paths = Hid.Paths();
-        var infos = paths.Select(path => Hid.Query(path, batteries: true)).OfType<HidInfo>().ToList();
-        check("devices: HID collections list and open for their attributes", paths.Count == 0 || infos.Count > 0 && infos.All(info => info.Vendor >= 0 && info.InputLength >= 0));
+        // As HidBatteries.Scan does: a Bluetooth collection no reader speaks to is not opened (a sleeping device could hold its
+        // string requests), and none is asked for its battery usages.
+        var opened = Hid.Paths().Where(path => !Hid.IsBluetooth(path) || HidBatteries.Spoken(Hid.Ids(path))).ToList();
+        var infos = opened.Select(path => Hid.Query(path, batteries: !Hid.IsBluetooth(path))).OfType<HidInfo>().ToList();
+        check("devices: HID collections list and open for their attributes", opened.Count == 0 || infos.Count > 0 && infos.All(info => info.Vendor >= 0 && info.InputLength >= 0));
 
         var batteries = new DeviceBatteries(Dispatcher.CurrentDispatcher);
         Pump(TimeSpan.FromMilliseconds(100));
