@@ -84,7 +84,7 @@ public partial class MainWindow
         var button = new Button { Content = content is null ? label : content(label), Height = height, Padding = new Thickness(icon ? 6 : 9, 0, icon ? 6 : 9, 0),
             Style = (Style)FindResource(style), Tag = active ? "Selected" : null, ToolTip = toolTip ? name : null };
         // The toolbar look's 6 DIP corner comes from its style's own resources, which a theme does not replace: square in a pixel theme.
-        if (style == "ToolbarActionButton") button.Resources["SegmentCorner"] = new CornerRadius(PanelTheme.Corner(6));
+        if (style == "ToolbarActionButton") button.Resources["SegmentCorner"] = new CornerRadius(PanelTheme.Corner(Radius.Md));
         AutomationProperties.SetName(button, name); button.Click += (_, _) => click(); return button;
     }
 
@@ -102,10 +102,10 @@ public partial class MainWindow
             UIElement Tab(TextBlock shown)
             {
                 // A hidden SemiBold copy reserves the selected width, so selecting a tab does not resize it.
-                var reserve = UI.Centered(label, 12, UI.Secondary, FontWeights.SemiBold); reserve.Visibility = Visibility.Hidden;
+                var reserve = UI.Centered(label, TextSize.Body, UI.Secondary, FontWeights.SemiBold); reserve.Visibility = Visibility.Hidden;
                 var text = new Grid { Children = { reserve, shown } };
                 if (stage < 2) return text;
-                var dot = new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(StatisticsTheme(app)), Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center };
+                var dot = new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(StatisticsTheme(app)), Margin = new Thickness(0, 0, Space.S4, 0), VerticalAlignment = VerticalAlignment.Center };
                 return new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, text } };
             }
             var button = ModelAction(label, Loc.T("筛选 ", "Filter ") + name, () => ToggleModelApp(app), _modelApps.Contains(app),
@@ -113,7 +113,7 @@ public partial class MainWindow
             button.Padding = new Thickness(stage >= 2 ? 5 : 8, 0, stage >= 2 ? 5 : 8, 0);
             strip.Children.Add(button);
         }
-        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
+        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Padding = new Thickness(1) };
     }
 
     private Button ModelDateButton(bool iconOnly)
@@ -127,8 +127,8 @@ public partial class MainWindow
             // The calendar glyph sits slightly above the label; move the glyph, not the label. The top margin centers it
             // 2/3 DIP lower (one device pixel at 150%), and layout rounding keeps it on whole pixels at every scale.
             icon.Margin = new Thickness(0, 4.0 / 3, 0, 0); content.Children.Add(icon);
-            var label = UI.Centered(_customRange is null ? Loc.T("按时间", "By date") : ModelPeriodLabel, 12, _customRange is null ? UI.Secondary : UI.Primary);
-            label.Margin = new Thickness(6, 0, 0, 0); content.Children.Add(label); button.Content = content;
+            var label = UI.Centered(_customRange is null ? Loc.T("按时间", "By date") : ModelPeriodLabel, TextSize.Body, _customRange is null ? UI.Secondary : UI.Primary);
+            label.Margin = new Thickness(Space.Tight, 0, 0, 0); content.Children.Add(label); button.Content = content;
         }
         return button;
     }
@@ -193,7 +193,7 @@ public partial class MainWindow
             { ToggleModelApp(app); button.Tag = _modelApps.Contains(app) ? "Selected" : null; }, _modelApps.Contains(app), toolTip: false);
             button.Margin = new Thickness(0, 3, 0, 3); stack.Children.Add(button);
         }
-        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
+        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Lg)), Padding = new Thickness(Space.S8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
         ShowModelPopup(popup, ModelToolbar);
     }
 
@@ -203,6 +203,14 @@ public partial class MainWindow
         _leave.Stop(); _popupReturnArea = null; _detailPopup = popup; popup.Owner = this;
         // A layered window renders grayscale text unless told otherwise; its rounded background is opaque, so ClearType is safe.
         RenderOptions.SetClearTypeHint(popup, ClearTypeHint.Enabled);
+        // Under a larger Windows text size the pop-up is drawn larger with the panel it opens from (Zoom).
+        if (Zoom != 1 && popup.Content is FrameworkElement content)
+        {
+            var scale = new ScaleTransform(Zoom, Zoom); scale.Freeze();
+            content.LayoutTransform = scale;
+            popup.Width *= Zoom;
+            if (double.IsFinite(popup.Height)) popup.Height *= Zoom;
+        }
         var point = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
         var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
         point = transform.Transform(point);
@@ -298,7 +306,7 @@ public partial class MainWindow
         if (tiers.Length > 0)
             for (int i = 0; i < columns.Length; i++)
                 Cell(i == 0 ? $"< {UI.Number(tiers[0].MinimumPromptTokens)}" : i < tiers.Length ? $"{UI.Number(tiers[i - 1].MinimumPromptTokens)}–{UI.Number(tiers[i].MinimumPromptTokens)}"
-                    : $"≥ {UI.Number(tiers[i - 1].MinimumPromptTokens)}", line, i + 1, UI.Secondary, true, margin: new Thickness(16, 0, 0, 0));
+                    : $"≥ {UI.Number(tiers[i - 1].MinimumPromptTokens)}", line, i + 1, UI.Secondary, true, margin: new Thickness(Space.S16, 0, 0, 0));
         if (tiers.Length > 0) line++;
         (string Label, Func<TokenPrices, decimal?> Price)[] kinds =
         [
@@ -310,7 +318,7 @@ public partial class MainWindow
             Cell(label, line, 0, UI.Secondary);
             for (int i = 0; i < columns.Length; i++)
                 Cell(price(columns[i]) is { } value ? "$" + (value * 1_000_000m).ToString("0.00####", System.Globalization.CultureInfo.InvariantCulture) : "—",
-                    line, i + 1, right: true, margin: new Thickness(16, 0, 0, 0));
+                    line, i + 1, right: true, margin: new Thickness(Space.S16, 0, 0, 0));
             line++;
         }
         string note = recovery switch
@@ -431,7 +439,7 @@ public partial class MainWindow
         if (result.Rows.Count == 0)
         {
             var message = UI.Centered(incomplete ? Refreshing ? Loc.T("正在读取所选时段…", "Reading the selected period…") : Loc.T("所选应用的用量明细暂不可用", "Usage details for the selected apps are not available yet")
-                : Loc.T("所选时段暂无用量记录", "No usage records in the selected period"), 12, UI.Tertiary);
+                : Loc.T("所选时段暂无用量记录", "No usage records in the selected period"), TextSize.Body, UI.Tertiary);
             message.HorizontalAlignment = HorizontalAlignment.Center; message.VerticalAlignment = VerticalAlignment.Center; Grid.SetRow(message, 1); panel.Children.Add(message);
         }
         string selected = _modelApps.SetEquals(Settings.StatisticsProviders) ? Loc.T("全部", "All") : _modelApps.Count == 1 ? AppPresets.Name(_modelApps.Single()) : Loc.T($"{_modelApps.Count} 个应用", Loc.Count(_modelApps.Count, "app", "apps"));

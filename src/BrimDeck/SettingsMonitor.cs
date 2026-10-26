@@ -25,7 +25,7 @@ public sealed partial class SettingsWindow
         // Shows what the settings hold in place: the colors, the preset they match, and the readings' colors in the table.
         void Refresh() { syncing = true; try { foreach (var update in refresh) update(); } finally { syncing = false; } _refreshReadings?.Invoke(); }
         // A color per reading, three to a row.
-        var roles = KeepPreview(new UniformGrid { Columns = 3, Width = Loc.IsEnglish ? 450 : 330, Margin = new Thickness(0, 6, 0, 6) });
+        var roles = KeepPreview(new UniformGrid { Columns = 3, Width = Loc.IsEnglish ? 450 : 330, Margin = new Thickness(0, Space.Tight, 0, Space.Tight) });
         foreach (var role in Enum.GetValues<MonitorRole>()) roles.Children.Add(SwatchCell(RoleName(role), RoleHelp(role), () => RoleSwatch(role, Refresh), refresh));
         // Quick presets under the colors, as under the collapsed readings' table: one sets every color, and the one the colors
         // match is lit, else none (the colors are then the user's own). Each is shown by its CPU, memory and GPU colors as the
@@ -132,7 +132,7 @@ public sealed partial class SettingsWindow
             cell.Children.Insert(0, next);
             shown = next;
         });
-        var label = TextLine(name, 12.5, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(8, 0, 0, 0);
+        var label = TextLine(name, TextSize.Body, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(Space.S8, 0, 0, 0);
         cell.Children.Add(label);
         if (info && help is not null) cell.Children.Add(HelpIcon(name, () => help, 12, nudge: 0));
         return cell;
@@ -231,7 +231,7 @@ public sealed partial class SettingsWindow
         });
         // The names in the rows start at the left of their column, so their heading does too rather than floating in its middle.
         var nameHeading = headings.Children.OfType<FrameworkElement>().First(heading => Grid.GetColumn(heading) == 2);
-        nameHeading.HorizontalAlignment = HorizontalAlignment.Left; nameHeading.Margin = new Thickness(6, 0, 6, 0);
+        nameHeading.HorizontalAlignment = HorizontalAlignment.Left; nameHeading.Margin = new Thickness(Space.Tight, 0, Space.Tight, 0);
         var table = new StackPanel();
         table.Children.Add(headings);
         table.Children.Add(new Border { Child = rows, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0, 1, 0, 0) });
@@ -253,7 +253,7 @@ public sealed partial class SettingsWindow
         }
         var quick = QuickRow(Loc.T("快捷预设", "Presets"), presets);
         // The readings' colors when usage is high; the expanded page does not change color by level, except for its temperatures.
-        var levels = KeepPreview(new UniformGrid { Columns = 2, Width = Loc.IsEnglish ? 300 : 220, Margin = new Thickness(0, 6, 0, 6) });
+        var levels = KeepPreview(new UniformGrid { Columns = 2, Width = Loc.IsEnglish ? 300 : 220, Margin = new Thickness(0, Space.Tight, 0, Space.Tight) });
         foreach (var level in new[] { MemoryLevel.Elevated, MemoryLevel.Critical })
             levels.Children.Add(SwatchCell(LevelName(level), LevelHelp(level), () => LevelSwatch(level, Refresh), refresh, info: true));
         var status = Row(Loc.T("状态颜色", "Level colors"), levels, help: () => Loc.T("用于收起时的读数；展开时只有温度会变色，占用不变色。",
@@ -324,7 +324,7 @@ public sealed partial class SettingsWindow
         var row = ReadingColumns();
         var handle = new Border { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
         row.Children.Add(handle);
-        var label = TextLine(name, 13, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(6, 0, 6, 0);
+        var label = TextLine(name, TextSize.Strong, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(Space.Tight, 0, Space.Tight, 0);
         Grid.SetColumn(label, 2); row.Children.Add(label);
         // The reading's colors in the normal state as the scheme gives them, one per channel (the core columns: one per kind of
         // core). They are set under "配色", so they only show here.
@@ -382,7 +382,7 @@ public sealed partial class SettingsWindow
 
     private void MonitorSizeControls()
     {
-        var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
+        var dimensions = new Grid { Margin = new Thickness(0, Space.S8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
         var width = Dimension(Loc.T("宽度", "Width"), S.MonitorWidth, 440, 1200, value => Resize(s => s.MonitorWidth = value, DeckPage.Monitor)); width.Margin = new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
         var height = Dimension(Loc.T("高度", "Height"), S.MonitorHeight, 140, 400, value => Resize(s => s.MonitorHeight = value, DeckPage.Monitor)); height.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(height, 1); dimensions.Children.Add(height);
         Target.Children.Add(dimensions);

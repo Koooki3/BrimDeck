@@ -35,7 +35,7 @@ internal static class ScriptEditor
     {
         var editor = new TextEditor
         {
-            Text = text, FontFamily = CodeFont.Value, FontSize = 12, Foreground = UI.Brush(palette.Primary), Background = Brushes.Transparent,
+            Text = text, FontFamily = CodeFont.Value, FontSize = TextSize.Body, Foreground = UI.Brush(palette.Primary), Background = Brushes.Transparent,
             WordWrap = false, ShowLineNumbers = false, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             SyntaxHighlighting = Highlighting(palette.Dark)
         };
@@ -48,7 +48,7 @@ internal static class ScriptEditor
         var frame = new Border
         {
             CornerRadius = new CornerRadius(6), Background = UI.Brush(palette.Input), BorderBrush = UI.Brush(palette.Border), BorderThickness = new Thickness(1),
-            Padding = new Thickness(10, 8, 10, 8), Height = 210, Child = editor
+            Padding = new Thickness(10, Space.S8, 10, Space.S8), Height = 210, Child = editor
         };
         // The frame follows the other inputs: its border takes the accent colour while the editor has focus.
         editor.IsKeyboardFocusWithinChanged += (_, _) => frame.BorderBrush = UI.Brush(editor.IsKeyboardFocusWithin ? (palette.Dark ? "#348AEB" : "#2374DE") : palette.Border);

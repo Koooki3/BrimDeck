@@ -21,7 +21,7 @@ public sealed partial class SettingsWindow
     {
         bool notch = style == CompactStyle.Notch;
         string title = Loc.T("时间", "Clock");
-        var options = new Border { Background = UI.Brush(Inset), CornerRadius = new CornerRadius(10), Padding = new Thickness(16, 14, 16, 0), Margin = new Thickness(0, 0, 0, 12), Child = ClockOptions(style) };
+        var options = new Border { Background = UI.Brush(Inset), CornerRadius = new CornerRadius(10), Padding = new Thickness(Space.S16, 14, Space.S16, 0), Margin = new Thickness(0, 0, 0, Space.S12), Child = ClockOptions(style) };
         void Enable(bool on) { options.IsEnabled = on; options.Opacity = on ? 1 : .45; }
         Enable(S.ShowsClock(style));
         Button arrow = null!;
@@ -32,7 +32,7 @@ public sealed partial class SettingsWindow
         }
         void Flip() { _clockOpen = !_clockOpen; Show(_clockOpen); }
         arrow = ChevronButton(Loc.T("时间设置", "Clock settings"), Flip);
-        arrow.Margin = new Thickness(2, 0, 0, 0);
+        arrow.Margin = new Thickness(Space.Hair, 0, 0, 0);
         var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(indent, 0, 0, 0) };
         heading.Children.Add(SettingLabel(title)); heading.Children.Add(arrow);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.ShowsClock(style), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
@@ -56,14 +56,14 @@ public sealed partial class SettingsWindow
     private FrameworkElement ClockOptions(CompactStyle compact)
     {
         var panel = new StackPanel();
-        var heading = TextLine(Loc.T("时间样式", "Clock style"), 11.5, TextSecondary); heading.Margin = new Thickness(0, 0, 0, 10); panel.Children.Add(heading);
+        var heading = TextLine(Loc.T("时间样式", "Clock style"), TextSize.Body, TextSecondary); heading.Margin = new Thickness(0, 0, 0, 10); panel.Children.Add(heading);
         // Each card shows only the time; its name is read by screen readers.
-        var tiles = new UniformGrid { Columns = 3, Margin = new Thickness(-5, -5, -5, 9) };
+        var tiles = new UniformGrid { Columns = 3, Margin = new Thickness(-5, -5, -5, Space.S8) };
         _clockTiles.Clear();
         foreach (var style in Enum.GetValues<ClockStyle>())
         {
             var tile = new RadioButton { Style = (Style)FindResource("SettingsClockTile"), GroupName = "ClockStyle" + compact, IsChecked = S.ClockStyle == style,
-                Margin = new Thickness(5), Content = ClockPreview(style) };
+                Margin = new Thickness(Space.S4), Content = ClockPreview(style) };
             AutomationProperties.SetName(tile, Loc.T("时间样式 ", "Clock style ") + ClockFace.Title(style));
             tile.Checked += (_, _) => Change(s => s.ClockStyle = style);
             tiles.Children.Add(tile); _clockTiles.Add((tile, style));
@@ -182,7 +182,7 @@ public sealed partial class SettingsWindow
             preset.Checked += (_, _) => { if (updating) return; Change(s => s.ClockGradient = [.. colors]); Refresh(); };
             presets.Add((preset, colors)); line.Children.Add(preset);
         }
-        line.Children.Add(new Border { Width = 1, Height = 20, Background = UI.Brush(Divider), Margin = new Thickness(12, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center });
+        line.Children.Add(new Border { Width = 1, Height = 20, Background = UI.Brush(Divider), Margin = new Thickness(Space.S12, 0, Space.S12, 0), VerticalAlignment = VerticalAlignment.Center });
         string[] names = [Loc.T("起始颜色", "Start color"), Loc.T("中间颜色", "Middle color"), Loc.T("结束颜色", "End color")];
         for (int i = 0; i < 3; i++)
         {

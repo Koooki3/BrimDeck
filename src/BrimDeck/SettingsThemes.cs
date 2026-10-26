@@ -59,7 +59,7 @@ public sealed partial class SettingsWindow
     private void ThemeSection(string title)
     {
         SectionTitle(title);
-        Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, 12) });
+        Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, Space.S12) });
     }
 
     private void Note(string text, double size, string color, Thickness margin)
@@ -79,7 +79,7 @@ public sealed partial class SettingsWindow
             // The chosen theme of the user's with unsaved changes offers to save them over it in place of its card.
             if (own && id == chosen && !PanelTheme.KeptLastGood && PanelTheme.DraftOf(id) is not null) { grid.Children.Add(OverwriteCard(theme)); continue; }
             var card = KeepPreview(new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = ThemePreview(id, theme),
-                Margin = new Thickness(6, 3, 6, 6), Tag = own ? "" : name, GroupName = "PanelTheme", IsChecked = id == chosen });
+                Margin = new Thickness(Space.Tight, 3, Space.Tight, Space.Tight), Tag = own ? "" : name, GroupName = "PanelTheme", IsChecked = id == chosen });
             AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + name);
             AutomationProperties.SetAutomationId(card, "panel-theme-" + id);
             card.Checked += (_, _) =>
@@ -132,7 +132,7 @@ public sealed partial class SettingsWindow
         var rows = new List<FrameworkElement>();
         string title = chosen == PanelThemes.SystemId ? Loc.T("跟随系统（当前：", "System (now: ") + theme.DisplayName + Loc.T("）", ")")
             : LiquidTheme.IsAuto(chosen) ? GlassTitle(theme) : theme.DisplayName;
-        var name = TextLine(title, 12, TextSecondary);
+        var name = TextLine(title, TextSize.Body, TextSecondary);
         rows.Add(Row(Loc.T("名称", "Name"), name));
         string description = chosen == PanelThemes.SystemId ? Loc.T("跟随 Windows 的应用主题，在深色与浅色之间切换。", "Follows the Windows app theme, switching between dark and light.")
             : LiquidTheme.IsAuto(chosen) ? GlassDescription : theme.DisplayDescription;
@@ -158,7 +158,7 @@ public sealed partial class SettingsWindow
         // A user's own theme file says who made it and where it comes from; the built-in themes' notices are in ThirdPartyNotices.txt.
         if (!theme.BuiltIn)
         {
-            if (theme.File.Author.Length > 0) rows.Add(Row(Loc.T("作者", "Author"), TextLine(theme.File.Author, 12, TextSecondary)));
+            if (theme.File.Author.Length > 0) rows.Add(Row(Loc.T("作者", "Author"), TextLine(theme.File.Author, TextSize.Body, TextSecondary)));
             if (theme.File.Homepage.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) rows.Add(Row(Loc.T("来源", "Source"), Link(Loc.T("主页 ↗", "Homepage ↗"), theme.File.Homepage)));
         }
         if (theme.Path is { } path)
@@ -216,8 +216,8 @@ public sealed partial class SettingsWindow
         }
         from.SelectionChanged += (_, _) => Save(from); to.SelectionChanged += (_, _) => Save(to);
         var pair = new StackPanel { Orientation = Orientation.Horizontal, IsEnabled = PanelThemes.DaylightModeOf(file, S.ThemeDaylight) == DaylightMode.Clock };
-        pair.Children.Add(from); pair.Children.Add(TextLine("–", 12, TextSecondary)); pair.Children.Add(to);
-        ((TextBlock)pair.Children[1]).Margin = new Thickness(8, 0, 8, 0); ((TextBlock)pair.Children[1]).VerticalAlignment = VerticalAlignment.Center;
+        pair.Children.Add(from); pair.Children.Add(TextLine("–", TextSize.Body, TextSecondary)); pair.Children.Add(to);
+        ((TextBlock)pair.Children[1]).Margin = new Thickness(Space.S8, 0, Space.S8, 0); ((TextBlock)pair.Children[1]).VerticalAlignment = VerticalAlignment.Center;
         // Turning it off goes back to the hours shown.
         yield return Toggle(Loc.T("跟随系统深浅", "Follow Windows"), !pair.IsEnabled, follow =>
         {
@@ -249,7 +249,7 @@ public sealed partial class SettingsWindow
 
     private TextBlock Wrapped(string text, bool error)
     {
-        var block = TextLine(text, 11.5, error ? (_palette.Dark ? "#F0A6AA" : "#B12E3A") : TextSecondary);
+        var block = TextLine(text, TextSize.Body, error ? (_palette.Dark ? "#F0A6AA" : "#B12E3A") : TextSecondary);
         block.TextWrapping = TextWrapping.Wrap; block.TextTrimming = TextTrimming.None; block.MaxWidth = 460; block.TextAlignment = TextAlignment.Right;
         return block;
     }
@@ -259,7 +259,7 @@ public sealed partial class SettingsWindow
     // theme from the current one. Files that cannot be used are listed under it with their errors.
     private void CustomSection(IReadOnlyList<PanelThemeInfo> users, string chosen)
     {
-        var head = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+        var head = new DockPanel { Margin = new Thickness(0, 0, 0, Space.S8) };
         var guide = Link(Loc.T("主题制作指南 ↗", "Theme guide ↗"), Updates.GitHubUpdates.RepositoryUrl + Loc.T("/blob/main/docs/zh-CN/themes.md", "/blob/main/docs/en-US/themes.md"));
         guide.VerticalAlignment = VerticalAlignment.Center; DockPanel.SetDock(guide, Dock.Right); head.Children.Add(guide);
         // The folder holds the theme files, so it is opened from the section's title row, beside the guide to writing them.
@@ -270,17 +270,17 @@ public sealed partial class SettingsWindow
         });
         folder.Style = (Style)FindResource("SettingsLink");
         folder.ToolTip = Loc.T("主题文件放在这里：*.json，或子文件夹中的 theme.json。", "Theme files live here: *.json, or theme.json in a subfolder.");
-        folder.VerticalAlignment = VerticalAlignment.Center; folder.Margin = new Thickness(0, 0, 16, 0);
+        folder.VerticalAlignment = VerticalAlignment.Center; folder.Margin = new Thickness(0, 0, Space.S16, 0);
         DockPanel.SetDock(folder, Dock.Right); head.Children.Add(folder);
-        var title = TextLine(Loc.T("自定义", "Custom"), 11, TextSecondary); title.VerticalAlignment = VerticalAlignment.Center; head.Children.Add(title);
+        var title = TextLine(Loc.T("自定义", "Custom"), TextSize.Caption, TextSecondary); title.VerticalAlignment = VerticalAlignment.Center; head.Children.Add(title);
         var reload = GlyphButton("M 12.5,4.5 A 5.5,5.5 0 1 0 13,9 M 12.5,1.5 V 4.5 H 9.5", 14, 14, Loc.T("重新加载主题文件", "Reload theme files"), () => ShowPage(ThemePage));
-        reload.Width = 22; reload.Height = 22; reload.Margin = new Thickness(4, 0, 0, 0); reload.VerticalAlignment = VerticalAlignment.Center;
+        reload.Width = 22; reload.Height = 22; reload.Margin = new Thickness(Space.S4, 0, 0, 0); reload.VerticalAlignment = VerticalAlignment.Center;
         reload.HorizontalAlignment = HorizontalAlignment.Left; // the last child fills the rest of the row; the icon stays beside the title
         // Measured on the rendered row in both settings themes, the arrow's ink centre sat 1 DIP above the title's.
         reload.RenderTransform = new System.Windows.Media.TranslateTransform(0, 1);
         head.Children.Add(reload);
         Target.Children.Add(head);
-        Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, 12) });
+        Target.Children.Add(new Border { Height = 1, Background = UI.Brush(Divider), Margin = new Thickness(0, 0, 0, Space.S12) });
         // In the order they were added, so a new theme takes the place of the card that made it, at the end.
         var own = PanelThemes.InAddedOrder(users.Where(t => t.Usable)).ToList();
         ThemeCards([.. own.Select(t => (t.Id, t.DisplayName, t))], chosen, CustomTile());
@@ -319,7 +319,7 @@ public sealed partial class SettingsWindow
         });
         create.ToolTip = Loc.T("把当前主题的全部颜色写入一个新的自定义主题，并切换到它。", "Writes every color of the current theme into a new custom theme and switches to it.");
         create.Style = (Style)FindResource("SettingsAddCard"); create.Content = null;
-        create.Tag = Loc.T("以当前主题新建", "New from current theme"); create.Margin = new Thickness(6, 3, 6, 6);
+        create.Tag = Loc.T("以当前主题新建", "New from current theme"); create.Margin = new Thickness(Space.Tight, 3, Space.Tight, Space.Tight);
         AutomationProperties.SetName(create, Loc.T("以当前主题新建主题", "New theme from current theme"));
         return create;
     }
@@ -342,7 +342,7 @@ public sealed partial class SettingsWindow
         name.SetBinding(FontWeightProperty, new System.Windows.Data.Binding(nameof(FontWeight)) { Source = card });
         name.SetBinding(FontSizeProperty, new System.Windows.Data.Binding(nameof(FontSize)) { Source = card });
         AutomationProperties.SetName(name, Loc.T("重命名主题 ", "Rename theme ") + theme.DisplayName);
-        var box = new TextBox { Style = (Style)FindResource("SettingsField"), Height = 26, FontSize = 12, Padding = new Thickness(6, 0, 6, 0),
+        var box = new TextBox { Style = (Style)FindResource("SettingsField"), Height = 26, FontSize = TextSize.Body, Padding = new Thickness(Space.Tight, 0, Space.Tight, 0),
             TextAlignment = TextAlignment.Center, Visibility = Visibility.Collapsed, MaxLength = 60 };
         AutomationProperties.SetName(box, Loc.T("主题名称", "Theme name"));
         bool editing = false;

@@ -393,11 +393,11 @@ public partial class MainWindow
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var source = new TextBlock { Text = Loc.Label(track.Source), FontSize = 12.5, Foreground = UI.Brush(UI.Primary), MaxWidth = 100,
-                TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, 6, 0) };
-            var title = new MusicMarquee { Text = track.Title, FontSize = 12, Foreground = UI.Brush(PanelTheme.Hex("menuDetail")),
-                CenterWhenFits = false, IsHitTestVisible = false, Height = 28, Margin = new Thickness(0, 0, 12, 0) };
-            var status = new TextBlock { Text = state, FontSize = 11, Foreground = UI.Brush(UI.Tertiary), TextWrapping = TextWrapping.NoWrap };
+            var source = new TextBlock { Text = Loc.Label(track.Source), FontSize = TextSize.Body, Foreground = UI.Brush(UI.Primary), MaxWidth = 100,
+                TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 0, Space.Tight, 0) };
+            var title = new MusicMarquee { Text = track.Title, FontSize = TextSize.Body, Foreground = UI.Brush(PanelTheme.Hex("menuDetail")),
+                CenterWhenFits = false, IsHitTestVisible = false, Height = 28, Margin = new Thickness(0, 0, Space.S12, 0) };
+            var status = new TextBlock { Text = state, FontSize = TextSize.Caption, Foreground = UI.Brush(UI.Tertiary), TextWrapping = TextWrapping.NoWrap };
             foreach (var text in new FrameworkElement[] { source, title, status }) text.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(title, 1); Grid.SetColumn(status, 2); row.Children.Add(source); row.Children.Add(title); row.Children.Add(status);
             var item = new MenuItem { Style = (Style)FindResource("MediaSourceMenuItem"), Header = row, IsCheckable = true, IsChecked = track.Id == _mediaTrack?.Id };
@@ -410,7 +410,7 @@ public partial class MainWindow
         if (FullControlEntryShown)
         {
             menu.Items.Add(new Separator { Style = (Style)FindResource("MediaSourceMenuSeparator") });
-            var label = new TextBlock { Text = FullControlEntryLabel, FontSize = 12.5, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.NoWrap,
+            var label = new TextBlock { Text = FullControlEntryLabel, FontSize = TextSize.Body, Foreground = UI.Brush(UI.Primary), TextWrapping = TextWrapping.NoWrap,
                 TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
             var entry = new MenuItem { Style = (Style)FindResource("MediaSourceMenuItem"), Header = label, Tag = "action", IsEnabled = _media?.RestartingNetease != true };
             AutomationProperties.SetName(entry, FullControlEntryLabel);
@@ -472,7 +472,7 @@ public partial class MainWindow
         CurrentMusicLayout = layout;
         var c = layout.Metrics;
         // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
-        ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(UsageHeader(_usageWidth, UsagePageHeight)) : PanelHeader.Music(c));
+        ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(UsageHeader(UsageLayoutWidth, UsagePageHeight)) : PanelHeader.Music(c));
         bool animate = Soft.Enabled;
         string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
@@ -507,14 +507,14 @@ public partial class MainWindow
         {
             MusicContent.Children.Clear(); _musicControls = null; _musicFullControl = null; _musicSmtcHint = null; _musicControlButtons.Clear();
             var empty = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = Math.Max(200, w - 60) };
-            var icon = MusicVisuals.Icon("music", 26); icon.Margin = new Thickness(0, 0, 0, 8); empty.Children.Add(icon);
-            empty.Children.Add(UI.Fixed(Loc.T("没有正在播放的媒体", "Nothing is playing"), 14, 22, UI.Secondary));
+            var icon = MusicVisuals.Icon("music", 26); icon.Margin = new Thickness(0, 0, 0, Space.S8); empty.Children.Add(icon);
+            empty.Children.Add(UI.Fixed(Loc.T("没有正在播放的媒体", "Nothing is playing"), TextSize.Strong, 22, UI.Secondary));
             // Why the page is empty, and where to go next: the players BrimDeck follows are chosen in the settings.
             var hint = UI.Line(_media?.Error ?? Loc.T("打开网易云音乐、QQ 音乐、Spotify 等播放器并开始播放后，会在这里显示。", "Start playing in NetEase Cloud Music, QQ Music, Spotify or another player and it shows here."),
-                11.5, UI.Tertiary);
+                TextSize.Body, UI.Tertiary);
             hint.TextWrapping = TextWrapping.Wrap; hint.TextAlignment = TextAlignment.Center; empty.Children.Add(hint);
-            var players = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2), Height = 26,
-                HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0), Content = Loc.T("选择播放器", "Choose players") };
+            var players = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(Space.Tight, Space.Hair, Space.Tight, Space.Hair), Height = 26,
+                HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, Space.Tight, 0, 0), Content = Loc.T("选择播放器", "Choose players") };
             players.Click += (_, _) => _app.OpenSettings(SettingsWindow.PlayersPage);
             empty.Children.Add(players);
             MusicContent.Children.Add(empty); _handover.Release(empty, motion); return;
@@ -762,7 +762,7 @@ public partial class MainWindow
         {
             if (_musicFullControl is null)
             {
-                _musicFullControl = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2),
+                _musicFullControl = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(Space.Tight, Space.Hair, Space.Tight, Space.Hair),
                     Height = 26, HorizontalContentAlignment = HorizontalAlignment.Right };
                 AutomationProperties.SetName(_musicFullControl, MusicLayout.FullControlLabels[0]);
                 _musicFullControl.Click += async (_, _) => { if (_mediaTrack?.IsAppleMusic == true) EnableAppleMusicControl(); else await EnableNeteaseControl(); };

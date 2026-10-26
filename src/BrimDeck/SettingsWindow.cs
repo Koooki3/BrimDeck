@@ -154,26 +154,26 @@ public sealed partial class SettingsWindow : Window
         outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) }); outer.ColumnDefinitions.Add(new ColumnDefinition());
         var sidebar = new Grid { Background = UI.Brush(Sidebar) };
         sidebar.RowDefinitions.Add(new RowDefinition { Height = new GridLength(100) }); sidebar.RowDefinitions.Add(new RowDefinition());
-        sidebar.Children.Add(Brand(24, new Thickness(24, 0, 22, 0)));
+        sidebar.Children.Add(Brand(24, new Thickness(Space.S24, 0, Space.S24, 0)));
         // The list of pages scrolls once it is taller than the window, so the last pages (About) stay reachable in a short window.
         // Like the page, it always keeps the scroll bar's 16 DIP column, here in place of its right margin, so the buttons and the
         // selected one's background keep their width when the bar appears. The scroll area clips at its edges, so the list keeps a
         // 4 DIP inset at the top, left and right for the keyboard focus outline, which reaches 2 DIP past a button; the scroll
         // area's own margin gives the top and left back, and the buttons stay where they were.
-        _navigation.Margin = new Thickness(8, 4, 4, 12);
+        _navigation.Margin = new Thickness(Space.S8, Space.S4, Space.S4, Space.S12);
         var navigationScroll = new ScrollViewer { Style = (Style)FindResource("SettingsPageScrollViewer"), Content = _navigation, Focusable = false,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(4, -4, 0, 0) };
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(Space.S4, -4, 0, 0) };
         Grid.SetRow(navigationScroll, 1); sidebar.Children.Add(navigationScroll);
         outer.Children.Add(sidebar); outer.Children.Add(new Border { Width = 1, Background = UI.Brush(Divider), HorizontalAlignment = HorizontalAlignment.Right });
         // The scroll area clips at its edges, so the content keeps a 4 DIP inset inside it for keyboard focus outlines
         // that extend past a control; the outer margins give those 4 DIP back and the page stays where it was.
-        var main = new DockPanel { Margin = new Thickness(32, 56, 32, 22), MaxWidth = 858 }; Grid.SetColumn(main, 1); outer.Children.Add(main);
-        _status.Margin = new Thickness(4, 4, 4, 14); _status.FontSize = 12; DockPanel.SetDock(_status, Dock.Top); main.Children.Add(_status);
-        _content.Margin = new Thickness(4);
+        var main = new DockPanel { Margin = new Thickness(Space.S32, 56, Space.S32, Space.S24), MaxWidth = 858 }; Grid.SetColumn(main, 1); outer.Children.Add(main);
+        _status.Margin = new Thickness(Space.S4, Space.S4, Space.S4, 14); _status.FontSize = TextSize.Body; DockPanel.SetDock(_status, Dock.Top); main.Children.Add(_status);
+        _content.Margin = new Thickness(Space.S4);
         // Only the controls inside take focus; a focusable scroll area would draw the system outline around the whole page.
         // The page's scroll bar always keeps its 16 DIP column, taken from the right margin, so no page changes width when it starts scrolling.
-        _scroll = new ScrollViewer { Style = (Style)FindResource("SettingsPageScrollViewer"), Content = _content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0,0,4,0), Margin = new Thickness(0,0,-16,0), Focusable = false }; main.Children.Add(_scroll);
-        var caption = new DockPanel { Height = 40, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(18, 0, 6, 0), LastChildFill = false }; Grid.SetColumn(caption, 1); outer.Children.Add(caption);
+        _scroll = new ScrollViewer { Style = (Style)FindResource("SettingsPageScrollViewer"), Content = _content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Space.S4, 0), Margin = new Thickness(0, 0, -16, 0), Focusable = false }; main.Children.Add(_scroll);
+        var caption = new DockPanel { Height = 40, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(18, 0, Space.Tight, 0), LastChildFill = false }; Grid.SetColumn(caption, 1); outer.Children.Add(caption);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(buttons, Dock.Right); caption.Children.Add(buttons);
         buttons.Children.Add(WindowButton("minimize", Loc.T("最小化", "Minimize"), () => SystemCommands.MinimizeWindow(this)));
         _maximize = WindowButton("maximize", Loc.T("最大化", "Maximize"), () => { if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this); else SystemCommands.MaximizeWindow(this); }); buttons.Children.Add(_maximize);
@@ -213,7 +213,7 @@ public sealed partial class SettingsWindow : Window
         mark.Children.Add(new Ellipse { Width = dot, Height = dot, Fill = UI.Brush("#E5A385"), HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, Math.Round(size * .12), 0, 0), IsHitTestVisible = false });
         brand.Children.Add(mark);
-        brand.Children.Add(new Border { Width = 30, Height = 1, Margin = new Thickness(1,7,0,0), HorizontalAlignment = HorizontalAlignment.Left,
+        brand.Children.Add(new Border { Width = 30, Height = 1, Margin = new Thickness(1, Space.S8, 0, 0), HorizontalAlignment = HorizontalAlignment.Left,
             Background = new LinearGradientBrush((Color)ColorConverter.ConvertFromString(TextTertiary), Colors.Transparent, 0) });
         return brand;
     }
@@ -245,7 +245,7 @@ public sealed partial class SettingsWindow : Window
     private Button WindowButton(string glyph, string label, Action action, bool close = false)
     {
         var button = ActionButton("", action); button.Content = CaptionIcon(glyph); button.Width = 42; button.Height = 32;
-        button.Padding = new Thickness(0); button.Margin = new Thickness(1, 4, 0, 0); button.ToolTip = label;
+        button.Padding = new Thickness(0); button.Margin = new Thickness(1, Space.S4, 0, 0); button.ToolTip = label;
         if (close) button.Style = (Style)FindResource("SettingsCloseButton");
         WindowChrome.SetIsHitTestVisibleInChrome(button, true); AutomationProperties.SetName(button, label); return button;
     }
@@ -331,15 +331,15 @@ public sealed partial class SettingsWindow : Window
         {
             if (i is 0 or 3 or 5 or 7 or MonitorSettingsPage or DevicesSettingsPage or NoticesSettingsPage)
             {
-                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), DevicesSettingsPage => Loc.T("设备", "Devices"), NoticesSettingsPage => Loc.T("灵动提示", "Live notices"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },10.5,TextTertiary);
+                var group = TextLine(i switch { 0 => Loc.T("基础设置", "Basics"), 3 => Loc.T("AI 用量", "AI usage"), MonitorSettingsPage => Loc.T("系统监控", "System monitor"), DevicesSettingsPage => Loc.T("设备", "Devices"), NoticesSettingsPage => Loc.T("灵动提示", "Live notices"), 5 => Loc.T("音乐", "Music"), _ => Loc.T("关于", "About") },TextSize.Caption,TextTertiary);
                 group.Margin = new Thickness(12, i == 0 ? 0 : 24, 0, 8); _navigation.Children.Add(group);
             }
             int target=i; bool selected=page==i;
             var row = new StackPanel { Orientation = Orientation.Horizontal };
-            var icon = NavigationIcon(i, selected ? TextPrimary : TextSecondary); icon.Margin = new Thickness(0,0,10,0); row.Children.Add(icon);
-            row.Children.Add(TextLine(i == 7 ? "BrimDeck" : _pages[i],12.5,selected ? TextPrimary : TextSecondary,selected ? FontWeights.Medium : FontWeights.Normal));
+            var icon = NavigationIcon(i, selected ? TextPrimary : TextSecondary); icon.Margin = new Thickness(0, 0, 10, 0); row.Children.Add(icon);
+            row.Children.Add(TextLine(i == 7 ? "BrimDeck" : _pages[i],TextSize.Body,selected ? TextPrimary : TextSecondary,selected ? FontWeights.Medium : FontWeights.Normal));
             if (i == 7) { _updateBadge = UpdateBadge(); row.Children.Add(_updateBadge); }
-            var button=new Button { Style=(Style)FindResource("SettingsNav"),Content=row,Margin=new Thickness(0,0,0,4),Tag=selected ? "Selected" : null };
+            var button=new Button { Style=(Style)FindResource("SettingsNav"),Content=row,Margin=new Thickness(0, 0, 0, Space.S4),Tag=selected ? "Selected" : null };
             button.Click+=(_,_)=>ShowPage(target); AutomationProperties.SetName(button,_pages[i]); _navigation.Children.Add(button);
             // The rebuilt list keeps its scroll position; a page opened from elsewhere (the tray, a link) is brought into view.
             if (selected) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => { if (button.IsLoaded) button.BringIntoView(); });
@@ -348,7 +348,7 @@ public sealed partial class SettingsWindow : Window
         var head = new DockPanel { Margin = new Thickness(0,0,0,page == 7 ? 10 : 20) };
         if (page is < 4 or 5 or 6 or ThemePage or MonitorSettingsPage or DevicesSettingsPage or NoticesSettingsPage)
         {
-            var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),ResetPage); reset.FontSize=11; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
+            var reset=ActionButton(Loc.T("恢复默认", "Restore defaults"),ResetPage); reset.FontSize=TextSize.Caption; DockPanel.SetDock(reset,Dock.Right); head.Children.Add(reset);
         }
         head.Children.Add(page == 7 ? Wordmark(28) : TextLine(_pages[page],24,TextPrimary,FontWeights.SemiBold)); _content.Children.Add(head);
         switch(page) { case 0: General(); break; case 1: Compact(); break; case 2: Expanded(); break; case 3: Pages(); break; case 4: ModelPrices(); break; case 5: MusicStyle(); break; case 6: Players(); break; case 7: About(); break; case ThemePage: ThemesPage(); break; case MonitorSettingsPage: MonitorSettings(); break; case NoticesSettingsPage: NoticesPage(); break; case DevicesSettingsPage: DevicesSettings(); break; }
@@ -466,11 +466,11 @@ public sealed partial class SettingsWindow : Window
         SectionTitle(Loc.T("收起样式", "Collapsed style"));
         // The grid clips at its own bounds, so each card keeps 3 DIP or more of its cell free on every side of the
         // keyboard focus ring: 6 DIP left and right (the grid overhangs the page by the same amount) and 3 DIP above.
-        var styles=new UniformGrid { Columns=3,Margin=new Thickness(-6,0,-6,24) };
+        var styles=new UniformGrid { Columns=3,Margin=new Thickness(-6, 0, -6, Space.S24) };
         _styleCards.Clear();
         foreach(var style in Enum.GetValues<CompactStyle>())
         {
-            var button=new RadioButton { Style=(Style)FindResource("SettingsChoice"),Content=CompactStylePreview.Create(style,_palette.Dark,S.ShowsClock(style)),Margin=new Thickness(6,3,6,0),Tag=StyleName(style),GroupName="CompactStyle",IsChecked=S.Style==style };
+            var button=new RadioButton { Style=(Style)FindResource("SettingsChoice"),Content=CompactStylePreview.Create(style,_palette.Dark,S.ShowsClock(style)),Margin=new Thickness(Space.Tight, 3, Space.Tight, 0),Tag=StyleName(style),GroupName="CompactStyle",IsChecked=S.Style==style };
             button.Checked+=(_,_)=>{ var previous=S.Style; Change(s=>s.Style=style); ShowStyleOptions(style,previous); }; AutomationProperties.SetName(button,StyleName(style)); styles.Children.Add(button);
             _styleCards[style]=button;
         }
@@ -537,13 +537,13 @@ public sealed partial class SettingsWindow : Window
         toggle.Checked += (_, _) => show(true);
         toggle.Unchecked += (_, _) => show(false);
         arrow = ChevronButton(Loc.T("展开" + (name.Length > 0 && name[0] < 128 ? " " : "") + name + "尺寸", "Show " + name + " sizes"), () => Flip());
-        arrow.Margin = new Thickness(12, 0, 0, 0);
+        arrow.Margin = new Thickness(Space.S12, 0, 0, 0);
         PointArrow(arrow, open);
         var controls = new StackPanel { Orientation = Orientation.Horizontal }; controls.Children.Add(toggle); controls.Children.Add(arrow);
         var header = Row(title, controls); header.Background = Brushes.Transparent;
         // Clicking anywhere else on the row opens or closes it, as the application rows do.
         header.MouseLeftButtonDown += (_, e) => { Flip(); e.Handled = true; };
-        sizes.Visibility = open ? Visibility.Visible : Visibility.Collapsed; sizes.Margin = new Thickness(20, 4, 0, 8);
+        sizes.Visibility = open ? Visibility.Visible : Visibility.Collapsed; sizes.Margin = new Thickness(20, Space.S4, 0, Space.S8);
         var row = new StackPanel(); row.Children.Add(header); row.Children.Add(sizes); return row;
     }
     private void QuickSizeRow(UniformGrid sizes)
@@ -560,9 +560,9 @@ public sealed partial class SettingsWindow : Window
     }
     private void UsageSizes()
     {
-        var dimensions=new Grid { Margin=new Thickness(0,8,0,0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
-        var width=Dimension(Loc.T("宽度", "Width"),S.Width,S.MinimumWidth,1200,value=>Resize(s=>{s.Width=value;s.QuickSize=null;})); width.Margin=new Thickness(0,0,20,0); dimensions.Children.Add(width);
-        var height=Dimension(Loc.T("高度", "Height"),S.Height,140,400,value=>Resize(s=>{s.Height=value;s.QuickSize=null;})); height.Margin=new Thickness(20,0,0,0); Grid.SetColumn(height,1); dimensions.Children.Add(height);
+        var dimensions=new Grid { Margin=new Thickness(0, Space.S8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
+        var width=Dimension(Loc.T("宽度", "Width"),S.Width,S.MinimumWidth,1200,value=>Resize(s=>{s.Width=value;s.QuickSize=null;})); width.Margin=new Thickness(0, 0, 20, 0); dimensions.Children.Add(width);
+        var height=Dimension(Loc.T("高度", "Height"),S.Height,140,400,value=>Resize(s=>{s.Height=value;s.QuickSize=null;})); height.Margin=new Thickness(20, 0, 0, 0); Grid.SetColumn(height,1); dimensions.Children.Add(height);
         Target.Children.Add(dimensions);
         // Quick sizes are computed from the enabled application count so each lands on one of the panel's typography tiers;
         // the segment that matches the current width and height is shown as selected.
@@ -700,8 +700,8 @@ public sealed partial class SettingsWindow : Window
         add.IsEnabled = !atLimit; add.Opacity = atLimit ? .45 : 1;
         var addContent = new StackPanel { Orientation = Orientation.Horizontal };
         addContent.Children.Add(Stroke("M 5,0 L 5,10 M 0,5 L 10,5", 10, 10, TextSecondary));
-        var addLabel = TextLine(Loc.T("添加应用", "Add app"), 12.5, TextSecondary); addLabel.Margin = new Thickness(8, 0, 0, 0); addLabel.VerticalAlignment = VerticalAlignment.Center; addContent.Children.Add(addLabel);
-        add.Content = addContent; add.HorizontalAlignment = HorizontalAlignment.Left; add.Margin = new Thickness(10, 6, 0, 6); add.Padding = new Thickness(10, 6, 12, 6);
+        var addLabel = TextLine(Loc.T("添加应用", "Add app"), TextSize.Body, TextSecondary); addLabel.Margin = new Thickness(Space.S8, 0, 0, 0); addLabel.VerticalAlignment = VerticalAlignment.Center; addContent.Children.Add(addLabel);
+        add.Content = addContent; add.HorizontalAlignment = HorizontalAlignment.Left; add.Margin = new Thickness(10, Space.Tight, 0, Space.Tight); add.Padding = new Thickness(10, Space.Tight, Space.S12, Space.Tight);
         add.ToolTip = atLimit ? Loc.T($"最多配置 {AppPresets.MaximumApps} 个应用；移除一行后可以继续添加", $"Up to {AppPresets.MaximumApps} apps. Remove a row to add another.")
             : Loc.T($"最多配置 {AppPresets.MaximumApps} 个应用；同一配额来源或统计应用可以重复选择", $"Up to {AppPresets.MaximumApps} apps. The same quota source or usage app can be chosen more than once.");
         ToolTipService.SetShowOnDisabled(add, true);
@@ -717,7 +717,7 @@ public sealed partial class SettingsWindow : Window
         {
             var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center };
-            var label = TextLine(title, 11, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center; heading.Children.Add(label);
+            var label = TextLine(title, TextSize.Caption, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center; heading.Children.Add(label);
             if (help.Length > 0)
             {
                 // The mark sits close to its own label so that, in the narrow color columns, each label and mark read as one pair.
@@ -797,13 +797,13 @@ public sealed partial class SettingsWindow : Window
         var select = ActionButton("", () => { });
         var selectContent = new DockPanel();
         var chevron = Chevron(); chevron.Foreground = UI.Brush(TextSecondary); chevron.Margin = new Thickness(8, ChevronDrop.Top, 0, ChevronDrop.Bottom); DockPanel.SetDock(chevron, Dock.Right); selectContent.Children.Add(chevron);
-        var selectLabel = TextLine(Label(selected), 12.5, TextPrimary, FontWeights.SemiBold);
+        var selectLabel = TextLine(Label(selected), TextSize.Body, TextPrimary, FontWeights.SemiBold);
         selectLabel.VerticalAlignment = VerticalAlignment.Center; selectLabel.TextTrimming = TextTrimming.CharacterEllipsis;
         selectContent.Children.Add(selectLabel);
         select.Content = selectContent; select.Height = 34;
         select.ToolTip = quota ? ProviderCatalog.QuotaTip(selected) : ProviderCatalog.UsageTip(selected);
         select.HorizontalContentAlignment = HorizontalAlignment.Stretch; select.VerticalAlignment = VerticalAlignment.Center;
-        select.Padding = new Thickness(9, 0, 9, 0); select.Margin = new Thickness(6, 0, 6, 0);
+        select.Padding = new Thickness(Space.S8, 0, Space.S8, 0); select.Margin = new Thickness(Space.Tight, 0, Space.Tight, 0);
         select.Background = UI.Brush(_palette.Input); select.BorderBrush = UI.Brush(_palette.Border);
         AutomationProperties.SetName(select, role + " " + entry.Name);
         AutomationProperties.SetAutomationId(select, (quota ? "quota-" : "usage-") + entry.InstanceId.ToString("N"));
@@ -817,8 +817,8 @@ public sealed partial class SettingsWindow : Window
             if (quota && ProviderCatalog.Group(id) != group)
             {
                 group = ProviderCatalog.Group(id);
-                if (items.Children.Count > 0) items.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(4, 5, 4, 3) });
-                var header = TextLine(group, 10.5, TextTertiary); header.Margin = new Thickness(10, 4, 10, 3); items.Children.Add(header);
+                if (items.Children.Count > 0) items.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(Space.S4, Space.S4, Space.S4, 3) });
+                var header = TextLine(group, TextSize.Caption, TextTertiary); header.Margin = new Thickness(10, Space.S4, 10, 3); items.Children.Add(header);
             }
             var item = MenuEntry(Label(id), "", true, id == selected);
             // Each option carries the same note as the selector shows once it is chosen.
@@ -854,7 +854,7 @@ public sealed partial class SettingsWindow : Window
         var surface = new Border
         {
             Child = list, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8), Padding = new Thickness(5)
+            CornerRadius = new CornerRadius(8), Padding = new Thickness(Space.S4)
         };
         menu.Child = surface;
         // A long list opens at the selected source.
@@ -906,13 +906,13 @@ public sealed partial class SettingsWindow : Window
         var content = new DockPanel();
         if (note.Length > 0)
         {
-            var hint = TextLine(note, 10.5, TextTertiary); hint.VerticalAlignment = VerticalAlignment.Center; hint.Margin = new Thickness(12, 0, 0, 0);
+            var hint = TextLine(note, TextSize.Caption, TextTertiary); hint.VerticalAlignment = VerticalAlignment.Center; hint.Margin = new Thickness(Space.S12, 0, 0, 0);
             DockPanel.SetDock(hint, Dock.Right); content.Children.Add(hint);
         }
-        var label = TextLine(name, 12.5, enabled ? TextPrimary : TextSecondary, current ? FontWeights.SemiBold : FontWeights.Normal); label.VerticalAlignment = VerticalAlignment.Center;
+        var label = TextLine(name, TextSize.Body, enabled ? TextPrimary : TextSecondary, current ? FontWeights.SemiBold : FontWeights.Normal); label.VerticalAlignment = VerticalAlignment.Center;
         content.Children.Add(label);
         var item = ActionButton("", () => { }); item.Content = content; item.IsEnabled = enabled;
-        item.HorizontalContentAlignment = HorizontalAlignment.Stretch; item.Padding = new Thickness(9, 6, 9, 6); item.Margin = new Thickness(0, 1, 0, 1);
+        item.HorizontalContentAlignment = HorizontalAlignment.Stretch; item.Padding = new Thickness(Space.S8, Space.Tight, Space.S8, Space.Tight); item.Margin = new Thickness(0, 1, 0, 1);
         if (current) item.Background = UI.Brush(Inset);
         return item;
     }
@@ -941,23 +941,23 @@ public sealed partial class SettingsWindow : Window
         static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
         string pending = AppPresets.NormalizeColor(current) is { Length: > 0 } valid ? valid : "#FFFFFF";
         var panel = new StackPanel { Width = width };
-        var area = new HsvColorPicker(width, 132, _palette.Border) { Margin = new Thickness(0, 0, 0, 12) };
+        var area = new HsvColorPicker(width, 132, _palette.Border) { Margin = new Thickness(0, 0, 0, Space.S12) };
         AutomationProperties.SetName(area, Loc.T("颜色选择器", "Color picker"));
         panel.Children.Add(area);
         var palette = new UniformGrid { Columns = 6 };
         panel.Children.Add(palette);
 
         var entry = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
-        var ok = ActionButton(Loc.T("确定", "OK"), () => { }, primary: true); ok.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(ok, Dock.Right);
-        var reset = ActionButton(resetLabel ?? Loc.T("默认", "Default"), () => choose("")); reset.IsEnabled = !isDefault; reset.Margin = new Thickness(6, 0, 0, 0); DockPanel.SetDock(reset, Dock.Right);
+        var ok = ActionButton(Loc.T("确定", "OK"), () => { }, primary: true); ok.Margin = new Thickness(Space.Tight, 0, 0, 0); DockPanel.SetDock(ok, Dock.Right);
+        var reset = ActionButton(resetLabel ?? Loc.T("默认", "Default"), () => choose("")); reset.IsEnabled = !isDefault; reset.Margin = new Thickness(Space.Tight, 0, 0, 0); DockPanel.SetDock(reset, Dock.Right);
         entry.Children.Add(ok); entry.Children.Add(reset);
-        var dot = new Ellipse { Width = 20, Height = 20, Stroke = UI.Brush(_palette.Border), StrokeThickness = 1, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        var dot = new Ellipse { Width = 20, Height = 20, Stroke = UI.Brush(_palette.Border), StrokeThickness = 1, Margin = new Thickness(0, 0, Space.S8, 0), VerticalAlignment = VerticalAlignment.Center };
         DockPanel.SetDock(dot, Dock.Left); entry.Children.Add(dot);
         var field = new StackPanel { Orientation = Orientation.Horizontal };
-        var hash = TextLine("#", 12, TextSecondary); hash.VerticalAlignment = VerticalAlignment.Center; hash.Margin = new Thickness(0, 0, 4, 0); field.Children.Add(hash);
+        var hash = TextLine("#", TextSize.Body, TextSecondary); hash.VerticalAlignment = VerticalAlignment.Center; hash.Margin = new Thickness(0, 0, Space.S4, 0); field.Children.Add(hash);
         var input = new TextBox { Style = (Style)FindResource("SettingsNumber"), Width = 60, TextAlignment = TextAlignment.Left, VerticalAlignment = VerticalAlignment.Center, MaxLength = 6 };
         AutomationProperties.SetName(input, Loc.T("颜色值", "Color value")); field.Children.Add(input);
-        var chip = new Border { Child = field, Height = 28, CornerRadius = new CornerRadius(6), Background = UI.Brush(Inset), BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(1), Padding = new Thickness(9, 0, 9, 0) };
+        var chip = new Border { Child = field, Height = 28, CornerRadius = new CornerRadius(6), Background = UI.Brush(Inset), BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(1), Padding = new Thickness(Space.S8, 0, Space.S8, 0) };
         input.GotKeyboardFocus += (_, _) => chip.BorderBrush = (Brush)FindResource("SettingsAccent"); input.LostKeyboardFocus += (_, _) => chip.BorderBrush = Brushes.Transparent;
         entry.Children.Add(chip); panel.Children.Add(entry);
 
@@ -993,7 +993,7 @@ public sealed partial class SettingsWindow : Window
         var surface = new Border
         {
             Child = panel, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9), Padding = new Thickness(12)
+            CornerRadius = new CornerRadius(9), Padding = new Thickness(Space.S12)
         };
         return surface;
     }
@@ -1018,12 +1018,12 @@ public sealed partial class SettingsWindow : Window
 
     private void About()
     {
-        var description=TextLine(Loc.T("Windows 顶部悬浮面板。", "A floating panel at the top of the Windows screen."),13,TextSecondary);description.Margin=new Thickness(0,0,0,30);_content.Children.Add(description);
+        var description=TextLine(Loc.T("Windows 顶部悬浮面板。", "A floating panel at the top of the Windows screen."),TextSize.Strong,TextSecondary);description.Margin=new Thickness(0, 0, 0, 30);_content.Children.Add(description);
         SectionTitle(Loc.T("软件更新", "Software update"));
         _aboutUpdateView = CreateUpdateView(true); Group(_aboutUpdateView.Root);
         SectionTitle(Loc.T("项目信息", "Project"));
-        Group(Row(Loc.T("当前版本", "Current version"),TextLine(_app.Updates.CurrentVersion,12,TextSecondary)),
-            Row(Loc.T("开源许可证", "License"),TextLine("Apache License 2.0",12,TextSecondary)),
+        Group(Row(Loc.T("当前版本", "Current version"),TextLine(_app.Updates.CurrentVersion,TextSize.Body,TextSecondary)),
+            Row(Loc.T("开源许可证", "License"),TextLine("Apache License 2.0",TextSize.Body,TextSecondary)),
             Row(Loc.T("项目主页", "Homepage"),Link("GitHub ↗","https://github.com/MoFeng2223/BrimDeck")),
             Row(Loc.T("问题与建议", "Issues and suggestions"),Link(Loc.T("提交反馈 ↗", "Send feedback ↗"),"https://github.com/MoFeng2223/BrimDeck/issues")));
     }
@@ -1046,9 +1046,9 @@ public sealed partial class SettingsWindow : Window
 
     private void SectionTitle(string title, FrameworkElement? action = null, Func<string>? help = null)
     {
-        var row = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+        var row = new DockPanel { Margin = new Thickness(0, 0, 0, Space.S8) };
         if (action is not null) { DockPanel.SetDock(action, Dock.Right); action.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(action); }
-        var label = TextLine(title, 11, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center;
+        var label = TextLine(title, TextSize.Caption, TextSecondary); label.VerticalAlignment = VerticalAlignment.Center;
         if (help is null) row.Children.Add(label);
         else
         {
@@ -1068,7 +1068,7 @@ public sealed partial class SettingsWindow : Window
             if (panel.Children.Count > 0) panel.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
             panel.Children.Add(row);
         }
-        Target.Children.Add(new Border { Child = panel, Background = Brushes.Transparent, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0,1,0,0), Margin = new Thickness(0, 0, 0, 28) });
+        Target.Children.Add(new Border { Child = panel, Background = Brushes.Transparent, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0, 1, 0, 0), Margin = new Thickness(0, 0, 0, 28) });
     }
 
     // One line per setting: the label at the left, the control at the right, an optional description underneath the label.
@@ -1087,7 +1087,7 @@ public sealed partial class SettingsWindow : Window
     // keepPreview marks the switch alone as a preview control, so a press on the rest of the row still ends the preview.
     private FrameworkElement Toggle(string title, bool value, Action<bool> changed, bool enabled = true, string? help = null, bool keepPreview = false)
     {
-        var toggle = new CheckBox { Content = TextLine(title, 13, TextPrimary, FontWeights.SemiBold), Style = (Style)FindResource("SettingsToggle"), IsChecked = value, IsEnabled = enabled, VerticalAlignment = VerticalAlignment.Center };
+        var toggle = new CheckBox { Content = TextLine(title, TextSize.Strong, TextPrimary, FontWeights.SemiBold), Style = (Style)FindResource("SettingsToggle"), IsChecked = value, IsEnabled = enabled, VerticalAlignment = VerticalAlignment.Center };
         if (keepPreview) KeepPreview(toggle);
         AutomationProperties.SetName(toggle, title); toggle.Checked += (_, _) => changed(true); toggle.Unchecked += (_, _) => changed(false);
         if (help is not null)
@@ -1103,7 +1103,7 @@ public sealed partial class SettingsWindow : Window
         var row=new Grid { Height=44 };
         row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(174)});row.ColumnDefinitions.Add(new ColumnDefinition());row.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
         row.Children.Add(SettingLabel(title, help is null ? null : () => help));
-        var controls=NumericControls(title,value,min,max,tick,unit,changed);controls.Slider.Margin=new Thickness(0,0,18,0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
+        var controls=NumericControls(title,value,min,max,tick,unit,changed);controls.Slider.Margin=new Thickness(0, 0, 18, 0);Grid.SetColumn(controls.Slider,1);row.Children.Add(controls.Slider);Grid.SetColumn(controls.Number,2);controls.Number.VerticalAlignment=VerticalAlignment.Center;row.Children.Add(controls.Number);
         return row;
     }
 

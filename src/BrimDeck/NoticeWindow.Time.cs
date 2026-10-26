@@ -38,7 +38,7 @@ internal sealed partial class NoticeWindow
         _liveDetail = null;
         if (LiveWords(notice) is not { } words) return null;
         var line = Line(words, 12.5, AccentHex, FontWeights.SemiBold);
-        line.Margin = new Thickness(0, 4, 0, 0);
+        line.Margin = new Thickness(0, Space.S4, 0, 0);
         AutomationProperties.SetLiveSetting(line, AutomationLiveSetting.Off);
         _liveDetail = line;
         return line;

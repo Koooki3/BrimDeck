@@ -70,7 +70,7 @@ public sealed partial class SettingsWindow
         // With no apps there is nothing open: a leftover open flag would expand the list the moment the first app is added.
         // A reserved height from earlier on this visit is kept so the page does not jump.
         if (exceptions.Count == 0) _exceptionsOpen = false;
-        var list = new StackPanel { Margin = new Thickness(20, 0, 0, 6) };
+        var list = new StackPanel { Margin = new Thickness(20, 0, 0, Space.Tight) };
         foreach (var exception in exceptions)
         {
             list.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
@@ -79,7 +79,7 @@ public sealed partial class SettingsWindow
         // The list's slot: its minimum height is the reserved height, so removing an app or closing the row leaves empty
         // space instead of pulling the rest of the page up.
         var space = new Border { Child = list, MinHeight = _exceptionsReservedHeight };
-        var label = TextLine(title, 13, TextPrimary, FontWeights.SemiBold); label.VerticalAlignment = VerticalAlignment.Center;
+        var label = TextLine(title, TextSize.Strong, TextPrimary, FontWeights.SemiBold); label.VerticalAlignment = VerticalAlignment.Center;
         var info = HelpIcon(title, () => Loc.T("为单个应用分别指定三种情境下面板的行为；选“跟随全局”的情境沿用上面的三项设置。",
             "Chooses what the panel does in each of the three contexts for one app; a context left on Follow follows the three settings above."), 14);
         // Pointing at the icon shows the description; a click on it should not also open the row.
@@ -110,16 +110,16 @@ public sealed partial class SettingsWindow
         if (exceptions.Count > 0)
         {
             arrow = ChevronButton(Loc.T("展开应用程序规则", "Show app rules"), Flip);
-            arrow.Margin = new Thickness(2, 0, 0, 0);
+            arrow.Margin = new Thickness(Space.Hair, 0, 0, 0);
             heading.Children.Add(arrow);
         }
         int n = exceptions.Count;
-        var count = TextLine(n == 0 ? Loc.T("未添加", "None") : Loc.T($"{n} 个应用", n == 1 ? "1 app" : $"{n} apps"), 12, TextTertiary);
-        count.VerticalAlignment = VerticalAlignment.Center; count.Margin = new Thickness(0, 0, 12, 0);
+        var count = TextLine(n == 0 ? Loc.T("未添加", "None") : Loc.T($"{n} 个应用", n == 1 ? "1 app" : $"{n} apps"), TextSize.Body, TextTertiary);
+        count.VerticalAlignment = VerticalAlignment.Center; count.Margin = new Thickness(0, 0, Space.S12, 0);
         var add = new Button { Style = (Style)FindResource("SettingsOutlineButton"), VerticalAlignment = VerticalAlignment.Center };
         var addContent = new StackPanel { Orientation = Orientation.Horizontal };
         addContent.Children.Add(new TextBlock { Text = Loc.T("添加应用", "Add app"), VerticalAlignment = VerticalAlignment.Center });
-        var addChevron = Chevron(); addChevron.Margin = new Thickness(6, 1, 0, -1); addContent.Children.Add(addChevron);
+        var addChevron = Chevron(); addChevron.Margin = new Thickness(Space.Tight, 1, 0, -1); addContent.Children.Add(addChevron);
         add.Content = addContent;
         AutomationProperties.SetName(add, Loc.T("添加应用程序规则", "Add an app rule"));
         add.Click += (_, _) => ExceptionMenu(add);
@@ -148,11 +148,11 @@ public sealed partial class SettingsWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         if (rule.Path.Length > 0) row.ToolTip = rule.Path;
         row.Children.Add(AppIcon(rule.Path));
-        var labels = new Grid { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+        var labels = new Grid { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Space.S12, 0) };
         labels.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); labels.ColumnDefinitions.Add(new ColumnDefinition());
-        var title = TextLine(name, 13, TextPrimary); title.VerticalAlignment = VerticalAlignment.Center; title.TextTrimming = TextTrimming.CharacterEllipsis;
-        var file = TextLine(FileName(rule.Name, rule.Path), 11.5, TextTertiary);
-        file.VerticalAlignment = VerticalAlignment.Center; file.Margin = new Thickness(8, 1, 0, 0); file.TextTrimming = TextTrimming.CharacterEllipsis;
+        var title = TextLine(name, TextSize.Strong, TextPrimary); title.VerticalAlignment = VerticalAlignment.Center; title.TextTrimming = TextTrimming.CharacterEllipsis;
+        var file = TextLine(FileName(rule.Name, rule.Path), TextSize.Body, TextTertiary);
+        file.VerticalAlignment = VerticalAlignment.Center; file.Margin = new Thickness(Space.S8, 1, 0, 0); file.TextTrimming = TextTrimming.CharacterEllipsis;
         Grid.SetColumn(file, 1);
         labels.Children.Add(title); labels.Children.Add(file);
         Grid.SetColumn(labels, 1); row.Children.Add(labels);
@@ -165,7 +165,7 @@ public sealed partial class SettingsWindow
         Grid.SetColumn(remove, 2);
         row.Children.Add(remove);
         column.Children.Add(row);
-        var picks = new StackPanel { Margin = new Thickness(26, 0, 0, 8) };
+        var picks = new StackPanel { Margin = new Thickness(Space.S24, 0, 0, Space.S8) };
         picks.Children.Add(RulePick(name, Loc.T("窗口最大化时", "Maximized"), rule.Maximized,
             choice => Change(s => { var i = At(s); if (i >= 0) s.FullscreenRules[i] = s.FullscreenRules[i] with { Maximized = choice }; })));
         picks.Children.Add(RulePick(name, Loc.T("无边框全屏时", "Borderless full screen"), rule.Borderless,
@@ -216,7 +216,7 @@ public sealed partial class SettingsWindow
             var line = new StackPanel { Orientation = Orientation.Horizontal };
             line.Children.Add(AppIcon(app.Path));
             line.Children.Add(new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center });
-            line.Children.Add(new TextBlock { Text = FileName(app.Name, app.Path), Opacity = .55, FontSize = 11.5, Margin = new Thickness(10, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+            line.Children.Add(new TextBlock { Text = FileName(app.Name, app.Path), Opacity = .55, FontSize = TextSize.Body, Margin = new Thickness(10, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center });
             var item = new MenuItem { Header = line, ToolTip = app.Path.Length > 0 ? app.Path : null };
             AutomationProperties.SetName(item, name);
             item.Click += (_, _) => AddException(new FullscreenRule(app.Name, app.Path)

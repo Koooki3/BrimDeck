@@ -358,7 +358,7 @@ internal sealed class ProcessCard : Border
 
     public ProcessCard(double body, double caption)
     {
-        Width = 248; Padding = new Thickness(14, 12, 14, 12); CornerRadius = new CornerRadius(PanelTheme.Corner(12));
+        Width = 248; Padding = new Thickness(14, Space.S12, 14, Space.S12); CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Lg));
         Background = UI.Brush(PanelTheme.Hex("popup")); BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")); BorderThickness = new Thickness(1);
         Cursor = Cursors.Hand; AutomationProperties.SetName(this, Loc.T("进程详情", "Process details"));
         var stack = new StackPanel();
@@ -371,7 +371,7 @@ internal sealed class ProcessCard : Border
         _where = UI.Line("", caption, UI.Tertiary); _where.FontFamily = UI.PanelFont;
         titles.Children.Add(_name); titles.Children.Add(_where); head.Children.Add(titles);
         stack.Children.Add(head);
-        var figures = new System.Windows.Controls.Primitives.UniformGrid { Columns = 3, Margin = new Thickness(0, 0, 0, 8) };
+        var figures = new System.Windows.Controls.Primitives.UniformGrid { Columns = 3, Margin = new Thickness(0, 0, 0, Space.S8) };
         (_cpu, _memory, _count) = (Cell(figures, "CPU", body, caption), Cell(figures, Loc.T("内存", "Memory"), body, caption), Cell(figures, Loc.T("进程", "Processes"), body, caption));
         stack.Children.Add(figures);
         _members = new StackPanel();
@@ -405,7 +405,7 @@ internal sealed class ProcessCard : Border
         // The busiest of the app's processes, up to five.
         foreach (var member in sample.Members.Take(5))
         {
-            var row = new DockPanel { Margin = new Thickness(0, 2, 0, 0) };
+            var row = new DockPanel { Margin = new Thickness(0, Space.Hair, 0, 0) };
             var mem = UI.Line(MonitorFormat.ProcessMemory(member.MemoryBytes), caption, UI.Tertiary); mem.FontFamily = UI.PanelFont; mem.Width = 44; mem.TextAlignment = TextAlignment.Right;
             var cpu = UI.Line(MonitorFormat.ProcessShare(member.CpuPercent, cores) + "%", caption, UI.Secondary); cpu.FontFamily = UI.PanelFont; cpu.Width = 44; cpu.TextAlignment = TextAlignment.Right;
             DockPanel.SetDock(mem, Dock.Right); DockPanel.SetDock(cpu, Dock.Right);

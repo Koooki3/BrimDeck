@@ -13,7 +13,7 @@
         <Grid Background="Transparent"><Grid x:Name="Face" Margin="{TemplateBinding local:HitArea.Inset}">
           <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{Binding CornerRadius, ElementName=Chrome}" Opacity="0"/>
           <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{Binding CornerRadius, ElementName=Chrome}" Opacity="0"/>
-          <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
+          <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1" CornerRadius="{DynamicResource PanelRadiusSm}" Padding="{TemplateBinding Padding}">
             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
         </Grid></Grid>
@@ -28,9 +28,9 @@
     <Setter Property="Template"><Setter.Value>
       <ControlTemplate TargetType="Button">
         <Grid Background="Transparent"><Grid x:Name="Face" Margin="{TemplateBinding local:HitArea.Inset}">
-          <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource PanelR6}" Opacity="0"/>
-          <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{DynamicResource PanelR6}" Opacity="0"/>
-          <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelR6}" Padding="{TemplateBinding Padding}">
+          <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource PanelRadiusMd}" Opacity="0"/>
+          <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{DynamicResource PanelRadiusMd}" Opacity="0"/>
+          <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelRadiusMd}" Padding="{TemplateBinding Padding}">
             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
         </Grid></Grid>
@@ -61,9 +61,9 @@
     <Setter Property="Width" Value="28"/><Setter Property="Height" Value="24"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
       <Grid Background="Transparent"><Grid x:Name="Face" Margin="{TemplateBinding local:HitArea.Inset}">
-        <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource PanelR6}" Opacity="0"/>
-        <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{DynamicResource PanelR6}" Opacity="0"/>
-        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelR6}">
+        <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{DynamicResource PanelRadiusMd}" Opacity="0"/>
+        <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{DynamicResource PanelRadiusMd}" Opacity="0"/>
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelRadiusMd}">
           <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
         </Border>
       </Grid></Grid>
@@ -76,7 +76,7 @@
     <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"/>
     <Setter Property="Foreground" Value="{DynamicResource PanelPrimary}"/><Setter Property="Background" Value="{DynamicResource PanelPopup}"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu">
-      <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource PanelPopupBorder}" BorderThickness="1" CornerRadius="{DynamicResource PanelR8}" Padding="{TemplateBinding Padding}">
+      <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource PanelPopupBorder}" BorderThickness="1" CornerRadius="{DynamicResource PanelRadiusMd}" Padding="{TemplateBinding Padding}">
         <ScrollViewer MaxHeight="400" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="True">
           <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/>
         </ScrollViewer>
@@ -87,7 +87,7 @@
     <Setter Property="OverridesDefaultStyle" Value="True"/><Setter Property="Cursor" Value="Hand"/>
     <Setter Property="Height" Value="28"/><Setter Property="Padding" Value="8,0,10,0"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
-      <Border x:Name="Chrome" Background="Transparent" CornerRadius="{DynamicResource PanelR5}" Height="{TemplateBinding Height}" Padding="{TemplateBinding Padding}">
+      <Border x:Name="Chrome" Background="Transparent" CornerRadius="{DynamicResource PanelRadiusSm}" Height="{TemplateBinding Height}" Padding="{TemplateBinding Padding}">
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="10"/><ColumnDefinition Width="4"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
           <!-- The check column doubles as the pin control. Its 16 DIP hit area reaches into the

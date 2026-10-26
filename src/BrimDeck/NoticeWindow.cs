@@ -66,6 +66,7 @@ internal sealed partial class NoticeWindow : Window
         _deck = deck; _app = app;
         WindowStyle = WindowStyle.None; AllowsTransparency = true; Background = Brushes.Transparent; ResizeMode = ResizeMode.NoResize;
         Topmost = true; ShowActivated = false; ShowInTaskbar = false; Title = "BrimDeck notices"; UseLayoutRounding = true;
+        System.Windows.Documents.Typography.SetNumeralAlignment(this, FontNumeralAlignment.Tabular);
         TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
         Content = _stage;
         _stage.Children.Add(_glow); _stage.Children.Add(_surface);
@@ -576,7 +577,7 @@ internal sealed partial class NoticeWindow : Window
         icon.VerticalAlignment = VerticalAlignment.Center;
         _toast.Children.Add(icon);
         var (title, summary, live) = ToastTexts();
-        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 6, 0) };
+        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, Space.Tight, 0) };
         // The title carries the whole notice for screen readers and is the live region they announce.
         _announced = Line(title, 12.5, _look.Primary, FontWeights.SemiBold);
         AutomationProperties.SetName(_announced, SpokenName(notice, title, summary));
@@ -597,8 +598,8 @@ internal sealed partial class NoticeWindow : Window
     {
         if (_item is { Count: > 1 } item)
         {
-            var chip = new Border { MinWidth = 22, Height = 18, CornerRadius = new CornerRadius(PanelTheme.Corner(9)), Background = UI.Brush(_look.Fill), Padding = new Thickness(6, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
-            chip.Child = _countText = new TextBlock { Text = item.Count > 99 ? "99+" : item.Count.ToString(Loc.Culture), FontFamily = UI.PanelFont, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            var chip = new Border { MinWidth = 22, Height = 18, CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Background = UI.Brush(_look.Fill), Padding = new Thickness(Space.Tight, 0, Space.Tight, 0), VerticalAlignment = VerticalAlignment.Center };
+            chip.Child = _countText = new TextBlock { Text = item.Count > 99 ? "99+" : item.Count.ToString(Loc.Culture), FontFamily = UI.PanelFont, FontSize = TextSize.Caption, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(_look.Primary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(chip, NoticeText.Count(item.Count));
             return chip;
         }
@@ -612,7 +613,7 @@ internal sealed partial class NoticeWindow : Window
             return ring;
         }
         if (notice is null) return null;
-        return new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(AccentHex), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0), IsHitTestVisible = false };
+        return new Ellipse { Width = 6, Height = 6, Fill = UI.Brush(AccentHex), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Space.Tight, 0, 0, 0), IsHitTestVisible = false };
     }
 
     private static TextBlock Line(string text, double size, string color, FontWeight weight) => Directed(new()
@@ -729,7 +730,7 @@ internal sealed partial class NoticeWindow : Window
         header.ColumnDefinitions.Add(new ColumnDefinition());
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.Children.Add(Plate(notice, 40));
-        var who = new StackPanel { Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        var who = new StackPanel { Margin = new Thickness(10, 0, Space.S8, 0), VerticalAlignment = VerticalAlignment.Center };
         who.Children.Add(Line(notice?.AppName ?? "BrimDeck", 12.5, _look.Primary, FontWeights.SemiBold));
         string meta = notice is null ? Loc.T("通知历史", "Notice history")
             : NoticeText.OriginName(notice.Origin, notice.Distro) + " · " + NoticeText.Relative(notice.ReceivedAt, DateTimeOffset.UtcNow) + (notice.Category is not NoticeCategory.Message ? " · " + NoticeText.CategoryName(notice.Category) : "");
@@ -740,17 +741,17 @@ internal sealed partial class NoticeWindow : Window
         stack.Children.Add(header);
         if (_item is { Kind: AttentionKind.Summary, Payload: int count })
         {
-            stack.Children.Add(Wrapped(NoticeText.Count(count), 14, _look.Primary, FontWeights.SemiBold, new Thickness(0, 12, 0, 0)));
-            stack.Children.Add(Wrapped(Loc.T("BrimDeck 暂停或安静期间收到的通知都在通知历史中。", "Notices that arrived while BrimDeck was paused or quiet are in the notice history."), 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0, 4, 0, 0)));
+            stack.Children.Add(Wrapped(NoticeText.Count(count), 14, _look.Primary, FontWeights.SemiBold, new Thickness(0, Space.S12, 0, 0)));
+            stack.Children.Add(Wrapped(Loc.T("BrimDeck 暂停或安静期间收到的通知都在通知历史中。", "Notices that arrived while BrimDeck was paused or quiet are in the notice history."), 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0, Space.S4, 0, 0)));
         }
         else if (notice is not null)
         {
-            if (notice.Title.Length > 0) stack.Children.Add(Wrapped(notice.Title, 14, _look.Primary, FontWeights.SemiBold, new Thickness(0, 12, 0, 0), maxLines: 3));
+            if (notice.Title.Length > 0) stack.Children.Add(Wrapped(notice.Title, 14, _look.Primary, FontWeights.SemiBold, new Thickness(0, Space.S12, 0, 0), maxLines: 3));
             if (LiveDetailLine(notice) is { } live) stack.Children.Add(live);
             if (notice.Body.Length > 0)
             {
                 var body = Wrapped(notice.Body, 12.5, _look.Secondary, FontWeights.Normal, new Thickness(0));
-                stack.Children.Add(new ScrollViewer { Content = body, MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 4, 0, 0),
+                stack.Children.Add(new ScrollViewer { Content = body, MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, Space.S4, 0, 0),
                     // Reachable with Tab in keyboard mode, so a long body scrolls with the arrows and page keys (review 7b).
                     Focusable = true, IsTabStop = true });
             }
@@ -763,18 +764,18 @@ internal sealed partial class NoticeWindow : Window
                 _progressLeft = new ColumnDefinition { Width = new GridLength(1 - done, GridUnitType.Star) };
                 track.ColumnDefinitions.Add(_progressDone); track.ColumnDefinitions.Add(_progressLeft);
                 _progressTrack = track;
-                var rail = new Border { Background = UI.Brush(PanelTheme.Hex("track")), CornerRadius = new CornerRadius(PanelTheme.Corner(2)) };
+                var rail = new Border { Background = UI.Brush(PanelTheme.Hex("track")), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Xs)) };
                 Grid.SetColumnSpan(rail, 2);
                 track.Children.Add(rail);
-                track.Children.Add(new Border { Background = UI.Brush(AccentHex), CornerRadius = new CornerRadius(PanelTheme.Corner(2)) });
+                track.Children.Add(new Border { Background = UI.Brush(AccentHex), CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Xs)) });
                 AutomationProperties.SetName(track, Loc.T($"进度 {progress:P0}", $"Progress {progress:P0}"));
                 stack.Children.Add(track);
             }
-            if (!notice.SourcePresent) stack.Children.Add(Wrapped(Loc.T("来源已关闭这条通知。", "The source has closed this notice."), 11, _look.Tertiary, FontWeights.Normal, new Thickness(0, 8, 0, 0)));
-            if (_openFailed) stack.Children.Add(Wrapped(Loc.T("无法打开该应用；它可能不支持从通知启动。", "The application could not be opened; it may not support being started from a notice."), 11, _look.Danger, FontWeights.Normal, new Thickness(0, 8, 0, 0)));
+            if (!notice.SourcePresent) stack.Children.Add(Wrapped(Loc.T("来源已关闭这条通知。", "The source has closed this notice."), 11, _look.Tertiary, FontWeights.Normal, new Thickness(0, Space.S8, 0, 0)));
+            if (_openFailed) stack.Children.Add(Wrapped(Loc.T("无法打开该应用；它可能不支持从通知启动。", "The application could not be opened; it may not support being started from a notice."), 11, _look.Danger, FontWeights.Normal, new Thickness(0, Space.S8, 0, 0)));
         }
         // Actions: only what can be done for this source.
-        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, Space.S12, 0, 0) };
         actions.Children.Add(TextButton(Loc.T("查看全部", "View all"), ViewAll, primary: false));
         if (notice is not null && (notice.Capabilities & NoticeCapabilities.Actions) != 0)
             foreach (var action in notice.Actions.Where(a => a.Key != "default").Take(3))
@@ -837,9 +838,9 @@ internal sealed partial class NoticeWindow : Window
     private Button TextButton(string text, Action click, bool primary, bool flat = false)
     {
         string rest = primary ? _look.Accent : flat ? "Transparent" : _look.Fill;
-        var face = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(8)), Background = UI.Brush(rest), Padding = new Thickness(12, 0, 12, 0), MinHeight = 32, BorderBrush = UI.Brush(primary ? _look.OnAccent : _look.Accent) };
-        face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 12, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal, Foreground = UI.Brush(primary ? _look.OnAccent : _look.Primary), VerticalAlignment = VerticalAlignment.Center };
-        var button = new Button { Content = face, Margin = new Thickness(8, 0, 0, 0), MinHeight = 32, Cursor = Cursors.Hand, FocusVisualStyle = null,
+        var face = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(Radius.Md)), Background = UI.Brush(rest), Padding = new Thickness(Space.S12, 0, Space.S12, 0), MinHeight = 32, BorderBrush = UI.Brush(primary ? _look.OnAccent : _look.Accent) };
+        face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = TextSize.Body, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal, Foreground = UI.Brush(primary ? _look.OnAccent : _look.Primary), VerticalAlignment = VerticalAlignment.Center };
+        var button = new Button { Content = face, Margin = new Thickness(Space.S8, 0, 0, 0), MinHeight = 32, Cursor = Cursors.Hand, FocusVisualStyle = null,
             Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
         // One hover look at a time: the theme's mark (InteractionFx) when it answers, else this one (q-P5).
         // High contrast lights hover and press in the highlight color, so the label takes the highlight's text color (review 5);
