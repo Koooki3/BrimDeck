@@ -38,9 +38,9 @@ public partial class MainWindow
     // The color the cover gave, if it gave one; _musicAccent is the theme's equalizer color otherwise.
     private Color? _coverAccent;
     private Lyrics _lyrics = Lyrics.Empty;
-    // The first lookup for the current song has ended; until then a song without lyrics may still get them.
-    private bool _lyricsSettled;
     private CancellationTokenSource? _lyricsRequest;
+    // Completed when Apple Music writes a lyric file while the current Apple Music song has no lyrics of Apple's.
+    private TaskCompletionSource? _appleLyricsWritten;
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
     // Drives the equalizer, which must keep moving while the cursor moves; see PromptTimer.
     private PromptTimer _musicTick = null!;
@@ -86,6 +86,7 @@ public partial class MainWindow
         _musicTick = new(Dispatcher, TickMusic) { Interval = TimeSpan.FromMilliseconds(33) };
         IsVisibleChanged += (_, _) => UpdateMusicTimer();
         _app.MediaChanged += MediaChanged;
+        _app.Lyrics.AppleLyricsWritten += AppleLyricsWritten;
     }
     private void StartMusic()
     {
@@ -294,51 +295,41 @@ public partial class MainWindow
         string key = LyricsKey(_mediaTrack);
         if (_lyricsKey == key) return;
         _lyricsKey = key; _lyricsRequest?.Cancel(); _lyricsRequest?.Dispose(); _lyricsRequest = null;
-        _lyrics = Lyrics.Empty; _lyricsSettled = false; _compactLyric = ""; _musicRenderKey = "";
+        _lyrics = Lyrics.Empty; _compactLyric = ""; _musicRenderKey = "";
         if (key.Length == 0) return;
         var requested = _mediaTrack!;
         if (!requested.IsQqMusic && !string.IsNullOrWhiteSpace(requested.EmbeddedLyrics))
         {
-            _lyrics = Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source); _lyricsSettled = true;
+            _lyrics = Lyrics.Parse(requested.EmbeddedLyrics, null, requested.Duration.TotalSeconds, requested.Source);
             if (IsMusicPage) RenderMusic(); RenderCompact(); return;
         }
         var request = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _lyricsRequest = request;
         try
         {
-            // Without authorization, Apple Music may cache a song's lyrics only after it starts playing:
-            // they are looked for twice more while the song plays, keeping any lyrics already shown.
+            // Apple Music writes a song's lyrics to its cache as the song starts, which can be after the song changes here, or later
+            // still: they are looked for again 3 and 15 seconds later and whenever Apple Music writes a lyric file, keeping any
+            // lyrics already shown.
             for (int attempt = 0; ; attempt++)
             {
                 var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
                 if (request.IsCancellationRequested || _lyricsKey != key) return;
                 if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0)
                 {
-                    _lyrics = lyrics; _lyricsSettled = true; _musicRenderKey = "";
+                    _lyrics = lyrics; _musicRenderKey = "";
                     if (IsMusicPage) RenderMusic(); RenderCompact();
                 }
-                if (!requested.IsAppleMusic || lyrics.Source == LyricsService.AppleSource || _app.AppleMusic.Access == AppleMusicAccess.Authorized || attempt >= 2) break;
-                await Task.Delay(TimeSpan.FromSeconds(15), request.Token);
+                if (!requested.IsAppleMusic || lyrics.Source == LyricsService.AppleSource) break;
+                var written = (_appleLyricsWritten = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+                await (attempt < 2 ? Task.WhenAny(written, Task.Delay(TimeSpan.FromSeconds(attempt == 0 ? 3 : 15), request.Token)) : written.WaitAsync(request.Token));
+                request.Token.ThrowIfCancellationRequested();
+                // The file is read once Apple Music has finished writing it.
+                if (written.IsCompleted) await Task.Delay(TimeSpan.FromSeconds(1), request.Token);
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception) { /* Lyrics are optional; provider failures keep the no-lyrics layout. */ }
     }
-    // Authorizing, revoking or an expiry looks up an Apple Music song's lyrics again, and shows or hides the prompt to authorize.
-    internal void AppleMusicChanged()
-    {
-        if (_mediaTrack?.IsAppleMusic != true) return;
-        _lyricsKey = ""; UpdateLyrics();
-        _musicRenderKey = ""; if (IsMusicPage) RenderMusic();
-    }
-    // In place of the lyrics of an Apple Music song that has none, while Apple's own lyrics need an authorization.
-    private string AppleLyricsPrompt(MediaTrack? track) =>
-        track is not { IsAppleMusic: true } || !Settings.LyricsEnabled || !_lyricsSettled || _lyrics.Lines.Count > 0 || _lyrics.Instrumental ? ""
-        : _app.AppleMusic.Access switch
-        {
-            AppleMusicAccess.None => Loc.T("授权 Apple Music 后可显示歌词", "Authorize Apple Music to show lyrics"),
-            AppleMusicAccess.Expired => Loc.T("Apple Music 授权已过期，点击重新授权", "Apple Music authorization expired. Authorize again"),
-            _ => ""
-        };
+    private void AppleLyricsWritten() => Dispatcher.BeginInvoke(() => _appleLyricsWritten?.TrySetResult());
     private void ToggleSourcePin(ContextMenu menu, MenuItem item, string id)
     {
         bool pin = !Equals(item.Tag, "pinned");
@@ -457,18 +448,17 @@ public partial class MainWindow
         bool showSmtcHint = logMode && track is { CanToggle: false, CanPrevious: false, CanNext: false }
             && _media?.RestartingNetease != true && _media?.Error is null;
         string message = _media?.RestartingNetease == true ? Loc.T("正在重启网易云…", "Restarting NetEase Cloud Music…") : _media?.Error ?? "";
-        string applePrompt = message.Length == 0 ? AppleLyricsPrompt(track) : "";
         var modes = track is null ? [] : MusicPlaybackModes.Supported(track);
         // While the timeline is held (MusicTimelineHold) the bar stays in its place, empty and without times.
         bool timeline = track?.HasTimeline == true || track is not null && _timelineHold.Holds(DateTimeOffset.UtcNow);
-        var layout = MusicLayout.Calculate(w, h, hasLyrics, timeline, message.Length > 0 || applePrompt.Length > 0, logMode || appleEntry, transport: !showSmtcHint,
+        var layout = MusicLayout.Calculate(w, h, hasLyrics, timeline, message.Length > 0, logMode || appleEntry, transport: !showSmtcHint,
             lyricsExpected: Settings.LyricsEnabled);
         CurrentMusicLayout = layout;
         var c = layout.Metrics;
         // With the usage page on, the controls are the usage page's, as it would lay them out now; see PanelHeader.WithControlsOf.
         ApplyHeader(Settings.UsagePage ? PanelHeader.Music(c).WithControlsOf(UsageHeader(_usageWidth, UsagePageHeight)) : PanelHeader.Music(c));
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
-        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{applePrompt}|{Settings.LyricsEnabled}|{animate}";
+        string key = $"{track?.Id}|{track?.SongKey}|{logMode}|{appleEntry}|{_media?.RestartingNetease}|{track?.State}|{track?.CanToggle}|{track?.CanPrevious}|{track?.CanNext}|{track?.CanSeek}|{track?.CanRepeat}|{track?.CanShuffle}|{track?.Shuffle}|{track?.Repeat}|{track?.CanLike}|{track?.Liked}|{track?.HasTimeline}|{timeline}|{playerLyrics}|{hasPlayerLyric}|{w}|{h}|{_lyrics.GetHashCode()}|{_mediaCover?.GetHashCode()}|{_media?.Error}|{Settings.LyricsEnabled}|{animate}";
         if (_musicRenderKey == key) { UpdateMusicPosition(); return; }
         _musicRenderKey = key;
         string song = track is null ? "" : $"{track.Id}|{track.SongKey}|{track.Title}|{track.Artist}";
@@ -572,15 +562,7 @@ public partial class MainWindow
             AutomationProperties.SetName(lyrics, Loc.T("歌词", "Lyrics")); middle.Children.Add(lyrics);
         }
         if (lyricsArrive) { var fade = Soft.Fade(0, 1, Soft.Move, Soft.Follow); fade.FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop; middle.BeginAnimation(OpacityProperty, fade); }
-        if (applePrompt.Length > 0 && layout.ShowMessage)
-        {
-            var text = UI.Fixed(applePrompt, c.Lyric, c.LyricLine, UI.Secondary); text.TextDecorations = TextDecorations.Underline; ShowCutText(text, applePrompt);
-            var prompt = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(0), Height = c.LyricLine,
-                HorizontalAlignment = HorizontalAlignment.Left, HorizontalContentAlignment = HorizontalAlignment.Left, Content = text };
-            AutomationProperties.SetName(prompt, applePrompt); prompt.Click += (_, _) => _app.AuthorizeAppleMusic(this);
-            middle.Children.Add(prompt);
-        }
-        else if (layout.MiddleHeight >= c.MiddleGap + c.LyricLine)
+        if (layout.MiddleHeight >= c.MiddleGap + c.LyricLine)
         {
             // One line; a longer message (a failed full control connection) is read whole in its tooltip, like a cut title.
             _musicMessage = UI.Fixed(message, c.Lyric, c.LyricLine, UI.Tertiary); ShowCutText(_musicMessage, message);
@@ -1050,5 +1032,5 @@ public partial class MainWindow
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.PresentMedia(this, false); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= AppleLyricsWritten; _app.PresentMedia(this, false); }
 }

@@ -34,7 +34,6 @@ public partial class App : Application
     internal MediaSessions? Media { get; private set; }
     internal event Action? MediaChanged;
     internal LyricsService Lyrics { get; private set; } = null!;
-    internal AppleMusicAccount AppleMusic { get; private set; } = null!;
     private readonly HashSet<MainWindow> _presentingMedia = [];
     // The system monitor page's readings, shared by every panel; created when a panel first shows the page.
     internal SystemSampler? Monitor { get; private set; }
@@ -84,13 +83,7 @@ public partial class App : Application
         Prices = new Pricing(folder);
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
-        AppleMusic = new AppleMusicAccount(folder);
-        AppleMusic.Changed += () => Dispatcher.BeginInvoke(() =>
-        {
-            foreach (var deck in Decks) deck.AppleMusicChanged();
-            _settingsWindow?.AppleMusicChanged();
-        });
-        Lyrics = new LyricsService(appleAccount: AppleMusic);
+        Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
         Deck = new MainWindow(this); MainWindow = Deck;
@@ -132,7 +125,6 @@ public partial class App : Application
         Resources["UnpinSourceName"] = Loc.T("取消固定", "Unpin");
     }
     public void OpenSettings() => ShowSettings(false);
-    internal void AuthorizeAppleMusic(Window owner) => new AppleMusicSignInWindow(Settings.Theme, AppleMusic) { Owner = owner }.ShowDialog();
     // The panel ends a collapsed preview when the pointer reaches it. The settings window clears its own preview state; the
     // panel is resumed either way, in case the two disagree (ResumeAfterPreview does nothing when no preview is on).
     internal void EndPreviewFromDeck()

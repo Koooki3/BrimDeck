@@ -9,12 +9,14 @@ public sealed record LyricLine(double Seconds, string Text);
 public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string Source, bool Instrumental = false)
 {
     public static Lyrics Empty { get; } = new([], true, "");
+    // Apple Music's lines are shown this many seconds before they are sung, so that a line can be read as it starts.
+    public const double AppleLead = 0.2;
     public bool QqPreview { get; init; }
     public bool CanSynchronize(MediaTrack track) => Synced && track.HasTimeline;
     public (string Previous, string Current, string Next) At(MediaTrack track, DateTimeOffset now)
     {
         if (!CanSynchronize(track)) return ("", "", "");
-        if (!QqPreview || !track.IsQqMusic) return At(track.Position(now).TotalSeconds);
+        if (!QqPreview || !track.IsQqMusic) return At(track.Position(now).TotalSeconds + (track.IsAppleMusic ? AppleLead : 0));
         // A preview can start at zero or inside the song. QQ's actual current line and
         // full-song karaoke timestamp locate it without guessing from the clip metadata.
         string text = track.CurrentLyric ?? "";
@@ -82,10 +84,11 @@ public sealed partial class LyricsService : IDisposable
     // A lyric reply is a few kilobytes; a larger one is given up rather than read into memory.
     public const int MaxResponseBytes = 2 * 1024 * 1024;
     private const int MaxRedirects = 2;
-    public LyricsService(HttpClient? http = null, IAppleMusicAccount? appleAccount = null, Func<IEnumerable<string>>? appleCacheRoots = null)
+    // appleLyricsFile keeps which Apple Music lyrics each song was matched to; none keeps it only in memory.
+    public LyricsService(HttpClient? http = null, Func<IEnumerable<string>>? appleCacheRoots = null, string? appleLyricsFile = null)
     {
-        _appleAccount = appleAccount;
         _appleCacheRoots = appleCacheRoots ?? AppleCacheRoots;
+        _appleLyricsFile = appleLyricsFile; _appleLyricsIds = LoadAppleLyricsIds(appleLyricsFile);
         _ownsHttp = http is null;
         // Redirects are followed by Get, only to HTTPS on the same host.
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(8) };
@@ -99,8 +102,7 @@ public sealed partial class LyricsService : IDisposable
         try
         {
             string cacheKey = string.Join("\n", track.Source, track.SongId, track.SongKey);
-            // A third-party result for Apple Music is kept only until Apple's own lyrics can be had: Apple Music
-            // may cache them later, or the user may authorize BrimDeck.
+            // A third-party result for Apple Music is kept only until Apple Music caches its own lyrics.
             bool hit = _cache.TryGetValue(cacheKey, out var cached);
             if (hit && (!track.IsAppleMusic || cached!.Source == AppleSource))
             { _order.Remove(cacheKey); _order.AddLast(cacheKey); return cached!; }
@@ -109,7 +111,7 @@ public sealed partial class LyricsService : IDisposable
             if (track.IsQqMusic) lyrics = await FindQq(track, token);
             else if (track.IsAppleMusic)
             {
-                lyrics = await FindApple(track, cacheKey, token);
+                lyrics = await FindApple(track, token);
                 if (!lyrics.Synced || lyrics.Lines.Count == 0) lyrics = hit ? cached! : await FindAppleFallback(track, lyrics, token);
             }
             else
@@ -177,14 +179,14 @@ public sealed partial class LyricsService : IDisposable
         return null;
     }
     // The reply, or null once it is larger than MaxResponseBytes, whatever its declared length said.
-    private static async Task<byte[]?> ReadLimitedAsync(Stream stream, CancellationToken token, int limit = MaxResponseBytes)
+    private static async Task<byte[]?> ReadLimitedAsync(Stream stream, CancellationToken token)
     {
         using var buffer = new MemoryStream();
         var chunk = new byte[16384];
         int read;
         while ((read = await stream.ReadAsync(chunk, token)) > 0)
         {
-            if (buffer.Length + read > limit) return null;
+            if (buffer.Length + read > MaxResponseBytes) return null;
             buffer.Write(chunk, 0, read);
         }
         return buffer.ToArray();
@@ -234,5 +236,9 @@ public sealed partial class LyricsService : IDisposable
         }
         return Lyrics.Empty;
     }
-    public void Dispose() { if (_ownsHttp) _http.Dispose(); }
+    public void Dispose()
+    {
+        if (_ownsHttp) _http.Dispose();
+        foreach (var watcher in _appleWatchers.Values) watcher.Dispose();
+    }
 }

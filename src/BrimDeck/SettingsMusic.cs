@@ -6,7 +6,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using BrimDeck.Core;
-using BrimDeck.Native;
 
 namespace BrimDeck;
 
@@ -116,38 +115,7 @@ public sealed partial class SettingsWindow
         Group(Toggle(Loc.T("始终显示“启用完整控制”按钮", "Always show \"Enable full control\""), S.NeteaseFullControlEntry, v => Change(s => s.NeteaseFullControlEntry = v), S.MusicPage,
             Loc.T("在音乐页面右上角的来源菜单末尾固定显示“网易云音乐 · 完整控制”，以便随时启用完整控制。启用完整控制后，可以在面板中拖动网易云音乐的播放进度，并切换播放模式。",
                 "Keeps \"NetEase Cloud Music · Full control\" at the end of the source menu at the top right of the music page, so full control can be enabled at any time. With full control, NetEase Cloud Music's playback position can be dragged in the panel and its playback mode switched.")));
-        SectionTitle("Apple Music");
-        Group(AppleMusicAuthorization());
     }
-    private FrameworkElement AppleMusicAuthorization()
-    {
-        var account = _app.AppleMusic;
-        var access = account.Access;
-        string status = access switch
-        {
-            AppleMusicAccess.Authorized when account.Expires is { } expires => Loc.T("已授权，有效期至 ", "Authorized until ") + expires.ToLocalTime().ToString("yyyy-MM-dd"),
-            AppleMusicAccess.Authorized => Loc.T("已授权", "Authorized"),
-            AppleMusicAccess.Expired => Loc.T("授权已过期，请重新授权", "The authorization has expired. Authorize again."),
-            _ => Loc.T("未授权", "Not authorized")
-        };
-        var subtitle = TextLine(status, 12, TextSecondary); subtitle.TextWrapping = TextWrapping.Wrap;
-        var actions = new StackPanel { Orientation = Orientation.Horizontal };
-        var authorize = ActionButton(access == AppleMusicAccess.None ? Loc.T("授权", "Authorize") : Loc.T("重新授权", "Authorize again"),
-            () => _app.AuthorizeAppleMusic(this), access != AppleMusicAccess.Authorized);
-        if (access == AppleMusicAccess.Authorized) authorize.Style = (Style)FindResource("SettingsOutlineButton");
-        if (access != AppleMusicAccess.None)
-        {
-            var revoke = ActionButton(Loc.T("取消授权", "Revoke"), account.Revoke);
-            revoke.Style = (Style)FindResource("SettingsOutlineButton"); revoke.Margin = new Thickness(0, 0, 8, 0);
-            actions.Children.Add(revoke);
-        }
-        actions.Children.Add(authorize);
-        foreach (var button in actions.Children.OfType<Button>()) button.Padding = new Thickness(14, 6, 14, 6);
-        return Row(Loc.T("歌词授权", "Lyrics authorization"), actions, subtitle, () => Loc.T(
-            "授权后，Apple Music 桌面版的歌词直接由 Apple Music 提供。授权时在弹出的窗口中登录 Apple 账户，BrimDeck 保存登录后的令牌，用 Windows 加密后存放在本机，只发送给 Apple。未授权或授权过期时，歌词依次取自 Apple Music 的本地缓存、LRCLIB、QQ 音乐和网易云音乐。",
-            "Once authorized, lyrics for the Apple Music desktop app come straight from Apple Music. To authorize, sign in to your Apple Account in the window that opens; BrimDeck keeps the token from that sign-in on this computer, encrypted by Windows, and sends it only to Apple. Without a valid authorization, lyrics come from Apple Music's local cache, LRCLIB, QQ Music and NetEase Cloud Music, in that order."));
-    }
-    internal void AppleMusicChanged() { if (IsLoaded && _page == 6) ShowPage(6); }
     private void MusicSizeControls()
     {
         var dimensions = new Grid { Margin = new Thickness(0, 8, 0, 0) }; dimensions.ColumnDefinitions.Add(new()); dimensions.ColumnDefinitions.Add(new());
