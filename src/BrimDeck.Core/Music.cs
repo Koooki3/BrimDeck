@@ -63,13 +63,15 @@ public sealed record MediaTrack
 
 // The collapsed row, left to right: the cover region, the middle (quota rings, the lyric or track notice and the system
 // readings, in the order of CompactPart chosen for the style), the equalizer region and the clock region. The order only
-// places the regions; their widths are the same in any order. Each region has a width and clips what does not fit; nothing is hidden as a
-// whole. Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are
+// places the regions; their widths are the same in any order. The row shows what fits of each region whole: the rings and the
+// readings that do not fit scroll through it (CompactSpacing.Window), and the surface is never narrower than the cover, the
+// equalizer, the clock and the shortest lyric (RequiredWidth). CompactSpacing places the parts with one gap between all of them.
+// Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are
 // whole or half DIPs. The width only moves the middle: the side regions keep their size until the middle is empty.
 public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, double RingGap, int VisibleRings, double RingWidth, double TextWidth, bool ScrollRings)
 {
     // The narrowest scrolling lyric: about one and a half characters. Below it the lyric rests, clipped.
-    private const double MinimumText = 18;
+    public const double MinimumText = 18;
     public double Scale { get; init; } = 1;
     public double ContentWidth { get; init; }
     public double RowHeight { get; init; } = 24;
@@ -105,6 +107,17 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // Any scale is accepted; non-numbers and non-positive values mean the default size.
     public static double SafeScale(double scale) => double.IsFinite(scale) && scale > 0 ? Math.Clamp(scale, .25, 8) : 1;
     private static double Safe(double width) => double.IsFinite(width) && width > 0 ? width : 0;
+    // The gap between any two neighbours in the row, and between two rings or two readings (CompactSpacing).
+    public static double Gap(double scale) => Whole(8 * SafeScale(scale));
+
+    // The narrowest content that shows everything the row must: the clock, and while media plays the cover, the equalizer and
+    // the shortest lyric, with the gaps between them. The surface is never narrower (CollapsedGeometry.Resolve).
+    public static double RequiredWidth(double scale, bool media, bool text, double clockFace)
+    {
+        double s = SafeScale(scale), face = Safe(clockFace), gap = Gap(s);
+        double width = media ? Math.Max(1, Whole(20 * s)) + gap + Math.Max(1, Whole(18 * s)) + (text ? Whole(MinimumText * s) + gap : 0) : 0;
+        return width + (face == 0 ? 0 : width > 0 ? face + gap : face);
+    }
 
     // The width an auto-width row keeps for the lyric or the title at scale 1. It does not follow the text, so the surface
     // keeps its width from line to line; a longer line scrolls in it.

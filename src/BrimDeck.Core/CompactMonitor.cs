@@ -189,8 +189,6 @@ public static class CompactMonitor
         CompactMonitorItems.Storage => storage,
         _ => 0
     };
-    // Rings alone, as Brief showed them, sit closer together.
-    public static bool RingsOnly(CompactMonitorItems shown, CompactMonitorItems values) => shown != CompactMonitorItems.None && (shown & ~Rings) == 0 && (shown & values) == 0;
 
     // The shown readings left to right in the order given, each with its left edge from the start of the strip. Each takes its
     // width and the gap after it in proportion to how present it is (1 when settled), so the row closes up smoothly as one
@@ -248,8 +246,8 @@ public static class CompactMonitor
         return Width(shown, width, gap) <= available + 1e-9 ? shown : CompactMonitorItems.None;
     }
 
-    // Whether a region of the collapsed row this wide shows any of the readings. Readings wider than their region scroll in it,
-    // so any room shows some; a region squeezed to nothing shows none, and the sampler is not run for them.
+    // Whether a region of the collapsed row this wide shows any of the readings; a region squeezed to nothing shows none, and the
+    // sampler is not run for them.
     public static bool HasRoom(double region) => double.IsFinite(region) && region > 0;
 }
 
