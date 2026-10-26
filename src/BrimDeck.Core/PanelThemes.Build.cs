@@ -51,7 +51,7 @@ public static partial class PanelThemes
         colors["tooltip"] = colors["tooltip"].Over(surface);
         colors["bubble"] = colors["bubble"].Over(surface);
         var values = EffectValues(effects);
-        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. TextureStops(values, colors, surface), .. DecorStops(values, surface)];
+        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. TextureStops(values, colors, surface), .. DecoratedStops(values, colors, surface)];
 
         var adjustments = new List<PanelThemeAdjustment>();
         var popup = colors["popup"].Over(surface);
@@ -99,6 +99,16 @@ public static partial class PanelThemes
         var light = colors["textPrimary"]; var alpha = (byte)Math.Round(255 * values.Texture);
         yield return new ThemeColor(alpha, light.R, light.G, light.B).Over(surface);
         yield return new ThemeColor(alpha, 0, 0, 0).Over(surface);
+    }
+
+    // The motifs' colors, and the texture's squares over each of them: the texture is drawn after the motifs, over them.
+    internal static IEnumerable<ThemeColor> DecoratedStops(PanelThemeEffectValues values, IReadOnlyDictionary<string, ThemeColor> colors, ThemeColor surface)
+    {
+        foreach (var stop in DecorStops(values, surface))
+        {
+            yield return stop;
+            foreach (var square in TextureStops(values, colors, stop)) yield return square;
+        }
     }
 
     // What the motifs lay under the content: the sea (the surface where the horizon puts it, from its color at the horizon to its

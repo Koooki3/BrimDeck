@@ -268,6 +268,12 @@ internal static class PanelThemeTests
         check("The palm is measured over the sky and the caustics over the sea and the sky it fades in over", shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shaded.Surface))
             && !shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shadedSea)) && shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shadedSea))
             && shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shaded.Surface)));
+        // The texture is drawn over the motifs, so its squares are measured over the sea too.
+        var blocky = PanelThemes.Build("blocky", PanelThemes.Parse("""{ "formatVersion": 1, "id": "blocky", "base": "light", "effects": { "pixel": 2, "texture": 0.12, "decor": { "horizon": { "sea": "#FFAAAAAA" } } } }"""));
+        var blockySea = blocky.Effects.Decor!.Horizon!.Sea.Over(blocky.Surface);
+        check("A texture over the motifs is measured over them", blocky.SurfaceStops.Contains(new ThemeColor(31, 0, 0, 0).Over(blockySea))
+            && blocky["textPrimary"].MinimumContrast([new ThemeColor(31, 0, 0, 0).Over(blockySea)]) >= 7 - .001);
+        check("A theme with motifs alone has an overlay, so scrolling text fades itself", Decor("""{ "palm": { "color": "#1F000000" } }""").HasOverlay);
         // The motifs do not decide whether a theme is dark: a deep sea under a light sky leaves it light.
         check("A theme's motifs do not make it dark", !Decor("""{ "horizon": { "at": 0.3, "sea": "#FF001020" } }""").IsDark);
         // Without a horizon the caustics cover the surface and the palm falls over them as well.

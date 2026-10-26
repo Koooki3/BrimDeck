@@ -49,9 +49,10 @@ public sealed class PanelPalette
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
         WrittenColors = writtenColors; WrittenApps = writtenApps;
-        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. PanelThemes.TextureStops(effects, colors, Surface), .. PanelThemes.DecorStops(effects, Surface)];
+        List<ThemeColor> plain = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. PanelThemes.TextureStops(effects, colors, Surface)];
+        SurfaceStops = [.. plain, .. PanelThemes.DecoratedStops(effects, colors, Surface)];
         // Dark or light by the surface itself, its gradient and its texture; the motifs drawn into it do not change which.
-        IsDark = SurfaceStops.Take(SurfaceStops.Count - PanelThemes.DecorStops(effects, Surface).Count()).Average(stop => stop.Luminance) < .18;
+        IsDark = plain.Average(stop => stop.Luminance) < .18;
     }
 
     public string Id { get; }
@@ -69,8 +70,8 @@ public sealed class PanelPalette
     public bool IsDark { get; }
 
     public PanelThemeEffectValues Effects { get; }
-    // A textured surface, like a gradient, has no single color to fade text into.
-    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Texture > 0;
+    // A textured or decorated surface, like a gradient, has no single color to fade text into.
+    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Texture > 0 || Effects.Decor is not null;
     // Whether this is a theme's night look (PanelThemes.Resolve).
     public bool IsNight { get; init; }
     public IReadOnlyList<PanelThemeAdjustment> Adjustments { get; }
