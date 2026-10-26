@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -375,6 +376,8 @@ public partial class MainWindow
         tools.Children.Add(PageButton(center.Paused ? Loc.T("恢复提醒", "Resume") : Loc.T("暂停 1 小时", "Pause 1 h"),
             () => { center.Pause(center.Paused ? null : TimeSpan.FromHours(1)); RenderNotices(); }));
         if (notices.Count > 0) tools.Children.Add(PageButton(Loc.T("清空", "Clear"), () => { center.Clear(); _expandedNotice = null; RenderNotices(); }));
+        // The tools take the pointer 30 DIP tall, within the gaps above and below the head (HitArea).
+        foreach (var tool in tools.Children.OfType<Button>()) HitArea.Grow(tool, 2, 6);
         head.Children.Add(UI.Fixed(Status(center, notices.Count), 11.5, 22, UI.Tertiary));
         _pageKey = NoticePageKey(center); _noticeLayout = NoticeLayout();
         if (notices.Count == 0) { page.Children.Add(_pageEmpty = Empty(center)); WatchPageLive(); return; }
@@ -483,7 +486,8 @@ public partial class MainWindow
     {
         var center = _app.Notices;
         bool open = _expandedNotice == notice.Id;
-        var row = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8, 7, 8, 7), Margin = new Thickness(0, 0, 0, 2), Background = UI.Brush(open ? UI.Fill : "Transparent"), Cursor = Cursors.Hand };
+        // Read as a list item named for the notice; invoking it opens or closes it, as a click does.
+        var row = new SpokenBorder(AutomationControlType.ListItem, () => { _expandedNotice = open ? null : notice.Id; RenderNotices(); }) { CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8, 7, 8, 7), Margin = new Thickness(0, 0, 0, 2), Background = UI.Brush(open ? UI.Fill : "Transparent"), Cursor = Cursors.Hand };
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -653,7 +657,12 @@ public partial class MainWindow
     {
         var face = new Border { CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Background = UI.Brush(UI.Fill), Padding = new Thickness(9, 0, 9, 0), Height = 22, Margin = new Thickness(4, 0, 0, 0) };
         face.Child = new TextBlock { Text = text, FontFamily = UI.PanelFont, FontSize = 11.5, Foreground = UI.Brush(UI.Secondary), VerticalAlignment = VerticalAlignment.Center };
-        var button = new Button { Content = face, Cursor = Cursors.Hand, FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = new FrameworkElementFactory(typeof(ContentPresenter)) } };
+        // The face is 22 DIP tall; a button may take the pointer taller around it (HitArea, the page's tools).
+        var hit = new FrameworkElementFactory(typeof(Border));
+        hit.SetValue(Border.BackgroundProperty, Brushes.Transparent);
+        hit.SetValue(Border.PaddingProperty, new TemplateBindingExtension(HitArea.InsetProperty));
+        hit.AppendChild(new FrameworkElementFactory(typeof(ContentPresenter)));
+        var button = new Button { Content = face, Cursor = Cursors.Hand, FocusVisualStyle = (Style)Application.Current.FindResource("PanelKeyboardFocus"), Template = new ControlTemplate(typeof(Button)) { VisualTree = hit } };
         button.MouseEnter += (_, _) => face.Background = UI.Brush(UI.FillSelected);
         button.MouseLeave += (_, _) => face.Background = UI.Brush(UI.Fill);
         button.Click += (_, _) => click();

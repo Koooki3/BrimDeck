@@ -25,6 +25,20 @@ internal static class CurvesTests
         eased.Set(1, true, 100);
         check("Curves: the monitor's move is the one its readings follow (Eased)", Enumerable.Range(0, 21).All(i => Math.Abs(eased.At(100 + Eased.Seconds * i / 20) - Curves.Follow(i / 20.0)) < 1e-9));
 
+        // A hover's feedback leaves in seven tenths of the time it takes to arrive, and one turned back on its way out goes on
+        // from where it is.
+        check("Curves: a hover leaves in seven tenths of its arrival", Math.Abs(Eased.HoverOut - Eased.Hover * .7) < 1e-12);
+        var hover = new Eased(0, Eased.Hover);
+        hover.Set(1, true, 200, Eased.Hover);
+        check("Curves: a hover arrives over Eased.Hover", hover.Moving(200 + Eased.Hover * .99) && !hover.Moving(200 + Eased.Hover * 1.01));
+        hover.Set(0, true, 201, Eased.HoverOut);
+        check("Curves: a hover leaves over Eased.HoverOut", hover.Moving(201 + Eased.HoverOut * .99) && !hover.Moving(201 + Eased.HoverOut * 1.01) && hover.At(201 + Eased.HoverOut * 1.01) == 0);
+        var turned = new Eased(0, Eased.Hover);
+        turned.Set(1, true, 300, Eased.Hover);
+        double halfway = turned.At(300 + Eased.Hover / 2);
+        turned.Set(0, true, 300 + Eased.Hover / 2, Eased.HoverOut);
+        check("Curves: a hover turned back leaves from where it was", Math.Abs(turned.At(300 + Eased.Hover / 2) - halfway) < 1e-9);
+
         var bounce = Enumerable.Range(0, 1001).Select(i => Curves.Bounce(i / 1000.0)).ToList();
         check("Curves: the opening spring starts at 0 and lands exactly on 1", bounce[0] == 0 && bounce[^1] == 1);
         check("Curves: the opening spring leaves at speed", bounce[100] > .45);

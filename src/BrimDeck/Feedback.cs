@@ -57,10 +57,10 @@ internal static class Feedback
         if (sender is not ButtonBase { Template: { } template } button) return;
         bool enabled = button.IsEnabled, animate = Soft.Enabled && button.IsVisible;
         bool over = enabled && button.IsMouseOver && !(bool)button.GetValue(TouchedProperty), pressed = enabled && button.IsPressed;
-        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate, Soft.Hover);
+        Show(template.FindName("HoverLayer", button) as UIElement, over ? 1 : 0, animate, over ? Soft.Hover : Soft.HoverOut);
         // motion-review F12: a press shows at once and lets go as hover does.
         Show(template.FindName("PressLayer", button) as UIElement, pressed ? 1 : 0, animate, pressed ? Soft.PressFill : Soft.Quick);
-        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate, pressed ? Soft.PressFill : Soft.Hover);
+        Show(template.FindName("Glyph", button) as UIElement, pressed ? GlyphPressed : over ? 1 : GlyphRest, animate, pressed ? Soft.PressFill : over ? Soft.Hover : Soft.HoverOut);
     }
     private const double GlyphRest = .78, GlyphPressed = .6;
 

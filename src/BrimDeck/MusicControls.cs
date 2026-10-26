@@ -35,7 +35,7 @@ public sealed class MusicControlButton : Button
         if (Template?.FindName("Hover", this) is Ellipse hover)
         {
             double opacity = !IsEnabled ? 0 : IsPressed ? .16 : (bool)GetValue(IsMouseOverProperty) && !_touched ? .10 : 0;
-            Soft.Glide(hover, OpacityProperty, opacity, AnimationsEnabled, IsPressed ? Soft.PressFill : Soft.Hover);
+            Soft.Glide(hover, OpacityProperty, opacity, AnimationsEnabled, IsPressed ? Soft.PressFill : opacity >= hover.Opacity ? Soft.Hover : Soft.HoverOut);
         }
         // The press shrinks the button as it does the cover (motion-review F11).
         if (Template?.FindName("ControlScale", this) is ScaleTransform scale) Soft.Pressed(scale, IsEnabled && IsPressed, AnimationsEnabled);

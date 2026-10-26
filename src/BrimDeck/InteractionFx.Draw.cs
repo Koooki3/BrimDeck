@@ -474,11 +474,12 @@ internal sealed partial class FxSurface
         Line(dc, _secondLine, r.X + Px(4), Snap(band.Bottom, _line), r.Right + Px(4), Snap(band.Bottom, _line), .9);
     }
 
-    // A short accent where keyboard focus lands: it rises quickly, then fades, over the control's own focus outline.
+    // A short accent where keyboard focus lands, over the control's own focus outline: it is there at once (M-01: the keyboard
+    // never waits for it), holds for the first quarter of its time, then fades.
     private void DrawFocus(DrawingContext dc, FxMark mark, double now)
     {
         double t = MotionCurve.Linear(now - _focusAt, _timing.Focus / 1000.0);
-        double a = t < .25 ? MotionCurve.Ease(t / .25, Steps) : 1 - MotionCurve.EaseOut((t - .25) / .75, Steps);
+        double a = t < .25 ? 1 : 1 - MotionCurve.EaseOut((t - .25) / .75, Steps);
         if (a <= .001) return;
         var r = mark.Box; double radius = mark.Radius;
         bool clip = !mark.Clip.IsEmpty;

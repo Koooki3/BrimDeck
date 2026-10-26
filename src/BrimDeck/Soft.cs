@@ -27,9 +27,10 @@ internal static class Soft
     public static readonly IEasingFunction Bounce = Frozen(new BounceEase());
 
     // Hover and press feedback, and what leaves; small things that appear or swap. Values that follow readings take
-    // BrimDeck.Core.Eased.Seconds, and the panel itself the duration chosen in the settings. Hover is the monitor's (Eased.Hover),
-    // a glide between choices the monitor's sort pill (Choose), content that moves in or out the monitor's readings (Move).
-    public const int Quick = 160, Short = 240, Hover = (int)(Eased.Hover * 1000), Choose = (int)(Eased.Seconds * 750), Move = (int)(Eased.Seconds * 1000);
+    // BrimDeck.Core.Eased.Seconds, and the panel itself the duration chosen in the settings. Hover is the monitor's (Eased.Hover, and
+    // HoverOut its quicker way out), a glide between choices the monitor's sort pill (Choose), content that moves in or out the
+    // monitor's readings (Move).
+    public const int Quick = 160, Short = 240, Hover = (int)(Eased.Hover * 1000), HoverOut = (int)(Eased.HoverOut * 1000 + .5), Choose = (int)(Eased.Seconds * 750), Move = (int)(Eased.Seconds * 1000);
     // A press (motion-review F11, F12): what shrinks under the button goes down in Press to PressScale, a pressed fill or glyph
     // in PressFill, so the press is felt at once; both let go in Quick.
     public const int Press = 100, PressFill = 70;

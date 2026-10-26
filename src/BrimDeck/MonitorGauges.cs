@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -55,6 +56,17 @@ internal sealed class FigureGauge : FrameworkElement
         }
     }
 
+    // For screen readers: the reading and what it shows after the figure, "CPU 占用 47% · 62 °C", and on the small gauge what a
+    // click does; the tooltip stays the help text.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.ProgressBar, Spoken,
+        () => Clicked?.Invoke(), () => _button, () => _hasShare ? _share.Target : null);
+    private string Spoken()
+    {
+        string name = _letter switch { "C" => "CPU", "G" => "GPU", _ => _letter };
+        string reading = _hasShare ? Loc.T($"{name} 占用 {_number}{_unit}", $"{name} usage {_number}{_unit}") : name + " · " + DrawnPeer.FirstLine(ToolTip);
+        return reading + (_detail.Length > 0 ? " · " + _detail : "") + (_button && _buttonName is { Length: > 0 } action ? Loc.T("，", ", ") + action : "");
+    }
+
     // detailColor: the detail's color, the tertiary text color by default (a temperature takes its level's).
     public void Set(double? share, string number, string unit, string detail, string tip, bool motion, string? detailColor = null)
     {
@@ -70,7 +82,7 @@ internal sealed class FigureGauge : FrameworkElement
     // as the page's dials are larger; a letter seven sixteenths of it).
     public static double DialRing(double size) => Math.Max(1.2, size * .1);
     public static double DialLetter(double size) => Math.Max(1, size * 7 / 16);
-    private void Hover(bool on) { if (_hover.Set(on ? 1 : 0, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
+    private void Hover(bool on) { if (_hover.Fade(on, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, Height);
 
@@ -157,11 +169,13 @@ internal sealed class ColumnGraph : FrameworkElement
     // The tracks and the figures under the columns, drawn again only when the figures or the size change (_labelsVersion).
     private readonly DrawingCache<(int, double, double, double)> _fixed = new();
     private int _labelsVersion;
+    private readonly string _name, _action;
     public event Action? Clicked;
 
-    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null)
+    // name: what the graph shows, for screen readers ("CPU 各核心占用").
+    public ColumnGraph(double maxColumn, double label, bool labels, double gap = 3, string? button = null, string name = "")
     {
-        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null;
+        _maxColumn = maxColumn; _label = label; _labels = labels; _gap = gap; _button = button is not null; _name = name; _action = button ?? "";
         ClipToBounds = true; SnapsToDevicePixels = true;
         if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); KeyboardPress.Take(this, true); }
         else ToolTipService.SetPlacement(this, System.Windows.Controls.Primitives.PlacementMode.Mouse);
@@ -187,6 +201,18 @@ internal sealed class ColumnGraph : FrameworkElement
     private bool Step(double now) { InvalidateVisual(); return _values.Any(v => v.Moving(now)) || _ticks.Any(t => t.Moving(now)); }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
+
+    // For screen readers: a list of the columns, each read as its tooltip says ("性能核 3 · 47% · 3.41 GHz"); as a button, the
+    // graph's name and what a click does.
+    protected override AutomationPeer OnCreateAutomationPeer() => _button
+        ? new DrawnPeer(this, AutomationControlType.Button, () => _name + Loc.T("，", ", ") + _action, () => Clicked?.Invoke())
+        : new DrawnPeer(this, AutomationControlType.List, () => _name, parts: Parts);
+    private IEnumerable<DrawnPart> Parts()
+    {
+        var (xs, column) = Geometry(ActualWidth);
+        for (int i = 0; i < xs.Length; i++)
+            yield return new DrawnPart(i.ToString(), _columns[i].Tip.Replace("\n", Loc.T("，", ", ")), new Rect(xs[i], 0, column, ActualHeight));
+    }
 
     // The room under the columns for their figures. With the figure line alone, the line's baseline sits on the graph's bottom
     // edge, level with the foot of the graph beside it (the engines' names and the small cores); a second line needs room for both.
@@ -269,9 +295,14 @@ internal sealed class BlockGauge : FrameworkElement
     private readonly string _color;
     private Eased _value, _tick, _hover = new(0, Eased.Hover);
     private bool _hasTick;
+    private readonly string _action;
     public event Action? Clicked;
 
-    public BlockGauge(string color, string button) { _color = color; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true; KeyboardPress.Take(this, true); }
+    public BlockGauge(string color, string button) { _color = color; _action = button; Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); SnapsToDevicePixels = true; KeyboardPress.Take(this, true); }
+
+    // For screen readers: "GPU 占用 12%，切换为以 GPU 为主".
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Button,
+        () => Loc.T($"GPU 占用 {MonitorFormat.Percent(_value.Target)}%，", $"GPU usage {MonitorFormat.Percent(_value.Target)}%, ") + _action, () => Clicked?.Invoke());
 
     public void Set(double value, double? tick, string tip, bool motion)
     {
@@ -282,7 +313,7 @@ internal sealed class BlockGauge : FrameworkElement
         if (moving) Motion.Start(this, Step); else InvalidateVisual();
     }
     private bool Step(double now) { InvalidateVisual(); return _value.Moving(now) || _tick.Moving(now) || _hover.Moving(now); }
-    private void Hover(bool on) { if (_hover.Set(on ? 1 : 0, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
+    private void Hover(bool on) { if (_hover.Fade(on, Motion.Enabled)) Motion.Start(this, Step); else InvalidateVisual(); }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
 
@@ -323,6 +354,10 @@ internal sealed class MemoryBlock : FrameworkElement
         _colors = colors; _compact = compact; _body = body; _caption = caption;
         Height = compact ? Math.Ceiling(body * 1.7) : Math.Ceiling(body * 1.7 + 6 + 5 + 5 + 3);
     }
+
+    // For screen readers: "物理内存 63% · 正常", the memory in use as its value.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.ProgressBar, () => DrawnPeer.FirstLine(ToolTip),
+        share: () => _memory?.UsedFraction);
 
     public void Set(Reading<MemorySample> reading, bool motion)
     {
@@ -413,6 +448,9 @@ internal sealed class NetworkBlock : FrameworkElement
         Height = mode == MetricsMode.Blocks ? Math.Ceiling(body * 1.7 + 4 + body * 2) : Math.Ceiling(body * 1.7);
     }
 
+    // For screen readers: "网络 · 下载 1.2 MB/s · 上传 85 KB/s".
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => Loc.T("网络 · ", "Network · ") + DrawnPeer.FirstLine(ToolTip));
+
     public void Set(Reading<NetworkSample> reading, IReadOnlyList<double> down, IReadOnlyList<double> up)
     {
         _rates = reading.OrDefault; _reason = reading.HasValue ? "" : reading.Reason; _down = down; _up = up;
@@ -484,6 +522,17 @@ internal sealed class StorageBlock : FrameworkElement
         Height = Math.Max(1, lines) * row;
         SnapsToDevicePixels = true;
     }
+
+    // For screen readers: a list of the drives' lines, each read as its tooltip lines say.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.List, () => Loc.T("硬盘", "Drives"), parts: Parts);
+    private IEnumerable<DrawnPart> Parts()
+    {
+        if (_shown.Target <= 0) yield break;
+        for (int i = 0; i < _rows.Count; i++)
+            yield return new DrawnPart(i + " " + _rows[i].Label, string.Join(Loc.T("；", "; "), _rows[i].Drives.Select(Spoken)), new Rect(0, i * _row, ActualWidth, _row));
+    }
+    // A drive's tooltip lines on one line: "C: D: · YMTC … · 44 °C，C: Windows-SSD · 246 / 300 GB，…".
+    private static string Spoken(StorageDrive drive) => string.Join(Loc.T("，", ", "), Describe(drive).Split('\n').Select(line => line.Trim()));
 
     public void Set(IReadOnlyList<StorageDrive> drives, bool motion)
     {

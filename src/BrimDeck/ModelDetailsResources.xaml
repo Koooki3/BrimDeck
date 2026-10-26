@@ -6,12 +6,13 @@
     <Setter Property="FocusVisualStyle" Value="{StaticResource PanelKeyboardFocus}"/>
     <Setter Property="local:Feedback.Fade" Value="True"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-      <Grid>
+      <!-- The face is drawn inside the hit area's inset (HitArea); the edge around it only takes the pointer. -->
+      <Grid Background="Transparent"><Grid x:Name="Face" Margin="{TemplateBinding local:HitArea.Inset}">
         <Border x:Name="HoverLayer" Background="{DynamicResource PanelFill}" CornerRadius="{DynamicResource PanelR5}" Opacity="0"/>
         <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
           <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
         </Border>
-      </Grid>
+      </Grid></Grid>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <!-- The date range picker's buttons (ModelDatePicker): hover and press fade as the monitor's do (Feedback) over the face, and

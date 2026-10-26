@@ -84,9 +84,9 @@ internal static class MotionReviewTests
 
         // C5, F14: the pointer's answers keep their own pace, whatever the panel's animation length.
         var smooth = MotionTiming.For(1, 0);
-        check("Motion review: a smooth theme's hover comes and goes in the monitor's hover time",
-            smooth.HoverIn == (int)Math.Round(Eased.Hover * 1000) && smooth.HoverOut == smooth.HoverIn && smooth.HoverIn == 160);
-        check("Motion review: the theme's pace still scales it", MotionTiming.For(1.2, 0).HoverIn == 192 && MotionTiming.For(1.2, 0).HoverOut == 192
+        check("Motion review: a smooth theme's hover comes and goes in the monitor's hover times",
+            smooth.HoverIn == (int)Math.Round(Eased.Hover * 1000) && smooth.HoverOut == (int)Math.Round(Eased.HoverOut * 1000) && smooth.HoverIn == 160 && smooth.HoverOut == 112);
+        check("Motion review: the theme's pace still scales it", MotionTiming.For(1.2, 0).HoverIn == 192 && MotionTiming.For(1.2, 0).HoverOut == 134
             && MotionTiming.For(.75, 0).HoverIn == 120);
         check("Motion review: the rest of the timings are the default length's",
             smooth with { HoverIn = 0, HoverOut = 0 } == MotionTiming.From(AnimationLength.Default, 1) with { HoverIn = 0, HoverOut = 0 }
@@ -94,6 +94,10 @@ internal static class MotionReviewTests
         var stepped = MotionTiming.For(.8, 3);
         check("Motion review: a stepped theme keeps its quick arrival and its slower, stepped way out",
             stepped == MotionTiming.From(AnimationLength.Default, .8) && stepped.HoverOut > stepped.HoverIn && stepped.HoverIn < smooth.HoverIn);
+        // M-01: a hover leaves faster than it comes, in seven tenths of its arrival as it is drawn (a stepped theme draws its way
+        // out in half of HoverOut).
+        check("Motion review: a hover leaves in seven tenths of its arrival", Math.Abs(smooth.HoverOut - smooth.HoverIn * .7) <= 1
+            && Math.Abs(stepped.HoverOut * .5 - stepped.HoverIn * .7) <= 1 && Math.Abs(MotionTiming.From(360, 1).HoverOut * .5 - MotionTiming.From(360, 1).HoverIn * .7) <= 1);
         check("Motion review: a pace out of range is held to it", MotionTiming.For(double.NaN, 0) == smooth && MotionTiming.For(9, 0).HoverIn == 256);
 
         // F13: what fades out leaves at once and slows, and is gone exactly at its end.
