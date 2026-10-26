@@ -74,17 +74,31 @@ internal static class MediaRoutingTests
         var t0 = new DateTimeOffset(2026, 10, 25, 23, 40, 57, 677, TimeSpan.Zero);
         var known = new MediaTrack { Title = "Song", Artist = "Artist", State = MediaState.Playing, PositionKnown = true,
             End = TimeSpan.FromSeconds(245), ReportedPosition = TimeSpan.FromSeconds(2), PositionAt = t0 };
-        var repeated = known with { PositionAt = t0.AddMilliseconds(542) };
-        var next = known with { ReportedPosition = TimeSpan.FromSeconds(3), PositionAt = t0.AddMilliseconds(756) };
-        check("A whole-second report behind the known position keeps the known timeline",
-            MediaRouting.KeepsTimeline(known, repeated, t0.AddMilliseconds(600)));
-        check("A report ahead of the known position is taken", !MediaRouting.KeepsTimeline(known, next, t0.AddMilliseconds(800)));
-        check("A step back of more than a second is a seek and is taken",
-            !MediaRouting.KeepsTimeline(known, known with { ReportedPosition = TimeSpan.Zero, PositionAt = t0.AddMilliseconds(500) }, t0.AddMilliseconds(600)));
-        check("A paused, different or untimed song is taken as reported",
-            !MediaRouting.KeepsTimeline(known, repeated with { State = MediaState.Paused }, t0.AddMilliseconds(600))
-            && !MediaRouting.KeepsTimeline(known, repeated with { Title = "Other" }, t0.AddMilliseconds(600))
-            && !MediaRouting.KeepsTimeline(known, repeated with { PositionKnown = false }, t0.AddMilliseconds(600)));
+        MediaTrack Report(MediaTrack track, int seconds, DateTimeOffset at) => track with { ReportedPosition = TimeSpan.FromSeconds(seconds), PositionAt = at };
+        var (first, span) = MediaRouting.FromWholeSeconds(null, known);
+        check("A first whole-second report is taken from the middle of its second", first.Position(t0) == TimeSpan.FromSeconds(2.5));
+        (_, span) = MediaRouting.FromWholeSeconds(span, Report(known, 2, t0.AddMilliseconds(542)));
+        var (third, narrowed) = MediaRouting.FromWholeSeconds(span, Report(known, 3, t0.AddMilliseconds(756)));
+        // The three reports place the start between :55.219 and :55.433.
+        check("Whole-second reports narrow where the song started", narrowed!.Earliest == t0.AddMilliseconds(-2458) && narrowed.Latest == t0.AddMilliseconds(-2244)
+            && Math.Abs((third.Position(t0.AddSeconds(1)) - TimeSpan.FromSeconds(3.351)).TotalMilliseconds) < 1);
+
+        // Measured 2026-10-26: the reports of 122 to 130 seconds place the song at 124 between 11:53:32.352 and 11:53:32.629.
+        var day = new DateTimeOffset(2026, 10, 26, 11, 53, 0, TimeSpan.Zero);
+        (int Seconds, double At)[] reports = [(122, 31.301), (123, 31.844), (123, 32.125), (124, 32.665), (124, 33.212), (125, 33.737), (125, 34.272), (126, 34.811),
+            (126, 35.352), (127, 35.629), (127, 36.169), (128, 36.712), (128, 37.240), (129, 37.786), (129, 38.324), (130, 38.870)];
+        MediaRouting.WholeSecondStart? measured = null; MediaTrack estimate = known;
+        foreach (var (seconds, at) in reports) (estimate, measured) = MediaRouting.FromWholeSeconds(measured, Report(known, seconds, day.AddSeconds(at)));
+        var at124 = day.AddSeconds(32.352) + (day.AddSeconds(32.629) - day.AddSeconds(32.352)) / 2;
+        check("Measured whole-second reports place the song within a seventh of a second",
+            (measured!.Latest - measured.Earliest) <= TimeSpan.FromSeconds(0.28) && Math.Abs((estimate.Position(at124.AddSeconds(7)) - TimeSpan.FromSeconds(131)).TotalSeconds) < 0.15);
+        check("A report outside the span is a seek and starts a new one",
+            MediaRouting.FromWholeSeconds(measured, Report(known, 10, day.AddSeconds(39))).Start is { } seek && seek.Latest - seek.Earliest == TimeSpan.FromSeconds(1));
+        check("A paused, different, untimed or fractional report is taken as reported",
+            MediaRouting.FromWholeSeconds(measured, known with { State = MediaState.Paused }) is ({ } stopped, null) && stopped == known with { State = MediaState.Paused }
+            && MediaRouting.FromWholeSeconds(measured, Report(known with { Title = "Other" }, 130, day.AddSeconds(39))).Start!.Latest - day.AddSeconds(39 - 130) == TimeSpan.Zero
+            && MediaRouting.FromWholeSeconds(measured, known with { PositionKnown = false }).Start is null
+            && MediaRouting.FromWholeSeconds(measured, known with { ReportedPosition = TimeSpan.FromSeconds(2.4) }).Start is null);
         // Measured on the Traditional Chinese interface: off and all share a glyph, one has its own.
         string loop = AppleMusicRepeat.RepeatGlyph, one = AppleMusicRepeat.RepeatOneGlyph;
         var traditional = new AppleMusicRepeat();

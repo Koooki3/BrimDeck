@@ -190,7 +190,7 @@ public partial class MainWindow
             _springWidth = new Spring(_resizeFrom.Width); _springHeight = new Spring(_resizeFrom.Height);
             _resizeChanged = false;
         }
-        _resizeCompact = compact; _resizeStyle = style; _resizePage = CurrentPage; _resizeSettling = false;
+        _resizeCompact = compact; _resizeStyle = style; _resizePage = CurrentPage; _resizeSettling = false; Island.SettledClip = false;
         _resizeEdge = edge; _resizeStart = WindowsHost.Cursor();
         SetHoverEdge(edge);
         _grips.Light(edge, true, SizeLabel(_resizeFrom.Width, _resizeFrom.Height));
