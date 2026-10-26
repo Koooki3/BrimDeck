@@ -30,6 +30,11 @@ internal sealed class SystemSampler : IDisposable
     private PdhQuery? _pdh;
     private CpuProvider? _cpu;
     private GpuProvider? _gpu;
+    private ThermalZones? _zones;
+    private readonly GpuTemperatures _gpuTemperatures = new();
+    private readonly DiskTemperatures _disks = new();
+    // Whether the processor's and the graphics adapter's temperatures are read, and the drives' (SetTemperatures).
+    private volatile bool _temperatures, _driveTemperatures;
     private readonly NetworkProvider _network = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
@@ -80,6 +85,12 @@ internal sealed class SystemSampler : IDisposable
         else _wake.Set();
     }
 
+    // Called on the UI thread with what the panels show: readings, the processor's and the graphics adapter's temperatures (the
+    // expanded page with temperatures on, or the collapsed row's temperature); drives, the drives' too (the expanded page only).
+    public void SetTemperatures(bool readings, bool drives) { _temperatures = readings || drives; _driveTemperatures = drives; }
+    // Whether any drive has reported a temperature since BrimDeck started (the page keeps a row for the drives from then on).
+    public bool DrivesFound => _disks.Found;
+
     private void Run()
     {
         // Without performance counters (the library is missing or broken) the processor falls back to the kernel's times
@@ -88,12 +99,13 @@ internal sealed class SystemSampler : IDisposable
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { Debug.WriteLine(ex); }
         _cpu = new CpuProvider(_pdh);
         _gpu = new GpuProvider(_pdh);
+        _zones = new ThermalZones(_pdh);
         bool primed = false, first = false;
         while (!_disposed)
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _wake.WaitOne(); continue; }
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistory.Clear(); _disks.Forget(); _wake.WaitOne(); continue; }
                 if (!primed || _primeProcesses)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
@@ -138,12 +150,16 @@ internal sealed class SystemSampler : IDisposable
             if (_history.Count == HistoryLength) _history.Dequeue();
             _history.Enqueue((rates.DownBytesPerSecond, rates.UpBytesPerSecond));
         }
-        var cpu = _cpu!.Sample(pdh); var gpu = _gpu!.Sample(pdh);
+        bool temperatures = _temperatures;
+        var cpu = _cpu!.Sample(pdh); var gpu = _gpu!.Sample(pdh, temperatures ? _gpuTemperatures : null);
+        if (temperatures && _zones!.Sample(pdh) is { } zone) cpu = cpu.Map(sample => sample with { Temperature = zone.Celsius, TemperatureZone = zone.Zone });
+        if (!_driveTemperatures) _disks.Forget();
+        IReadOnlyList<DiskTemperature> disks = _driveTemperatures ? _disks.Sample(now) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage); Remember(_gpuHistory, gpu.OrDefault?.Usage);
         return new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network, gpu, _lastProcesses)
         {
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
-            CpuHistory = _cpuHistory.ToArray(), GpuHistory = _gpuHistory.ToArray()
+            CpuHistory = _cpuHistory.ToArray(), GpuHistory = _gpuHistory.ToArray(), Disks = disks
         };
     }
     private static void Remember(Queue<double> history, double? usage)
@@ -159,7 +175,7 @@ internal sealed class SystemSampler : IDisposable
         _disposed = true; _wanted = false; _linger.Stop();
         _wake.Set();
         // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
-        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _processes.Dispose(); _network.Dispose(); _wake.Dispose(); }
+        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures.Dispose(); _wake.Dispose(); }
     }
 }
 
@@ -459,7 +475,8 @@ internal sealed class GpuProvider
         _shared = pdh?.Add(SharedPath) == true;
     }
 
-    public Reading<GpuSample> Sample(bool collected)
+    // temperatures: read the shown adapter's temperature too.
+    public Reading<GpuSample> Sample(bool collected, GpuTemperatures? temperatures = null)
     {
         if (!_engines) return Reading<GpuSample>.Unavailable(_pdh?.IsOpen == true ? Why.NoGpu : Why.NoCounters);
         if (!collected) return Reading<GpuSample>.Unavailable(Why.NoCounters);
@@ -483,7 +500,7 @@ internal sealed class GpuProvider
         return new GpuSample(Math.Clamp(busiest.Usage / 100, 0, 1), AdapterMemory(_memory ? MemoryPath : null, busiest.Adapter))
         {
             Engines = kinds, SharedBytes = AdapterMemory(_shared ? SharedPath : null, busiest.Adapter),
-            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null
+            Name = info.Name, DedicatedTotal = info.Dedicated > 0 ? info.Dedicated : null, Temperature = temperatures?.Read(busiest.Adapter)
         };
     }
 

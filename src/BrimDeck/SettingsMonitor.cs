@@ -71,6 +71,11 @@ public sealed partial class SettingsWindow
                 help:
                 Loc.T("按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行。面板足够大时显示。",
                     "Lists the apps using the most CPU or memory, with the processes of one program folded into one row. Shown when the panel is large enough."),
+                keepPreview: true),
+            Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
+                help:
+                Loc.T("在 CPU 和 GPU 读数后显示温度；面板足够高时，另起一行显示固态硬盘温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供；硬盘温度每 30 秒读取一次。",
+                    "Shows temperatures after the CPU and GPU readings and, when the panel is tall enough, the solid-state drives' on a line of their own. Sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it; drives are read every 30 seconds."),
                 keepPreview: true));
     }
 
@@ -195,7 +200,7 @@ public sealed partial class SettingsWindow
         var presets = new UniformGrid { Columns = 2, Width = 196 };
         foreach (var (mode, label, help) in new[]
         {
-            (CompactMonitorMode.Full, Loc.T("完整", "Full"), Loc.T("显示全部读数，CPU、内存和 GPU 带百分比。不改变顺序和颜色。", "Shows every reading, with the percentages of CPU, memory and GPU. The order and the colors stay.")),
+            (CompactMonitorMode.Full, Loc.T("完整", "Full"), Loc.T("显示全部占用和网速读数，CPU、内存和 GPU 带百分比。不改变温度、顺序和颜色。", "Shows every usage and network reading, with the percentages of CPU, memory and GPU. The temperature, the order and the colors stay.")),
             (CompactMonitorMode.Brief, Loc.T("简洁", "Brief"), Loc.T("只显示 CPU、内存和 GPU 的圆环，不带数值。不改变顺序和颜色。", "Shows only the CPU, memory and GPU rings, without figures. The order and the colors stay."))
         })
         {
@@ -206,12 +211,12 @@ public sealed partial class SettingsWindow
             presets.Children.Add(choice);
         }
         var quick = QuickRow(Loc.T("快捷预设", "Presets"), presets);
-        // The readings' colors when usage is high; the expanded page does not change color by level.
+        // The readings' colors when usage is high; the expanded page does not change color by level, except for its temperatures.
         var levels = KeepPreview(new UniformGrid { Columns = 2, Width = Loc.IsEnglish ? 300 : 220, Margin = new Thickness(0, 6, 0, 6) });
         foreach (var level in new[] { MemoryLevel.Elevated, MemoryLevel.Critical })
             levels.Children.Add(SwatchCell(LevelName(level), LevelHelp(level), () => LevelSwatch(level, Refresh), refresh, info: true));
-        var status = Row(Loc.T("状态颜色", "Level colors"), levels, help: () => Loc.T("仅在收起时生效，展开时不随占用变色。",
-            "Used only while collapsed; the expanded page does not change color with usage."));
+        var status = Row(Loc.T("状态颜色", "Level colors"), levels, help: () => Loc.T("用于收起时的读数；展开时只有温度会变色，占用不变色。",
+            "Used by the collapsed readings; on the expanded page only temperatures change color, usage does not."));
         Refresh();
         Group(table, quick, status);
     }
@@ -235,8 +240,9 @@ public sealed partial class SettingsWindow
             rate = (critical ? ReadingLevels.CriticalRate : ReadingLevels.ElevatedRate) / 1_000_000;
         // The memory commit charge is always named: by its own threshold where it differs from the shares', else as part of memory.
         bool apart = commit != share;
-        return Loc.T($"占用达到 {share * 100:0}%{(apart ? $"（内存提交量为 {commit * 100:0}%）" : "（内存包括内存提交量）")}或网速达到 {rate:0} MB/s 时的颜色。",
-            $"The color when usage reaches {share * 100:0}%{(apart ? $" ({commit * 100:0}% for the memory commit charge)" : " (for memory, including the commit charge)")} or the network rate reaches {rate:0} MB/s.");
+        double cpu = critical ? Temperatures.CpuCritical : Temperatures.CpuWarning, gpu = critical ? Temperatures.GpuCritical : Temperatures.GpuWarning;
+        return Loc.T($"占用达到 {share * 100:0}%{(apart ? $"（内存提交量为 {commit * 100:0}%）" : "（内存包括内存提交量）")}、网速达到 {rate:0} MB/s，或 CPU 温度达到 {cpu:0} °C、GPU 温度达到 {gpu:0} °C 时的颜色；硬盘按其自身报告的{(critical ? "临界" : "警告")}温度。",
+            $"The color when usage reaches {share * 100:0}%{(apart ? $" ({commit * 100:0}% for the memory commit charge)" : " (for memory, including the commit charge)")}, the network rate reaches {rate:0} MB/s, or the CPU temperature reaches {cpu:0} °C and the GPU's {gpu:0} °C; drives by the {(critical ? "critical" : "warning")} temperature they report.");
     }
 
     private const double ReadingDot = 10;
@@ -244,7 +250,8 @@ public sealed partial class SettingsWindow
     private static string ReadingName(CompactMonitorItems item) => item switch
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
-        CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"), _ => "CPU"
+        CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
+        CompactMonitorItems.Temperature => Loc.T("温度", "Temperature"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -274,11 +281,16 @@ public sealed partial class SettingsWindow
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Temperature };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
-            value.ToolTip = item == CompactMonitorItems.Columns ? Loc.T("核心柱没有数值。", "The core columns have no figure.") : Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.");
+            value.ToolTip = item switch
+            {
+                CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
+                CompactMonitorItems.Temperature => Loc.T("温度始终显示数值：CPU 与 GPU 中较高的一个。", "The temperature always shows its figure: the higher of the CPU's and the GPU's."),
+                _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
+            };
             ToolTipService.SetShowOnDisabled(value, true);
         }
         else

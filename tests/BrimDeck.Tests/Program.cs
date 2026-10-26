@@ -28,6 +28,7 @@ try
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
+    TemperatureTests.Run(Check);
     CurvesTests.Run(Check);
     IdleCostTests.Run(Check);
     DotMotionTests.Run(Check);

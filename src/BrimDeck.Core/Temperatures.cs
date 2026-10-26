@@ -1,0 +1,96 @@
+using System.Globalization;
+
+namespace BrimDeck.Core;
+
+// A solid-state drive's temperature as the drive reports it, in degrees Celsius, with the drive's own warning and critical
+// temperatures where it gives them. Name is the drive's model.
+public sealed record DiskTemperature(string Name, double Celsius, double? Warning = null, double? Critical = null);
+
+// The temperatures the system monitor shows, from what Windows reports without a driver or administrator rights: the processor
+// from the ACPI thermal zones, which the firmware defines and which may be the board's rather than the processor's own; the
+// graphics adapter as Task Manager reads it; solid-state drives as they report themselves. A sensor that gives nothing, or a
+// value no working sensor gives, is no reading: the page hides it rather than show a zero.
+public static class Temperatures
+{
+    // Readings outside this range, in degrees Celsius, are taken for a missing or broken sensor: thermal zones report 0 K when
+    // the firmware has nothing, and some drives report 0 °C or −273 °C.
+    public const double Lowest = 1, Highest = 125;
+    // The levels (ReadingLevels): a laptop processor runs in the high eighties under load and throttles near 100 °C; graphics
+    // adapters aim for the low eighties; drives without thresholds of their own take ones solid-state drives keep well under.
+    public const double CpuWarning = 85, CpuCritical = 95, GpuWarning = 80, GpuCritical = 90, DiskWarning = 60, DiskCritical = 70;
+
+    public static double? Plausible(double celsius) => double.IsFinite(celsius) && celsius >= Lowest && celsius <= Highest ? celsius : null;
+    public static double? FromKelvin(double kelvin) => Plausible(kelvin - 273.15);
+    // The thermal zones' high precision counter, in tenths of a kelvin.
+    public static double? FromDeciKelvin(double deciKelvin) => Plausible(deciKelvin / 10 - 273.15);
+    // The graphics adapter's reading, in tenths of a degree; zero is an adapter without a sensor.
+    public static double? FromDeciCelsius(uint deciCelsius) => deciCelsius == 0 ? null : Plausible(deciCelsius / 10.0);
+
+    // The processor's temperature from the thermal zones' counters, by zone ("\_TZ.TZ00"): the high precision counter (tenths of
+    // a kelvin) where a zone has it, else the whole kelvin one. A zone named for the processor wins; otherwise the hottest zone,
+    // as the processor is usually what heats a zone most. Null without a zone giving a plausible reading.
+    public static (double Celsius, string Zone)? Cpu(IEnumerable<(string Instance, double Value)> precise, IEnumerable<(string Instance, double Value)> whole)
+    {
+        var zones = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (zone, value) in whole) if (FromKelvin(value) is { } celsius) zones[zone] = celsius;
+        foreach (var (zone, value) in precise) if (FromDeciKelvin(value) is { } celsius) zones[zone] = celsius;
+        if (zones.Count == 0) return null;
+        static bool Processor(string zone) => zone.Contains("CPU", StringComparison.OrdinalIgnoreCase) || zone.Contains("PROC", StringComparison.OrdinalIgnoreCase);
+        var best = zones.OrderByDescending(pair => Processor(pair.Key)).ThenByDescending(pair => pair.Value).ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).First();
+        return (best.Value, best.Key);
+    }
+
+    // A drive's reading, or null when it is not plausible. Thresholds the drive gives are kept only when they are plausible and
+    // in order.
+    public static DiskTemperature? Disk(string name, double celsius, double warning, double critical)
+    {
+        if (Plausible(celsius) is not { } value) return null;
+        double? own(double threshold) => Plausible(threshold);
+        var (w, c) = (own(warning), own(critical));
+        if (w is { } low && c is { } high && high < low) (w, c) = (null, null);
+        return new DiskTemperature(name.Trim(), value, w, c);
+    }
+
+    public static MemoryLevel Level(double celsius, double warning, double critical) => celsius >= critical ? MemoryLevel.Critical : celsius >= warning ? MemoryLevel.Elevated : MemoryLevel.Normal;
+    public static MemoryLevel OfCpu(double celsius) => Level(celsius, CpuWarning, CpuCritical);
+    public static MemoryLevel OfGpu(double celsius) => Level(celsius, GpuWarning, GpuCritical);
+    // A drive by its own thresholds where it gives them (NVMe drives give both); one alone sets the other five or ten degrees apart.
+    public static MemoryLevel OfDisk(DiskTemperature disk)
+    {
+        double warning = disk.Warning ?? (disk.Critical is { } c ? c - 5 : DiskWarning);
+        double critical = disk.Critical ?? (disk.Warning is { } w ? w + 10 : DiskCritical);
+        return Level(disk.Celsius, warning, critical);
+    }
+
+    // The hotter of the processor and the graphics adapter, for the collapsed row: its temperature and the higher of their levels,
+    // so a hot adapter warns even while the processor reads higher but within its range. Null while neither has a reading.
+    public static (double Celsius, MemoryLevel Level)? Hottest(MonitorSnapshot? snapshot)
+    {
+        double? cpu = snapshot?.Cpu.OrDefault?.Temperature, gpu = snapshot?.Gpu.OrDefault?.Temperature;
+        if (cpu is null && gpu is null) return null;
+        var level = (MemoryLevel)Math.Max((int)(cpu is { } c ? OfCpu(c) : MemoryLevel.Normal), (int)(gpu is { } g ? OfGpu(g) : MemoryLevel.Normal));
+        return (Math.Max(cpu ?? double.MinValue, gpu ?? double.MinValue), level);
+    }
+
+    // Whole degrees: "47".
+    public static string Format(double celsius) => ((int)Math.Round(celsius, MidpointRounding.AwayFromZero)).ToString(CultureInfo.InvariantCulture);
+}
+
+// The adapter's locally unique identifier from the key the performance counters and DXGI name adapters by,
+// "luid_0x00000000_0x0000C5E2" (the high part, then the low part).
+public static class AdapterLuid
+{
+    public static (uint Low, int High)? Parse(string? key)
+    {
+        if (key is null || !key.StartsWith("luid_0x", StringComparison.OrdinalIgnoreCase)) return null;
+        var parts = key.Split('_');
+        if (parts.Length < 3 || !Hex(parts[1], out uint high) || !Hex(parts[2], out uint low)) return null;
+        return (low, unchecked((int)high));
+    }
+    private static bool Hex(string text, out uint value)
+    {
+        value = 0;
+        return text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) && text.Length > 2
+            && uint.TryParse(text.AsSpan(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value);
+    }
+}

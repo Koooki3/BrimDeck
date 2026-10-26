@@ -63,9 +63,11 @@ public partial class MainWindow
     }
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
-    // The sort is not part of it: a new sort reorders the list in place.
+    // The sort is not part of it: a new sort reorders the list in place. The drives' line is kept from the first reading that finds
+    // a drive with a temperature (SystemSampler.DrivesFound), so the page is built again once, when the drives first report.
     private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Settings.MonitorProcesses,
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation);
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorDrives);
+    private bool MonitorDrives => Settings.MonitorTemperatures && _app.Monitor?.DrivesFound == true;
 
     private void RenderMonitor()
     {
@@ -87,7 +89,8 @@ public partial class MainWindow
         // The list being replaced may have been under the pointer; its leave event never comes.
         if (_app.Monitor is { } monitor) monitor.HoldProcesses = false;
         _monitorView = new MonitorView(CurrentMonitorLayout(), MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
-            Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; });
+            Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; },
+            Settings.MonitorTemperatures, MonitorDrives);
         MonitorContent.Children.Clear(); MonitorContent.Children.Add(_monitorView);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // A new main gauge, asked for on the page, arrives with a short fade instead of a cut.

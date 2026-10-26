@@ -5,7 +5,8 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, CPU,
-// memory and GPU each as a dial with its letter inside, with its figure after it or alone (narrower), and download and upload, in
+// memory and GPU each as a dial with its letter inside, with its figure after it or alone (narrower), download and upload, and,
+// when chosen, the temperature with a thermometer, in
 // the order and the colors set in the settings' table (CompactReading); the rings alone sit closer together. It asks for
 // the width of everything chosen (PreferredWidth); when its region is narrower, the row draws it at that width and scrolls it
 // through the region (ReadingsCarousel). It draws itself once per reading; the collapsed row stays still between readings.
@@ -52,7 +53,8 @@ internal sealed class MonitorStrip : FrameworkElement
         // at most five characters (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, Math.Round(4 * _scale) + Math.Ceiling(text("100%")), _dial, ColumnsWidth(Environment.ProcessorCount),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))));
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))),
+            Math.Round(11 * _scale) + Math.Round(2 * _scale) + Math.Ceiling(text("125°")));
     }
 
     private double ItemWidth(CompactMonitorItems item) => _tight && _actual.TryGetValue(item, out var actual) ? actual : _width(item);
@@ -98,6 +100,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu when (_values & item) != 0 => _dial + Math.Round(4 * _scale) + FigureWidth(GaugeFigure(share)),
                 CompactMonitorItems.Download => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.DownBytesPerSecond)),
                 CompactMonitorItems.Upload => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.UpBytesPerSecond)),
+                CompactMonitorItems.Temperature => Math.Round(11 * _scale) + Math.Round(2 * _scale) + FigureWidth(TemperatureFigure(Temperatures.Hottest(s)?.Celsius)),
                 _ => _width(item)
             };
         }
@@ -113,6 +116,9 @@ internal sealed class MonitorStrip : FrameworkElement
         var q = rate is { } r ? MonitorFormat.CompactRate(r) : new MonitorFormat.Quantity("—", "");
         return q.Number + q.Unit;
     }
+    // Whole degrees with the degree sign, the unit left out for room: "62°". Made once for every degree a reading can have.
+    private static readonly string[] Degrees = [.. Enumerable.Range(0, (int)Temperatures.Highest + 1).Select(degrees => Temperatures.Format(degrees) + "°")];
+    private static string TemperatureFigure(double? celsius) => celsius is { } c ? Degrees[(int)Math.Clamp(Math.Round(c, MidpointRounding.AwayFromZero), 0, Temperatures.Highest)] : "—";
 
     // The readings that fit the width the row gives; a change starts their transitions. A row built again in the middle of one
     // carries it on, as the old row no longer draws.
@@ -159,6 +165,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, color, level, "G", (_values & item) != 0, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
+                case CompactMonitorItems.Temperature: Temperature(drawing, left, center, Temperatures.Hottest(s)?.Celsius, color, level, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
         }
@@ -210,6 +217,15 @@ internal sealed class MonitorStrip : FrameworkElement
         MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.4 * _scale), glyph, color);
         var text = MonitorDraw.Text(RateFigure(rate), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + size + Math.Round(3 * _scale), Math.Round(center + _font * .36));
+    }
+
+    // A thermometer and the hotter of the processor's and the graphics adapter's temperatures (Temperatures.Hottest): "62°".
+    private void Temperature(DrawingContext drawing, double x, double center, double? celsius, string color, MemoryLevel level, double ppd)
+    {
+        double size = Math.Round(11 * _scale);
+        MonitorDraw.Arrow(drawing, new Point(x, center - size / 2), size, Math.Max(1, 1.3 * _scale), MonitorGlyph.Thermometer, celsius is null ? UI.Tertiary : color);
+        var text = MonitorDraw.Text(TemperatureFigure(celsius), _font, FigureColor(level, color), ppd);
+        MonitorDraw.Baseline(drawing, text, x + size + Math.Round(2 * _scale), Math.Round(center + _font * .36));
     }
 }
 

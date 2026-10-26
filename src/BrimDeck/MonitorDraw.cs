@@ -11,16 +11,17 @@ namespace BrimDeck;
 // directly instead of a tree of text blocks and borders: a new reading changes what they draw, never the layout, so it costs
 // one redraw of the panel and no measuring. The look follows ftop by Nongfsq (https://github.com/Nongfsq/ftop, MIT License;
 // see ThirdPartyNotices.txt). The page and the collapsed strip lead their figures alike: CPU, memory and GPU with a dial
-// carrying the reading's letter (Dial), the rates with an arrow (Arrow).
-internal enum MonitorGlyph { Down, Up }
+// carrying the reading's letter (Dial), the rates with an arrow and the temperatures with a thermometer (Arrow).
+internal enum MonitorGlyph { Down, Up, Thermometer }
 
 internal static class MonitorDraw
 {
-    // The arrows on a 16 unit grid, stroked.
+    // The arrows and the thermometer on a 16 unit grid, stroked.
     private static readonly Dictionary<MonitorGlyph, Geometry> Glyphs = new()
     {
         [MonitorGlyph.Down] = Frozen("M8,2.5 V13 M3.8,8.8 L8,13 L12.2,8.8"),
         [MonitorGlyph.Up] = Frozen("M8,13.5 V3 M3.8,7.2 L8,3 L12.2,7.2"),
+        [MonitorGlyph.Thermometer] = Frozen("M6,9.6 V4.4 A2,2 0 0 1 10,4.4 V9.6 A3.2,3.2 0 1 1 6,9.6 Z M8,7.2 V12"),
     };
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
 
@@ -103,7 +104,7 @@ internal static class MonitorDraw
         drawing.DrawGeometry(null, Stroke(ArcPens, color, thickness, PenLineJoin.Miter), geometry);
     }
 
-    // A rate's arrow in the color, stroked, in a square of the size with its top left corner at the point.
+    // A rate's arrow (or the thermometer) in the color, stroked, in a square of the size with its top left corner at the point.
     public static void Arrow(DrawingContext drawing, Point at, double size, double thickness, MonitorGlyph glyph, string color)
     {
         double scale = size / 16;

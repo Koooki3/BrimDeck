@@ -22,8 +22,8 @@ internal sealed class FigureGauge : FrameworkElement
     private readonly bool _right, _button;
     private Eased _share, _hover = new(0, Eased.Hover);
     private bool _hasShare, _pressed;
-    private string _number = "—", _unit = "", _detail = "", _tip = "";
-    private readonly DrawingCache<(string, string, string, double, double, double)> _text = new();
+    private string _number = "—", _unit = "", _detail = "", _tip = "", _detailColor = UI.Tertiary;
+    private readonly DrawingCache<(string, string, string, string, double, double, double)> _text = new();
     private readonly DrawingCache<(IReadOnlyList<double>, double, double)> _trend = new();
     private IReadOnlyList<double> _history = [];
 
@@ -38,10 +38,12 @@ internal sealed class FigureGauge : FrameworkElement
         if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); Focusable = false; }
     }
 
-    public void Set(double? share, string number, string unit, string detail, string tip, bool motion)
+    // detailColor: the detail's color, the tertiary text color by default (a temperature takes its level's).
+    public void Set(double? share, string number, string unit, string detail, string tip, bool motion, string? detailColor = null)
     {
-        bool changed = number != _number || unit != _unit || detail != _detail || (share is not null) != _hasShare;
-        _number = number; _unit = unit; _detail = detail; _hasShare = share is not null;
+        detailColor ??= UI.Tertiary;
+        bool changed = number != _number || unit != _unit || detail != _detail || detailColor != _detailColor || (share is not null) != _hasShare;
+        _number = number; _unit = unit; _detail = detail; _detailColor = detailColor; _hasShare = share is not null;
         if (tip != _tip) { _tip = tip; ToolTip = tip.Length > 0 ? tip : null; }
         if (share is { } value && _share.Set(value, motion)) Motion.Start(this, Step);
         else if (changed || share is not null) InvalidateVisual();
@@ -62,7 +64,7 @@ internal sealed class FigureGauge : FrameworkElement
         double badge = Math.Round(_figure + 3), gap = Math.Round(_figure * .4);
         var number = MonitorDraw.Text(_number, _figure, UI.Primary, ppd, display: true);
         var unit = MonitorDraw.Text(_unit, _small, UI.Secondary, ppd);
-        var detail = MonitorDraw.Text(_detail, _small, UI.Tertiary, ppd);
+        var detail = MonitorDraw.Text(_detail, _small, _detailColor, ppd);
         double width = badge + gap + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0)
             + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0);
         double x = _right ? Math.Max(0, w - width) : 0, baseline = Math.Round(h / 2 + number.Baseline - number.Height / 2 + _figure * .05);
@@ -80,22 +82,23 @@ internal sealed class FigureGauge : FrameworkElement
         if (_history.Count >= 3 && !_right)
         {
             // From after the figures (and any detail) to the right edge, half the line's height, centred on it.
-            double end = start + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0) + gap * 1.5;
+            double end = start + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0)
+                + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0) + gap * 1.5;
             var area = new Rect(end, Math.Round(h * .2), Math.Max(0, w - end - 6), Math.Round(h * .6));
-            if (area.Width >= 48 && _detail.Length == 0)
+            if (area.Width >= 48)
                 MonitorDraw.Place(drawing, area.TopLeft, _trend.Get((_history, area.Width, area.Height), context =>
                     MonitorDraw.Sparkline(context, new Rect(0, 0, area.Width, area.Height), _history, 1, _color, .14, 1.3)));
         }
-        drawing.DrawDrawing(_text.Get((_number, _unit, _detail, w, h, ppd), context =>
+        drawing.DrawDrawing(_text.Get((_number, _unit, _detail, _detailColor, w, h, ppd), context =>
         {
             double x = start;
             MonitorDraw.Baseline(context, number, x, baseline); x += number.WidthIncludingTrailingWhitespace;
             if (_unit.Length > 0) { MonitorDraw.Baseline(context, unit, x + 2, baseline); x += 2 + unit.WidthIncludingTrailingWhitespace; }
             if (_detail.Length > 0)
             {
-                // A long detail (an adapter's name) is cut to the room left, with an ellipsis.
+                // A long detail is cut to the room left, with an ellipsis.
                 double room = w - x - gap;
-                if (room > 12) MonitorDraw.Baseline(context, detail.WidthIncludingTrailingWhitespace <= room ? detail : MonitorDraw.Trimmed(_detail, _small, UI.Tertiary, room, ppd), x + gap, baseline);
+                if (room > 12) MonitorDraw.Baseline(context, detail.WidthIncludingTrailingWhitespace <= room ? detail : MonitorDraw.Trimmed(_detail, _small, _detailColor, room, ppd), x + gap, baseline);
             }
         }));
     }
@@ -426,4 +429,54 @@ internal sealed class NetworkBlock : FrameworkElement
         => MonitorDraw.Sparkline(drawing, area, history, Math.Max(64_000, history.Max()), color, .16);
 
 
+}
+
+// The solid-state drives' temperatures on one line under network: a thermometer in the room a dial takes, then each drive's
+// figure, in the order Windows numbers the drives, as many as the line holds. A drive's figure takes the warning or critical
+// color at its level (Temperatures.OfDisk); each drive's model and thresholds are in the tooltip.
+internal sealed class DriveTemperatureLine : FrameworkElement
+{
+    private readonly MonitorColors _colors;
+    private readonly double _body, _caption;
+    private IReadOnlyList<DiskTemperature> _drives = [];
+
+    public DriveTemperatureLine(MonitorColors colors, double body, double caption)
+    {
+        _colors = colors; _body = body; _caption = caption;
+        Height = Math.Ceiling(body * 1.7);
+    }
+
+    public void Set(IReadOnlyList<DiskTemperature> drives)
+    {
+        if (drives.SequenceEqual(_drives)) return;
+        _drives = drives;
+        ToolTip = drives.Count == 0 ? null : string.Join("\n", drives.Select(drive => drive.Name + " · " + Temperatures.Format(drive.Celsius) + " °C"
+            + (drive.Warning is { } warning ? Loc.T($"（警告 {Temperatures.Format(warning)} °C）", $" (warning at {Temperatures.Format(warning)} °C)") : "")));
+        InvalidateVisual();
+    }
+
+    protected override Size MeasureOverride(Size availableSize) => new(0, Height);
+
+    protected override void OnRender(DrawingContext drawing)
+    {
+        if (_drives.Count == 0) return;
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), line = Height, badge = Math.Round(_body + 5), baseline = Math.Round(line / 2 + _body * .38);
+        drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
+        double glyph = Math.Round(badge * 9 / 16);
+        MonitorDraw.Arrow(drawing, new Point((badge - glyph) / 2, line / 2 - glyph / 2), glyph, Math.Max(1, glyph * .155), MonitorGlyph.Thermometer, UI.Secondary);
+        double x = badge + Math.Round(_body * .5);
+        var label = MonitorDraw.Text(Loc.T("硬盘", "Drives"), _caption, UI.Tertiary, ppd);
+        MonitorDraw.Baseline(drawing, label, x, baseline); x += label.WidthIncludingTrailingWhitespace + Math.Round(_body * .7);
+        foreach (var drive in _drives)
+        {
+            var level = Temperatures.OfDisk(drive);
+            var number = MonitorDraw.Text(Temperatures.Format(drive.Celsius), _body + 1, _colors.Level(level, UI.Primary), ppd, strong: true);
+            var unit = MonitorDraw.Text("°C", _caption, UI.Tertiary, ppd);
+            double width = number.WidthIncludingTrailingWhitespace + 2 + unit.WidthIncludingTrailingWhitespace;
+            if (x + width > w) break;
+            MonitorDraw.Baseline(drawing, number, x, baseline);
+            MonitorDraw.Baseline(drawing, unit, x + number.WidthIncludingTrailingWhitespace + 2, baseline);
+            x += width + Math.Round(_body);
+        }
+    }
 }

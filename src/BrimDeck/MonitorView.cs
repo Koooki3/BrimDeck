@@ -51,6 +51,8 @@ internal sealed class MonitorView : Grid
     private readonly BlockGauge? _gpuBlock;
     private readonly MemoryBlock _memory;
     private readonly NetworkBlock _network;
+    private readonly DriveTemperatureLine? _drives;
+    private readonly bool _temperatures;
     private readonly ProcessListView? _list;
     private readonly Canvas _overlay = new() { IsHitTestVisible = false };
     private ProcessCard? _card;
@@ -58,10 +60,12 @@ internal sealed class MonitorView : Grid
     private int _cores = Environment.ProcessorCount;
     private bool _motion;
 
+    // temperatures: the gauges carry the processor's and the graphics adapter's temperatures after their figures; drives: the drives'
+    // temperatures take a line under network, where the page has room for one (not when memory and network share a line).
     public MonitorView(MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
-        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold)
+        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, bool temperatures = false, bool drives = false)
     {
-        _layout = layout; _colors = colors; _main = main;
+        _layout = layout; _colors = colors; _main = main; _temperatures = temperatures;
         bool cpuMain = main == MonitorMain.Cpu;
         string swapToGpu = Loc.T("切换为以 GPU 为主", "Show the GPU large"), swapToCpu = Loc.T("切换为以 CPU 为主", "Show the CPU large");
         var readings = new Grid();
@@ -69,10 +73,12 @@ internal sealed class MonitorView : Grid
         readings.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        // The gauge shown small takes a fixed width at the right: a wide block for the GPU, thin columns for the processor.
+        // The gauge shown small takes a fixed width at the right: a wide block for the GPU, thin columns for the processor. Its
+        // line is wider than the column under it, and wider still with a temperature after the figure.
         double mini = cpuMain ? Math.Round(Math.Clamp(layout.Figure * 3.4, 54, 84)) : Math.Round(Math.Clamp(layout.Figure * 5, 80, 120));
-        double headMini = Math.Max(mini, Math.Round(layout.Figure * 4.6));
+        double headMini = Math.Max(mini, Math.Round(layout.Figure * (temperatures ? 5.8 : 4.6)));
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(headMini) });
@@ -118,6 +124,11 @@ internal sealed class MonitorView : Grid
         {
             _network.Margin = new Thickness(0, layout.Metrics == MetricsMode.Blocks ? 10 : 6, 0, 0);
             SetRow(_memory, 2); SetRow(_network, 3); readings.Children.Add(_memory); readings.Children.Add(_network);
+            if (temperatures && drives)
+            {
+                _drives = new DriveTemperatureLine(colors, layout.Body, layout.Caption) { Margin = new Thickness(0, 6, 0, 0) };
+                SetRow(_drives, 4); readings.Children.Add(_drives);
+            }
         }
 
         if (layout.List == ListPlacement.None) Children.Add(readings);
@@ -159,8 +170,13 @@ internal sealed class MonitorView : Grid
         if (snapshot.Cpu.TryGet(out var cpu))
         {
             string frequency = cpu.FrequencyMhz.TryGet(out var mhz) ? MonitorFormat.Gigahertz(mhz) + " GHz" : "";
-            _cpuGauge.Set(cpu.Usage, MonitorFormat.Percent(cpu.Usage), "%", "",
-                "CPU " + MonitorFormat.Percent(cpu.Usage) + "%" + (frequency.Length > 0 ? " · " + frequency : "") + Loc.T($" · {cpu.Cores.Count} 个逻辑处理器", $" · {cpu.Cores.Count} logical processors"), motion);
+            // The zone is the firmware's, which may be the board near the processor rather than the processor itself.
+            double? heat = _temperatures ? cpu.Temperature : null;
+            string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
+            _cpuGauge.Set(cpu.Usage, MonitorFormat.Percent(cpu.Usage), "%", temperature,
+                "CPU " + MonitorFormat.Percent(cpu.Usage) + "%" + (frequency.Length > 0 ? " · " + frequency : "") + Loc.T($" · {cpu.Cores.Count} 个逻辑处理器", $" · {cpu.Cores.Count} logical processors")
+                + (temperature.Length > 0 ? Loc.T($"\n温度 {temperature}（ACPI 热区 {cpu.TemperatureZone}，可能是主板而非 CPU 本身）", $"\nTemperature {temperature} (ACPI thermal zone {cpu.TemperatureZone}, possibly the board rather than the CPU itself)") : ""),
+                motion, heat is { } c ? Hot(Temperatures.OfCpu(c)) : null);
             int groups = Math.Max(1, cpu.GroupCount);
             _cpuGraph.Set(cpu.Cores.Select(core => new GraphColumn(core.Usage, cpuMain ? core.FrequencyFraction : null, _colors.Core(core.Group, groups), core.Group, Describe(core))).ToList(), motion);
         }
@@ -170,10 +186,14 @@ internal sealed class MonitorView : Grid
         {
             string memory = gpu.DedicatedBytes.TryGet(out var used)
                 ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Gigabytes(used) + (gpu.DedicatedTotal is { } total ? " / " + MonitorFormat.GigabytesCompact(total) : "") + " GB" : "";
+            double? heat = _temperatures ? gpu.Temperature : null;
+            string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
             string tip = (gpu.Name ?? "GPU") + " · " + MonitorFormat.Percent(gpu.Usage) + "%" + (memory.Length > 0 ? " · " + memory : "")
-                + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "");
-            // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure.
-            _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", "", tip, motion);
+                + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "")
+                + (temperature.Length > 0 ? " · " + temperature : "");
+            // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure; its
+            // temperature follows the figure.
+            _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", temperature, tip, motion, heat is { } c ? Hot(Temperatures.OfGpu(c)) : null);
             _gpuBlock?.Set(gpu.Usage, gpu.DedicatedFraction, tip, motion);
             _gpuGraph?.Set(gpu.Engines.Select(engine => new GraphColumn(engine.Usage, null, _colors.Gpu, 0,
                 GpuEngines.Label(engine.Kind) + " · " + MonitorFormat.Percent(engine.Usage) + "%", GpuEngines.Short(engine.Kind))).ToList(), motion);
@@ -190,6 +210,7 @@ internal sealed class MonitorView : Grid
         (cpuMain ? _cpuGauge : _gpuGauge).Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
         _memory.Set(snapshot.Memory, motion);
         _network.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
+        _drives?.Set(snapshot.Disks);
         _list?.Set(snapshot.Processes, _cores, motion);
         _processes = snapshot.Processes.OrDefault;
         // An open card follows its app's readings; it closes when the app has left the list.
@@ -199,6 +220,9 @@ internal sealed class MonitorView : Grid
             if (sample is null) CloseCard(animate: true); else _card.Show(sample, _cores, _layout.Body, _layout.Caption);
         }
     }
+
+    // A temperature's color: the text's while normal, the collapsed readings' warning or critical color above.
+    private string? Hot(MemoryLevel level) => level == MemoryLevel.Normal ? null : _colors.Level(level, UI.Tertiary);
 
     private static string Describe(CoreSample core)
     {
