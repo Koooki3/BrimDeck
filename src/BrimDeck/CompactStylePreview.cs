@@ -107,9 +107,26 @@ internal static class CompactStylePreview
         var row = new DockPanel { Margin = new Thickness(inset, 0, inset, 0), VerticalAlignment = VerticalAlignment.Center };
         DockPanel.SetDock(time, Dock.Right); row.Children.Add(time); row.Children.Add(rings);
         island.Child = row;
+        // A corner of the open panel behind the capsule, at the card's lower right (SW-13): its surface, a title and a line of secondary
+        // text, and the accent, so themes whose capsules look alike still tell apart.
+        Border Bar(double barWidth, double barHeight, string key, Thickness margin) => new()
+        {
+            Width = barWidth, Height = barHeight, CornerRadius = new CornerRadius(barHeight / 2), Background = UI.Brush(Hex(key)), Margin = margin,
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top
+        };
+        var corner = new Grid();
+        corner.Children.Add(Bar(46, 6, "textPrimary", new Thickness(16, 16, 0, 0)));
+        corner.Children.Add(Bar(70, 4, "textSecondary", new Thickness(16, 28, 0, 0)));
+        corner.Children.Add(Bar(22, 8, "accent", new Thickness(96, 15, 0, 0)));
+        var panel = new IslandBorder
+        {
+            MaterialOpacity = 1, Width = 136, Height = 64, CornerRadius = new CornerRadius(12), Background = UI.Brush(palette.Effects.Glass?.Tint.ToString() ?? Hex("surface")),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -14, -26), Child = corner
+        };
+        PanelTheme.Dress(panel, palette);
         // Room around the capsule for a wide glow to fade out before the card's edge.
-        var scene = new Grid { Width = width + 48, Height = ThemeHeight, IsHitTestVisible = false };
-        scene.Children.Add(shadow); scene.Children.Add(island);
+        var scene = new Grid { Width = width + 48, Height = ThemeHeight, IsHitTestVisible = false, ClipToBounds = true };
+        scene.Children.Add(panel); scene.Children.Add(shadow); scene.Children.Add(island);
         var card = new Border { Height = ThemeHeight, CornerRadius = new CornerRadius(9), ClipToBounds = true,
             Child = new Viewbox { Child = scene, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly } };
         card.SetResourceReference(Border.BackgroundProperty, "SettingsInset");

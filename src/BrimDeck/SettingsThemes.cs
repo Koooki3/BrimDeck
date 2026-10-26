@@ -45,7 +45,7 @@ public sealed partial class SettingsWindow
         ThemeSection(Loc.T("基础", "Basics"));
         ThemeCards([(PanelThemes.SystemId, Loc.T("跟随系统", "System"), PanelTheme.Find(PanelThemes.SystemId)),
             .. WithGlassAuto([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Basic).Select(Card)])], chosen);
-        ThemeSection(Loc.T("主题扩展", "Theme extensions"));
+        ThemeSection(Loc.T("更多主题", "More themes"));
         ThemeCards([.. PanelThemes.BuiltIns.Where(t => t.Kind == PanelThemeKind.Extension).Select(Card)], chosen);
         CustomSection(users, chosen);
         _themeDetails = Collect(() => ThemeDetails(chosen, users)); _content.Children.Add(_themeDetails);
@@ -78,8 +78,10 @@ public sealed partial class SettingsWindow
             bool own = theme.Path is not null;
             // The chosen theme of the user's with unsaved changes offers to save them over it in place of its card.
             if (own && id == chosen && !PanelTheme.KeptLastGood && PanelTheme.DraftOf(id) is not null) { grid.Children.Add(OverwriteCard(theme)); continue; }
-            var card = KeepPreview(new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = ThemePreview(id, theme),
-                Margin = new Thickness(6, 3, 6, 6), Tag = own ? "" : name, GroupName = "PanelTheme", IsChecked = id == chosen });
+            // A stage in the name ("alpha") is shown as a badge on the preview, not as part of the name (SW-13).
+            string caption = Stage(name, out string? stage);
+            var card = KeepPreview(new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = ThemePreview(id, theme, stage),
+                Margin = new Thickness(6, 3, 6, 6), Tag = own ? "" : caption, GroupName = "PanelTheme", IsChecked = id == chosen });
             AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + name);
             AutomationProperties.SetAutomationId(card, "panel-theme-" + id);
             card.Checked += (_, _) =>
@@ -107,7 +109,16 @@ public sealed partial class SettingsWindow
     private static void ChooseTheme(DeckSettings settings, string id)
         => PanelThemes.SwitchTheme(settings, settings.PanelTheme, PanelTheme.Current, id, PanelThemes.Resolve(PanelTheme.Find(id)));
 
-    private FrameworkElement ThemePreview(string card, PanelThemeInfo theme)
+    // A theme's name without a trailing stage ("液态玻璃（深色）alpha" → "液态玻璃（深色）", stage "alpha").
+    private static string Stage(string name, out string? stage)
+    {
+        foreach (var word in new[] { "alpha", "beta" })
+            if (name.EndsWith(word, StringComparison.OrdinalIgnoreCase) && name.Length > word.Length)
+            { stage = word; return name[..^word.Length].TrimEnd(); }
+        stage = null; return name;
+    }
+
+    private FrameworkElement ThemePreview(string card, PanelThemeInfo theme, string? stage = null)
     {
         var palette = PanelThemes.Resolve(theme);
         var key = (card, Loc.Language);
@@ -118,7 +129,14 @@ public sealed partial class SettingsWindow
             return kept.Preview;
         }
         // The collapsed capsule with its quota rings and clock, at its real size, in this theme's colors.
-        var preview = CompactStylePreview.Theme(palette);
+        FrameworkElement preview = CompactStylePreview.Theme(palette);
+        if (stage is not null)
+        {
+            var badge = new Border { CornerRadius = new CornerRadius(4), Padding = new Thickness(5, 1, 5, 2), Margin = new Thickness(8), HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top, Child = TextLine(stage, 10, TextSecondary) };
+            badge.SetResourceReference(Border.BackgroundProperty, "SettingsSurface");
+            preview = new Grid { Children = { preview, badge } };
+        }
         _themePreviews[key] = (palette, preview);
         return preview;
     }
