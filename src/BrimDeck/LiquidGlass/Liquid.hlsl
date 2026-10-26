@@ -738,6 +738,9 @@ float3 Slab(float2 p, float sd, float2 outward)
         float turned = CoverDark(), busy, base = lerp(SlabCoverLight, AcrylicLumDark, turned);
         float a = Adapt(p, base, busy);
         float3 target = lerp(AcrylicLight, AcrylicDark, turned);
+        // The dark look first gives back the saturation its frost took, as Acrylic does (sc_saturation 1.25; round 15: the
+        // user's shell acrylic keeps neon as soft colour), within the backdrop's own (the caps below).
+        c = Lum(c) + (c - Lum(c)) * lerp(1, AcrylicSaturation, turned);
         // Between text the light look's body carries a little of it too (BodyCover), so the cover reads as the glass growing
         // denser, not as a plate laid on it.
         // Where the backdrop behind the text asks for more (much darker than the light look), the density
