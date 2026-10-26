@@ -149,6 +149,11 @@ internal sealed class GlassBackdrop : IDisposable
     private CompositionLinearGradientBrush? _lightBrush;
     private CompositionColorGradientStop? _lightTop, _lightFade;
     private bool? _rimDark;
+    // The acrylic body's noise (AcrylicNoise): a grid of tiles sharing one brush, inside the body's clip, made for the window's
+    // size and again only when the window grows.
+    private Windows.UI.Composition.ContainerVisual? _noise;
+    private CompositionSurfaceBrush? _noiseBrush;
+    private (int Columns, int Rows) _noiseGrid;
     // The acrylic body's luminosity opacity now (GlassEffect.LuminosityFor) and the probe that sets it (AcrylicProbe): a couple
     // of looks a second at what lies around the island, never in the frame's path. It rises at once when the text needs more
     // and comes down only after the backdrop stayed calmer for ProbeDwellMs (a video's flashes never make it pump); automatic
@@ -453,9 +458,14 @@ internal sealed class GlassBackdrop : IDisposable
             _clip.CornerRadius = new Vector2((float)round);
             clipTop = acrylicTop;
             Rim(outerLeft, acrylicTop, outerRight, outerBottom, round, opacity);
+            Noise(opacity);
             Probe(true);
         }
-        else if (_rim is not null) _rim.IsVisible = false;
+        else
+        {
+            if (_rim is not null) _rim.IsVisible = false;
+            if (_noise is not null) _noise.IsVisible = false;
+        }
         _sprite!.Opacity = liquid ? 0 : (float)opacity;
         Decided(liquid || acrylic, frame.Material);
         if (liquid || acrylic) { left = outerLeft; right = outerRight; bottom = outerBottom; corner = radius; }
@@ -849,6 +859,36 @@ internal sealed class GlassBackdrop : IDisposable
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException) { _rim = null; }
     }
 
+    private void Noise(double opacity)
+    {
+        if (_noise is null || _windowRect is not { } window || Composition.Compositor is not { } compositor) return;
+        if (_noiseBrush is null)
+        {
+            if (LiquidGlass.AcrylicNoise.Surface(compositor) is not { } surface) return;
+            _noiseBrush = compositor.CreateSurfaceBrush(surface);
+            _noiseBrush.Stretch = CompositionStretch.None;
+            _noiseBrush.HorizontalAlignmentRatio = 0; _noiseBrush.VerticalAlignmentRatio = 0;
+        }
+        int tile = LiquidGlass.AcrylicNoise.Tile;
+        var grid = ((window.Width + tile - 1) / tile, (window.Height + tile - 1) / tile);
+        if (grid.Item1 > _noiseGrid.Columns || grid.Item2 > _noiseGrid.Rows)
+        {
+            _noise.Children.RemoveAll();
+            for (int row = 0; row < grid.Item2; row++)
+                for (int column = 0; column < grid.Item1; column++)
+                {
+                    var sprite = compositor.CreateSpriteVisual();
+                    sprite.Size = new Vector2(tile, tile);
+                    sprite.Offset = new Vector3(column * tile, row * tile, 0);
+                    sprite.Brush = _noiseBrush;
+                    _noise.Children.InsertAtTop(sprite);
+                }
+            _noiseGrid = grid;
+        }
+        _noise.Opacity = (float)opacity;
+        _noise.IsVisible = true;
+    }
+
     private (double, double, double, double, double, double, bool)? _rimFor;
     private void Rim(double left, double top, double right, double bottom, double radius, double opacity)
     {
@@ -972,6 +1012,9 @@ internal sealed class GlassBackdrop : IDisposable
             _clip = compositor.CreateRoundedRectangleGeometry();
             _sprite.Clip = compositor.CreateGeometricClip(_clip);
             root.Children.InsertAtTop(_sprite);
+            _noise = compositor.CreateContainerVisual(); _noise.RelativeSizeAdjustment = Vector2.One; _noise.IsVisible = false;
+            _noise.Clip = compositor.CreateGeometricClip(_clip);
+            root.Children.InsertAtTop(_noise);
             MakeRim(compositor, root);
             _target.Root = root;
             return true;
@@ -1024,6 +1067,7 @@ internal sealed class GlassBackdrop : IDisposable
         SurfaceAside = false;
         // The composition objects are let go with the window: a panel made again (a monitor added, settings applied) starts afresh.
         if (_sprite is not null) { GlassEffect.Release(_sprite.Brush); _sprite.Clip?.Dispose(); _sprite.Dispose(); }
+        _noise?.Clip?.Dispose(); _noise?.Dispose(); _noise = null; _noiseBrush?.Dispose(); _noiseBrush = null; _noiseGrid = default;
         _rim?.Dispose(); _rimHair?.Dispose(); _rimLight?.Dispose(); _hairShape?.Dispose(); _lightShape?.Dispose();
         _hairBrush?.Dispose(); _lightBrush?.Dispose(); _lightTop?.Dispose(); _lightFade?.Dispose();
         _rim = null; _rimHair = _rimLight = null; _hairShape = _lightShape = null; _hairBrush = null; _lightBrush = null; _lightTop = _lightFade = null; _rimDark = null;
