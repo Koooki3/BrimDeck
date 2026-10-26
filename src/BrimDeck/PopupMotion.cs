@@ -2,10 +2,12 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using BrimDeck.Core;
 
 namespace BrimDeck;
 
@@ -15,15 +17,16 @@ namespace BrimDeck;
 // own that is opened as soon as the real one has been laid out: a pop-up created at the moment of closing came up some 50 ms
 // later, after a blank. It lies right beneath the real one and is kept up to date while that is open, so it already shows
 // when WPF takes the real one away: given its picture only on closing, it was drawn a frame late and the list blinked out
-// and back before it left.
+// and back before it left. It is first taken once the list has entered, and then again only when the list can have changed
+// (motion-review F7, BrimDeck.Core.PopupPicture): the pointer moved onto another element, a button or key went down or up, or
+// the list scrolled; once right after (the change's own frame) and once more when a hover's fade has settled. A change while it
+// entered is taken the same way right after the first picture. Taken 20 times a second while open, it kept the list rendering in
+// software.
 internal static class PopupMotion
 {
     private static readonly ConditionalWeakTable<object, Placed> Places = new();
     // The waiting picture's pop-up for the opening under way, null between openings.
-    private sealed class Placed { public Popup? Ghost; public Image? Picture; public Window? Window; public DispatcherTimer? Refresh; }
-
-    // How often the picture beneath an open pop-up is taken again: a hover or a choice changes the list.
-    private static readonly TimeSpan RefreshEvery = TimeSpan.FromMilliseconds(50);
+    private sealed class Placed { public Popup? Ghost; public Image? Picture; public Window? Window; public DispatcherTimer? Refresh; public Action? Unhook; }
 
     public static void Attach(Popup popup)
     {
@@ -72,30 +75,61 @@ internal static class PopupMotion
             var ghost = placed.Ghost = new Popup { PlacementTarget = window, Placement = PlacementMode.Relative, HorizontalOffset = at.X, VerticalOffset = at.Y,
                 AllowsTransparency = true, StaysOpen = true, IsHitTestVisible = false, Focusable = false, Child = picture, IsOpen = true };
             if (PresentationSource.FromVisual(picture) is HwndSource own) Native.WindowsHost.PlaceBelow(own.Handle, real.Handle);
+            // First once the content has entered, then again only after something that can change it. After a change it is taken
+            // again once a hover's fade (Soft.Hover, Feedback) has had time to settle.
+            var schedule = new PopupPicture();
+            var settled = TimeSpan.FromMilliseconds(PopupPicture.SettleMilliseconds(Soft.Hover));
             var refresh = placed.Refresh = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(Soft.Short + 80) };
+            bool queued = false;
+            object? over = null;
             refresh.Tick += (_, _) =>
             {
-                refresh.Interval = RefreshEvery;
-                if (placed.Ghost != ghost || !element.IsVisible) { refresh.Stop(); return; }
-                Take(element, picture);
+                refresh.Stop();
+                // The first picture; a change while the list entered (the pointer onto an option) may still be fading its hover
+                // in, so it is taken once more when that has settled. This one is that frame's picture already.
+                bool missed = schedule.Enter();
+                if (placed.Ghost == ghost && element.IsVisible) Take(element, picture);
+                if (missed) { refresh.Interval = settled; refresh.Start(); }
             };
             refresh.Start();
+            void Changed()
+            {
+                // Before it has entered, the first picture is still to come: taken now, it would lie opaque under the list
+                // fading in, and the timer would not wait for the entrance.
+                if (placed.Ghost != ghost || !schedule.Changed()) return;
+                // The change's own frame, once its layout is done; a burst of changes queues it once.
+                if (!queued)
+                {
+                    queued = true;
+                    element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { queued = false; if (placed.Ghost == ghost && element.IsVisible) Take(element, picture); });
+                }
+                refresh.Stop(); refresh.Interval = settled; refresh.Start();
+            }
+            MouseEventHandler moved = (_, _) => { if (!ReferenceEquals(Mouse.DirectlyOver, over)) { over = Mouse.DirectlyOver; Changed(); } };
+            MouseEventHandler left = (_, _) => { over = null; Changed(); };
+            MouseButtonEventHandler button = (_, _) => Changed();
+            KeyEventHandler key = (_, _) => Changed();
+            ScrollChangedEventHandler scrolled = (_, _) => Changed();
+            element.PreviewMouseMove += moved; element.MouseLeave += left;
+            element.PreviewMouseDown += button; element.PreviewMouseUp += button;
+            element.PreviewKeyDown += key; element.PreviewKeyUp += key;
+            element.AddHandler(ScrollViewer.ScrollChangedEvent, scrolled);
+            placed.Unhook = () =>
+            {
+                element.PreviewMouseMove -= moved; element.MouseLeave -= left;
+                element.PreviewMouseDown -= button; element.PreviewMouseUp -= button;
+                element.PreviewKeyDown -= key; element.PreviewKeyUp -= key;
+                element.RemoveHandler(ScrollViewer.ScrollChangedEvent, scrolled);
+            };
         });
     }
 
-    // The content as it is drawn now, one to one (PageHandover.Exactly), so neither its offset nor its entrance transform is
-    // part of the picture.
+    // The content as it is drawn now (PageHandover.Snapshot).
     private static void Take(FrameworkElement content, Image image)
     {
         double width = content.ActualWidth, height = content.ActualHeight;
         if (width < 1 || height < 1 || PresentationSource.FromVisual(image) is null) return;
-        var dpi = VisualTreeHelper.GetDpi(image);
-        var picture = new RenderTargetBitmap((int)Math.Ceiling(width * dpi.DpiScaleX), (int)Math.Ceiling(height * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
-        var drawing = new DrawingVisual();
-        using (var context = drawing.RenderOpen()) context.DrawRectangle(PageHandover.Exactly(content, width, height), null, new Rect(0, 0, width, height));
-        picture.Render(drawing);
-        picture.Freeze();
-        image.Width = width; image.Height = height; image.Source = picture;
+        image.Width = width; image.Height = height; image.Source = PageHandover.Snapshot(content, width, height, VisualTreeHelper.GetDpi(image));
     }
 
     // Applies a choice made in a pop-up once the pop-up's leaving has been drawn: a choice that rebuilds the page holds the
@@ -104,16 +138,16 @@ internal static class PopupMotion
 
     private static void Close(Placed placed)
     {
-        placed.Refresh?.Stop();
+        placed.Refresh?.Stop(); placed.Unhook?.Invoke();
         if (placed.Ghost is { } ghost) ghost.IsOpen = false;
-        placed.Ghost = null; placed.Picture = null; placed.Window = null; placed.Refresh = null;
+        placed.Ghost = null; placed.Picture = null; placed.Window = null; placed.Refresh = null; placed.Unhook = null;
     }
 
     private static void Leave(FrameworkElement? content, Placed placed)
     {
         var ghost = placed.Ghost; var image = placed.Picture; var window = placed.Window;
-        placed.Refresh?.Stop();
-        placed.Ghost = null; placed.Picture = null; placed.Window = null; placed.Refresh = null;
+        placed.Refresh?.Stop(); placed.Unhook?.Invoke();
+        placed.Ghost = null; placed.Picture = null; placed.Window = null; placed.Refresh = null; placed.Unhook = null;
         if (ghost is null || image is null) return;
         // A pop-up closed with its window (the settings window closed or hidden) goes with it, without a picture left behind.
         if (!Soft.Enabled || content is null || window is not { IsVisible: true } || PresentationSource.FromVisual(image) is null) { ghost.IsOpen = false; return; }

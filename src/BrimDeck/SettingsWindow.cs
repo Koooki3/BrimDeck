@@ -615,7 +615,8 @@ public sealed partial class SettingsWindow : Window
     {
         SectionTitle(Loc.T("悬停与动画", "Hover and animation"));
         var duration = SliderRow(Loc.T("展开与收起动画时长", "Animation duration"), S.AnimationDuration, 100, 1000, 20, Loc.T("毫秒", "ms"), value => Change(s => s.AnimationDuration = (int)value),
-            Loc.T("设置每次展开或收起动画的持续时间。时间越短，动画越快。", "How long each expand or collapse animation lasts. The shorter the time, the faster the animation."));
+            Loc.T("设置面板展开和换页变形的动画时长。时间越短，动画越快；收起用其 0.75 倍，快捷键或 Esc 触发的展开收起用其 0.6 倍。悬停、按压等反馈有各自固定的节奏，不受此项影响。",
+                "How long the panel takes to expand and to change shape between pages. The shorter the time, the faster the animation; collapsing takes 0.75 of it, and expanding or collapsing with a hotkey or Esc 0.6 of it. Hover and press feedback keep their own pace and are not affected."));
         void EnableDuration(bool enabled)
         {
             foreach (var control in duration.Children.OfType<FrameworkElement>().Where(control => Grid.GetColumn(control) > 0)) control.IsEnabled = enabled;
