@@ -11,6 +11,10 @@ public static class PanelMotion
     public static int Length(int length, bool closing, bool keyboard)
         => length <= 0 ? 0 : (int)Math.Round(length * (keyboard ? KeyFactor : closing ? CloseFactor : 1));
 
+    // The open panel taking a new size in place (another page, a changed setting) always takes this long, the default opening
+    // length: the setting is for opening and closing, and a page switch slowed down with it felt like a stall.
+    public const int Reshape = 360;
+
     // Where the closing surface starts, as a fraction of the move: a little after the content has begun to leave; at once
     // when the closing turns back an opening still under way (motion-review F1), rather than stopping where the opening was
     // and starting back from rest after a pause.
