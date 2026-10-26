@@ -7,7 +7,8 @@ internal static class MediaAppTargetTests
         check("Media session ids map to player process names",
             MediaAppTarget.ProcessName("cloudmusic.exe") == "cloudmusic" && MediaAppTarget.ProcessName("D:\\Tencent\\QQMusic\\QQMusic.exe") == "QQMusic"
             && MediaAppTarget.ProcessName("Chrome") == "chrome" && MediaAppTarget.ProcessName("MSEdge") == "msedge"
-            && MediaAppTarget.ProcessName("foobar2000.exe") == "foobar2000");
+            && MediaAppTarget.ProcessName("foobar2000.exe") == "foobar2000"
+            && MediaAppTarget.ProcessName("AppleInc.AppleMusicWin_nzyj5cx40ttqa!App") == "AMPLibraryAgent");
         check("A packaged application id names its package family",
             new MediaAppOwner(null, "x", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify").PackageFamily == "SpotifyAB.SpotifyMusic_zpdnekdrzrea0"
             && new MediaAppOwner(null, "chrome", "Chrome").PackageFamily is null);
