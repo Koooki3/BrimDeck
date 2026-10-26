@@ -46,6 +46,7 @@ try
     await DashboardUsageTests.Run(root, Check);
     await AppUpdateTests.Run(root, Check);
     await InstallerUpdateTests.Run(root, Check);
+    await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);

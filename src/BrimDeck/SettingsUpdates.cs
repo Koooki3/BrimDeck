@@ -149,8 +149,8 @@ public sealed partial class SettingsWindow
                 AppUpdateStage.Ready => Loc.T($"{updates.CurrentVersion} → {release?.Version} · 重启后生效，现有设置将保留。", $"{updates.CurrentVersion} → {release?.Version} · Takes effect after a restart. Your settings are kept."),
                 AppUpdateStage.Installing => Loc.T("正在退出 BrimDeck，完成后将重新打开。", "BrimDeck is closing and will open again when the update is done."),
                 _ when release is not null && updates.IsSkipped(release.Version) => Loc.T("已跳过此版本，不再提示；仍可手动下载。", "This version is skipped and will not be announced again. You can still download it."),
-                _ when release is not null && !updates.CanInstall => Loc.T("当前程序不是通过安装包安装的，无法在应用内更新。请下载安装版。",
-                    "This copy was not installed with the installer and cannot update itself. Download the installer version."),
+                _ when release is not null && !updates.CanInstall => Loc.T("当前程序不是通过安装包或免安装压缩包获得的，无法在应用内更新。请前往下载页面下载新版本。",
+                    "This copy did not come from the installer or the portable package and cannot update itself. Download the new version from the download page."),
                 _ when release is not null => Loc.T($"{updates.CurrentVersion} → {release.Version} · 约 {release.Size / 1048576d:0.#} MB", $"{updates.CurrentVersion} → {release.Version} · About {release.Size / 1048576d:0.#} MB"),
                 _ when updates.LastChecked is { } time => Loc.T("上次检查 ", "Last checked ") + time.ToLocalTime().ToString("MM-dd HH:mm"),
                 _ => updates.AutoCheck ? Loc.T("BrimDeck 会在启动后和每 6 小时于后台检查一次新版本，打开设置时也会检查；也可以随时手动检查。", "BrimDeck checks for a new version in the background after startup and every 6 hours, and when settings open. You can also check at any time.")
@@ -161,7 +161,7 @@ public sealed partial class SettingsWindow
             noteScroll.Visibility = notes.Text.Length > 0 && stage is not AppUpdateStage.Checking ? Visibility.Visible : Visibility.Collapsed;
             progress.Value = updates.Progress; progress.Visibility = stage == AppUpdateStage.Downloading ? Visibility.Visible : Visibility.Collapsed;
             error.Text = updates.Error ?? ""; error.Visibility = updates.Error is null ? Visibility.Collapsed : Visibility.Visible;
-            primary.Content = stage == AppUpdateStage.Ready ? Loc.T("安装并重启", "Install and restart") : updates.CanInstall ? Loc.T("下载更新", "Download update") : Loc.T("下载安装版", "Download installer");
+            primary.Content = stage == AppUpdateStage.Ready ? Loc.T("安装并重启", "Install and restart") : updates.CanInstall ? Loc.T("下载更新", "Download update") : Loc.T("前往下载页面", "Open download page");
             primary.Visibility = release is not null && stage != AppUpdateStage.Downloading ? Visibility.Visible : Visibility.Collapsed; primary.IsEnabled = !updates.IsBusy;
             check.IsEnabled = !updates.IsBusy; check.Visibility = stage is AppUpdateStage.Downloading or AppUpdateStage.Ready or AppUpdateStage.Installing ? Visibility.Collapsed : Visibility.Visible;
             // On the About page checking is the main action until a found release hands that role to the download button.

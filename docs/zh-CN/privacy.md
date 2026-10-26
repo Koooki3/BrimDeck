@@ -31,7 +31,7 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | `moonshot-prices.json` | 从 OpenRouter 同步的 Moonshot AI 官方渠道单价（Kimi K3、K3.1 Pro 与 K3.1 Pro Highspeed），用于计算 Kimi Code 的费用 |
 | `claude-quota.json` | 最近一次联网读取的 Claude 额度（各项百分比、重置时间与订阅名称），重启后接口被限流时用来继续显示 Fable 等额度；不含登录令牌；账户仅以其 ID 的单向哈希记录（不保存 ID 本身），只在同一账户登录时使用；超过 7 天不再使用，登录失效或退出登录时删除 |
 | `kimi-quota.json` | 最近一次联网读取的 Kimi Code 额度（各项百分比、重置时间、加油包与会员等级），登录过期或接口暂时不可用时继续显示，重启后同样适用；不含登录令牌与其他账户资料；账户仅以其 ID 连同服务地址的单向哈希记录（不保存 ID 本身），只在同一站点的同一账户登录时使用；超过 7 天不再使用，退出登录或账户未订阅 Kimi Code 套餐时删除 |
-| `update-prompt.txt`、`updates\` | 已提示过的版本号、下载的安装包 |
+| `update-prompt.txt`、`updates\` | 已提示过的版本号、下载的安装包或免安装压缩包（免安装版更新时还有解压出的新版本文件） |
 | `crash.log` | 错误记录，超过 1 MB 时清空 |
 
 ## 联网与安全

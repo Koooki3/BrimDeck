@@ -110,8 +110,12 @@ The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT
 
 Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited support.
 
-1. Download and run `BrimDeck-<version>-Setup.exe` from [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest).
+1. Download one of these files from [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest):
+   - Installer: `BrimDeck-<version>-Setup.exe`. Run it and follow the steps.
+   - Portable: `BrimDeck-<version>-Portable-x64.zip`. Extract it and run `BrimDeck.exe` in the `BrimDeck` folder.
 2. If Windows shows "Windows protected your PC", select "More info", then "Run anyway".
+
+Both versions update from within the app, and both keep settings and data in `%LOCALAPPDATA%\BrimDeck`. When the portable version is in a folder that needs administrator rights to change, such as `C:\Program Files`, the update asks for administrator approval. To stop using the portable version, turn off starting with Windows in settings if it is on, then delete its folder; to remove settings and data as well, also delete `%LOCALAPPDATA%\BrimDeck`.
 
 ## Quick start
 
@@ -121,7 +125,7 @@ Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited suppor
 
 ## Uninstall
 
-Uninstall BrimDeck from Apps in Windows Settings.
+Installer: uninstall BrimDeck from Apps in Windows Settings. Portable: turn off starting with Windows in settings if it is on, then delete its folder.
 
 ## Privacy
 
