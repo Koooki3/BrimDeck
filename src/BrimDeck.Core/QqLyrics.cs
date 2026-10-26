@@ -31,7 +31,7 @@ public sealed partial class LyricsService
             // The desktop transport currently has no song ID. Wait for its duration before
             // matching; otherwise an identically named live recording or cover can be selected.
             if (track.Duration <= TimeSpan.Zero) return Lyrics.Empty;
-            var search = await Get("https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&p=1&n=20&w=" +
+            var search = await Get("https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp?format=json&p=1&n=20&w=" +
                 Uri.EscapeDataString(track.Title + " " + track.Artist), token);
             if (search is not { } root || !QqSucceeded(root) ||
                 !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object ||
