@@ -397,7 +397,7 @@ public sealed partial class SettingsWindow
             var text = TextLine(label, 12.5, TextPrimary); text.VerticalAlignment = VerticalAlignment.Center; text.TextTrimming = TextTrimming.CharacterEllipsis;
             line.Children.Add(text);
             var entry = ActionButton("", () => { }); entry.Content = line;
-            entry.HorizontalContentAlignment = HorizontalAlignment.Stretch; entry.Padding = new Thickness(7, 6, 7, 6); entry.Margin = new Thickness(0, 1, 0, 1);
+            entry.HorizontalContentAlignment = HorizontalAlignment.Stretch; entry.Padding = new Thickness(7, 3, 7, 3);
             entry.IsEnabled = !last;
             entry.ToolTip = last ? Loc.T("至少保留一项。", "At least one stays.") : help;
             ToolTipService.SetShowOnDisabled(entry, true);
@@ -407,8 +407,8 @@ public sealed partial class SettingsWindow
         }
         void Header(string text)
         {
-            if (items.Children.Count > 0) items.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(4, 4, 4, 3) });
-            var header = TextLine(text, 10.5, TextTertiary); header.Margin = new Thickness(8, 4, 8, 2); items.Children.Add(header);
+            if (items.Children.Count > 0) items.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(4, 3, 4, 2) });
+            var header = TextLine(text, 10.5, TextTertiary); header.Margin = new Thickness(8, 2, 8, 1); items.Children.Add(header);
         }
         void Fill()
         {
@@ -449,18 +449,23 @@ public sealed partial class SettingsWindow
                 items.Children.Add(note);
             }
         }
-        menu.Opened += (_, _) =>
+        // The menu is filled before it opens: filled as it opened, it grew while dropping into place (Soft.Enter), and WPF placed
+        // it again with the drop's offset, six DIPs below its button.
+        if (drives && listed is null)
         {
-            Fill();
-            if (!drives || listed is not null) return;
-            listed = _app.Monitor?.Latest?.Storage is { Count: > 0 } latest ? latest : null;
-            if (listed is not null) { Fill(); return; }
-            // Nothing read the drives yet: they are read once here, off the UI thread, and the menu shows them when they come.
+            // Nothing read the drives yet: they are read once here, off the UI thread, while the page is open.
             var reader = new Native.StorageReader();
             reader.Start(false);
             reader.Pending.ContinueWith(_ => Dispatcher.BeginInvoke(() => { listed = reader.Listed; if (menu.IsOpen) Fill(); }));
+        }
+        // The menu sits right against its button rather than the app list's four DIPs below it.
+        select.Click += (_, _) =>
+        {
+            if (menu.IsOpen) return;
+            Fill();
+            FitMenuToScreen(select, menu, surface);
+            menu.VerticalOffset = 0;
         };
-        select.Click += (_, _) => { if (!menu.IsOpen) FitMenuToScreen(select, menu, surface); };
         TogglePopup(select, menu);
         return select;
     }
