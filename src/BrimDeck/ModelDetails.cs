@@ -203,6 +203,14 @@ public partial class MainWindow
         _leave.Stop(); _popupReturnArea = null; _detailPopup = popup; popup.Owner = this;
         // A layered window renders grayscale text unless told otherwise; its rounded background is opaque, so ClearType is safe.
         RenderOptions.SetClearTypeHint(popup, ClearTypeHint.Enabled);
+        // Under a larger Windows text size the pop-up is drawn larger with the panel it opens from (Zoom).
+        if (Zoom != 1 && popup.Content is FrameworkElement content)
+        {
+            var scale = new ScaleTransform(Zoom, Zoom); scale.Freeze();
+            content.LayoutTransform = scale;
+            popup.Width *= Zoom;
+            if (double.IsFinite(popup.Height)) popup.Height *= Zoom;
+        }
         var point = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
         var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
         point = transform.Transform(point);

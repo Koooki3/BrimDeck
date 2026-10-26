@@ -261,7 +261,7 @@ public partial class MainWindow
 
     // What the page's frame was built for: the settings (each change replaces them), its size and the theme.
     private (DeckSettings? Settings, int Theme, double Width, double Height, double UsageWidth) NoticeLayout()
-        => (Settings, PanelTheme.Generation, ContentCanvas.Width, ContentCanvas.Height, _usageWidth);
+        => (Settings, PanelTheme.Generation, ContentCanvas.Width, ContentCanvas.Height, UsageLayoutWidth);
 
     // RenderUsage on the recent notices page (N50-2). Closed, the page is not drawn at all: SetExpanded builds it as the panel
     // opens, with what arrived meanwhile. Open with the page already on screen for the same theme, a data refresh or the
@@ -356,7 +356,7 @@ public partial class MainWindow
         RefreshStatus();
         UsageContent.Visibility = Visibility.Collapsed; MusicContent.Visibility = Visibility.Collapsed; DevicesContent.Visibility = Visibility.Collapsed; MonitorContent.Visibility = Visibility.Collapsed; NoticesContent.Visibility = Visibility.Visible;
         ModelToolbar.Visibility = Visibility.Collapsed; ApplicationPages.Visibility = Visibility.Collapsed; ClockLabel.Visibility = Visibility.Visible;
-        ApplyHeader(Settings.UsagePage ? UsageHeader(_usageWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
+        ApplyHeader(Settings.UsagePage ? UsageHeader(UsageLayoutWidth, UsagePageHeight) : UnfittedHeader(ContentCanvas.Height));
         double offset = fresh ? 0 : NoticesContent.Children.OfType<DockPanel>().FirstOrDefault()?.Children.OfType<ScrollViewer>().FirstOrDefault()?.VerticalOffset ?? 0;
         // Worked from the keyboard, the page keeps the focus on the same notice when it is built again (an Enter, a new notice).
         string? refocus = NoticesContent.IsKeyboardFocusWithin ? _focusedNotice : null;

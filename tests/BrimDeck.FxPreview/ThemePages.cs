@@ -8,13 +8,15 @@ using BrimDeck.Core;
 // The real panel's pages in every built-in theme and look, offscreen, over a plain backdrop (no glass composition): one sheet per
 // look with the collapsed capsule, the music page with a cover and without, the system monitor, the recent notices and the AI
 // usage page, for before-and-after comparisons of layout and type.
-//   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --theme-pages <output folder> [--scale 150] [--themes dark,light]
-// The sheets are named pages-<theme>[-night|-dusk]-<percent>.png.
+//   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --theme-pages <output folder> [--scale 150] [--text-scale 125] [--themes dark,light]
+// The sheets are named pages-<theme>[-night|-dusk]-<percent>[-text<percent>].png; the text size is Windows' (TextScale).
 internal static partial class LiquidPages
 {
-    public static int RunThemes(string folder, double scale, HashSet<string>? only)
+    public static int RunThemes(string folder, double scale, HashSet<string>? only, double textScale = 1)
     {
         Scale = scale;
+        TextScale.Override = textScale;
+        string text = textScale == 1 ? "" : $"-text{textScale * 100:0}";
         Directory.CreateDirectory(folder);
         var (app, deck, root, source) = Offscreen(animations: false);
         using var _ = source;
@@ -38,8 +40,9 @@ internal static partial class LiquidPages
                     tiles.Add((label, Tile(deck, root, palette.IsDark), 0, row));
                 }
                 string name = theme.Id + (look == DaylightLook.Day ? "" : "-" + look.ToString().ToLowerInvariant());
-                LiquidPreview.Save(Sheet($"{name} at {Scale * 100:0} %", tiles), Path.Combine(folder, $"pages-{name}-{Scale * 100:0}.png"));
-                Console.WriteLine($"Wrote pages-{name}-{Scale * 100:0}.png");
+                string title = $"{name} at {Scale * 100:0} %" + (textScale == 1 ? "" : $", text {textScale * 100:0} %");
+                LiquidPreview.Save(Sheet(title, tiles), Path.Combine(folder, $"pages-{name}-{Scale * 100:0}{text}.png"));
+                Console.WriteLine($"Wrote pages-{name}-{Scale * 100:0}{text}.png");
             }
         return 0;
     }

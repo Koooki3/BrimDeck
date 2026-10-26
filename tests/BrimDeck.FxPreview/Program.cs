@@ -33,12 +33,18 @@ internal static class Program
         // The real panel's pages over liquid glass (LiquidPages): --liquid-pages <backgrounds> <output folder>. It needs BrimDeck's own
         // App (never run) instead of a plain Application, so it starts before one is made.
         // [--scale <percent>] (or BRIMDECK_PAGES_SCALE) draws them at another display scale than 150 percent.
-        // The real panel's pages in every built-in theme and look (LiquidPages.RunThemes): --theme-pages <output folder> [--scale 150] [--themes ids].
+        // The real panel's pages in every built-in theme and look (LiquidPages.RunThemes): --theme-pages <output folder> [--scale 150]
+        // [--text-scale 125] [--themes ids]. --text-scale stands in for Windows' text size (TextScale).
         if (args.Length > 1 && args[0] == "--theme-pages")
         {
             if (LiquidPages.ScaleFrom(args) is not { } themeScale) { Console.WriteLine("FAIL: --scale wants a display scale such as 100, 125, 150"); return 1; }
+            int text = Array.IndexOf(args, "--text-scale");
+            double textScale = 1;
+            if (text > 0 && (text + 1 >= args.Length || !double.TryParse(args[text + 1], System.Globalization.CultureInfo.InvariantCulture, out textScale) || textScale < 100 || textScale > 225))
+            { Console.WriteLine("FAIL: --text-scale wants Windows' text size, 100 to 225"); return 1; }
             int listed = Array.IndexOf(args, "--themes");
-            return LiquidPages.RunThemes(args[1], themeScale, listed > 0 && listed + 1 < args.Length ? args[listed + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null);
+            return LiquidPages.RunThemes(args[1], themeScale, listed > 0 && listed + 1 < args.Length ? args[listed + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
+                text > 0 ? TextScale.Clamp(textScale) : 1);
         }
         if (args.Length > 2 && args[0] == "--liquid-pages")
         {
