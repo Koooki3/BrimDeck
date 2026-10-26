@@ -245,6 +245,9 @@ internal sealed class LiquidRenderer : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (frame.Width < 1 || frame.Height < 1) return;
         var swapChain = EnsureSwapChain(frame.Width, frame.Height);
+        // E17: a waitable swap chain at one frame of latency - the wait comes before the drawing (bounded: never longer than a
+        // frame on the UI thread), so a frame is drawn from the newest capture rather than queued behind one still on screen.
+        if (_latency != IntPtr.Zero) WaitForSingleObjectEx(_latency, LatencyWaitMs, true);
         Draw(background, pad, frame, _target!);
         swapChain.Present(0, PresentFlags.None);
     }
@@ -601,14 +604,16 @@ internal sealed class LiquidRenderer : IDisposable
     // ----- What lies behind -----
     // The mean brightness of the background under the island, for automatic liquid glass (GlassAppearance): the copy or a
     // downsample of it (at most MeasureTexels across: fine enough that a word on a page shows in the percentiles) is copied to
-    // a staging texture after the pyramid is made, and read on a later frame, never waited for. One copy is out at a time. The percentiles come
-    // from a histogram (no sort: a measure of the open panel reads some 37,000 texels).
-    private const int MeasureTexels = 512, Bins = 1024;
-    private ID3D11Texture2D? _measure;
+    // a staging texture after the pyramid is made, and read on a later frame, never waited for. E17: a ring of MeasureRing
+    // staging textures, so a copy goes out on each drawing while earlier ones are still in flight, and a read takes the newest
+    // that is in (not the oldest, as a single texture made it). The percentiles come from a histogram (no sort: a measure of
+    // the open panel reads some 37,000 texels).
+    private const int MeasureTexels = 512, Bins = 1024, MeasureRing = 3;
+    private readonly ID3D11Texture2D?[] _measures = new ID3D11Texture2D?[MeasureRing];
     private (int Width, int Height, int Level) _measureFor;
     private Format _measureFormat;
-    private bool _measuring;
-    private (int Pad, int Width, int Height) _measuredRegion;
+    private int _measureHead, _measurePending;
+    private readonly (int Pad, int Width, int Height)[] _measuredRegions = new (int, int, int)[MeasureRing];
     private readonly byte[] _measureRow = new byte[MeasureTexels * 4 * 2];
     private readonly int[] _histogram = new int[Bins];
     // The backdrop's brightness under the island, its 2nd and 98th percentiles (sRGB luma), from the last measure: the band
@@ -621,42 +626,61 @@ internal sealed class LiquidRenderer : IDisposable
 
     private void Sample(int pad, int width, int height, int least)
     {
-        if (_measuring || _copy is null) return;
+        if (_measurePending == MeasureRing || _copy is null) return;
         // The copy itself, or the first downsample (D_k, Frost.hlsl) at most MeasureTexels across and at least as coarse as asked.
         int level = 0, w = _copy.Width, h = _copy.Height;
         while ((w > MeasureTexels || level < least) && level < _built) { level++; w = _down[level]!.Width; h = _down[level]!.Height; }
         var source = level == 0 ? _copy : _down[level]!;
         var format = level == 0 ? _copyFor.Format : Pyramid;
-        if (_measure is null || _measureFor != (w, h, level) || _measureFormat != format)
+        if (_measureFor != (w, h, level) || _measureFormat != format)
         {
-            _measure?.Dispose();
-            _measure = _device.CreateTexture2D(new Texture2DDescription(format, (uint)w, (uint)h, 1, 1, BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read));
+            // Another size: the copies in flight are of the old one, dropped with their textures.
+            for (int i = 0; i < MeasureRing; i++) { _measures[i]?.Dispose(); _measures[i] = null; }
+            _measurePending = 0;
             _measureFor = (w, h, level);
             _measureFormat = format;
         }
-        _context.CopySubresourceRegion(_measure, 0, 0, 0, 0, source.Texture, 0);
-        _measuredRegion = (pad, width, height);
-        _measuring = true;
+        int slot = (_measureHead + _measurePending) % MeasureRing;
+        var target = _measures[slot] ??= _device.CreateTexture2D(new Texture2DDescription(format, (uint)w, (uint)h, 1, 1, BindFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read));
+        _context.CopySubresourceRegion(target, 0, 0, 0, 0, source.Texture, 0);
+        _measuredRegions[slot] = (pad, width, height);
+        _measurePending++;
     }
 
     // The mean luma (0..1, sRGB) of the background under the island, from the last copy whose answer is in; false while none
     // is (the next frame's copy goes out once this one is read).
     // Whether a measure is out, to be read on a later frame.
-    public bool Measuring => _measuring;
+    public bool Measuring => _measurePending > 0;
     public bool TryBackdrop(out double luma) => Read(wait: false, out luma);
     // The same, waiting for the copy (the previews, which draw once).
     internal bool MeasureNow(out double luma) => Read(wait: true, out luma);
     private bool Read(bool wait, out double luma)
     {
+        // The newest copy that is in decides (tried newest first, so only one is read); it and those before it are done with.
         luma = 0;
-        if (!_measuring || _measure is null) return false;
-        if (_context.Map(_measure, 0, MapMode.Read, wait ? Vortice.Direct3D11.MapFlags.None : Vortice.Direct3D11.MapFlags.DoNotWait, out var mapped).Failure) return false;
+        for (int k = _measurePending - 1; k >= 0; k--)
+        {
+            int slot = (_measureHead + k) % MeasureRing;
+            if (!ReadOne(slot, wait && k == _measurePending - 1, out double one)) continue;
+            _measureHead = (slot + 1) % MeasureRing; _measurePending -= k + 1;
+            if (double.IsNaN(one)) return false;
+            luma = one;
+            return true;
+        }
+        return false;
+    }
+    // One copy: false while it is not in; NaN for a copy with nothing of the island in it.
+    private bool ReadOne(int slot, bool wait, out double luma)
+    {
+        luma = double.NaN;
+        var measure = _measures[slot]!;
+        if (_context.Map(measure, 0, MapMode.Read, wait ? Vortice.Direct3D11.MapFlags.None : Vortice.Direct3D11.MapFlags.DoNotWait, out var mapped).Failure) return false;
         try
         {
             var (w, h, level) = _measureFor;
             double step = 1 << level, sum = 0;
             int count = 0;
-            var (pad, width, height) = _measuredRegion;
+            var (pad, width, height) = _measuredRegions[slot];
             bool half = _measureFormat == Pyramid;
             Array.Clear(_histogram);
             for (int y = 0; y < h; y++)
@@ -686,7 +710,7 @@ internal sealed class LiquidRenderer : IDisposable
                     _histogram[Math.Min(Bins - 1, (int)(l * Bins))]++;
                 }
             }
-            if (count == 0) return false;
+            if (count == 0) return true;
             luma = sum / count;
             _bandMean = (float)luma;
             _bandA = Percentile(.02); _bandB = Percentile(.98);
@@ -694,8 +718,7 @@ internal sealed class LiquidRenderer : IDisposable
         }
         finally
         {
-            _context.Unmap(_measure, 0);
-            _measuring = false;
+            _context.Unmap(measure, 0);
         }
     }
 
@@ -789,6 +812,12 @@ internal sealed class LiquidRenderer : IDisposable
 
     // The swap chain, its buffers at least the frame's size: they grow (in steps of 64 pixels, so an opening panel does not
     // reallocate every frame) and never shrink, and the source size shows only the frame's part of them, from the top-left.
+    // E17: made with a frame latency waitable object (Render waits on it, at most LatencyWaitMs).
+    private const SwapChainFlags SwapFlags = SwapChainFlags.FrameLatencyWaitableObject;
+    private const uint LatencyWaitMs = 17;
+    private IntPtr _latency;
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern uint WaitForSingleObjectEx(IntPtr handle, uint milliseconds, bool alertable);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);
     private IDXGISwapChain2 EnsureSwapChain(int width, int height)
     {
         if (_swapChain is null)
@@ -798,15 +827,17 @@ internal sealed class LiquidRenderer : IDisposable
             using var adapter = dxgi.GetAdapter();
             using var factory = adapter.GetParent<IDXGIFactory2>();
             var description = new SwapChainDescription1((uint)_capacity.Width, (uint)_capacity.Height, Pixels, false, Usage.RenderTargetOutput, 2, Scaling.Stretch,
-                SwapEffect.FlipSequential, AlphaMode.Premultiplied);
+                SwapEffect.FlipSequential, AlphaMode.Premultiplied, SwapFlags);
             using var created = factory.CreateSwapChainForComposition(_device, description);
             _swapChain = created.QueryInterface<IDXGISwapChain2>();
+            _swapChain.MaximumFrameLatency = 1;
+            _latency = _swapChain.FrameLatencyWaitableObject;
         }
         else if (width > _capacity.Width || height > _capacity.Height)
         {
             _target?.Dispose(); _target = null;
             _capacity = (Math.Max(_capacity.Width, Step(width)), Math.Max(_capacity.Height, Step(height)));
-            _swapChain.ResizeBuffers(2, (uint)_capacity.Width, (uint)_capacity.Height, Pixels, SwapChainFlags.None).CheckError();
+            _swapChain.ResizeBuffers(2, (uint)_capacity.Width, (uint)_capacity.Height, Pixels, SwapFlags).CheckError();
             _size = default;
         }
         if (_size != (width, height))
@@ -913,7 +944,9 @@ internal sealed class LiquidRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
         _target?.Dispose(); _swapChain?.Dispose();
-        _copy?.Dispose(); DisposePyramid(); _stats[0]?.Dispose(); _stats[1]?.Dispose(); _measure?.Dispose();
+        if (_latency != IntPtr.Zero) { CloseHandle(_latency); _latency = IntPtr.Zero; }
+        _copy?.Dispose(); DisposePyramid(); _stats[0]?.Dispose(); _stats[1]?.Dispose();
+        foreach (var measure in _measures) measure?.Dispose();
         // The immediate context is not let go: Vortice keeps one wrapper for the device, which the capture side uses too.
         _constants.Dispose(); _passConstants.Dispose(); _smooth.Dispose();
         _pixel.Dispose(); _zoned?.Dispose(); _downPass.Dispose(); _upPass.Dispose(); _bandPass.Dispose(); _statsPass.Dispose(); _vertex.Dispose();

@@ -192,7 +192,9 @@ internal static class DesktopSourceTests
         source.DeviceChanged += () => { raised++; inside |= new StackTrace().ToString().Contains("DesktopSource.Capture", StringComparison.Ordinal); };
         var frame = LiquidFrame.Preset(false, region.Width - 48, region.Height - 48, 20, 20, 0, 1);
         long now = 0;
-        bool Draw(bool tick) { for (int i = 0; i < 40; i++) { if (tick ? host.Tick(region, 24, frame, now += 100) : host.Frame(region, 24, frame with { Hover = i / 40f }, now += 16)) return true; Thread.Sleep(25); } return false; }
+        // Frames a PollMs apart (E18: a frame that changes only the pointer's light is drawn over the last capture, and a lost
+        // device found at the next look, at most PollMs later).
+        bool Draw(bool tick) { for (int i = 0; i < 40; i++) { if (tick ? host.Tick(region, 24, frame, now += 100) : host.Frame(region, 24, frame with { Hover = i / 40f }, now += LiquidIdle.PollMs)) return true; Thread.Sleep(25); } return false; }
         if (!Draw(false)) { Console.WriteLine("SKIP: device loss (no capture)."); return; }
         var lose = typeof(DesktopSource).GetMethod("Lose", BindingFlags.NonPublic | BindingFlags.Instance)!;
         int swaps = 20, drawn = 0, errors = 0;

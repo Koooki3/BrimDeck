@@ -26,6 +26,8 @@ internal sealed class LiquidIdle
     public long Ticks { get; private set; }
     public long Renders { get; private set; }
     public long FrameRenders { get; private set; }
+    // Followed frames drawn over the last capture, only the pointer's light or the press changed (E18).
+    public long Reused { get; private set; }
     // Ticks that only read the measure (Settling), for the debug log and the cost check.
     public long Settles { get; private set; }
     // What the swap chain holds (the frame drawn, over which region), and when the desktop was last looked at (following or
@@ -78,14 +80,20 @@ internal sealed class LiquidIdle
     public bool Frame(DesktopSource source, RECT region, in LiquidFrame frame, Func<ID3D11Texture2D, bool> render, long now)
     {
         bool same = _holds && frame == _drawn && region == _drawnOver;
-        bool changed = false;
-        if (!same || now - _lookedAt >= PollMs)
+        // E18: the pointer's light and the press are shading over the same backdrop: drawn again over the last capture at the
+        // frame rate, the desktop still looked at no oftener than PollMs (what lies behind cannot have moved with the pointer).
+        bool shading = !same && _holds && region == _drawnOver
+            && frame with { PointerX = _drawn.PointerX, PointerY = _drawn.PointerY, Hover = _drawn.Hover, Press = _drawn.Press } == _drawn;
+        bool changed = false, looked = false;
+        if ((!same && !shading) || now - _lookedAt >= PollMs)
         {
+            looked = true;
             _lookedAt = now;
             if (!source.Update(region, out changed) || source.Texture is null) return false;
         }
         if (same && !changed) return true;
-        if (!render(source.Texture!)) return false;
+        if (source.Texture is null || !render(source.Texture)) return false;
+        if (shading && !looked) Reused++;
         _drawn = frame; _drawnOver = region; _holds = true; _owed = false;
         // Followed, every frame reads the measure: no settle tick owed when the poll takes over.
         _settleOwed = false;

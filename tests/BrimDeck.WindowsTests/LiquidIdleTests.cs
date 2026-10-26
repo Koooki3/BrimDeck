@@ -76,6 +76,20 @@ internal static class LiquidIdleTests
                     && next == LiquidIdle.StillPollMs - LiquidIdle.SettleMs && settle.Interval(false, true, 4000) == LiquidIdle.IdlePollMs);
             }
 
+            // E18: a followed frame that changes only the pointer's light (hover, press, the pointer) is drawn over the last capture,
+            // the desktop looked at again only PollMs after the last look; any other change looks at once.
+            using (new Backdrop(Backdrop.Corner(200, 100), 90, 120, 150))
+            {
+                var follow = new LiquidIdle();
+                bool first = follow.Frame(source, region, frame, Render, 2000);
+                bool lit = follow.Frame(source, region, frame with { Hover = .5f, PointerX = 30, PointerY = 10 }, Render, 2010);
+                long reused = follow.Reused;
+                bool later = follow.Frame(source, region, frame with { Hover = .8f, PointerX = 40, PointerY = 10 }, Render, 2000 + LiquidIdle.PollMs);
+                bool other = follow.Frame(source, region, frame with { Hover = .8f, PointerX = 40, PointerY = 10, Dark = 0 }, Render, 2000 + LiquidIdle.PollMs + 5);
+                check(FormattableString.Invariant($"liquid idle: the pointer's light alone is drawn over the last capture, the next look PollMs on (reused {reused} then {follow.Reused}, drawn {follow.FrameRenders})"),
+                    first && lit && later && other && reused == 1 && follow.Reused == 1 && follow.FrameRenders == 4);
+            }
+
             // The test's own loop, with nothing polled, without and with the redraws: what the process spends on it is not the poll's.
             var quiet = Phase(source, renderer, region, false, Render, old: false, none: true);
             var harness = Phase(source, renderer, region, true, Render, old: false, none: true);
