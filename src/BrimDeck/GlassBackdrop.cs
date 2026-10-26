@@ -154,6 +154,11 @@ internal sealed class GlassBackdrop : IDisposable
     private Windows.UI.Composition.ContainerVisual? _noise;
     private CompositionSurfaceBrush? _noiseBrush;
     private (int Columns, int Rows) _noiseGrid;
+    // The pointer's soft light over the acrylic body (round 16, step 6): a radial glow following the pointer at hover, a little
+    // brighter while pressed (GlassFeedback's eased hover and press), inside the body's clip; only its properties change.
+    private SpriteVisual? _glow;
+    private CompositionRadialGradientBrush? _glowBrush;
+    private CompositionColorGradientStop? _glowCentre;
     // The acrylic body's luminosity opacity now (GlassEffect.LuminosityFor) and the probe that sets it (AcrylicProbe): a couple
     // of looks a second at what lies around the island, never in the frame's path. It rises at once when the text needs more
     // and comes down only after the backdrop stayed calmer for ProbeDwellMs (a video's flashes never make it pump); automatic
@@ -463,12 +468,14 @@ internal sealed class GlassBackdrop : IDisposable
             clipTop = acrylicTop;
             Rim(outerLeft, acrylicTop, outerRight, outerBottom, round, opacity);
             Noise(opacity);
+            Glow(shown, opacity);
             Probe(true);
         }
         else
         {
             if (_rim is not null) _rim.IsVisible = false;
             if (_noise is not null) _noise.IsVisible = false;
+            if (_glow is not null) _glow.IsVisible = false;
         }
         _sprite!.Opacity = liquid ? 0 : (float)opacity;
         Decided(liquid || acrylic, frame.Material);
@@ -863,6 +870,40 @@ internal sealed class GlassBackdrop : IDisposable
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException) { _rim = null; }
     }
 
+    private void MakeGlow(Compositor compositor, Windows.UI.Composition.ContainerVisual root)
+    {
+        try
+        {
+            _glowBrush = compositor.CreateRadialGradientBrush();
+            _glowBrush.MappingMode = CompositionMappingMode.Absolute;
+            _glowCentre = compositor.CreateColorGradientStop(0, Windows.UI.Color.FromArgb(255, 255, 255, 255));
+            _glowBrush.ColorStops.Add(_glowCentre);
+            _glowBrush.ColorStops.Add(compositor.CreateColorGradientStop(1, Windows.UI.Color.FromArgb(0, 255, 255, 255)));
+            _glow = compositor.CreateSpriteVisual(); _glow.RelativeSizeAdjustment = Vector2.One; _glow.Brush = _glowBrush; _glow.IsVisible = false;
+            _glow.Clip = compositor.CreateGeometricClip(_clip);
+            root.Children.InsertAtTop(_glow);
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException) { _glow = null; }
+    }
+
+    // The glow at the pointer: hover and press as GlassFeedback eases them (calmed on the open panel), its place in the glass's
+    // device pixels from the island's corner (Answer), some 90 DIPs wide; soft on the dark look, a little more on the light.
+    private void Glow(Frame shown, double opacity)
+    {
+        if (_glow is null || _glowBrush is null || _glowCentre is null) return;
+        double width = shown.Right - shown.Left, height = shown.Bottom - shown.Top;
+        var (hover, press, x, y) = Answer(width, height, Openness?.Invoke() ?? 0);
+        double strength = Math.Clamp(hover * .6 + press * .4, 0, 1);
+        if (strength <= .002 || !float.IsFinite(x) || !float.IsFinite(y)) { _glow.IsVisible = false; return; }
+        double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
+        bool dark = PanelTheme.Current.IsDark;
+        _glowCentre.Color = Windows.UI.Color.FromArgb((byte)(dark ? 34 : 70), 255, 255, 255);
+        _glowBrush.EllipseCenter = new Vector2((float)(shown.Left + x), (float)(shown.Top + y));
+        _glowBrush.EllipseRadius = new Vector2((float)(90 * scale));
+        _glow.Opacity = (float)(strength * opacity);
+        _glow.IsVisible = true;
+    }
+
     private void Noise(double opacity)
     {
         if (_noise is null || _windowRect is not { } window || Composition.Compositor is not { } compositor) return;
@@ -898,7 +939,8 @@ internal sealed class GlassBackdrop : IDisposable
     {
         if (_rim is null || _rimHair is null || _rimLight is null || _hairShape is null || _lightShape is null) return;
         bool dark = PanelTheme.Current.IsDark;
-        _rim.Opacity = (float)opacity;
+        // The rim grows with the island's presence, behind its body (round 15's condensation): faint while it fades in.
+        _rim.Opacity = (float)(opacity * opacity);
         _rim.IsVisible = true;
         if (_rimFor == (left, top, right, bottom, radius, VisualTreeHelper.GetDpi(_island).DpiScaleX, dark)) return;
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
@@ -945,6 +987,9 @@ internal sealed class GlassBackdrop : IDisposable
         long now = Environment.TickCount64;
         bool dark = PanelTheme.Current.IsDark;
         double openness = Openness?.Invoke() ?? 0;
+        // The island's shadow takes its tone from the same reading (MainWindow.ShadowLook: deeper over a busy backdrop, lighter
+        // over a plain light one), as it took it from the refraction renderer's measure.
+        Measured?.Invoke((float)reading.Dark, (float)reading.Bright);
         double wanted = GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness));
         // Up after two readings in a row ask for it (a second: one flash of a video or a window passing never lifts it), down
         // after the backdrop stayed calmer for ProbeDwellMs.
@@ -1029,6 +1074,7 @@ internal sealed class GlassBackdrop : IDisposable
             _noise = compositor.CreateContainerVisual(); _noise.RelativeSizeAdjustment = Vector2.One; _noise.IsVisible = false;
             _noise.Clip = compositor.CreateGeometricClip(_clip);
             root.Children.InsertAtTop(_noise);
+            MakeGlow(compositor, root);
             MakeRim(compositor, root);
             _target.Root = root;
             return true;
@@ -1081,6 +1127,7 @@ internal sealed class GlassBackdrop : IDisposable
         SurfaceAside = false;
         // The composition objects are let go with the window: a panel made again (a monitor added, settings applied) starts afresh.
         if (_sprite is not null) { GlassEffect.Release(_sprite.Brush); _sprite.Clip?.Dispose(); _sprite.Dispose(); }
+        _glow?.Clip?.Dispose(); _glow?.Dispose(); _glow = null; _glowBrush?.Dispose(); _glowBrush = null; _glowCentre?.Dispose(); _glowCentre = null;
         _noise?.Clip?.Dispose(); _noise?.Dispose(); _noise = null; _noiseBrush?.Dispose(); _noiseBrush = null; _noiseGrid = default;
         _rim?.Dispose(); _rimHair?.Dispose(); _rimLight?.Dispose(); _hairShape?.Dispose(); _lightShape?.Dispose();
         _hairBrush?.Dispose(); _lightBrush?.Dispose(); _lightTop?.Dispose(); _lightFade?.Dispose();
