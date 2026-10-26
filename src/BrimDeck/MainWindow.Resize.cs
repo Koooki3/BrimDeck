@@ -271,6 +271,7 @@ public partial class MainWindow
         // layout step and stretch in between, so they follow too; the model details and the media page are built again whole,
         // about 25 times a second during the drag, and once more when it ends (FinishResize saves the size).
         if (_resizePage == DeckPage.Monitor) RenderMonitor();
+        else if (_resizePage == DeckPage.Devices) RenderDevices();
         else if (Environment.TickCount64 - _resizeRendered >= 40)
         {
             _resizeRendered = Environment.TickCount64;

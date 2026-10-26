@@ -39,6 +39,10 @@ public partial class App : Application
     internal SystemSampler? Monitor { get; private set; }
     internal event Action<MonitorSnapshot>? MonitorUpdated;
     private readonly HashSet<MainWindow> _presentingMonitor = [], _stripMonitor = [];
+    // The wireless devices' batteries, shared by every panel; created when first wanted (UpdateDeviceDemand).
+    internal DeviceBatteries? Devices { get; private set; }
+    internal event Action? DevicesChanged;
+    private readonly HashSet<MainWindow> _devicePages = [], _deviceStrips = [];
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
 
@@ -105,6 +109,7 @@ public partial class App : Application
         InitializeHotkeys();
         StartBackgroundUpdates();
         DisplayPower.Install(Dispatcher);
+        DisplayPower.Changed += UpdateDeviceDemand;
         _save.Tick += (_, _) => FlushSettings();
         _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden);
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
@@ -182,6 +187,7 @@ public partial class App : Application
         ApplyHotkeys();
         // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
         UpdateMonitorExtras();
+        UpdateDeviceDemand();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
@@ -292,6 +298,26 @@ public partial class App : Application
         Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
         UpdateMonitorExtras();
     }
+    // The devices are read while any panel shows the devices page or the collapsed battery reading, or the settings list them;
+    // otherwise nothing runs (DeviceBatteries lets every source go after a short linger).
+    internal void PresentDevices(MainWindow deck, bool page, bool strip)
+    {
+        if (page) _devicePages.Add(deck); else _devicePages.Remove(deck);
+        if (strip) _deviceStrips.Add(deck); else _deviceStrips.Remove(deck);
+        UpdateDeviceDemand();
+    }
+    private void UpdateDeviceDemand()
+    {
+        // The settings page is not read for with the display off, as a panel is not (its own demand drops then).
+        var demand = _devicePages.Count + _deviceStrips.Count > 0 || _deviceSettings && !DisplayPower.Off ? DeviceDemand.Watch : DeviceDemand.None;
+        if (Exiting || Devices is null && demand == DeviceDemand.None) return;
+        if (Devices is null) { Devices = new DeviceBatteries(Dispatcher); Devices.Changed += DeviceBatteriesChanged; }
+        Devices.SetDemand(demand);
+    }
+    // The settings' devices page lists what is connected, so it reads the devices while it is open.
+    private bool _deviceSettings;
+    internal void WatchDevicesForSettings(bool open) { _deviceSettings = open; UpdateDeviceDemand(); }
+    private void DeviceBatteriesChanged() => DevicesChanged?.Invoke();
     // Temperatures and drives are read for an open page with them on, the drives' temperatures only there; the processor's and the
     // graphics adapter's temperatures, and the drives, also for a collapsed row showing those readings.
     private void UpdateMonitorExtras()
@@ -347,7 +373,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Media?.Dispose(); Monitor?.Dispose(); Devices?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

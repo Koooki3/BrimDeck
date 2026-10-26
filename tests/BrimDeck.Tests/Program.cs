@@ -34,6 +34,7 @@ try
     StripAdmissionTests.Run(Check);
     DevicesTests.Run(Check);
     DeviceProtocolTests.Run(Check);
+    DevicesPageTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
     MotionReviewTests.Run(Check);

@@ -267,7 +267,7 @@ static class SystemMonitorTests
     private static void Pages(Action<string, bool> check)
     {
         var settings = new DeckSettings();
-        check("Pages: monitor comes after usage and music", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor]));
+        check("Pages: monitor comes after usage and music, the devices page after it", DeckPages.Visible(settings).SequenceEqual([DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Devices]));
         var sized = new DeckSettings();
         DeckPages.SetSize(sized, DeckPage.Music, 700, 300); DeckPages.SetSize(sized, DeckPage.Monitor, 800, 320); DeckPages.SetSize(sized, DeckPage.Usage, 900, 260);
         check("Pages: a drag sets the size of the page it is on and of no other",
@@ -282,7 +282,7 @@ static class SystemMonitorTests
         check("Pages: a hidden page falls back to the first shown one", DeckPages.Resolve(settings, DeckPage.Usage) == DeckPage.Music);
         settings.MonitorPage = false;
         check("Pages: the music page alone", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Music);
-        settings.MusicPage = false;
+        settings.MusicPage = false; settings.DevicesPage = false;
         check("Pages: with every page off the usage page says so", DeckPages.Resolve(settings, DeckPage.Music) == DeckPage.Usage && DeckPages.Visible(settings).Count == 0);
         check("The wheel switches pages by default and its choice is saved with the settings",
             settings.MouseWheel == MouseWheelAction.Pages && System.Text.Json.JsonSerializer.Deserialize<DeckSettings>("""{"MouseWheel":2}""")!.MouseWheel == MouseWheelAction.Volume);
@@ -296,7 +296,7 @@ static class SystemMonitorTests
             && DeckPages.Opening(DefaultDeckPage.Usage) == DeckPage.Usage && DeckPages.Opening(DefaultDeckPage.Music) == DeckPage.Music);
         var sizes = new DeckSettings { Width = 500, Height = 150, MusicWidth = 700, MusicHeight = 180, MonitorWidth = 600, MonitorHeight = 300 };
         check("Pages: the window holds the largest shown page", DeckPages.Largest(sizes) == (700, 300));
-        sizes.MusicPage = false; sizes.MonitorPage = false;
+        sizes.MusicPage = false; sizes.MonitorPage = false; sizes.DevicesPage = false;
         check("Pages: only shown pages size the window", DeckPages.Largest(sizes) == (Math.Max(500, sizes.MinimumWidth), 150));
         check("Pages: each page's own size", DeckPages.Size(sizes, DeckPage.Monitor) == (600, 300) && DeckPages.Size(sizes, DeckPage.Music) == (700, 180));
         var saved = new DeckSettings { MonitorWidth = 5000, MonitorHeight = double.NaN, MonitorInterval = 9, MonitorPalette = (MonitorPalette)42, MonitorSort = (ProcessSort)7, LastPage = (DeckPage)9 };

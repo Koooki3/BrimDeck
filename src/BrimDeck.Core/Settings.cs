@@ -32,8 +32,9 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16 }
 public enum SettingsTheme { System, Light, Dark }
 // Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
-public enum DeckPage { Usage, Music, Monitor }
-public enum DefaultDeckPage { Last, Usage, Music, Monitor }
+// The devices page is 4 and its opening choice 5: 3 (and 4) are kept free for a page in review.
+public enum DeckPage { Usage, Music, Monitor, Devices = 4 }
+public enum DefaultDeckPage { Last, Usage, Music, Monitor, Devices = 5 }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
 public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
@@ -303,6 +304,16 @@ public sealed class DeckSettings
     public bool MonitorTemperatures { get; set; } = true;
     // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
     public bool MonitorStorage { get; set; } = true;
+    // The devices page: the battery of the connected wireless devices (Devices); it reads them only while it shows.
+    public bool DevicesPage { get; set; } = true;
+    public double DevicesWidth { get; set; } = 460;
+    public double DevicesHeight { get; set; } = 200;
+    // The devices left off the page and the collapsed reading, by their key (DeviceBattery.Key), with the name they had, so the
+    // settings can list one that is not connected.
+    public List<HiddenDevice> HiddenDevices { get; set; } = [];
+    public bool Hides(string key) => HiddenDevices.Any(device => device.Key == key);
+    // At or under this charge a battery shows as low, within ten points above it as getting low (Devices.Level).
+    public int DeviceLowPercent { get; set; } = Devices.DefaultLowPercent;
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
@@ -449,6 +460,11 @@ public sealed class DeckSettings
         MusicWidth = double.IsFinite(MusicWidth) ? Math.Clamp(MusicWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 440;
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
+        DevicesWidth = double.IsFinite(DevicesWidth) ? Math.Clamp(DevicesWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : 460;
+        DevicesHeight = double.IsFinite(DevicesHeight) ? Math.Clamp(DevicesHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
+        HiddenDevices = [.. (HiddenDevices ?? []).OfType<HiddenDevice>().Where(device => !string.IsNullOrWhiteSpace(device.Key)).DistinctBy(device => device.Key).Take(256)
+            .Select(device => device with { Name = device.Name ?? "" })];
+        DeviceLowPercent = Devices.LowChoices.Contains(DeviceLowPercent) ? DeviceLowPercent : Devices.DefaultLowPercent;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();

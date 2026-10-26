@@ -35,6 +35,9 @@ public sealed record DeviceBattery(string Key, string Name, DeviceKind Kind, Dev
         && Charging == other.Charging && Coarse == other.Coarse && Parts.SequenceEqual(other.Parts);
 }
 
+// A device switched off in the settings (DeckSettings.HiddenDevices).
+public sealed record HiddenDevice(string Key, string Name);
+
 public static class Devices
 {
     public const int DefaultLowPercent = 15;
@@ -229,5 +232,68 @@ public sealed class DeviceRoster
         }
         result.Sort(Devices.Order);
         return result;
+    }
+}
+
+// The devices page's layout, after the monitor page's ladder: a grid of cards whose steps come from the page's size, in two
+// tiers. Comfortable: cards tall enough for two lines (at least ComfortableRow), as many columns as keep each card under
+// MaximumCard. Dense: single-line cards (at least DenseRow), as many columns as the width holds cards of MinimumCard. The page
+// takes the comfortable grid while the devices fit in it and the dense one when they do not, going back only once a device fewer
+// than the comfortable grid holds remains, so a device that comes and goes at the edge does not flip it. Within a step devices
+// arrive and leave in place; the page is built again only when the size or the tier changes. Room: the cards the grid holds;
+// with more devices the last card counts the rest.
+public sealed record DevicesLayout(int Columns, int Rows, double Body, double Caption, double Figure, bool Roomy, bool Dense)
+{
+    public const double MinimumCard = 180, MaximumCard = 440, Gap = 10, DenseRow = 34, ComfortableRow = 52, MaximumRow = 72, Hysteresis = 12;
+    public int Room => Columns * Rows;
+
+    public static DevicesLayout For(double width, double height, int devices, DevicesLayout? previous)
+    {
+        bool? dense = previous is null ? null : previous.Dense;
+        var next = Tier(width, height, devices, dense);
+        if (previous is null || next == previous) return next;
+        foreach (double dw in new[] { 0, -Hysteresis, Hysteresis })
+            foreach (double dh in new[] { 0, -Hysteresis, Hysteresis })
+                if (Tier(width + dw, height + dh, devices, dense) == previous) return previous;
+        return next;
+    }
+
+    // dense: the tier the page has now (null for none); it stays dense until the devices fit the comfortable grid with one to spare.
+    private static DevicesLayout Tier(double width, double height, int devices, bool? dense)
+    {
+        width = double.IsFinite(width) ? Math.Max(0, width) : 0;
+        height = double.IsFinite(height) ? Math.Max(0, height) : 0;
+        var comfortable = Grid(width, height, dense: false);
+        bool useDense = dense == true ? devices >= comfortable.Room : devices > comfortable.Room;
+        return useDense ? Grid(width, height, dense: true) : comfortable;
+    }
+
+    private static DevicesLayout Grid(double width, double height, bool dense)
+    {
+        int fit = Math.Clamp((int)Math.Floor((width + Gap) / (MinimumCard + Gap)), 1, 4);
+        int columns = dense ? fit : Math.Clamp((int)Math.Ceiling((width + Gap) / (MaximumCard + Gap)), 1, fit);
+        int rows = Math.Max(1, (int)Math.Floor((height + Gap) / ((dense ? DenseRow : ComfortableRow) + Gap)));
+        double row = Math.Min(MaximumRow, (height - (rows - 1) * Gap) / rows);
+        bool roomy = !dense && row >= 60 && (width - (columns - 1) * Gap) / columns >= 260;
+        return new(columns, rows, roomy ? 13 : 12, roomy ? 11 : 10.5, roomy ? 20 : dense ? 14 : 17, roomy, dense);
+    }
+
+    // The card size, the same for every card of the page, in whole DIPs that never add up past the page.
+    public (double Width, double Height) CardSize(double width, double height)
+        => (Math.Floor(Math.Min(MaximumCard, Math.Max(0, (width - (Columns - 1) * Gap) / Columns))), Math.Floor(Math.Clamp((height - (Rows - 1) * Gap) / Rows, 0, MaximumRow)));
+
+    // Each card's place, row by row, for shown cards: the rows and columns they take sit in the middle of the page, so one
+    // device sits in the middle rather than in a corner, and a device that arrives moves the others aside.
+    public (double X, double Y, double Width, double Height) Card(int index, double width, double height, int shown = int.MaxValue)
+    {
+        var (cardWidth, cardHeight) = CardSize(width, height);
+        int count = Math.Clamp(Math.Min(shown, Room), 1, Room);
+        int columns = Math.Min(Columns, count), rows = (int)Math.Ceiling(count / (double)Columns);
+        double left = Math.Max(0, (width - columns * cardWidth - (columns - 1) * Gap) / 2), top = Math.Max(0, (height - rows * cardHeight - (rows - 1) * Gap) / 2);
+        int column = index % Columns, row = index / Columns;
+        // The last row, if not full, is centred on its own.
+        int inRow = row == rows - 1 ? count - row * Columns : columns;
+        double rowLeft = inRow < columns ? left + (columns - inRow) * (cardWidth + Gap) / 2 : left;
+        return (Math.Round(rowLeft + column * (cardWidth + Gap)), Math.Round(top + row * (cardHeight + Gap)), cardWidth, cardHeight);
     }
 }

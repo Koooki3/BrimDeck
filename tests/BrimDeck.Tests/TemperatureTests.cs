@@ -122,7 +122,7 @@ static class TemperatureTests
     {
         const CompactMonitorItems Temperature = CompactMonitorItems.Temperature, All = CompactMonitorItems.All;
         check("Compact temperature: a reading of the table, not of the Full preset", CompactMonitor.Order.Contains(Temperature) && (All & Temperature) == 0
-            && CompactMonitor.Every == (All | CompactMonitorItems.Storage | Temperature) && !CompactMonitor.HasValueChoice(Temperature) && CompactMonitor.Channels(Temperature) == 1);
+            && CompactMonitor.Every == (All | CompactMonitorItems.Storage | Temperature | CompactMonitorItems.Battery) && !CompactMonitor.HasValueChoice(Temperature) && CompactMonitor.Channels(Temperature) == 1);
         var defaults = new DeckSettings(); defaults.Normalize();
         check("Compact temperature: hidden by default", defaults.CompactReadings.Single(r => r.Item == Temperature) is { Visible: false }
             && CompactMonitor.Preset(defaults.CompactReadings) == CompactMonitorMode.Full && defaults.MonitorTemperatures);

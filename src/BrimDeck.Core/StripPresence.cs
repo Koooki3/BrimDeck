@@ -45,7 +45,7 @@ public sealed class StripPresence
 // (a figure missing for a moment shows a dash) until its sensor is known to be missing.
 public sealed class StripAdmission
 {
-    public const CompactMonitorItems Later = CompactMonitorItems.Temperature | CompactMonitorItems.Storage;
+    public const CompactMonitorItems Later = CompactMonitorItems.Temperature | CompactMonitorItems.Storage | CompactMonitorItems.Battery;
     private CompactMonitorItems _seen = CompactMonitorItems.None;
     // The readings left out of the row as it was last built; all of them until the first figures.
     public CompactMonitorItems Hidden { get; private set; } = Later;
@@ -56,20 +56,25 @@ public sealed class StripAdmission
     // once each such reading's sensor is known to be missing, so a machine without them stops reading for them.
     public bool Awaits(CompactMonitorItems chosen, SensorState cpu, SensorState gpu, SensorState storage)
     {
-        var waiting = chosen & Hidden & Later;
+        // The battery is the devices' (DeviceBatteries), not the system's: the system is never read for it.
+        var waiting = chosen & Hidden & Later & ~CompactMonitorItems.Battery;
         if (!Temperatures.Readable(cpu, gpu)) waiting &= ~CompactMonitorItems.Temperature;
         if (storage == SensorState.None) waiting &= ~CompactMonitorItems.Storage;
         return waiting != CompactMonitorItems.None;
     }
 
     // The readings to leave out for this snapshot and the sensors' states, and those that join now (Hidden before, not now).
-    public (CompactMonitorItems Hidden, CompactMonitorItems Arriving) Update(MonitorSnapshot? latest, SensorState cpu, SensorState gpu, SensorState storage)
+    // battery: Found while a device reports a charge, None once the devices are listed and none does, else Unknown.
+    public (CompactMonitorItems Hidden, CompactMonitorItems Arriving) Update(MonitorSnapshot? latest, SensorState cpu, SensorState gpu, SensorState storage,
+        SensorState battery = SensorState.Unknown)
     {
+        if (battery == SensorState.Found) _seen |= CompactMonitorItems.Battery;
         if (Temperatures.Hottest(latest) is not null) _seen |= CompactMonitorItems.Temperature;
         if (latest is not null && Storage.System(latest.Storage, Storage.WindowsLetter) is not null) _seen |= CompactMonitorItems.Storage;
         var hidden = Later & ~_seen;
         if (!Temperatures.Readable(cpu, gpu)) hidden |= CompactMonitorItems.Temperature;
         if (storage == SensorState.None) hidden |= CompactMonitorItems.Storage;
+        if (battery == SensorState.None) { hidden |= CompactMonitorItems.Battery; _seen &= ~CompactMonitorItems.Battery; }
         var arriving = Hidden & ~hidden;
         Hidden = hidden;
         return (hidden, arriving);
