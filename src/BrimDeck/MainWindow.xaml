@@ -18,6 +18,17 @@
       <Grid x:Name="ShadowHost" HorizontalAlignment="Left" VerticalAlignment="Top" Opacity="0" IsHitTestVisible="False">
         <Grid.CacheMode><BitmapCache EnableClearType="False" SnapsToDevicePixels="True"/></Grid.CacheMode>
         <Rectangle x:Name="ShadowBounds" Fill="Transparent" Margin="-20"/>
+        <!-- Under liquid glass only: the tight contact shadow close under the edge, beside IslandShadow's ambient one
+             (MainWindow.LiquidShadowLook). Collapsed otherwise, so other themes cast the one shadow they always did. -->
+        <Grid x:Name="IslandContact" HorizontalAlignment="Left" VerticalAlignment="Top" Visibility="Collapsed"
+              Width="{Binding ActualWidth, ElementName=Island}" Height="{Binding ActualHeight, ElementName=Island}"
+              Margin="{Binding Margin, ElementName=Island}" IsHitTestVisible="False">
+          <Grid.Effect>
+            <DropShadowEffect Color="Black" BlurRadius="3" ShadowDepth="1" Direction="270" Opacity="0.2"/>
+          </Grid.Effect>
+          <local:IslandBorder Background="Black" CornerRadius="{Binding CornerRadius, ElementName=Island}"
+                              ShoulderRadius="{Binding ShoulderRadius, ElementName=Island}" Inset="1"/>
+        </Grid>
         <Grid x:Name="IslandShadow" HorizontalAlignment="Left" VerticalAlignment="Top"
               Width="{Binding ActualWidth, ElementName=Island}" Height="{Binding ActualHeight, ElementName=Island}"
               Margin="{Binding Margin, ElementName=Island}" IsHitTestVisible="False">

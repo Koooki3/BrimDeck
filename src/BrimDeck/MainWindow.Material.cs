@@ -225,6 +225,7 @@ public partial class MainWindow
             _glass.Look += (dark, instant) => _app.TurnGlass(this, dark, instant);
             _glass.Crossed += () => _app.GlassCrossed(this);
             _glass.Openness = GlassOpenness;
+            _glass.Measured += ShadowBackdrop;
             _glass.ContentArea = GlassContentArea;
             _glass.TextRegions = GlassTextRegions;
             Island.LayoutUpdated += (_, _) => { _contentAreaStale = true; _textStale = true; };
@@ -357,6 +358,8 @@ public partial class MainWindow
     private void LiquidShadow(bool shown)
     {
         if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is not { } caster) return;
+        // The ambient and contact shadows by size and backdrop (MainWindow.Shadow), again after a theme's Dress set the theme's.
+        LiquidShadowLook(shown);
         if (shown)
         {
             if (ReferenceEquals(caster.Background, Brushes.Black)) return;
