@@ -84,7 +84,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 "clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
 ```
 
-`style` 取 `minimal`、`stacked`、`digits`、`dots`、`segment`、`neon`、`serif`、`wide`、`condensed`、`pixel`（方块点阵，像素方块主题推荐）；`color` 取 `default`（即上面的 `clock` 颜色）、`amber`、`cyan`、`pink`、`lime`、`custom`、`gradient`、`cover`。`palette` 给出本主题下“琥珀、青色、粉色、柠檬绿”四个色块的颜色，`gradients` 给出本主题提供的预设渐变（一到八组，每组正好三个颜色），二者都需在底色上达到 4.5:1。切换主题时，正在使用的预设渐变会换成新主题同一位置的那一组。`custom` 在 `color` 为 `custom` 时使用；`gradient` 必须正好三个颜色，在 `color` 为 `gradient` 时使用。浅色主题下霓虹与数码管的辉光会自动减弱，避免数字发虚。
+`style` 取 `minimal`、`stacked`、`digits`、`dots`、`segment`、`neon`、`serif`、`wide`、`condensed`、`pixel`（方块点阵，像素方块主题推荐）、`rounded`（圆润的 Fredoka 字体，海岛假日主题推荐）；`color` 取 `default`（即上面的 `clock` 颜色）、`amber`、`cyan`、`pink`、`lime`、`custom`、`gradient`、`cover`。`palette` 给出本主题下“琥珀、青色、粉色、柠檬绿”四个色块的颜色，`gradients` 给出本主题提供的预设渐变（一到八组，每组正好三个颜色），二者都需在底色上达到 4.5:1。切换主题时，正在使用的预设渐变会换成新主题同一位置的那一组。`custom` 在 `color` 为 `custom` 时使用；`gradient` 必须正好三个颜色，在 `color` 为 `gradient` 时使用。浅色主题下霓虹与数码管的辉光会自动减弱，避免数字发虚。
 
 ### 颜色选择器预设色（swatches）
 
@@ -101,6 +101,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 | `scanlines` | 横向扫描线，以主要文字色按此不透明度绘制 | 0–0.12 |
 | `pixel` | 像素风：轮廓的曲线变成这么多 DIP 的阶梯（按整设备像素取整），面板上的圆角变成直角，文字不做平滑；配合 `rimGradient` 时描线变成斜面，第一个颜色照亮朝上和朝左的边，最后一个颜色压暗朝下和朝右的边 | 0，或 1–4 |
 | `texture` | 配合 `pixel`：以像素大小为单位、略亮或略暗于底色的方块，像方块的颗粒。最亮和最暗的方块与渐变色标一样参与对比度检查；没有 `pixel` 时不生效 | 0–0.12 |
+| `decor` | 画在表面里、内容之下的安静图案，每个值分别继承（夜间外观只写 `sea` 时沿用白天的 `at` 与 `line`）：`horizon` 在高度 `at`（未设置时为 0.62）处以下铺一片海（`sea`），沿海平线有一道光（`line`，不透明度不限，同样检查对比度）；`caustics` 是海平线以下柔和的水波光纹（没有海平线时铺满整个表面）；`palm` 是展开面板右上角、海平线以上的棕榈叶影。完全透明的颜色会关掉该部分（例如在夜间外观里）；`sea` 透明时整条海平线都不画，水光随之铺满整个表面。收起的小岛上不画任何图案，海平线不会横穿时间；面板展开时图案渐显。文字对比度按海面（海平线处与最深处）、海平线光带和各图案在其所在区域叠加后的颜色检查 | `at` 0.3–0.9，水光不透明度 ≤ 0.2，叶影不透明度 ≤ 0.12 |
 
 ### 日夜外观（night、daylight）
 
@@ -139,7 +140,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 
 ## 新主题的设计说明
 
-**海岛假日**：白天是从暖沙（`#FFF6E8`）到海沫的渐变，深海色文字，泻湖青强调色，珊瑚色衬线时间，描线是“海岸线”（青、天蓝、沙色），阴影带一点海绿。夜里是月光海面：藏青到深青的渐变，灯笼金时间，月光下的海岸线描线，岛下没有阴影，而是一圈淡淡的青色海光。两种外观都无需任何可读性调整。
+**海岛假日**：一张海岛明信片。白天是晴空（`#A8E1F8`）渐入地平线的暖雾，约三分之二处是海平线，下面是泻湖青的海面（`decor.horizon`），海平线上一道阳光，海面上是阳光投下的柔和水光（`decor.caustics`），展开面板右上角落着棕榈叶影（`decor.palm`）；深海色文字，泻湖青强调色，晒红的珊瑚色圆润时间（Fredoka 字体，`rounded` 样式），芒果色指示条，扶桑红“已喜欢”，描线是“海岸线”（泻湖、天空、沙滩、珊瑚），阴影带一点海绿。夜里是深海藏青（`#001E3C`），淡淡月金色的海平线下是深青海面，水面上有月光，灯笼金时间，岛下没有阴影，而是一圈淡淡的青色海光。收起的小岛只保留天空，海平线不会横穿时间。两种外观都无需任何可读性调整。
 
 ## 像素方块
 

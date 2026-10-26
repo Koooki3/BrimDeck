@@ -20,6 +20,7 @@ public sealed record PanelThemeInfo(string Id, PanelThemeKind Kind, PanelThemeFi
 }
 
 [JsonSerializable(typeof(PanelThemeFile))]
+[JsonSerializable(typeof(PanelThemeDecor))]
 [JsonSerializable(typeof(string))]
 internal sealed partial class PanelThemeJson : JsonSerializerContext;
 

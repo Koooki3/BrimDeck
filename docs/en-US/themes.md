@@ -84,7 +84,7 @@ The clock style and color that suit the theme. Choosing the theme in settings sw
 "clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
 ```
 
-`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`, `pixel` (a block dot matrix, suggested by Pixel Blocks); `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
+`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`, `pixel` (a block dot matrix, suggested by Pixel Blocks), `rounded` (the round Fredoka face, suggested by Island Holiday); `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
 
 ### Picker swatches (swatches)
 
@@ -101,6 +101,7 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `scanlines` | Horizontal scan lines in the primary text color at this opacity | 0–0.12 |
 | `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels), the panel's rounded corners become square and its text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right | 0, or 1–4 |
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain. Its lightest and darkest squares are checked for contrast like gradient stops; without `pixel` it has no effect | 0–0.12 |
+| `decor` | Quiet pictures drawn into the surface under the content, each value inherited on its own (a night look that names only `sea` keeps the day's `at` and `line`): `horizon` a sea (`sea`) below `at` of the height (0.62 when not set) with a line of light (`line`, any opacity, checked like the rest) along it; `caustics` a net of soft light lines below the horizon (over the whole surface without one); `palm` a palm frond's shadow in the open panel's top-right corner, above the horizon. A fully transparent color turns a part off, e.g. in a night look; a transparent `sea` removes the whole horizon, so the caustics then cover the surface. Nothing is drawn on the small collapsed island, so the horizon never crosses the clock; the motifs fade in as the panel opens. Text is held to its minimums over the sea (at the horizon and at its deepest), the line and the motifs, each over what it is drawn on | `at` 0.3–0.9, caustics alpha ≤ 0.2, palm alpha ≤ 0.12 |
 
 ### Day and night looks (night, daylight)
 
@@ -139,7 +140,7 @@ The demo theme was made in these five steps.
 
 ## The newer themes
 
-**Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock, a shoreline rim (turquoise, sky, sand) and a faintly sea-green shadow. By night, a moonlit sea from navy into teal, a lantern-gold clock, a moonlit shoreline along the rim and, instead of a shadow, a soft teal glow under the island. Neither look needs any readability adjustment.
+**Island Holiday**: a postcard of an island. By day, a clear sky (`#A8E1F8`) fading into the warm haze of the horizon, and below a horizon about two thirds down a turquoise lagoon (`decor.horizon`) with a line of sunlight along it, the soft net of light a sunlit sea throws (`decor.caustics`) and a palm frond's shade in the open panel's corner (`decor.palm`); deep-sea text, a lagoon accent, a sunburnt coral clock in the round Fredoka face (the `rounded` style), a mango indicator, hibiscus for liked songs, a shore rim (lagoon, sky, sand, coral) and a faintly sea-green shadow. By night, a deep ocean navy (`#001E3C`) over a dark teal sea under a horizon lit faintly in moon gold, moonlight playing on the water, a lantern-gold clock and, instead of a shadow, a soft teal glow under the island. The small collapsed island keeps the plain sky, so the horizon never crosses the clock. Neither look needs any readability adjustment.
 
 ## Pixel Blocks
 

@@ -21,7 +21,18 @@ public sealed record PanelThemeAdjustment(string Key, string Before, string Afte
 }
 
 public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGradient, IReadOnlyList<ThemeColor> RimGradient, double RimWidth,
-    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, double Pixel = 0, double Texture = 0);
+    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, double Pixel = 0, double Texture = 0, PanelDecor? Decor = null);
+
+// A theme's motifs (PanelThemeDecor, fitted); null parts are not drawn.
+public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, ThemeColor? Palm)
+{
+    public bool Any => Horizon is not null || Caustics is not null || Palm is not null;
+}
+public sealed record PanelHorizon(double At, ThemeColor Sea, ThemeColor? Line)
+{
+    // The sea deepens from Sea at the horizon to this at the bottom, as open water does away from the light.
+    public ThemeColor Deep => Sea with { R = (byte)(Sea.R * .9), G = (byte)(Sea.G * .92), B = (byte)(Sea.B * .95) };
+}
 
 // A theme ready to draw: every token has a color, every effect a value, and the contrast rules hold (see PanelThemes.Build).
 public sealed class PanelPalette
@@ -38,8 +49,9 @@ public sealed class PanelPalette
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
         WrittenColors = writtenColors; WrittenApps = writtenApps;
-        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. PanelThemes.TextureStops(effects, colors, Surface)];
-        IsDark = SurfaceStops.Average(stop => stop.Luminance) < .18;
+        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. PanelThemes.TextureStops(effects, colors, Surface), .. PanelThemes.DecorStops(effects, Surface)];
+        // Dark or light by the surface itself, its gradient and its texture; the motifs drawn into it do not change which.
+        IsDark = SurfaceStops.Take(SurfaceStops.Count - PanelThemes.DecorStops(effects, Surface).Count()).Average(stop => stop.Luminance) < .18;
     }
 
     public string Id { get; }

@@ -236,6 +236,49 @@ internal static class PanelThemeTests
                 && original.HasOwnSwatches == copy.HasOwnSwatches && original.Swatches.SequenceEqual(copy.Swatches);
         }
         check("A theme made from another starts out identical: colors, effects, apps, clock and swatches", reproduced);
+        // Motifs: fitted into their ranges, inherited value by value, held under the text and carried by a copy.
+        PanelPalette Decor(string decor) => PanelThemes.Build("decor", PanelThemes.Parse(
+            $$"""{ "formatVersion": 1, "id": "decor", "base": "light", "effects": { "decor": {{decor}} } }"""));
+        var fitted = Decor("""{ "horizon": { "at": 2, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#FFFFFFFF" }, "palm": { "color": "#40002010" } }""");
+        check("Motifs are fitted: the horizon to its range, the caustics and palm to a faint alpha",
+            fitted.Effects.Decor is { Horizon: { At: .9, Line: not null } horizon, Caustics: { A: 51 }, Palm: { A: 31 } } && horizon.Sea == ThemeColor.Parse("#4000A6A6"));
+        check("A motif without a usable color is left out, and no motifs at all is none",
+            Decor("""{ "horizon": { "at": 0.5 }, "palm": { "color": "#00000000" }, "caustics": { "color": "#33FFFFFF" } }""").Effects.Decor is { Horizon: null, Palm: null, Caustics: not null }
+            && Decor("""{ "horizon": { "at": 0.5 } }""").Effects.Decor is null && BuiltIn("dark").Effects.Decor is null);
+        // The night look names only a sea: the day's horizon height, line and palm stay.
+        var layered = PanelThemes.Parse("""{ "formatVersion": 1, "id": "layered", "base": "light", "effects": { "decor": { "palm": { "color": "#20002010" }, "horizon": { "at": 0.5, "sea": "#2000A6A6", "line": "#80FFFFFF" } } }, "night": { "effects": { "decor": { "horizon": { "sea": "#3000A6A6" } } } } }""");
+        check("Each motif value is inherited on its own", PanelThemes.Build("layered", layered).Effects.Decor is { Palm: not null, Horizon: { At: .5, Sea.A: 0x20 } }
+            && PanelThemes.Build("layered", layered, night: true).Effects.Decor is { Palm: not null, Horizon: { At: .5, Sea.A: 0x30, Line: not null } }
+            && layered.Effects!.Decor!.Horizon!.Sea == "#2000A6A6");
+        // A deep lagoon under dark text: the text is darkened until it reads over the sea too.
+        var deepSea = Decor("""{ "horizon": { "at": 0.4, "sea": "#A000A6A6" } }""");
+        var sea = deepSea.Effects.Decor!.Horizon!.Sea.Over(deepSea.Surface);
+        check("Text is held over the sea the horizon lays under it, at the horizon and at its deepest", deepSea.SurfaceStops.Contains(sea)
+            && deepSea.SurfaceStops.Contains(deepSea.Effects.Decor!.Horizon!.Deep.Over(deepSea.Surface))
+            && deepSea["textPrimary"].MinimumContrast([sea]) >= 4.5 - .001 && deepSea.Adjustments.Count > 0);
+        var tinted = PanelThemes.Build("tinted", PanelThemes.Parse("""{ "formatVersion": 1, "id": "tinted", "base": "light", "effects": { "surfaceGradient": ["#00FFFFFF", "#FF8FB8C8"], "decor": { "horizon": { "sea": "#A000A6A6" } } } }"""));
+        var tintedSea = tinted.Effects.Decor!.Horizon!.Sea.Over(tinted.Effects.SurfaceGradient[1].Over(tinted.Surface));
+        check("The sea is measured over the gradient it lies on", tinted.SurfaceStops.Contains(tintedSea) && tinted["textPrimary"].MinimumContrast([tintedSea]) >= 7 - .001);
+        var lit = Decor("""{ "horizon": { "sea": "#2000A6A6", "line": "#FFFFC24B" } }""");
+        check("The horizon's line is measured too", lit.SurfaceStops.Contains(ThemeColor.Parse("#FFFFC24B")));
+        // Each motif is measured over what it is drawn on: the palm over the sky (it stops at the horizon), the caustics over the sea
+        // and over the sky where the sea's top fades in.
+        var shaded = Decor("""{ "horizon": { "sea": "#4000A6A6" }, "palm": { "color": "#1F000000" }, "caustics": { "color": "#33FFFFFF" } }""");
+        var shadedSea = shaded.Effects.Decor!.Horizon!.Sea.Over(shaded.Surface);
+        check("The palm is measured over the sky and the caustics over the sea and the sky it fades in over", shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shaded.Surface))
+            && !shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shadedSea)) && shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shadedSea))
+            && shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shaded.Surface)));
+        // The motifs do not decide whether a theme is dark: a deep sea under a light sky leaves it light.
+        check("A theme's motifs do not make it dark", !Decor("""{ "horizon": { "at": 0.3, "sea": "#FF001020" } }""").IsDark);
+        // Without a horizon the caustics cover the surface and the palm falls over them as well.
+        var open = Decor("""{ "palm": { "color": "#1F000000" }, "caustics": { "color": "#33FFFFFF" } }""");
+        check("Without a horizon the palm is measured over the caustics too",
+            open.SurfaceStops.Contains(open.Effects.Decor!.Palm!.Value.Over(open.Effects.Decor.Caustics!.Value.Over(open.Surface))));
+        var badDecor = PanelThemes.LoadFolder(Folder("decor-bad", ("sea.json", """{ "formatVersion": 1, "id": "sea", "effects": { "decor": { "horizon": { "sea": "teal" } } } }"""),
+            ("palm.json", """{ "formatVersion": 1, "id": "palm", "effects": { "decor": { "palm": { "color": "#12345" } } } }""")));
+        check("A motif color that is not a color is refused", badDecor.Count == 2 && badDecor.All(theme => theme.Error is not null));
+        var decorCopy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", fitted, "light")));
+        check("A theme made from one with motifs keeps them", decorCopy.Effects.Decor == fitted.Effects.Decor && decorCopy.Adjustments.Count == 0);
         // A theme with a night look keeps it, with its hours: the copy's night look is the original's, and its day look too.
         var holidayTheme = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
         var holidayCopyText = PanelThemes.FillTemplate("copy", PanelThemes.Resolve(holidayTheme), PanelThemes.IslandHoliday, holidayTheme.File);
@@ -250,6 +293,11 @@ internal static class PanelThemeTests
             && PanelThemes.Build("copy", holidayCopy).Colors.All(pair => PanelThemes.Resolve(holidayTheme)[pair.Key] == pair.Value));
         check("The copied night look writes only what it sets", holidayCopy.Night is { Id: "", Name: "", Base: "", Swatches: null, Night: null, Daylight: null } && holidayCopy.Night.Clock is { Style: "", Color: "" }
             && !holidayCopyText.Contains("displayName", StringComparison.OrdinalIgnoreCase) && PanelThemes.LoadFolder(Folder("holiday-copy", ("copy.json", holidayCopyText))).Single().Usable);
+        // The island's night look turns the palm off with a transparent color.
+        check("The island's motifs differ by look and a copy keeps each one", new[] { false, true }.All(night =>
+                PanelThemes.Resolve(holidayTheme, night).Effects.Decor is { Horizon: not null, Caustics: not null } decor && (decor.Palm is null) == night
+                && PanelThemes.Build("copy", holidayCopy, night).Effects.Decor == decor)
+            && PanelThemes.Resolve(holidayTheme, true).Effects.Decor != PanelThemes.Resolve(holidayTheme).Effects.Decor);
         check("A theme without a night look gets none from the template",
             PanelThemes.Parse(PanelThemes.FillTemplate("plain", BuiltIn("dracula"), "dracula", PanelThemes.BuiltIn("dracula")!.File)) is { Night: null, Daylight: null });
         var nightOwl = BuiltIn("night-owl");
@@ -258,6 +306,16 @@ internal static class PanelThemeTests
         check("A theme made from another keeps its clock gradient, and the template's placeholder otherwise",
             PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", glow, "night-owl"))).Clock is { Style: "neon", Color: "gradient" } copiedClock
             && copiedClock.Gradient!.SequenceEqual(glow.Clock!.Gradient!) && PanelThemes.Parse(PanelThemes.FillTemplate("copy", nightOwl)).Clock!.Custom == "#B9A8FF");
+
+        // Rounded came last, so the styles saved before it keep their numbers; a theme file names it like any other style.
+        var roundedFile = PanelThemes.LoadFolder(Folder("rounded", ("rounded.json", """{ "formatVersion": 1, "id": "rounded", "base": "night-owl", "clock": { "style": "Rounded" } }"""))).Single();
+        var rounded = PanelThemes.Build("rounded", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "rounded" } });
+        var roundedSettings = new DeckSettings();
+        PanelThemes.ApplyClock(rounded, roundedSettings);
+        check("The rounded clock style is read from a theme file and comes back from the template",
+            (int)ClockStyle.Rounded == 10 && (int)ClockStyle.Pixel == 9 && roundedFile.Error is null && roundedSettings.ClockStyle == ClockStyle.Rounded
+            && PanelThemes.Parse(PanelThemes.FillTemplate("copy", rounded, "night-owl")).Clock is { Style: "rounded" }
+            && PanelThemes.Template.Contains("condensed, pixel, rounded", StringComparison.Ordinal) && BuiltIn(PanelThemes.IslandHoliday).Clock?.Style == "rounded");
 
         // Clock, swatches and what choosing a theme changes.
         bool clockColors = true, pickers = true;
