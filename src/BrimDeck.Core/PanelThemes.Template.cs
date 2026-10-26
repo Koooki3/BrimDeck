@@ -55,8 +55,9 @@ public static partial class PanelThemes
         var effects = start.Effects;
         text = Regex.Replace(text, @"""surfaceGradient"": \[\]", "\"surfaceGradient\": " + ColorList(effects.SurfaceGradient));
         text = Regex.Replace(text, @"""rimGradient"": \[\]", "\"rimGradient\": " + ColorList(effects.RimGradient));
-        foreach (var (key, value) in new[] { ("rimWidth", effects.RimWidth), ("shadowBlur", effects.ShadowBlur), ("shadowDepth", effects.ShadowDepth), ("shadowOpacity", effects.ShadowOpacity), ("scanlines", effects.Scanlines) })
-            text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {value.ToString("0.###", CultureInfo.InvariantCulture)}");
+        // Every numeric effect, those the settings page cannot edit (pixel, texture) included, so a copy keeps them.
+        foreach (var key in EffectKeys)
+            text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {Effect(effects, key).ToString("0.###", CultureInfo.InvariantCulture)}");
         return text;
     }
 

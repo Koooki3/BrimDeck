@@ -371,15 +371,18 @@ public partial class MainWindow : Window
     {
         double dpi = PresentationSource.FromVisual(this) is null ? 1 : VisualTreeHelper.GetDpi(this).DpiScaleX;
         if (_themeGeneration == PanelTheme.Generation && _themeDpi == dpi) return;
-        // A new scale alone only redraws the scan lines, which are laid out in device pixels.
+        // A new scale alone only redraws the scan lines or texture, which are laid out in device pixels.
         bool sameTheme = _themeGeneration == PanelTheme.Generation;
         _themeGeneration = PanelTheme.Generation; _themeDpi = dpi;
         // The resize hints take the theme's colors when they are drawn.
         _grips?.InvalidateVisual();
-        if (sameTheme) { Island.Pattern = PanelTheme.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
+        if (sameTheme) { Island.Pattern = PanelTheme.Texture(dpiScale: dpi) ?? PanelTheme.Scanlines(dpiScale: dpi); FitShadowCache(dpi); return; }
         Foreground = UI.Brush(UI.Primary);
         PanelTheme.Dress(Island, dpiScale: dpi);
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
+        // Pixel art draws the island's text unsmoothed, as on a pixel screen, and casts a stepped shadow.
+        PanelTheme.Text(Island);
+        if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) caster.Pixel = PanelTheme.Current.Effects.Pixel;
         FitShadowCache(dpi);
         MusicIndicator.Background = UI.Brush(PanelTheme.Hex("indicatorProgress"));
         SetImmediate(_surface, SolidColorBrush.ColorProperty, PanelTheme.ColorOf(!_expanded && Collapsed.Style == CompactStyle.Line ? "indicator" : "surface"));

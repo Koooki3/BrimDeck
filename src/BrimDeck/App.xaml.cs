@@ -51,9 +51,22 @@ public partial class App : Application
         System.Windows.Controls.ToolTipService.ShowDurationProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(20000));
     }
 
+    // The element whose tooltip opens next (OnStartup).
+    private WeakReference<DependencyObject>? _toolTipOwner;
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Menus and tooltips take the text rendering of what they open from as they open (PanelTheme.Text). A tooltip opened by
+        // the service has no placement target, so its owner is noted as the service raises ToolTipOpening on it.
+        EventManager.RegisterClassHandler(typeof(FrameworkElement), FrameworkElement.ToolTipOpeningEvent,
+            new System.Windows.Controls.ToolTipEventHandler((_, args) => _toolTipOwner = new WeakReference<DependencyObject>((DependencyObject)args.OriginalSource)), true);
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ToolTip), System.Windows.Controls.ToolTip.OpenedEvent, new RoutedEventHandler((sender, _) =>
+        {
+            var tip = (System.Windows.Controls.ToolTip)sender;
+            PanelTheme.Text(tip, tip.PlacementTarget ?? (_toolTipOwner?.TryGetTarget(out var owner) == true ? owner : null));
+        }));
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ContextMenu), System.Windows.Controls.ContextMenu.OpenedEvent,
+            new RoutedEventHandler((sender, _) => PanelTheme.Text((System.Windows.Controls.ContextMenu)sender, ((System.Windows.Controls.ContextMenu)sender).PlacementTarget)));
         Resources[SystemParameters.VerticalScrollBarWidthKey] = 7.0;
         var suffix = Environment.UserName;
         var eventName = "Local\\BrimDeck.Settings." + suffix;
