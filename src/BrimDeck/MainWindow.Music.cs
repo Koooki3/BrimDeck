@@ -39,6 +39,8 @@ public partial class MainWindow
     private Color? _coverAccent;
     private Lyrics _lyrics = Lyrics.Empty;
     private CancellationTokenSource? _lyricsRequest;
+    // Completed when Apple Music writes a lyric file while the current Apple Music song has no lyrics of Apple's.
+    private TaskCompletionSource? _appleLyricsWritten;
     private string _lyricsKey = "", _musicRenderKey = "", _compactLyric = "";
     // Drives the equalizer, which must keep moving while the cursor moves; see PromptTimer.
     private PromptTimer _musicTick = null!;
@@ -87,6 +89,7 @@ public partial class MainWindow
         _musicTick = new(Dispatcher, TickMusic) { Interval = TimeSpan.FromMilliseconds(33) };
         IsVisibleChanged += (_, _) => UpdateMusicTimer();
         _app.MediaChanged += MediaChanged;
+        _app.Lyrics.AppleLyricsWritten += AppleLyricsWritten;
         DisplayPower.Changed += DisplayPowerChanged;
     }
     private void StartMusic()
@@ -310,14 +313,30 @@ public partial class MainWindow
         var request = CancellationTokenSource.CreateLinkedTokenSource(_app.Lifetime.Token); _lyricsRequest = request;
         try
         {
-            var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
-            if (request.IsCancellationRequested || _lyricsKey != key) return;
-            _lyrics = lyrics; _musicRenderKey = "";
-            if (IsMusicPage) RenderMusic(); RenderCompact();
+            // Apple Music writes a song's lyrics to its cache as the song starts, which can be after the song changes here, or later
+            // still: they are looked for again 3 and 15 seconds later and whenever Apple Music writes a lyric file, keeping any
+            // lyrics already shown.
+            for (int attempt = 0; ; attempt++)
+            {
+                var lyrics = await _app.Lyrics.FindAsync(requested, true, request.Token);
+                if (request.IsCancellationRequested || _lyricsKey != key) return;
+                if (lyrics.Lines.Count > 0 || lyrics.Instrumental || attempt == 0)
+                {
+                    _lyrics = lyrics; _musicRenderKey = "";
+                    if (IsMusicPage) RenderMusic(); RenderCompact();
+                }
+                if (!requested.IsAppleMusic || lyrics.Source == LyricsService.AppleSource) break;
+                var written = (_appleLyricsWritten = new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+                await (attempt < 2 ? Task.WhenAny(written, Task.Delay(TimeSpan.FromSeconds(attempt == 0 ? 3 : 15), request.Token)) : written.WaitAsync(request.Token));
+                request.Token.ThrowIfCancellationRequested();
+                // The file is read once Apple Music has finished writing it.
+                if (written.IsCompleted) await Task.Delay(TimeSpan.FromSeconds(1), request.Token);
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception) { /* Lyrics are optional; provider failures keep the no-lyrics layout. */ }
     }
+    private void AppleLyricsWritten() => Dispatcher.BeginInvoke(() => _appleLyricsWritten?.TrySetResult());
     private void ToggleSourcePin(ContextMenu menu, MenuItem item, string id)
     {
         bool pin = !Equals(item.Tag, "pinned");
@@ -903,7 +922,8 @@ public partial class MainWindow
         if (StripChoosesBattery) _stripPresence.Arrive(UpdateStripAdmission(_app.Monitor?.Latest).Arriving);
         // The system readings ask for the width of everything chosen, on whole device pixels, and show what fits in the region they get.
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
-            !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden) : null;
+            !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission) : null;
+        _stripLayout = _stripAdmission.Layout;
         if (StripChoosesBattery) strip?.SetBattery(StripBattery());
         // Readings that do not fit scroll in their region, as the rings and the lyric do, so the region keeps its width.
         var layout = CompactMusicLayout.Calculate(contentWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0); CurrentCompactLayout = layout;
@@ -1070,5 +1090,5 @@ public partial class MainWindow
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= AppleLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false); }
 }

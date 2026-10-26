@@ -148,12 +148,9 @@ static class StorageTests
                 bool lines = rows.All(row => (row.Celsius is not null) == withDrives) && rows.Count == Math.Min(count, 3);
                 bool details = (cpuDetail.Length > 0) == (cpu is not null) && (gpuDetail.Length > 0) == (gpu is not null)
                     && !cpuDetail.Contains('—') && !gpuDetail.Contains('—') && !cpuDetail.StartsWith('0') && !gpuDetail.StartsWith('0');
-                bool strip = (Temperatures.Hottest(snapshot) is null) == (cpu is null && gpu is null);
+                bool strip = (CompactFigures.Heat(CompactMonitorItems.Cpu, snapshot) is null) == (cpu is null) && (CompactFigures.Heat(CompactMonitorItems.Gpu, snapshot) is null) == (gpu is null);
                 check($"Missing temperatures ({name}, {count} drive(s)): nothing left behind", lines && details && strip);
             }
-        check("Missing temperatures: the collapsed temperature leaves the row once neither sensor exists",
-            !Temperatures.Readable(SensorState.None, SensorState.None) && Temperatures.Readable(SensorState.Found, SensorState.None)
-            && Temperatures.Readable(SensorState.None, SensorState.Found) && Temperatures.Readable(SensorState.Unknown, SensorState.None));
         check("Missing temperatures: an empty detail for no reading", Temperatures.Detail(null) == "" && Temperatures.Detail(47.4) == "47 °C");
     }
 
@@ -168,12 +165,12 @@ static class StorageTests
         check("Compact drive: chosen, it shows and Full still matches", (CompactMonitor.Shown(readings) & Storage_) != 0 && CompactMonitor.Preset(readings) == CompactMonitorMode.Full);
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
         check("Compact drive: Brief hides it", !readings.Single(r => r.Item == Storage_).Visible);
-        var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, 30, 14, 20, 50, 34, 40);
-        // The battery reading (the devices) is left out: it leaves before both.
+        var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, _ => 30, 14, 20, 50, 40);
+        // The battery reading (the devices) is left out: it leaves before the drives.
         var every = CompactMonitor.Every & ~CompactMonitorItems.Battery;
         double full = CompactMonitor.Width(every, width, 10);
-        check("Compact drive: its own width; it leaves after the temperature", width(Storage_) == 40 && CompactMonitor.Fit(every, width, 10, full - 1) == (every & ~CompactMonitorItems.Temperature)
-            && CompactMonitor.Fit(every, width, 10, full - 45) == CompactMonitorItems.All);
+        check("Compact drive: its own width; it leaves first when the row is short", width(Storage_) == 40 && CompactMonitor.Fit(every, width, 10, full) == every
+            && CompactMonitor.Fit(every, width, 10, full - 1) == CompactMonitorItems.All && CompactMonitor.Fit(every, width, 10, full - 55) == (CompactMonitorItems.All & ~CompactMonitorItems.Upload));
         var drives = Storage.Group([(Volume("C:", 100, 5), 0)], Disks);
         var snapshot = MonitorSnapshot.Empty(4, "test") with { Storage = drives };
         check("Compact drive: the level of the Windows drive's space", ReadingLevels.Of(Storage_, snapshot) == MemoryLevel.Critical

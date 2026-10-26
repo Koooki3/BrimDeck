@@ -31,7 +31,7 @@ public sealed partial class LyricsService
             // The desktop transport currently has no song ID. Wait for its duration before
             // matching; otherwise an identically named live recording or cover can be selected.
             if (track.Duration <= TimeSpan.Zero) return Lyrics.Empty;
-            var search = await Get("https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&p=1&n=20&w=" +
+            var search = await Get("https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp?format=json&p=1&n=20&w=" +
                 Uri.EscapeDataString(track.Title + " " + track.Artist), token);
             if (search is not { } root || !QqSucceeded(root) ||
                 !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object ||
@@ -46,7 +46,7 @@ public sealed partial class LyricsService
                 string candidateMid = Str(item, "songmid");
                 if (!Regex.IsMatch(candidateMid, @"\A[a-zA-Z0-9]{8,32}\z") ||
                     !Matches(track, WebUtility.HtmlDecode(Str(item, "songname")), WebUtility.HtmlDecode(artist), track.Duration.TotalSeconds) ||
-                    !string.IsNullOrWhiteSpace(track.Album) && Normalize(track.Album) != Normalize(WebUtility.HtmlDecode(Str(item, "albumname")))) continue;
+                    track.IsQqMusic && !string.IsNullOrWhiteSpace(track.Album) && Normalize(track.Album) != Normalize(WebUtility.HtmlDecode(Str(item, "albumname")))) continue;
                 var expectedArtists = Regex.Split(track.Artist, @"\s*[/、,，&;；]\s*").Select(Normalize).Where(a => a.Length > 0).ToHashSet();
                 var actualArtists = singers.EnumerateArray().Where(s => s.ValueKind == JsonValueKind.Object)
                     .Select(s => Normalize(WebUtility.HtmlDecode(Str(s, "name")))).Where(a => a.Length > 0);
@@ -54,7 +54,7 @@ public sealed partial class LyricsService
             }
             mid = candidates.Where(c => Math.Abs(c.Seconds - track.Duration.TotalSeconds) <= 2)
                 .OrderBy(c => Math.Abs(c.Seconds - track.Duration.TotalSeconds)).Select(c => c.Mid).FirstOrDefault();
-            if (mid is null && !string.IsNullOrWhiteSpace(track.Album))
+            if (mid is null && track.IsQqMusic && !string.IsNullOrWhiteSpace(track.Album))
             {
                 // A VIP preview reports the clip duration. Require an unambiguous recording
                 // and verify its preview length with QQ's song detail before accepting it.
