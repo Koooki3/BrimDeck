@@ -689,7 +689,8 @@ float3 Slab(float2 p, float sd, float2 outward)
     // the rim and frosted with its thickness.
     // The collapsed island carries its text across its whole top: its cover follows the slab's thickness all the way round
     // (round ends alike), clear at the rim, so its ends are no other material than its sides.
-    float row = Content.z > Content.x ? thickness : 0;
+    // On a low shape (the bar, its text filling it to near the rim) it reaches its full within a quarter of the bevel.
+    float row = Content.z > Content.x ? saturate(thickness / lerp(.25, .7, saturate((shorter / Scale - 20) / 16))) : 0;
     // The dark look covers the whole open panel (one even dark glass, as round 13 had it); the light look only behind text.
     float text = max(row, opened * max(TextFeathered(p), CoverDark()));
     float calm = 1 - Busy(p);
@@ -741,26 +742,28 @@ float3 Slab(float2 p, float sd, float2 outward)
     float directional = pow(saturate(dot(normal, l)), 7) + .52 * pow(saturate(dot(normal, lo)), 7);
     // Schlick's Fresnel for n = 1.45 (F0 = .034) at the slope's grazing angle, with liquid-glass-studio's fifth-power rim term
     // for the very edge: what it reflects is the scene's own colour (the backdrop's broad average), not white.
+    // The thin bar (20 DIP: its text fills it, close to the rim) carries its edge's light faintly.
+    float thin = lerp(.3, 1, saturate((shorter / Scale - 20) / 16));
     float f0 = .0337, fresnel = f0 + (1 - f0) * pow(1 - normal.z, 5) + .35 * pow(edge, 6);
     float shown = FrostShown;
     float3 scene = Frost(p + Pad, EnvDip * Scale);
     FrostShown = shown;    // (the grain follows the glass's own frost, not this look-up's)
-    c = lerp(c, saturate(scene * 1.1 + .04), saturate(fresnel * EnvGain * live * (1 - .6 * text)));
+    c = lerp(c, saturate(scene * 1.1 + .04), saturate(fresnel * EnvGain * live * thin * (1 - .6 * text)));
     // Thin specular lines along the slope: one facing the key light, its pair opposite, each a narrow line a little in from
     // the rim (no white ring), coloured by the backdrop lifted in lightness (its hue kept).
     float d = -sd;
     float lines = exp(-pow((d - 1.6 * Scale) / (.7 * Scale), 2));
     float facing = pow(saturate(dot(outward, key)), 2) + .5 * pow(saturate(dot(outward, -key)), 2);
     float3 lifted = lerp(SetLum(saturate(backdrop), min(1, Lum(backdrop) + .45)), 1, .3);
-    c = lerp(c, lifted, saturate(lines * facing * .55 * live * (1 - .6 * text)));
+    c = lerp(c, lifted, saturate(lines * facing * .55 * live * thin * (1 - .6 * text)));
     // The broad directional term, weaker now (the lines carry the edge): where the glass is frosted denser behind text its
     // surface scatters, the highlight there spreads out and dims (rough glass).
     float3 glare = lerp(1, saturate(backdrop * 1.6 + .25), .5);
-    c = lerp(c, glare, saturate(directional * .3 * live * edge * (1 - .8 * text)));
+    c = lerp(c, glare, saturate(directional * .3 * live * edge * thin * (1 - .8 * text)));
     // A very soft caustic where the rim's refraction converges, inside the bevel.
-    c = lerp(c, 1, edge * (1 - edge) * 4 * .03 * (1 - .5 * dark) * (1 - .6 * text));
+    c = lerp(c, 1, edge * (1 - edge) * 4 * .03 * (1 - .5 * dark) * thin * (1 - .6 * text));
     // A 0.75 pt dark hairline just inside the edge (iOS 27's contour).
-    c *= 1 - exp(-pow((d - .9 * Scale) / (.45 * Scale), 2)) * lerp(.14, .28, dark);
+    c *= 1 - exp(-pow((d - .9 * Scale) / (.45 * Scale), 2)) * lerp(.14, .28, dark) * thin;
     float sheen = .045 * saturate(dot(-pc, key) * .5 + .5);
     c = lerp(c, 1, sheen * (1 - text * .7) * (1 - .5 * dark));
     c *= 1 - pow(edge, 8) * .085 * saturate(dot(outward, -key) * .5 + .5);
