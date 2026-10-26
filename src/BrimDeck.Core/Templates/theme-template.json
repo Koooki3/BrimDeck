@@ -162,9 +162,10 @@
     "aberration": 0,                // 0 (none) or 1 to 1.5: red and blue pulled apart by this many DIP at the edges for at most
                                     // 120 ms, on a completed press and a glitch or foam collapse
     "collapseMs": 0,                // 0 (the style's own) or 200 to 630: how long the collapse picture takes
-    "particleMs": 0,                // 0 (the style's own) or 300 to 1600: how long the particles a press leaves live
+    "particleMs": 0,                // 0 (the style's own) or 300 to 2400: how long the particles a press leaves live
     "sliceMs": 0,                   // 0 (about 70 ms) or 50 to 160: how long lock's glitch slice holds
     "scanMs": 0,                    // 0 (about 140 ms) or 100 to 400: how long lock's scan line takes to pass
+    "splashMs": 0,                  // 0 (about 360 ms) or 300 to 800: how long each of splash's rings takes to spread
     "color": "accent",              // The main mark: a color key above, a "#RRGGBB" color, or "system" (the Windows accent color)
     "secondary": "accent",          // Its second tone: a gradient's end, a shadow, a ghost or a neutral bar
     "highlight": "accent"           // The color of the moment of a press: an indicator, a selection, a scan line, sparkles

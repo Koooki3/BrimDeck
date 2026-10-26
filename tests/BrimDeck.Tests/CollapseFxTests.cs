@@ -26,8 +26,11 @@ internal static class CollapseFxTests
         check("Lengths: collapseMs, particleMs, sliceMs and scanMs are read and inherited",
             slow is { CollapseMs: 480, ParticleMs: 1000, SliceMs: 120, ScanMs: 300 } && ThemeMotion.Default is { CollapseMs: 0, ParticleMs: 0, SliceMs: 0, ScanMs: 0 });
         var wild = custom("""{ "base": "dark", "motion": { "collapseMs": 5000, "particleMs": 10, "sliceMs": 999, "scanMs": -4 } }""").Motion;
-        check("Lengths: held to 200-630, 300-1600, 50-160 and 100-400 ms (0 or less keeps the built-in)",
+        check("Lengths: held to 200-630, 300-2400, 50-160 and 100-400 ms (0 or less keeps the built-in)",
             wild is { CollapseMs: 630, ParticleMs: 300, SliceMs: 160, ScanMs: 0 });
+        check("Lengths: splashMs is read and held to 300-800 ms",
+            custom("""{ "base": "dark", "motion": { "press": "splash", "splashMs": 620 } }""").Motion.SplashMs == 620
+            && custom("""{ "base": "dark", "motion": { "splashMs": 2000 } }""").Motion.SplashMs == 800 && ThemeMotion.Default.SplashMs == 0);
         check("Lengths: a theme's collapseMs replaces the style's length, whatever its pace",
             CollapseFx.Length(CollapseStyle.Glitch, .8, 480) == .48 && CollapseFx.Length(CollapseStyle.Glitch, .8) == .24 && CollapseFx.Length(CollapseStyle.Fade, 1, 480) == 0);
         check("Lengths: the theme template writes them out", PanelThemes.FillTemplate("t", custom("""{ "base": "dark", "motion": { "collapseMs": 480, "scanMs": 300 } }""")) is var t

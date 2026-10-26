@@ -88,9 +88,10 @@ internal sealed partial class FxSurface
                 }
                 break;
             case ParticleFx.Bubble:
-                // Three to five bubbles 2 to 4 DIP across from the bottom edge, rising 18 to 28 DIP over 0.8 to 1.2 s and swaying.
+                // Three to five bubbles 2 to 4 DIP across from the bottom edge, rising 22 to 32 DIP over 0.8 to 1.2 s (or the
+                // theme's particleMs) and swaying.
                 for (int i = 0, n = 3 + (int)(Next() * 3); i < n; i++)
-                    Spawn(r.Left + r.Width * (.15 + .7 * (i + Next()) / n), r.Bottom - 2, 0, -(18 + 10 * Next()), .8 + .4 * Next(), 2 + 2 * Next(), i % 2 == 1);
+                    Spawn(r.Left + r.Width * (.15 + .7 * (i + Next()) / n), r.Bottom - 2, 0, -(22 + 10 * Next()), .8 + .4 * Next(), 2 + 2 * Next(), i % 2 == 1);
                 break;
         }
 

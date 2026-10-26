@@ -21,7 +21,8 @@ namespace BrimDeck;
 //   slot / bevel (pixel blocks): a square highlight with a solid inner edge, as an inventory slot; a press turns the block's
 //     bevel over, shaded at the top left and lit at the bottom right, as a pixel-art button pushed in.
 //   splash: a ring of water spreads out from the shape's own edge as the press goes down and a second, fainter one as a
-//     completed press lets go, each 320 to 400 ms on the soft landing (never from the pointer).
+//     completed press lets go (not before the first is half way out), each 320 to 400 ms on the soft landing or the theme's
+//     splashMs (never from the pointer).
 //   aberration (any press): a completed press pulls the shape's edge apart, the main color a DIP or so to the left and the
 //     second to the right, for at most 120 ms, as the wallpaper's chromatic aberration (a flash: FlashBudget).
 // Brushes and pens are made when the theme dresses the layer and frozen; strengths are applied as opacity, so a frame only
@@ -189,10 +190,13 @@ internal sealed partial class FxSurface
     // ----- Splash and the chromatic pulse -----
 
     private double _drawNow, _pulseAt = double.NaN;
-    private double SplashLength => Math.Clamp(.36 * _motion.Pace, .32, .40);
+    private double SplashLength => _motion.SplashMs > 0 ? _motion.SplashMs / 1000.0 : Math.Clamp(.36 * _motion.Pace, .32, .40);
+    // The second ring starts as a completed press lets go, but never before the first is half way out, so the two read as
+    // one splash and its echo rather than one ring drawn twice (NaN while there is none).
+    private double SecondRingAt => _press.Committed ? Math.Max(_press.UpAt, _press.DownAt + SplashLength / 2) : double.NaN;
     // Whether a ring or the pulse of the last press still shows, so the press is kept that long.
     private bool Lingering(double now) => _motion.Press == PressFx.Splash
-        && (now - _press.DownAt < SplashLength || _press.Committed && now - _press.UpAt < SplashLength)
+        && (now - _press.DownAt < SplashLength || now - SecondRingAt < SplashLength)
         || now - _pulseAt is >= 0 and < CollapseFx.AberrationLength;
 
     // One ring of the splash, `age` seconds after it started: it leaves the edge and spreads 2 to 9 DIP out, fading as it goes.
@@ -368,7 +372,7 @@ internal sealed partial class FxSurface
                 if (ReferenceEquals(mark, _pressed))
                 {
                     Ring(dc, r, radius, ellipse, _drawNow - _press.DownAt, Math.Min(1, ps * 3));
-                    if (_press.Committed) Ring(dc, r, radius, ellipse, _drawNow - _press.UpAt, Math.Min(1, ps * 1.6));
+                    if (_press.Committed) Ring(dc, r, radius, ellipse, _drawNow - SecondRingAt, Math.Min(1, ps * 1.6));
                 }
                 break;
             case PressFx.Bevel:

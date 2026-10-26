@@ -87,7 +87,9 @@ internal static class Program
             if (upgrade)
             {
                 foreach (var (id, json) in UpgradeThemes.Where(t => only is null || only.Contains(t.Id)))
-                    UpgradeStrip(json.Length == 0 ? PanelThemes.Resolve(PanelThemes.BuiltIn(id)!) : PanelThemes.Build(id, PanelThemes.Parse(json)), id, folder);
+                    UpgradeStrip(json.Length == 0 ? PanelThemes.Resolve(PanelThemes.BuiltIn(id)!)
+                        : json == "night" ? PanelThemes.Resolve(PanelThemes.BuiltIn(id[..^"-night".Length])!, night: true)
+                        : PanelThemes.Build(id, PanelThemes.Parse(json)), id, folder);
                 Console.WriteLine($"Wrote upgrade strips at {stripDpi * 100:0}% to " + System.IO.Path.GetFullPath(folder));
                 return _failures == 0 ? 0 : 1;
             }
@@ -586,6 +588,8 @@ internal static class Program
         ("upgrade-glass-pulse", """{ "base": "liquid-glass-dark", "motion": { "aberration": 1.5 } }"""),
         // The built-in theme itself, as it ships.
         ("cyberpunk-edgerunners", ""),
+        ("island-holiday", ""),
+        ("island-holiday-night", "night"),
     ];
     // --step: frames this many seconds apart from the press to the end of what it leaves (0: the strip's own beats).
     private static double _step;
@@ -609,7 +613,7 @@ internal static class Program
                 var list = new List<(double, string, Action<Scene>?)> { (0, "悬停", s => Hover(s, target(s))), (down, "按下", s => Down(s, target(s))) };
                 for (double t = down + _step; t < release - 1e-6; t += _step) list.Add((t, $"+{(t - down) * 1000:0}", null));
                 list.Add((release, "松开", s => Up(s, target(s), true)));
-                for (double t = release + _step; t <= release + 1.3; t += _step) list.Add((t, $"松+{(t - release) * 1000:0}", null));
+                for (double t = release + _step; t <= release + 2.1; t += _step) list.Add((t, $"松+{(t - release) * 1000:0}", null));
                 return list;
             }
             Save([Run(scene, Media, Every(s => s.Play))], palette, id + $" · 每 {_step * 1000:0} ms 一帧", System.IO.Path.Combine(folder, id + "-press-every.png"));

@@ -124,11 +124,11 @@ public readonly record struct AmbientFrame(double Rim, double Drift, double Swee
 // edges and through the first moments of a pixel collapse picture, for at most CollapseFx.AberrationLength.
 // The lengths a theme may set itself, in milliseconds, 0 for the built-in ones: CollapseMs the collapse picture's,
 // ParticleMs how long the particles live (each keeps its own small spread), SliceMs the lock press's glitch slice and ScanMs
-// its scan line. They change only how long a beat holds; the flashes stay rationed as before.
+// its scan line, SplashMs each of the splash press's rings. They change only how long a beat holds; the flashes stay rationed as before.
 public sealed record ThemeMotion(AmbientMotion Ambient, HoverFx Hover, double HoverStrength, PressFx Press, double PressStrength,
     double ParticleStrength, FocusFx Focus, double Pace, string Color, string Secondary, ParticleFx Particles = ParticleFx.None, int Steps = 0, string Highlight = "accent",
     SpringTier Spring = SpringTier.Default, CollapseStyle Collapse = CollapseStyle.Fade, double Aberration = 0,
-    int CollapseMs = 0, int ParticleMs = 0, int SliceMs = 0, int ScanMs = 0)
+    int CollapseMs = 0, int ParticleMs = 0, int SliceMs = 0, int ScanMs = 0, int SplashMs = 0)
 {
     public const string SystemAccent = "system";
     // Without a motion section anywhere in the base chain, nothing is drawn over the controls: they keep their own hover and
@@ -177,7 +177,7 @@ public static class MotionSafety
     public static double Aberration(double? value, double fallback)
         => value is not { } v || !double.IsFinite(v) ? fallback : v <= 0 ? 0 : Math.Clamp(v, CollapseFx.AberrationMin, CollapseFx.AberrationMax);
 
-    public const int ParticleMsMin = 300, ParticleMsMax = 1600, SliceMsMin = 50, SliceMsMax = 160, ScanMsMin = 100, ScanMsMax = 400;
+    public const int ParticleMsMin = 300, ParticleMsMax = 2400, SliceMsMin = 50, SliceMsMax = 160, ScanMsMin = 100, ScanMsMax = 400, SplashMsMin = 300, SplashMsMax = 800;
 
     // A theme's length in milliseconds: 0 (or less) keeps the built-in one; anything else lies within its range.
     public static int Milliseconds(double? value, int min, int max, int fallback)
@@ -441,11 +441,12 @@ public sealed class PanelThemeMotion
     // 0 (none) or 1 to 1.5 DIP: a short chromatic pulse on a completed press and a pixel collapse picture
     public double? Aberration { get; set; }
     // The theme's own lengths in milliseconds, 0 for the built-in ones: the collapse picture (200 to 630), the particles
-    // (300 to 1600), the lock press's glitch slice (50 to 160) and scan line (100 to 400)
+    // (300 to 2400), the lock press's glitch slice (50 to 160) and scan line (100 to 400), each splash ring (300 to 800)
     public double? CollapseMs { get; set; }
     public double? ParticleMs { get; set; }
     public double? SliceMs { get; set; }
     public double? ScanMs { get; set; }
+    public double? SplashMs { get; set; }
 }
 
 public sealed class PanelThemeAmbient
@@ -498,7 +499,8 @@ public static partial class PanelThemes
                 CollapseMs = MotionSafety.Milliseconds(motion.CollapseMs, CollapseFx.CollapseMsMin, CollapseFx.CollapseMsMax, m.CollapseMs),
                 ParticleMs = MotionSafety.Milliseconds(motion.ParticleMs, MotionSafety.ParticleMsMin, MotionSafety.ParticleMsMax, m.ParticleMs),
                 SliceMs = MotionSafety.Milliseconds(motion.SliceMs, MotionSafety.SliceMsMin, MotionSafety.SliceMsMax, m.SliceMs),
-                ScanMs = MotionSafety.Milliseconds(motion.ScanMs, MotionSafety.ScanMsMin, MotionSafety.ScanMsMax, m.ScanMs)
+                ScanMs = MotionSafety.Milliseconds(motion.ScanMs, MotionSafety.ScanMsMin, MotionSafety.ScanMsMax, m.ScanMs),
+                SplashMs = MotionSafety.Milliseconds(motion.SplashMs, MotionSafety.SplashMsMin, MotionSafety.SplashMsMax, m.SplashMs)
             };
         }
         return m with { Ambient = a };
