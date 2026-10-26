@@ -29,6 +29,7 @@ try
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
     CurvesTests.Run(Check);
+    MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
     DisplayWatchTests.Run(Check);

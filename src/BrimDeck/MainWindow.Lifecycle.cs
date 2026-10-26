@@ -29,7 +29,7 @@ public partial class MainWindow
     // The swell from the dot into the shape (SetExpanded), and the surface drawing back into the dot, as multiples of the
     // duration set for the panel: these change the panel's shape as opening and closing do. The dot's own motion keeps its
     // pace (DotMotion).
-    private const double BootSwell = 1.0, PowerOffShrink = .75;
+    private const double BootSwell = 1.0, PowerOffShrink = PanelMotion.CloseFactor;
     // How long BrimDeck's exit waits at most for the panels to power off (App.ExitApplication).
     internal static int PowerOffLength(int duration) => (int)(duration * PowerOffShrink + DotMotion.PowerOffLength);
 
@@ -113,7 +113,7 @@ public partial class MainWindow
         if (Compact.Visibility == Visibility.Visible)
         {
             SetImmediate(Compact, OpacityProperty, 0d);
-            SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, .85); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, .85);
+            SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk);
         }
         const double swell = DotMotion.SwellStart;
         _bootEnds = Environment.TickCount64 + (long)(swell + Settings.AnimationDuration * BootSwell);
@@ -197,11 +197,12 @@ public partial class MainWindow
         // The shoulders and the flat top go early, so the surface is round well before it is small. The line takes the
         // surface's color and material on the way, so it ends as the same dot as the other forms.
         Track compact = new(0, .35), surface = new(.1, 1), corners = new(.1, .55), shadow = new(0, .45), tone = new(0, .5);
-        Animate(Compact, OpacityProperty, 0, shrink, compact, Soft.InOut);
+        // The content leaves as every exit does (Soft.Out): it starts at once and slows into nothing.
+        Animate(Compact, OpacityProperty, 0, shrink, compact, Soft.Out);
         // The line's playback progress leaves with the content: kept, it showed as a grey bar inside the shrinking dot.
-        Animate(MusicIndicator, OpacityProperty, 0, shrink, compact, Soft.InOut);
-        Animate(CompactScale, ScaleTransform.ScaleXProperty, .85, shrink, compact, Soft.InOut);
-        Animate(CompactScale, ScaleTransform.ScaleYProperty, .85, shrink, compact, Soft.InOut);
+        Animate(MusicIndicator, OpacityProperty, 0, shrink, compact, Soft.Out);
+        Animate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk, shrink, compact, Soft.Out);
+        Animate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk, shrink, compact, Soft.Out);
         Animate(ShadowHost, OpacityProperty, 0, shrink, shadow, Soft.Out);
         Animate(Island, IslandBorder.MaterialOpacityProperty, 1, shrink, tone, Soft.Out);
         _surface.BeginAnimation(SolidColorBrush.ColorProperty, Timed(new ColorAnimation { To = PanelTheme.ColorOf("surface"), EasingFunction = Soft.InOut }, shrink, tone), HandoffBehavior.SnapshotAndReplace);
