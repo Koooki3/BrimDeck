@@ -170,8 +170,9 @@ public sealed partial class SettingsWindow
     };
 
     // What the collapsed notch or capsule shows when its "系统监控" switch is on: a table of the readings, laid out as the app list
-    // is (drag handle, the reading's colors from the scheme, switches), with Full and Brief under it as quick presets, then the
-    // readings' warning and critical colors; and whether each surface widens to its content.
+    // is (drag handle, the reading's colors from the scheme, switches), CPU, GPU and the drives each with a menu of what they
+    // show, with Full and Brief under it as quick presets, then the readings' warning and critical colors; and whether each
+    // surface widens to its content.
     private Action? _refreshReadings;
     private const double ReadingRowHeight = 53;
     private void CompactMonitorOptions()
@@ -185,8 +186,7 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("收起时", "When collapsed"));
 
         var rows = new StackPanel();
-        // The usage and rate readings in the table; the system drive and the temperature have a group of their own below it.
-        foreach (var reading in S.CompactReadings.Where(reading => (StripAdmission.Later & reading.Item) == 0)) rows.Children.Add(ReadingRow(reading.Item, rows, refresh, Edit));
+        foreach (var reading in S.CompactReadings) rows.Children.Add(ReadingRow(reading.Item, rows, refresh, Edit));
         UpdateDividers(rows);
         var headings = ReadingColumns(); headings.Height = 34;
         AddHeadings(headings, new[]
@@ -207,8 +207,8 @@ public sealed partial class SettingsWindow
         var presets = new UniformGrid { Columns = 2, Width = 196 };
         foreach (var (mode, label, help) in new[]
         {
-            (CompactMonitorMode.Full, Loc.T("完整", "Full"), Loc.T("显示全部占用和网速读数，CPU、内存和 GPU 带百分比。不改变温度、顺序和颜色。", "Shows every usage and network reading, with the percentages of CPU, memory and GPU. The temperature, the order and the colors stay.")),
-            (CompactMonitorMode.Brief, Loc.T("简洁", "Brief"), Loc.T("只显示 CPU、内存和 GPU 的圆环，不带数值。不改变顺序和颜色。", "Shows only the CPU, memory and GPU rings, without figures. The order and the colors stay."))
+            (CompactMonitorMode.Full, Loc.T("完整", "Full"), Loc.T("显示全部占用和网速读数，CPU、内存和 GPU 带数值。不改变硬盘、显示的数值、顺序和颜色。", "Shows every usage and network reading, with the figures of CPU, memory and GPU. The drives, the figures chosen, the order and the colors stay.")),
+            (CompactMonitorMode.Brief, Loc.T("简洁", "Brief"), Loc.T("只显示 CPU、内存和 GPU 的圆环，不带数值，隐藏硬盘。不改变顺序和颜色。", "Shows only the CPU, memory and GPU rings, without figures, and hides the drives. The order and the colors stay."))
         })
         {
             var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = label, GroupName = "CompactMonitorPreset" };
@@ -224,25 +224,8 @@ public sealed partial class SettingsWindow
             levels.Children.Add(SwatchCell(LevelName(level), LevelHelp(level), () => LevelSwatch(level, Refresh), refresh, info: true));
         var status = Row(Loc.T("状态颜色", "Level colors"), levels, help: () => Loc.T("用于收起时的读数；展开时只有温度会变色，占用不变色。",
             "Used by the collapsed readings; on the expanded page only temperatures change color, usage does not."));
-        // The system drive and the temperature: each on or off, either or both, after the table's readings in the row. They show
-        // once their first figures arrive, and not at all on a machine without the sensor.
-        var extras = new List<FrameworkElement>();
-        foreach (var (item, label, help) in new[]
-        {
-            (CompactMonitorItems.Storage, Loc.T("系统所在硬盘", "System drive"), Loc.T("显示 Windows 所在硬盘已用空间的百分比（不含 USB 盘和 SD 卡）。", "Shows the share in use of the drive Windows is on (not USB drives or SD cards).")),
-            (CompactMonitorItems.Temperature, Loc.T("温度", "Temperature"), Loc.T("显示 CPU 与 GPU 中较高的温度；读不到温度的电脑上不显示。", "Shows the higher of the CPU's and the GPU's temperatures; not shown on a PC whose temperatures cannot be read."))
-        })
-        {
-            var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
-            AutomationProperties.SetName(toggle, Loc.T("收起时显示", "Show when collapsed: ") + label);
-            toggle.Checked += (_, _) => Edit(s => Reading(s, item).Visible = true); toggle.Unchecked += (_, _) => Edit(s => Reading(s, item).Visible = false);
-            refresh.Add(() => toggle.IsChecked = Reading(S, item).Visible);
-            extras.Add(Row(label, toggle, help: () => help));
-        }
         Refresh();
         Group(table, quick, status);
-        SectionTitle(Loc.T("收起时 · 附加读数（可多选）", "When collapsed · more readings (any of them)"), help: () => Loc.T("可以只选其中一项，也可以都选；它们排在上表读数之后。", "Choose either or both; they follow the readings of the table above."));
-        Group([.. extras]);
     }
 
     private static Grid ReadingColumns()
@@ -275,7 +258,7 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
-        CompactMonitorItems.Temperature => Loc.T("温度", "Temperature"), CompactMonitorItems.Storage => Loc.T("系统所在硬盘", "System drive"), _ => "CPU"
+        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -288,6 +271,12 @@ public sealed partial class SettingsWindow
         row.Children.Add(handle);
         var label = TextLine(name, 13, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(6, 0, 6, 0);
         Grid.SetColumn(label, 2); row.Children.Add(label);
+        // CPU, GPU and the drives choose what they show in a menu at the right of their name.
+        if (CompactFigures.Has(item))
+        {
+            var menu = FiguresMenu(item, refresh, edit);
+            Grid.SetColumn(menu, 2); row.Children.Add(menu);
+        }
         // The reading's colors in the normal state as the scheme gives them, one per channel (the core columns: one per kind of
         // core). They are set under "配色", so they only show here.
         var dots = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent,
@@ -305,15 +294,14 @@ public sealed partial class SettingsWindow
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Temperature or CompactMonitorItems.Storage };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
             value.ToolTip = item switch
             {
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
-                CompactMonitorItems.Temperature => Loc.T("温度始终显示数值：CPU 与 GPU 中较高的一个。", "The temperature always shows its figure: the higher of the CPU's and the GPU's."),
-                CompactMonitorItems.Storage => Loc.T("始终显示数值：Windows 所在硬盘已用空间的百分比（不含 USB 盘和 SD 卡）。", "Always shows its figure: the share in use of the drive Windows is on (not USB drives or SD cards)."),
+                CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值，在左侧的菜单中选择显示什么。", "The drives always show figures; choose which in the menu at the left."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);
@@ -335,10 +323,146 @@ public sealed partial class SettingsWindow
         AttachDrag(handle, () => rows, ReadingRowHeight, list =>
         {
             var order = list.Children.OfType<Border>().Where(b => b.Tag is CompactMonitorItems).Select(b => (CompactMonitorItems)b.Tag).ToArray();
-            // The system drive and the temperature are not in the table; they keep their places after its readings.
-            Change(s => s.CompactReadings = [.. order.Select(id => Reading(s, id)), .. s.CompactReadings.Where(reading => (StripAdmission.Later & reading.Item) != 0)]);
+            Change(s => s.CompactReadings = [.. order.Select(id => Reading(s, id))]);
         });
         return new Border { Child = row, Height = ReadingRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = item, RenderTransform = new TranslateTransform() };
+    }
+
+    // The menu of what CPU, GPU or the drives show after their glyph: the share in use, the temperature or both (one above the
+    // other), at least one; for the drives also which lettered volumes, at least one. A chosen letter not found now (a drive taken
+    // out) is listed as not connected. The drives come from the sampler's last reading, or, when it has none, are read once as the
+    // menu opens. The menu is as wide as its button.
+    private Button FiguresMenu(CompactMonitorItems item, List<Action> refresh, Action<Action<DeckSettings>> edit)
+    {
+        bool drives = item == CompactMonitorItems.Storage;
+        string name = ReadingName(item), role = Loc.T($"{name}显示的数值", $"Figures shown for {name}");
+        const double Wide = 150;
+        var select = ActionButton("", () => { });
+        var content = new DockPanel();
+        var chevron = Chevron(); chevron.Foreground = UI.Brush(TextSecondary); chevron.Margin = new Thickness(8, ChevronDrop.Top, 0, ChevronDrop.Bottom); DockPanel.SetDock(chevron, Dock.Right); content.Children.Add(chevron);
+        var summary = TextLine("", 12.5, TextPrimary); summary.VerticalAlignment = VerticalAlignment.Center; summary.TextTrimming = TextTrimming.CharacterEllipsis;
+        content.Children.Add(summary);
+        select.Content = content; select.Height = 30; select.Width = Wide;
+        select.HorizontalAlignment = HorizontalAlignment.Right; select.HorizontalContentAlignment = HorizontalAlignment.Stretch; select.VerticalAlignment = VerticalAlignment.Center;
+        select.Padding = new Thickness(9, 0, 9, 0); select.Margin = new Thickness(6, 0, 6, 0);
+        select.Background = UI.Brush(_palette.Input); select.BorderBrush = UI.Brush(_palette.Border);
+        ToolTipService.SetShowOnDisabled(select, true);
+        AutomationProperties.SetName(select, role);
+
+        static string FigureName(string figure) => figure == CompactFigures.Usage ? Loc.T("占用", "Usage") : Loc.T("温度", "Temperature");
+        refresh.Add(() =>
+        {
+            var reading = Reading(S, item);
+            var figures = string.Join(Loc.T("、", ", "), CompactFigures.Of(reading).Select(FigureName));
+            summary.Text = drives ? string.Join(" ", CompactSources.Of(reading)) + " · " + figures : figures;
+            // A ring set to show no figure shows none of these either.
+            select.IsEnabled = drives || reading.ShowValue;
+            select.ToolTip = select.IsEnabled ? role + Loc.T("：", ": ") + summary.Text : Loc.T("先打开“显示数值”。", "Switch Value on first.");
+        });
+
+        IReadOnlyList<StorageDrive>? listed = _app.Monitor?.Latest?.Storage is { Count: > 0 } latest ? latest : null;
+        List<(string Letter, string Label)> Letters()
+        {
+            var chosen = CompactSources.Of(Reading(S, item));
+            var options = new List<(string, string)>();
+            foreach (var volume in (listed ?? []).SelectMany(drive => drive.Volumes))
+                options.Add((volume.Letter.ToUpperInvariant(), volume.Label.Length > 0 ? volume.Letter + " " + volume.Label : volume.Letter));
+            foreach (var letter in chosen.Where(letter => options.All(option => option.Item1 != letter)))
+                options.Add((letter, listed is null ? letter : letter + Loc.T("（未连接）", " (not connected)")));
+            return [.. options.OrderBy(option => CompactSources.Rank(option.Item1))];
+        }
+
+        var menu = new Popup { PlacementTarget = select, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, VerticalOffset = 4 };
+        var items = new StackPanel();
+        var list = new ScrollViewer
+        {
+            Style = (Style)FindResource("SettingsScrollViewer"), Content = items, Focusable = false,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        var surface = new Border
+        {
+            Child = list, Width = Wide, Background = UI.Brush(_palette.Popup), BorderBrush = UI.Brush(_palette.Border), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8), Padding = new Thickness(4)
+        };
+        menu.Child = surface;
+        // One line: a check when chosen, then the label. The last one chosen of its group stays.
+        void Entry(string label, bool on, bool last, string? help, Action toggle)
+        {
+            var line = new DockPanel();
+            line.Children.Add(new TextBlock
+            {
+                Text = on ? "" : "", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 12, Width = 20,
+                Foreground = UI.Brush(TextPrimary), VerticalAlignment = VerticalAlignment.Center
+            });
+            var text = TextLine(label, 12.5, TextPrimary); text.VerticalAlignment = VerticalAlignment.Center; text.TextTrimming = TextTrimming.CharacterEllipsis;
+            line.Children.Add(text);
+            var entry = ActionButton("", () => { }); entry.Content = line;
+            entry.HorizontalContentAlignment = HorizontalAlignment.Stretch; entry.Padding = new Thickness(7, 6, 7, 6); entry.Margin = new Thickness(0, 1, 0, 1);
+            entry.IsEnabled = !last;
+            entry.ToolTip = last ? Loc.T("至少保留一项。", "At least one stays.") : help;
+            ToolTipService.SetShowOnDisabled(entry, true);
+            AutomationProperties.SetName(entry, label); AutomationProperties.SetHelpText(entry, on ? Loc.T("已选", "Chosen") : Loc.T("未选", "Not chosen"));
+            entry.Click += (_, _) => { toggle(); Fill(); };
+            items.Children.Add(entry);
+        }
+        void Header(string text)
+        {
+            if (items.Children.Count > 0) items.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider), Margin = new Thickness(4, 4, 4, 3) });
+            var header = TextLine(text, 10.5, TextTertiary); header.Margin = new Thickness(8, 4, 8, 2); items.Children.Add(header);
+        }
+        void Fill()
+        {
+            items.Children.Clear();
+            var reading = Reading(S, item);
+            var figures = CompactFigures.Of(reading);
+            if (drives) Header(Loc.T("数值", "Figures"));
+            foreach (var figure in new[] { CompactFigures.Usage, CompactFigures.Temperature })
+            {
+                bool on = figures.Contains(figure);
+                string? help = figure == CompactFigures.Temperature
+                    ? drives ? Loc.T("固态硬盘的温度，显示在已用空间下方；机械硬盘不显示。", "A solid-state drive's temperature, under its space in use; not shown for hard disks.")
+                        : Loc.T("显示在占用下方；读不到温度的电脑上不显示。", "Shown under the usage; not shown on a PC whose temperature cannot be read.")
+                    : null;
+                Entry(FigureName(figure), on, on && figures.Count == 1, help, () =>
+                {
+                    var next = CompactFigures.Of(Reading(S, item)).ToList();
+                    if (!next.Remove(figure)) next.Add(figure);
+                    edit(s => Reading(s, item).Figures = CompactFigures.Normalize(item, next));
+                });
+            }
+            if (!drives) return;
+            Header(Loc.T("盘符", "Letters"));
+            var chosen = CompactSources.Of(reading);
+            foreach (var (letter, label) in Letters())
+            {
+                bool on = chosen.Contains(letter);
+                Entry(label, on, on && chosen.Count == 1, null, () =>
+                {
+                    var next = CompactSources.Of(Reading(S, item)).ToList();
+                    if (!next.Remove(letter)) next.Add(letter);
+                    edit(s => Reading(s, item).Sources = CompactSources.Normalize(item, next));
+                });
+            }
+            if (listed is null)
+            {
+                var note = TextLine(Loc.T("正在读取硬盘…", "Reading the drives…"), 11.5, TextTertiary); note.Margin = new Thickness(8, 4, 8, 4);
+                items.Children.Add(note);
+            }
+        }
+        menu.Opened += (_, _) =>
+        {
+            Fill();
+            if (!drives || listed is not null) return;
+            listed = _app.Monitor?.Latest?.Storage is { Count: > 0 } latest ? latest : null;
+            if (listed is not null) { Fill(); return; }
+            // Nothing read the drives yet: they are read once here, off the UI thread, and the menu shows them when they come.
+            var reader = new Native.StorageReader();
+            reader.Start(false);
+            reader.Pending.ContinueWith(_ => Dispatcher.BeginInvoke(() => { listed = reader.Listed; if (menu.IsOpen) Fill(); }));
+        };
+        select.Click += (_, _) => { if (!menu.IsOpen) FitMenuToScreen(select, menu, surface); };
+        TogglePopup(select, menu);
+        return select;
     }
 
     private void MonitorSizeControls()

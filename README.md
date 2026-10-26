@@ -94,7 +94,7 @@ Works with players that use Windows media controls, with extra support for some 
 - Shows CPU, GPU and memory usage and network speed in real time, along with the usage of each core.
 - Lists the busiest apps by CPU or memory; click an app for its details.
 - Shows the space in use on each physical drive, one line per drive, with a segment per letter for a drive split into several; only internal drives are listed, not USB sticks, SD cards, external or network drives.
-- Shows CPU, GPU and solid-state drive temperatures (you can turn them off in settings, or show one in the notch or capsule). No administrator rights or drivers are needed; sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it.
+- Shows CPU, GPU and solid-state drive temperatures (you can turn them off in settings; the CPU, GPU and drive readings in the notch or capsule can show them too). No administrator rights or drivers are needed; sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it.
 - Colors follow the panel theme by default; several preset color schemes are offered, and you can make your own.
 
 The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT License), a system monitor for macOS.

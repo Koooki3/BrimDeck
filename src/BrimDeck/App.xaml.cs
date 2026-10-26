@@ -276,14 +276,20 @@ public partial class App : Application
         Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
         UpdateMonitorExtras();
     }
-    // Temperatures and drives are read for an open page with them on, the drives' temperatures only there; the processor's and the
-    // graphics adapter's temperatures, and the drives, also for a collapsed row showing those readings.
+    // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
+    // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
+    // it shows those.
     private void UpdateMonitorExtras()
     {
         bool page = _presentingMonitor.Count > 0;
-        var shown = _stripMonitor.Count > 0 ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
-        Monitor?.SetExtras(page && Settings.MonitorTemperatures || (shown & CompactMonitorItems.Temperature) != 0,
-            page && Settings.MonitorStorage || (shown & CompactMonitorItems.Storage) != 0, page && Settings.MonitorStorage && Settings.MonitorTemperatures);
+        bool strip = _stripMonitor.Count > 0;
+        var shown = strip ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
+        bool Heat(CompactMonitorItems item) => (shown & item) != 0 && Settings.CompactReadings.FirstOrDefault(reading => reading.Item == item) is { } reading
+            && (item == CompactMonitorItems.Storage || reading.ShowValue) && CompactFigures.Shows(reading, CompactFigures.Temperature);
+        bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
+        Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
+            page && Settings.MonitorStorage || stripDrives,
+            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage));
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
