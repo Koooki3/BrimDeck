@@ -21,7 +21,7 @@ public sealed record PanelThemeAdjustment(string Key, string Before, string Afte
 }
 
 public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGradient, IReadOnlyList<ThemeColor> RimGradient, double RimWidth,
-    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines);
+    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, double Pixel = 0, double Texture = 0);
 
 // A theme ready to draw: every token has a color, every effect a value, and the contrast rules hold (see PanelThemes.Build).
 public sealed class PanelPalette
@@ -38,7 +38,7 @@ public sealed class PanelPalette
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
         WrittenColors = writtenColors; WrittenApps = writtenApps;
-        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface))];
+        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. PanelThemes.TextureStops(effects, colors, Surface)];
         IsDark = SurfaceStops.Average(stop => stop.Luminance) < .18;
     }
 
@@ -52,12 +52,15 @@ public sealed class PanelPalette
     public IReadOnlyDictionary<string, ThemeColor> WrittenApps { get; }
     public ThemeColor this[string key] => _colors[key];
     public ThemeColor Surface => _colors["surface"];
-    // The surface and every gradient stop: text must read on each of them.
+    // The surface, every gradient stop and a texture's lightest and darkest squares: text must read on each of them.
     public IReadOnlyList<ThemeColor> SurfaceStops { get; }
     public bool IsDark { get; }
 
     public PanelThemeEffectValues Effects { get; }
-    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0;
+    // A textured surface, like a gradient, has no single color to fade text into.
+    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Texture > 0;
+    // Whether this is a theme's night look (PanelThemes.Resolve).
+    public bool IsNight { get; init; }
     public IReadOnlyList<PanelThemeAdjustment> Adjustments { get; }
 
     // The theme's default color for an application column. The dark theme names every source, and every theme builds on it.

@@ -13,8 +13,12 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
     public KimiEnvironment KimiEnvironment { get; init; } = new();
     // Conversation databases of Antigravity 2.x and the Antigravity CLI.
     public IReadOnlyList<string> AntigravityConversations { get; init; } = [];
+    // OpenCode's data folder ($XDG_DATA_HOME\opencode, otherwise %USERPROFILE%\.local\share\opencode) and its database
+    // (OPENCODE_DB, otherwise opencode.db there); its CLI and desktop app share both.
+    public string OpenCodeData { get; init; } = "";
+    public string OpenCodeDatabase { get; init; } = "";
 
-    public static DataLocations Detect() => Resolve(
+    public static DataLocations Detect() => (Resolve(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -22,13 +26,21 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
         Environment.GetEnvironmentVariable("ZCODE_HOME"), Environment.GetEnvironmentVariable("DSH_HOME"), Environment.GetEnvironmentVariable("KIMI_CODE_HOME"))
     with { KimiEnvironment = new(Environment.GetEnvironmentVariable("KIMI_CODE_BASE_URL"),
         Environment.GetEnvironmentVariable("KIMI_CODE_OAUTH_HOST") ?? Environment.GetEnvironmentVariable("KIMI_OAUTH_HOST"),
-        Environment.GetEnvironmentVariable("KIMI_CODE_REGION_MARKER")) };
+        Environment.GetEnvironmentVariable("KIMI_CODE_REGION_MARKER")) })
+    .WithOpenCode(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Environment.GetEnvironmentVariable("XDG_DATA_HOME"), Environment.GetEnvironmentVariable("OPENCODE_DB"));
+
+    public DataLocations WithOpenCode(string home, string? xdgData, string? database)
+    {
+        var data = OpenCodeUsage.DataFolder(home, xdgData);
+        return this with { OpenCodeData = data, OpenCodeDatabase = OpenCodeUsage.Database(data, database) };
+    }
 
     public static DataLocations Resolve(string home, string roaming, string local, string? claudeOverride, string? codexOverride, string? zcodeOverride = null, string? dshOverride = null, string? kimiOverride = null) => new(
         ConfigDirectory(claudeOverride, Path.Combine(home, ".claude")),
         ConfigDirectory(codexOverride, Path.Combine(home, ".codex")),
         Path.Combine(roaming, "Cursor", "User", "globalStorage", "state.vscdb"), roaming, local)
-    { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home) };
+    { ZCodeHome = ConfigDirectory(zcodeOverride, Path.Combine(home, ".zcode")), DshHome = ConfigDirectory(dshOverride, Path.Combine(home, ".dsh")), KimiHome = ConfigDirectory(kimiOverride, Path.Combine(home, ".kimi-code")), AntigravityConversations = AntigravityUsage.Folders(home),
+      OpenCodeData = OpenCodeUsage.DataFolder(home, null), OpenCodeDatabase = OpenCodeUsage.Database(OpenCodeUsage.DataFolder(home, null), null) };
 
     private static string ConfigDirectory(string? value, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && Path.IsPathFullyQualified(value) ? Path.GetFullPath(value) : fallback;
