@@ -394,6 +394,13 @@ internal sealed partial class FxSurface
         bool committed = lockStyle && _press.Committed && ReferenceEquals(mark, _pressed) && press.Release >= 0;
         double kick = committed ? 3 * MotionCurve.Step(1 - press.Release, Math.Max(2, Steps)) * (press.Release < .5 ? 1 : 0) : 0;
         double presence = _motion.Hover == HoverFx.Brackets ? Math.Max(h, k) : k;
+        // The scan line runs its whole pass even once the brackets have let go (it used to end with them, after about 70 ms).
+        if (press.ScanAt >= 0 && ReferenceEquals(mark, _pressed))
+        {
+            double y = Snap(r.Top + 1 + (r.Height - 2) * press.ScanAt, _line);
+            Line(dc, _highLine, r.Left, y, r.Right, y, .95);
+            Line(dc, _mainLine, r.Left, Snap(y - 2, _line), r.Right, Snap(y - 2, _line), .35);
+        }
         if (presence <= .001 && kick <= 0) return;
         double outset = 1 + 4 * (1 - h) * (1 - k) - 1.5 * k + kick;
         double arm = Px(Math.Clamp(Math.Min(r.Width, r.Height) * .3, 4, 9) + 2 * k);
@@ -411,12 +418,6 @@ internal sealed partial class FxSurface
             Line(dc, _highBold, left, top, left, top + arm, 1);
         }
         if (press.GlitchOn && ReferenceEquals(mark, _pressed) && !_sliceBand.IsEmpty) DrawGlitch(dc, r);
-        if (press.ScanAt >= 0 && ReferenceEquals(mark, _pressed))
-        {
-            double y = Snap(r.Top + 1 + (r.Height - 2) * press.ScanAt, _line);
-            Line(dc, _highLine, r.Left, y, r.Right, y, .95);
-            Line(dc, _mainLine, r.Left, Snap(y - 2, _line), r.Right, Snap(y - 2, _line), .35);
-        }
     }
 
     // A gentle wave along the inside of the bottom edge, clear of the corners: it rolls in from the left as the hover arrives

@@ -170,10 +170,11 @@ internal sealed partial class FxSurface
                     break;
                 case ParticleFx.Rain:
                 {
-                    // Falling faster as it goes, a streak along its own way down; at most a quarter opaque.
+                    // Falling faster as it goes, a streak along its own way down; at most a quarter opaque, held so until well into
+                    // its fall and only then fading, so it can be followed.
                     double fall = t * (.6 + .4 * t);
                     double hx = m.X + m.Vx * fall, hy = m.Y + m.Vy * fall, length = m.Size / Math.Sqrt(1 + RainSlant * RainSlant);
-                    double a = Math.Min(.25, strength) * Math.Min(1, t / .12) * (1 - t);
+                    double a = Math.Min(.25, strength) * Math.Min(1, t / .12) * (1 - CollapseFx.SmoothStep(.55, 1, t));
                     if (a > .001) { dc.PushOpacity(a); dc.DrawLine(_highLine, new Point(hx - RainSlant * length, hy - length), new Point(hx, hy)); dc.Pop(); }
                     break;
                 }
