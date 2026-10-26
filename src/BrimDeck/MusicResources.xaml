@@ -30,7 +30,8 @@
     <Setter Property="Height" Value="18"/><Setter Property="Minimum" Value="0"/><Setter Property="Maximum" Value="1"/>
     <Setter Property="SmallChange" Value=".02"/><Setter Property="LargeChange" Value=".1"/><Setter Property="IsMoveToPointEnabled" Value="True"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="{x:Type local:MusicSeekSlider}">
-      <Grid Background="Transparent">
+      <!-- The bar is drawn inside the hit area's inset (HitArea); the whole box takes the pointer. -->
+      <Grid Background="Transparent"><Grid x:Name="Face" Margin="{TemplateBinding local:HitArea.Inset}">
         <Border x:Name="Rail" Background="{DynamicResource PanelSeekRail}" Height="{TemplateBinding BarHeight}" CornerRadius="{DynamicResource PanelR4}"/>
         <Track x:Name="PART_Track" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}">
           <Track.DecreaseRepeatButton><RepeatButton Style="{StaticResource MusicTrackButton}" Command="Slider.DecreaseLarge" Background="{TemplateBinding Foreground}"/></Track.DecreaseRepeatButton>
@@ -42,7 +43,7 @@
             <TextBlock Text="{TemplateBinding BubbleText}" Foreground="{DynamicResource PanelPrimary}" FontFamily="Segoe UI" FontSize="11.5" Typography.NumeralAlignment="Tabular" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
         </Canvas>
-      </Grid>
+      </Grid></Grid>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
 </ResourceDictionary>

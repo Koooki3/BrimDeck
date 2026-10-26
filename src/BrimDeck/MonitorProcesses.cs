@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -51,6 +52,29 @@ internal sealed class ProcessListView : FrameworkElement
     }
 
     private (int Rows, int Columns) Grid => MonitorLayout.ListGrid(ActualWidth, ActualHeight, _layout.RowHeight);
+
+    // For screen readers: the two sort pills, then each app's row as it shows ("Chrome，CPU 12%，内存 1.2 GB"); invoking a row
+    // opens its card, as a click does.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.List, () => Loc.T("进程列表", "Process list"), parts: Parts);
+    private IEnumerable<DrawnPart> Parts()
+    {
+        string[] sorts = [Loc.T("按 CPU 排序", "Sort by CPU"), Loc.T("按内存排序", "Sort by memory")];
+        for (int i = 0; i < _sortRects.Length && i < sorts.Length; i++)
+        {
+            var sort = (ProcessSort)i;
+            yield return new DrawnPart("sort " + i, sorts[i] + ((int)_sort == i ? Loc.T("（当前）", " (current)") : ""), _sortRects[i], AutomationControlType.Button,
+                () => { if (sort != _sort) _sortChanged(sort); });
+        }
+        var (rows, columns) = Grid;
+        for (int i = 0; i < _rows.Count && i < rows * columns; i++)
+        {
+            var sample = _rows[i];
+            var box = RowRect(i, rows, columns);
+            if (box.Bottom > ActualHeight + .5) continue;
+            yield return new DrawnPart(sample.Id, sample.Name + Loc.T("，CPU ", ", CPU ") + MonitorFormat.ProcessShare(sample.CpuPercent, _cores) + "%"
+                + Loc.T("，内存 ", ", memory ") + MonitorFormat.ProcessMemory(sample.MemoryBytes), box, Invoke: () => _open(sample, box));
+        }
+    }
     private double ColumnWidth(int columns) => columns <= 1 ? ActualWidth : (ActualWidth - ColumnGap * (columns - 1)) / columns;
 
     // A new sort from another panel or from this one's pills: the rows reorder as a new reading would, and the pill slides.
@@ -113,12 +137,12 @@ internal sealed class ProcessListView : FrameworkElement
     {
         int slot = -1;
         for (int i = 0; id is not null && i < _rows.Count; i++) if (_rows[i].Id == id) { slot = i; break; }
-        if (slot < 0) return _highlight.Set(0, motion);
+        if (slot < 0) return _highlight.Fade(false, motion);
         int rows = Grid.Rows;
         bool visible = _highlight.Target > .5 || _highlight.Moving(Eased.Now);
         bool glide = visible && rows > 0 && (int)Math.Round(_highlightSlot.Target) / rows == slot / rows;
         bool moving = _highlightSlot.Set(slot, motion && glide);
-        return _highlight.Set(1, motion) | moving;
+        return _highlight.Fade(true, motion) | moving;
     }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
@@ -268,12 +292,12 @@ internal sealed class ProcessListView : FrameworkElement
         if (_hover is null && _pressed is null && _hoverSort < 0) return;
         _hover = _pressed = null; Cursor = null;
         HoverPill(-1);
-        _highlight.Set(0, Motion.Enabled); _press.Set(0, Motion.Enabled);
+        _highlight.Fade(false, Motion.Enabled); _press.Set(0, Motion.Enabled);
         Motion.Start(this, Step);
     }
     private void HoverPill(int sort)
     {
-        for (int i = 0; i < 2; i++) _pillHover[i].Set(i == sort && i != (int)_sort ? 1 : 0, Motion.Enabled);
+        for (int i = 0; i < 2; i++) _pillHover[i].Fade(i == sort && i != (int)_sort, Motion.Enabled);
         _hoverSort = sort;
     }
     protected override void OnMouseMove(MouseEventArgs e)
@@ -315,6 +339,11 @@ internal sealed class ProcessCard : Border
     private readonly StackPanel _members;
     private readonly Image _icon;
     public string Id { get; private set; } = "";
+    private string _spoken = "";
+
+    // For screen readers: the card's app and its figures; the busiest processes follow as its text shows them.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Group,
+        () => Loc.T("进程详情：", "Process details: ") + _spoken);
 
     public ProcessCard(double body, double caption)
     {
@@ -360,6 +389,7 @@ internal sealed class ProcessCard : Border
         _cpu.Text = MonitorFormat.ProcessShare(sample.CpuPercent, cores) + "%";
         _memory.Text = MonitorFormat.ProcessMemory(sample.MemoryBytes);
         _count.Text = Math.Max(1, sample.Members.Count).ToString();
+        _spoken = sample.Name + " · CPU " + _cpu.Text + Loc.T(" · 内存 ", " · memory ") + _memory.Text + Loc.T($" · {_count.Text} 个进程", $" · {_count.Text} processes");
         _members.Children.Clear();
         // The busiest of the app's processes, up to five.
         foreach (var member in sample.Members.Take(5))

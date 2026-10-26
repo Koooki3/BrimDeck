@@ -71,6 +71,7 @@ internal sealed class MonitorView : Grid
         _layout = layout; _colors = colors; _main = main; _temperatures = temperatures;
         bool cpuMain = main == MonitorMain.Cpu;
         string swapToGpu = Loc.T("切换为以 GPU 为主", "Show the GPU large"), swapToCpu = Loc.T("切换为以 CPU 为主", "Show the CPU large");
+        string cores = Loc.T("CPU 各核心占用", "CPU usage by core");
         var readings = _readings;
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
@@ -100,7 +101,7 @@ internal sealed class MonitorView : Grid
         if (cpuMain)
         {
             // The cores carry no figures: the fill is the load, the tick the clock, and pointing at a core gives both.
-            _cpuGraph = new ColumnGraph(26, layout.Caption, labels: false);
+            _cpuGraph = new ColumnGraph(26, layout.Caption, labels: false, name: cores);
             _gpuBlock = new BlockGauge(colors.Gpu, swapToGpu);
             _gpuBlock.Clicked += () => mainChanged(MonitorMain.Gpu);
             SetColumn(_gpuBlock, 2); graphs.Children.Add(_cpuGraph); graphs.Children.Add(_gpuBlock);
@@ -108,8 +109,8 @@ internal sealed class MonitorView : Grid
         else
         {
             // The engines spread over the room the graph has, so a wide page leaves no gap between them and the processor's columns.
-            _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, !layout.CompactMetrics, gap: 6);
-            _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu);
+            _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, !layout.CompactMetrics, gap: 6, name: Loc.T("GPU 各引擎占用", "GPU usage by engine"));
+            _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu, name: cores);
             _cpuGraph.Clicked += () => mainChanged(MonitorMain.Cpu);
             SetColumn(_cpuGraph, 2); graphs.Children.Add(_gpuGraph); graphs.Children.Add(_cpuGraph);
         }
