@@ -151,7 +151,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); _hotkeyRehide?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseWheel += PanelWheel;
@@ -212,6 +212,9 @@ public partial class MainWindow : Window
         UpdateCollapsedGeometry(bounds, work, scale);
         double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
         _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
+        // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
+        // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
+        _widestPage = Fit(DeckPages.Largest(Settings).Width);
         // The layered HWND keeps the largest size anything it shows can take, so that it is not resized or moved while the panel
         // is used: Windows shows a layered window's last picture at its new size and place before WPF draws it again, so every
         // resize flashed the panel cut off or shifted for a frame (it did on each press and release of a resize drag). That is
@@ -505,11 +508,13 @@ public partial class MainWindow : Window
             : new CornerRadius(shape.TopRadius, shape.TopRadius, shape.BottomRadius, shape.BottomRadius);
         double gap = expanded ? panelTop : shape.Surface.Y;
         // The island's left edge in window coordinates: the surface, or the open panel centred on it and kept on the monitor. A
-        // panel opened by hovering a surface wider than itself centres on where the pointer was instead, as far as the surface's
-        // ends allow, and keeps that centre while open (page switches, resizing) without following the pointer.
+        // panel opened by hovering a surface wider than every shown page centres on where the pointer was instead, as far as the
+        // surface's ends allow, and keeps that centre while open (page switches, resizing) without following the pointer. The
+        // choice is the same for every page: decided per page, a capsule that the music widens past the narrow pages but not the
+        // wide ones put some pages at the pointer and others at the middle, so switching pages moved the panel sideways.
         if (!expanded) _openCentre = null;
         double panelCentre = shape.Surface.X + shape.Surface.Width / 2;
-        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > _pageWidth)
+        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > Math.Max(_pageWidth, _widestPage))
             panelCentre = Math.Clamp(pointer, shape.Surface.X + _pageWidth / 2, shape.Surface.Right - _pageWidth / 2);
         double panelLeft = Math.Clamp(panelCentre - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
         double left = (expanded ? panelLeft : shape.Surface.X) - _windowOffset;
@@ -718,6 +723,8 @@ public partial class MainWindow : Window
     {
         // Dragging an edge may take the pointer outside; the panel stays open until the drag ends.
         if (!inside && Resizing) return;
+        // A pointer on the island means the display is on, whatever Windows last reported (DisplayPower).
+        if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
         if (inside) ReleaseHotkeyPin();
         if (inside)

@@ -221,6 +221,11 @@ public partial class MainWindow
             if (left || _app.Exiting || popup.Content is not UIElement content || !Soft.Enabled) return;
             e.Cancel = true; left = true; popup.IsHitTestVisible = false;
             Soft.Leave(content, () => popup.Close());
+            // The leave is the only thing that closes it now, and an animation replaced on the same property never completes,
+            // so the pop-up closes on its own a little after the leave should have ended.
+            var fallback = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Soft.Quick + 250) };
+            fallback.Tick += (_, _) => { fallback.Stop(); if (popup.IsLoaded) popup.Close(); };
+            fallback.Start();
             RenderUsage();
         };
         popup.Deactivated += (_, _) => { if (!closing && popup.IsVisible) popup.Close(); };
@@ -231,7 +236,17 @@ public partial class MainWindow
             if (!left) RenderUsage();
             if (_expanded && !IsMouseOver) PointerChanged(false);
         };
-        Soft.Enter(popup.Content as UIElement);
+        // The pop-up enters once its first frame has been drawn: a layered window takes a frame or two to come up, and an
+        // entrance started before Show lost its beginning to them and popped in. Until then its content is held out of sight.
+        if (Soft.Enabled && popup.Content is UIElement entering)
+        {
+            entering.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 0, TimeSpan.Zero));
+            // Once only, and not when it was closed before its first frame: the entrance would replace the leave's fade, whose
+            // end is what closes it.
+            EventHandler? enter = null;
+            enter = (_, _) => { popup.ContentRendered -= enter; if (!left && popup.IsVisible) Soft.Enter(entering); };
+            popup.ContentRendered += enter;
+        }
         popup.Show(); popup.Activate();
     }
 
