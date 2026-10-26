@@ -926,7 +926,9 @@ public partial class MainWindow
                 if (text.Length == 0) text = _mediaTrack!.Caption;
             }
         }
-        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? Settings.EnabledApps : [];
+        // A quota ring with nothing read yet would be an empty grey circle that says nothing: it is left out until its quota has
+        // a reading (QuotaRings).
+        var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
         // The clock keeps its own width at the right; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         // The system readings offer each chosen reading, in the order of the settings' table and in the scheme's colors; the row
@@ -946,7 +948,7 @@ public partial class MainWindow
         // can show, the title in its fixed slot (CompactMusicLayout.AutoWidth). Neither follows the width the surface has now, nor
         // the track notice or the lyric's changing length, so the width changes only when the content itself does and never
         // feeds back on itself. A new width builds the row again.
-        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
+        int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count(HasQuotaReading) : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
         double wanted = CompactMusicLayout.AutoWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.Candidates ?? [], strip?.Gap ?? 0);
         double required = layout.Required > 0 ? Math.Ceiling(layout.Required) + 1 : 0;
@@ -1003,15 +1005,18 @@ public partial class MainWindow
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
-    // One ring per application: the highest used share among its quotas, with every quota in the tooltip.
-    private (double Used, string Color, string Tip)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
+    // Whether an application's quota has anything read, which its collapsed ring needs.
+    private bool HasQuotaReading(AppEntry entry) => DashboardUsage.Quota(entry, Snapshots).Metrics.Count > 0;
+    // One ring per application: the highest used share among its quotas, with every quota in the tooltip, and the application's
+    // letter inside so the rings are told apart by more than their color.
+    private (double Used, string Color, string Tip, string Letter)[] QuotaRings(IReadOnlyList<AppEntry> apps) => apps.Select(entry =>
     {
         var snapshot = DashboardUsage.Quota(entry, Snapshots);
         var percentages = snapshot.Metrics.Where(m => m.UsedPercent is not null).Select(m => Math.Clamp(m.UsedPercent!.Value, 0, 100)).ToArray();
         double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
         string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-        return (used, PanelTheme.AppTheme(entry), tip);
+        return (used, PanelTheme.AppTheme(entry), tip, QuotaCarousel.Letter(entry.Name));
     }).ToArray();
     private void UpdateMusicTimer()
     {
