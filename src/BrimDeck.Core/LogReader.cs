@@ -1,4 +1,7 @@
 using System.Buffers;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace BrimDeck.Core;
@@ -175,7 +178,7 @@ public sealed class LogReader
             if (id == ProviderId.Codex)
             {
                 var payload = obj.Get("payload");
-                if (type == "turn_context") { item.Model = payload.Get("model").Text(); return; }
+                if (type == "turn_context") { item.Model = string.Intern(payload.Get("model").Text()); return; }
                 if (type != "event_msg" || payload.Get("type").Text() != "token_count" || time is null) return;
                 var limits = payload.Get("rate_limits");
                 if (limits.ValueKind == JsonValueKind.Object && (limits.Get("limit_id").Text() is "" or "codex") && (item.QuotaTime is null || time >= item.QuotaTime))
@@ -194,7 +197,7 @@ public sealed class LogReader
                 var write = usage.Get("cache_write_input_tokens").Count();
                 var output = usage.Get("output_tokens").Count();
                 // Timestamp + cumulative counters deduplicate history copied into a fork.
-                item.Entries.Add(new($"codex:{time:O}:{identity}:{usage.GetRawText()}", time.Value, item.Model, input - cached, cached, write, 0, output));
+                item.Entries.Add(new(CodexKey(time.Value, identity, usage), time.Value, item.Model, input - cached, cached, write, 0, output));
             }
             else
             {
@@ -207,11 +210,24 @@ public sealed class LogReader
                 var key = message.Get("id").Text();
                 if (key.Length == 0) key = obj.Get("uuid").Text();
                 if (key.Length == 0) key = $"{time:O}:{usage.GetRawText()}";
-                item.Entries.Add(new("claude:" + key, time.Value, message.Get("model").Text(), usage.Get("input_tokens").Count(),
+                item.Entries.Add(new("claude:" + key, time.Value, string.Intern(message.Get("model").Text()), usage.Get("input_tokens").Count(),
                     usage.Get("cache_read_input_tokens").Count(), creation - hour, hour, usage.Get("output_tokens").Count()));
             }
         }
         catch (JsonException) { item.Errors++; }
+    }
+
+    // Every record of the last 30 days stays cached, so a Codex record is known by a hash of what tells it apart (its time and
+    // both counters) instead of their JSON, which ran to hundreds of characters a record. Model names, which repeat in every
+    // record, are interned for the same reason.
+    private static string CodexKey(DateTimeOffset time, string identity, JsonElement usage)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(Encoding.UTF8.GetBytes($"{time:O}\n{identity}\n"));
+        hash.AppendData(JsonMarshal.GetRawUtf8Value(usage));
+        Span<byte> digest = stackalloc byte[32];
+        hash.GetHashAndReset(digest);
+        return "codex:" + Convert.ToHexString(digest[..16]);
     }
 }
 
