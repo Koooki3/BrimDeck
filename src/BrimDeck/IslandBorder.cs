@@ -23,6 +23,9 @@ public sealed class IslandBorder : Border
         nameof(Gradient), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty PatternProperty = DependencyProperty.Register(
         nameof(Pattern), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+    // The theme's motifs (IslandDecor), between the gradient and the pattern, fading with the material like them.
+    public static readonly DependencyProperty DecorProperty = DependencyProperty.Register(
+        nameof(Decor), typeof(IslandDecor), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty RimBrushProperty = DependencyProperty.Register(
         nameof(RimBrush), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(DefaultRim, FrameworkPropertyMetadataOptions.AffectsRender, (d, _) => ((IslandBorder)d)._rim = null));
     // A new width also rebuilds a pixel theme's bevel, which is made with the outline.
@@ -64,6 +67,7 @@ public sealed class IslandBorder : Border
     }
     public Brush? Gradient { get => (Brush?)GetValue(GradientProperty); set => SetValue(GradientProperty, value); }
     public Brush? Pattern { get => (Brush?)GetValue(PatternProperty); set => SetValue(PatternProperty, value); }
+    internal IslandDecor? Decor { get => (IslandDecor?)GetValue(DecorProperty); set => SetValue(DecorProperty, value); }
     public Brush RimBrush { get => (Brush)GetValue(RimBrushProperty); set => SetValue(RimBrushProperty, value); }
     public double RimWidth { get => (double)GetValue(RimWidthProperty); set => SetValue(RimWidthProperty, value); }
     public double Inset { get => (double)GetValue(InsetProperty); set => SetValue(InsetProperty, value); }
@@ -79,6 +83,7 @@ public sealed class IslandBorder : Border
         bool fading = MaterialOpacity < 1;
         if (fading) drawingContext.PushOpacity(Math.Clamp(MaterialOpacity, 0, 1));
         if (Gradient is { } gradient) drawingContext.DrawGeometry(gradient, null, outline);
+        Decor?.Draw(drawingContext, RenderSize, outline);
         if (Pattern is { } pattern) drawingContext.DrawGeometry(pattern, null, outline);
         if (RimWidth > 0)
         {
