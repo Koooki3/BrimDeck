@@ -33,7 +33,7 @@ public sealed record FullscreenRule(string Name = "", string Path = "")
 // SettingsMigrations maps them back to Claude, and later members keep their saved numbers.
 public enum ProviderId { Claude, Codex, Antigravity, Cursor, GlmChina, NewApi, Sub2Api, Custom, ZCode = 10, GlmGlobal = 11, Dsh = 12, DeepSeek = 13, GrokBot = 14, Kimi = 15, KimiApi = 16, OpenCode = 17, OpenCodeGo = 18, OpenRouter = 19 }
 public enum SettingsTheme { System, Light, Dark }
-// Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckPages.Order.
+// Pages are saved as numbers, so new members go at the end; their order in the page switch is DeckSettings.PageOrder.
 public enum DeckPage { Usage, Music, Monitor }
 public enum DefaultDeckPage { Last, Usage, Music, Monitor }
 // What the mouse wheel does over the expanded panel. Saved as numbers, so new members go at the end.
@@ -244,6 +244,7 @@ public sealed class DeckSettings
     private List<AppEntry>? _apps;
     private List<CompactReading>? _readings;
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
+    private List<DeckPage> _pageOrder = [.. DeckPages.Order];
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -369,6 +370,8 @@ public sealed class DeckSettings
     // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
     public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
     public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value); }
+    // The order of the pages in the open panel's page switch, left to right.
+    public List<DeckPage> PageOrder { get => _pageOrder; set => _pageOrder = DeckPages.Normalize(value); }
     // Whether the notch and the capsule widen to their content (CollapsedGeometry.Resolve). Resizing one by dragging an end turns
     // its own off, so the width set by hand stays.
     public bool NotchAutoWidth { get; set; } = true;
@@ -476,7 +479,7 @@ public sealed class DeckSettings
         copy._apps = _apps?.Select(app => app.Copy()).ToList();
         copy._readings = _readings?.Select(reading => reading?.Copy()!).ToList();
         copy.MonitorCustomColors = (MonitorCustomColors ?? new()).Copy();
-        copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder];
+        copy._notchOrder = [.. _notchOrder]; copy._capsuleOrder = [.. _capsuleOrder]; copy._pageOrder = [.. _pageOrder];
         copy.ClockGradient = [.. ClockGradient ?? [.. ClockColors.Sunset]];
         copy.DisplayMonitors = [.. DisplayMonitors ?? []];
         copy.ThemeChoices = (ThemeChoices ?? []).ToDictionary(pair => pair.Key, pair => pair.Value.Copy());
