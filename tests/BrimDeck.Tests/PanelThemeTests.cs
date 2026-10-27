@@ -392,6 +392,12 @@ internal static class PanelThemeTests
             && !palette.HasOverlay && palette.Colors.Count == PanelThemes.Tokens.Count));
         check("A system gray text too faint to read is moved like a theme's", PanelThemes.HighContrast(S("#000000"), S("#FFFFFF"), S("#404040"), S("#1AEBFF"), S("#000000")) is var faint
             && faint.Adjustments.Any(a => a.Key == "textTertiary") && faint["textTertiary"].MinimumContrast([faint.Surface]) >= PanelThemes.TextContrast - .001);
+        // Warning and critical colors, the theme's and those chosen by the user, color a quota's number, so they read as text.
+        var faintLevels = new[] { "#7A4A00", "#8A2020", "#FFE9A0", "#FFB0B0", "#606060" }.Select(S).ToList();
+        check("Chosen warning and critical colors are held to the text minimum like the theme's", PanelThemes.LevelContrast >= PanelThemes.TextContrast
+            && PanelThemes.BuiltIns.Select(theme => PanelThemes.Resolve(theme)).All(palette =>
+                faintLevels.All(color => palette.Readable(color, PanelThemes.LevelContrast).MinimumContrast(palette.SurfaceStops) >= PanelThemes.TextContrast - .001)
+                && new[] { palette.WarningDefault, palette.CriticalDefault }.All(color => color is null || color.Value.MinimumContrast(palette.SurfaceStops) >= PanelThemes.TextContrast - .001)));
 
         // Settings.
         var settings = new DeckSettings { PanelTheme = "  GitHub-Dark " }; settings.Normalize();

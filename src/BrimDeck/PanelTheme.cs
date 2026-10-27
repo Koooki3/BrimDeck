@@ -188,8 +188,10 @@ internal static class PanelTheme
     // An application column's colors: the color chosen for it, else the theme's default for its source, as the panel draws them.
     // Under high contrast every application shows the system's colors (PanelThemes.HighContrast), whatever was chosen for it.
     public static string AppTheme(AppEntry entry) => entry.ThemeColor.Length > 0 && !HighContrast ? Readable(entry.ThemeColor) : DefaultAppColor(entry.QuotaSource);
-    public static string AppWarning(AppEntry entry) => entry.WarningColor.Length > 0 && !HighContrast ? Readable(entry.WarningColor) : _warningColor ??= Readable(WarningDefault);
-    public static string AppCritical(AppEntry entry) => entry.CriticalColor.Length > 0 && !HighContrast ? Readable(entry.CriticalColor) : _criticalColor ??= Readable(CriticalDefault);
+    // The warning and critical colors also color the quota's number, so a chosen one is held to the text minimum like the
+    // theme's (PanelThemes.LevelContrast).
+    public static string AppWarning(AppEntry entry) => entry.WarningColor.Length > 0 && !HighContrast ? Readable(entry.WarningColor, PanelThemes.LevelContrast) : _warningColor ??= Readable(WarningDefault, PanelThemes.LevelContrast);
+    public static string AppCritical(AppEntry entry) => entry.CriticalColor.Length > 0 && !HighContrast ? Readable(entry.CriticalColor, PanelThemes.LevelContrast) : _criticalColor ??= Readable(CriticalDefault, PanelThemes.LevelContrast);
     public static string QuotaColor(AppEntry entry, double usedPercent)
         => usedPercent >= AppPresets.CriticalPercent ? AppCritical(entry) : usedPercent >= AppPresets.WarningPercent ? AppWarning(entry) : AppTheme(entry);
     public static string DefaultAppColor(ProviderId id) => _appColors.TryGetValue(id, out var color) ? color : _appColors[id] = Current.AppColor(id).ToString();
