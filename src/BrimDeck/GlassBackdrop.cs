@@ -139,6 +139,16 @@ internal sealed class GlassBackdrop : IDisposable
     // LiquidRenderer) stays reachable for comparison behind BRIMDECK_LIQUID_REFRACT=1.
     internal static bool Refraction { get; set; } = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_REFRACT") == "1";
     private bool AcrylicBody => LiquidTint is not null && !LiquidOff && !Refraction && LiquidTheme.Renders;
+    // Round 16, step 9 (experimental, BRIMDECK_LIQUID_RIM=1): the rim lens over the acrylic body - the refraction renderer's
+    // slab, its bevel only (LiquidFrame.Rim), concentrated at the contour and gone before the flat top. Shown only while the
+    // island holds still (fading in over RimLensInMs once a few frames saw the same shape, out at once when it moves), so the
+    // capture's frame never trails the shape and the frames of a motion carry nothing of it; the capture and its device made
+    // when it is first shown and let go with the liquid glass theme (ReleaseLiquid). Off, nothing of it is made.
+    internal static bool RimLens { get; set; } = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_RIM") == "1";
+    internal const float RimLensStrength = .7f;
+    private const int RimLensInMs = 220, RimLensDelayMs = 50, RimLensStillFrames = 3;
+    private bool _lensIn;
+    private float _lensOpacity;
     // Whether the liquid glass themes' glass is shown now: the acrylic body (its surface stepped aside for it), or the
     // refraction renderer's.
     public bool BodyShown => LiquidShown || SurfaceAside && AcrylicBody;
@@ -475,6 +485,7 @@ internal sealed class GlassBackdrop : IDisposable
             RimBelow(shoulder >= 1 ? top + shoulder : double.NaN);
             Glow(shown, opacity);
             Probe(true);
+            Lens(shown, outerLeft, acrylicTop, outerRight, outerBottom, round, opacity);
         }
         else
         {
@@ -504,7 +515,7 @@ internal sealed class GlassBackdrop : IDisposable
     }
 
     // Liquid glass for this frame, at the delayed shape, clipped to the recent shapes (window pixels); false shows the blur.
-    private bool Liquid(Frame shown, double left, double top, double right, double bottom, double radius, double opacity)
+    private bool Liquid(Frame shown, double left, double top, double right, double bottom, double radius, double opacity, float rim = 0)
     {
         // Another glass theme (only the liquid glass themes render, LiquidTheme): the blur, and liquid glass's capture goes with it.
         if (!LiquidTheme.Renders) { ReleaseLiquid(); return ShowLiquid(false); }
@@ -544,6 +555,9 @@ internal sealed class GlassBackdrop : IDisposable
             // indicator's, a notice's handoff), in steps of 1/64 so a held opacity draws nothing more; its refraction, rim light
             // and edge grow with it.
             var next = Pointered(preset, width, height, scale) with { Presence = (float)(Math.Round(opacity * 64) / 64), Plain = PlainShown() };
+            // The rim lens: the bevel alone, the same whatever the pointer does (the acrylic's own light answers it), so a
+            // still island draws it again only when what lies behind changes.
+            if (rim > 0) next = next with { Rim = rim, RimLuminosity = (float)_luminosityShown, Hover = 0, Press = 0, PointerX = float.NaN, PointerY = float.NaN };
             // Drawn again only when the glass changed (its shape, place, look, the press) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),
             // the desktop is looked at no oftener than the idle poll's PollMs.
@@ -555,7 +569,7 @@ internal sealed class GlassBackdrop : IDisposable
             _liquidClip!.Offset = new Vector2((float)(left - x), (float)(top - y));
             _liquidClip.Size = new Vector2((float)Math.Max(0, right - left), (float)Math.Max(0, bottom - top));
             _liquidClip.CornerRadius = new Vector2((float)radius);
-            _liquid.Opacity = (float)opacity;
+            if (rim <= 0) _liquid.Opacity = (float)opacity;
             return ShowLiquid(true);
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotSupportedException or SharpGen.Runtime.SharpGenException or DllNotFoundException)
@@ -564,6 +578,42 @@ internal sealed class GlassBackdrop : IDisposable
             return ShowLiquid(false);
         }
     }
+
+    // The rim lens for this frame (RimLens): drawn and faded in once the island has held the same shape for a few frames and
+    // nothing of it moves; out at once otherwise (the capture and its device kept for the next rest).
+    private void Lens(Frame shown, double left, double top, double right, double bottom, double radius, double opacity)
+    {
+        if (!RimLens) return;
+        bool still = _moving == 0 && _arriving == 0 && _recent.Count > RimLensStillFrames;
+        for (int i = 1; still && i <= RimLensStillFrames; i++) still = _recent[^i] == _recent[^(i + 1)];
+        if (!still || !Liquid(shown, left, top, right, bottom, radius, opacity, RimLensStrength) || _liquid is null) { LensOut(); return; }
+        float target = (float)opacity;
+        if (_lensIn && target == _lensOpacity) return;
+        _lensOpacity = target;
+        _liquid.StopAnimation("Opacity");
+        if (_lensIn || !Soft.Enabled) { _liquid.Opacity = target; _lensIn = true; return; }
+        // Faded in a little after the frame is drawn, so the swap chain's first present (or a stale one) never shows.
+        _lensIn = true;
+        _liquid.Opacity = 0;
+        var compositor = _liquid.Compositor;
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(0, 0);
+        fade.InsertKeyFrame(1, target, compositor.CreateCubicBezierEasingFunction(new Vector2(.2f, 0), new Vector2(0, 1)));
+        fade.DelayTime = TimeSpan.FromMilliseconds(RimLensDelayMs);
+        fade.Duration = TimeSpan.FromMilliseconds(RimLensInMs);
+        _liquid.StartAnimation("Opacity", fade);
+    }
+
+    private void LensOut()
+    {
+        if (!_lensIn || _liquid is null) return;
+        _lensIn = false;
+        _liquid.StopAnimation("Opacity");
+        _liquid.Opacity = 0;
+    }
+
+    // For the tests: whether the rim lens is shown (or fading in) now.
+    internal bool LensShown => _lensIn;
 
     // The pointer's answer, the opening and the content row over a preset: hover brightens the glass and moves its rim light
     // toward the pointer, a press lights it from inside (both eased, GlassFeedback; only on the collapsed island). The morph
@@ -640,7 +690,12 @@ internal sealed class GlassBackdrop : IDisposable
         var previous = _liquid.Brush;
         _liquid.Brush = renderer.CreateBrush(compositor);
         previous?.Dispose();
-        if (_liquid.Parent is null) _root.Children.InsertAtTop(_liquid);
+        // The rim lens lies on the acrylic body, under its rim light and pointer glow.
+        if (_liquid.Parent is null)
+        {
+            if (AcrylicBody && _sprite?.Parent is not null) _root.Children.InsertAbove(_liquid, _sprite);
+            else _root.Children.InsertAtTop(_liquid);
+        }
     }
 
     // The last brightness any liquid glass measured behind its island (NaN before one): automatic liquid glass chosen while
@@ -660,7 +715,8 @@ internal sealed class GlassBackdrop : IDisposable
     // never runs over those motions; adaptivity resumes once they are over (GlassAppearance's held).
     private void ReportBackdrop()
     {
-        if (_host?.Renderer is not { } renderer) return;
+        // Over the acrylic body (the rim lens) its probe decides the look and the shadow's tone (AcrylicProbe), not the lens.
+        if (_host?.Renderer is not { } renderer || AcrylicBody) return;
         long now = Environment.TickCount64;
         bool auto = AutoLook?.Invoke() == true;
         bool current = _lead ?? PanelTheme.Current.IsDark;
@@ -720,7 +776,8 @@ internal sealed class GlassBackdrop : IDisposable
         if (shown) { _failures = 0; _retry?.Stop(); }
         else
         {
-            if (_liquid is not null) _liquid.Opacity = 0;
+            if (_liquid is not null) { _liquid.StopAnimation("Opacity"); _liquid.Opacity = 0; }
+            _lensIn = false;
             // What the swap chain holds is not shown now, and may be stale when it is again: drawn anew then.
             if (was) _host?.Idle.Forget();
             if (LiquidWanted) Recover();
@@ -730,7 +787,7 @@ internal sealed class GlassBackdrop : IDisposable
 
     // Liquid glass would be shown but the blur is, in its place (a failure, no capture for now).
     private bool LiquidWanted => LiquidTint is not null && !LiquidOff && !_excludeRefused && !_disposed && _shown && !LiquidShown
-        && LiquidTheme.Renders && Available;
+        && LiquidTheme.Renders && Available && (!AcrylicBody || RimLens);
 
     // Tries liquid glass again every RetryMs while it is wanted: after a failure once its wait is over, else once the capture
     // answers again (the lock screen or a UAC prompt gone, protected content closed); following the island then shows it.
@@ -804,6 +861,7 @@ internal sealed class GlassBackdrop : IDisposable
     {
         _poll?.Stop();
         LiquidShown = false;
+        _lensIn = false;
         if (_host is not null) { _host.Rebuilt -= Rebuilt; _host.Dispose(); _host = null; }
         if (_liquid is not null) { _liquid.Brush?.Dispose(); _liquid.Clip?.Dispose(); _liquid.Dispose(); _liquid = null; }
         _liquidClip?.Dispose(); _liquidClip = null;
@@ -1084,6 +1142,8 @@ internal sealed class GlassBackdrop : IDisposable
         // Glass not shown at all now (another theme, transparency effects off, battery saver): liquid glass goes, its capture
         // with it, and our windows are back in Desktop Duplication (CaptureExclusion).
         if (!Available) { SurfaceAside = false; ReleaseLiquid(); }
+        // The rim lens's capture goes with the island too (hidden: nothing to lie on); made again when it is next still.
+        else if (RimLens) ReleaseLiquid();
         if (!SurfaceAside) Report(0, always: false);
         Conceal();
         _recent.Clear(); _last = null; _moving = 0; _arriving = 0;

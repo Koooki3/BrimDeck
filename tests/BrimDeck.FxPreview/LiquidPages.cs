@@ -327,6 +327,18 @@ internal static partial class LiquidPages
         {
             glass = AcrylicEmulation.Draw(desktop, dw, dh, gx, gy, layer.W, layer.H, glass, dark, Scale, layer.Open);
             Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: acrylic luminosity {AcrylicEmulation.Luminosity:0.00}"));
+            // Step 9 (BRIMDECK_LIQUID_RIM=1): the rim lens over it, the slab's bevel alone, as GlassBackdrop lays it on the body.
+            if (GlassBackdrop.RimLens)
+            {
+                var lens = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H),
+                    frame with { Rim = GlassBackdrop.RimLensStrength, RimLuminosity = (float)AcrylicEmulation.Luminosity }, (int)Math.Ceiling(48 * Scale));
+                for (int i = 0; i < lens.Length; i += 4) Over(lens, i, glass, i);
+                // Only at the contour: nothing at the middle, and the bottom edge's middle carries it.
+                int middle = (layer.H / 2 * layer.W + layer.W / 2) * 4 + 3, edge = 0;
+                for (int y = layer.H - (int)Math.Ceiling(4 * Scale); y < layer.H; y++) edge = Math.Max(edge, lens[(y * layer.W + layer.W / 2) * 4 + 3]);
+                bool contour = lens[middle] == 0 && edge >= 96;
+                Console.WriteLine(FormattableString.Invariant($"{(contour ? "PASS" : "FAIL")}: {name}: the rim lens lies at the contour only (middle alpha {lens[middle]}, bottom edge up to {edge})"));
+            }
         }
         var under = (byte[])desktop.Clone();
         for (int y = 0; y < layer.H; y++)
