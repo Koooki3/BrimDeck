@@ -51,6 +51,17 @@ internal static class DeviceChecks
         // The HID worker ends when nothing is wanted, so the threads after the last stop are no more than after the first; one
         // more is allowed for the thread pool and WinRT, which start and end threads of their own.
         check("devices: starting and stopping again leaves no threads behind", threadCounts[^1] <= threadCounts[0] + 1);
+        // Started again after all those stops, every source watches afresh: the same devices are listed again, with readings.
+        int changes = 0;
+        batteries.Changed += () => changes++;
+        batteries.SetDemand(DeviceDemand.Watch);
+        settleBy = Environment.TickCount64 + 11_000;
+        while (!batteries.Settled && Environment.TickCount64 < settleBy) Pump(TimeSpan.FromMilliseconds(250));
+        var again = batteries.All.ToList();
+        check("devices: started again, the same devices are listed and read", batteries.Settled && (read.Count == 0 || changes > 0)
+            && read.Select(device => device.Key).Order().SequenceEqual(again.Select(device => device.Key).Order())
+            && read.Where(device => device.Lowest is not null).All(device => again.Single(other => other.Key == device.Key).Lowest is not null));
+        batteries.SetDemand(DeviceDemand.None); Pump(TimeSpan.FromSeconds(11));
         batteries.Dispose();
     }
 

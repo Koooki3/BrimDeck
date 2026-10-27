@@ -49,6 +49,12 @@ static class DevicesTests
         var roster = new DeviceRoster();
         check("Devices: a source's list fills the roster", roster.Set(DeviceSource.Bluetooth, [Bt("AA", 50), Bt("BB", null, "Buds", DeviceKind.Earbuds)]) && roster.All.Count == 2);
         check("Devices: the same list again changes nothing", !roster.Set(DeviceSource.Bluetooth, [Bt("AA", 50), Bt("BB", null, "Buds", DeviceKind.Earbuds)]));
+        // A new level, or charging starting, of a device already listed reaches the page: the roster changes and hands out a new list.
+        var before = roster.All;
+        check("Devices: a new level of a listed device is a change, in a new list", roster.Set(DeviceSource.Bluetooth, [Bt("AA", 48), Bt("BB", null, "Buds", DeviceKind.Earbuds)])
+            && !ReferenceEquals(before, roster.All) && roster.All.Single(d => d.Key == "bt:AA").Percent == 48
+            && roster.Set(DeviceSource.Bluetooth, [Bt("AA", 48) with { Charging = true }, Bt("BB", null, "Buds", DeviceKind.Earbuds)]) && roster.All.Single(d => d.Key == "bt:AA").Charging);
+        roster.Set(DeviceSource.Bluetooth, [Bt("AA", 50), Bt("BB", null, "Buds", DeviceKind.Earbuds)]);
         // GATT reads the earbuds Windows has no level for: one entry, the reading's, under the Bluetooth key.
         roster.Set(DeviceSource.Gatt, [new DeviceBattery("bt:BB", "Buds", DeviceKind.Earbuds, DeviceSource.Gatt, 70) { Address = "BB" }]);
         check("Devices: two sources of one device make one entry with the reading", roster.All.Count == 2 && roster.All.Single(d => d.Key == "bt:BB").Percent == 70);
