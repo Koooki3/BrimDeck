@@ -126,7 +126,18 @@ public partial class MainWindow : Window
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
-        _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
+        // A new foreground context closes the panel directly (ApplySettings lays it out collapsed), so SetExpanded never sees the
+        // panel turn from open to closed: the collapsed title is set to scroll its laps again here, as SetExpanded does.
+        _host.ContextChanged += context =>
+        {
+            _context = context;
+            if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true)
+            {
+                if (_expanded) ReplayCompactTitle();
+                _expanded = false;
+            }
+            ApplySettings(true);
+        };
         // The app under the same context changed. Only the app rules' answer can differ, so only a changed answer is
         // re-applied: collapsed, the shape crosses to it with the same animation a context change uses; expanded, it is
         // applied at once, so switching windows does not replay the expand animation. An unchanged answer re-applies
