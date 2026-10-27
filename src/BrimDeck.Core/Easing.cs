@@ -165,14 +165,14 @@ public static class Curves
         return 1 - Math.Exp(-BounceDecay * u) * (Math.Cos(BounceOmega * u) + c * Math.Sin(BounceOmega * u));
     }
 
-    // The indicator's return: the closing curve (Bezier .45, 0, .12, 1: a slow start and a soft landing) until the middle of the
-    // move; from there the surface carries on past the line's size by carry (a fraction of the whole move), at the move's three
+    // The indicator's return: the panel's closing curve (a cubic-bezier; by default .45, 0, .12, 1, a slow start and a soft landing)
+    // until the middle of the move; from there the surface carries on past the line's size by carry (a fraction of the whole move), at the move's three
     // quarters, as a spring that was moving when it arrived does, and comes back to the line's size at the end. The path, its
     // speed and its acceleration are continuous throughout; a carry of 0 is the closing curve alone.
     public const double LineCarryFrom = .5;
-    public static double LineReturn(double x, double carry)
+    public static double LineReturn(double x, double carry, double x1 = .45, double y1 = 0, double x2 = .12, double y2 = 1)
     {
-        double closing = Bezier(.45, 0, .12, 1, x);
+        double closing = Bezier(x1, y1, x2, y2, x);
         if (x <= LineCarryFrom || x >= 1 || carry <= 0) return x >= 1 ? 1 : closing;
         double wave = Math.Sin(Math.PI * (x - LineCarryFrom) / (1 - LineCarryFrom));
         return closing + (1 - closing + carry) * wave * wave * wave;
