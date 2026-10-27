@@ -38,7 +38,7 @@ public sealed class PanelThemeDaylight
 
 public sealed class PanelThemeClock
 {
-    // A ClockStyle name: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel.
+    // A ClockStyle name: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel, rounded.
     public string Style { get; set; } = "";
     // "default" (the theme's clock color), amber, cyan, pink, lime, custom, gradient or cover.
     public string Color { get; set; } = "";
@@ -76,4 +76,33 @@ public sealed class PanelThemeEffects
     // A pixel theme's block texture: squares of the pixel size a little lighter or darker than the surface, at most this opacity
     // (0 to 0.12), as a stone or dirt block is mottled. Without pixel art there are no blocks to mottle, so it is ignored.
     public double? Texture { get; set; }
+    // Quiet pictures drawn into the surface, under the content (PanelThemeDecor). Each value is inherited on its own.
+    public PanelThemeDecor? Decor { get; set; }
+}
+
+// A theme's motifs, drawn into the surface under the content and faint, so they never compete with it:
+//   horizon: a sea below a horizon at "at" (0.3 to 0.9 of the height), the "sea" color laid over the surface there and a thin
+//     "line" of light along the horizon;
+//   caustics: the light a sunlit (or moonlit) sea throws, a net of soft bright lines in "color" (its alpha at most 0.2);
+//   palm: the shadow of a palm frond reaching into the top-right corner of the open panel, above the horizon, in "color" (alpha
+//     at most 0.12).
+// A fully transparent color turns a part off, so a night look can drop a motif the day has.
+// Text is held to its minimums over every color the motifs can lay under it (PanelThemes.DecorStops).
+public sealed class PanelThemeDecor
+{
+    public PanelThemeHorizon? Horizon { get; set; }
+    public PanelThemeMotif? Caustics { get; set; }
+    public PanelThemeMotif? Palm { get; set; }
+}
+
+public sealed class PanelThemeHorizon
+{
+    public double? At { get; set; }
+    public string? Sea { get; set; }
+    public string? Line { get; set; }
+}
+
+public sealed class PanelThemeMotif
+{
+    public string? Color { get; set; }
 }

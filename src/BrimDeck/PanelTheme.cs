@@ -106,11 +106,13 @@ internal static class PanelTheme
         var e = palette.Effects;
         var clock = palette.Clock;
         return string.Join("|", theme.Id, palette.IsNight, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
-            string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}"),
+            string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}") + DecorKey(e.Decor),
             $"{clock?.Style}/{clock?.Color}/{clock?.Custom}/{string.Join(",", clock?.Gradient ?? [])}",
             string.Join(",", ClockColors.Swatches.Select(palette.ClockPreset)), string.Join(";", palette.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops))),
             string.Join(",", palette.Swatches));
     }
+    private static string DecorKey(PanelDecor? decor) => decor is null ? "" : FormattableString.Invariant(
+        $"/{decor.Horizon?.At}/{decor.Horizon?.Sea}/{decor.Horizon?.Line}/{decor.Caustics}/{decor.Palm}");
     private static Dictionary<string, string> Hexes(PanelPalette palette) => palette.Colors.ToDictionary(pair => pair.Key, pair => pair.Value.ToString());
 
     // A theme as the theme page edits it: its file with the unsaved changes made to it, if any.
@@ -194,12 +196,13 @@ internal static class PanelTheme
     public static string WarningDefault => Current.WarningDefault?.ToString() ?? AppPresets.WarningColor;
     public static string CriticalDefault => Current.CriticalDefault?.ToString() ?? AppPresets.CriticalColor;
 
-    // Gives an island the theme's layers over its base color: the gradient, the scan lines or texture, the rim and a pixel
+    // Gives an island the theme's layers over its base color: the gradient, the motifs, the scan lines or texture, the rim and a pixel
     // theme's steps and bevel. The base color is the caller's, as the panel animates it between the surface and the indicator.
     public static void Dress(IslandBorder island, PanelPalette? palette = null, double dpiScale = 1)
     {
         palette ??= Current;
         island.Gradient = SurfaceGradient(palette); island.Pattern = Texture(palette, dpiScale) ?? Scanlines(palette, dpiScale);
+        island.Decor = IslandDecor.For(palette);
         island.RimBrush = RimBrush(palette); island.RimWidth = palette.Effects.RimWidth;
         island.Pixel = palette.Effects.Pixel; island.BevelBrush = BevelBrush(palette);
     }
