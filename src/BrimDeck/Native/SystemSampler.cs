@@ -23,7 +23,7 @@ internal sealed class SystemSampler : IDisposable
     private readonly DispatcherTimer _linger;
     private readonly AutoResetEvent _wake = new(false);
     private Thread? _thread;
-    private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses;
+    private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses, _primePower;
     private volatile int _intervalMilliseconds = 1000;
     // The providers belong to the sampling thread, which creates them: adding the performance counters can take tens of
     // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread.
@@ -107,7 +107,11 @@ internal sealed class SystemSampler : IDisposable
     // page knows early how many lines it needs for them.
     public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false)
     {
+        bool newly = power && !_powerWanted;
         _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power; _batteryWanted = power || battery;
+        // Power asked for while the sampler already runs (the collapsed row's readings kept it going): the counters are read at once and again
+        // after the short priming window, so the first figure comes with the next snapshot and not a second reading later.
+        if (newly && _wanted && _thread is not null) { _primePower = true; _wake.Set(); }
         if (storage && (_storage.Drives == SensorState.Unknown || _driveTemperatures && _storage.Temperatures == SensorState.Unknown)) _storage.Start(_driveTemperatures);
     }
     // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
@@ -138,12 +142,17 @@ internal sealed class SystemSampler : IDisposable
             try
             {
                 if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _wake.WaitOne(); continue; }
-                if (!primed || _primeProcesses)
+                bool primePower = _primePower;
+                _primePower = false;
+                if (!primed || _primeProcesses || primePower)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
-                    // figures cover the short window and not the whole pause.
+                    // figures cover the short window and not the whole pause. Power asked for while the sampler runs is primed the same way:
+                    // one collection now, and the next (the first snapshot) has the two samples a rate needs.
+                    bool primeProcesses = _primeProcesses;
                     _primeProcesses = false;
                     if (!primed) Collect(listProcesses: true);
+                    else if (primePower) Collect(listProcesses: primeProcesses && _listProcesses);
                     else if (_listProcesses) _processes.Sample(Now());
                     primed = true; first = true;
                     _wake.WaitOne(PrimeMilliseconds);
@@ -176,6 +185,7 @@ internal sealed class SystemSampler : IDisposable
     private MonitorSnapshot Collect(bool listProcesses)
     {
         double now = Now();
+        _power!.Prepare(_powerWanted);
         bool pdh = _pdh?.Collect() == true;
         if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; }
         else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)

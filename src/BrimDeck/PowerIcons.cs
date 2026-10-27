@@ -131,6 +131,11 @@ internal static class PowerWarm
 {
     public static void Start(Dispatcher dispatcher) => dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => ThreadPool.QueueUserWorkItem(_ => Run()));
 
+    private static void Prepare(MethodBase method)
+    {
+        if (!method.IsAbstract && !method.ContainsGenericParameters && method.GetMethodBody() is not null) RuntimeHelpers.PrepareMethod(method.MethodHandle);
+    }
+
     private static void Run()
     {
         try
@@ -138,8 +143,7 @@ internal static class PowerWarm
             RuntimeHelpers.RunClassConstructor(typeof(PowerIcons).TypeHandle);
             const BindingFlags All = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
             foreach (var type in new[] { typeof(PowerBlock), typeof(PowerGlyphs), typeof(PowerIcons), typeof(PowerStyle), typeof(PowerText), typeof(PowerResolver), typeof(BatteryModel), typeof(PowerFormat) })
-                foreach (var method in type.GetMethods(All))
-                    if (!method.IsAbstract && !method.ContainsGenericParameters && method.GetMethodBody() is not null) RuntimeHelpers.PrepareMethod(method.MethodHandle);
+                foreach (var method in type.GetMethods(All)) Prepare(method);
             // The words and the figures once, with made-up readings.
             var sample = new PowerSample(20, PowerOrigin.Estimated, PowerSource.Components, [new PowerPart("cpu", "CPU", 12, "RAPL")]);
             var battery = BatteryModel.Build(new BatteryInputs([new BatteryCell("warm", 30_000, 60_000, 66_000, -10_000, false, true)], false, false, PowerMode.Balanced));

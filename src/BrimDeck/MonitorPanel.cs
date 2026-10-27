@@ -75,9 +75,10 @@ public partial class MainWindow
         if (!Settings.ShowsMonitor(EffectiveStyle)) return false;
         return _stripAdmission.Awaits(Settings.CompactReadings, _app.Monitor?.Latest, StripSensors);
     }
-    private PowerOptions PowerBlockFor() => Native.BatteryProvider.SystemHasBattery
-        ? new(PowerStyle.For(MonitorThemeColors.For(Settings)), Settings.DeviceLowPercent, true, Native.BatteryProvider.Quick())
-        : new(PowerStyle.For(MonitorThemeColors.For(Settings)), Settings.DeviceLowPercent, false);
+    // animate: the page is built for the first time, not for a new size, so its power rows come in (PowerOptions.Animate).
+    private PowerOptions PowerBlockFor(bool animate) => Native.BatteryProvider.SystemHasBattery
+        ? new(PowerStyle.For(MonitorThemeColors.For(Settings)), Settings.DeviceLowPercent, true, Native.BatteryProvider.Quick(), animate)
+        : new(PowerStyle.For(MonitorThemeColors.For(Settings)), Settings.DeviceLowPercent, false, default, animate);
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
     private static bool MonitorMotion => Soft.Enabled;
@@ -193,7 +194,7 @@ public partial class MainWindow
         old?.CloseCard();
         _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
-            Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor());
+            Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor(old is null && MonitorMotion && !Resizing));
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // The new page may show the power line where the old one did not, or the other way round: what is read follows.
         if (_monitorShowing && _monitorView.ShowsPower != _powerPage) UpdateMonitorDemand();

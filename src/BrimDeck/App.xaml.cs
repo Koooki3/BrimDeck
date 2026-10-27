@@ -143,6 +143,7 @@ public partial class App : Application
         InitializeHotkeys();
         StartBackgroundUpdates();
         PowerWarm.Start(Dispatcher);
+        WarmSettingsWriter();
         DisplayPower.Install(Dispatcher);
         DisplayPower.Changed += UpdateDeviceDemand;
         _save.Tick += (_, _) => FlushSettings();
@@ -486,8 +487,9 @@ public partial class App : Application
             // A choice saved under an older key is kept under the adapter's key from now on (GpuChoice.Resolve).
             Monitor.GpuKeyUpgraded += (old, key) => { if (Settings.MonitorGpu == old) { Settings.MonitorGpu = key; QueueSave(); } };
         }
-        Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
+        // What is read besides the usage is set before the sampler starts, so its first collection already holds it.
         UpdateMonitorExtras();
+        Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
     }
     // The devices are read in full while any panel shows the devices page or the collapsed battery reading; otherwise, while the
     // low battery notice can show (the dynamic notices are on), the sources only listen (DeviceDemand.Listen); else nothing runs.
@@ -538,6 +540,18 @@ public partial class App : Application
     // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
     // source nor a battery (a desktop with nothing), so such a page does not keep asking.
     private bool PowerKnownToExist => Monitor is null || Monitor.PowerSensor != SensorState.None || Monitor.BatterySensor != SensorState.None || Native.BatteryProvider.SystemHasBattery;
+    // The first save of a session took about 115 ms on the UI thread (the serializer's first use), which landed 400 ms after the first opening
+    // of a page (the last page is saved then) as a stall in its animation. Once the app is idle a pool thread serializes a copy of the
+    // settings once, so the first real save finds the serializer ready.
+    private void WarmSettingsWriter()
+    {
+        var copy = Settings.Copy();
+        Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try { copy.Normalize(); System.Text.Json.JsonSerializer.SerializeToNode(copy); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine(ex); }
+        }));
+    }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
     // The settings are turned into text here, where they live, and written on the thread pool: writing the file (and the virus

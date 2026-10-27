@@ -30,6 +30,16 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
     private NvidiaSmi? _smi;
     public SensorState State => _state;
 
+    // Called before each collection of the query: while power is wanted the Energy Meter counters are in it, so the first collection after the
+    // page opens already holds a sample of them and the next (the first snapshot, 300 ms later) a second: a rate needs two. Taken out again
+    // once it is not wanted.
+    public void Prepare(bool wanted)
+    {
+        if (pdh is null) return;
+        if (wanted && !_added) { _added = true; _available = pdh.Add(EnergyPath) | pdh.Add(MeterPath); }
+        else if (!wanted && _added) { pdh.Remove(EnergyPath); pdh.Remove(MeterPath); _added = false; }
+    }
+
     // gpus: the adapters read this tick (usage tells whether one is awake); discharge: the battery's supply (BatteryModel.Discharge);
     // hasBattery: the machine runs on a battery, so a missing source may only be for the moment.
     public Reading<PowerSample> Sample(bool collected, bool wanted, double now, IReadOnlyList<GpuSample> gpus, Reading<double> discharge, bool hasBattery)
@@ -40,7 +50,8 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
             _smi?.Dispose(); _smi = null; _busyAt.Clear();
             return Reading<PowerSample>.Unavailable(Why.Waiting);
         }
-        if (pdh is not null && !_added) { _added = true; _available = pdh.Add(EnergyPath) | pdh.Add(MeterPath); }
+        // Normally the counters are in the query already (Prepare, before the collection); a caller that did not prepare gets them from here on.
+        Prepare(true);
         Reading<double> system = Reading<double>.Unavailable(""), cpu = system, memory = system;
         if (_available && collected && pdh is not null)
             (system, cpu, memory) = PowerResolver.FromCounters(pdh.Read(EnergyPath), pdh.Read(MeterPath));
