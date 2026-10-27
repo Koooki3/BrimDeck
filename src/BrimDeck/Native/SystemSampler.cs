@@ -34,7 +34,9 @@ internal sealed class SystemSampler : IDisposable
     private readonly GpuTemperatures _gpuTemperatures = new();
     private readonly StorageReader _storage = new();
     // Whether the processor's and the graphics adapter's temperatures are read, the drives, and the drives' temperatures (SetExtras).
-    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted;
+    // _powerWanted: the whole machine's power (the Energy Meter counters, NVIDIA's board power); _batteryWanted: the battery alone, which
+    // the machine's charge reading needs without any of the rest.
+    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted;
     // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
     private PowerProvider? _power;
     private BatteryProvider? _battery;
@@ -103,9 +105,9 @@ internal sealed class SystemSampler : IDisposable
     // with temperatures on, or the collapsed row's temperature); storage, the drives (the page with storage on, or the collapsed
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
     // page knows early how many lines it needs for them.
-    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false)
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false)
     {
-        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power;
+        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power; _batteryWanted = power || battery;
         if (storage && (_storage.Drives == SensorState.Unknown || _driveTemperatures && _storage.Temperatures == SensorState.Unknown)) _storage.Start(_driveTemperatures);
     }
     // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
@@ -196,18 +198,22 @@ internal sealed class SystemSampler : IDisposable
         // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
         Reading<PowerSample> power = default;
         Reading<BatterySample> battery = default;
-        if (_powerWanted)
+        bool powerWanted = _powerWanted, batteryWanted = _batteryWanted;
+        if (batteryWanted)
         {
             // Apart from the rest: a battery or a driver that fails in an unexpected way costs these two readings, never the page's.
             try
             {
                 var (batteryInputs, batterySample) = _battery!.Sample();
                 battery = batterySample;
-                power = _power!.Sample(pdh, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
-                if (power.TryGet(out var drawn))
+                if (powerWanted)
                 {
-                    if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
-                    _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts);
+                    power = _power!.Sample(pdh, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
+                    if (power.TryGet(out var drawn))
+                    {
+                        if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
+                        _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts);
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -216,7 +222,9 @@ internal sealed class SystemSampler : IDisposable
                 power = Reading<PowerSample>.Unavailable(ex.Message); battery = Reading<BatterySample>.Unavailable(ex.Message);
             }
         }
-        else
+        // Power no longer wanted (the page left, the row dropped the reading, the display went off): the counters leave the query, the
+        // NVIDIA helper ends and the history starts over, at this very reading and not after the sampler's pause.
+        if (!powerWanted)
         {
             if (_powerHistory.Count > 0) { _powerHistory.Clear(); _powerStats.Reset(); }
             _power!.Sample(false, false, now, [], default, false);

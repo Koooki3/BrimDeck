@@ -9,7 +9,7 @@ namespace BrimDeck.Core;
 //   2. Battery: the power the battery supplies while the machine runs on it (Windows.Devices.Power.Battery's charge rate), which is
 //      all that the machine draws, display and fans included. Measured, but only on battery.
 //   3. Components: the processor package (RAPL, through the Energy Meter counters), memory where it has a meter of its own, and each
-//      graphics adapter that reports its board power (NVIDIA through NVML). A sum of what can be read: the display, drives, fans,
+//      graphics adapter that reports its board power (NVIDIA through the driver's nvidia-smi). A sum of what can be read: the display, drives, fans,
 //      other chips and the power supply's losses are not in it, so it is labelled an estimate and never shown as a measurement.
 //   4. None: the reading says why there is none, and the page shows a dash with that reason.
 public enum PowerSource { SystemMeter, Battery, Components }
@@ -61,7 +61,7 @@ public static class PowerResolver
         if (Value(inputs.Memory) is { } memory && memory > 0) parts.Add(new PowerPart("memory", Loc.T("内存", "Memory"), memory, Loc.T("能量计（RAPL）", "Energy Meter (RAPL)")));
         foreach (var gpu in inputs.Gpus)
         {
-            if (Value(gpu.Watts) is { } watts) parts.Add(new PowerPart("gpu", gpu.Name.Length > 0 ? gpu.Name : "GPU", watts, "NVML"));
+            if (Value(gpu.Watts) is { } watts) parts.Add(new PowerPart("gpu", gpu.Name.Length > 0 ? gpu.Name : "GPU", watts, "nvidia-smi"));
             else if (!gpu.Watts.HasValue && gpu.Watts.Reason.Length > 0) missing.Add((gpu.Name.Length > 0 ? gpu.Name : "GPU") + Loc.T("：", ": ") + gpu.Watts.Reason);
         }
         PowerSample Make(double watts, PowerOrigin origin, PowerSource source) => new(watts, origin, source, parts) { Missing = missing };
@@ -72,6 +72,20 @@ public static class PowerResolver
         string reason = inputs.NoSourceReason.Length > 0 ? inputs.NoSourceReason
             : Loc.T("这台电脑没有提供整机能量计、电池放电读数，也读不到 CPU 或显卡的功率", "This machine provides no whole-system meter or battery discharge reading, and no processor or graphics power can be read");
         return Reading<PowerSample>.Unavailable(reason);
+    }
+
+    // The reading of an adapter among the driver's lines (name, watts), the driver's order kept: the nth of the lines that name this adapter,
+    // so two identical cards are two readings and not one counted twice; with one line and one adapter, that line.
+    public static Reading<double> PickGpu(IReadOnlyList<(string Name, double? Watts)> lines, string adapter, int ordinal)
+    {
+        var found = lines.Where(line => line.Name.Equals(adapter, StringComparison.OrdinalIgnoreCase) || adapter.Contains(line.Name, StringComparison.OrdinalIgnoreCase)
+            || line.Name.Contains(adapter, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (found.Count == 0 && lines.Count == 1) found = [.. lines];
+        if (found.Count == 0) return Reading<double>.Unavailable(Loc.T("驱动没有列出这块显卡", "the driver does not list this adapter"));
+        // An adapter beyond the lines (one the driver does not list twice) has none of its own.
+        if (ordinal >= found.Count && found.Count > 1) return Reading<double>.Unavailable(Loc.T("驱动没有列出这块显卡", "the driver does not list this adapter"));
+        var line = found[Math.Min(ordinal, found.Count - 1)];
+        return line.Watts is { } watts && Plausible(watts) ? watts : Reading<double>.Unavailable(Loc.T("驱动没有报告功率", "the driver reports no power"));
     }
 
     // Where a figure comes from, in the words the page shows beside it.

@@ -33,7 +33,7 @@ internal static partial class LiquidPages
 
     private static List<PowerScene> PowerScenes(MonitorSnapshot basis, bool sizes)
     {
-        var parts = new PowerPart[] { new("cpu", "CPU", 27.1, "能量计（RAPL）"), new("gpu", "NVIDIA GeForce RTX 4060 Laptop GPU", 15.3, "NVML") };
+        var parts = new PowerPart[] { new("cpu", "CPU", 27.1, "能量计（RAPL）"), new("gpu", "NVIDIA GeForce RTX 4060 Laptop GPU", 15.3, "nvidia-smi") };
         var estimate = new PowerSample(42.4, PowerOrigin.Estimated, PowerSource.Components, parts);
         var discharge = new PowerSample(23.4, PowerOrigin.Measured, PowerSource.Battery, parts);
         BatterySample B(double remaining, double rate, bool ac, bool charging, bool saver = false, PowerMode mode = PowerMode.Balanced) => BatteryModel.Build(new BatteryInputs(
@@ -169,31 +169,62 @@ internal static partial class LiquidPages
         return 0;
     }
 
-    // The memory each source costs once loaded (private bytes after a collection), one after another in a fresh process: the battery's
-    // WinRT reads, the Energy Meter counters, NVIDIA's library. --power-memory
+    // The memory of the power readings in the three states that matter, in a test process of its own (nothing of the user's is touched): power
+    // off; power on with an NVIDIA adapter at work (the helper running); power off again, and after the adapter has gone idle. Private bytes and
+    // working set of this process, and of the helper (nvidia-smi.exe) while it runs. --power-memory
     public static int RunPowerMemory()
     {
         var process = System.Diagnostics.Process.GetCurrentProcess();
-        double Mb() { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); process.Refresh(); return process.PrivateMemorySize64 / 1048576.0; }
-        double start = Mb();
-        Console.WriteLine($"start                          private {start:0.0} MB");
-        var battery = new BatteryProvider(); battery.Sample(); battery.Sample();
-        double afterBattery = Mb();
-        Console.WriteLine($"battery (WinRT) first read     private {afterBattery:0.0} MB (+{afterBattery - start:0.0})");
+        (double Private, double Working) Own() { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); process.Refresh(); return (process.PrivateMemorySize64 / 1048576.0, process.WorkingSet64 / 1048576.0); }
+        (int Count, double Private, double Working) Helper()
+        {
+            double p = 0, w = 0; int n = 0;
+            foreach (var other in System.Diagnostics.Process.GetProcessesByName("nvidia-smi"))
+            {
+                using (other) { try { n++; p += other.PrivateMemorySize64 / 1048576.0; w += other.WorkingSet64 / 1048576.0; } catch (InvalidOperationException) { } }
+            }
+            return (n, p, w);
+        }
+        void Report(string state)
+        {
+            var own = Own(); var helper = Helper();
+            Console.WriteLine($"{state,-52} BrimDeck private {own.Private,6:0.0}  working {own.Working,6:0.0}   helper x{helper.Count}: private {helper.Private,5:0.0}  working {helper.Working,5:0.0}");
+        }
         using var pdh = new PdhQuery();
         pdh.Add(@"\Processor Information(_Total)\% Processor Utility");
-        double beforeCounters = Mb();
+        var battery = new BatteryProvider(); battery.Sample();
         using var power = new PowerProvider(pdh);
-        power.Sample(pdh.Collect(), true, 1, [], default, true); pdh.Collect(); power.Sample(pdh.Collect(), true, 2, [], default, true);
-        double afterCounters = Mb();
-        Console.WriteLine($"Energy Meter counters          private {afterCounters:0.0} MB (+{afterCounters - beforeCounters:0.0})");
-        var gpus = new List<GpuSample> { new(.5, Reading<ulong>.Unavailable("")) { Name = "NVIDIA GeForce RTX 4060 Laptop GPU" } };
-        power.Sample(pdh.Collect(), true, 3, gpus, default, true);
-        double afterNvml = Mb();
-        Console.WriteLine($"NVIDIA library loaded          private {afterNvml:0.0} MB (+{afterNvml - afterCounters:0.0})");
-        power.Sample(pdh.Collect(), false, 4, [], default, true);
-        double released = Mb();
-        Console.WriteLine($"power no longer wanted         private {released:0.0} MB ({released - afterNvml:+0.0;-0.0})");
+        var busy = new List<GpuSample> { new(.5, Reading<ulong>.Unavailable("")) { Name = "NVIDIA GeForce RTX 4060 Laptop GPU" } };
+        var idle = new List<GpuSample> { new(0, Reading<ulong>.Unavailable("")) { Name = "NVIDIA GeForce RTX 4060 Laptop GPU" } };
+        double clock = 0;
+        void Tick(bool wanted, List<GpuSample> gpus, int seconds)
+        {
+            for (int i = 0; i < seconds; i++) { clock += 1; power.Sample(pdh.Collect(), wanted, clock, gpus, default, true); Thread.Sleep(1000); }
+        }
+        // Everything the process loads once is loaded first (WinRT, counters, the first helper), so each state shows what it adds.
+        Tick(true, busy, 4); Tick(false, busy, 2); Thread.Sleep(1500);
+        Report("1 power off (nothing running)");
+        Tick(true, idle, 4);
+        Report("2 power on, the NVIDIA adapter idle (helper not started)");
+        Tick(true, busy, 5);
+        Report("3 power on, the NVIDIA adapter at work (helper running)");
+        Tick(true, idle, 12);
+        Report("4 the adapter idle for 12 s (helper ended by itself)");
+        Tick(true, busy, 4);
+        Report("5 at work again (helper started again)");
+        Tick(false, busy, 1); Thread.Sleep(500);
+        Report("6 power no longer wanted (leaving the page)");
+        return 0;
+    }
+
+    // The helper must not outlive this process: it starts nvidia-smi, reads it, and then ends abruptly, as a crash would. --smi-crash
+    public static int RunSmiCrash()
+    {
+        var smi = new NvidiaSmi();
+        Thread.Sleep(2500);
+        Console.WriteLine("reading: " + (smi.Read("NVIDIA GeForce RTX 4060 Laptop GPU", 0).TryGet(out var w) ? w.ToString("0.0") + " W" : "none") + "; ending without cleaning up");
+        Console.Out.Flush();
+        Environment.FailFast("smi-crash test");
         return 0;
     }
 }

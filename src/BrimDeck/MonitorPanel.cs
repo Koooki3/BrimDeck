@@ -17,7 +17,7 @@ public partial class MainWindow
     private readonly StripPresence _stripPresence = new();
     // When the temperatures and the drives join the collapsed row: only once their first figures arrive (StripAdmission).
     private readonly StripAdmission _stripAdmission = new();
-    private bool _monitorShowing, _monitorShown, _stripShowing, _monitorFade;
+    private bool _monitorShowing, _monitorShown, _stripShowing, _monitorFade, _powerPage;
 
     private void InitializeMonitor()
     {
@@ -47,7 +47,10 @@ public partial class MainWindow
             _monitorView?.CloseCard();
         }
         _monitorShown = shown;
-        _app.PresentMonitor(this, page, strip);
+        // The power is read for a page that shows its line (a page too small for it, or with the setting off, reads none of it).
+        bool power = page && Settings.MonitorPower && _monitorView?.ShowsPower == true;
+        _powerPage = power;
+        _app.PresentMonitor(this, page, strip, power);
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
@@ -184,6 +187,8 @@ public partial class MainWindow
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
             Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor());
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
+        // The new page may show the power line where the old one did not, or the other way round: what is read follows.
+        if (_monitorShowing && _monitorView.ShowsPower != _powerPage) UpdateMonitorDemand();
         // A drag across a layout step (and the spring settling after it) swaps at once: the page follows the pointer, and a
         // crossfade there laid both layouts over each other for most of its length (live check X-02).
         if (old is not null) MonitorCrossfade.Swap(MonitorContent, _monitorView, old, MonitorMotion && !Resizing);

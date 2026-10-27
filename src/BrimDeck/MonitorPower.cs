@@ -51,7 +51,14 @@ internal sealed class PowerBlock : FrameworkElement
         _top = _history.Count == 0 ? 10 : Math.Max(10, _history.Max() * 1.15);
         bool moving = _fill.Set(_battery.TryGet(out var sample) ? sample.Percent / 100 : 0, motion);
         ToolTip = Describe();
-        _spoken = Spoken();
+        string spoken = Spoken();
+        if (spoken != _spoken)
+        {
+            string old = _spoken; _spoken = spoken;
+            // A screen reader hears the new reading: the automation name changed (it is asked for the name only on focus otherwise).
+            if (AutomationPeer.ListenerExists(AutomationEvents.PropertyChanged) && UIElementAutomationPeer.FromElement(this) is { } peer)
+                peer.RaisePropertyChangedEvent(System.Windows.Automation.AutomationElementIdentifiers.NameProperty, old, spoken);
+        }
         if (moving) Motion.Start(this, now => { InvalidateVisual(); return _fill.Moving(now); }); else InvalidateVisual();
     }
 

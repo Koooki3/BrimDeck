@@ -34,7 +34,7 @@ static class PowerTests
         var desktop = PowerResolver.Resolve(new PowerInputs { Cpu = W(42.5), Gpus = [new GpuPowerInput("NVIDIA GeForce RTX 4070", W(118.2))] });
         check("Power: a desktop sums the processor and the graphics board, marked an estimate",
             desktop.TryGet(out var sum) && Math.Abs(sum.Watts - 160.7) < 1e-9 && sum.Estimated && sum.Source == PowerSource.Components && sum.Parts.Count == 2);
-        check("Power: the estimate names its parts and where each is read", sum!.Parts[0].Name == "CPU" && sum.Parts[0].Source.Contains("RAPL") && sum.Parts[1].Source == "NVML");
+        check("Power: the estimate names its parts and where each is read", sum!.Parts[0].Name == "CPU" && sum.Parts[0].Source.Contains("RAPL") && sum.Parts[1].Source == "nvidia-smi");
         check("Power: an estimate is labelled 估算, a measurement 实测", PowerResolver.OriginName(sum) == "估算" && PowerResolver.SourceName(sum) == "部件合计");
 
         // A desktop with nothing to read: unavailable with a reason, never a zero.
@@ -69,6 +69,15 @@ static class PowerTests
         // Memory from its own meter is added; a zero memory meter is left out.
         check("Power: memory with its own meter is added, a zero one is not", PowerResolver.Resolve(new PowerInputs { Cpu = W(10), Memory = W(3) }).OrDefault is { Watts: 13 }
             && PowerResolver.Resolve(new PowerInputs { Cpu = W(10), Memory = W(0) }).OrDefault is { Watts: 10 } z && z.Parts.Count == 1);
+
+        // Two identical cards are two readings, each its own; one the driver does not list twice has none of its own.
+        (string, double?)[] twins = [("NVIDIA RTX 4090", 210.5), ("NVIDIA RTX 4090", 198.2)];
+        check("Power: identical adapters are read by their order, not one counted twice", PowerResolver.PickGpu(twins, "NVIDIA RTX 4090", 0).OrDefault == 210.5 && PowerResolver.PickGpu(twins, "NVIDIA RTX 4090", 1).OrDefault == 198.2
+            && !PowerResolver.PickGpu(twins, "NVIDIA RTX 4090", 2).HasValue);
+        (string, double?)[] mixed = [("NVIDIA GeForce RTX 4060 Laptop GPU", 14.5), ("NVIDIA T400", null)];
+        check("Power: an adapter is found by its name, a figure that is not a number is none", PowerResolver.PickGpu(mixed, "NVIDIA GeForce RTX 4060 Laptop GPU", 0).OrDefault == 14.5 && !PowerResolver.PickGpu(mixed, "NVIDIA T400", 0).HasValue
+            && !PowerResolver.PickGpu(mixed, "NVIDIA RTX A2000", 0).HasValue && PowerResolver.PickGpu([("NVIDIA GPU", 9.0)], "NVIDIA RTX 3050 Laptop", 0).OrDefault == 9.0);
+        check("Power: an absurd driver figure is none", !PowerResolver.PickGpu([("NVIDIA X", 99999.0)], "NVIDIA X", 0).HasValue);
 
         var stats = new PowerStats();
         foreach (double watts in new[] { 20.0, 60, 40, double.NaN, -3 }) stats.Add(watts);

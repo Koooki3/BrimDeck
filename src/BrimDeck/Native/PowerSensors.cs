@@ -10,8 +10,7 @@ namespace BrimDeck.Native;
 
 // What Windows reports about power to a normal user: nothing here needs administrator rights or installs a driver. Processor power
 // comes from the Energy Meter counters (Windows exposes the processor's RAPL registers through its own Energy Meter Interface
-// driver); a graphics adapter's board power from NVIDIA's management library, which the graphics driver ships in the system folder
-// (an adapter of another make reports none yet); the battery from Windows.Devices.Power; the power mode from the power API. Each
+// driver); a graphics adapter's board power from the driver's nvidia-smi (NvidiaSmi; an adapter of another make reports none yet); the battery from Windows.Devices.Power; the power mode from the power API. Each
 // reader belongs to the sampling thread, as the providers in SystemSampler do; the sensor states are read from the UI thread.
 
 // The whole machine's power (PowerResolver chooses between the sources, PowerInputs hands them over). The counters are in the query
@@ -28,7 +27,7 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
     private bool _everFound;
     private volatile SensorState _state = SensorState.Unknown;
     private readonly Dictionary<string, double> _busyAt = new(StringComparer.OrdinalIgnoreCase);
-    private NvmlPower? _nvml;
+    private NvidiaSmi? _smi;
     public SensorState State => _state;
 
     // gpus: the adapters read this tick (usage tells whether one is awake); discharge: the battery's supply (BatteryModel.Discharge);
@@ -38,7 +37,7 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
         if (!wanted)
         {
             if (_added && pdh is not null) { pdh.Remove(EnergyPath); pdh.Remove(MeterPath); _added = false; }
-            _nvml?.Dispose(); _nvml = null; _busyAt.Clear();
+            _smi?.Dispose(); _smi = null; _busyAt.Clear();
             return Reading<PowerSample>.Unavailable(Why.Waiting);
         }
         if (pdh is not null && !_added) { _added = true; _available = pdh.Add(EnergyPath) | pdh.Add(MeterPath); }
@@ -59,94 +58,128 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
     private List<GpuPowerInput> ReadGpus(IReadOnlyList<GpuSample> gpus, double now)
     {
         var read = new List<GpuPowerInput>();
+        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var gpu in gpus)
         {
             string name = gpu.Name ?? "GPU";
             // Only NVIDIA's driver is asked, and only an adapter that is working.
             if (!name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)) continue;
-            // Idle counts as under a few percent (the desktop's own drawing): NVIDIA's library costs about 20 MB once loaded, and loading it for
-            // an adapter that only draws the desktop is not worth it.
-            if (gpu.Usage >= Busy) _busyAt[name] = now;
-            if (!_busyAt.TryGetValue(name, out var last) || now - last > Awake)
+            // Identical cards are told apart by their order (the nth of this name).
+            int ordinal = seen.GetValueOrDefault(name); seen[name] = ordinal + 1;
+            string key = name + "#" + ordinal;
+            // Idle counts as under a few percent (the desktop's own drawing): the helper takes about 25 MB while it runs, and starting it
+            // for an adapter that only draws the desktop is not worth it.
+            if (gpu.Usage >= Busy) _busyAt[key] = now;
+            if (!_busyAt.TryGetValue(key, out var last) || now - last > Awake)
             {
-                // Idle for good: the library (about 20 MB) goes until the adapter works again.
-                if (_nvml is not null && _busyAt.Values.All(at => now - at > Awake)) { _nvml.Dispose(); _nvml = null; }
                 read.Add(new GpuPowerInput(name, Reading<double>.Unavailable(Loc.T("空闲，未读取以免唤醒休眠的显卡", "idle; not read so a sleeping adapter stays asleep"))));
                 continue;
             }
-            _nvml ??= new NvmlPower();
-            read.Add(new GpuPowerInput(name, _nvml.Read(name)));
+            _smi ??= new NvidiaSmi();
+            read.Add(new GpuPowerInput(name, _smi.Read(name, ordinal)));
         }
+        // Every adapter idle for good: the helper ends, and its memory goes with it.
+        if (_smi is not null && _busyAt.Values.All(at => now - at > Awake)) { _smi.Dispose(); _smi = null; }
         return read;
     }
 
-    public void Dispose() { _nvml?.Dispose(); _nvml = null; }
+    public void Dispose() { _smi?.Dispose(); _smi = null; }
 }
 
-// NVIDIA's management library (nvml.dll), loaded from the system folder or NVIDIA's own program folder (both writable by
-// administrators only), initialised when first asked and closed when power is no longer wanted. Board power is read in milliwatts.
-internal sealed class NvmlPower : IDisposable
+// NVIDIA's board power, read by the driver's own nvidia-smi.exe (in the system folder) running in loop mode in a process of its own.
+// Its management library cannot be taken out of this process once loaded: nvml.dll and the driver's copy of it pin themselves, so
+// closing it returned none of its 20 MB (measured, see PowerPages.RunNvmlProbe). In a helper the memory leaves with the process: it is
+// started when an adapter works and ended once it has been idle for a while or power is no longer wanted. A job object ends it with
+// this process, so a crash leaves none behind. One line a second, "name, watts", for every NVIDIA adapter in the driver's order.
+internal sealed class NvidiaSmi : IDisposable
 {
-    private delegate int Init();
-    private delegate int Shutdown();
-    private delegate int Count(out uint count);
-    private delegate int Handle(uint index, out IntPtr device);
-    private delegate int Name(IntPtr device, byte[] name, uint length);
-    private delegate int Power(IntPtr device, out uint milliwatts);
-    private IntPtr _library;
-    private Shutdown? _shutdown;
-    private Power? _power;
-    private readonly List<(IntPtr Device, string Name)> _devices = [];
-    private string? _failure;
+    private readonly Process? _process;
+    private readonly IntPtr _job;
+    private readonly object _lock = new();
+    private List<(string Name, double? Watts)> _ready = [], _batch = [];
+    private long _lastLine, _readyAt;
+    private readonly string? _failure;
 
-    public NvmlPower()
+    public NvidiaSmi()
     {
+        string path = Path.Combine(Environment.SystemDirectory, "nvidia-smi.exe");
+        if (!File.Exists(path)) { _failure = Loc.T("驱动没有提供 nvidia-smi", "the driver provides no nvidia-smi"); return; }
         try
         {
-            foreach (var path in new[] { Path.Combine(Environment.SystemDirectory, "nvml.dll"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "NVIDIA Corporation", "NVSMI", "nvml.dll") })
-                if (File.Exists(path) && NativeLibrary.TryLoad(path, out _library)) break;
-            if (_library == IntPtr.Zero) { _failure = Loc.T("驱动没有提供 NVIDIA 管理库", "the driver provides no NVIDIA management library"); return; }
-            T Export<T>(string name) where T : Delegate => Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(_library, name));
-            if (Export<Init>("nvmlInit_v2")() != 0) { _failure = Loc.T("NVIDIA 管理库初始化失败", "the NVIDIA management library did not start"); return; }
-            _shutdown = Export<Shutdown>("nvmlShutdown");
-            _power = Export<Power>("nvmlDeviceGetPowerUsage");
-            var count = Export<Count>("nvmlDeviceGetCount_v2"); var handle = Export<Handle>("nvmlDeviceGetHandleByIndex_v2"); var name = Export<Name>("nvmlDeviceGetName");
-            if (count(out uint devices) != 0) return;
-            for (uint i = 0; i < devices; i++)
+            var start = new ProcessStartInfo(path, "--query-gpu=name,power.draw --format=csv,noheader,nounits -l 1")
             {
-                if (handle(i, out var device) != 0) continue;
-                var text = new byte[96];
-                _devices.Add((device, name(device, text, (uint)text.Length) == 0 ? Encoding.ASCII.GetString(text).TrimEnd('\0') : ""));
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8, WorkingDirectory = Environment.SystemDirectory
+            };
+            _process = Process.Start(start);
+            if (_process is null) { _failure = Loc.T("无法启动 nvidia-smi", "nvidia-smi did not start"); return; }
+            _job = CreateJobObjectW(IntPtr.Zero, null);
+            if (_job != IntPtr.Zero)
+            {
+                // JOBOBJECT_EXTENDED_LIMIT_INFORMATION: LimitFlags (KILL_ON_JOB_CLOSE, 0x2000) at offset 16 of the basic information.
+                int size = IntPtr.Size == 8 ? 144 : 112;
+                var info = Marshal.AllocHGlobal(size);
+                try
+                {
+                    for (int i = 0; i < size; i += 8) Marshal.WriteInt64(info, i, 0);
+                    Marshal.WriteInt32(info, 16, 0x2000);
+                    if (SetInformationJobObject(_job, 9, info, (uint)size)) AssignProcessToJobObject(_job, _process.Handle);
+                }
+                finally { Marshal.FreeHGlobal(info); }
             }
+            _process.OutputDataReceived += (_, e) => { if (e.Data is { Length: > 0 } line) Line(line); };
+            _process.BeginOutputReadLine();
         }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or ArgumentException or InvalidOperationException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
-            Debug.WriteLine(ex); _failure = Loc.T("NVIDIA 管理库不可用", "the NVIDIA management library is unavailable");
+            Debug.WriteLine(ex); _failure = Loc.T("无法启动 nvidia-smi", "nvidia-smi did not start");
         }
     }
 
-    // The adapter by its name (DXGI and NVML name it alike); with one device and one NVIDIA adapter, that device.
-    public Reading<double> Read(string adapter)
+    // One line, on a thread of the pool: the adapters' lines of one second arrive together; a pause starts the next batch.
+    private void Line(string line)
+    {
+        int comma = line.LastIndexOf(',');
+        if (comma <= 0) return;
+        string name = line[..comma].Trim();
+        double? watts = double.TryParse(line[(comma + 1)..].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : null;
+        long now = Stopwatch.GetTimestamp();
+        lock (_lock)
+        {
+            if (_batch.Count > 0 && (now - _lastLine) * 1000 / Stopwatch.Frequency > 400) { _ready = _batch; _readyAt = _lastLine; _batch = []; }
+            _batch.Add((name, watts)); _lastLine = now;
+            // Until the first batch is complete the lines so far stand in for it.
+            if (_ready.Count == 0 || _readyAt == 0) { _ready = [.. _batch]; _readyAt = now; }
+        }
+    }
+
+    // The nth adapter of this name in the driver's order (identical cards are told apart by it); the adapter's name is DXGI's, the
+    // driver's alike.
+    public Reading<double> Read(string adapter, int ordinal)
     {
         if (_failure is not null) return Reading<double>.Unavailable(_failure);
-        var found = _devices.Where(device => device.Name.Length > 0 && (adapter.Contains(device.Name, StringComparison.OrdinalIgnoreCase) || device.Name.Contains(adapter, StringComparison.OrdinalIgnoreCase))).ToList();
-        if (found.Count == 0 && _devices.Count == 1) found = _devices;
-        if (found.Count == 0 || _power is null) return Reading<double>.Unavailable(Loc.T("NVIDIA 管理库没有这块显卡", "the NVIDIA library does not list this adapter"));
-        try
-        {
-            if (_power(found[0].Device, out uint milliwatts) == 0) return milliwatts / 1000.0;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Debug.WriteLine(ex); }
-        return Reading<double>.Unavailable(Loc.T("驱动没有报告功率", "the driver reports no power"));
+        if (_process is { HasExited: true }) return Reading<double>.Unavailable(Loc.T("nvidia-smi 已退出", "nvidia-smi has stopped"));
+        List<(string Name, double? Watts)> ready; long at;
+        lock (_lock) { ready = _ready; at = _readyAt; }
+        if (ready.Count == 0) return Reading<double>.Unavailable(Loc.T("等待 nvidia-smi 的第一次读数", "waiting for nvidia-smi's first reading"));
+        if ((Stopwatch.GetTimestamp() - at) * 1000 / Stopwatch.Frequency > 4000) return Reading<double>.Unavailable(Loc.T("nvidia-smi 没有新读数", "nvidia-smi gives no new reading"));
+        return PowerResolver.PickGpu(ready, adapter, ordinal);
     }
 
     public void Dispose()
     {
-        try { _shutdown?.Invoke(); } catch (Exception ex) when (ex is not OutOfMemoryException) { Debug.WriteLine(ex); }
-        if (_library != IntPtr.Zero) { NativeLibrary.Free(_library); _library = IntPtr.Zero; }
-        _devices.Clear(); _power = null; _shutdown = null;
+        try
+        {
+            if (_process is { HasExited: false }) { _process.Kill(); _process.WaitForExit(1000); }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { Debug.WriteLine(ex); }
+        _process?.Dispose();
+        if (_job != IntPtr.Zero) CloseHandle(_job);
     }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr CreateJobObjectW(IntPtr attributes, string? name);
+    [DllImport("kernel32.dll")] private static extern bool SetInformationJobObject(IntPtr job, int informationClass, IntPtr information, uint length);
+    [DllImport("kernel32.dll")] private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
 }
 
 // The machine's own batteries: each one's report, the mains connection, Battery saver and the power mode (BatteryInputs). The

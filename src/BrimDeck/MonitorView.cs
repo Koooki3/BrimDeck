@@ -186,6 +186,8 @@ internal sealed class MonitorView : Grid
     }
 
     public bool CardOpen => _card is not null;
+    // Whether the page has the power line (the layout had room for it): the power is read only then.
+    public bool ShowsPower => _power is not null;
     // The widest a graphics engine's column grows on the page with the GPU large: no narrower than the graph's room needs, so the
     // few kinds of engine an adapter has always fill it.
     public const double EngineColumn = 1000;

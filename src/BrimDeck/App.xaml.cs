@@ -43,6 +43,8 @@ public partial class App : Application
     internal SystemSampler? Monitor { get; private set; }
     internal event Action<MonitorSnapshot>? MonitorUpdated;
     private readonly HashSet<MainWindow> _presentingMonitor = [], _stripMonitor = [];
+    // The panels whose open monitor page shows the power line (PresentMonitor): the power is read for those, and for a row that chose it.
+    private readonly HashSet<MainWindow> _presentingPower = [];
     // The wireless devices' batteries, shared by every panel; created when first wanted (UpdateDeviceDemand).
     internal DeviceBatteries? Devices { get; private set; }
     internal event Action? DevicesChanged;
@@ -465,9 +467,10 @@ public partial class App : Application
     }
     // The system is read while any panel shows the monitor page open (and briefly after; see SystemSampler) or shows readings in
     // its collapsed row. Processes are listed only for an open page.
-    internal void PresentMonitor(MainWindow deck, bool page, bool strip)
+    internal void PresentMonitor(MainWindow deck, bool page, bool strip, bool power = false)
     {
         if (page) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
+        if (power) _presentingPower.Add(deck); else _presentingPower.Remove(deck);
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
         bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
         if (Exiting || Monitor is null && !wanted) return;
@@ -523,7 +526,10 @@ public partial class App : Application
         Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
             page && Settings.MonitorStorage || stripDrives,
             page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage),
-            page && Settings.MonitorPower && PowerKnownToExist || (shown & (CompactMonitorItems.Power | CompactMonitorItems.Charge)) != 0);
+            // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
+            // alone also for the row's charge reading.
+            _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
+            (shown & CompactMonitorItems.Charge) != 0);
     }
     // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
     // source nor a battery (a desktop with nothing), so such a page does not keep asking.
