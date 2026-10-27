@@ -6,17 +6,14 @@ namespace BrimDeck;
 
 // The system readings in the collapsed notch or capsule, after ftop's strip and corner sizes: the core columns small, CPU,
 // memory and GPU each as a dial with its letter inside, with its figure after it or alone (narrower), download and upload, and,
-// when chosen, the system drive's space with a drive and the temperature with a thermometer, in the order and the colors set in the settings' table (CompactReading). It offers each reading's widest width (Candidates) and
-// the collapsed row admits the readings that fit whole (Admit, CompactMusicLayout); on its own it shows what fits the width it
-// gets (CompactMonitor.Fit). Either way it never cuts through a figure.
-// Each reading takes the room its figure needs, with every digit as wide as the widest one, so figures of one length take one
-// width; a wider figure widens it at once and a narrower one gives the room back only after a while (HeldWidth), so a busy
-// rate does not push its neighbours about every second; the change is taken at once, not eased (StripPresence.Resize). In the row, the readings stand the row's own gap apart
-// (CompactSpacing places them as parts of the row, Place). It draws itself once per reading; the collapsed row stays still
-// between readings. When the row narrows or widens (a drag on its end, the lyric beside it changing), a reading that no longer
-// fits fades and shrinks out of its place while the others slide together, and one that fits again comes back the same way.
-// The panel keeps those transitions and the readings' widths (StripPresence) across rebuilds of the row, which happen on every
-// change of its width.
+// when chosen, the system drive's space with a drive and the temperature with a thermometer, in the order and the colors set in
+// the settings' table (CompactReading). It asks for the width of everything chosen (PreferredWidth); when its region in the row
+// is narrower, the row scrolls it through a window of whole readings (ReadingsCarousel, CompactSpacing.Window). Each reading
+// keeps the width of the widest figure it can show (every digit as wide as the widest one), so the window and the readings in
+// it never move with the figures, and two readings stand the row's gap apart (Gap). On its own it shows what fits the width it
+// gets (CompactMonitor.Fit), so it never cuts through a figure. It draws itself once per reading; the collapsed row stays still
+// between readings. A reading that joins once its first figures arrive (StripAdmission) fades into its place while the others
+// slide aside; the panel keeps those transitions (StripPresence) across rebuilds of the row.
 internal sealed class MonitorStrip : FrameworkElement
 {
     private readonly StripPresence _presence;
@@ -25,16 +22,12 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly CompactMonitorItems[] _order;
     private readonly bool _centered;
     private readonly StripColors _colors;
-    private readonly double _scale, _font, _dial, _gap, _row, _inner, _arrow, _stroke;
+    private readonly double _scale, _font, _dial, _row, _inner, _arrow, _stroke;
+    private double _gap;
     private MonitorSnapshot? _snapshot;
     // The lowest battery among the devices shown (MainWindow.LowestBattery), for the battery reading.
     private BatteryReading? _battery;
-    // Where the row placed each reading that shows, from the strip's left, in _order; null while the strip places them itself.
-    private double[]? _placed;
-    // How present the row placed each of them, which a reading is drawn at (less than its own while the row is short).
-    private double[]? _shares;
-
-    // dpi is kept in the signature for the callers; the row rounds the readings' places itself (CompactRow).
+    // dpi is kept in the signature for the callers.
     // unavailable: readings left out (StripAdmission.Hidden): the temperature and the system drive until their first figures, and
     // for good on a machine without the sensor, so the row never shows a dash for them.
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi = 1,
@@ -48,8 +41,8 @@ internal sealed class MonitorStrip : FrameworkElement
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
         // Each ring is a dial carrying its letter, with its figure after it or alone.
         _dial = Math.Max(4, CompactMusicLayout.Whole(16 * _scale));
-        // The row's own gap (CompactMusicLayout.Gap), so the readings stand as far apart as every other part.
-        _gap = CompactMusicLayout.Whole(8 * _scale);
+        // The row's own gap (CompactMusicLayout.Gap), so the readings stand as far apart as every other part; the row may widen it.
+        _gap = CompactMusicLayout.Gap(_scale);
         // The space between a reading's mark (dial or arrow) and its figure, from ink to ink.
         _inner = Math.Max(1, CompactMusicLayout.Whole(4 * _scale));
         _arrow = Math.Round(9 * _scale); _stroke = Math.Max(1, 1.4 * _scale);
@@ -58,7 +51,6 @@ internal sealed class MonitorStrip : FrameworkElement
         IsHitTestVisible = false;
         // A reading fading out of a narrow row stays within it, off the lyric or the rings beside it.
         ClipToBounds = true;
-        _presence.Measure((_values, _scale), Shown, item => FigureWidth(item, Figure(item, null)), false, false);
     }
 
     // The arrows' ink lies between 3.8 and 12.2 of their 16-unit box, widened by half the stroke on each side.
@@ -102,8 +94,6 @@ internal sealed class MonitorStrip : FrameworkElement
     };
     // The widest each reading gets, so the row's choice of readings never changes with the figures.
     private double ItemWidth(CompactMonitorItems item) => FigureWidth(item, null);
-    // The width it takes now.
-    private double LiveWidth(CompactMonitorItems item, double now) => _presence.Width(item, now) ?? ItemWidth(item);
     private double ColumnsWidth(int cores) => Math.Min(Math.Round(56 * _scale), cores * Math.Max(1.5, 2 * _scale) + (cores - 1) * Math.Max(.5, _scale));
 
     private static string GaugeFigure(double? share) => share is { } v ? MonitorFormat.Percent(v) + "%" : "—";
@@ -125,90 +115,43 @@ internal sealed class MonitorStrip : FrameworkElement
     private static string TemperatureFigure(double? celsius) => celsius is { } c ? Degrees[(int)Math.Clamp(Math.Round(c, MidpointRounding.AwayFromZero), 0, Temperatures.Highest)] : "—";
 
     private CompactMonitorItems Shown => _shown;
+    // Rounded up to whole device pixels by the row (DevicePixels.Up), which must not drop a reading.
     public double PreferredWidth => CompactMonitor.Width(Shown, ItemWidth, _gap);
-    // What the collapsed row fits (CompactMusicLayout): each chosen reading's widest width in the order they stay, and the
-    // space between two.
-    public IReadOnlyList<double> Candidates => [.. CompactMonitor.Priority.Where(item => (Shown & item) != 0).Select(ItemWidth)];
-    public double Gap => _gap;
-
-    // The row's choice: the first count of the Candidates. From then on the strip shows these instead of what fits its own
-    // width, and the row places them (Readings, Place), so nothing is cut at its edges.
-    private CompactMonitorItems? _admitted;
-    public void Admit(int count)
+    // The gap between two readings: the row's, widened with the row's other gaps (CompactSpacing.Arrange).
+    public double Gap
     {
-        _admitted = CompactMonitor.First(Shown, count);
-        ClipToBounds = false;
-        if (_presence.Set(Shown, _admitted.Value, Motion.Enabled)) Motion.Start(this, Step);
+        get => _gap;
+        set { if (_gap == value || !double.IsFinite(value) || value < 0) return; _gap = value; InvalidateArrange(); InvalidateVisual(); }
     }
-    // The readings present now, left to right, each with its width and how present it is.
-    public IReadOnlyList<(double Width, double Presence)> Readings(double now)
-    {
-        var list = new List<(double, double)>(_order.Length);
-        foreach (var item in _order)
-        {
-            double p = _presence.At(item, now);
-            if (p > 0) list.Add((LiveWidth(item, now), p));
-        }
-        return list;
-    }
-    // The row's placing of Readings, from the strip's left, and how present it placed each (CompactSpacing.Placement.Presence).
-    public void Place(double[] offsets, double[] presences)
-    {
-        if (_placed is not null && _placed.AsSpan().SequenceEqual(offsets) && _shares is not null && _shares.AsSpan().SequenceEqual(presences)) return;
-        _placed = offsets; _shares = presences; InvalidateVisual();
-    }
-    // The width the readings take on their own, each in proportion to how present it is.
-    public double DrawnWidth(double now)
-    {
-        double total = 0, last = 0;
-        foreach (var item in _order)
-        {
-            double p = _presence.At(item, now);
-            if (p <= 0) continue;
-            total += (LiveWidth(item, now) + _gap) * p; last = p;
-        }
-        return Math.Max(0, total - _gap * last);
-    }
-    public double Presence(double now)
-    {
-        double most = 0;
-        foreach (var item in _order) most = Math.Max(most, _presence.At(item, now));
-        return most;
-    }
-    // Whether the row admitted any reading or one is still fading out: otherwise nothing of the strip shows and it needs no
-    // readings (MainWindow.UpdateMonitorDemand).
-    public bool Showing(double now) => _admitted is not { } admitted || admitted != CompactMonitorItems.None || _presence.Any(now);
+    // The width of each reading shown, left to right, for the window the row scrolls them through (CompactSpacing.Window).
+    public List<double> ItemWidths() => [.. _order.Select(ItemWidth)];
+    // Whether any reading is chosen and available: the row then shows the strip, and it needs readings
+    // (MainWindow.UpdateMonitorDemand).
+    public bool Showing(double now) => Shown != CompactMonitorItems.None;
     public bool Moving(double now) => _presence.Moving(now);
 
     // Whether the settings choose the battery reading, shown yet or not (StripAdmission); and whether any reading other than the
     // battery is chosen, which the system sampler reads.
     public bool ChoosesBattery => (_chosen & CompactMonitorItems.Battery) != 0;
     public bool NeedsSystem => (_chosen & ~CompactMonitorItems.Battery) != 0;
-    // A new lowest battery: its figure may change the reading's width, as a new snapshot's figures do.
+    // A new lowest battery, for the battery reading's figure.
     public void SetBattery(BatteryReading? battery)
     {
         if (_battery == battery) return;
         _battery = battery; InvalidateVisual();
-        if (battery is not null && _presence.Resize(Shown, item => FigureWidth(item, Figure(item, _snapshot)))) Relayout();
     }
 
-    public void Update(MonitorSnapshot? snapshot)
-    {
-        _snapshot = snapshot; InvalidateVisual();
-        // A figure of a new width takes it at once, and the row places its readings again (StripPresence.Resize).
-        if (snapshot is not null && _presence.Resize(Shown, item => FigureWidth(item, Figure(item, snapshot)))) Relayout();
-    }
-    private void Relayout() => (VisualTreeHelper.GetParent(this) as UIElement)?.InvalidateArrange();
+    public void Update(MonitorSnapshot? snapshot) { _snapshot = snapshot; InvalidateVisual(); }
 
-    // The readings that fit the width the row gives (or that the row admitted); a change starts their transitions. A row built
-    // again in the middle of one carries it on, as the old row no longer draws.
+    // The readings that fit the width the row gives; a change starts their transitions. A row built again in the middle of one
+    // carries it on, as the old row no longer draws.
     protected override Size ArrangeOverride(Size finalSize)
     {
-        var fitting = _admitted ?? CompactMonitor.Fit(Shown, ItemWidth, _gap, finalSize.Width);
+        var fitting = CompactMonitor.Fit(Shown, ItemWidth, _gap, finalSize.Width);
         if (_presence.Set(Shown, fitting, Motion.Enabled) | _presence.Moving(Eased.Now)) Motion.Start(this, Step);
         return finalSize;
     }
-    private bool Step(double now) { InvalidateVisual(); if (_placed is not null) Relayout(); return _presence.Moving(now); }
+    private bool Step(double now) { InvalidateVisual(); return _presence.Moving(now); }
 
     protected override void OnRender(DrawingContext drawing)
     {
@@ -216,23 +159,23 @@ internal sealed class MonitorStrip : FrameworkElement
         // Halves go up, as FxShapes.Snap rounds: banker's rounding put alternate readings on either side of a half pixel.
         double Snap(double value) => Math.Round(value * ppd, MidpointRounding.AwayFromZero) / ppd;
         // Each reading takes its width and the gap after it in proportion to how present it is, so the row closes up smoothly.
-        double total = DrawnWidth(now);
-        if (total <= 0) return;
-        double x = _centered ? (w - total) / 2 : w - total;
-        var s = _snapshot;
-        int index = 0;
+        double total = 0, last = 0;
         foreach (var item in _order)
         {
-            double presence = _presence.At(item, now), width = LiveWidth(item, now);
+            double p = _presence.At(item, now);
+            if (p <= 0) continue;
+            total += (ItemWidth(item) + _gap) * p; last = p;
+        }
+        total = Math.Max(0, total - _gap * last);
+        if (total <= 0) return;
+        // From the left: the row gives the strip its own width, or a carousel scrolls it from its first reading.
+        double x = _centered ? (w - total) / 2 : 0;
+        var s = _snapshot;
+        foreach (var item in _order)
+        {
+            double presence = _presence.At(item, now), width = ItemWidth(item);
             if (presence <= 0) continue;
             double advance = presence;
-            if (_placed is { } placed && index < placed.Length)
-            {
-                x = placed[index];
-                if (_shares is { } shares && index < shares.Length) presence = Math.Clamp(shares[index], 0, 1);
-            }
-            index++;
-            if (presence <= 0) continue;
             // A reading on its way in or out is drawn smaller and fainter, within the room it has (CompactSpacing.Zoom), so it
             // never lies over the reading or the part beside it.
             bool partial = presence < .999;

@@ -253,7 +253,7 @@ public partial class MainWindow
     }
 
     // The widths a drag can give the collapsed surface: the style's range on this monitor, but never narrower than what the content
-    // must show (CompactMusicLayout.Required), which the surface keeps whatever width is saved.
+    // must show (CompactMusicLayout.RequiredWidth), which the surface keeps whatever width is saved.
     private (double Min, double Max) CompactWidthRange(CompactStyle style)
     {
         var (min, max) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip);

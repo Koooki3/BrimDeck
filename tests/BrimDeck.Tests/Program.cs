@@ -32,6 +32,7 @@ try
     AuditPerfTests.Run(Check);
     MemoryFootprintTests.Run(Check);
     ColorMathTests.Run(Check);
+    CompactSpacingTests.Run(Check);
     AuditUiTests.Run(Check);
     AuditFollowupTests.Run(Check);
     AuditWin2Tests.Run(Check);

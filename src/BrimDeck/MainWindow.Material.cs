@@ -32,7 +32,7 @@ public partial class MainWindow
     // from the island's top-left as drawn (the compact content's own scale included), inside the island. None while the panel
     // is open or opening, for the line (it shows no content), or while nothing is shown.
     // Asked on every frame the glass follows: the parts are walked again only after a layout pass (Island.LayoutUpdated, which
-    // also follows the row's parts coming, going and fading, CompactRow.ArrangeOverride) or a scale of the compact content too
+    // also follows the row being built again and its readings coming and going) or a scale of the compact content too
     // small to scale from; the compact content's own scale (CompactScale, about its middle) is applied to the area kept.
     private Rect _contentArea = Rect.Empty;
     private Point _contentAreaMiddle;
@@ -79,7 +79,7 @@ public partial class MainWindow
         try
         {
             _contentAreaMiddle = Compact.TransformToAncestor(Island).Transform(new Point(Compact.ActualWidth / 2, Compact.ActualHeight / 2));
-            // The row's parts (CompactRow and the alert's row are panels of them); anything else as a whole.
+            // The row's parts (the row and the alert's row are panels of them); anything else as a whole.
             var children = row.Children;
             for (int i = 0; i < children.Count; i++)
             {

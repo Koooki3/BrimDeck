@@ -65,22 +65,6 @@ public static class CompactMonitor
     // When the row is too short, readings leave in this order.
     public static readonly IReadOnlyList<CompactMonitorItems> LeaveOrder =
         [CompactMonitorItems.Battery, CompactMonitorItems.Temperature, CompactMonitorItems.Storage, CompactMonitorItems.Upload, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Columns, CompactMonitorItems.Memory, CompactMonitorItems.Cpu];
-    // The same order reversed: the order in which the collapsed row takes readings while they fit (CompactMusicLayout).
-    public static readonly IReadOnlyList<CompactMonitorItems> Priority = [.. LeaveOrder.Reverse()];
-
-    // The first count of the chosen items in Priority order.
-    public static CompactMonitorItems First(CompactMonitorItems items, int count)
-    {
-        var taken = CompactMonitorItems.None;
-        foreach (var item in Priority)
-        {
-            if (count <= 0) break;
-            if ((items & item) == 0) continue;
-            taken |= item; count--;
-        }
-        return taken;
-    }
-
     // The readings with a figure that can be hidden.
     public const CompactMonitorItems Rings = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu;
     public static bool HasValueChoice(CompactMonitorItems item) => item is CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu;

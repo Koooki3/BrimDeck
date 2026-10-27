@@ -10,24 +10,6 @@ internal static class MemoryFootprintTests
         var root = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-memory-" + Guid.NewGuid().ToString("N"));
         try { Statistics(check, root); }
         finally { try { Directory.Delete(root, true); } catch (IOException) { } }
-        StripWidths(check);
-    }
-
-    // The collapsed strip takes a new figure's width at once: an eased width kept the row drawing every display frame.
-    private static void StripWidths(Action<string, bool> check)
-    {
-        var presence = new StripPresence();
-        var items = CompactMonitorItems.Cpu | CompactMonitorItems.Download;
-        double cpu = 20, rate = 30;
-        presence.Measure((items, 1), items, item => item == CompactMonitorItems.Cpu ? cpu : rate, true, true);
-        double now = Eased.Now;
-        check("Strip: an unchanged figure changes nothing", !presence.Resize(items, item => item == CompactMonitorItems.Cpu ? cpu : rate));
-        cpu = 26;
-        check("Strip: a wider figure widens its reading at once, without easing",
-            presence.Resize(items, item => item == CompactMonitorItems.Cpu ? cpu : rate) && presence.Width(CompactMonitorItems.Cpu, now) == 26 && !presence.Moving(now));
-        cpu = 20;
-        check("Strip: a narrower figure keeps the room for a while (HeldWidth)",
-            !presence.Resize(items, item => item == CompactMonitorItems.Cpu ? cpu : rate) && presence.Width(CompactMonitorItems.Cpu, now) == 26);
     }
 
     private static void Statistics(Action<string, bool> check, string root)

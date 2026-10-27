@@ -191,6 +191,9 @@ internal sealed class MusicMarquee : FrameworkElement
         set { if (_fontSize == value) return; _fontSize = value; ResetText(); }
     }
     public bool CenterWhenFits { get; init; } = true;
+    // The width a text takes in this type at this size, as the marquee draws it.
+    public static double NaturalWidth(string text, double fontSize, double pixelsPerDip) => new FormattedText(text, CultureInfo.CurrentUICulture,
+        FlowDirection.LeftToRight, Typeface, fontSize, Brushes.Black, pixelsPerDip > 0 ? pixelsPerDip : 1).Width;
     // The edge fade's width; the collapsed row scales it with its height. The scroll speed does not change.
     public double EdgeWidth { get; init; } = Edge;
     // False when the region is too narrow for a meaningful stretch of text: the text then rests at its start, cut at the edge.
@@ -370,13 +373,15 @@ internal sealed class MusicMarquee : FrameworkElement
     }
 }
 
-// Overflowing rings scroll like the lyric marquee: rest at the first ring, glide until the
-// last ring is in view, rest there, then fade back to the first ring and start again.
-internal sealed class QuotaCarousel : Grid
+// A window over a strip of items wider than it, which scrolls like the lyric marquee: rest with the first items whole in the
+// window, glide until the last ones stand whole from its left edge (CompactSpacing.Window, Travel), rest there, then fade back
+// to the start and begin again. Both rests show whole items only; the fades lie outside the window, over the gaps beside it,
+// so nothing at rest is cut or faded. The quota rings and the system readings use it.
+internal abstract class GlideCarousel : Grid
 {
     internal const double StartHold = QuotaCycle.StartHold, EndHold = QuotaCycle.EndHold, Speed = QuotaCycle.Speed, Fade = QuotaCycle.Fade, FadeEdge = 3;
-    private readonly Canvas _strip;
-    private readonly bool _discrete;
+    private FrameworkElement _strip = null!;
+    private bool _discrete;
     private bool _enabled, _paused;
     private TimeSpan _elapsed;
     // The rests are waited out on a timer (Turn) and an animation clock runs only while the rings move (win2 P1: a storyboard
@@ -390,69 +395,32 @@ internal sealed class QuotaCarousel : Grid
     private const double Lead = .05;
     private static readonly IEasingFunction GlideEase = Frozen(new BezierEase(QuotaCycle.CurveX1, QuotaCycle.CurveY1, QuotaCycle.CurveX2, QuotaCycle.CurveY2));
     private static IEasingFunction Frozen(BezierEase ease) { ease.Freeze(); return ease; }
-    public bool Rotates { get; }
-    public double Travel { get; }
+    public bool Rotates { get; private set; }
+    public double Travel { get; private set; }
     // Position within the cycle; the window hands it to the next carousel so a rebuild continues where this one was.
     public TimeSpan Elapsed => Rotates ? TimeSpan.FromSeconds(At(Eased.Now)) : _elapsed;
-    // For screen readers: its name, every ring's tooltip line, rotating or not.
-    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
-    // The first letter or digit of an application's name, upper case, for the middle of its ring; empty without one.
-    internal static string Letter(string name)
-    {
-        foreach (char c in name ?? "") if (char.IsLetterOrDigit(c)) return char.ToUpperInvariant(c).ToString();
-        return "";
-    }
 
-    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip, string Letter)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
+    // Shows strip in a window this wide, its fades (edge wide) outside it, and scrolls it by travel; no travel leaves it at rest.
+    protected void Glide(FrameworkElement strip, double window, double travel, double edge, TimeSpan elapsed, bool animate)
     {
-        // The region is the layout's ring width in whole device pixels; rings sit in fixed slots from its left edge and its
-        // right edge cuts whichever ring it falls on. Rotation only moves the rings through the region, never resizes it.
-        // Ring positions, the visible width and the travel all use whole device pixels. Layout rounding
-        // would otherwise widen each 5 DIP gap at 150 % and carry the last ring into the edge fade.
-        double scale = VisualTreeHelper.GetDpi(Application.Current?.MainWindow ?? (Visual)this).DpiScaleX;
-        double Snap(double value) => Math.Round(value * scale, MidpointRounding.AwayFromZero) / scale;
-        double step = Snap(layout.RingSize + layout.RingGap);
-        double span = Math.Floor(Math.Max(0, layout.RingWidth) * scale + .001) / scale, full = items.Count > 0 ? (items.Count - 1) * step + layout.RingSize : 0;
-        // Short of one whole ring, the first ring is cut at the region's edge and rests.
-        Rotates = layout.ScrollRings && items.Count > 1 && span >= layout.RingSize && span < full;
-        double edge = Rotates ? Snap(layout.RingEdge) : 0;
-        // The left fade lies outside, over the cover's gap, so the first ring is whole at rest; the right fade lies inside the
-        // region, so nothing is drawn past its right edge toward the lyric. It spans up to one ring gap: a ring the edge cuts
-        // fades out over what shows of it, so a sliver of a pixel or two is all but transparent instead of a hard line. It
-        // never reaches the first ring, and like the region its width follows the row's width continuously.
-        Width = span + edge; Height = layout.RingSize; ClipToBounds = true;
-        _strip = new Canvas { Width = items.Count * step, Height = layout.RingSize, RenderTransform = new TranslateTransform() };
-        for (int i = 0; i < items.Count; i++)
-        {
-            var ring = UI.Ring(items[i].Used, items[i].Color, layout.RingSize, layout.RingThickness);
-            if (items[i].Letter.Length > 0)
-            {
-                // The letter inside, at the size the system readings' dials carry theirs for this height, in the secondary text color.
-                var letter = new TextBlock { Text = items[i].Letter, FontFamily = UI.PanelFont, FontWeight = FontWeights.SemiBold, FontSize = Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * layout.Scale)),
-                    Foreground = UI.Brush(UI.Secondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center };
-                ring.Children.Add(letter);
-            }
-            Canvas.SetLeft(ring, edge + i * step); _strip.Children.Add(ring);
-        }
-        // A Canvas measures the strip at its full width. Inside the Grid the strip would be
-        // layout-clipped to the visible width, and that clip moves with the translation,
-        // so rings scrolled in from the right would render blank.
-        var host = new Canvas(); host.Children.Add(_strip); Children.Add(host);
-        ToolTip = string.Join("\n", items.Select(i => i.Tip));
-        AutomationProperties.SetName(this, Loc.T("配额环 ", "Quota rings ") + ToolTip);
+        _strip = strip;
+        window = Math.Max(0, window); travel = Math.Max(0, travel);
+        Rotates = travel > 0;
+        edge = Rotates ? Math.Max(0, edge) : 0;
+        Width = edge + window + edge; ClipToBounds = true;
+        strip.RenderTransform = new TranslateTransform();
+        Canvas.SetLeft(strip, edge);
+        // A Canvas measures the strip at its full width. Inside the Grid the strip would be layout-clipped to the visible width,
+        // and that clip moves with the translation, so what scrolls in from the right would render blank.
+        var host = new Canvas(); host.Children.Add(strip); Children.Add(host);
         if (!Rotates) return;
-        Margin = new Thickness(-edge, 0, 0, 0);
-        double fade = Math.Clamp(span - layout.RingSize, 0, Snap(layout.RingGap));
+        Margin = new Thickness(-edge, 0, -edge, 0);
         OpacityMask = new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), new(Colors.White, edge / Width),
-            new(Colors.White, (Width - fade) / Width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(Width, 0)) { MappingMode = BrushMappingMode.Absolute };
-        // The masked content is composited from a layer the size of what is drawn. A transparent
-        // background extends that layer to the box, so its resampled edge column falls on empty
-        // space instead of repeating a ring's outermost pixels.
+            new(Colors.White, (Width - edge) / Width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(Width, 0)) { MappingMode = BrushMappingMode.Absolute };
+        // The masked content is composited from a layer the size of what is drawn. A transparent background extends that layer
+        // to the box, so its resampled edge column falls on empty space instead of repeating the strip's outermost pixels.
         Background = Brushes.Transparent;
-        // The glide moves by whole ring steps, so at the end the rings stand in the same slots as at the start: the first is
-        // whole at the left edge, and the last is whole before the right fade. Since the fade is at most span - ring, this
-        // never moves the last ring out of the region.
-        Travel = Math.Ceiling((full + fade - span) / step - 1e-6) * step;
+        Travel = travel;
         _discrete = !animate;
         _cycle = new QuotaCycle(Travel);
         // Without animations there is no fade back, so the cycle ends with the last rest.
@@ -540,5 +508,62 @@ internal sealed class QuotaCarousel : Grid
         if (run) _since = now;
         else { _elapsed = TimeSpan.FromSeconds(At(now)); _since = double.NaN; }
         Turn();
+    }
+}
+
+// Rings that do not all fit scroll through a window of whole rings (CompactSpacing.Window), a ring step at a time.
+internal sealed class QuotaCarousel : GlideCarousel
+{
+    // For screen readers: its name, every ring's tooltip line, rotating or not.
+    protected override AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, AutomationControlType.Text, () => AutomationProperties.GetName(this).Replace("\n", Loc.T("；", "; ")));
+    // The first letter or digit of an application's name, upper case, for the middle of its ring; empty without one.
+    internal static string Letter(string name)
+    {
+        foreach (char c in name ?? "") if (char.IsLetterOrDigit(c)) return char.ToUpperInvariant(c).ToString();
+        return "";
+    }
+
+    // count: the whole rings the window holds (CompactSpacing.Window); gap: the row's gap, which the rings keep between them too.
+    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip, string Letter)> items, double size, double thickness, double gap, int count, double edge,
+        double scale, TimeSpan elapsed = default, bool animate = true)
+    {
+        // Ring positions, the window and the travel all use whole device pixels. Layout rounding would otherwise widen each gap
+        // at 150 % and carry the last ring into the edge fade.
+        double dpi = VisualTreeHelper.GetDpi(Application.Current?.MainWindow ?? (Visual)this).DpiScaleX;
+        double Snap(double value) => Math.Round(value * dpi, MidpointRounding.AwayFromZero) / dpi;
+        double step = Snap(size + gap);
+        int shown = Math.Clamp(count, 0, items.Count);
+        double window = shown == 0 ? 0 : (shown - 1) * step + size;
+        Height = size;
+        var strip = new Canvas { Width = items.Count * step, Height = size };
+        for (int i = 0; i < items.Count; i++)
+        {
+            var ring = UI.Ring(items[i].Used, items[i].Color, size, thickness);
+            if (items[i].Letter.Length > 0)
+            {
+                // The letter inside, at the size the system readings' dials carry theirs for this height, in the secondary text color.
+                var letter = new TextBlock { Text = items[i].Letter, FontFamily = UI.PanelFont, FontWeight = FontWeights.SemiBold, FontSize = Math.Max(1, BrimDeck.Core.CompactMusicLayout.Half(7 * scale)),
+                    Foreground = UI.Brush(UI.Secondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center };
+                ring.Children.Add(letter);
+            }
+            Canvas.SetLeft(ring, i * step); strip.Children.Add(ring);
+        }
+        ToolTip = string.Join("\n", items.Select(i => i.Tip));
+        AutomationProperties.SetName(this, Loc.T("配额环 ", "Quota rings ") + ToolTip);
+        // The glide moves by whole ring steps, so at the end the last rings stand whole in the window, as the first did. The fades
+        // are no wider than a gap, so they lie over the gaps beside the window.
+        Glide(strip, window, shown >= 1 && shown < items.Count ? (items.Count - shown) * step : 0, Math.Min(Snap(edge), Snap(gap)), elapsed, animate);
+    }
+}
+
+// System readings that do not all fit scroll through a window of whole readings (CompactSpacing.Window). The readings keep the
+// width of their widest figures (MonitorStrip), so the window and the travel do not move with the figures.
+internal sealed class ReadingsCarousel : GlideCarousel
+{
+    public ReadingsCarousel(MonitorStrip strip, double window, double travel, double edge, TimeSpan elapsed, bool animate)
+    {
+        Height = strip.Height;
+        strip.Width = strip.PreferredWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        Glide(strip, window, travel, edge, elapsed, animate);
     }
 }

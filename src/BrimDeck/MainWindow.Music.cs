@@ -77,6 +77,9 @@ public partial class MainWindow
     private ClockFace? _compactClock;
     private QuotaCarousel? _quotaCarousel;
     private TimeSpan _quotaElapsed;
+    // The system readings' carousel, when they do not all fit, and where its cycle stood when the row was last built.
+    private ReadingsCarousel? _stripCarousel;
+    private TimeSpan _stripElapsed;
     // The page on screen: the chosen one while it is shown, otherwise the one DeckPages falls back to.
     internal DeckPage CurrentPage => DeckPages.Resolve(Settings, _page);
     internal bool IsMusicPage => CurrentPage == DeckPage.Music;
@@ -946,67 +949,90 @@ public partial class MainWindow
             !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden) : null;
         if (StripChoosesBattery) strip?.SetBattery(StripBattery());
         double rowWidth = SnapDown(contentWidth, dpi);
-        var layout = CompactMusicLayout.Calculate(rowWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0, strip?.Candidates ?? [], strip?.Gap ?? 0);
+        // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
+        var layout = CompactMusicLayout.Calculate(rowWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0,
+            strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi));
         CurrentCompactLayout = layout;
-        // Every row is at least as wide as what it must show (the clock; while media plays the cover, the equalizer and the
-        // title), with a DIP to spare for rounding to device pixels. An auto-width surface takes the width of everything the row
-        // can show, the title in its fixed slot (CompactMusicLayout.AutoWidth). Neither follows the width the surface has now, nor
-        // the track notice or the lyric's changing length, so the width changes only when the content itself does and never
-        // feeds back on itself. A new width builds the row again.
+        // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
+        // and the lyric's changing length are left out, so the width changes only when the content itself does.
         int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count(HasQuotaReading) : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
-        double wanted = CompactMusicLayout.AutoWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.Candidates ?? [], strip?.Gap ?? 0);
-        double required = layout.Required > 0 ? Math.Ceiling(layout.Required) + 1 : 0;
+        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi));
+        // The surface is never narrower than what the row shows needs (CompactMusicLayout.RequiredWidth): a clock alone, or rings
+        // alone, make a short surface. Like the width it asks for, this leaves out the track notice.
+        double required = CompactMusicLayout.RequiredWidth(scale, media, steadyText, clock?.ReservedWidth ?? 0,
+            steadyRings > 0 ? Math.Max(1, CompactMusicLayout.Whole(12 * scale)) : 0, strip?.ItemWidths() is [var firstReading, ..] ? firstReading : 0);
         if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5 || Math.Abs(required - _compactRequired) > .5)
         { _compactWanted = wanted; _compactRequired = required; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
-        // Parts carry over from the previous row while the row shows the same kind of content; see CompactRow.
-        var order = Settings.CompactOrder(EffectiveStyle);
-        string readings = string.Join(",", Settings.CompactReadings.Select(reading => $"{reading.Item}:{reading.Visible}:{reading.ShowValue}"));
-        var key = (EffectiveStyle, scale, Settings.ShowsSummary(EffectiveStyle), Settings.ShowsMusic(EffectiveStyle), Settings.ShowsClock(EffectiveStyle), Settings.ShowsMonitor(EffectiveStyle),
-            Settings.MusicText, readings, string.Join(",", order), Settings.ClockStyle, PanelTheme.Generation);
-        var previous = _compactRow is { } last && Equals(last.Key, key) ? last : null;
-        bool motion = previous is not null && Soft.Enabled;
-        var grid = new CompactRow(key, layout.Gap, dpi, scale, order) { Width = rowWidth, Height = layout.RowHeight };
-        if (media && layout.CoverWidth > 0)
+        double row = layout.RowHeight, unit = CompactMusicLayout.Gap(scale);
+        var grid = new Grid { Width = rowWidth, Height = row };
+        // Each part shows whole or not at all. The rings and the readings show the whole ones that fit the room the layout gives
+        // them and scroll through those (CompactSpacing.Window); room a title shorter than its share leaves goes to the readings,
+        // then to the rings, before the row spreads it out.
+        bool hasCover = media && layout.CoverWidth >= layout.CoverSize - .001, hasEqualizer = media && layout.EqualizerWidth >= layout.EqualizerSize - .001;
+        bool hasClock = clock is not null && layout.ClockWidth >= clock.ReservedWidth - .001, hasText = layout.TextWidth > 0 && text.Length > 0;
+        double titleText = hasText ? MusicMarquee.NaturalWidth(text, layout.TextFont, VisualTreeHelper.GetDpi(this).PixelsPerDip) : 0;
+        double shortest = CompactMusicLayout.Whole(CompactMusicLayout.MinimumText * scale);
+        double spare = hasText ? Math.Max(0, layout.TextWidth - Math.Max(shortest, Math.Min(titleText, CompactMusicLayout.Whole(CompactSpacing.TitleMax * scale)))) : 0;
+        var readingWidths = strip?.ItemWidths() ?? [];
+        double readingsRoom = strip is null || layout.MonitorWidth <= 0 ? 0 : (layout.MonitorAlone ? layout.MonitorWidth : layout.MonitorWidth - unit) + spare;
+        var readings = CompactSpacing.Window(readingWidths, unit, readingsRoom);
+        if (readings.Count > 0) spare = Math.Max(0, spare - Math.Max(0, readingsRoom - readings.Window));
+        // Readings with room for none of them give that room, gap and all, to the rings.
+        else if (!layout.MonitorAlone) spare += Math.Max(0, layout.MonitorWidth);
+        var rings = CompactSpacing.Window([.. apps.Select(_ => layout.RingSize)], unit, layout.RingWidth > 0 ? layout.RingWidth + spare : 0);
+        var shown = new List<(object Part, CompactSpacing.Part Size)>();
+        if (hasCover) shown.Add(("cover", new(layout.CoverSize)));
+        foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
-            var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
-            grid.Show(RowPart.Cover, cover, layout.CoverWidth, previous, motion);
+            if (part == CompactPart.Rings && rings.Count > 0) shown.Add((part, new(rings.Window - rings.Gaps * unit, rings.Gaps)));
+            else if (part == CompactPart.Music && hasText) shown.Add((part, new(0)));
+            else if (part == CompactPart.Monitor && readings.Count > 0) shown.Add((part, new(readings.Window - readings.Gaps * unit, readings.Gaps)));
         }
-        // The readings are sampled only while one shows or is fading (UpdateMonitorDemand): with none fitting, the sampler rests.
-        // It lingers for a while first (SystemSampler), so a row narrowed and widened again finds current figures.
-        if (strip is not null && (layout.MonitorItems > 0 || _stripPresence.Any(Eased.Now)))
+        if (hasEqualizer) shown.Add(("equalizer", new(layout.EqualizerSize)));
+        if (hasClock) shown.Add(("clock", new(clock!.ReservedWidth)));
+        int title = shown.FindIndex(entry => entry.Part is CompactPart.Music);
+        // One gap between every two parts, rings and readings; what is left widens them evenly and then centres the row.
+        var place = CompactSpacing.Arrange([.. shown.Select(entry => entry.Size)], title, titleText, shortest, grid.Width, unit, scale, dpi);
+        bool animate = Soft.Enabled;
+        for (int i = 0; i < shown.Count; i++)
         {
-            strip.Admit(layout.MonitorItems);
-            grid.Show(RowPart.Monitor, strip, layout.MonitorWidth, previous, motion); _compactStrip = strip;
+            double left = place.Left[i], room = place.Room[i];
+            FrameworkElement element;
+            switch (shown[i].Part)
+            {
+                case "cover":
+                    var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
+                    element = CompactRegion(cover, room, layout.CoverSize, layout.CoverSize, row, RegionAnchor.Left, dpi); break;
+                case "equalizer":
+                    // The bars' levels carry over from the row before (EqualizerBars), so rebuilding the row while resizing never resets them.
+                    _compactEqualizer = new MusicEqualizer { Bars = 4, Levels = _compactBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar,
+                        Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
+                    element = CompactRegion(_compactEqualizer, room, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Left, dpi); break;
+                case "clock":
+                    element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
+                case CompactPart.Rings:
+                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, place.Gap, rings.Count, layout.RingEdge, scale, _quotaElapsed, animate); break;
+                case CompactPart.Music:
+                    // The title's scroll position carries over from the row before (MarqueeScroll).
+                    _compactMarquee = new MusicMarquee { Text = text, Scroll = _compactScroll, Width = room, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
+                        ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
+                    _compactMarquee.Gliding += _ => UpdateMusicTimer();
+                    element = _compactMarquee; break;
+                default:
+                    // The readings that fit stand still; more scroll through the window. Either way they need sampling.
+                    strip!.Gap = place.Gap; strip.Margin = new Thickness(0); _compactStrip = strip;
+                    double travel = readings.Travel > 0 ? CompactSpacing.Travel(readingWidths, place.Gap, room) : 0;
+                    if (travel > 0) element = _stripCarousel = new ReadingsCarousel(strip, room, travel, Snap(layout.TextEdge, dpi), _stripElapsed, animate);
+                    else { strip.Width = room; element = strip; }
+                    break;
+            }
+            // The carousels' fades lie outside their window (a negative margin); the margin puts the window at its place.
+            element.Margin = new Thickness(element.Margin.Left + left, 0, element.Margin.Right, 0);
+            element.HorizontalAlignment = HorizontalAlignment.Left; element.VerticalAlignment = VerticalAlignment.Center;
+            grid.Children.Add(element);
         }
-        if (clock is not null && layout.ClockWidth > 0) { grid.Show(RowPart.Clock, clock, layout.ClockWidth, previous, motion); _compactClock = clock; }
-        if (media && layout.EqualizerWidth > 0)
-        {
-            // The bars' levels carry over from the row before (EqualizerBars), so rebuilding the row while resizing never resets them.
-            _compactEqualizer = new MusicEqualizer { Bars = 4, Levels = _compactBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar, Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
-            grid.Show(RowPart.Equalizer, _compactEqualizer, layout.EqualizerWidth, previous, motion);
-        }
-        if (layout.RingWidth > 0 && apps.Count > 0)
-        {
-            // Rotating rings show whole rings at rest; the carousel's right fade lies over the gap after them, where the next ring
-            // waits (the region is one gap wider than the rings it shows).
-            var rings = layout.ScrollRings ? layout with { RingWidth = layout.RingWidth + layout.RingGap } : layout;
-            _quotaCarousel = new QuotaCarousel(QuotaRings(apps), rings, _quotaElapsed, Soft.Enabled);
-            grid.Show(RowPart.Rings, _quotaCarousel, layout.RingWidth, previous, motion);
-        }
-        if (layout.TextWidth > 0)
-        {
-            // The title takes the room the row gives it (CompactRow, CompactSpacing): what its text needs while there is room, never
-            // less than the shortest the layout keeps when its text is longer; its scroll position carries over from the row before
-            // (MarqueeScroll).
-            _compactMarquee = new MusicMarquee { Text = text, Scroll = _compactScroll, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
-                ScrollAllowed = layout.TextScrolls, Backdrop = PanelTheme.MarqueeBackdrop, InkFade = PanelTheme.Current.HasOverlay };
-            _compactMarquee.Gliding += _ => UpdateMusicTimer();
-            grid.Show(RowPart.Text, _compactMarquee, layout.TextWidth, previous, motion);
-        }
-        grid.Carry(previous, motion);
-        _compactRow = grid;
-        CompactRings.Children.Add(grid); grid.Begin(); UpdateMusicTimer();
+        CompactRings.Children.Add(grid); UpdateMusicTimer();
         // The readings were built with the row; they start or stop the sampler and take the newest reading.
         _stripShowing = false; UpdateMonitorDemand();
     }
@@ -1083,7 +1109,11 @@ public partial class MainWindow
     private void UpdateLyricScrolling() => _lyricCurrent?.SetScrolling(MusicMotion && MusicAudioActive && IsVisible && !IsSuppressed && _expanded && IsMusicPage);
     // The carousel runs its own timer and WPF animation; it only needs to know when it may move.
     private void UpdateQuotaCarousel()
-        => _quotaCarousel?.SetRunning(IsVisible && !IsSuppressed && !ScreenOff && !_expanded && _alert is null, _pointerInside);
+    {
+        bool running = IsVisible && !IsSuppressed && !ScreenOff && !_expanded && _alert is null;
+        _quotaCarousel?.SetRunning(running, _pointerInside);
+        _stripCarousel?.SetRunning(running, _pointerInside);
+    }
     // What moves with the music (the marquees and the bars) moves only while motion is allowed and the display is on: with the
     // screen off and the session unlocked, nothing of it is seen.
     private static bool MusicMotion => Soft.Enabled && !ScreenOff;

@@ -1,13 +1,11 @@
 namespace BrimDeck.Core;
 
-// How present each reading of the collapsed row is, 0 to 1, easing as readings come and go, and how wide each is as its figure
-// changes. Owned by the panel, so that it outlives the row, which is built again whenever its width changes.
+// How present each reading of the collapsed row is, 0 to 1, easing as readings come and go. Owned by the panel, so that it
+// outlives the row, which is built again whenever its width changes.
 public sealed class StripPresence
 {
     private readonly Dictionary<CompactMonitorItems, Eased> _items = [];
-    private readonly Dictionary<CompactMonitorItems, (HeldWidth Held, Eased Width)> _widths = [];
     private CompactMonitorItems _chosen = CompactMonitorItems.None, _arriving = CompactMonitorItems.None;
-    private (CompactMonitorItems, double) _sizes;
 
     // Readings that join the row because their first figures arrived (StripAdmission), not because the settings chose them: the
     // next Set brings them in from nothing with the row's own entrance, while the others slide aside.
@@ -32,49 +30,10 @@ public sealed class StripPresence
         return moving;
     }
 
-    // Each chosen reading's width for its figure now (width), held a while when it narrows (HeldWidth). A reading measured for
-    // the first time takes its width at once; placeholders (figures false, before the first reading) never change a width the
-    // panel already knows. Returns whether any width moves.
-    public bool Measure((CompactMonitorItems Values, double Scale) sizes, CompactMonitorItems chosen, Func<CompactMonitorItems, double> width, bool figures, bool motion)
-    {
-        // Widths measured for other sizes (a new height, or rings that show or hide their figures) are measured again.
-        if (sizes != _sizes) { _widths.Clear(); _sizes = sizes; }
-        double now = Eased.Now; bool moving = false;
-        foreach (var item in CompactMonitor.Order)
-        {
-            if ((chosen & item) == 0) continue;
-            bool known = _widths.TryGetValue(item, out var entry);
-            if (known && !figures) continue;
-            double target = entry.Held.Update(width(item), now);
-            if (!known) entry.Width = new Eased(target, Eased.Seconds);
-            else moving |= entry.Width.Set(target, motion, now);
-            _widths[item] = entry;
-        }
-        return moving;
-    }
-
-    // A new figure's width, taken at once, held a while when it narrows (HeldWidth). Returns whether any width changed, so the
-    // row places its readings again. Easing these changes kept the collapsed row drawing at the display's rate for a third of a
-    // second whenever a figure changed length (9% to 10%, a rate gaining a digit): measured, about seven frames a second on
-    // average and as much CPU as the rest of the idle panel. A reading coming or going (Set) still eases.
-    public bool Resize(CompactMonitorItems chosen, Func<CompactMonitorItems, double> width)
-    {
-        double now = Eased.Now; bool changed = false;
-        foreach (var item in CompactMonitor.Order)
-        {
-            if ((chosen & item) == 0 || !_widths.TryGetValue(item, out var entry)) continue;
-            double target = entry.Held.Update(width(item), now);
-            if (Math.Abs(target - entry.Width.Target) > 1e-6 || entry.Width.Moving(now)) { entry.Width.Set(target, false, now); changed = true; }
-            _widths[item] = entry;
-        }
-        return changed;
-    }
-
     public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
-    public double? Width(CompactMonitorItems item, double now) => _widths.TryGetValue(item, out var entry) ? Math.Max(0, entry.Width.At(now)) : null;
     // Whether any reading still shows, even fading out.
     public bool Any(double now) => _items.Values.Any(eased => eased.At(now) > 0 || eased.Target > 0);
-    public bool Moving(double now) => _items.Values.Any(eased => eased.Moving(now)) || _widths.Values.Any(entry => entry.Width.Moving(now));
+    public bool Moving(double now) => _items.Values.Any(eased => eased.Moving(now));
 }
 
 // Which of the collapsed row's later readings (the temperature, the system drive) it leaves out, and when they join. Neither joins
