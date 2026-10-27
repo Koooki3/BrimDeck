@@ -12,7 +12,8 @@ namespace BrimDeck;
 // at the full rate). Composed by DWM instead, the window is an ordinary one whose frame is extended over all of it, so its
 // transparent pixels show what lies below, and WPF presents to it as to any window.
 // A layered window lets clicks through its fully transparent pixels; this one would take them all. So its region is cut to
-// what it draws (the island, its shadow, the resize grips and the hover strip of an open panel) and follows it as it changes.
+// what it draws (the island, its shadow as far as it reaches, the resize grips and the hover strip of an open panel): at rest
+// it follows the layout, and for a move it is set once to cover the move (HoldRegion).
 // Without a graphics card (software rendering, a remote session) DWM would show the transparent pixels black, so the window
 // stays layered there. Chosen once per process: BRIMDECK_COMPOSITION=dwm while this is a prototype.
 public partial class MainWindow
@@ -42,37 +43,100 @@ public partial class MainWindow
             DwmSetWindowAttribute(handle, 3, ref noTransitions, 4);   // DWMWA_TRANSITIONS_FORCEDISABLED: shown and hidden at once, as a layered window is
             FitRegion();
         };
-        // Whatever moves or changes size lays the window out again; the region follows once per frame at most.
+        // Whatever moves or changes size lays the window out again; the region follows once per frame at most. The shadow's
+        // reach changes without a layout: as it fades in or out, and as its look follows the backdrop (MainWindow.ShadowLook).
         LayoutUpdated += (_, _) => QueueRegion();
+        var opacity = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(OpacityProperty, typeof(System.Windows.Controls.Grid));
+        void ShadowShown(object? sender, EventArgs e) => QueueRegion();
+        opacity.AddValueChanged(ShadowHost, ShadowShown);
+        foreach (var layer in new FrameworkElement[] { IslandShadow, IslandContact }) if (layer.Effect is { IsFrozen: false } effect) effect.Changed += ShadowShown;
+        Closed += (_, _) => opacity.RemoveValueChanged(ShadowHost, ShadowShown);
     }
 
     private void QueueRegion()
     {
-        if (_regionQueued) return;
+        if (_regionQueued || Environment.TickCount64 < _regionHeldUntil) return;
         _regionQueued = true;
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, () => { _regionQueued = false; FitRegion(); });
     }
 
-    // The window's region: the bounds of everything drawn in it, in device pixels, a little larger. What lies outside gets the
-    // clicks, as the transparent pixels of the layered window did; the island's rounded corners and the faint edge of its shadow
-    // take them as they did there too.
+    // While the island opens, closes or changes size, the region is set once, to cover where it starts and where it ends, and
+    // held until the move is over: set on every frame, it made DWM shape the window again on every frame of the move. Clicks
+    // beside the island are taken for those few hundred milliseconds. Bounds in window DIPs; the move's own curve overshoots
+    // its end by under 2 percent.
+    private long _regionHeldUntil;
+    private Rect _regionHeld = Rect.Empty;
+    private System.Windows.Threading.DispatcherTimer? _regionRelease;
+    private void HoldRegion(Rect target, int duration)
+    {
+        if (!DwmComposed || PresentationSource.FromVisual(this) is null) return;
+        if (duration <= 0) { _regionHeldUntil = 0; QueueRegion(); return; }
+        var held = Drawn(Island.TranslatePoint(new Point(0, 0), this) is var at ? new Rect(at, Island.RenderSize) : Rect.Empty);
+        var end = target; end.Inflate(target.Width * .02, target.Height * .02);
+        held.Union(Drawn(end));
+        // A move that takes over one still under way keeps what the first one covered: the island may still be anywhere in it.
+        if (Environment.TickCount64 < _regionHeldUntil) held.Union(_regionHeld);
+        _regionHeld = held;
+        _regionHeldUntil = Environment.TickCount64 + duration + 50;
+        SetRegion(held);
+        _regionRelease ??= new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render, Dispatcher);
+        _regionRelease.Stop();
+        _regionRelease.Interval = TimeSpan.FromMilliseconds(duration + 60);
+        _regionRelease.Tick -= ReleaseRegion; _regionRelease.Tick += ReleaseRegion;
+        _regionRelease.Start();
+    }
+    private void ReleaseRegion(object? sender, EventArgs e) { _regionRelease?.Stop(); _regionHeldUntil = 0; FitRegion(); }
+
+    // What the window draws around an island at these bounds, in window DIPs: the island, its shadow as far as it is seen, the
+    // resize grips and the open panel's hover strip. A drop shadow's alpha falls below 1/255 at about two thirds of its blur
+    // radius: a layered window took clicks to 9 px around the collapsed island (blur 14) and to 19 px around the open liquid
+    // glass panel (blur about 30), so the region ends there (ShadowSeen of the blur, around the island moved by the depth) and
+    // what it leaves out was never drawn. The shadow's reserved bounds (20 to 40 DIPs) took clicks well beyond the visible
+    // shadow under liquid glass (live check 10-27).
+    private const double ShadowSeen = .7;
+    private Rect Drawn(Rect island)
+    {
+        if (island.IsEmpty) return island;
+        var drawn = island;
+        if (ShadowHost.Visibility == Visibility.Visible && ShadowHost.Opacity > .01)
+            foreach (var layer in new FrameworkElement[] { IslandShadow, IslandContact })
+            {
+                if (layer.Visibility != Visibility.Visible || layer.Effect is not System.Windows.Media.Effects.DropShadowEffect shadow) continue;
+                double angle = shadow.Direction * Math.PI / 180;
+                var cast = island;
+                cast.Offset(shadow.ShadowDepth * Math.Cos(angle), -shadow.ShadowDepth * Math.Sin(angle));
+                cast.Inflate(shadow.BlurRadius * ShadowSeen + 1, shadow.BlurRadius * ShadowSeen + 1);
+                drawn.Union(cast);
+            }
+        if (_grips.Visibility == Visibility.Visible && VisualTreeHelper.GetDescendantBounds(_grips) is { IsEmpty: false } grips)
+            drawn.Union(new Rect(_grips.TranslatePoint(grips.TopLeft, this), grips.Size));
+        if (HoverExtension.Visibility == Visibility.Visible && HoverExtension.ActualHeight > 0)
+            drawn.Union(new Rect(HoverExtension.TranslatePoint(new Point(0, 0), this), HoverExtension.RenderSize));
+        return drawn;
+    }
+
     private void FitRegion()
     {
+        if (Environment.TickCount64 < _regionHeldUntil) return;
+        SetRegion(IsVisible ? Drawn(new Rect(Island.TranslatePoint(new Point(0, 0), this), Island.RenderSize)) : Rect.Empty);
+    }
+
+    // The region in device pixels, whole pixels around the bounds; nothing at all while nothing is drawn.
+    private void SetRegion(Rect bounds)
+    {
         if (PresentationSource.FromVisual(this) is not HwndSource source || source.CompositionTarget is null) return;
-        var bounds = VisualTreeHelper.GetDescendantBounds(Stage);
         Int32Rect wanted;
-        if (bounds.IsEmpty || !IsVisible) wanted = new Int32Rect(0, 0, 0, 0);
+        if (bounds.IsEmpty) wanted = new Int32Rect(0, 0, 0, 0);
         else
         {
             var device = source.CompositionTarget.TransformToDevice;
-            var corner = device.Transform(Stage.TranslatePoint(bounds.TopLeft, this));
-            var far = device.Transform(Stage.TranslatePoint(bounds.BottomRight, this));
-            int left = (int)Math.Floor(corner.X) - 2, top = (int)Math.Floor(corner.Y) - 2;
-            wanted = new Int32Rect(Math.Max(0, left), Math.Max(0, top), (int)Math.Ceiling(far.X) + 2 - Math.Max(0, left), (int)Math.Ceiling(far.Y) + 2 - Math.Max(0, top));
+            var corner = device.Transform(bounds.TopLeft); var far = device.Transform(bounds.BottomRight);
+            int left = Math.Max(0, (int)Math.Floor(corner.X)), top = Math.Max(0, (int)Math.Floor(corner.Y));
+            wanted = new Int32Rect(left, top, Math.Max(0, (int)Math.Ceiling(far.X) - left), Math.Max(0, (int)Math.Ceiling(far.Y) - top));
         }
         if (wanted == _regionShown) return;
         _regionShown = wanted;
-        var region = CreateRectRgn(wanted.X, wanted.Y, wanted.X + Math.Max(0, wanted.Width), wanted.Y + Math.Max(0, wanted.Height));
+        var region = CreateRectRgn(wanted.X, wanted.Y, wanted.X + wanted.Width, wanted.Y + wanted.Height);
         // The system owns the region once it is set; it is deleted only if setting it failed.
         if (SetWindowRgn(source.Handle, region, false) == 0) DeleteObject(region);
     }

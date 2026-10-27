@@ -724,6 +724,7 @@ public partial class MainWindow : Window
         else if (wasExpanded || carried > 0) _collapseEnds = duration > 0 ? now + duration : 0;
         if (!expanded) SettleClip(duration);
         if (turning || carried > 0) _turn.Started(now, duration, expanded, width, height);
+        HoldRegion(new Rect(left, gap, width, height), duration);
         // The opening and closing tracks are NoticeMotion's Panel* (a notice moves on the same ones); the boot's, the style
         // morph's and the indicator's own variations stay here.
         Track content = expanded ? NoticeMotion.PanelOpenContent : NoticeMotion.PanelCloseContent;
