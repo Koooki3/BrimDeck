@@ -57,15 +57,15 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 | `surface` | 刘海、胶囊和展开面板的底色，总是不透明 |
 | `textPrimary` | 标题、数字（7:1） |
 | `textSecondary` | 标签（4.5:1） |
-| `textTertiary` | 重置时间、备注等辅助文字（3:1） |
-| `accent` / `onAccent` | 键盘焦点、选中的日期 / 其上的文字（3:1） |
+| `textTertiary` | 重置时间、备注等辅助小字（4.5:1） |
+| `accent` / `onAccent` | 键盘焦点、选中的日期（3:1） / 其上的文字，如通知的主按钮（4.5:1） |
 | `danger` | 错误与暂停同步（4.5:1） |
 | `liked` | 已喜欢的歌曲（3:1） |
 | `clock` | 时间颜色选“主题默认色”时的颜色（4.5:1） |
 | `equalizer` | 律动条不跟随封面时的颜色（3:1） |
 | `hairline` `track` `ringTrack` `fill` `fillSelected` `hover` `pressed` `outline` | 分隔线、进度底轨、分段控件、悬停与按下、描边 |
 | `popup` `popupBorder` `input` `rangeFill` | 菜单与弹出层，日期输入框和日期范围 |
-| `coverPlaceholder` `coverOutline` `scrollThumb` | 无封面占位、封面描边、滚动条 |
+| `coverPlaceholder` `coverOutline` `scrollThumb` | 无封面占位、封面描边、滚动条（滑块在底色上 2:1） |
 | `rim` `shadow` | 表面内侧描线；收起时的阴影（亮色加零偏移即为辉光） |
 | `indicator` `indicatorProgress` | 指示条与其上的播放进度（2:1） |
 | `switchFill` `seekRail` `rowDivider` `rowHover` | 工具栏页面切换底色、播放进度底轨、模型明细的行分隔与悬停 |
@@ -74,7 +74,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 
 ### 应用颜色（apps）
 
-配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`opencode`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
+配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`opencode`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`（这两种同时也是文字，需 4.5:1）。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
 
 ### 时间（clock）
 
@@ -135,7 +135,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 1. **收集参考**：截取作品或品牌的代表画面，记录场景的明暗、主色、点缀色与反复出现的图形元素。
 2. **提炼角色**：把颜色分到面板的角色上——底色（大面积、最暗或最亮）、文字三级、强调色、语义色（预警、告警、错误）、装饰（描线、阴影、渐变、纹理）。
 3. **先定底色与文字**：底色决定一切对比度；文字三级按 7 : 4.5 : 3 拉开。
-4. **再定点缀与应用色**：应用色彼此要能区分，并且在底色上不低于 3:1；预警与告警要符合直觉（黄、红）。
+4. **再定点缀与应用色**：应用色彼此要能区分，并且在底色上不低于 3:1（预警与告警同时也是文字，需 4.5:1）；预警与告警要符合直觉（黄、红）。
 5. **验证**：在设置页逐一查看收起、展开、提示与弹出层，确认“可读性调整”为空或可以接受；必要时回到第 3 步。
 
 ## 新主题的设计说明
