@@ -192,7 +192,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
                     Gauge(drawing, left, center, item, memory?.UsedFraction, memory is null ? UI.Tertiary : color, level, "M", s, ppd); break;
-                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, item, s?.Gpu.OrDefault?.Usage, color, level, "G", s, ppd); break;
+                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, item, s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, color, level, "G", s, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Storage: Drives(drawing, left, center, s, ppd); break;
