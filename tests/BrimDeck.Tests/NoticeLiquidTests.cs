@@ -1,3 +1,4 @@
+using BrimDeck.Protocol;
 using BrimDeck.Core.Notices;
 
 // The liquid motion of an arriving notice (NoticeLiquid): its timing, its bounds, its determinism and its ending.
@@ -26,6 +27,12 @@ internal static class NoticeLiquidTests
         var quota = NoticeFx.For(AttentionKind.Quota, NoticePriority.Normal, false, false, null);
         var error = NoticeFx.For(AttentionKind.Notice, NoticePriority.Normal, false, false, NoticeCategory.Error);
         var warning = NoticeFx.For(AttentionKind.Notice, NoticePriority.Normal, false, false, NoticeCategory.Warning);
+        // A message from brim-notify: its category and priority hint reach the plan through the notice BrimDeck keeps.
+        var cliError = NoticeIntake.FromPipe(new NoticeMessage { AppName = "build", Category = "error" });
+        var cliLow = NoticeIntake.FromPipe(new NoticeMessage { AppName = "build", Priority = "low" });
+        var cliError2 = NoticeFx.For(AttentionKind.Notice, cliError.PriorityHint, false, cliError.Call, cliError.Category);
+        var cliLow2 = NoticeFx.For(AttentionKind.Notice, cliLow.PriorityHint, false, cliLow.Call, cliLow.Category);
+        check("Liquid plans: a brim-notify error plays in the danger color, one marked low plays lightly", cliError2.Tone == NoticeFxTone.Danger && cliLow2.Intensity < normal.Intensity);
         check("Liquid plans: an ordinary notice plays as designed (intensity 5, a separation of 0.6 s, the theme's glow)", normal == NoticeFxPlan.Standard);
         check("Liquid plans: the weight of a notice follows its priority: low, normal, high, urgent",
             low.Intensity < normal.Intensity && normal.Intensity < high.Intensity && high.Intensity < urgent.Intensity
