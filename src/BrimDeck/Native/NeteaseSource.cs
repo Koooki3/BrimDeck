@@ -114,6 +114,12 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
     private bool _cdpFailed;
     private int _restarting;
     private string? _installed;
+    // The setting NeteaseAutoFullControl, which the user confirmed when switching it on. Each player started the
+    // normal way is restarted once; one that comes back without the port is left as it is.
+    private bool _autoFullControl;
+    private string? _autoRestarted;
+    // A player that has only just started is given time to finish starting before it is asked to quit.
+    private const long AutoRestartAge = 3_000;
     // Installation rarely changes while the app runs, and a running player already counts as installed.
     private const long InstalledCheckInterval = 600_000;
     private long _installedCheckedAt = -InstalledCheckInterval;
@@ -125,6 +131,13 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
     public string? Error { get; private set; }
     public bool IsLogMode => _process is not null && _cdp?.Ready != true;
     public bool Restarting => Volatile.Read(ref _restarting) != 0;
+    public bool AutoFullControl
+    {
+        get => Volatile.Read(ref _autoFullControl);
+        set { if (Volatile.Read(ref _autoFullControl) == value) return; Volatile.Write(ref _autoFullControl, value); if (value) Signal(); }
+    }
+    // While a restart may be due the player is looked for every second instead of every five.
+    private bool AutoPending => AutoFullControl && (_process is null || _process.DebugPort is null && _autoRestarted != _process.Identity);
     // A running player counts as installed even when neither registry entry is present.
     public bool Installed => _process is not null || Volatile.Read(ref _installed) is not null;
     internal bool LogWatching => _log?.Watching == true;
@@ -138,7 +151,7 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
             try { await RefreshAsync().ConfigureAwait(false); }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
             catch { Error = Loc.T("网易云来源暂时不可用。", "The NetEase Cloud Music source is temporarily unavailable."); }
-            try { await _wake.WaitAsync(TimeSpan.FromSeconds(5), _stop.Token).ConfigureAwait(false); }
+            try { await _wake.WaitAsync(TimeSpan.FromSeconds(AutoPending ? 1 : 5), _stop.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
     }
@@ -168,6 +181,11 @@ internal sealed class NeteaseSource : IMediaPlayerConnection
                 _stop.Token.ThrowIfCancellationRequested();
                 if (_process is null) return;
                 _cdpFailed = false; Error = null;
+            }
+            if (AutoPending && _process is { } normal && !Restarting && Environment.TickCount64 - normal.StartTick >= AutoRestartAge)
+            {
+                _autoRestarted = normal.Identity;
+                _ = Task.Run(() => EnableFullControlAsync());
             }
             if (_process.DebugPort.HasValue && !_cdpFailed && _cdp is null)
             {

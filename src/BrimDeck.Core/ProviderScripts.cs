@@ -6,7 +6,7 @@ public static class ProviderScripts
 {
     public static string For(ProviderId id) => id switch
     {
-        ProviderId.GlmChina => GlmChina, ProviderId.GlmGlobal => GlmGlobal, ProviderId.DeepSeek => DeepSeek, ProviderId.NewApi => NewApi, ProviderId.Sub2Api => Sub2Api, _ => Example
+        ProviderId.GlmChina => GlmChina, ProviderId.GlmGlobal => GlmGlobal, ProviderId.DeepSeek => DeepSeek, ProviderId.OpenRouter => OpenRouter, ProviderId.NewApi => NewApi, ProviderId.Sub2Api => Sub2Api, _ => Example
     };
 
     // The template a new custom row starts from, in the interface language.
@@ -128,6 +128,44 @@ public static class ProviderScripts
           if (metrics.length === 0) throw new Error(t("接口没有返回人民币或美元余额。", "The API returned no balance in CNY or USD."));
           const warnings = body.is_available === false ? [t("余额不足，DeepSeek API 暂时无法调用。", "The balance is insufficient, so the DeepSeek API cannot be called for now.")] : [];
           return { scope: "account", metrics, warnings };
+        }
+        """;
+
+    // GET /api/v1/key (openrouter.ai/docs/api/reference/limits): credits are US dollars. usage_daily and usage_monthly count
+    // the current UTC day and month; limit, limit_remaining and limit_reset describe the key's own cap, and effective_budget,
+    // when set, is the budget that blocks requests first, with its own resets_at. GET /api/v1/credits gives the account's
+    // total_credits and total_usage; its documentation asks for a management key, yet ordinary keys are answered too, so the
+    // account balance is shown only when it answers.
+    public const string OpenRouter = """
+        async function fetchUsage(ctx) {
+          const t = (zh, en) => ctx.language === "en-US" ? en : zh;
+          const auth = { headers: { Authorization: "Bearer " + ctx.secrets.key, Accept: "application/json" } };
+          function json(res) { try { return res.json(); } catch (e) { return null; } }
+          async function tryGet(url) { try { return await ctx.http.get(url, auth); } catch (e) { return null; } }
+          const [res, credits] = await Promise.all([ctx.http.get("https://openrouter.ai/api/v1/key", auth), tryGet("https://openrouter.ai/api/v1/credits")]);
+          if (res.status === 401) throw new Error(t("OpenRouter 拒绝了这个 API 密钥，请检查密钥是否正确或已被删除。", "OpenRouter rejected this API key. Check that it is correct and has not been deleted."));
+          if (res.status !== 200) throw new Error("HTTP " + res.status);
+          const body = json(res), data = body && body.data;
+          if (!data || typeof data.usage_daily !== "number" || typeof data.usage_monthly !== "number") throw new Error(t("密钥用量字段缺失。", "The key's usage fields are missing."));
+          const now = new Date(ctx.now), day = 86400000;
+          const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+          const nextDay = today + day, nextMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+          // UTC weeks start on Monday.
+          const nextWeek = today + ((8 - now.getUTCDay()) % 7 || 7) * day;
+          const metrics = [];
+          const account = credits && credits.status === 200 ? json(credits) : null;
+          if (account && account.data && typeof account.data.total_credits === "number" && typeof account.data.total_usage === "number")
+            metrics.push({ id: "account", kind: "balance", label: "账户余额", amount: account.data.total_credits - account.data.total_usage, currency: "USD" });
+          const budget = data.effective_budget;
+          if (budget && typeof budget.limit_usd === "number" && typeof budget.remaining_usd === "number")
+            metrics.push({ id: "budget", kind: "balance", label: budget.scope === "key_limit" ? "密钥余额" : "预算余额",
+              amount: budget.remaining_usd, total: budget.limit_usd, currency: "USD", resetAt: budget.resets_at || null, expiresAt: data.expires_at || null });
+          else if (typeof data.limit === "number" && typeof data.limit_remaining === "number")
+            metrics.push({ id: "key", kind: "balance", label: "密钥余额", amount: data.limit_remaining, total: data.limit, currency: "USD",
+              resetAt: { daily: nextDay, weekly: nextWeek, monthly: nextMonth }[data.limit_reset] || null, expiresAt: data.expires_at || null });
+          metrics.push({ id: "today", kind: "spend", label: "今日扣费", amount: Math.max(0, data.usage_daily), currency: "USD", resetAt: nextDay });
+          metrics.push({ id: "month", kind: "spend", label: "本月扣费", amount: Math.max(0, data.usage_monthly), currency: "USD", resetAt: nextMonth });
+          return { scope: metrics[0].id === "account" ? "account" : "key", metrics };
         }
         """;
 
