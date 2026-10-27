@@ -69,7 +69,7 @@ internal sealed class MonitorView : Grid
     private GpuSample? _nextGpu;
 
     // temperatures: the gauges carry the processor's and the graphics adapter's temperatures after their figures, and the drives'
-    // lines theirs (the layout's StorageLines are the lines kept for the drives under memory and network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
+    // entries theirs (the layout's StorageLines and StorageColumns are the places kept for the volumes under memory and network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
     public MonitorView(MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
         Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures = false, bool smallTemperature = false)
     {
@@ -137,8 +137,8 @@ internal sealed class MonitorView : Grid
         }
         if (layout.StorageLines > 0)
         {
-            // Under the line memory and network share, or under network; its lines are list rows' height.
-            _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.RowHeight, layout.StorageLines, layout.StorageLines, temperatures)
+            // Under the line memory and network share, or under network; its lines are tighter than the list's rows.
+            _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, layout.StorageLines, layout.StorageColumns, temperatures)
             { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
             SetRow(_storage, layout.Metrics == MetricsMode.Line ? 3 : 4); readings.Children.Add(_storage);
         }

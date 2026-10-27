@@ -146,15 +146,29 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
     // A side list takes this share of the width, within these bounds; a list this wide or wider has two columns.
     public const double ListShare = .42, ListMinimum = 220, ListMaximum = 560, TwoColumns = 470;
 
-    // The drives' lines (Storage): as many as there are drives, at most three, while the core columns keep MinimumGraph of height
-    // under what memory and network take at this size; the rest share the last line, and a page too short for one has none.
-    // Memory and network keep the room they have without drives, so their sparklines stay as wide as before.
+    // The drives' lines (Storage): an entry per volume, in two columns where the readings are StorageTwoColumns wide, else one;
+    // as many lines as the entries fill, at most three, while the core columns keep MinimumGraph of height under what memory and
+    // network take at this size. The rest share the last entry, and a page too short for one line has none. Memory and network
+    // keep the room they have without drives, so their sparklines stay as wide as before.
     public int StorageLines { get; init; }
-    public const double MinimumGraph = 40;
-    public static int StorageRoom(double readings, MetricsMode metrics, double figure, double body, double row)
+    public int StorageColumns { get; init; }
+    // Two columns of 215 DIP and the gap between them: the letter, the figures and the temperature, with a bar of about 45.
+    public const double MinimumGraph = 40, StorageTwoColumns = 450;
+    public const int MaximumStorageLines = 3, MaximumStorageColumns = 2;
+    // A drive line's height: tighter than the list's rows, so the lines sit close together.
+    public double StorageRow => StorageRowFor(Body);
+    private static double StorageRowFor(double body) => Math.Ceiling(body * 1.5);
+    public static int StorageRoom(double readings, MetricsMode metrics, double figure, double body)
     {
         var (head, margins, rest, storageMargin) = Fixed(metrics, figure, body);
-        return Math.Clamp((int)Math.Floor((readings - head - margins - rest - storageMargin - MinimumGraph) / row), 0, 3);
+        return Math.Clamp((int)Math.Floor((readings - head - margins - rest - storageMargin - MinimumGraph) / StorageRowFor(body)), 0, MaximumStorageLines);
+    }
+
+    // The least height for memory and network on a line each: 150, or what a drive's line under them needs.
+    private static double LinesFrom(double figure, double body)
+    {
+        var (head, margins, rest, storageMargin) = Fixed(MetricsMode.Lines, figure, body);
+        return Math.Max(150, head + margins + rest + storageMargin + MinimumGraph + StorageRowFor(body));
     }
 
     // The heights MonitorView gives the readings' parts: the main gauge's line, the graph's margins, memory and network, and the
@@ -175,7 +189,7 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
     public IReadOnlyList<(double Top, double Height)> Parts(double readings, double foot = 0)
     {
         var (head, margins, metrics, storageMargin) = Fixed(Metrics, Figure, Body);
-        double storage = StorageLines > 0 ? storageMargin + StorageLines * RowHeight : 0;
+        double storage = StorageLines > 0 ? storageMargin + StorageLines * StorageRow : 0;
         double graph = Math.Max(16, readings - foot - head - margins - metrics - storage);
         double graphTop = head + (Metrics == MetricsMode.Line ? 4 : 6);
         double metricsTop = head + margins + graph;
@@ -197,7 +211,7 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
         return next;
     }
 
-    // storage: the drives the page would show a line each.
+    // storage: the volumes the page would show an entry each.
     public static MonitorLayout For(double width, double height, bool processes, int storage = 0)
     {
         width = double.IsFinite(width) ? Math.Max(0, width) : 0;
@@ -210,9 +224,14 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
             : height >= StackedReadings + ListHead + MinimumRows * row ? ListPlacement.Below : ListPlacement.None;
         // The core columns need height to read; memory and network give theirs first. Readings above a list have its fixed height.
         double readings = list == ListPlacement.Below ? StackedReadings : height;
-        var metrics = readings < 150 ? MetricsMode.Line : readings < 250 ? MetricsMode.Lines : MetricsMode.Blocks;
-        int lines = storage <= 0 ? 0 : Math.Min(storage, StorageRoom(readings, metrics, figure, body, row));
-        return new(figure, body, caption, metrics, list, row) { StorageLines = lines };
+        // Memory and network take a line each only where a drive's line still fits under them, so a page growing past that step
+        // does not lose its drives for a few DIPs.
+        var metrics = readings < LinesFrom(figure, body) ? MetricsMode.Line : readings < 250 ? MetricsMode.Lines : MetricsMode.Blocks;
+        // The readings beside a side list are the page less the list and the 22 DIP between them.
+        double readingsWidth = list == ListPlacement.Side ? width - 22 - SideListWidth(width) : width;
+        int columns = storage <= 0 ? 0 : readingsWidth >= StorageTwoColumns ? Math.Min(storage, MaximumStorageColumns) : 1;
+        int lines = storage <= 0 ? 0 : Math.Min((storage + columns - 1) / columns, StorageRoom(readings, metrics, figure, body));
+        return new(figure, body, caption, metrics, list, row) { StorageLines = lines, StorageColumns = lines > 0 ? columns : 0 };
     }
 
     // The rows and columns a list of this size shows.
