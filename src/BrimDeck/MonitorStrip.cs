@@ -112,7 +112,7 @@ internal sealed class MonitorStrip : FrameworkElement
     {
         CompactMonitorItems.Cpu => GaugeFigure(s?.Cpu.OrDefault?.Usage),
         CompactMonitorItems.Memory => GaugeFigure(s?.Memory.OrDefault?.UsedFraction),
-        CompactMonitorItems.Gpu => GaugeFigure(s?.Gpu.OrDefault?.Usage),
+        CompactMonitorItems.Gpu => GaugeFigure(s?.Gpu.OrDefault is { NoReadings: false } shown ? shown.Usage : null),
         CompactMonitorItems.Download => RateFigure(s?.Network.OrDefault?.DownBytesPerSecond),
         CompactMonitorItems.Upload => RateFigure(s?.Network.OrDefault?.UpBytesPerSecond),
         CompactMonitorItems.Temperature => TemperatureFigure(Temperatures.Hottest(s)?.Celsius),
@@ -255,7 +255,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Memory:
                     var memory = s?.Memory.OrDefault;
                     Gauge(drawing, left, center, memory?.UsedFraction, memory is null ? UI.Tertiary : color, level, "M", (_values & item) != 0, ppd); break;
-                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault?.Usage, color, level, "G", (_values & item) != 0, ppd); break;
+                case CompactMonitorItems.Gpu: Gauge(drawing, left, center, s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, color, level, "G", (_values & item) != 0, ppd); break;
                 case CompactMonitorItems.Download: Rate(drawing, left, center, MonitorGlyph.Down, s?.Network.OrDefault?.DownBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Temperature: Temperature(drawing, left, center, Temperatures.Hottest(s)?.Celsius, color, level, ppd); break;
