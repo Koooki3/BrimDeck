@@ -6,13 +6,15 @@ namespace BrimDeck.Native;
 
 // Global hotkeys registered on a message-only window that the app owns for its whole run. The panels are closed and opened
 // again when monitors change, so their windows cannot hold the registrations; this window has no monitor, no position and
-// no DPI, and Explorer restarting does not affect it.
+// no DPI, and Explorer restarting does not affect it. A hotkey may hold several combinations, told apart by their slot (the
+// resize shortcut's four arrow keys).
 internal sealed class GlobalHotkeys : IDisposable
 {
-    private const int WmHotkey = 0x0312, ErrorHotkeyAlreadyRegistered = 1409;
+    // Slots per hotkey in the registration ids: room for more combinations than the four arrow keys need.
+    private const int WmHotkey = 0x0312, ErrorHotkeyAlreadyRegistered = 1409, Slots = 8;
     private readonly HwndSource _source;
-    private readonly HashSet<HotkeyKind> _registered = [];
-    public event Action<HotkeyKind>? Pressed;
+    private readonly HashSet<(HotkeyKind Kind, int Slot)> _registered = [];
+    public event Action<HotkeyKind, int>? Pressed;
 
     public GlobalHotkeys()
     {
@@ -21,16 +23,22 @@ internal sealed class GlobalHotkeys : IDisposable
     }
 
     // Registers a combination given as RegisterHotKey's values; Active, InUse when another program holds it, Invalid otherwise.
-    public HotkeyStatus Register(HotkeyKind kind, uint fsModifiers, uint vk)
+    public HotkeyStatus Register(HotkeyKind kind, uint fsModifiers, uint vk, int slot = 0)
     {
-        Unregister(kind);
-        if (RegisterHotKey(_source.Handle, Id(kind), fsModifiers, vk)) { _registered.Add(kind); return HotkeyStatus.Active; }
+        Unregister(kind, slot);
+        if (RegisterHotKey(_source.Handle, Id(kind, slot), fsModifiers, vk)) { _registered.Add((kind, slot)); return HotkeyStatus.Active; }
         return Marshal.GetLastWin32Error() == ErrorHotkeyAlreadyRegistered ? HotkeyStatus.InUse : HotkeyStatus.Invalid;
     }
 
+    // Every combination of the hotkey.
     public void Unregister(HotkeyKind kind)
     {
-        if (_registered.Remove(kind)) UnregisterHotKey(_source.Handle, Id(kind));
+        foreach (var (registered, slot) in _registered.Where(entry => entry.Kind == kind).ToList()) Unregister(registered, slot);
+    }
+
+    private void Unregister(HotkeyKind kind, int slot)
+    {
+        if (_registered.Remove((kind, slot))) UnregisterHotKey(_source.Handle, Id(kind, slot));
     }
 
     // The monitor under the mouse pointer, or the nearest one.
@@ -38,17 +46,17 @@ internal sealed class GlobalHotkeys : IDisposable
 
     public void Dispose()
     {
-        foreach (var kind in _registered.ToList()) Unregister(kind);
+        foreach (var (kind, slot) in _registered.ToList()) Unregister(kind, slot);
         _source.RemoveHook(Hook); _source.Dispose();
     }
 
-    private static int Id(HotkeyKind kind) => 0xB100 + (int)kind;
+    private static int Id(HotkeyKind kind, int slot) => 0xB100 + (int)kind * Slots + slot;
 
     private IntPtr Hook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (message != WmHotkey) return IntPtr.Zero;
-        foreach (var kind in _registered)
-            if (wParam.ToInt32() == Id(kind)) { handled = true; Pressed?.Invoke(kind); break; }
+        foreach (var (kind, slot) in _registered)
+            if (wParam.ToInt32() == Id(kind, slot)) { handled = true; Pressed?.Invoke(kind, slot); break; }
         return IntPtr.Zero;
     }
 
