@@ -1,3 +1,4 @@
+using BrimDeck.Core;
 using BrimDeck.Protocol;
 using BrimDeck.Core.Notices;
 
@@ -167,20 +168,45 @@ internal static class NoticeLiquidTests
         check("Liquid notch: a toast that grows meanwhile gets the outline of its new size", frame.Outline.Max(p => p.X) > 400);
     }
 
+    // The indicator's own motion: the surface's size on two curves (Curves.LineArrive, Curves.LineReturn), no liquid layer.
     private static void Line(Action<string, bool> check)
     {
-        var liquid = new NoticeLiquid(Spec(LiquidForm.Line, 240, 40));
-        var frame = new LiquidFrame(); int sweeps = 0; double most = 0; int drops = 0; double biggest = 0;
-        for (double t = 0; t < liquid.Length; t += 1d / 120)
-        {
-            liquid.Sample(t, frame);
-            sweeps = Math.Max(sweeps, frame.SweepCount); drops = Math.Max(drops, frame.Discs.Count);
-            foreach (var s in frame.Sweeps.Take(frame.SweepCount)) most = Math.Max(most, s.Amount);
-            foreach (var d in frame.Discs) biggest = Math.Max(biggest, d.R);
-        }
-        check("Liquid indicator: the glow sweeps from the middle twice, and no droplet is large (it keeps to a thin line's restraint)",
-            sweeps == 2 && most > .5 && most <= 1 + 1e-9 && biggest <= 8 && drops >= 1 && drops <= 6);
-        check("Liquid indicator: the glow is a sweep, not the capsule's flash", frame.Glow == 0);
+        const double h = 1e-5;
+        double Speed(Func<double, double> f, double x) => (f(x + h) - f(x - h)) / (2 * h);
+        double windUp = .03, carry = .04;
+        double Arrive(double x) => Curves.LineArrive(x, windUp);
+        double Return(double x) => Curves.LineReturn(x, carry);
+        check("Line arrival: from the line to the card, and the opening spring alone without a wind-up",
+            Arrive(0) == 0 && Arrive(1) == 1 && Curves.LineArrive(.37, 0) == Curves.Bounce(.37) && Curves.LineArrive(.9, 0) == Curves.Bounce(.9));
+        double least = 0; for (double x = 0; x < Curves.LineWindUpLength; x += .001) least = Math.Min(least, Arrive(x));
+        check("Line arrival: it first draws back by the wind-up (against the way it will go) and is back at its length when it is let go",
+            Math.Abs(least + windUp) < 1e-3 && Math.Abs(Arrive(Curves.LineWindUpLength + 1e-9)) < 1e-6);
+        double before = Speed(Arrive, Curves.LineWindUpLength - 1e-3), after = Speed(Arrive, Curves.LineWindUpLength + 1e-3);
+        check("Line arrival: its speed runs on through the release (no stop, no turn, no jump), outward on both sides",
+            before > 0 && after > 0 && Math.Abs(after - before) < .08 * before + .1);
+        double most = 0; bool grows = true; double previous = Arrive(Curves.LineWindUpLength + .02);
+        for (double x = Curves.LineWindUpLength + .03; x < .5; x += .01) { double v = Arrive(x); grows &= v >= previous - 1e-9; previous = v; most = Math.Max(most, v); }
+        double high = 0; for (double x = .5; x < 1; x += .002) high = Math.Max(high, Arrive(x));
+        check("Line arrival: after the release it only grows until it is nearly there, and passes its size by under 2 percent", grows && high < 1.02);
+        check("Line return: from the card to the line, and the closing curve alone without a carry",
+            Return(0) == 0 && Return(1) == 1 && Curves.LineReturn(.3, 0) == Curves.Bezier(.45, 0, .12, 1, .3) && Curves.LineReturn(.8, 0) == Curves.Bezier(.45, 0, .12, 1, .8));
+        check("Line return: it carries on from whichever closing curve it is given",
+            Curves.LineReturn(.3, 0, .32, .72, 0, 1) == Curves.Bezier(.32, .72, 0, 1, .3) && Curves.LineReturn(.75, carry, .32, .72, 0, 1) > 1 + carry - 2e-3);
+        double top = 0, at = 0; for (double x = 0; x <= 1; x += .001) { double v = Return(x); if (v > top) { top = v; at = x; } }
+        check("Line return: it carries on past the line's size by the carry, at three quarters of the move, and is back at the end",
+            Math.Abs(top - (1 + carry)) < 2e-3 && Math.Abs(at - .75) < .02 && Math.Abs(Return(.999) - 1) < 5e-3);
+        double speedBefore = Speed(Return, Curves.LineCarryFrom - 1e-3), speedAfter = Speed(Return, Curves.LineCarryFrom + 1e-3);
+        double Accel(double x) => (Return(x + 2e-4) - 2 * Return(x) + Return(x - 2e-4)) / 4e-8;
+        double peak = 0; for (double x = .1; x < .9; x += .005) peak = Math.Max(peak, Math.Abs(Accel(x)));
+        double accelBefore = Accel(Curves.LineCarryFrom - 3e-4), accelAfter = Accel(Curves.LineCarryFrom + 3e-4);
+        check("Line return: its speed and its acceleration are continuous where the carry begins",
+            Math.Abs(speedAfter - speedBefore) < .02 * Math.Abs(speedBefore) + 1e-3 && Math.Abs(accelAfter - accelBefore) < .03 * peak);
+        var normal = NoticeFxPlan.Standard; var urgent = NoticeFx.For(AttentionKind.Notice, NoticePriority.High, true, false, NoticeCategory.Message); var low = NoticeFx.For(AttentionKind.Summary, NoticePriority.Normal, false, false, null);
+        double Px(double fraction, double span) => fraction * span;
+        check("Line amplitude: at most 5 DIPs of draw-back and 7 of carry for the standard notice, more for an urgent one, less for what only informs",
+            Math.Abs(Px(NoticeFx.LineWindUp(56, 240, normal), 184) - 5) < 1e-6 && Math.Abs(Px(NoticeFx.LineCarry(56, 240, normal), 184) - 6.72) < 1e-6
+            && NoticeFx.LineWindUp(56, 240, urgent) > NoticeFx.LineWindUp(56, 240, normal) && NoticeFx.LineWindUp(56, 240, low) < NoticeFx.LineWindUp(56, 240, normal)
+            && NoticeFx.LineWindUp(24, 240, normal) < NoticeFx.LineWindUp(56, 240, normal) && NoticeFx.LineWindUp(56, 70, normal) == 0 && NoticeFx.LineCarry(56, 70, normal) == 0);
     }
 
     private static void Ending(Action<string, bool> check)

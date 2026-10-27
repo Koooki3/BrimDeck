@@ -162,7 +162,7 @@ internal sealed partial class NoticeWindow : Window
         if (!continuing) _deck.SetIslandCovered(true);
         double duration = Duration();
         _turn.Started(Environment.TickCount64, duration, opening: true, _toastFrame.Rect.Width, _toastFrame.Rect.Height);
-        SetFrame(_toastFrame, duration, NoticeMotion.Surface, Soft.Bounce);
+        SetFrame(_toastFrame, duration, NoticeMotion.Surface, Soft.Bounce, sizeEasing: continuing ? null : LineArrival());
         Animate(_surface, NoticeSurface.IslandOpacityProperty, 0, duration, NoticeMotion.ArriveTint, Soft.Out);
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out, () => { if (!_showingDetail && _detailFor is null) _detail.Visibility = Visibility.Collapsed; });
         Animate(_toast, OpacityProperty, 1, duration, continuing ? NoticeMotion.FollowContent : NoticeMotion.ArriveContent, Soft.Out);
@@ -221,7 +221,7 @@ internal sealed partial class NoticeWindow : Window
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out);
         Animate(_glow, OpacityProperty, Indicator ? 0 : 1, duration, NoticeMotion.ReturnGlow, Soft.Out);
         if (Indicator) Animate(_surface, NoticeSurface.IslandOpacityProperty, 1, duration, NoticeMotion.ReturnTint, Soft.InOut);
-        SetFrame(_collapsed, duration, NoticeMotion.ReturnSurfaceFor(redirect), Soft.Drawer, () => { if (generation == _generation && _item is null) Finish(reveal: true); });
+        SetFrame(_collapsed, duration, NoticeMotion.ReturnSurfaceFor(redirect), Soft.Drawer, () => { if (generation == _generation && _item is null) Finish(reveal: true); }, LineReturning());
     }
 
     // The panel opens over the island: a notice still on its way out is removed at once, so the panel is never hidden.
@@ -380,16 +380,19 @@ internal sealed partial class NoticeWindow : Window
 
     // Moves the surface and the copy that casts its shadow to a frame: place, size, corners and shoulders on one clock and one
     // curve, so the outline never changes shape on the way other than as the curve says.
-    private void SetFrame(NoticeFrame frame, double duration, NoticeMotion.Track track, IEasingFunction? easing = null, Action? completed = null)
+    private void SetFrame(NoticeFrame frame, double duration, NoticeMotion.Track track, IEasingFunction? easing = null, Action? completed = null, IEasingFunction? sizeEasing = null)
     {
         easing ??= Soft.Out;
+        // The indicator's surface moves in its length and place along the line on its own curve (NoticeWindow.Line.cs); its height, its
+        // top and its corners keep the move's, so that it never draws in thinner than the line itself.
+        sizeEasing ??= easing;
         double left = frame.Rect.X - _stageRect.X, top = frame.Rect.Y - _stageRect.Y;
         bool line = Indicator && ReferenceEquals(frame, _collapsed);
         foreach (var element in new NoticeSurface[] { _surface, _glow })
         {
-            Animate(element, Canvas.LeftProperty, left, duration, track, easing);
+            Animate(element, Canvas.LeftProperty, left, duration, track, sizeEasing);
             Animate(element, Canvas.TopProperty, top, duration, track, easing);
-            Animate(element, WidthProperty, Math.Max(0, frame.Rect.Width), duration, track, easing);
+            Animate(element, WidthProperty, Math.Max(0, frame.Rect.Width), duration, track, sizeEasing);
             Animate(element, HeightProperty, Math.Max(0, frame.Rect.Height), duration, track, easing, ReferenceEquals(element, _surface) ? completed : null);
             Animate(element, NoticeSurface.TopRadiusProperty, frame.TopRadius, duration, track, easing);
             Animate(element, NoticeSurface.BottomRadiusProperty, line ? frame.Rect.Height / 2 : frame.BottomRadius, duration, track, easing);
