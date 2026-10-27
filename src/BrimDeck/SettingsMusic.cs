@@ -115,6 +115,9 @@ public sealed partial class SettingsWindow
         Group(Toggle(Loc.T("始终显示“启用完整控制”按钮", "Always show \"Enable full control\""), S.NeteaseFullControlEntry, v => Change(s => s.NeteaseFullControlEntry = v), S.MusicPage,
             Loc.T("在音乐页面右上角的来源菜单末尾固定显示“网易云音乐 · 完整控制”，以便随时启用完整控制。启用完整控制后，可以在面板中拖动网易云音乐的播放进度，并切换播放模式。",
                 "Keeps \"NetEase Cloud Music · Full control\" at the end of the source menu at the top right of the music page, so full control can be enabled at any time. With full control, NetEase Cloud Music's playback position can be dragged in the panel and its playback mode switched.")));
+        SectionTitle("Apple Music");
+        Group(Toggle(Loc.T("始终启用完整控制", "Always enable full control"), S.AppleMusicFullControl, v => Change(s => s.AppleMusicFullControl = v), S.MusicPage,
+            Loc.T("BrimDeck 启动后自动启用 Apple Music 的完整控制。", "Enables full control of Apple Music when BrimDeck starts.")));
     }
     private void MusicSizeControls()
     {

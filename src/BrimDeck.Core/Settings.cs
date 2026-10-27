@@ -252,6 +252,8 @@ public sealed class DeckSettings
     public bool LyricsEnabled { get; set; } = true;
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
     public bool NeteaseFullControlEntry { get; set; }
+    // Enables Apple Music's full control when BrimDeck starts, without the entry and its explanation.
+    public bool AppleMusicFullControl { get; set; }
     public DefaultDeckPage DefaultPage { get; set; }
     // A right click on the expanded panel opens the settings window.
     public bool RightClickSettings { get; set; } = true;

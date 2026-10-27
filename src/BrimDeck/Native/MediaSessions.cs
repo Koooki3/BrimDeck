@@ -113,7 +113,7 @@ internal sealed class MediaSessions : IDisposable
     }
     // Apple Music's shuffle, repeat and seeking through the controls of its window (AppleMusicControls), enabled from the
     // music page's "Enable full control" entry after its explanation. It lasts while BrimDeck runs and is not saved, so the
-    // entry and its explanation come back after a restart.
+    // entry and its explanation come back after a restart, unless the setting AppleMusicFullControl enables it at start.
     public bool AppleMusicFullControl { get; private set; }
     public void EnableAppleMusicFullControl()
     {
