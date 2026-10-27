@@ -251,7 +251,8 @@ internal sealed class ProcessListView : FrameworkElement
         else
         {
             // Without an icon (a process this user cannot open) its first letter stands in, in a faint disc.
-            drawing.DrawEllipse(UI.Brush(UI.Fill), null, new Point(iconRect.X + icon / 2, iconRect.Y + icon / 2), icon / 2, icon / 2);
+            if (PanelTheme.Plated) drawing.DrawRoundedRectangle(UI.Brush(UI.Fill), null, iconRect, 2, 2);
+            else drawing.DrawEllipse(UI.Brush(UI.Fill), null, new Point(iconRect.X + icon / 2, iconRect.Y + icon / 2), icon / 2, icon / 2);
             var letter = MonitorDraw.Text(sample.Name.Length > 0 ? char.ToUpperInvariant(sample.Name[0]).ToString() : "?", Math.Max(8, icon * .55), UI.Secondary, ppd, strong: true);
             drawing.DrawText(letter, new Point(iconRect.X + (icon - letter.Width) / 2, iconRect.Y + (icon - letter.Height) / 2));
         }

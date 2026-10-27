@@ -232,13 +232,14 @@ An unofficial fan look inspired by the industrial interface of *Arknights: Endfi
 
 | Source | Color | Panel role |
 | --- | --- | --- |
-| Paper and ink | light `#FAFAFA` / `#191919`, dark `#141414` / `#EDEDED` | The surface and the three text levels (primary text 16:1 in the dark look) |
-| Signal yellow | `#FFFA00` | In the dark look a line and text: the accent, the Indicator, playback progress, the equalizer, a clock preset. In the light look a fill only: the selected page and segment, the Indicator, a chosen date's yellow text on an ink block; no yellow text or hairline on white, and the focus color is ink |
+| Paper and ink | light `#FAFAFA` / `#191919`, dark `#2B2B2B` / `#EDEDED` | The surface and the three text levels (the dark look is the graphite of the game's HUD pill) |
+| Signal | light `#FFFA00`, dark `#C6CA4C` (the yellow-green of the game's HUD) | In the dark look a line and text: the accent, the Indicator, playback progress, the equalizer, a clock preset. In the light look a fill only: the selected page and segment, the Indicator, a chosen date's yellow text on an ink block; no yellow text or hairline on white, and the focus color is ink |
 | Notice orange | `#FC6C00` (dark) / `#B84A00` (light) | Quota warnings |
 | Danger red | `#FF5A52` / `#C61218` | Over quota, errors, liked songs |
 | Rarity ladder | blue, teal, green, violet (a set for each look) | Identity of the application columns; cursor and the like are grays, as identity never takes a semantic color |
 | Cut nameplate | `effects.cut = 10` | The island's outline: bottom corners cut at 45 degrees, a notch's shoulders straight slants, the collapsed capsule stays a pill (a readout is a pill); controls keep corners of at most 2 DIP |
 | Printed marks | `decor.tab` (signal yellow) and `decor.hatch` (hatching) | Two marks on the open panel's bottom edge, a short signal bar at the left and a faint strip of hatching at the right; on a notice, the signal bar runs down its left edge |
+| Plates | a dark round well under the quota rings and the monitor page's dials, a small square in a ring's middle, a small plate for a process without an icon | Cut-corner themes (`effects.cut > 0`) only; other themes are unchanged |
 | Wide clock | the `wide` style (Unbounded) | Stands in for the game's wide numerals |
 
 **Motion.** Mechanical, never springy: a hovered control gets the line highlight and a bar at its left (`caret`), a press shades the plate (`shade`), keyboard focus is four corner brackets (`brackets`), the springs are `firm`; no ambient light, particles, breathing or steps, so nothing runs while the island is idle.

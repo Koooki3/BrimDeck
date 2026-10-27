@@ -13,17 +13,17 @@ internal static class EndfieldTests
             theme.Kind == PanelThemeKind.Extension && theme.File.Stage == "alpha" && !theme.File.Name.Contains("alpha", StringComparison.OrdinalIgnoreCase)
             && !theme.File.NameEn.Contains("alpha", StringComparison.OrdinalIgnoreCase) && theme.File.Description.Contains("非官方") && theme.File.DescriptionEn.Contains("unofficial"));
         check("Its day look is paper and its night look charcoal, both read as written (no adjustment)",
-            !day.IsDark && night.IsDark && day.Adjustments.Count == 0 && night.Adjustments.Count == 0 && day.Surface == ThemeColor.Parse("#FAFAFA") && night.Surface == ThemeColor.Parse("#1F1F1F"));
+            !day.IsDark && night.IsDark && day.Adjustments.Count == 0 && night.Adjustments.Count == 0 && day.Surface == ThemeColor.Parse("#FAFAFA") && night.Surface == ThemeColor.Parse("#2B2B2B"));
         check("The looks follow Windows, not the clock",
             PanelThemes.DaylightModeOf(theme.File) == DaylightMode.System && PanelThemes.LookAt(theme.File, new DateTime(2026, 10, 27, 3, 0, 0), appsLight: true) == DaylightLook.Day
             && PanelThemes.LookAt(theme.File, new DateTime(2026, 10, 27, 12, 0, 0), appsLight: false) == DaylightLook.Night && PanelThemes.NextDaylightChange(theme.File, DateTime.Now) is null);
-        check("Cut corners and the two marks are in both looks, in the signal yellow and a faint hatching",
+        check("Cut corners and the two marks are in both looks, in the look's signal and a faint hatching",
             day.Effects.Cut == 10 && night.Effects.Cut == 10 && day.Effects.Pixel == 0 && day.Effects.Glass is null && day.Effects.SurfaceGradient.Count == 0 && day.Effects.Scanlines == 0
             && day.Effects.Decor is { Tab: { } dayTab, Hatch: { } dayHatch, Horizon: null, Hud: null } && night.Effects.Decor is { Tab: { } nightTab, Hatch: { } nightHatch }
-            && dayTab == ThemeColor.Parse("#FFFA00") && nightTab == dayTab && dayHatch.A < 80 && nightHatch.A < 80 && dayHatch != nightHatch);
-        check("Signal yellow is a fill on paper (the selected segment, the indicator, ink on it) and a line and text on charcoal",
+            && dayTab == ThemeColor.Parse("#FFFA00") && nightTab == night["accent"] && dayHatch.A < 80 && nightHatch.A < 80 && dayHatch != nightHatch);
+        check("Signal yellow is a fill on paper (the selected segment, the indicator, ink on it); on graphite the signal is the HUD's yellow-green, a line and text",
             day["fillSelected"] == ThemeColor.Parse("#FFFA00") && day["indicator"] == day["fillSelected"] && day["textPrimary"].MinimumContrast([day["fillSelected"]]) >= 7
-            && day["accent"] == day["textPrimary"] && day["onAccent"] == ThemeColor.Parse("#FFFA00") && night["accent"] == ThemeColor.Parse("#FFFA00") && night["accent"].MinimumContrast(night.SurfaceStops) >= 7
+            && day["accent"] == day["textPrimary"] && day["onAccent"] == ThemeColor.Parse("#FFFA00") && night["accent"] == ThemeColor.Parse("#C6CA4C") && night["indicator"] == night["accent"] && night["accent"].MinimumContrast(night.SurfaceStops) >= 7
             && day["indicatorProgress"].MinimumContrast([day["indicator"]]) >= 7);
         check("The clock is the wide face in both looks, and offers five readable preset gradients each",
             day.Clock is { Style: "wide" } && night.Clock is { Style: "wide" } && day.ClockGradients.Count == 5 && night.ClockGradients.Count == 5

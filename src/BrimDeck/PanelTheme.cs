@@ -260,6 +260,10 @@ internal static class PanelTheme
     // only slants) and whose pills (Radius.Full: the page switch, a segment strip) stay pills; as given otherwise.
     public static double Corner(double radius) => Current.Effects.Pixel > 0 ? 0 : Current.Effects.Cut > 0 && radius < Radius.Full ? Math.Min(radius, 2) : radius;
 
+    // A cut-corner theme (effects.cut) sets its readouts on plates, as the game's HUD does: a dial or a ring sits on a dark round well
+    // with its mark in the middle, and the letter of a process without an icon on a small plate. Other themes draw them bare.
+    public static bool Plated => Current.Effects.Cut > 0;
+
     // The motion BrimDeck's windows move with: the theme's, or its quiet Windows form while "system" is chosen (as the pointer
     // layer dresses itself, FxSurface.EnsureDressed).
     public static ThemeMotion Motion => PanelThemes.NormalizeId((Application.Current as App)?.Settings.PanelTheme) == PanelThemes.SystemId ? Current.Motion.ForSystem() : Current.Motion;
