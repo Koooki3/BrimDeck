@@ -12,7 +12,7 @@ namespace BrimDeck;
 // there are several (CompactSources). It asks for the width of everything chosen (PreferredWidth); when its region is narrower,
 // the row draws it at that width and scrolls it through a window of whole readings (ReadingsCarousel, CompactSpacing.Window).
 // Each reading keeps the width of the widest figures it can show, so the window and the readings in it never move with the
-// figures, and the gap between two readings is the row's (Gap). It draws itself once per reading; the
+// figures; the readings keep their own close spacing (Gap), which the row does not widen. It draws itself once per reading; the
 // collapsed row stays still between readings. Given a narrower width directly, it shows what fits, dropping whole readings
 // (CompactMonitor.Fit) so it never cuts through a figure: a reading that no longer fits fades and shrinks out of its place while
 // the others slide together. The panel keeps those transitions (StripPresence) across rebuilds of the row, which happen on every
@@ -24,8 +24,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly IReadOnlyList<CompactMonitorItems> _order;
     private readonly bool _centered;
     private readonly StripColors _colors;
-    private readonly double _scale, _font, _small, _dial, _row, _dpi;
-    private double _gap;
+    private readonly double _scale, _font, _small, _dial, _gap, _row, _dpi;
     private readonly Func<CompactMonitorItems, double> _width;
     private MonitorSnapshot? _snapshot;
     // Made once, as the strip measures and draws on every reading: the readings in order, each once, the delegates it hands to
@@ -75,8 +74,8 @@ internal sealed class MonitorStrip : FrameworkElement
         _small = Math.Max(1, CompactMusicLayout.Half(8.5 * _scale));
         // Each ring is a dial carrying its letter, with its figure after it or alone.
         _dial = Math.Max(4, CompactMusicLayout.Whole(16 * _scale));
-        // The row's gap (CompactSpacing), which the row may widen.
-        _gap = CompactMusicLayout.Gap(_scale);
+        // Readings with figures sit closer than the dials alone: a figure narrower than the widest it can show already leaves room after it.
+        _gap = CompactMusicLayout.Whole((CompactMonitor.RingsOnly(_shown, _values) ? 7 : 6) * _scale);
         _row = Math.Max(1, CompactMusicLayout.Whole(24 * _scale));
         Height = _row;
         IsHitTestVisible = false;
@@ -116,12 +115,8 @@ internal sealed class MonitorStrip : FrameworkElement
     private CompactMonitorItems Shown => _shown;
     // Rounded up to whole device pixels: the row rounds the region it gives down to them, which must not drop a reading.
     public double PreferredWidth => DevicePixels.Up(CompactMonitor.Width(Shown, _width, _gap), _dpi);
-    // The gap between two readings: the row's, widened with the row's other gaps (CompactSpacing.Arrange).
-    public double Gap
-    {
-        get => _gap;
-        set { if (_gap == value || !double.IsFinite(value) || value < 0) return; _gap = value; InvalidateArrange(); InvalidateVisual(); }
-    }
+    // The gap between two readings.
+    public double Gap => _gap;
     // The width of each reading shown, left to right, for the window the row scrolls them through (CompactSpacing.Window).
     public List<double> ItemWidths()
     {

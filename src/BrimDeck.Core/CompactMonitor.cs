@@ -189,6 +189,8 @@ public static class CompactMonitor
         CompactMonitorItems.Storage => storage,
         _ => 0
     };
+    // Rings alone, as Brief showed them, sit closer together.
+    public static bool RingsOnly(CompactMonitorItems shown, CompactMonitorItems values) => shown != CompactMonitorItems.None && (shown & ~Rings) == 0 && (shown & values) == 0;
 
     // The shown readings left to right in the order given, each with its left edge from the start of the strip. Each takes its
     // width and the gap after it in proportion to how present it is (1 when settled), so the row closes up smoothly as one

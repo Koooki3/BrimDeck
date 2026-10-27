@@ -117,6 +117,8 @@ internal static class CompactReadingTests
         check("Compact readings: hiding figures shrinks the strip",
             CompactMonitor.Width(All, bare, 10) < CompactMonitor.Width(All, some, 10) && CompactMonitor.Width(All, some, 10) < CompactMonitor.Width(All, width, 10));
         check("Compact readings: hiding figures lets more readings fit", CompactMonitor.Fit(All, bare, 10, 200) == (All & ~Upload) && CompactMonitor.Fit(All, width, 10, 200) == (Cpu | Memory | Columns | Download));
+        check("Compact readings: rings alone sit closer only without figures",
+            CompactMonitor.RingsOnly(CompactMonitor.Rings, CompactMonitorItems.None) && !CompactMonitor.RingsOnly(CompactMonitor.Rings, Cpu) && !CompactMonitor.RingsOnly(All, CompactMonitorItems.None));
 
         // Upload, GPU, download, columns and memory leave in turn; widths 50, 42, 50, 20, 42 and CPU 42, gaps 10.
         static CompactMonitorItems Expected(double space) => space switch
