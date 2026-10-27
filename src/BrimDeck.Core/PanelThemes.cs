@@ -35,6 +35,15 @@ public static partial class PanelThemes
     public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
     public const string GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2", PixelBlocks = "pixel-blocks";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2, ThumbContrast = 2;
+    // The scroll bar's handle at rest is drawn at this opacity or, where that would leave it under ThumbContrast, at the least
+    // opacity in steps of 0.05 that reaches it (PanelPalette.ThumbRestOpacity).
+    public const double ThumbRest = .55;
+    public static double ThumbRestOpacity(ThemeColor thumb, IReadOnlyList<ThemeColor> surfaces)
+    {
+        for (double opacity = ThumbRest; opacity < 1; opacity = Math.Round(opacity + .05, 2))
+            if (thumb.WithAlpha((byte)Math.Round(thumb.A * opacity)).MinimumContrast(surfaces) >= ThumbContrast) return opacity;
+        return 1;
+    }
 
     public static readonly IReadOnlyList<PanelThemeToken> Tokens =
     [

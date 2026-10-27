@@ -169,7 +169,9 @@ internal static class ThemeCoverageTests
                 ("textTertiary", palette["textTertiary"], PanelThemes.TextContrast, [.. palette.SurfaceStops, popup]),
                 ("warning", palette.Apps["warning"], PanelThemes.TextContrast, palette.SurfaceStops),
                 ("critical", palette.Apps["critical"], PanelThemes.TextContrast, palette.SurfaceStops),
-                ("scrollThumb", palette["scrollThumb"], PanelThemes.ThumbContrast, palette.SurfaceStops)
+                ("scrollThumb", palette["scrollThumb"], PanelThemes.ThumbContrast, palette.SurfaceStops),
+                // The handle as it rests while the pointer is elsewhere (App.xaml).
+                ("scrollThumb at rest", palette["scrollThumb"].WithAlpha((byte)Math.Round(palette["scrollThumb"].A * palette.ThumbRestOpacity)), PanelThemes.ThumbContrast, palette.SurfaceStops)
             })
             {
                 double ratio = color.MinimumContrast(backgrounds);
@@ -177,7 +179,7 @@ internal static class ThemeCoverageTests
                 if (ratio < minimum - .005) roles.Add($"{id}: {name} {ratio:0.00} < {minimum}");
             }
         }
-        check("Every theme's text roles, warning and critical reach 4.5:1 (primary 7:1) and its scroll thumb 2:1" + (roles.Count > 0 ? ": " + string.Join("; ", roles) : ""), roles.Count == 0);
+        check("Every theme's text roles, warning and critical reach 4.5:1 (primary 7:1) and its scroll thumb 2:1, at rest too" + (roles.Count > 0 ? ": " + string.Join("; ", roles) : ""), roles.Count == 0);
         SettingsPalette(check, report);
         if (report)
             foreach (var (id, palette) in palettes)
