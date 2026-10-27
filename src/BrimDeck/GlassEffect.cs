@@ -51,9 +51,12 @@ internal static class GlassEffect
     public readonly record struct AcrylicLook(double Saturation, double LuminosityOpacity, double Luminosity, double TintR, double TintG, double TintB, double TintOpacity);
     // User 10-27 ("各个液态玻璃主题都能再透一点"): a notch clearer, the tint and the saturation as they were, the probe raising
     // it where the text needs it as before. The collapsed island .45 to .40 in both looks;
-    // the light look's open panel .55 to .45; the dark look's open panel stays .55 - at .50 its secondary text fell to 4.47:1
-    // over a moving wallpaper's frame whose bright part lies under the panel, where the probe's ring cannot see it.
-    public const double LuminosityBase = .55, LuminosityBaseLight = .45, LuminosityMost = .95;
+    // both looks' open panel .55 to .45. The user chose the dark look as clear as the light one ("液态玻璃深色也和浅色一样透吧"),
+    // knowing that over a moving wallpaper a bright streak under the panel, where the probe's ring cannot see it, can take the
+    // dark look's secondary or tertiary text a little short for that frame (offscreen, all backdrops at 100/150/200 %: one
+    // moving frame at 150 %, tertiary text 2.93:1 for 3:1; the pages report it as a warning, LiquidPages.Known); the primary text
+    // keeps 4.5:1, and the probe still thickens the glass wherever its ring sees light.
+    public const double LuminosityBase = .45, LuminosityBaseLight = .45, LuminosityMost = .95;
     // Size makes thickness (step 4 of round 16): the collapsed island, the control layer, thinner and clearer (.40); the open
     // panel, the content layer, its full base - in between with the opening.
     public const double LuminosityCapsule = .40;
