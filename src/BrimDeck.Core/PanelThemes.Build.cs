@@ -61,7 +61,8 @@ public static partial class PanelThemes
             {
                 PanelThemeBackdrop.Surface => surfaces,
                 PanelThemeBackdrop.SurfaceAndPopup => [.. surfaces, popup],
-                PanelThemeBackdrop.Accent => [colors["accent"].Over(popup)],
+                // The chosen date sits on the accent in a pop-up, a notice's main button on the accent over the surface.
+                PanelThemeBackdrop.Accent => [colors["accent"].Over(popup), colors["accent"].Over(surface)],
                 PanelThemeBackdrop.Indicator => [colors["indicator"].Over(ThemeColor.Black)],
                 _ => []
             };
@@ -78,12 +79,14 @@ public static partial class PanelThemes
             needs.AddRange(fills.Select(fill => new ContrastNeed(fill, TextContrast)));
             Ensure(colors, token.Key, needs, adjustments);
         }
-        // App colors are opaque, as the color picker and the settings store them, and read on every surface stop.
+        // App colors are opaque, as the color picker and the settings store them, and read on every surface stop. The warning and
+        // critical colors are also text ("quota nearly used up"), so they are held to the body-text minimum.
         var graphic = surfaces.Select(background => new ContrastNeed(background, GraphicContrast)).ToList();
+        var text = surfaces.Select(background => new ContrastNeed(background, LevelContrast)).ToList();
         foreach (var key in apps.Keys.ToList())
         {
             apps[key] = apps[key].Over(surface);
-            Ensure(apps, key, graphic, adjustments);
+            Ensure(apps, key, key is "warning" or "critical" ? text : graphic, adjustments);
         }
         // A theme's own picker colors are offered as the panel draws them, like the ones derived from its palette.
         var swatches = file.Swatches?.Select(value => ThemeColor.TryParse(value, out var color) ? color.Over(surface).EnsureContrast(graphic) : (ThemeColor?)null)
