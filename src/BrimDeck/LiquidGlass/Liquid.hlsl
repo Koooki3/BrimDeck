@@ -927,14 +927,14 @@ float3 Glass(float2 p, float sd, float2 n)
 
 // The acrylic body over a pixel as GlassBackdrop has DWM draw it (GlassEffect.AcrylicMatrix): the backdrop under a Gaussian
 // of AcrylicDip, its saturation 1.3 about its luma, its luma moved toward the look's by the luminosity opacity shown
-// (PresenceInfo.w), the look's tint laid over (#232323 at .23 dark, #F3F3F3 at .25 light). For the rim lens's colour.
+// (PresenceInfo.w), the look's tint laid over (#232323 dark, #F3F3F3 light, both at .20: GlassEffect.AcrylicDark, AcrylicLight). For the rim lens's colour.
 static const float AcrylicDip = 30;
 float3 AcrylicBody(float2 p)
 {
     float3 c = Frost(p + Pad, AcrylicDip * Scale / .75);
     float l = Luma(c);
     c = l + (c - l) * 1.3;
-    float dark = saturate(Dark), target = lerp(.953, .1373, dark), t = lerp(.25, .23, dark);
+    float dark = saturate(Dark), target = lerp(.953, .1373, dark), t = .20;
     c += saturate(PresenceInfo.w) * (target - Luma(c));
     return saturate(c * (1 - t) + t * target);
 }

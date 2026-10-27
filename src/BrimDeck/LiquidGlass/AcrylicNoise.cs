@@ -13,7 +13,8 @@ namespace BrimDeck.LiquidGlass;
 internal static class AcrylicNoise
 {
     public const int Tile = 256;
-    public const double Opacity = .02;
+    // 2 % as Windows' Acrylic has it, halved for a lighter frost (user 10-27, "磨砂质感做淡一点").
+    public const double Opacity = .01;
     private static readonly Dictionary<double, Brush> Brushes = [];
 
     // The tile's premultiplied BGRA pixels: a grey of random lightness at Opacity, from the middle half of the range (the
