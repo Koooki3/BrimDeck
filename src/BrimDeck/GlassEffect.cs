@@ -56,10 +56,11 @@ internal static class GlassEffect
     // dark look's secondary or tertiary text a little short for that frame (offscreen, all backdrops at 100/150/200 %: one
     // moving frame at 150 %, tertiary text 2.93:1 for 3:1; the pages report it as a warning, LiquidPages.Known); the primary text
     // keeps 4.5:1, and the probe still thickens the glass wherever its ring sees light.
-    public const double LuminosityBase = .45, LuminosityBaseLight = .45, LuminosityMost = .95;
-    // Size makes thickness (step 4 of round 16): the collapsed island, the control layer, thinner and clearer (.40); the open
+    // Then once more ("浅色/深色液态玻璃都再透一些（0.05）"): the open panel .45 to .40, the collapsed island .40 to .35, both looks.
+    public const double LuminosityBase = .40, LuminosityBaseLight = .40, LuminosityMost = .95;
+    // Size makes thickness (step 4 of round 16): the collapsed island, the control layer, thinner and clearer (.35); the open
     // panel, the content layer, its full base - in between with the opening.
-    public const double LuminosityCapsule = .40;
+    public const double LuminosityCapsule = .35;
     public static double PanelBase(bool dark) => dark ? LuminosityBase : LuminosityBaseLight;
     public static double Thickness(double openness, bool dark) => LuminosityCapsule + (PanelBase(dark) - LuminosityCapsule) * Math.Clamp(openness, 0, 1);
     // The luminosity opacity shown: what the text needs (LuminosityFor) and never under the thickness for the opening; in steps.
@@ -70,6 +71,10 @@ internal static class GlassEffect
     // dark text over at least LightLeast (sRGB luma; 4.5:1 and more with the text's own colours, #F6F7F9 and #101217).
     // (DarkMost .27 to .26 with the lower floors of 10-27: a moving wallpaper's frame at 100 % left the dark look's open panel at
     // 89.9 % of the opaque theme's masked contrast.)
+    // (LightLeast stays .82, 10-27, "浅色模式好像不透了": over a dark, moving wallpaper the light look's dark text needs its body
+    // at .82, which the recipe reaches only at a luminosity of about .85 - the light look over a dark desktop is near solid by
+    // its nature. .78 left the light look's masked contrast at 72 % of the opaque theme's (Lc 73.6) over a plain mid-grey or
+    // blue backdrop, short of 75 % and Lc 75. Over a dark desktop the dark look, or automatic, is the clear one.)
     public const double DarkMost = .26, LightLeast = .82;
 
     // The luminosity opacity the text needs over a backdrop whose brightest tenth reaches bright (the dark look) or whose

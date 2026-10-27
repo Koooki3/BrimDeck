@@ -38,8 +38,46 @@ internal static class EdgeProbe
                 if (!ok) failures++;
                 Console.WriteLine($"{(ok ? "PASS" : "FAIL")}: {name} at {scale * 100:0} % sizes: {aa} of {total} rows along the bottom-left curve carry a partly covered edge pixel");
             }
+        failures += FirstFrame(app, deck, root);
         Console.WriteLine(failures == 0 ? "PASS: all edge checks" : $"{failures} edge checks failed");
         return failures == 0 ? 0 : 1;
+    }
+
+    // The first frame's luminosity (user 10-27: the light glass came up very dark at first): the glass shown for the first time,
+    // and the look turned while it is shown, each settle the luminosity layer in that very frame, from the first reading (here
+    // the screen off every monitor reads black: the light look wants its body lifted well past its floor, the dark one not).
+    private static int FirstFrame(App app, MainWindow deck, System.Windows.Controls.Grid root)
+    {
+        int failures = 0;
+        LiquidPages.UseLook(app, deck, root, PanelThemes.GlassLight);
+        var island = new IslandBorder { Width = 200, Height = 36, CornerRadius = new CornerRadius(18), MaterialOpacity = 1, Background = Brushes.Transparent };
+        var window = new Window
+        {
+            WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, ShowActivated = false, Topmost = false,
+            AllowsTransparency = true, Background = Brushes.Transparent, Left = -32000, Top = -32000, Width = 240, Height = 76,
+            Content = new System.Windows.Controls.Grid { Children = { island } },
+        };
+        var glass = new GlassBackdrop(window, island) { LiquidTint = () => .5 };
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+            glass.Follow(0);
+            double light = glass.LuminosityShown, wanted = GlassEffect.Shown(GlassEffect.LuminosityFor(false, 0, 0), 0, false);
+            bool ok = Math.Abs(light - wanted) < 1e-6;
+            if (!ok) failures++;
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}: the light glass's first frame is settled: luminosity {light:0.00} (over black it wants {wanted:0.00}; the floor is {GlassEffect.LuminosityCapsule:0.00})");
+            LiquidPages.UseLook(app, deck, root, PanelThemes.GlassDark);
+            // A few frames (the glass is still following its first frames), well inside the probe's ProbeMs of 500.
+            glass.Follow(0);
+            Wait(120);
+            double dark = glass.LuminosityShown, darkWanted = GlassEffect.Shown(GlassEffect.LuminosityFor(true, 0, 0), 0, true);
+            ok = Math.Abs(dark - darkWanted) < 1e-6;
+            if (!ok) failures++;
+            Console.WriteLine($"{(ok ? "PASS" : "FAIL")}: turned to the dark look, its first frame is settled too: luminosity {dark:0.00} (wants {darkWanted:0.00})");
+        }
+        finally { glass.Dispose(); window.Close(); }
+        return failures;
     }
 
     private static (int Antialiased, int Rows) Probe(string folder, string name, double w, double h, CornerRadius corners, double shoulder)
