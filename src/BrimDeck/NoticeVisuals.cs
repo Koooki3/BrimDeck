@@ -19,6 +19,9 @@ internal sealed record NoticeLook(
 {
     // The island's material beyond its colors: a pixel theme's step (PanelThemeEffectValues.Pixel) and bevel, a glass's edge light.
     public double Pixel { get; init; }
+    // Cut corners (PanelThemeEffectValues.Cut) and the notice's own marks (a hatching strip and the signal bar), from the theme's decor.
+    public double Cut { get; init; }
+    public PanelDecor? Decor { get; init; }
     public Brush? Bevel { get; init; }
     public Brush? Edge { get; init; }
     // Glass shown (PanelTheme.GlassShown): the surface is a tint over the desktop, so the text cannot use ClearType.
@@ -40,7 +43,7 @@ internal sealed record NoticeLook(
             // A theme without depth whose shadow is drawn anyway gives its surface a glow rather than a shadow.
             Glow: effects.ShadowDepth <= 0 && effects.ShadowOpacity > 0, HighContrast: false)
         {
-            Pixel = effects.Pixel, Bevel = PanelTheme.BevelBrush(palette), Edge = glass ? PanelTheme.EdgeBrush(palette) : null, Glass = glass
+            Pixel = effects.Pixel, Cut = effects.Cut, Decor = effects.Decor is { Hatch: not null } or { Tab: not null } ? effects.Decor : null, Bevel = PanelTheme.BevelBrush(palette), Edge = glass ? PanelTheme.EdgeBrush(palette) : null, Glass = glass
         };
         _cached = (PanelTheme.Generation, glass, dpiScale, look);
         return look;
@@ -84,7 +87,7 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public double FillOpacity { get => (double)GetValue(FillOpacityProperty); set => SetValue(FillOpacityProperty, value); }
     public Color IslandColor { get => (Color)GetValue(IslandColorProperty); set => SetValue(IslandColorProperty, value); }
     // Drawn with the look's material, or only its fill (Shadow: the black copy that casts a shadow behind the notice).
-    public NoticeLook? Look { get => _look; set { _look = value; _fill = null; _rim = null; _edge = null; _key = null; InvalidateArrange(); InvalidateVisual(); } }
+    public NoticeLook? Look { get => _look; set { _look = value; _fill = null; _rim = null; _edge = null; _tabBrush = null; _key = null; InvalidateArrange(); InvalidateVisual(); } }
     public Brush? FillOverride { get => _fillOverride; set { _fillOverride = value; _fill = null; InvalidateVisual(); } }
     public bool MaterialHidden { get; set; }
 
@@ -92,8 +95,8 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     private Brush? _fill, _fillOverride;
     private Pen? _rim;
     private Pen[]? _edge;
-    private SolidColorBrush? _islandBrush;
-    private (Size, double, double, double, double)? _key;
+    private SolidColorBrush? _islandBrush, _tabBrush;
+    private (Size, double, double, double, double, double)? _key;
     private Geometry _outline = Geometry.Empty;
     private (Geometry Light, Geometry Shade)? _bevel;
 
@@ -101,11 +104,11 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public Geometry Outline()
     {
         double step = IslandBorder.PixelStep(_look?.Pixel ?? 0, this);
-        var key = (RenderSize, TopRadius, BottomRadius, Shoulder, step);
+        var key = (RenderSize, TopRadius, BottomRadius, Shoulder, step, step > 0 ? 0 : _look?.Cut ?? 0);
         if (_key == key) return _outline;
         _key = key;
         (_outline, _bevel) = IslandBorder.Shape(RenderSize.Width, RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius), 0, step,
-            _look?.RimWidth ?? 0, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            _look?.RimWidth ?? 0, VisualTreeHelper.GetDpi(this).PixelsPerDip, _look?.Cut ?? 0);
         return _outline;
     }
 
@@ -152,6 +155,7 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
                 _rim ??= Freeze(new Pen(look.Rim, look.RimWidth * 2));
                 drawing.DrawGeometry(null, _rim, outline);
             }
+            if (look.Decor is { } marks) Marks(drawing, outline, marks);
         }
         if (IslandOpacity > 0)
         {
@@ -160,6 +164,26 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
             drawing.DrawGeometry(_islandBrush, null, outline);
             drawing.Pop();
         }
+    }
+
+    // The notice's own marks, on its outline: the signal color as a bar down the left edge (a notice is what is waiting to be read) and
+    // the strip of hatching at the right end of the bottom edge, as the island's open panel has them.
+    private void Marks(DrawingContext drawing, Geometry outline, PanelDecor marks)
+    {
+        drawing.PushClip(outline);
+        if (marks.Tab is { } tab)
+        {
+            _tabBrush ??= Freeze(new SolidColorBrush(Color.FromArgb(tab.A, tab.R, tab.G, tab.B)));
+            drawing.DrawRectangle(_tabBrush, null, new Rect(0, 0, 4, RenderSize.Height));
+        }
+        double x = RenderSize.Width - Shoulder - BottomRadius - 4 - IslandDecor.HatchWidth;
+        if (marks.Hatch is { } hatch && x > 12 && RenderSize.Height > IslandDecor.MarksMinHeight)
+        {
+            drawing.PushTransform(new TranslateTransform(x, RenderSize.Height - IslandDecor.MarkBand));
+            drawing.DrawDrawing(IslandDecor.HatchStrip(Color.FromArgb(hatch.A, hatch.R, hatch.G, hatch.B)));
+            drawing.Pop();
+        }
+        drawing.Pop();
     }
 
     private static T Freeze<T>(T freezable) where T : Freezable { if (freezable.CanFreeze) freezable.Freeze(); return freezable; }

@@ -6,8 +6,9 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // A theme's motifs drawn into the island's surface, under its content (PanelDecor): a sea below a horizon, the caustics a sea
-// throws, a palm frond's shadow in the open panel's corner and HUD cuts with ticks in the corners. Nothing here moves: the picture is still, so it costs nothing
-// while the island is idle.
+// throws, a palm frond's shadow in the open panel's corner, HUD cuts with ticks in the corners, and the two marks along the open
+// panel's bottom edge (a bar of the signal color at the left, a strip of hatching at the right). Nothing here moves: the picture is
+// still, so it costs nothing while the island is idle.
 // The island animates its size every frame while it opens and closes, so the picture is made once, the first time it is
 // drawn (the caustics' tile is shared by every island of a color), and a new size only moves its parts: the rectangles, the
 // transforms and the fade are changed in place, nothing is allocated.
@@ -17,12 +18,17 @@ internal sealed class IslandDecor
     // strikethrough, so it keeps the plain surface. Between the two heights they fade in, so an opening island grows into
     // them rather than having them appear on one frame.
     private const double SeaMinHeight = 90, SeaFullHeight = 140, HudMinHeight = 40, HudFullHeight = 60;
+    // The bottom marks: both are MarkBand tall and lie on the bottom edge, clear of the corners' cuts. Like the sea they belong to the
+    // open panel and fade in between the two heights, so the collapsed island's clock is never crossed.
+    internal const double MarkBand = 5, HatchWidth = 72, TabWidth = 28, MarksMinHeight = 56, MarksFullHeight = 80;
+    private static readonly Dictionary<Color, Drawing> HatchStrips = [];
     // The caustics' tile, in DIP: lines a few DIP wide, far enough apart to read as light, not as a pattern.
     private const double Tile = 150;
     // Tiles kept for the colors last used; a theme file being edited through many colors does not keep them all.
     private const int TilesKept = 8;
     private static readonly Dictionary<Color, Brush> CausticTiles = [];
     private readonly PanelDecor _decor;
+    private readonly Brush? _tab;
     private Size? _for;
     // The picture and the parts a size moves.
     private DrawingGroup? _scene;
@@ -34,7 +40,11 @@ internal sealed class IslandDecor
     private Drawing? _hud;
     private (Size Size, CornerRadius Corners, double Shoulder)? _hudFor;
 
-    public IslandDecor(PanelDecor decor) => _decor = decor;
+    public IslandDecor(PanelDecor decor)
+    {
+        _decor = decor;
+        if (decor.Tab is { } tab) _tab = Frozen(new SolidColorBrush(ToColor(tab)));
+    }
 
     public static IslandDecor? For(PanelPalette palette) => palette.Effects.Decor is { } decor ? new IslandDecor(decor) : null;
 
@@ -43,7 +53,8 @@ internal sealed class IslandDecor
         if (size.Width < 2) return;
         bool scene = size.Height > SeaMinHeight && (_decor.Horizon is not null || _decor.Caustics is not null || _decor.Palm is not null);
         bool hud = _decor.Hud is not null && size.Height >= HudMinHeight;
-        if (!scene && !hud) return;
+        bool plate = (_decor.Hatch is not null || _decor.Tab is not null) && size.Height > MarksMinHeight;
+        if (!scene && !hud && !plate) return;
         dc.PushClip(outline);
         if (scene)
         {
@@ -63,7 +74,44 @@ internal sealed class IslandDecor
             }
             dc.DrawDrawing(_hud);
         }
+        if (plate) Marks(dc, size, corners, shoulder);
         dc.Pop();
+    }
+
+    // The tab at the bottom edge's left end and the hatching at its right end, each starting beyond its corner's radius.
+    private void Marks(DrawingContext dc, Size size, CornerRadius corners, double shoulder)
+    {
+        double fade = Math.Min(1, (size.Height - MarksMinHeight) / (MarksFullHeight - MarksMinHeight));
+        double y = size.Height - MarkBand, tabX = shoulder + corners.BottomLeft + 4, hatchX = size.Width - shoulder - corners.BottomRight - 4 - HatchWidth;
+        bool tab = _tab is not null && tabX + TabWidth < size.Width, hatch = _decor.Hatch is not null && hatchX > (tab ? tabX + TabWidth + 8 : 0);
+        if (!tab && !hatch) return;
+        if (fade < 1) dc.PushOpacity(fade);
+        if (tab) dc.DrawRectangle(_tab, null, new Rect(tabX, y, TabWidth, MarkBand));
+        if (hatch)
+        {
+            dc.PushTransform(new TranslateTransform(hatchX, y));
+            dc.DrawDrawing(HatchStrip(ToColor(_decor.Hatch!.Value)));
+            dc.Pop();
+        }
+        if (fade < 1) dc.Pop();
+    }
+
+    // A strip of hatching: 45-degree stripes 2 DIP wide every 5, clipped to the strip. It is the same for every island of a color.
+    internal static Drawing HatchStrip(Color color)
+    {
+        if (HatchStrips.TryGetValue(color, out var known)) return known;
+        if (HatchStrips.Count >= TilesKept) HatchStrips.Clear();
+        var geometry = new StreamGeometry();
+        using (var g = geometry.Open())
+            for (double x = -MarkBand; x < HatchWidth; x += 5)
+            {
+                g.BeginFigure(new Point(x, MarkBand), true, true);
+                g.LineTo(new Point(x + 2, MarkBand), true, false); g.LineTo(new Point(x + 2 + MarkBand, 0), true, false); g.LineTo(new Point(x + MarkBand, 0), true, false);
+            }
+        geometry.Freeze();
+        var strip = new DrawingGroup { ClipGeometry = Frozen(new RectangleGeometry(new Rect(0, 0, HatchWidth, MarkBand))), Children = { new GeometryDrawing(Frozen(new SolidColorBrush(color)), null, geometry) } };
+        strip.Freeze();
+        return HatchStrips[color] = strip;
     }
 
     private DrawingGroup Build()

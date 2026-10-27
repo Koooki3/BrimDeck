@@ -139,7 +139,7 @@ internal static class CompactStylePreview
     // is kept as a bitmap (for up to a 200% display) instead of being drawn again whenever the page scrolls.
     private static Grid Shadow(IslandBorder shape, PanelPalette palette)
     {
-        shape.Inset = 1;
+        shape.Inset = 1; shape.Cut = palette.Effects.Cut;
         var glow = new System.Windows.Media.Effects.DropShadowEffect { Direction = 270 };
         PanelTheme.Dress(glow, palette); glow.Freeze();
         var shadow = new Grid { Effect = glow, CacheMode = new BitmapCache { RenderAtScale = 2 },

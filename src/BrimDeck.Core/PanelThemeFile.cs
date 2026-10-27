@@ -13,6 +13,8 @@ public sealed class PanelThemeFile
     public string Author { get; set; } = "";
     public string License { get; set; } = "";
     public string Homepage { get; set; } = "";
+    // A development stage shown as a badge on the theme's card in settings ("alpha", "beta"), so the name itself stays clean.
+    public string Stage { get; set; } = "";
     // A built-in theme id. Unset means "dark".
     public string Base { get; set; } = "";
     public Dictionary<string, string>? Colors { get; set; }
@@ -89,6 +91,9 @@ public sealed class PanelThemeEffects
     // A pixel theme's block texture: squares of the pixel size a little lighter or darker than the surface, at most this opacity
     // (0 to 0.12), as a stone or dirt block is mottled. Without pixel art there are no blocks to mottle, so it is ignored.
     public double? Texture { get; set; }
+    // Cut corners: the outline's curves become 45-degree cuts of at most this many DIP (a corner never cuts more than its own radius),
+    // a notch's shoulders straight slants, as on an industrial nameplate. 0 keeps the curves. Not with glass or pixel art.
+    public double? Cut { get; set; }
     // Quiet pictures drawn into the surface, under the content (PanelThemeDecor). Each value is inherited on its own.
     public PanelThemeDecor? Decor { get; set; }
 }
@@ -99,7 +104,9 @@ public sealed class PanelThemeEffects
 //   caustics: the light a sunlit (or moonlit) sea throws, a net of soft bright lines in "color" (its alpha at most 0.2);
 //   palm: the shadow of a palm frond reaching into the top-right corner of the open panel, in "color" (alpha at most 0.12);
 //   hud: HUD marks, a 45-degree cut drawn across the bottom-left and the top-right corner (the bottom-right on an island hanging
-//     from the screen's edge), "chamfer" 0 to 10 DIP, with a hexagonal tick beside each, in "color".
+//     from the screen's edge), "chamfer" 0 to 10 DIP, with a hexagonal tick beside each, in "color";
+//   hatch: a strip of 45-degree hatching along the bottom edge's right end, in "color", the print of a panel that is closed up;
+//   tab: a short bar of "color" along the bottom edge's left end, where a cut corner begins, as the marker beside a current item.
 // A fully transparent color turns a part off, so a night or dusk look can drop a motif the day has.
 // Text is held to its minimums over every color the motifs can lay under it (PanelThemes.DecorStops).
 public sealed class PanelThemeDecor
@@ -108,6 +115,8 @@ public sealed class PanelThemeDecor
     public PanelThemeMotif? Caustics { get; set; }
     public PanelThemeMotif? Palm { get; set; }
     public PanelThemeHud? Hud { get; set; }
+    public PanelThemeMotif? Hatch { get; set; }
+    public PanelThemeMotif? Tab { get; set; }
 }
 
 public sealed class PanelThemeHorizon

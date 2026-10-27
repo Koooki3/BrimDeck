@@ -117,7 +117,9 @@ public static partial class PanelThemes
             Horizon = decor.Horizon is { } h ? new PanelThemeHorizon { At = h.At, Sea = h.Sea.ToString(), Line = h.Line?.ToString() } : null,
             Caustics = decor.Caustics is { } caustics ? new PanelThemeMotif { Color = caustics.ToString() } : null,
             Palm = decor.Palm is { } palm ? new PanelThemeMotif { Color = palm.ToString() } : null,
-            Hud = decor.Hud is { } hud ? new PanelThemeHud { Color = hud.Color.ToString(), Chamfer = hud.Chamfer } : null
+            Hud = decor.Hud is { } hud ? new PanelThemeHud { Color = hud.Color.ToString(), Chamfer = hud.Chamfer } : null,
+            Hatch = decor.Hatch is { } hatch ? new PanelThemeMotif { Color = hatch.ToString() } : null,
+            Tab = decor.Tab is { } tab ? new PanelThemeMotif { Color = tab.ToString() } : null
         };
         return JsonSerializer.Serialize(file, Json);
     }

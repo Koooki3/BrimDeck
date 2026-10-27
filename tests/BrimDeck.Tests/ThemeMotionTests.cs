@@ -12,7 +12,7 @@ internal static class ThemeMotionTests
         // Every built-in theme but the default dark and light ones (which keep BrimDeck's own control looks) has its own answers
         // to the pointer; ambient light is for the cyberpunk demo, the glass themes' drifting glint and the island's swell.
         string[] builtIns = ["dark", "light", PanelThemes.GlassLight, PanelThemes.GlassDark, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl",
-            PanelThemes.IslandHoliday, PanelThemes.IslandHoliday2, PanelThemes.PixelBlocks, PanelThemes.Demo];
+            PanelThemes.IslandHoliday, PanelThemes.IslandHoliday2, PanelThemes.PixelBlocks, PanelThemes.Demo, PanelThemes.Endfield];
         string[] ambient = [PanelThemes.Demo, PanelThemes.GlassLight, PanelThemes.GlassDark, PanelThemes.IslandHoliday, PanelThemes.IslandHoliday2];
         check("Every built-in theme is listed for motion", PanelThemes.BuiltIns.Select(theme => theme.Id).Order().SequenceEqual(builtIns.Order()));
         check("Every built-in theme answers the pointer except the default dark and light, which draw nothing over the controls",

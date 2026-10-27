@@ -80,6 +80,7 @@ public sealed partial class SettingsWindow
             if (own && id == chosen && !PanelTheme.KeptLastGood && PanelTheme.DraftOf(id) is not null) { grid.Children.Add(OverwriteCard(theme)); continue; }
             // A stage in the name ("alpha") is shown as a badge on the preview, not as part of the name (SW-13).
             string caption = Stage(name, out string? stage);
+            if (stage is null && theme.File.Stage is { Length: > 0 } written) stage = written;
             var card = KeepPreview(new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = ThemePreview(id, theme, stage),
                 Margin = new Thickness(Space.Tight, 3, Space.Tight, Space.Tight), Tag = own ? "" : caption, GroupName = "PanelTheme", IsChecked = id == chosen });
             AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + name);

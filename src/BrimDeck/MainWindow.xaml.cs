@@ -455,7 +455,7 @@ public partial class MainWindow : Window
         if (IslandShadow.Effect is System.Windows.Media.Effects.DropShadowEffect shadow) PanelTheme.Dress(shadow);
         // Pixel art draws the island's text unsmoothed, as on a pixel screen, and casts a stepped shadow.
         PanelTheme.Text(Island);
-        if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) caster.Pixel = PanelTheme.Current.Effects.Pixel;
+        if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) { caster.Pixel = PanelTheme.Current.Effects.Pixel; caster.Cut = PanelTheme.Current.Effects.Cut; }
         FitShadowCache(dpi);
         ApplyThemeMotion();
         // A theme whose scan line crosses the whole surface keeps the rounded clip (SettleClip).

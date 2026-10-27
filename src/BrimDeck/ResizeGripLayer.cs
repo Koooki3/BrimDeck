@@ -253,13 +253,17 @@ internal sealed class ResizeGripLayer : FrameworkElement
     {
         var r = _rect;
         double radius = Math.Max(4, _radius - 1.5);
-        var start = left ? new Point(r.X + 1.5, r.Bottom - _radius) : new Point(r.Right - 1.5, r.Bottom - _radius);
-        var end = left ? new Point(r.X + _radius, r.Bottom - 1.5) : new Point(r.Right - _radius, r.Bottom - 1.5);
+        // A cut-corner theme (effects.cut) has a 45-degree cut where the curve would be: its legs, taken in by the line's own inset.
+        double cut = PanelTheme.Current.Effects.Cut > 0 ? Math.Max(2, Math.Min(PanelTheme.Current.Effects.Cut, _radius) - 1.5 * (2 - Math.Sqrt(2))) : 0;
+        double leg = cut > 0 ? cut : _radius - 1.5;
+        var start = left ? new Point(r.X + 1.5, r.Bottom - 1.5 - leg) : new Point(r.Right - 1.5, r.Bottom - 1.5 - leg);
+        var end = left ? new Point(r.X + 1.5 + leg, r.Bottom - 1.5) : new Point(r.Right - 1.5 - leg, r.Bottom - 1.5);
         var geometry = new StreamGeometry();
         using (var context = geometry.Open())
         {
             context.BeginFigure(start, false, false);
-            context.ArcTo(end, new Size(radius, radius), 0, false, left ? SweepDirection.Counterclockwise : SweepDirection.Clockwise, true, false);
+            if (cut > 0) context.LineTo(end, true, false);
+            else context.ArcTo(end, new Size(radius, radius), 0, false, left ? SweepDirection.Counterclockwise : SweepDirection.Clockwise, true, false);
         }
         geometry.Freeze();
         var pen = new Pen(UI.Brush(Accent), 2.5) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };

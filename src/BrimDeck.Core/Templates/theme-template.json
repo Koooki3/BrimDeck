@@ -14,8 +14,9 @@
   "author": "",
   "license": "",
   "homepage": "",
+  // "stage": "alpha",              // Optional: a development stage ("alpha", "beta") shown as a badge on the theme's card, not in its name
   "base": "dark",                   // Any built-in theme: dark, light, liquid-glass-light, liquid-glass-dark, one-dark-pro, github-dark,
-                                    // github-light, dracula, night-owl, island-holiday, island-holiday-2, pixel-blocks, cyberpunk-edgerunners
+                                    // github-light, dracula, night-owl, island-holiday, island-holiday-2, pixel-blocks, cyberpunk-edgerunners, endfield-industrial
   // A theme can change its look through the day: add "daylight", a "night" look and, if you like, a "dusk" look after "motion"
   // at the end of the file ("New from current theme" writes them for a theme that has them). night and dusk take "colors",
   // "apps", "effects", "motion" and "clock", laid over everything above. For example:
@@ -108,11 +109,14 @@
     "pixel": 0,                     // 0, or 1 to 4: pixel art. Corners become steps of this many DIP, text is drawn unsmoothed,
                                     // and with a rimGradient the rim is a bevel: its first color lights the edges facing up and
                                     // left, its last shades the others. Not with glass: a theme with both is refused
+    "cut": 0,                       // 0 to 16 DIP: cut corners. The outline's curves become 45-degree cuts (a corner never cuts more
+                                    // than its own radius; a capsule stays a pill) and a notch's shoulders straight slants. Not with glass or pixel art
     "texture": 0                    // 0 to 0.12, with pixel art: squares a little lighter or darker than the surface, a block's grain
     // Motifs: remove the "//" to draw quiet pictures into the surface, under the content. horizon: a sea below "at" (0.3 to 0.9
     // of the height, 0.62 when not set) and a line of light along it; caustics: a net of soft light lines on the sea (alpha at
     // most 0.2); palm: a palm frond's shadow in the open panel's top-right corner, above the horizon (alpha at most 0.12); hud:
-    // 45-degree cuts across two corners ("chamfer", 0 to 10 DIP) with hexagonal ticks. Each value is inherited on its own, a fully
+    // 45-degree cuts across two corners ("chamfer", 0 to 10 DIP) with hexagonal ticks; hatch: a strip of 45-degree hatching along the
+    // bottom edge's right end; tab: a short bar along the bottom edge's left end, each as {"color": "#RRGGBB"} (alpha is kept). Each value is inherited on its own, a fully
     // transparent color turns a part off, and text is held to its minimums over the sea, the line and the motifs too.
     // , "decor": { "horizon": { "at": 0.62, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#1AFFFFFF" } }
     // Glass: remove the "//" to make the surface a tint over the desktop instead of a solid color. Text is held to its minimums

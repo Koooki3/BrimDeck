@@ -1,0 +1,161 @@
+{
+  // The custom-theme demo's sibling: an unofficial fan look inspired by the interface language of Arknights: Endfield
+  // (Hypergryph). It is made of colors and shapes only, no artwork, logos, fonts or text from the game. The design notes are in
+  // docs/zh-CN/themes.md.
+  //   Paper and ink: the day look is the white studio of the game's menus (a near-white sheet, near-black ink, graphite lines), the
+  //   night look its charcoal operation screen. Neutrals are over nine tenths of every look; the one signal, a hard yellow, points at
+  //   what is current: the indicator, the selected segment, a chosen date, the bar at the open panel's lower left.
+  //   Where yellow may be text (on charcoal) it is; on paper it is only ever a fill under ink, and the focus color is ink.
+  //   Shapes: the island is a nameplate with 45-degree cut corners (the collapsed capsule stays a pill), its controls plates with barely
+  //   softened corners. The only
+  //   pictures are two marks on the open panel's bottom edge: the signal bar and a strip of hatching, as print on a panel.
+  //   The look follows Windows (light or dark), not the clock: it is the display mode of a device, not a time of day.
+  "formatVersion": 1,
+  "id": "endfield-industrial",
+  "name": "明日方舟：终末地",
+  "nameEn": "Arknights: Endfield",
+  "stage": "alpha",
+  "description": "非官方同人风格：纸与墨的工业面板，一处信号黄指向当前项，斜切 45° 的铭牌轮廓与斜纹，浅色与深色两套跟随 Windows。",
+  "descriptionEn": "An unofficial fan look: an industrial panel of paper and ink, one signal yellow for what is current, a nameplate with 45-degree cut corners and hatching; a light and a dark look that follow Windows.",
+  "author": "BrimDeck",
+  "license": "Apache-2.0",
+  "base": "dark",
+  "colors": {
+    "surface": "#FAFAFA",
+    "textPrimary": "#191919",
+    "textSecondary": "#3C3C3C",
+    "textTertiary": "#5C5C5C",
+    "accent": "#191919",
+    "onAccent": "#FFFA00",
+    "danger": "#C61218",
+    "liked": "#C61218",
+    "clock": "#191919",
+    "equalizer": "#191919",
+    "hairline": "#D9D9D9",
+    "track": "#DADADA",
+    "ringTrack": "#DADADA",
+    "fill": "#F0F0F0",
+    "fillSelected": "#FFFA00",
+    "hover": "#EBEBEB",
+    "pressed": "#E0E0E0",
+    "outline": "#BFBFBF",
+    "popup": "#FFFFFF",
+    "popupBorder": "#8A8A8A",
+    "input": "#F2F2F2",
+    "rangeFill": "#80FFFA00",
+    "coverPlaceholder": "#E6E6E6",
+    "coverOutline": "#B3B3B3",
+    "scrollThumb": "#8A8A8A",
+    "rim": "#B3B3B3",
+    "shadow": "#000000",
+    "indicator": "#FFFA00",
+    "indicatorProgress": "#191919",
+    "switchFill": "#F0F0F0",
+    "seekRail": "#D9D9D9",
+    "rowDivider": "#E0E0E0",
+    "rowHover": "#F0F0F0",
+    "menuDetail": "#3C3C3C",
+    "tooltip": "#FFFFFF",
+    "tooltipBorder": "#191919",
+    "bubble": "#FFFFFF",
+    "bubbleBorder": "#191919"
+  },
+  // Identity by hue only where a column needs telling apart: the rarity ladder of blue, teal, green and violet, amber for the
+  // brand that is orange; the rest are grays. Warning is the notice orange, critical the danger red.
+  "apps": {
+    "claude": "#A8620A", "codex": "#1F6FA3", "antigravity": "#047A7A", "cursor": "#3C3C3C", "zcode": "#6B35C9",
+    "dsh": "#4D7A1C", "grokBot": "#5C5C5C", "kimi": "#A63FCB", "opencode": "#6B6B6B", "manual": "#3C3C3C", "other": "#5C5C5C", "warning": "#B84A00", "critical": "#C61218"
+  },
+  // The clock in the wide face, white-on-charcoal or ink-on-paper; the signal yellow is a preset, not the default.
+  "clock": {
+    "style": "wide", "color": "default",
+    "palette": { "amber": "#6B5D00", "cyan": "#1F6FA3", "pink": "#C61218", "lime": "#4D7A1C" },
+    "gradients": [
+      { "name": "信号", "nameEn": "Signal", "stops": ["#6B5D00", "#B84A00", "#C61218"] },
+      { "name": "量测", "nameEn": "Gauge", "stops": ["#1F6FA3", "#047A7A", "#4D7A1C"] },
+      { "name": "石墨", "nameEn": "Graphite", "stops": ["#191919", "#3C3C3C", "#5C5C5C"] },
+      { "name": "地区", "nameEn": "Region", "stops": ["#047A7A", "#1F6FA3", "#6B35C9"] },
+      { "name": "稀有", "nameEn": "Rarity", "stops": ["#5C5C5C", "#4D7A1C", "#A8620A"] }
+    ]
+  },
+  "effects": {
+    "surfaceGradient": [], "rimGradient": [], "rimWidth": 1,
+    // An ambient shadow with no offset to speak of and no color.
+    "shadowBlur": 16, "shadowDepth": 1, "shadowOpacity": 0.22,
+    "scanlines": 0,
+    // Cut corners (each at most its corner's radius; a collapsed capsule stays a pill, as a readout is a pill in the game) and, along
+    // the open panel's bottom edge, the signal bar at the left and a strip of hatching at the right, in ink at a fifth of its strength.
+    "cut": 10,
+    "decor": { "tab": { "color": "#FFFA00" }, "hatch": { "color": "#38191919" } }
+  },
+  // Mechanical, never springy: a hovered control gets the line highlight and a bar at its left (a record shifting into focus), a
+  // press shades the plate as a graphite button does, keyboard focus is the four corner brackets of a selected item. The springs are
+  // firm, nothing breathes, flashes or leaves particles, and nothing runs while the island is idle.
+  "motion": {
+    "ambient": { "breathe": 0, "breatheDepth": 0, "drift": 0, "sweep": 0, "sweepOpacity": 0, "flicker": 0, "flickerDepth": 0 },
+    "hover": "caret", "hoverStrength": 0.2, "press": "shade", "pressStrength": 0.3, "trail": 0, "particles": "none", "spring": "firm",
+    "focus": "brackets", "pace": 1, "steps": 0, "color": "accent", "secondary": "textSecondary", "highlight": "indicator"
+  },
+  "daylight": { "mode": "system" },
+  // The night look: the graphite operation screen (the game's own panel gray, #1F1F1F). Yellow here is a line and text, as on the game's dark menus.
+  "night": {
+    "colors": {
+      "surface": "#1F1F1F",
+      "textPrimary": "#EDEDED",
+      "textSecondary": "#CCCCCC",
+      "textTertiary": "#9A9A9A",
+      "accent": "#FFFA00",
+      "onAccent": "#191919",
+      "danger": "#FF5A52",
+      "liked": "#FF5A52",
+      "clock": "#EDEDED",
+      "equalizer": "#FFFA00",
+      "hairline": "#404040",
+      "track": "#3A3A3A",
+      "ringTrack": "#3A3A3A",
+      "fill": "#262626",
+      "fillSelected": "#3A3A3A",
+      "hover": "#2C2C2C",
+      "pressed": "#383838",
+      "outline": "#505050",
+      "popup": "#2A2A2A",
+      "popupBorder": "#505050",
+      "input": "#171717",
+      "rangeFill": "#33FFFA00",
+      "coverPlaceholder": "#2C2C2C",
+      "coverOutline": "#505050",
+      "scrollThumb": "#707070",
+      "rim": "#505050",
+      "shadow": "#000000",
+      "indicator": "#FFFA00",
+      "indicatorProgress": "#191919",
+      "switchFill": "#262626",
+      "seekRail": "#404040",
+      "rowDivider": "#333333",
+      "rowHover": "#262626",
+      "menuDetail": "#CCCCCC",
+      "tooltip": "#2C2C2C",
+      "tooltipBorder": "#6A6A6A",
+      "bubble": "#2C2C2C",
+      "bubbleBorder": "#FFFA00"
+    },
+    "apps": {
+      "claude": "#FC9C1E", "codex": "#24BAFC", "antigravity": "#06C2C2", "cursor": "#CCCCCC", "zcode": "#9B6BF7",
+      "dsh": "#8BC34A", "grokBot": "#9A9A9A", "kimi": "#D272FC", "opencode": "#8A8A8A", "manual": "#CCCCCC", "other": "#CCCCCC", "warning": "#FC6C00", "critical": "#FF5A52"
+    },
+    "clock": {
+      "palette": { "amber": "#FFFA00", "cyan": "#24BAFC", "pink": "#FF5A52", "lime": "#E4FC00" },
+      "gradients": [
+        { "name": "信号", "nameEn": "Signal", "stops": ["#FFFA00", "#FC9C1E", "#FF5A52"] },
+        { "name": "量测", "nameEn": "Gauge", "stops": ["#24BAFC", "#06C2C2", "#8BC34A"] },
+        { "name": "石墨", "nameEn": "Graphite", "stops": ["#EDEDED", "#CCCCCC", "#8A8A8A"] },
+        { "name": "地区", "nameEn": "Region", "stops": ["#06C2C2", "#24BAFC", "#9B6BF7"] },
+        { "name": "稀有", "nameEn": "Rarity", "stops": ["#9A9A9A", "#8BC34A", "#FC9C1E"] }
+      ]
+    },
+    "effects": {
+      "shadowOpacity": 0.5,
+      "decor": { "tab": { "color": "#FFFA00" }, "hatch": { "color": "#40EDEDED" } }
+    }
+  }
+}

@@ -126,7 +126,7 @@ internal static class PanelTheme
         var e = palette.Effects;
         var clock = palette.Clock;
         return string.Join("|", theme.Id, palette.Look, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
-            string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}/{e.Glass}/{e.Decor}"),
+            string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}/{e.Cut}/{e.Glass}/{e.Decor}"),
             $"{clock?.Style}/{clock?.Color}/{clock?.Custom}/{string.Join(",", clock?.Gradient ?? [])}",
             string.Join(",", ClockColors.Swatches.Select(palette.ClockPreset)), string.Join(";", palette.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops))),
             string.Join(",", palette.Swatches), palette.Motion.ToString());
@@ -227,7 +227,7 @@ internal static class PanelTheme
         island.Gradient = SurfaceGradient(palette); island.Pattern = Texture(palette, dpiScale) ?? Scanlines(palette, dpiScale);
         island.Decor = IslandDecor.For(palette);
         island.RimBrush = RimBrush(palette); island.RimWidth = palette.Effects.RimWidth;
-        island.Pixel = palette.Effects.Pixel; island.BevelBrush = BevelBrush(palette);
+        island.Pixel = palette.Effects.Pixel; island.Cut = palette.Effects.Cut; island.BevelBrush = BevelBrush(palette);
         island.EdgeBrush = GlassShownFor(palette) ? EdgeBrush(palette) : null;
     }
 
@@ -256,8 +256,9 @@ internal static class PanelTheme
     }
 
     // A corner of the panel's own drawing as the theme draws it: square in a pixel theme, where the island's steps are the only
-    // curve, and as given otherwise.
-    public static double Corner(double radius) => Current.Effects.Pixel > 0 ? 0 : radius;
+    // curve; at most 2 DIP in a cut-corner theme, whose controls are plates with barely softened corners (the island's cuts are the
+    // only slants) and whose pills (Radius.Full: the page switch, a segment strip) stay pills; as given otherwise.
+    public static double Corner(double radius) => Current.Effects.Pixel > 0 ? 0 : Current.Effects.Cut > 0 && radius < Radius.Full ? Math.Min(radius, 2) : radius;
 
     // The motion BrimDeck's windows move with: the theme's, or its quiet Windows form while "system" is chosen (as the pointer
     // layer dresses itself, FxSurface.EnsureDressed).

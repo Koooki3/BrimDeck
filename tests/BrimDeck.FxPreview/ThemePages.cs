@@ -47,6 +47,52 @@ internal static partial class LiquidPages
         return 0;
     }
 
+    // What drawing each theme costs, per page: the stage of the real panel drawn into a bitmap `rounds` times, as the island's own
+    // layer is drawn on every frame it changes, in CPU milliseconds (the process's processor time) per draw, and the managed
+    // memory a theme's pass leaves. A relative picture of the material (gradient, pattern, outline, motifs): the live idle and
+    // playing numbers are measured on the real app (pr-plan/themes-endfield/live).
+    //   dotnet run -c Release --no-build --project tests/BrimDeck.FxPreview -- --theme-cost [--scale 150] [--rounds 120] [--themes id,id,...]
+    public static int RunCost(double scale, HashSet<string>? only, int rounds)
+    {
+        Scale = scale;
+        TextScale.Override = 1;
+        var (app, deck, root, source) = Offscreen(animations: false);
+        using var _ = source;
+        var cover = Cover(); var track = Track(); var snapshot = Snapshot();
+        var process = System.Diagnostics.Process.GetCurrentProcess();
+        Console.WriteLine($"{"theme / look",-40}{"collapsed",10}{"music",10}{"monitor",10}{"usage",10}   ms of CPU per draw, {rounds} draws, {Scale * 100:0} %");
+        foreach (var theme in PanelThemes.BuiltIns.Where(theme => only is null || only.Contains(theme.Id)))
+            foreach (var look in new[] { DaylightLook.Day, DaylightLook.Night }.Where(look => look == DaylightLook.Day || theme.File.Night is not null))
+            {
+                var palette = PanelThemes.Resolve(theme, look);
+                PanelTheme.Show(palette);
+                var again = new ResourceDictionary();
+                again.MergedDictionaries.Add(deck.Resources);
+                again.MergedDictionaries.Add(app.Resources.MergedDictionaries.First(dictionary => dictionary.Contains("PanelSurface")));
+                root.Resources = again;
+                deck.ApplySettings();
+                var costs = new List<double>();
+                foreach (var page in new[] { Page.Capsule, Page.MusicCover, Page.Monitor, Page.Usage })
+                {
+                    Show(deck, root, page, track, cover, snapshot);
+                    for (int i = 0; i < 8; i++) Tile(deck, root, palette.IsDark);
+                    var samples = new List<double>();
+                    for (int pass = 0; pass < 3; pass++)
+                    {
+                        process.Refresh();
+                        var before = process.TotalProcessorTime;
+                        for (int i = 0; i < rounds; i++) Tile(deck, root, palette.IsDark);
+                        process.Refresh();
+                        samples.Add((process.TotalProcessorTime - before).TotalMilliseconds / rounds);
+                    }
+                    costs.Add(samples.Order().ElementAt(1));
+                }
+                GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+                Console.WriteLine($"{theme.Id + (look == DaylightLook.Night ? " (night)" : ""),-40}{costs[0],10:0.00}{costs[1],10:0.00}{costs[2],10:0.00}{costs[3],10:0.00}   managed {GC.GetTotalMemory(true) / 1048576.0:0.0} MB");
+            }
+        return 0;
+    }
+
     // The island's part of the stage over a plain backdrop that suits the look (a light desktop under a light theme).
     private static BitmapSource Tile(MainWindow deck, System.Windows.Controls.Grid root, bool dark)
     {

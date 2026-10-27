@@ -50,6 +50,7 @@ try
     MotionReviewTests.Run(Check);
     PanelThemeEditorTests.Run(root, Check);
     PixelBlocksTests.Run(root, Check);
+    EndfieldTests.Run(root, Check);
     ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");
     DisplayLayoutTests.Run(Check);
     WindowCompositionTests.Run(Check);

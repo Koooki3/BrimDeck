@@ -35,6 +35,13 @@ internal static class Program
         // [--scale <percent>] (or BRIMDECK_PAGES_SCALE) draws them at another display scale than 150 percent.
         // The real panel's pages in every built-in theme and look (LiquidPages.RunThemes): --theme-pages <output folder> [--scale 150]
         // [--text-scale 125] [--themes ids]. --text-scale stands in for Windows' text size (TextScale).
+        // What each theme costs to draw (LiquidPages.RunCost): --theme-cost [--scale 150] [--rounds 120] [--themes id,id,...].
+        if (args.Length > 0 && args[0] == "--theme-cost")
+        {
+            int at = Array.IndexOf(args, "--themes"), rounds = Array.IndexOf(args, "--rounds");
+            return LiquidPages.RunCost(LiquidPages.ScaleFrom(args) ?? 1.5, at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
+                rounds > 0 && rounds + 1 < args.Length ? int.Parse(args[rounds + 1], CultureInfo.InvariantCulture) : 120);
+        }
         if (args.Length > 1 && args[0] == "--theme-pages")
         {
             if (LiquidPages.ScaleFrom(args) is not { } themeScale) { Console.WriteLine("FAIL: --scale wants a display scale such as 100, 125, 150"); return 1; }
@@ -120,6 +127,13 @@ internal static class Program
         if (args.Length > 1 && args[0] == "--device-notice") return DeviceNoticeSheet.Run(args[1]);
         if (args.Length > 0 && args[0] == "--devices-cost") return DevicesSheet.Cost(args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 60);
         if (args.Length > 0 && args[0] == "--devices-probe") return DevicesSheet.Probe(args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : 12);
+        // The settings page's theme cards (ThemeCards): --cards <output folder> [--themes id,id,...] [--scale 1.5].
+        if (args.Length > 1 && args[0] == "--cards")
+        {
+            int at = Array.IndexOf(args, "--themes"), zoom = Array.IndexOf(args, "--scale");
+            return ThemeCards.Run(args[1], at > 0 && at + 1 < args.Length ? args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
+                zoom > 0 && zoom + 1 < args.Length ? double.Parse(args[zoom + 1], CultureInfo.InvariantCulture) : 2);
+        }
         // The theme design sheets (ThemeSheet): --sheet <output folder> [--themes id,id,...] [--dpi 1.5].
         if (args.Length > 1 && args[0] == "--sheet")
         {
@@ -144,6 +158,7 @@ internal static class Program
             Checks();
             PixelChecks();
             StairChecks();
+            CutChecks();
         }
         // A bundled face that fails to load falls back to another font without an error, so each must be the file's own face.
         Check("The clock's bundled fonts load from BrimDeck's resources", new[]
@@ -166,7 +181,12 @@ internal static class Program
                 Console.WriteLine($"Wrote upgrade strips at {stripDpi * 100:0}% to " + System.IO.Path.GetFullPath(folder));
                 return _failures == 0 ? 0 : 1;
             }
-            foreach (var theme in PanelThemes.BuiltIns.Where(t => only is null || only.Contains(t.Id))) Strips(PanelThemes.Resolve(theme), theme.Id, folder);
+            foreach (var theme in PanelThemes.BuiltIns.Where(t => only is null || only.Contains(t.Id)))
+            {
+                Strips(PanelThemes.Resolve(theme), theme.Id, folder);
+                // A theme with a night look is drawn in it too, when asked for by name (the default run keeps the files it always made).
+                if (only is not null && theme.File.Night is not null) Strips(PanelThemes.Resolve(theme, true), theme.Id + "-night", folder);
+            }
             if (only is null || only.Contains("system-dark")) Strips(PanelThemes.Resolve(PanelThemes.BuiltIn("dark")!), "system-dark", folder, system: true);
             if (only is null || only.Contains("system-light")) Strips(PanelThemes.Resolve(PanelThemes.BuiltIn("light")!), "system-light", folder, system: true);
             Console.WriteLine($"Wrote previews at {stripDpi * 100:0}% to " + System.IO.Path.GetFullPath(folder));
@@ -426,6 +446,60 @@ internal static class Program
             Check($"Stepped {name} at {_dpi * 100:0}%: on device pixels, axis-aligned, within bounds, stepped corners, mirrored",
                 points.Count >= 8 && points.All(p => OnGrid(p.X) && OnGrid(p.Y)) && axis && inside && steps && mirror);
         }
+    }
+
+    // The cut outline (IslandBorder.BuildCut): every edge is horizontal, vertical or at 45 degrees, no leg is longer than the cut or its
+    // corner's radius, the outline fills the same bounds as the curved one, an inset copy lies inside it, and a pixel theme's steps win.
+    private static void CutChecks()
+    {
+        const double cut = 10;
+        var shapes = new (string Name, double W, double H, CornerRadius Corners, double Shoulder)[]
+        {
+            ("lowered panel", 230, 70, new CornerRadius(20), 0), ("notch", 260, 32, new CornerRadius(0, 0, 12, 12), 16), ("panel", 580, 300, new CornerRadius(0, 0, 18, 18), 0),
+            ("notice", 320, 104, new CornerRadius(22), 0), ("small", 40, 30, new CornerRadius(4), 0)
+        };
+        // A capsule keeps its round ends: the pill, at any size, is the curved outline's shape, and there is no cut in it.
+        foreach (var (w, h) in new[] { (230d, 32d), (180d, 24d), (300d, 64d) })
+        {
+            var pill = IslandBorder.BuildCut(w, h, 0, new CornerRadius(h / 2), 0, cut);
+            var round = IslandBorder.BuildOutline(w, h, 0, new CornerRadius(h / 2), 0);
+            Check($"A {w}x{h} capsule is still a pill with cut corners on: the curved outline to a tenth of a DIP²",
+                Math.Abs(pill.GetArea() - round.GetArea()) < Math.Max(2, .002 * round.GetArea()) && pill.Bounds == round.Bounds);
+        }
+        // Opening into a panel the shape changes continuously: between frames a quarter DIP apart only the quarter DIP of height shows.
+        double worst = 0; Geometry? before = null;
+        for (double h = 32; h <= 140; h += .25)
+        {
+            double radius = Math.Min(24, 16 + (h - 32) / 4);
+            var now = IslandBorder.BuildCut(230, h, 0, new CornerRadius(radius), 0, cut);
+            if (before is not null) worst = Math.Max(worst, Geometry.Combine(before, now, GeometryCombineMode.Xor, null).GetArea());
+            before = now;
+        }
+        Check($"A capsule opening into a panel changes shape continuously (worst frame {worst:0.0} DIP², a quarter DIP of a 230 wide island is 57.5)", worst < 230 * .25 + 4);
+        foreach (var (name, w, h, corners, shoulder) in shapes)
+        {
+            var outline = IslandBorder.BuildCut(w, h, shoulder, corners, 0, cut);
+            var curved = IslandBorder.BuildOutline(w, h, shoulder, corners, 0);
+            var points = outline.GetFlattenedPathGeometry().Figures.SelectMany(f => new[] { f.StartPoint }.Concat(f.Segments.OfType<PolyLineSegment>().SelectMany(s => s.Points))).ToList();
+            bool angles = points.Select((p, i) => (p, q: points[(i + 1) % points.Count])).All(e =>
+            {
+                double dx = Math.Abs(e.p.X - e.q.X), dy = Math.Abs(e.p.Y - e.q.Y);
+                // A leg is at most the cut, and a corner's cut at most its radius (a shoulder's slant is longer, from the screen's edge).
+                return dx < 1e-6 || dy < 1e-6 || Math.Abs(dx - dy) < 1e-6 && dx <= cut + 1e-6 || shoulder > 0 && dy <= shoulder + 1e-6;
+            });
+            Check($"Cut {name}: straight, horizontal, vertical or 45 degrees, legs within the cut, the curved outline's bounds",
+                points.Count >= 4 && angles && Math.Abs(outline.Bounds.Width - curved.Bounds.Width) < .01 && Math.Abs(outline.Bounds.Height - curved.Bounds.Height) < .01
+                && outline.Bounds.Left >= -1e-6 && outline.Bounds.Top >= -1e-6);
+            // A corner the size of its radius is cut by no more than that radius.
+            if (name == "small") Check("A corner is never cut by more than its own radius", points.All(p => p.X >= -1e-6) && outline.Bounds.Width > 0
+                && points.Any(p => Math.Abs(p.X) < 1e-6 && p.Y > 3.9 && p.Y < 4.1 || Math.Abs(p.Y) < 1e-6 && p.X > 3.9 && p.X < 4.1));
+            var inset = IslandBorder.BuildCut(w, h, shoulder, corners, 1, cut);
+            Check($"Cut {name}: the shadow's inset copy lies inside the outline", inset.Bounds.Left >= outline.Bounds.Left + .99 && inset.Bounds.Right <= outline.Bounds.Right - .99 && inset.Bounds.Bottom <= outline.Bounds.Bottom - .99
+                && Geometry.Combine(inset, outline, GeometryCombineMode.Exclude, null).GetArea() < .01);
+        }
+        var stepped = IslandBorder.Shape(230, 32, 0, new CornerRadius(16), 0, 2, 1, 1, cut).Outline;
+        Check("A pixel theme's steps win over cut corners", stepped.Bounds == IslandBorder.Shape(230, 32, 0, new CornerRadius(16), 0, 2, 1, 1).Outline.Bounds);
+        Check("Cut zero keeps the curves", IslandBorder.Shape(230, 32, 0, new CornerRadius(16), 0, 0, 1, 1, 0).Outline.ToString() == IslandBorder.BuildOutline(230, 32, 0, new CornerRadius(16), 0).ToString());
     }
 
     private static void PixelChecks()

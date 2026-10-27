@@ -214,7 +214,7 @@ internal sealed class ModelDatePicker : Border
     private double Clock() => Preview?.Clock() ?? Eased.Now;
     private string Hex(string token) => _palette[token].ToString();
     // Square in a pixel theme, as the panel's other corners (PanelTheme.Corner), for the picker's own palette.
-    private double Corner(double radius) => _palette.Effects.Pixel > 0 ? 0 : radius;
+    private double Corner(double radius) => _palette.Effects.Pixel > 0 ? 0 : _palette.Effects.Cut > 0 && radius < BrimDeck.Radius.Full ? Math.Min(radius, 2) : radius;
     private Brush Brush(string token) => UI.Brush(Hex(token));
 
     // The band's color laid over the pop-up's: the half cells overlap by a hair to leave no seam at fractional widths, and a
