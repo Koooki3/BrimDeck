@@ -250,17 +250,41 @@ public partial class MainWindow : Window
             // squash the whole surface once it shows again (without a boot).
             ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
             ResetDotPose();
-            SetExpanded(false, true); Hide();
+            SetExpanded(false, true); HideBlank();
         }
         else
         {
-            bool appearing = !IsVisible;
+            bool appearing = !IsVisible || _hiding;
+            _hiding = false;
             if (!IsVisible) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
             SetExpanded(_expanded, !animatePage || !wasVisible);
         }
         UpdatePointerTracking();
         RenderUsage();
+    }
+    // Windows keeps a layered window's last picture while it is hidden and puts it on screen the moment the window is shown,
+    // before WPF draws again. Hidden straight away, the panel came back showing the frame it was hidden on: after the expand
+    // hotkey opened it while the panels were hidden, the next press flashed the whole open panel before it opened again from
+    // the collapsed surface. The surface is cleared first and the window hidden once that empty frame has been drawn.
+    private bool _hiding;
+    private void HideBlank()
+    {
+        if (!IsVisible || _hiding) return;
+        _hiding = true;
+        SetImmediate(HoverZone, OpacityProperty, 0d);
+        int frames = 0;
+        void Rendered(object? sender, EventArgs e)
+        {
+            // Shown again meanwhile (ApplySettings clears _hiding), or closed.
+            if (!_hiding || PresentationSource.FromVisual(this) is null) { CompositionTarget.Rendering -= Rendered; return; }
+            // Rendering comes before each frame: by the third, the empty frame has been drawn.
+            if (++frames < 3) return;
+            CompositionTarget.Rendering -= Rendered;
+            _hiding = false;
+            Hide();
+        }
+        CompositionTarget.Rendering += Rendered;
     }
     // Sizes are DIPs as they will be on the target monitor, and WPF turns Left and Top into pixels with the DPI the window
     // has now. A window on a monitor with another scale is therefore first moved onto the target in one step, which gives
