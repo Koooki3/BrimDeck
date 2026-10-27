@@ -8,9 +8,11 @@ public static class CollapsedLimits
     public const double BaseHeight = 32;
     // The notch and the capsule may be as wide as the monitor (the work area for the capsule). NotchWidthMax and CapsuleWidthMax
     // are only the limits for saved values; each monitor narrows them when the shape is resolved (WidthRange).
-    public const double NotchWidthDefault = 238, NotchWidthMin = 180, NotchWidthMax = 8000;
+    // The smallest widths are only what the shape itself needs; the content keeps the surface wide enough for what it shows
+    // (CompactMusicLayout.RequiredWidth, CollapsedGeometry.Resolve).
+    public const double NotchWidthDefault = 238, NotchWidthMin = 72, NotchWidthMax = 8000;
     public const double NotchHeightDefault = 32, NotchHeightMin = 24, NotchHeightMax = 64;
-    public const double CapsuleWidthDefault = 196, CapsuleWidthMin = 140, CapsuleWidthMax = 8000;
+    public const double CapsuleWidthDefault = 196, CapsuleWidthMin = 48, CapsuleWidthMax = 8000;
     public const double CapsuleHeightDefault = 32, CapsuleHeightMin = 24, CapsuleHeightMax = 64;
     // CapsuleTopMax is only the limit for saved values; on a monitor the capsule may go down until its bottom edge meets the
     // bottom of the work area (CapsuleTopRange).
@@ -64,8 +66,8 @@ public static class CollapsedGeometry
     // contentWanted: with auto width, the width the notch's or capsule's content asks for (0 for none); null keeps the saved
     // width. With a value the surface takes the content's width plus its insets, wider or narrower, between the style's
     // smallest width and the monitor.
-    // contentRequired: the width of what the content must show (CompactMusicLayout.RequiredWidth: the clock, and while media plays its
-    // cover, equalizer and title). The surface is always at least wide enough for it, with auto width or a saved width, within
+    // contentRequired: the width of what the content must show (CompactMusicLayout.RequiredWidth: the clock and, while media plays,
+    // its cover, equalizer and title; else one quota ring or the first system reading). The surface is always at least wide enough for it, with auto width or a saved width, within
     // the same limits.
     public static CollapsedShape Resolve(DeckSettings settings, CompactStyle style, DipRect monitor, DipRect work, double pixelsPerDip = 1, double? contentWanted = null, double contentRequired = 0)
     {

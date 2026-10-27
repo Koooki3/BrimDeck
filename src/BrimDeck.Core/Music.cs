@@ -110,13 +110,20 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // The gap between any two neighbours in the row, and between two rings or two readings (CompactSpacing).
     public static double Gap(double scale) => Whole(8 * SafeScale(scale));
 
-    // The narrowest content that shows everything the row must: the clock, and while media plays the cover, the equalizer and
-    // the shortest lyric, with the gaps between them. The surface is never narrower (CollapsedGeometry.Resolve).
-    public static double RequiredWidth(double scale, bool media, bool text, double clockFace)
+    // The narrowest content for what the row shows, so the surface is never narrower (CollapsedGeometry.Resolve) and is no
+    // wider than that needs: the clock; while media plays the cover, the equalizer and the shortest lyric; one quota ring when
+    // the rings show (ring: its size, 0 without rings), which the carousel then shows in turn; all with the gaps between them.
+    // A row with none of those keeps room for its first system reading (reading: its width, 0 without readings). A clock alone,
+    // or rings alone, so make a short surface. In whole DIPs, rounded up, so rounding never takes a part away.
+    public static double RequiredWidth(double scale, bool media, bool text, double clockFace, double ring = 0, double reading = 0)
     {
-        double s = SafeScale(scale), face = Safe(clockFace), gap = Gap(s);
-        double width = media ? Math.Max(1, Whole(20 * s)) + gap + Math.Max(1, Whole(18 * s)) + (text ? Whole(MinimumText * s) + gap : 0) : 0;
-        return width + (face == 0 ? 0 : width > 0 ? face + gap : face);
+        double s = SafeScale(scale), gap = Gap(s), width = 0;
+        int parts = 0;
+        void Add(double part) { if (part <= 0) return; width += part; parts++; }
+        if (media) { Add(Math.Max(1, Whole(20 * s))); Add(Math.Max(1, Whole(18 * s))); if (text) Add(Whole(MinimumText * s)); }
+        Add(Safe(ring)); Add(Safe(clockFace));
+        if (parts == 0) Add(Safe(reading));
+        return parts == 0 ? 0 : Math.Ceiling(width + (parts - 1) * gap - 1e-9);
     }
 
     // The width an auto-width row keeps for the lyric or the title at scale 1. It does not follow the text, so the surface

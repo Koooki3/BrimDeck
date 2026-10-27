@@ -929,7 +929,8 @@ public partial class MainWindow
         double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0);
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
         // for, this leaves out the track notice, so the surface does not move for it.
-        double required = CompactMusicLayout.RequiredWidth(scale, media, steadyText, clock?.ReservedWidth ?? 0);
+        double required = CompactMusicLayout.RequiredWidth(scale, media, steadyText, clock?.ReservedWidth ?? 0,
+            steadyRings > 0 ? Math.Max(1, CompactMusicLayout.Whole(12 * scale)) : 0, strip?.ItemWidths() is [var first, ..] ? first : 0);
         if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5 || Math.Abs(required - _compactRequired) > .5)
         { _compactWanted = wanted; _compactRequired = required; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         double row = layout.RowHeight, unit = CompactMusicLayout.Gap(scale);
@@ -946,6 +947,8 @@ public partial class MainWindow
         double readingsRoom = strip is null || layout.MonitorWidth <= 0 ? 0 : (layout.MonitorAlone ? layout.MonitorWidth : layout.MonitorWidth - unit) + spare;
         var readings = CompactSpacing.Window(readingWidths, unit, readingsRoom);
         if (readings.Count > 0) spare = Math.Max(0, spare - Math.Max(0, readingsRoom - readings.Window));
+        // Readings with room for none of them give that room, gap and all, to the rings.
+        else if (!layout.MonitorAlone) spare += Math.Max(0, layout.MonitorWidth);
         var rings = CompactSpacing.Window([.. apps.Select(_ => layout.RingSize)], unit, layout.RingWidth > 0 ? layout.RingWidth + spare : 0);
         var shown = new List<(object Part, CompactSpacing.Part Size)>();
         if (hasCover) shown.Add(("cover", new(layout.CoverSize)));

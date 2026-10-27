@@ -80,6 +80,19 @@ internal static class CompactSpacingTests
             CompactMusicLayout.RequiredWidth(1, true, true, 40) == 20 + 8 + 18 + 8 + 18 + 8 + 40 && CompactMusicLayout.RequiredWidth(1, false, false, 40) == 40
             && CompactMusicLayout.RequiredWidth(1, true, false, 0) == 20 + 8 + 18 && CompactMusicLayout.RequiredWidth(1, false, true, 0) == 0
             && CompactMusicLayout.RequiredWidth(2, true, true, 80) == 2 * (20 + 8 + 18 + 8 + 18 + 8) + 80);
+        check("Compact required: a clock alone, or rings or readings alone, need only themselves; one ring joins what else shows",
+            CompactMusicLayout.RequiredWidth(1, false, false, 40, 0, 56) == 40 && CompactMusicLayout.RequiredWidth(1, false, false, 0, 12, 56) == 12
+            && CompactMusicLayout.RequiredWidth(1, false, false, 0, 0, 56) == 56 && CompactMusicLayout.RequiredWidth(1, false, false, 0) == 0
+            && CompactMusicLayout.RequiredWidth(1, false, false, 40, 12, 56) == 40 + 8 + 12
+            && CompactMusicLayout.RequiredWidth(1, true, true, 0, 12, 56) == 20 + 8 + 18 + 8 + 18 + 8 + 12
+            && CompactMusicLayout.RequiredWidth(1, false, false, 31.83) == 32);
+        var ringOnly = new DeckSettings { CapsuleWidth = 48, NotchWidth = 72 };
+        var screenAll = new DipRect(0, 0, 1920, 1080); var areaAll = new DipRect(0, 0, 1920, 1032);
+        check("Compact required: a short surface for a clock alone or a ring alone",
+            CollapsedGeometry.Resolve(ringOnly, CompactStyle.Capsule, screenAll, areaAll, 1, null, 40).Surface.Width == 72
+            && CollapsedGeometry.Resolve(ringOnly, CompactStyle.Capsule, screenAll, areaAll, 1, null, 12).Surface.Width == 48
+            && CollapsedGeometry.Resolve(ringOnly, CompactStyle.Notch, screenAll, areaAll, 1, null, 40).Surface.Width == 100
+            && CollapsedGeometry.Resolve(ringOnly, CompactStyle.Notch, screenAll, areaAll, 1, null, 12).Surface.Width == 72);
         var layout = CompactMusicLayout.Calculate(CompactMusicLayout.RequiredWidth(1, true, true, 40), 1, true, 3, true, 40, 120);
         check("Compact required: at that width nothing the row must show is cut", layout.CoverWidth == 28 && layout.EqualizerWidth == 26 && layout.ClockWidth == 48
             && layout.TextWidth == 18 && layout.MonitorWidth == 0 && layout.RingWidth == 0);
