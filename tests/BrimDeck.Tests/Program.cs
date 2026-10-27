@@ -39,6 +39,7 @@ try
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
     HotkeyTests.Run(Check);
+    KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);

@@ -3,14 +3,14 @@ using BrimDeck.Native;
 
 namespace BrimDeck;
 
-// The two global hotkeys and the hidden state the hide hotkey toggles. Both hotkeys are unset by default and are taken from
-// the settings (HideHotkey, ExpandHotkey). The registrations live on a message-only window of the app (GlobalHotkeys), so
+// The global hotkeys and the hidden state the hide hotkey toggles. All are unset by default and are taken from the settings
+// (HideHotkey, ExpandHotkey, NoticeHotkey, ResizeHotkey). The registrations live on a message-only window of the app (GlobalHotkeys), so
 // panels closed and opened again for display changes do not lose them.
 public partial class App
 {
     private GlobalHotkeys? _hotkeys;
-    private readonly Dictionary<HotkeyKind, HotkeyStatus> _hotkeyStatus = new() { [HotkeyKind.Hide] = HotkeyStatus.Unset, [HotkeyKind.Expand] = HotkeyStatus.Unset, [HotkeyKind.Notices] = HotkeyStatus.Unset };
-    private string _hideHotkey = "", _expandHotkey = "", _noticesHotkey = "";
+    private readonly Dictionary<HotkeyKind, HotkeyStatus> _hotkeyStatus = new() { [HotkeyKind.Hide] = HotkeyStatus.Unset, [HotkeyKind.Expand] = HotkeyStatus.Unset, [HotkeyKind.Notices] = HotkeyStatus.Unset, [HotkeyKind.Resize] = HotkeyStatus.Unset };
+    private string _hideHotkey = "", _expandHotkey = "", _noticesHotkey = "", _resizeHotkey = "";
     private int _hotkeySuspensions;
 
     // Raised on the UI thread after the hotkeys are registered again, with any status change.
@@ -37,19 +37,19 @@ public partial class App
 
     // Registers the hotkeys saved in the settings. Unchanged texts that are already active are left alone; any other one is
     // tried again, so a combination another program has since released becomes active on the next save.
-    // The notices hotkey is registered only while dynamic notices are on.
-    public void ApplyHotkeys() => ApplyHotkeys(Settings.HideHotkey, Settings.ExpandHotkey, Settings.NoticesEnabled ? Settings.NoticeHotkey : "");
-    internal void ApplyHotkeys(string? hide, string? expand, string? notices = "")
+    // The notices hotkey is registered only while live notices are on.
+    public void ApplyHotkeys() => ApplyHotkeys(Settings.HideHotkey, Settings.ExpandHotkey, Settings.NoticesEnabled ? Settings.NoticeHotkey : "", Settings.ResizeHotkey);
+    internal void ApplyHotkeys(string? hide, string? expand, string? notices, string? resize)
     {
-        hide ??= ""; expand ??= ""; notices ??= "";
-        bool unchanged = hide == _hideHotkey && expand == _expandHotkey && notices == _noticesHotkey
+        hide ??= ""; expand ??= ""; notices ??= ""; resize ??= "";
+        bool unchanged = hide == _hideHotkey && expand == _expandHotkey && notices == _noticesHotkey && resize == _resizeHotkey
             && _hotkeyStatus.Values.All(status => status is HotkeyStatus.Active or HotkeyStatus.Unset);
-        _hideHotkey = hide; _expandHotkey = expand; _noticesHotkey = notices;
+        _hideHotkey = hide; _expandHotkey = expand; _noticesHotkey = notices; _resizeHotkey = resize;
         if (unchanged && _hotkeySuspensions == 0 && _hotkeys is not null) return;
         RegisterHotkeys();
     }
 
-    // Releases both hotkeys, for example while the settings window records a new combination. Calls nest; each must be
+    // Releases the hotkeys, for example while the settings window records a new combination. Calls nest; each must be
     // matched by ResumeHotkeys, and the hotkeys come back with the last one.
     public void SuspendHotkeys()
     {
@@ -88,7 +88,7 @@ public partial class App
         (Decks.FirstOrDefault(deck => deck.HotkeyMonitor == monitor) ?? Deck).OpenFromHotkey();
     }
 
-    // A notice on screen opens its details for the keyboard; otherwise the panel under the pointer opens on the recent notices.
+    // A notice on screen opens its details for the keyboard; otherwise the panel under the pointer opens on the notice history.
     private void NoticesFromHotkey()
     {
         if (!Settings.NoticesEnabled) return;
@@ -97,12 +97,21 @@ public partial class App
         (Decks.FirstOrDefault(deck => deck.HotkeyMonitor == monitor) ?? Deck).OpenNoticesPage();
     }
 
+    // Resizes the open panel, or the collapsed surface on the monitor under the pointer (KeyboardResize).
+    public void ResizeFromHotkey(int arrow)
+    {
+        var target = Decks.FirstOrDefault(deck => deck.IsOpenForHotkey);
+        if (target is null) { var monitor = GlobalHotkeys.CursorMonitor(); target = Decks.FirstOrDefault(deck => deck.HotkeyMonitor == monitor) ?? Deck; }
+        target.ResizeFromKeyboard(KeyboardResize.Of(arrow));
+    }
+
     private void RegisterHotkeys()
     {
-        foreach (var kind in Enum.GetValues<HotkeyKind>())
+        // Everything is released first, so a combination one hotkey gives up is free for another this time round.
+        foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys?.Unregister(kind);
+        foreach (var kind in new[] { HotkeyKind.Hide, HotkeyKind.Expand, HotkeyKind.Notices })
         {
             var (status, text) = HotkeyText.Plan(kind, _hideHotkey, _expandHotkey, _noticesHotkey, HotkeyGesture.IsKeyName);
-            _hotkeys?.Unregister(kind);
             if (status is null)
             {
                 HotkeyGesture.TryParse(text, out var modifiers, out var key);
@@ -111,14 +120,36 @@ public partial class App
             }
             _hotkeyStatus[kind] = status.Value;
         }
+        RegisterResizeHotkey();
         HotkeysChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void HotkeyPressed(HotkeyKind kind)
+    // The resize shortcut's four combinations, each repeating while its key is held. It is active only when all four are; one
+    // another program holds leaves none registered, so the arrows never work in some directions only.
+    private void RegisterResizeHotkey()
+    {
+        const HotkeyKind kind = HotkeyKind.Resize;
+        var (status, text) = HotkeyText.PlanArrows(_resizeHotkey, HotkeyGesture.IsKeyName, _hideHotkey, _expandHotkey, _noticesHotkey);
+        if (status is null && HotkeyText.TryParseArrows(text, out var modifiers))
+        {
+            status = HotkeyStatus.Active;
+            for (int arrow = 0; arrow < HotkeyText.ArrowKeys.Count && status == HotkeyStatus.Active; arrow++)
+            {
+                HotkeyGesture.TryParse(HotkeyText.Format(modifiers, HotkeyText.ArrowKeys[arrow]), out var wpfModifiers, out var key);
+                status = !HotkeyGesture.ToNative(wpfModifiers, key, out uint fs, out uint vk, repeat: true) ? HotkeyStatus.Invalid
+                    : _hotkeys is null || _hotkeySuspensions > 0 ? HotkeyStatus.Active : _hotkeys.Register(kind, fs, vk, arrow);
+            }
+            if (status != HotkeyStatus.Active) _hotkeys?.Unregister(kind);
+        }
+        _hotkeyStatus[kind] = status ?? HotkeyStatus.Invalid;
+    }
+
+    private void HotkeyPressed(HotkeyKind kind, int slot)
     {
         if (Exiting) return;
         if (kind == HotkeyKind.Hide) ToggleHidden();
         else if (kind == HotkeyKind.Notices) NoticesFromHotkey();
+        else if (kind == HotkeyKind.Resize) ResizeFromHotkey(slot);
         else ToggleExpandFromHotkey();
     }
 }
