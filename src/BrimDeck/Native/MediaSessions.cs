@@ -80,6 +80,7 @@ internal sealed class MediaSessions : IDisposable
     public bool NeteaseRunning => Netease?.ProcessId is not null;
     public bool NeteaseFullControl => Netease is { ProcessId: not null, IsLogMode: false };
     private NeteaseSource? Netease => _connections.OfType<NeteaseSource>().FirstOrDefault();
+    public bool NeteaseAutoFullControl { set { if (Netease is { } source) source.AutoFullControl = value; } }
     public async Task<bool> EnableFullControlAsync(bool quiet = false)
     {
         var source = Netease;
