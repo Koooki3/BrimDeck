@@ -23,7 +23,10 @@ public partial class MainWindow
     {
         IsVisibleChanged += (_, _) => UpdateMonitorDemand();
         _app.MonitorUpdated += MonitorUpdated;
-        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; _app.PresentMonitor(this, false, false); };
+        // Plugging in or unplugging changes what the power reading can come from (battery discharge on battery only): asked again then.
+        Microsoft.Win32.PowerModeChangedEventHandler powerChanged = (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.StatusChange) Dispatcher.BeginInvoke(UpdateMonitorDemand); };
+        Microsoft.Win32.SystemEvents.PowerModeChanged += powerChanged;
+        Closed += (_, _) => { _app.MonitorUpdated -= MonitorUpdated; Microsoft.Win32.SystemEvents.PowerModeChanged -= powerChanged; _app.PresentMonitor(this, false, false); };
     }
 
     // Asked whenever the panel opens, closes, changes page or is hidden, and whenever the collapsed row is built.
@@ -57,7 +60,12 @@ public partial class MainWindow
     // good on a machine without them; and the temperatures and letters it was built with (StripAdmission.Layout).
     private CompactMonitorItems _stripUnavailable;
     private string _stripLayout = "";
-    private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor) { Power = monitor.PowerSensor, Charge = monitor.BatterySensor } : SensorStates.Unknown;
+    // A laptop on mains that gave no power reading may give one on battery (the discharge rate): its power is asked again then.
+    private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor)
+    {
+        Power = monitor.PowerSensor == SensorState.None && Native.BatteryProvider.SystemHasBattery && !Native.BatteryProvider.OnMains ? SensorState.Unknown : monitor.PowerSensor,
+        Charge = monitor.BatterySensor
+    } : SensorStates.Unknown;
     // Whether this surface shows the system readings and waits for the first figures of one it does not show yet.
     private bool StripAwaits()
     {

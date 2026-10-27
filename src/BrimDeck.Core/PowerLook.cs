@@ -33,7 +33,7 @@ public static class PowerLooks
     public static readonly PowerLook HighContrast = new(PowerGauge.Pill, PowerCurve.Fine, "textPrimary", "textPrimary", "textPrimary", "textPrimary");
 
     // Built-in themes by id. The plain themes (dark, light, GitHub, Dracula, Night Owl, One Dark Pro) share the default.
-    //   Cyberpunk: HUD-cut battery with neon cyan, charging in the magenta of the signs, a sharp scope-like curve with a bright head.
+    //   Cyberpunk: HUD-cut battery with neon cyan, charging in the pale glow of a lit window (the magenta is the curve's, and the low battery's red is not to be mistaken for it), a sharp scope-like curve with a bright head.
     //   Island Holiday (both): a capsule like a lagoon bubble, charging in the sea's own color, a wave curve over a deeper fill.
     //   Pixel Blocks: ten stepped squares in the bright chat palette, charging cyan, a stair curve.
     //   Liquid Glass: a thin glass body with a light edge, a hairline curve.
@@ -41,7 +41,7 @@ public static class PowerLooks
     {
         [PanelThemes.Dark] = Default,
         [PanelThemes.Light] = Default,
-        ["cyberpunk-edgerunners"] = new(PowerGauge.Chamfer, PowerCurve.Sharp, "accent", "liked", "warning", "liked"),
+        ["cyberpunk-edgerunners"] = new(PowerGauge.Chamfer, PowerCurve.Sharp, "accent", "clock", "warning", "liked"),
         [PanelThemes.IslandHoliday] = new(PowerGauge.Round, PowerCurve.Wave, "accent", "equalizer", "warning", "equalizer"),
         [PanelThemes.IslandHoliday2] = new(PowerGauge.Round, PowerCurve.Wave, "accent", "equalizer", "warning", "equalizer"),
         [PanelThemes.PixelBlocks] = new(PowerGauge.Blocks, PowerCurve.Steps, "accent", "equalizer", "warning", "equalizer"),

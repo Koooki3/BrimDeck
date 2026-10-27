@@ -98,7 +98,9 @@ public static class PowerResolver
         {
             if (!double.IsFinite(milliwatts) || milliwatts < 0) continue;
             if (instance.Equals("_Total", StringComparison.OrdinalIgnoreCase)) continue;
-            if (instance.StartsWith("RAPL_", StringComparison.OrdinalIgnoreCase))
+            // PSYS is RAPL's platform domain: the whole platform, a system meter.
+            if (instance.EndsWith("_PSYS", StringComparison.OrdinalIgnoreCase)) system = (system ?? 0) + milliwatts / 1000;
+            else if (instance.StartsWith("RAPL_", StringComparison.OrdinalIgnoreCase))
             {
                 rapl = true;
                 if (instance.EndsWith("_PKG", StringComparison.OrdinalIgnoreCase)) package = (package ?? 0) + milliwatts / 1000;
@@ -106,8 +108,11 @@ public static class PowerResolver
             }
             else system = (system ?? 0) + milliwatts / 1000;
         }
+        // The ACPI power meter is the platform's own: it stands for the system meter, not on top of the channels counted above.
+        double? meterSum = null;
         foreach (var (instance, milliwatts) in meter)
-            if (double.IsFinite(milliwatts) && milliwatts >= 0 && !instance.Equals("_Total", StringComparison.OrdinalIgnoreCase)) system = (system ?? 0) + milliwatts / 1000;
+            if (double.IsFinite(milliwatts) && milliwatts >= 0 && !instance.Equals("_Total", StringComparison.OrdinalIgnoreCase)) meterSum = (meterSum ?? 0) + milliwatts / 1000;
+        if (meterSum is { } acpi) system = acpi;
         string none = Loc.T("没有这类能量计", "no such meter");
         return (system is { } s ? s : Reading<double>.Unavailable(none), package is { } p ? p : Reading<double>.Unavailable(rapl ? Loc.T("能量计没有给出封装功率", "the Energy Meter gives no package power") : none),
             dram is { } d ? d : Reading<double>.Unavailable(none));

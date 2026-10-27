@@ -35,6 +35,16 @@ internal static class Program
         // [--scale <percent>] (or BRIMDECK_PAGES_SCALE) draws them at another display scale than 150 percent.
         // The real panel's pages in every built-in theme and look (LiquidPages.RunThemes): --theme-pages <output folder> [--scale 150]
         // [--text-scale 125] [--themes ids]. --text-scale stands in for Windows' text size (TextScale).
+        // The monitor page with the machine's power and battery, and the collapsed row's readings, in every theme (PowerPages): --power-pages <folder> [--scale 150] [--themes ids] [--sizes]
+        if (args.Length > 0 && args[0] == "--power-memory") return LiquidPages.RunPowerMemory();
+        if (args.Length > 0 && args[0] == "--power-cost") return LiquidPages.RunPowerCost(args.Length > 1 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 60);
+        if (args.Length > 1 && args[0] == "--power-pages")
+        {
+            if (LiquidPages.ScaleFrom(args) is not { } powerScale) { Console.WriteLine("FAIL: --scale wants a display scale such as 100, 125, 150"); return 1; }
+            int named = Array.IndexOf(args, "--themes");
+            return LiquidPages.RunPower(args[1], powerScale, named > 0 && named + 1 < args.Length ? args[named + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
+                args.Contains("--sizes"), args.Contains("--en"));
+        }
         if (args.Length > 1 && args[0] == "--theme-pages")
         {
             if (LiquidPages.ScaleFrom(args) is not { } themeScale) { Console.WriteLine("FAIL: --scale wants a display scale such as 100, 125, 150"); return 1; }

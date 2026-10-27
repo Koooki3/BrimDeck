@@ -183,7 +183,10 @@ public partial class App : Application
         _offscreen = true;
         AppInstance.ForTest();
         // A folder of its own for what the notices keep next to the settings (their banner ledger): never the user's.
-        Store = new SettingsStore(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-offscreen-" + Environment.ProcessId));
+        string scratch = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-offscreen-" + Environment.ProcessId);
+        Store = new SettingsStore(scratch);
+        // The lyrics service the music page asks (made in OnStartup in the app); its file is the sheet's own.
+        Lyrics = new LyricsService(appleLyricsFile: System.IO.Path.Combine(scratch, "apple-music-lyrics.json"));
         Settings = settings;
         UseLanguage();
         Notices = new NoticeCenter(this);
@@ -520,8 +523,11 @@ public partial class App : Application
         Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
             page && Settings.MonitorStorage || stripDrives,
             page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage),
-            page && Settings.MonitorPower || (shown & (CompactMonitorItems.Power | CompactMonitorItems.Charge)) != 0);
+            page && Settings.MonitorPower && PowerKnownToExist || (shown & (CompactMonitorItems.Power | CompactMonitorItems.Charge)) != 0);
     }
+    // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
+    // source nor a battery (a desktop with nothing), so such a page does not keep asking.
+    private bool PowerKnownToExist => Monitor is null || Monitor.PowerSensor != SensorState.None || Monitor.BatterySensor != SensorState.None || Native.BatteryProvider.SystemHasBattery;
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
     // The settings are turned into text here, where they live, and written on the thread pool: writing the file (and the virus

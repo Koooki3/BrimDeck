@@ -10,10 +10,12 @@ internal static class Program
     // Exercises the native adapters without starting the app, reading account
     // credentials, changing playback, or creating application settings.
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
         try
         {
+            // "--only power": just the power and battery checks, for a quick look at what this machine reports.
+            if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
             Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
             CheckWindowChrome();
             CheckSettledClip();
@@ -36,6 +38,7 @@ internal static class Program
             Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
                 && work.Width > 0 && work.Height > 0 && scale > 0);
             TemperatureChecks.Run(Check);
+            PowerChecks.Run(Check);
             DeviceChecks.Run(Check);
 
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))

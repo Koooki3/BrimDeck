@@ -111,7 +111,8 @@ public static class BatteryModel
 
     // The power the battery supplies, for the whole-machine reading (PowerResolver): the discharge rate, only while discharging.
     public static Reading<double> Discharge(BatteryInputs inputs, Reading<BatterySample> battery)
-        => battery.TryGet(out var sample) && sample.State == BatteryState.Discharging && sample.HasRate ? sample.Watts : Reading<double>.Unavailable(
+        // On mains (a charger weaker than the load) the battery covers only the shortfall, which is not what the machine draws.
+        => battery.TryGet(out var sample) && sample.State == BatteryState.Discharging && sample.HasRate && inputs.AcOnline != true ? sample.Watts : Reading<double>.Unavailable(
             Loc.T("没有在用电池供电", "not running on battery"));
 
     // Low is at or under the threshold, elevated within ten points above it, as the wireless devices are (Devices.Level); a battery on

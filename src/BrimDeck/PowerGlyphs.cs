@@ -61,6 +61,18 @@ internal static class PowerGlyphs
     private static readonly Geometry BoltBadge = Frozen("M9,1.5 L3.8,9 H7.6 L7,14.5 L12.2,7 H8.4 Z");
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
 
+    // Pens by color, thickness, join and dash, made once and frozen: the strip draws the battery on every reading.
+    private static readonly Dictionary<(string Color, double Thickness, PenLineJoin Join, bool Dashed), Pen> Outlines = [];
+    public static Pen Outline(string color, double thickness, PenLineJoin join, bool dashed = false)
+    {
+        if (Outlines.TryGetValue((color, thickness, join, dashed), out var known)) return known;
+        var pen = new Pen(UI.Brush(color), thickness) { LineJoin = join, MiterLimit = 2 };
+        if (dashed) pen.DashStyle = DashStyles.Dash;
+        pen.Freeze();
+        if (Outlines.Count > 96) Outlines.Clear();
+        return Outlines[(color, thickness, join, dashed)] = pen;
+    }
+
     // The leaf, stroked, in a square of the size with its top left corner at the point.
     public static void Leaf(DrawingContext drawing, Point at, double size, string color)
     {
@@ -78,7 +90,7 @@ internal static class PowerGlyphs
         switch (style.Look.Gauge)
         {
             case PowerGauge.Blocks:
-                drawing.DrawRectangle(null, new Pen(UI.Brush(PanelTheme.Hex("ringTrack")), ring) { LineJoin = PenLineJoin.Miter }, new Rect(center.X - r, center.Y - r, 2 * r, 2 * r));
+                drawing.DrawRectangle(null, Outline(PanelTheme.Hex("ringTrack"), ring, PenLineJoin.Miter), new Rect(center.X - r, center.Y - r, 2 * r, 2 * r));
                 break;
             case PowerGauge.Chamfer:
                 {
@@ -87,7 +99,7 @@ internal static class PowerGlyphs
                     foreach (var p in new[] { new Point(center.X + r, center.Y - r), new Point(center.X + r, center.Y + r - c), new Point(center.X + r - c, center.Y + r),
                         new Point(center.X - r, center.Y + r), new Point(center.X - r, center.Y - r + c) }) figure.Segments.Add(new LineSegment(p, true));
                     var hex = new PathGeometry([figure]); hex.Freeze();
-                    drawing.DrawGeometry(null, new Pen(UI.Brush(PanelTheme.Hex("ringTrack")), ring) { LineJoin = PenLineJoin.Miter }, hex);
+                    drawing.DrawGeometry(null, Outline(PanelTheme.Hex("ringTrack"), ring, PenLineJoin.Miter), hex);
                     break;
                 }
             default:
@@ -118,7 +130,7 @@ internal static class PowerGlyphs
         double inset = stroke + 1 / ppd;
         var inner = new Rect(body.X - stroke / 2 + inset, body.Y - stroke / 2 + inset, Math.Max(0, body.Width + stroke - 2 * inset), Math.Max(0, body.Height + stroke - 2 * inset));
         double share = unknown ? 0 : Math.Clamp(fill, 0, 1);
-        var pen = new Pen(UI.Brush(ink), stroke) { LineJoin = gauge is PowerGauge.Chamfer or PowerGauge.Blocks ? PenLineJoin.Miter : PenLineJoin.Round };
+        var pen = Outline(ink, stroke, gauge is PowerGauge.Chamfer or PowerGauge.Blocks ? PenLineJoin.Miter : PenLineJoin.Round);
         double tipX = Snap(body.Right + stroke / 2 + 1 / ppd);
         double lit = inner.Width * share;
 
@@ -196,14 +208,17 @@ internal static class PowerGlyphs
         }
     }
 
-    private static Pen Thin(string color, double stroke)
-    {
-        var pen = new Pen(UI.Brush(MonitorDraw.Faint(color, .85)), Math.Max(1, stroke * .8)) { LineJoin = PenLineJoin.Round };
-        return pen;
-    }
+    private static Pen Thin(string color, double stroke) => Outline(MonitorDraw.Faint(color, .85), Math.Max(1, stroke * .8), PenLineJoin.Round);
 
     // A rectangle with the top left and the bottom right corners cut, as the HUD look cuts its panels.
+    private static readonly Dictionary<(Rect, double), Geometry> Cuts = [];
     private static Geometry Cut(Rect r, double cut)
+    {
+        if (Cuts.TryGetValue((r, cut), out var known)) return known;
+        if (Cuts.Count > 48) Cuts.Clear();
+        return Cuts[(r, cut)] = Make(r, cut);
+    }
+    private static Geometry Make(Rect r, double cut)
     {
         cut = Math.Min(cut, Math.Min(r.Width, r.Height) / 2);
         var figure = new PathFigure(new Point(r.X + cut, r.Y), [], true);
@@ -262,9 +277,7 @@ internal static class PowerGlyphs
         }
         line.Freeze(); under.Freeze();
         drawing.DrawGeometry(UI.Brush(MonitorDraw.Faint(color, steps ? .18 : .1)), null, under);
-        var pen = new Pen(UI.Brush(color), steps ? 2 : 1.3) { LineJoin = PenLineJoin.Miter, MiterLimit = 2 };
-        pen.Freeze();
-        drawing.DrawGeometry(null, pen, line);
+        drawing.DrawGeometry(null, Outline(color, steps ? 2 : 1.3, PenLineJoin.Miter), line);
         if (steps) return;
         var head = points[^1];
         drawing.DrawEllipse(UI.Brush(MonitorDraw.Faint(color, .3)), null, head, 4, 4);

@@ -86,7 +86,9 @@ static class PowerTests
         var two = PowerResolver.FromCounters([("RAPL_Package0_PKG", 100_000), ("RAPL_Package1_PKG", 90_000), ("RAPL_Package0_DRAM", 12_000), ("RAPL_Package1_DRAM", 11_000)], []);
         check("Counters: sockets add up", two.Cpu.OrDefault == 190 && two.Memory.OrDefault == 23);
         var platform = PowerResolver.FromCounters([("Battery rail", 12_000), ("Board", 8_000), ("_Total", 20_000), ("RAPL_Package0_PKG", 30_000)], [("Power Meter (0)", 5_000), ("_Total", 5_000)]);
-        check("Counters: channels that are not RAPL, and the ACPI meter, make the system meter; _Total is not counted twice", platform.System.OrDefault == 25 && platform.Cpu.OrDefault == 30);
+        check("Counters: the ACPI meter stands for the system meter, not on top of other channels; _Total is not counted twice", platform.System.OrDefault == 5 && platform.Cpu.OrDefault == 30);
+        check("Counters: channels that are not RAPL make the system meter without an ACPI one; the platform domain counts", PowerResolver.FromCounters([("Battery rail", 12_000), ("Board", 8_000), ("_Total", 20_000)], []).System.OrDefault == 20
+            && PowerResolver.FromCounters([("RAPL_Package0_PSYS", 70_000), ("RAPL_Package0_PKG", 30_000)], []) is { } psys && psys.System.OrDefault == 70 && psys.Cpu.OrDefault == 30);
         var empty = PowerResolver.FromCounters([], []);
         check("Counters: none is unavailable, not zero", !empty.System.HasValue && !empty.Cpu.HasValue && !empty.Memory.HasValue);
         var broken = PowerResolver.FromCounters([("RAPL_Package0_PKG", double.NaN), ("RAPL_Package0_DRAM", -5)], []);
@@ -138,6 +140,15 @@ static class PowerTests
         check("Battery: the discharge feeds the power reading on battery only", BatteryModel.Discharge(inputs, BatteryModel.Build(inputs)).OrDefault is { } w && Math.Abs(w - 23.4) < 1e-9
             && !BatteryModel.Discharge(new BatteryInputs([Cell(40_000, 60_000, 66_000, 31_000, charging: true)], AcOnline: true), plugged.AsReading()).HasValue
             && !BatteryModel.Discharge(inputs, Reading<BatterySample>.Unavailable("x")).HasValue);
+
+        // On mains the battery covers only a shortfall (a weak charger): that is not the machine's draw.
+        var weak = new BatteryInputs([Cell(40_000, 60_000, 66_000, -23_400, discharging: true)], AcOnline: true);
+        check("Battery: on mains a discharge is not the machine's draw", BatteryModel.Build(weak).OrDefault is { State: BatteryState.Discharging } && !BatteryModel.Discharge(weak, BatteryModel.Build(weak)).HasValue);
+        // The system's own fallback cell (the listing gave none): discharging off mains, with Windows' time.
+        var flagged = BatteryModel.Build(new BatteryInputs([new BatteryCell("system", null, null, null, null, false, true)], AcOnline: false, WindowsPercent: 40, WindowsRemaining: TimeSpan.FromMinutes(90))).OrDefault!;
+        check("Battery: the fallback cell discharges off mains with Windows' time", flagged.State == BatteryState.Discharging && flagged.TimeLeft == TimeSpan.FromMinutes(90) && Math.Abs(flagged.Percent - 40) < 1e-9);
+        var charging = BatteryModel.Build(new BatteryInputs([new BatteryCell("system", null, null, null, null, true, false)], AcOnline: true, WindowsPercent: 40)).OrDefault!;
+        check("Battery: the fallback cell charges when the system flags charging", charging.State == BatteryState.Charging);
 
         // Levels: low at or under the threshold, elevated within ten above, never when on mains.
         check("Battery: levels follow the devices' rule, charging is never low",
@@ -246,14 +257,16 @@ static class PowerTests
         var tall = MonitorLayout.For(700, 400, true, 2, power: 2);
         check("Layout: a tall page shows power and the battery on two lines", tall.PowerLines == 2 && tall.StorageLines == 2);
         var narrow = MonitorLayout.For(620, 220, true, 2, power: 2);
-        check("Layout: a standard page with drives keeps one line for both, and the drives their lines", narrow.PowerLines == 1 && narrow.StorageLines == MonitorLayout.For(620, 220, true, 2).StorageLines);
-        check("Layout: a short page has none", MonitorLayout.For(620, 130, true, 2, power: 2).PowerLines == 0);
-        check("Layout: power takes the graph's room, never the drives'", Enumerable.Range(140, 260).All(height =>
+        check("Layout: a standard page with drives keeps one line for both", narrow.PowerLines == 1);
+        check("Layout: a short page has none", MonitorLayout.For(620, 100, true, 2, power: 2).PowerLines == 0);
+        check("Layout: the first line of power comes before the drives, which give up room for it (at most two lines) while the graph keeps its minimum", Enumerable.Range(140, 260).All(height =>
         {
             var plain = MonitorLayout.For(700, height, true, 3);
             var with = MonitorLayout.For(700, height, true, 3, power: 2);
-            return with.StorageLines == plain.StorageLines && with.Metrics == plain.Metrics && with.PowerLines is >= 0 and <= 2;
+            return with.StorageLines >= plain.StorageLines - 2 && with.StorageLines <= plain.StorageLines && with.Parts(height)[1].Height >= MonitorLayout.MinimumGraph - 1e-9 && with.Metrics == plain.Metrics && with.PowerLines is >= 0 and <= 2
+                && (with.PowerLines == 0) == (MonitorLayout.PowerRoom(height, with.Metrics, with.Figure, with.Body, with.RowHeight, 0) == 0);
         }));
+        check("Layout: a page with room for power and drives at once loses nothing", MonitorLayout.For(700, 400, true, 2, power: 2) is { StorageLines: 2, PowerLines: 2 });
         var parts = tall.Parts(400);
         check("Layout: the power lines sit under the drives and the graph keeps its minimum", parts[4].Top == parts[3].Top + parts[3].Height
             && parts[4].Height == (tall.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }) + 2 * tall.RowHeight && parts[1].Height >= MonitorLayout.MinimumGraph - 1e-9);

@@ -158,9 +158,9 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
     }
 
     // The lines under the drives for the whole machine's power draw and its own battery (PowerBlock): 2 lines when both have one, 1 when
-    // only power has, or when the page has room for one line only (power and battery then share it). They take what is left once the
-    // drives have theirs, with the core columns keeping MinimumGraph; a page without room for a line has none, so a page that has no
-    // power reading is laid out exactly as before.
+    // only power has, or when the page has room for one line only (power and battery then share it). The first line comes before the
+    // drives' lines, the second after them, with the core columns keeping MinimumGraph; a page without room for a line has none, and a
+    // page that asks for no power is laid out exactly as before.
     public int PowerLines { get; init; }
     public static int PowerRoom(double readings, MetricsMode metrics, double figure, double body, double row, int storageLines)
     {
@@ -224,11 +224,13 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
         // The core columns need height to read; memory and network give theirs first. Readings above a list have its fixed height.
         double readings = list == ListPlacement.Below ? StackedReadings : height;
         var metrics = readings < 150 ? MetricsMode.Line : readings < 250 ? MetricsMode.Lines : MetricsMode.Blocks;
-        int lines = storage <= 0 ? 0 : Math.Min(storage, StorageRoom(readings, metrics, figure, body, row));
-        return new(figure, body, caption, metrics, list, row)
-        {
-            StorageLines = lines, PowerLines = power <= 0 ? 0 : Math.Min(Math.Min(power, 2), PowerRoom(readings, metrics, figure, body, row, lines))
-        };
+        // The first line of power (with the battery, sharing it) comes before the drives' lines, which give up room for it: a page the
+        // user set to show power must show it at the size it has, however many drives there are. The battery's own line comes after the drives.
+        bool firstLine = power > 0 && PowerRoom(readings, metrics, figure, body, row, 0) >= 1;
+        double reserve = firstLine ? Fixed(metrics, figure, body).StorageMargin + row : 0;
+        int lines = storage <= 0 ? 0 : Math.Min(storage, StorageRoom(readings - reserve, metrics, figure, body, row));
+        int powerLines = power <= 0 ? 0 : Math.Min(Math.Min(power, 2), Math.Max(PowerRoom(readings, metrics, figure, body, row, lines), firstLine ? 1 : 0));
+        return new(figure, body, caption, metrics, list, row) { StorageLines = lines, PowerLines = powerLines };
     }
 
     // The rows and columns a list of this size shows.

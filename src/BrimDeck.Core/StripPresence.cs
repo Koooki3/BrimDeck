@@ -124,8 +124,10 @@ public sealed class StripAdmission
         // A reading of the machine's own: seen once it gives a figure, gone once the sampler knows there is none.
         if (latest?.Power.HasValue == true || states.Power == SensorState.Found) _powerSeen = true; else if (states.Power == SensorState.None) _powerSeen = false;
         if (latest?.Battery.HasValue == true || states.Charge == SensorState.Found) _chargeSeen = true; else if (states.Charge == SensorState.None) _chargeSeen = false;
-        if (_powerSeen) { hidden &= ~CompactMonitorItems.Power; layout.Append((int)CompactMonitorItems.Power).Append(' '); }
-        if (_chargeSeen) { hidden &= ~CompactMonitorItems.Charge; layout.Append((int)CompactMonitorItems.Charge).Append(' '); }
+        // Only for readings the row chooses: one it does not show must not rebuild the row when its first figure comes.
+        var chosen = CompactMonitor.Shown(readings);
+        if (_powerSeen && (chosen & CompactMonitorItems.Power) != 0) { hidden &= ~CompactMonitorItems.Power; layout.Append((int)CompactMonitorItems.Power).Append(' '); }
+        if (_chargeSeen && (chosen & CompactMonitorItems.Charge) != 0) { hidden &= ~CompactMonitorItems.Charge; layout.Append((int)CompactMonitorItems.Charge).Append(' '); }
         var arriving = Hidden & ~hidden;
         Hidden = hidden;
         Layout = layout.ToString();

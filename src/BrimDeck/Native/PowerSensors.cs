@@ -20,12 +20,13 @@ namespace BrimDeck.Native;
 internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
 {
     private const string EnergyPath = @"\Energy Meter(*)\Power", MeterPath = @"\Power Meter(*)\Power";
-    private const double Awake = 8;
+    private const double Awake = 8, Busy = .03;
     // Ticks without any source before the machine is taken for one without (a battery machine keeps trying: unplugged it has one).
     private const int GiveUpAfter = 5;
     private bool _added, _available;
     private int _empty;
-    private volatile SensorState _state = pdh is null ? SensorState.None : SensorState.Unknown;
+    private bool _everFound;
+    private volatile SensorState _state = SensorState.Unknown;
     private readonly Dictionary<string, double> _busyAt = new(StringComparer.OrdinalIgnoreCase);
     private NvmlPower? _nvml;
     public SensorState State => _state;
@@ -46,8 +47,12 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
             (system, cpu, memory) = PowerResolver.FromCounters(pdh.Read(EnergyPath), pdh.Read(MeterPath));
         var inputs = new PowerInputs { SystemMeter = system, BatteryDischarge = discharge, Cpu = cpu, Memory = memory, Gpus = ReadGpus(gpus, now) };
         var power = PowerResolver.Resolve(inputs);
-        if (power.HasValue) { _empty = 0; _state = SensorState.Found; }
-        else if (collected && ++_empty >= GiveUpAfter && !hasBattery) _state = SensorState.None;
+        if (power.HasValue) { _empty = 0; _everFound = true; _state = SensorState.Found; }
+        // None only for a machine that has never given a reading and has no NVIDIA adapter that may yet be busy; a laptop that gives
+        // none on mains may give one on battery, which the panel asks again for (MainWindow.StripSensors). Once found it stays found:
+        // a figure missing for a moment (an idle adapter) is a dash, not a sensor that has gone.
+        else if (!_everFound && (collected || pdh is null) && ++_empty >= GiveUpAfter && !gpus.Any(gpu => gpu.Name?.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) == true))
+            _state = SensorState.None;
         return power;
     }
 
@@ -59,9 +64,13 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
             string name = gpu.Name ?? "GPU";
             // Only NVIDIA's driver is asked, and only an adapter that is working.
             if (!name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)) continue;
-            if (gpu.Usage > 0) _busyAt[name] = now;
+            // Idle counts as under a few percent (the desktop's own drawing): NVIDIA's library costs about 20 MB once loaded, and loading it for
+            // an adapter that only draws the desktop is not worth it.
+            if (gpu.Usage >= Busy) _busyAt[name] = now;
             if (!_busyAt.TryGetValue(name, out var last) || now - last > Awake)
             {
+                // Idle for good: the library (about 20 MB) goes until the adapter works again.
+                if (_nvml is not null && _busyAt.Values.All(at => now - at > Awake)) { _nvml.Dispose(); _nvml = null; }
                 read.Add(new GpuPowerInput(name, Reading<double>.Unavailable(Loc.T("空闲，未读取以免唤醒休眠的显卡", "idle; not read so a sleeping adapter stays asleep"))));
                 continue;
             }
@@ -147,14 +156,18 @@ internal sealed class BatteryProvider
 {
     private const int Relist = 60;
     private readonly List<Windows.Devices.Power.Battery> _batteries = [];
-    private int _sinceList = Relist;
+    private int _sinceList = Relist, _unusable;
     private volatile SensorState _state = SensorState.Unknown;
     public SensorState State => _state;
     public bool Present => _state == SensorState.Found;
 
     // Whether the system says it has a battery, asked of the system directly (no reading of the batteries): the page needs it to
     // know how many lines to keep before the sampler has run. 128 is "no system battery", 255 "unknown".
-    public static bool SystemHasBattery => GetSystemPowerStatus(out var status) && status.BatteryFlag is not (128 or 255);
+    public static bool SystemHasBattery => ForceBattery ?? (GetSystemPowerStatus(out var status) && status.BatteryFlag is not (128 or 255));
+    // The page sheets (tests/BrimDeck.FxPreview) draw a laptop and a desktop whatever this machine is.
+    internal static bool? ForceBattery { get; set; }
+    // Whether the machine is on mains now (a laptop that gives no power reading there may give one on battery).
+    public static bool OnMains => GetSystemPowerStatus(out var status) && status.ACLineStatus == 1;
 
     public (BatteryInputs Inputs, Reading<BatterySample> Sample) Sample()
     {
@@ -171,15 +184,18 @@ internal sealed class BatteryProvider
                     report.DesignCapacityInMilliwattHours, report.ChargeRateInMilliwatts, report.Status == Windows.System.Power.BatteryStatus.Charging,
                     report.Status == Windows.System.Power.BatteryStatus.Discharging));
             }
-            catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException) { Debug.WriteLine(ex); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Debug.WriteLine(ex); }
         }
         // The system's own view where the batteries give no report (a driver that lists none): it knows a battery is there and its share.
         bool systemBattery = status.BatteryFlag is not (128 or 255);
         var inputs = new BatteryInputs(cells, status.AcOnline, status.Saver, BatteryModel.ModeOf(Overlay()), status.Percent, status.Remaining);
         if (cells.Count == 0 && systemBattery && status.Percent is not null)
-            inputs = inputs with { Cells = [new BatteryCell("system", null, null, null, null, status.AcOnline == false, false)] };
+            inputs = inputs with { Cells = [new BatteryCell("system", null, null, null, null, (status.BatteryFlag & 8) != 0, status.AcOnline == false)] };
         var sample = BatteryModel.Build(inputs);
-        _state = sample.HasValue ? SensorState.Found : cells.Count == 0 && !systemBattery ? SensorState.None : _state == SensorState.Found ? SensorState.Found : SensorState.Unknown;
+        if (sample.HasValue) { _unusable = 0; _state = SensorState.Found; }
+        else if (cells.Count == 0 && !systemBattery) _state = SensorState.None;
+        // A battery whose reports never give a share is taken for none after a few reads, so the row stops waiting for it.
+        else if (_state != SensorState.Found && ++_unusable >= 5) _state = SensorState.None;
         return (inputs, sample);
     }
 
@@ -194,7 +210,7 @@ internal sealed class BatteryProvider
                 if (Windows.Devices.Power.Battery.FromIdAsync(info.Id).AsTask().GetAwaiter().GetResult() is { } battery) batteries.Add(battery);
             _batteries.Clear(); _batteries.AddRange(batteries);
         }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException or TypeLoadException or DllNotFoundException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Debug.WriteLine(ex);
         }

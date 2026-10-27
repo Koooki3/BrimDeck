@@ -28,6 +28,8 @@ internal sealed class PowerBlock : FrameworkElement
     private IReadOnlyList<double> _history = [];
     private PowerSummary? _summary;
     private string _spoken = "";
+    // The watts that reach the top of the curve, worked out once per reading.
+    private double _top = 10;
 
     public PowerBlock(MonitorColors colors, PowerOptions options, double body, double caption, double row, int lines)
     {
@@ -46,6 +48,7 @@ internal sealed class PowerBlock : FrameworkElement
     public void Set(MonitorSnapshot snapshot, bool motion)
     {
         _power = snapshot.Power; _battery = snapshot.Battery; _history = snapshot.PowerHistory; _summary = snapshot.PowerSummary;
+        _top = _history.Count == 0 ? 10 : Math.Max(10, _history.Max() * 1.15);
         bool moving = _fill.Set(_battery.TryGet(out var sample) ? sample.Percent / 100 : 0, motion);
         ToolTip = Describe();
         _spoken = Spoken();
@@ -132,16 +135,19 @@ internal sealed class PowerBlock : FrameworkElement
         {
             var tag = new Rect(x, Math.Round(line.Y + (line.Height - tagHeight) / 2), tagWidth, tagHeight);
             double radius = PanelTheme.Corner(3);
-            var outline = new Pen(UI.Brush(power.Estimated ? UI.Secondary : MonitorDraw.Faint(UI.Secondary, .55)), 1) { DashStyle = power.Estimated ? DashStyles.Dash : DashStyles.Solid };
+            var outline = PowerGlyphs.Outline(power.Estimated ? UI.Secondary : MonitorDraw.Faint(UI.Secondary, .55), 1, PenLineJoin.Miter, power.Estimated);
             drawing.DrawRoundedRectangle(null, outline, tag, radius, radius);
             MonitorDraw.Baseline(drawing, kind, tag.X + padding, Math.Round(tag.Y + tag.Height / 2 + _caption * .36));
             x = tag.Right + 8;
         }
         var source = MonitorDraw.Text(PowerResolver.SourceName(power), _caption, UI.Tertiary, ppd);
         // The source is told only where the curve still has room after it.
-        double peakWidth = 0;
-        MonitorDraw.Baseline(drawing, source, x, baseline);
-        double afterSource = x + source.WidthIncludingTrailingWhitespace + 10;
+        double peakWidth = 0, afterSource = x;
+        if (x + source.WidthIncludingTrailingWhitespace <= line.Right)
+        {
+            MonitorDraw.Baseline(drawing, source, x, baseline);
+            afterSource = x + source.WidthIncludingTrailingWhitespace + 10;
+        }
         FormattedText? peak = null;
         if (_summary is { Count: > 2 } summary)
         {
@@ -151,8 +157,7 @@ internal sealed class PowerBlock : FrameworkElement
         double curveRight = line.Right - peakWidth;
         if (curveRight - afterSource >= 40 && _history.Count >= 3)
         {
-            double top = Math.Max(10, _history.Max() * 1.15);
-            PowerGlyphs.Curve(drawing, new Rect(afterSource, line.Y + 2, curveRight - afterSource, line.Height - 4), _history, top, Skin);
+            PowerGlyphs.Curve(drawing, new Rect(afterSource, line.Y + 2, curveRight - afterSource, line.Height - 4), _history, _top, Skin);
         }
         else if (peak is not null && line.Right - afterSource < peakWidth) peak = null;
         if (peak is not null) MonitorDraw.Baseline(drawing, peak, line.Right - peak.WidthIncludingTrailingWhitespace, baseline);
@@ -204,7 +209,7 @@ internal sealed class PowerBlock : FrameworkElement
             if (right - width < from + 8) break;
             var tag = new Rect(right - width, Math.Round(line.Y + (line.Height - tagHeight) / 2), width, tagHeight);
             double radius = PanelTheme.Corner(3);
-            drawing.DrawRoundedRectangle(null, new Pen(UI.Brush(hasLeaf ? Skin.Saver : MonitorDraw.Faint(UI.Secondary, .55)), 1), tag, radius, radius);
+            drawing.DrawRoundedRectangle(null, PowerGlyphs.Outline(hasLeaf ? Skin.Saver : MonitorDraw.Faint(UI.Secondary, .55), 1, PenLineJoin.Miter), tag, radius, radius);
             double textX = tag.X + padding;
             if (hasLeaf) { PowerGlyphs.Leaf(drawing, new Point(textX, Math.Round(tag.Y + (tag.Height - leaf) / 2)), leaf, Skin.Saver); textX += leaf + 3; }
             MonitorDraw.Baseline(drawing, text, textX, Math.Round(tag.Y + tag.Height / 2 + _caption * .36));

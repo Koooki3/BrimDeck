@@ -198,13 +198,22 @@ internal sealed class SystemSampler : IDisposable
         Reading<BatterySample> battery = default;
         if (_powerWanted)
         {
-            var (batteryInputs, batterySample) = _battery!.Sample();
-            battery = batterySample;
-            power = _power!.Sample(pdh, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
-            if (power.TryGet(out var drawn))
+            // Apart from the rest: a battery or a driver that fails in an unexpected way costs these two readings, never the page's.
+            try
             {
-                if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
-                _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts);
+                var (batteryInputs, batterySample) = _battery!.Sample();
+                battery = batterySample;
+                power = _power!.Sample(pdh, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
+                if (power.TryGet(out var drawn))
+                {
+                    if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
+                    _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts);
+                }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Debug.WriteLine(ex);
+                power = Reading<PowerSample>.Unavailable(ex.Message); battery = Reading<BatterySample>.Unavailable(ex.Message);
             }
         }
         else
