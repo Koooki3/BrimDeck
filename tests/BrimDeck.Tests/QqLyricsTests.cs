@@ -22,7 +22,7 @@ internal static class QqLyricsTests
     public static async Task Run(Action<string, bool> check)
     {
         var track = new MediaTrack { Source = "QQ 音乐", Title = "Song", Artist = "Artist/Guest", Album = "Album", End = TimeSpan.FromSeconds(140) };
-        using var handler = new Handler(request => request.RequestUri!.AbsolutePath.Contains("client_search_cp")
+        using var handler = new Handler(request => request.RequestUri!.AbsolutePath.Contains("search_for_qq_cp")
             ? Search(Song("wrongTitle01", title: "Song (Live)"), Song("wrongSinger1", artist: "Someone Else"),
                 Song("wrongAlbum01", album: "Live Album"), Song("wrongLength1", duration: 180), Song()) : Rpc());
         using var http = new HttpClient(handler); using var service = new LyricsService(http);
@@ -68,7 +68,7 @@ internal static class QqLyricsTests
         using (var lookup = new LyricsService(client))
             check("Known QQ preview identities retain clip synchronization",
                 (await lookup.FindAsync(previewTrack with { SongId = "qqid:1" }, true, default)).QqPreview && directPreview.Urls.Count == 1);
-        using (var legacyPreview = new Handler(request => request.RequestUri!.AbsolutePath.Contains("client_search_cp") ? Search(Song()) :
+        using (var legacyPreview = new Handler(request => request.RequestUri!.AbsolutePath.Contains("search_for_qq_cp") ? Search(Song()) :
             request.RequestUri.Host == "u.y.qq.com" ? PreviewRpc(text: "") : JsonSerializer.Serialize(new { code = 0, lyric = Lrc })))
         using (var client = new HttpClient(legacyPreview))
         using (var lookup = new LyricsService(client))

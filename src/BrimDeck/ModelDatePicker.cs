@@ -98,7 +98,8 @@ internal sealed class ModelDatePicker : Border
 
         System.Windows.Documents.TextElement.SetFontFamily(this, UI.PanelFont);
         Child = _body; Background = Brush("popup"); BorderBrush = Brush("popupBorder"); BorderThickness = new Thickness(1);
-        CornerRadius = new CornerRadius(10); Padding = new Thickness(8);
+        CornerRadius = new CornerRadius(_palette.Effects.Pixel > 0 ? 0 : 10); Padding = new Thickness(8);
+        if (_palette.Effects.Pixel > 0) TextOptions.SetTextRenderingMode(this, TextRenderingMode.Aliased);
 
         // The fields, with the active one's outline lying over both and gliding between them.
         var fields = new Grid { Margin = new Thickness(0, 0, 0, 5) };

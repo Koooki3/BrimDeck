@@ -20,6 +20,7 @@ public sealed record PanelThemeInfo(string Id, PanelThemeKind Kind, PanelThemeFi
 }
 
 [JsonSerializable(typeof(PanelThemeFile))]
+[JsonSerializable(typeof(PanelThemeDecor))]
 [JsonSerializable(typeof(string))]
 internal sealed partial class PanelThemeJson : JsonSerializerContext;
 
@@ -31,7 +32,8 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 // hue, just far enough to reach it (PanelThemes.Build.cs).
 public static partial class PanelThemes
 {
-    public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
+    public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners", PixelBlocks = "pixel-blocks";
+    public const string IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2;
 
     public static readonly IReadOnlyList<PanelThemeToken> Tokens =
@@ -76,12 +78,12 @@ public static partial class PanelThemes
         new("bubbleBorder", "进度时间气泡描边", "Seek time bubble border"),
     ];
     // Applications keyed by the names the "apps" object uses. Sources entered by hand share "manual".
-    public static readonly IReadOnlyList<string> AppKeys = ["claude", "codex", "antigravity", "cursor", "zcode", "dsh", "grokBot", "kimi", "manual", "other", "warning", "critical"];
+    public static readonly IReadOnlyList<string> AppKeys = ["claude", "codex", "antigravity", "cursor", "zcode", "dsh", "grokBot", "kimi", "opencode", "manual", "other", "warning", "critical"];
     public static string AppKey(ProviderId id) => id switch
     {
         ProviderId.Claude => "claude", ProviderId.Codex => "codex", ProviderId.Antigravity => "antigravity", ProviderId.Cursor => "cursor",
-        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi",
-        ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => "manual",
+        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi", ProviderId.OpenCode => "opencode",
+        ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.OpenCodeGo or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => "manual",
         _ => "other"
     };
 
@@ -97,9 +99,11 @@ public static partial class PanelThemes
         var file = JsonSerializer.Deserialize<PanelThemeFile>(json, Json) ?? throw new JsonException("The theme file is empty.");
         // Properties are checked for null by the serializer; values inside the colors, apps and gradient collections are not.
         static bool HasNull(IEnumerable<string?>? values) => values?.Any(value => value is null) == true;
-        if (HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
+        // The night look is a layer of the same format and is checked the same way.
+        static bool AnyNull(PanelThemeFile file) => HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
             || HasNull(file.Effects?.SurfaceGradient) || HasNull(file.Effects?.RimGradient)
-            || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true)
+            || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true;
+        if (AnyNull(file) || file.Night is { } night && AnyNull(night))
             throw new JsonException(Loc.T("颜色值不能为 null", "A color cannot be null"));
         return file;
     }
@@ -107,8 +111,8 @@ public static partial class PanelThemes
     // Built-in themes are read on demand: startup reads only the chosen theme and its base themes. The id of each is its resource
     // name, which a test keeps equal to the id inside the file.
     private const string ThemeResources = ".Themes.";
-    // Dark and light first, then the ported editor themes, then the custom demo.
-    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", Demo];
+    // Dark and light first, then the ported editor themes, then BrimDeck's own extensions with the custom demo last.
+    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, IslandHoliday2, PixelBlocks, Demo];
     private static (string Id, string Resource)[]? _builtInIndex;
     private static (string Id, string Resource)[] BuiltInIndex => _builtInIndex ??= [.. typeof(PanelThemes).Assembly.GetManifestResourceNames()
         .Where(name => name.Contains(ThemeResources, StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))

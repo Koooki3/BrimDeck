@@ -7,8 +7,8 @@
     <Setter Property="local:Feedback.Fade" Value="True"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
       <Grid>
-        <Border x:Name="HoverLayer" Background="{DynamicResource PanelFill}" CornerRadius="5" Opacity="0"/>
-        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+        <Border x:Name="HoverLayer" Background="{DynamicResource PanelFill}" CornerRadius="{DynamicResource PanelR5}" Opacity="0"/>
+        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
           <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
         </Border>
       </Grid>

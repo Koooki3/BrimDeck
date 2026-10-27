@@ -34,12 +34,13 @@ internal static class MusicVisuals
     }
     internal static Border Cover(BitmapSource? image, double size, double radius, bool outlined = false)
     {
+        double corner = PanelTheme.Corner(radius);
         var content = new Grid { Background = UI.Brush(PanelTheme.Hex("coverPlaceholder")) };
         if (image is not null) content.Children.Add(new Image { Source = image, Stretch = Stretch.UniformToFill });
         else content.Children.Add(Icon("music", size * .34));
-        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush(PanelTheme.Hex("coverOutline")), StrokeThickness = 1, RadiusX = radius, RadiusY = radius, Margin = new Thickness(.5), IsHitTestVisible = false });
-        content.Clip = new RectangleGeometry(new Rect(0, 0, size, size), radius, radius);
-        return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(radius), Child = content };
+        if (outlined) content.Children.Add(new Rectangle { Stroke = UI.Brush(PanelTheme.Hex("coverOutline")), StrokeThickness = 1, RadiusX = corner, RadiusY = corner, Margin = new Thickness(.5), IsHitTestVisible = false });
+        content.Clip = new RectangleGeometry(new Rect(0, 0, size, size), corner, corner);
+        return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(corner), Child = content };
     }
     // The color taken from the cover, or the theme's equalizer color when there is no cover or it gives none.
     internal static Brush Accent(BitmapSource? source) => Accent(source, out _);
@@ -103,7 +104,7 @@ internal sealed class MusicEqualizer : FrameworkElement
     // Bar width in DIPs; the collapsed row scales it with its height.
     public double BarWidth { get; init; } = 3;
     private readonly (double Time, double Peak)[] _history = new (double, double)[64];
-    private readonly double[] _levels = new double[5], _drawn = new double[5];
+    private readonly double[] _levels = new double[5];
     private readonly DrawingGroup _drawing = new();
     private Size _drawnSize;
     private int _next, _count;
@@ -161,18 +162,34 @@ internal sealed class MusicEqualizer : FrameworkElement
         return 0;
     }
     protected override void OnRender(DrawingContext dc) { Redraw(force: true); dc.DrawDrawing(_drawing); }
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi) { base.OnDpiChanged(oldDpi, newDpi); _bars = null; InvalidateVisual(); }
+    // The bars stand on half device pixels (EqualizerLayout): a level that moves none of them draws nothing new, and one that
+    // does only moves its own rectangle in the retained drawing.
+    private RectangleGeometry[]? _bars;
+    private Brush? _barsColor;
     private void Redraw(bool force = false)
     {
         var size = RenderSize;
-        // Paused bars stay at rest, so an unchanged frame is not drawn again.
-        if (!force && size == _drawnSize && _levels.AsSpan().SequenceEqual(_drawn)) return;
-        _levels.CopyTo(_drawn, 0); _drawnSize = size;
-        using var dc = _drawing.Open();
-        for (int i = 0; i < Math.Min(Bars, _levels.Length); i++)
+        int count = Math.Min(Bars, _levels.Length);
+        double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip, radius = BarWidth / 2;
+        bool rebuild = force || _bars is null || size != _drawnSize || !ReferenceEquals(_barsColor, Color);
+        if (rebuild)
         {
-            double bar = BarWidth;
-            double height = Math.Clamp(bar + _levels[i] * Math.Max(0, size.Height - bar), bar, Math.Max(bar, size.Height));
-            dc.DrawRoundedRectangle(Color, null, new Rect(i * Math.Max(0, size.Width - bar) / Math.Max(1, Bars - 1), (size.Height - height) / 2, bar, height), bar / 2, bar / 2);
+            _bars = new RectangleGeometry[count]; _barsColor = Color; _drawnSize = size;
+            using var dc = _drawing.Open();
+            for (int i = 0; i < count; i++)
+            {
+                var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, _levels[i], size.Width, size.Height, BarWidth, dpi);
+                _bars[i] = new RectangleGeometry(new Rect(x, y, w, h), radius, radius);
+                dc.DrawGeometry(Color, null, _bars[i]);
+            }
+            return;
+        }
+        for (int i = 0; i < count; i++)
+        {
+            var (x, y, w, h) = EqualizerLayout.Bar(i, Bars, _levels[i], size.Width, size.Height, BarWidth, dpi);
+            var rect = new Rect(x, y, w, h);
+            if (_bars![i].Rect != rect) _bars[i].Rect = rect;
         }
     }
 }
@@ -194,13 +211,22 @@ internal sealed class MusicMarquee : FrameworkElement
     // The scroll's cycle (MarqueeCycle), null until the text first scrolls. The rests are waited out on a timer (_turn) and a
     // clock runs only while the text glides (_glide): one clock repeating the whole cycle ticked at 60 frames a second through
     // the rests too, for as long as a song played. _since is when the scroll last went on (Eased.Now), NaN while it is held;
-    // _elapsed is where the cycle stood then.
+    // _elapsed is how long the cycle had then run in all, not wrapped, so its laps can be counted (MarqueeCycle.Done).
     private MarqueeCycle? _scroll;
     private PromptTimer? _turn;
     private ClockGroup? _glide;
     private CycleStretch? _glideMove;
     private double _since = double.NaN, _elapsed;
-    private bool _scrolling, _running, _hovered;
+    private bool _scrolling, _running, _hovered, _rested;
+    // With Laps set (the collapsed row's title), the text scrolls that many whole cycles and then rests at its start until the
+    // text changes or Replay is called; Rested starts it there. Without (the open page's lyric), it scrolls for as long as it may.
+    public bool Laps { get; init; }
+    public bool Rested { get => _rested; init => _rested = value; }
+    // Raised once the laps are done, so the window can keep the text resting when the row is built again.
+    public event Action? Finished;
+    // Raised when the glide's clock starts and when it lets go: while it runs, WPF draws a frame every refresh anyway.
+    public event Action<bool>? Gliding;
+    public bool IsGliding => _glide is not null;
     public MusicMarquee()
     {
         Loaded += (_, _) => UpdateAnimation();
@@ -270,19 +296,25 @@ internal sealed class MusicMarquee : FrameworkElement
     private FormattedText Formatted => _formatted ??= new(Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
         Typeface, FontSize, _ink ?? Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
     public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
-    private void ResetText() { _formatted = null; ResetAnimation(); Painter.InvalidateVisual(); }
+    private void ResetText() { _formatted = null; _rested = false; ResetAnimation(); Painter.InvalidateVisual(); }
+    // Scrolls the laps again from the start (the pointer came over the island).
+    public void Replay()
+    {
+        if (!_rested) return;
+        _rested = false; ResetAnimation(); UpdateAnimation();
+    }
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     { base.OnDpiChanged(oldDpi, newDpi); ResetText(); }
     private double EdgeStop => _fadeWidth > 0 ? Math.Min(.5, EdgeWidth / _fadeWidth) : 0;
     private void ResetAnimation()
     {
-        _turn?.Stop(); ReleaseGlide();
+        _turn?.Stop(); ReleaseGlide(); ShowGliding();
         _scroll = null; _running = false; _since = double.NaN; _elapsed = 0;
         _shift.X = 0; _unshift.X = 0; _left.Offset = 0; _right.Offset = 1 - EdgeStop;
     }
     private void UpdateAnimation()
     {
-        bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && _overflow > 0 && _formatted is not null;
+        bool running = _scrolling && ScrollAllowed && IsLoaded && IsVisible && !_hovered && !_rested && _overflow > 0 && _formatted is not null;
         // Rest, glide to the end, rest, start again (MarqueeCycle).
         if (_scroll is null && running) { _scroll = new MarqueeCycle(_overflow, Speed, EdgeWidth, EdgeStop); _elapsed = 0; }
         if (_scroll is not null && _running != running)
@@ -300,24 +332,26 @@ internal sealed class MusicMarquee : FrameworkElement
         TextOptions.SetTextHintingMode(Painter, _running ? TextHintingMode.Animated : TextHintingMode.Auto);
     }
 
-    // Where the cycle stands at a time, in seconds from its start.
-    private double At(double now) => _scroll is { } cycle ? cycle.Wrap(double.IsNaN(_since) ? _elapsed : _elapsed + now - _since) : 0;
+    // How long the cycle has run at a time, in seconds from its first start (not wrapped).
+    private double At(double now) => _scroll is null ? 0 : double.IsNaN(_since) ? _elapsed : _elapsed + now - _since;
     // The same, taken from the glide's clock while it runs: that is where the text is on screen (CycleTurn.Where).
     private double Position(double now)
     {
         double at = At(now);
         if (_scroll is not { } cycle || _glide is null || _glideMove is not { } move) return at;
-        return cycle.Wrap(CycleTurn.Where(at, move, MusicVisuals.MoveClockOf(_glide), _glide.CurrentTime?.TotalSeconds ?? double.NaN));
+        double within = cycle.Wrap(at);
+        return at - within + CycleTurn.Where(within, move, MusicVisuals.MoveClockOf(_glide), _glide.CurrentTime?.TotalSeconds ?? double.NaN);
     }
 
     // Shows where the cycle stands and, while it runs, waits for its next turn: a rest shows its still values with no clock
     // running, and just before it ends the glide starts on a clock of its own (CycleTurn.Lead), which lets go at the next turn.
-    private void Turn()
+    private void Turn() { TurnClock(); ShowGliding(); }
+    private void TurnClock()
     {
         if (_scroll is not { } cycle) { _turn?.Stop(); return; }
         // The time counted here follows the glide's clock, so the two never drift apart.
-        double now = Eased.Now, at = Position(now);
-        _elapsed = at; if (_running) _since = now;
+        double now = Eased.Now, played = Position(now), at = cycle.Wrap(played);
+        _elapsed = played; if (_running) _since = now;
         _turn ??= new PromptTimer(Dispatcher, Turn);
         if (_running && _glide is not null && _glideMove is { } gliding && CycleTurn.Holds(MusicVisuals.MoveClockOf(_glide), at, gliding))
         {
@@ -326,7 +360,17 @@ internal sealed class MusicMarquee : FrameworkElement
             return;
         }
         ReleaseGlide();
+        // Its laps done, the text rests at its start with no clock or timer left.
+        bool done = Laps && _running && cycle.Done(played);
+        if (done) at = cycle.Played(played);
         _shift.X = cycle.Shift(at); _unshift.X = cycle.Unshift(at); _left.Offset = cycle.Left(at); _right.Offset = cycle.Right(at);
+        if (done)
+        {
+            _rested = true; _running = false; _since = double.NaN; _elapsed = 0; _turn.Stop();
+            TextOptions.SetTextHintingMode(Painter, TextHintingMode.Auto);
+            Finished?.Invoke();
+            return;
+        }
         if (!_running) { _turn?.Stop(); return; }
         var stretch = cycle.StretchAt(at);
         var turn = CycleTurn.Plan(stretch, cycle.StretchAt(stretch.End), at);
@@ -365,6 +409,16 @@ internal sealed class MusicMarquee : FrameworkElement
         _unshift.ApplyAnimationClock(TranslateTransform.XProperty, null);
         _left.ApplyAnimationClock(GradientStop.OffsetProperty, null);
         _right.ApplyAnimationClock(GradientStop.OffsetProperty, null);
+    }
+    // Gliding is raised once a turn has settled, and only when whether a clock glides has changed: a turn that lets one clock go
+    // and starts the next (a new room for the text) raised it twice, and the bars' timer was stopped and started again for it.
+    private bool _glidingShown;
+    private void ShowGliding()
+    {
+        bool gliding = _glide is not null;
+        if (gliding == _glidingShown) return;
+        _glidingShown = gliding;
+        Gliding?.Invoke(gliding);
     }
     protected override void OnRender(DrawingContext dc) { if (_glyphs is null) Draw(dc, RenderSize); }
     // The size comes from the element that draws: the child renders during this element's arrange, before its own size is set.

@@ -12,7 +12,7 @@ internal sealed class ClockFace : FrameworkElement
 {
     public const double FaceHeight = 24;
     public static readonly Color White = Color.FromRgb(0xF5, 0xF5, 0xF7);
-    private static readonly FontFamily Orbitron = Bundled("Orbitron"), InstrumentSerif = Bundled("Instrument Serif"), Unbounded = Bundled("Unbounded"), BebasNeue = Bundled("Bebas Neue");
+    private static readonly FontFamily Orbitron = Bundled("Orbitron"), InstrumentSerif = Bundled("Instrument Serif"), Unbounded = Bundled("Unbounded"), BebasNeue = Bundled("Bebas Neue"), Fredoka = Bundled("Fredoka");
     private static FontFamily Bundled(string name) => new(new Uri("pack://application:,,,/BrimDeck;component/"), "./Assets/Fonts/#" + name);
     private static readonly Typeface Plain = Face(UI.PanelFont), Bold = Face(UI.PanelFont, FontWeights.SemiBold);
     private static Typeface Face(FontFamily family, FontWeight? weight = null, bool italic = false)
@@ -44,7 +44,8 @@ internal sealed class ClockFace : FrameworkElement
     {
         ClockStyle.Stacked => Loc.T("双行", "Two lines"), ClockStyle.Digits => Loc.T("叠放", "Stacked digits"), ClockStyle.Dots => Loc.T("点阵", "Dot matrix"),
         ClockStyle.Segment => Loc.T("数码管", "Seven segment"), ClockStyle.Neon => Loc.T("霓虹", "Neon"), ClockStyle.Serif => Loc.T("衬线", "Serif"),
-        ClockStyle.Wide => Loc.T("宽体", "Wide"), ClockStyle.Condensed => Loc.T("窄体", "Condensed"), _ => Loc.T("简约", "Simple")
+        ClockStyle.Wide => Loc.T("宽体", "Wide"), ClockStyle.Condensed => Loc.T("窄体", "Condensed"), ClockStyle.Pixel => Loc.T("像素", "Pixel"),
+        ClockStyle.Rounded => Loc.T("圆润", "Rounded"), _ => Loc.T("简约", "Simple")
     };
     // The cover color is used when a song with a cover is playing; otherwise the clock takes the theme's clock color, which
     // "white" stands for. Every color is drawn as the theme can read it on its surface (see PanelTheme.Readable).
@@ -104,6 +105,7 @@ internal sealed class ClockFace : FrameworkElement
         switch (_style)
         {
             case ClockStyle.Dots: return Dots(dc, clock, x);
+            case ClockStyle.Pixel: return Blocks(dc, clock, x);
             case ClockStyle.Segment: return Segments(dc, clock, x);
             case ClockStyle.Digits:
             {
@@ -139,11 +141,14 @@ internal sealed class ClockFace : FrameworkElement
                     ClockStyle.Serif => new Run(clock, Face(InstrumentSerif, italic: true), 19, .01),
                     ClockStyle.Wide => new Run(clock, Face(Unbounded, FontWeights.SemiBold), 11.5, .01),
                     ClockStyle.Condensed => new Run(clock, Face(BebasNeue), 19, .05),
+                    // Fredoka SemiBold, round and soft. Its digits are 0.72 em tall like Orbitron's, so it takes the neon clock's size.
+                    ClockStyle.Rounded => new Run(clock, Face(Fredoka, FontWeights.SemiBold), 11.5, .02),
                     _ => new Run(clock, Bold, 12.5)
                 };
                 Run? label = period is null ? null : _style switch
                 {
                     ClockStyle.Neon => new Run(period, Face(Orbitron, FontWeights.SemiBold), 8, .04, Cells: false),
+                    ClockStyle.Rounded => new Run(period, Face(Fredoka, FontWeights.SemiBold), 8.5, .03, Opacity: .8, Cells: false),
                     ClockStyle.Minimal => new Run(period, Plain, 10, Opacity: .62, Cells: false),
                     _ => new Run(period, Plain, 10, Opacity: .7, Cells: false)
                 };
@@ -232,6 +237,37 @@ internal sealed class ClockFace : FrameworkElement
                         if (rows[row][column] == '1') dc.DrawEllipse(brush, null, new Point(x + column * pitch + dot / 2, top + row * pitch + dot / 2), dot / 2, dot / 2);
             }
             x += (rows[0].Length - 1) * pitch + dot + (i < clock.Length - 1 ? gap : 0);
+        }
+        return x - start;
+    }
+
+    // Pixel: the dot matrix's digits as solid square blocks, 2 DIP each with no gap, so each lit block meets its neighbors and
+    // the strokes read as one pixel-art glyph. Blocks lie on whole device pixels at every scale: the face starts on a whole
+    // device pixel (OnRender), and a block is the device pixels its square covers.
+    private double Blocks(DrawingContext? dc, string clock, double x)
+    {
+        // Every block the same whole number of device pixels (at 125 % a 2 DIP block would alternate between 2 and 3 pixels);
+        // a half rounds up, as the island's pixel steps do (PixelStairs.Step).
+        double device = _scale * VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        double Snap(double value) => Math.Round(value * device, MidpointRounding.AwayFromZero) / device;
+        double block = PixelStairs.Step(2, device), gap = block;
+        double top = Snap((FaceHeight - 7 * block) / 2), start = x;
+        for (int i = 0; i < clock.Length; i++)
+        {
+            var rows = DotFont[clock[i]];
+            if (dc is not null)
+            {
+                var brush = GlyphBrush(i, clock.Length);
+                for (int row = 0; row < rows.Length; row++)
+                    for (int column = 0; column < rows[row].Length; column++)
+                        if (rows[row][column] == '1')
+                        {
+                            double left = Snap(x + column * block), right = Snap(x + (column + 1) * block);
+                            double y = Snap(top + row * block), bottom = Snap(top + (row + 1) * block);
+                            dc.DrawRectangle(brush, null, new Rect(left, y, right - left, bottom - y));
+                        }
+            }
+            x += rows[0].Length * block + (i < clock.Length - 1 ? gap : 0);
         }
         return x - start;
     }
