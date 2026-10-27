@@ -35,6 +35,9 @@ internal static class Motion
         _hooked = true; _last = TimeSpan.Zero; (_period, _every) = Pacing(); CompositionTarget.Rendering += Tick;
     }
 
+    // The frames a second this clock draws at, for WPF's own animations too (App: Timeline.DesiredFrameRate).
+    public static int FrameRate { get; } = Pacing() is var (period, every) ? (int)Math.Round(1000 / (period * every)) : 60;
+
     // The display's refresh period in milliseconds, from the desktop compositor, and how many of its frames make one of ours.
     // DWM_TIMING_INFO is packed to the byte and 292 bytes long; only its refresh rate is read (a ratio, after the size).
     private static (double Period, int Every) Pacing()

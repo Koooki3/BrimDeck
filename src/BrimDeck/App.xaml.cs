@@ -53,6 +53,13 @@ public partial class App : Application
     // The system hover time on some machines is a full second; every tooltip here opens after the same short pause.
     static App()
     {
+        // WPF's own animations (the panel's opening, the notices, every Storyboard) tick at 60 a second unless told otherwise. On a
+        // faster display that alternated one and two refreshes a frame: live check 10-27 at 144 Hz, openings ran at 72 to 85
+        // frames a second (frame interval median 13.9 ms) where the closing, which Motion also draws every frame, ran at 120+.
+        // They now follow the display as Motion does.
+        // The property belongs to Timeline, so it is overridden on the kinds of timeline that run: single animations and groups.
+        foreach (var kind in new[] { typeof(System.Windows.Media.Animation.AnimationTimeline), typeof(System.Windows.Media.Animation.TimelineGroup) })
+            System.Windows.Media.Animation.Timeline.DesiredFrameRateProperty.OverrideMetadata(kind, new PropertyMetadata((int?)Motion.FrameRate));
         System.Windows.Controls.ToolTipService.InitialShowDelayProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(120));
         System.Windows.Controls.ToolTipService.BetweenShowDelayProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(400));
         System.Windows.Controls.ToolTipService.ShowDurationProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(20000));
