@@ -98,10 +98,11 @@ public sealed class LineArriveEase : EasingFunctionBase
 
 public sealed class LineReturnEase : EasingFunctionBase
 {
-    private readonly double _carry;
-    public LineReturnEase(double carry = 0) { _carry = carry; EasingMode = EasingMode.EaseIn; }
-    protected override Freezable CreateInstanceCore() => new LineReturnEase(_carry);
-    protected override double EaseInCore(double normalizedTime) => Curves.LineReturn(normalizedTime, _carry);
+    private readonly double _carry, _x1, _y1, _x2, _y2;
+    // The closing curve it carries on from (Soft.Settle's by default).
+    public LineReturnEase(double carry = 0, double x1 = .45, double y1 = 0, double x2 = .12, double y2 = 1) { _carry = carry; _x1 = x1; _y1 = y1; _x2 = x2; _y2 = y2; EasingMode = EasingMode.EaseIn; }
+    protected override Freezable CreateInstanceCore() => new LineReturnEase(_carry, _x1, _y1, _x2, _y2);
+    protected override double EaseInCore(double normalizedTime) => Curves.LineReturn(normalizedTime, _carry, _x1, _y1, _x2, _y2);
 }
 
 // Curves.Bounce as a WPF easing; see BezierEase for the mode.
