@@ -139,6 +139,16 @@ internal sealed class GlassBackdrop : IDisposable
     // LiquidRenderer) stays reachable for comparison behind BRIMDECK_LIQUID_REFRACT=1.
     internal static bool Refraction { get; set; } = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_REFRACT") == "1";
     private bool AcrylicBody => LiquidTint is not null && !LiquidOff && !Refraction && LiquidTheme.Renders;
+    // Round 16, step 9 (experimental, BRIMDECK_LIQUID_RIM=1): the rim lens over the acrylic body - the refraction renderer's
+    // slab, its bevel only (LiquidFrame.Rim), concentrated at the contour and gone before the flat top. Shown only while the
+    // island holds still (fading in over RimLensInMs once a few frames saw the same shape, out at once when it moves), so the
+    // capture's frame never trails the shape and the frames of a motion carry nothing of it; the capture and its device made
+    // when it is first shown and let go with the liquid glass theme (ReleaseLiquid). Off, nothing of it is made.
+    internal static bool RimLens { get; set; } = Environment.GetEnvironmentVariable("BRIMDECK_LIQUID_RIM") == "1";
+    internal const float RimLensStrength = .7f;
+    private const int RimLensInMs = 220, RimLensDelayMs = 50, RimLensStillFrames = 3;
+    private bool _lensIn;
+    private float _lensOpacity;
     // Whether the liquid glass themes' glass is shown now: the acrylic body (its surface stepped aside for it), or the
     // refraction renderer's.
     public bool BodyShown => LiquidShown || SurfaceAside && AcrylicBody;
@@ -445,13 +455,14 @@ internal sealed class GlassBackdrop : IDisposable
         double outerLeft = left - shoulder - inset, outerRight = right + shoulder + inset, outerBottom = bottom + inset;
         bool acrylic = AcrylicBody;
         bool liquid = !acrylic && Liquid(shown, outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
+        double regionCorner = radius;
         if (acrylic)
         {
             // The acrylic body covers the island's whole outline as liquid glass did (its surface steps aside), and the rim
             // lies along that outline.
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
             // The luminosity layer for the text (the probe's) and the thickness for the island's size (GlassEffect.Shown).
-            double shownLuminosity = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0);
+            double shownLuminosity = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0, PanelTheme.Current.IsDark);
             if (shownLuminosity != _luminosityShown) { _luminosityShown = shownLuminosity; _brushFor = null; }
             Dress();
             // The body's sides (the shoulders are not the body: a rectangle as wide as the flare would stand out past the sides);
@@ -469,9 +480,12 @@ internal sealed class GlassBackdrop : IDisposable
             _clip.Size = new Vector2((float)Math.Max(0, bodyRight - bodyLeft), (float)Math.Max(0, outerBottom - acrylicTop));
             _clip.CornerRadius = new Vector2((float)round);
             clipTop = acrylicTop;
+            regionCorner = round;
             Rim(bodyLeft, acrylicTop, bodyRight, outerBottom, round, opacity);
+            RimBelow(shoulder >= 1 ? top + shoulder : double.NaN);
             Glow(shown, opacity);
             Probe(true);
+            Lens(shown, outerLeft, acrylicTop, outerRight, outerBottom, round, opacity);
         }
         else
         {
@@ -483,6 +497,11 @@ internal sealed class GlassBackdrop : IDisposable
         _sprite!.Opacity = liquid ? 0 : (float)opacity;
         Decided(liquid || acrylic, frame.Material);
         if (liquid || acrylic) { left = outerLeft; right = outerRight; bottom = outerBottom; corner = radius; }
+        // Over acrylic the body's own edge is the glass's edge (no island surface over it): composition draws it antialiased,
+        // and the region, which Windows cuts with no antialiasing (and GDI's rounded corner only near the circle), lies two
+        // device pixels outside it all round, concentric, so it never cuts the edge's partly covered pixels into steps (user
+        // report 10-27: the liquid glass themes' corners jagged where the other themes', under the island's own edge, are smooth).
+        if (acrylic) { left -= RegionMargin; clipTop -= RegionMargin; right += RegionMargin; bottom += RegionMargin; corner = regionCorner + RegionMargin; }
         // The window region: the clip's rectangle, rounded alike, so the window takes no clicks and shows nothing outside it.
         // A square top reaches above the window, as the clip does, so the region's rounded top corners fall outside it.
         var region = ((int)Math.Floor(left), (int)Math.Floor(clipTop), (int)Math.Ceiling(right), (int)Math.Ceiling(bottom), (int)Math.Round(corner));
@@ -496,7 +515,7 @@ internal sealed class GlassBackdrop : IDisposable
     }
 
     // Liquid glass for this frame, at the delayed shape, clipped to the recent shapes (window pixels); false shows the blur.
-    private bool Liquid(Frame shown, double left, double top, double right, double bottom, double radius, double opacity)
+    private bool Liquid(Frame shown, double left, double top, double right, double bottom, double radius, double opacity, float rim = 0)
     {
         // Another glass theme (only the liquid glass themes render, LiquidTheme): the blur, and liquid glass's capture goes with it.
         if (!LiquidTheme.Renders) { ReleaseLiquid(); return ShowLiquid(false); }
@@ -536,6 +555,9 @@ internal sealed class GlassBackdrop : IDisposable
             // indicator's, a notice's handoff), in steps of 1/64 so a held opacity draws nothing more; its refraction, rim light
             // and edge grow with it.
             var next = Pointered(preset, width, height, scale) with { Presence = (float)(Math.Round(opacity * 64) / 64), Plain = PlainShown() };
+            // The rim lens: the bevel alone, the same whatever the pointer does (the acrylic's own light answers it), so a
+            // still island draws it again only when what lies behind changes.
+            if (rim > 0) next = next with { Rim = rim, RimLuminosity = (float)_luminosityShown, Hover = 0, Press = 0, PointerX = float.NaN, PointerY = float.NaN };
             // Drawn again only when the glass changed (its shape, place, look, the press) or what lies behind it did;
             // while nothing about the glass changes (the island following frames for an animation that moves nothing of it),
             // the desktop is looked at no oftener than the idle poll's PollMs.
@@ -547,7 +569,7 @@ internal sealed class GlassBackdrop : IDisposable
             _liquidClip!.Offset = new Vector2((float)(left - x), (float)(top - y));
             _liquidClip.Size = new Vector2((float)Math.Max(0, right - left), (float)Math.Max(0, bottom - top));
             _liquidClip.CornerRadius = new Vector2((float)radius);
-            _liquid.Opacity = (float)opacity;
+            if (rim <= 0) _liquid.Opacity = (float)opacity;
             return ShowLiquid(true);
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or NotSupportedException or SharpGen.Runtime.SharpGenException or DllNotFoundException)
@@ -556,6 +578,42 @@ internal sealed class GlassBackdrop : IDisposable
             return ShowLiquid(false);
         }
     }
+
+    // The rim lens for this frame (RimLens): drawn and faded in once the island has held the same shape for a few frames and
+    // nothing of it moves; out at once otherwise (the capture and its device kept for the next rest).
+    private void Lens(Frame shown, double left, double top, double right, double bottom, double radius, double opacity)
+    {
+        if (!RimLens) return;
+        bool still = _moving == 0 && _arriving == 0 && _recent.Count > RimLensStillFrames;
+        for (int i = 1; still && i <= RimLensStillFrames; i++) still = _recent[^i] == _recent[^(i + 1)];
+        if (!still || !Liquid(shown, left, top, right, bottom, radius, opacity, RimLensStrength) || _liquid is null) { LensOut(); return; }
+        float target = (float)opacity;
+        if (_lensIn && target == _lensOpacity) return;
+        _lensOpacity = target;
+        _liquid.StopAnimation("Opacity");
+        if (_lensIn || !Soft.Enabled) { _liquid.Opacity = target; _lensIn = true; return; }
+        // Faded in a little after the frame is drawn, so the swap chain's first present (or a stale one) never shows.
+        _lensIn = true;
+        _liquid.Opacity = 0;
+        var compositor = _liquid.Compositor;
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(0, 0);
+        fade.InsertKeyFrame(1, target, compositor.CreateCubicBezierEasingFunction(new Vector2(.2f, 0), new Vector2(0, 1)));
+        fade.DelayTime = TimeSpan.FromMilliseconds(RimLensDelayMs);
+        fade.Duration = TimeSpan.FromMilliseconds(RimLensInMs);
+        _liquid.StartAnimation("Opacity", fade);
+    }
+
+    private void LensOut()
+    {
+        if (!_lensIn || _liquid is null) return;
+        _lensIn = false;
+        _liquid.StopAnimation("Opacity");
+        _liquid.Opacity = 0;
+    }
+
+    // For the tests: whether the rim lens is shown (or fading in) now.
+    internal bool LensShown => _lensIn;
 
     // The pointer's answer, the opening and the content row over a preset: hover brightens the glass and moves its rim light
     // toward the pointer, a press lights it from inside (both eased, GlassFeedback; only on the collapsed island). The morph
@@ -603,6 +661,10 @@ internal sealed class GlassBackdrop : IDisposable
             width, height, scale);
     }
     internal bool HoldsWindowOrCapture => _window is not null || _host is not null;
+    // For the offscreen edge check (FxPreview --edge-probe): the glass's own window, once made.
+    internal IntPtr GlassWindow => _window?.Handle ?? IntPtr.Zero;
+    // For the same check: the acrylic body drawn in this solid color instead (DWM leaves the host backdrop out of a print).
+    internal static Windows.UI.Color? ProbeColor { get; set; }
 
     // The capture being made off the UI thread is done: liquid glass is tried again at once.
     private Action? _sourceDone;
@@ -628,7 +690,12 @@ internal sealed class GlassBackdrop : IDisposable
         var previous = _liquid.Brush;
         _liquid.Brush = renderer.CreateBrush(compositor);
         previous?.Dispose();
-        if (_liquid.Parent is null) _root.Children.InsertAtTop(_liquid);
+        // The rim lens lies on the acrylic body, under its rim light and pointer glow.
+        if (_liquid.Parent is null)
+        {
+            if (AcrylicBody && _sprite?.Parent is not null) _root.Children.InsertAbove(_liquid, _sprite);
+            else _root.Children.InsertAtTop(_liquid);
+        }
     }
 
     // The last brightness any liquid glass measured behind its island (NaN before one): automatic liquid glass chosen while
@@ -648,7 +715,8 @@ internal sealed class GlassBackdrop : IDisposable
     // never runs over those motions; adaptivity resumes once they are over (GlassAppearance's held).
     private void ReportBackdrop()
     {
-        if (_host?.Renderer is not { } renderer) return;
+        // Over the acrylic body (the rim lens) its probe decides the look and the shadow's tone (AcrylicProbe), not the lens.
+        if (_host?.Renderer is not { } renderer || AcrylicBody) return;
         long now = Environment.TickCount64;
         bool auto = AutoLook?.Invoke() == true;
         bool current = _lead ?? PanelTheme.Current.IsDark;
@@ -708,7 +776,8 @@ internal sealed class GlassBackdrop : IDisposable
         if (shown) { _failures = 0; _retry?.Stop(); }
         else
         {
-            if (_liquid is not null) _liquid.Opacity = 0;
+            if (_liquid is not null) { _liquid.StopAnimation("Opacity"); _liquid.Opacity = 0; }
+            _lensIn = false;
             // What the swap chain holds is not shown now, and may be stale when it is again: drawn anew then.
             if (was) _host?.Idle.Forget();
             if (LiquidWanted) Recover();
@@ -718,7 +787,7 @@ internal sealed class GlassBackdrop : IDisposable
 
     // Liquid glass would be shown but the blur is, in its place (a failure, no capture for now).
     private bool LiquidWanted => LiquidTint is not null && !LiquidOff && !_excludeRefused && !_disposed && _shown && !LiquidShown
-        && LiquidTheme.Renders && Available;
+        && LiquidTheme.Renders && Available && (!AcrylicBody || RimLens);
 
     // Tries liquid glass again every RetryMs while it is wanted: after a failure once its wait is over, else once the capture
     // answers again (the lock screen or a UAC prompt gone, protected content closed); following the island then shows it.
@@ -792,6 +861,7 @@ internal sealed class GlassBackdrop : IDisposable
     {
         _poll?.Stop();
         LiquidShown = false;
+        _lensIn = false;
         if (_host is not null) { _host.Rebuilt -= Rebuilt; _host.Dispose(); _host = null; }
         if (_liquid is not null) { _liquid.Brush?.Dispose(); _liquid.Clip?.Dispose(); _liquid.Dispose(); _liquid = null; }
         _liquidClip?.Dispose(); _liquidClip = null;
@@ -833,7 +903,7 @@ internal sealed class GlassBackdrop : IDisposable
             try
             {
                 var look = (PanelTheme.Current.IsDark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = _luminosityShown };
-                _sprite.Brush = GlassEffect.Acrylic(compositor, look);
+                _sprite.Brush = ProbeColor is { } probe ? compositor.CreateColorBrush(probe) : GlassEffect.Acrylic(compositor, look);
                 DressShoulder(_shoulderLeft, compositor, look, left: true);
                 DressShoulder(_shoulderRight, compositor, look, left: false);
                 return;
@@ -881,14 +951,14 @@ internal sealed class GlassBackdrop : IDisposable
         if (sprite is null) return;
         if (sprite.Brush is CompositionMaskBrush old) { GlassEffect.Release(old.Source); old.Mask?.Dispose(); old.Dispose(); }
         var mask = compositor.CreateRadialGradientBrush();
-        // Relative to the square: clear inside the quarter circle about the corner under the flare, the acrylic outside it.
-        mask.EllipseCenter = new Vector2(left ? 0 : 1, 1);
-        mask.EllipseRadius = new Vector2(1, 1);
+        // In device pixels from the square's corner: clear inside the quarter circle about the corner under the flare, the
+        // acrylic outside it, the arc antialiased over a device pixel about the flare's radius (ShoulderArc, per frame).
+        mask.MappingMode = CompositionMappingMode.Absolute;
         mask.ColorStops.Add(compositor.CreateColorGradientStop(0, Windows.UI.Color.FromArgb(0, 0, 0, 0)));
-        mask.ColorStops.Add(compositor.CreateColorGradientStop(.985f, Windows.UI.Color.FromArgb(0, 0, 0, 0)));
+        mask.ColorStops.Add(compositor.CreateColorGradientStop(.97f, Windows.UI.Color.FromArgb(0, 0, 0, 0)));
         mask.ColorStops.Add(compositor.CreateColorGradientStop(1, Windows.UI.Color.FromArgb(255, 0, 0, 0)));
         var brush = compositor.CreateMaskBrush();
-        brush.Source = GlassEffect.Acrylic(compositor, look);
+        brush.Source = ProbeColor is { } probe ? compositor.CreateColorBrush(probe) : GlassEffect.Acrylic(compositor, look);
         brush.Mask = mask;
         sprite.Brush = brush;
     }
@@ -899,11 +969,27 @@ internal sealed class GlassBackdrop : IDisposable
         bool shown = shoulder >= 1;
         _shoulderLeft.IsVisible = _shoulderRight.IsVisible = shown;
         if (!shown) return;
-        var size = new Vector2((float)shoulder, (float)shoulder);
+        // Each square reaches a device pixel into the body (the body's antialiased side and the square's would otherwise leave a
+        // faint seam between them where both cover a part of the same pixel); the acrylic is opaque, so the overlap shows nothing.
+        var size = new Vector2((float)shoulder + ShoulderOverlap, (float)shoulder);
         _shoulderLeft.Size = _shoulderRight.Size = size;
         _shoulderLeft.Offset = new Vector3((float)(bodyLeft - shoulder), (float)top, 0);
-        _shoulderRight.Offset = new Vector3((float)bodyRight, (float)top, 0);
+        _shoulderRight.Offset = new Vector3((float)bodyRight - ShoulderOverlap, (float)top, 0);
         _shoulderLeft.Opacity = _shoulderRight.Opacity = (float)opacity;
+        ShoulderArc(_shoulderLeft, shoulder, left: true);
+        ShoulderArc(_shoulderRight, shoulder, left: false);
+    }
+
+    // The flare's arc in the shoulder's mask: about the square's outer bottom corner, clear to half a device pixel inside the
+    // flare's radius and whole half a pixel outside it (the island's own outline, IslandBorder, is antialiased alike).
+    private const float ShoulderOverlap = 1, RegionMargin = 2;
+    private void ShoulderArc(SpriteVisual sprite, double shoulder, bool left)
+    {
+        if (sprite.Brush is not CompositionMaskBrush { Mask: CompositionRadialGradientBrush mask } || mask.ColorStops.Count < 3) return;
+        float radius = (float)shoulder + .5f;
+        mask.EllipseCenter = new Vector2(left ? 0 : (float)shoulder + ShoulderOverlap, (float)shoulder);
+        mask.EllipseRadius = new Vector2(radius, radius);
+        mask.ColorStops[1].Offset = Math.Clamp(((float)shoulder - .5f) / radius, 0, 1);
     }
 
     private void MakeGlow(Compositor compositor, Windows.UI.Composition.ContainerVisual root)
@@ -973,6 +1059,16 @@ internal sealed class GlassBackdrop : IDisposable
         }
     }
 
+    // The notch: the rim's sides begin below its shoulders. Above, the body's side runs inside the glass, between the shoulder's
+    // flare and the body (the flare is the outline there), where the hairline and the light would draw a line through the glass.
+    private void RimBelow(double y)
+    {
+        if (_rim is null) return;
+        if (double.IsNaN(y)) { if (_rim.Clip is not null) { _rim.Clip.Dispose(); _rim.Clip = null; } return; }
+        var clip = _rim.Clip as InsetClip ?? (InsetClip)(_rim.Clip = _rim.Compositor.CreateInsetClip());
+        clip.TopInset = (float)y;
+    }
+
     private void Probe(bool on)
     {
         if (!on) { _probe?.Stop(); return; }
@@ -1038,7 +1134,7 @@ internal sealed class GlassBackdrop : IDisposable
 
         void Redress()
         {
-            double shown = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0);
+            double shown = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0, PanelTheme.Current.IsDark);
             if (shown == _luminosityShown) return;
             _luminosityShown = shown; _brushFor = null; Dress();
         }
@@ -1061,6 +1157,8 @@ internal sealed class GlassBackdrop : IDisposable
         // Glass not shown at all now (another theme, transparency effects off, battery saver): liquid glass goes, its capture
         // with it, and our windows are back in Desktop Duplication (CaptureExclusion).
         if (!Available) { SurfaceAside = false; ReleaseLiquid(); }
+        // The rim lens's capture goes with the island too (hidden: nothing to lie on); made again when it is next still.
+        else if (RimLens) ReleaseLiquid();
         if (!SurfaceAside) Report(0, always: false);
         Conceal();
         _recent.Clear(); _last = null; _moving = 0; _arriving = 0;

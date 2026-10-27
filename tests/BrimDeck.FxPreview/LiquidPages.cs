@@ -51,6 +51,13 @@ internal static partial class LiquidPages
         return value is >= .5 and <= 4 ? value : null;
     }
     private static int _failures;
+    // The known case the user accepted (10-27, the dark look as clear as the light): the acrylic body's dark look on the open
+    // panel left at its floor by the probe (its ring saw nothing bright), over a backdrop whose bright part lies under the panel
+    // alone. Its secondary and tertiary text and its masked contrast may then fall a little short for that frame: reported as
+    // WARN while within Unseen's margins (secondary 4.0:1, tertiary 2.6:1, masked 80 % of the opaque theme's), FAIL past them.
+    // The primary text is always held to 4.5:1.
+    private static bool _unseen;
+    private static int _warnings;
 
     private enum Page { Capsule, MusicCover, MusicPlain, Monitor, Notices, Usage }
     private static readonly (Page Page, string Label)[] Pages =
@@ -173,6 +180,7 @@ internal static partial class LiquidPages
             LiquidPreview.Save(sheet, Path.Combine(folder, sheetName));
             Console.WriteLine($"Wrote {sheetName}");
         }
+        if (_warnings > 0) Console.WriteLine($"NOTE: {_warnings} warnings of the known case (the dark panel at its floor over a bright part the probe cannot see)");
         Console.WriteLine(_failures == 0 ? "PASS: all page checks" : $"{_failures} page checks failed");
         return _failures == 0 ? 0 : 1;
     }
@@ -327,6 +335,18 @@ internal static partial class LiquidPages
         {
             glass = AcrylicEmulation.Draw(desktop, dw, dh, gx, gy, layer.W, layer.H, glass, dark, Scale, layer.Open);
             Console.WriteLine(FormattableString.Invariant($"NOTE: {name}: acrylic luminosity {AcrylicEmulation.Luminosity:0.00}"));
+            // Step 9 (BRIMDECK_LIQUID_RIM=1): the rim lens over it, the slab's bevel alone, as GlassBackdrop lays it on the body.
+            if (GlassBackdrop.RimLens)
+            {
+                var lens = LiquidPreview.Render(device, renderer, desktop, dw, dh, (gx, gy, layer.W, layer.H),
+                    frame with { Rim = GlassBackdrop.RimLensStrength, RimLuminosity = (float)AcrylicEmulation.Luminosity }, (int)Math.Ceiling(48 * Scale));
+                for (int i = 0; i < lens.Length; i += 4) Over(lens, i, glass, i);
+                // Only at the contour: nothing at the middle, and the bottom edge's middle carries it.
+                int middle = (layer.H / 2 * layer.W + layer.W / 2) * 4 + 3, edge = 0;
+                for (int y = layer.H - (int)Math.Ceiling(4 * Scale); y < layer.H; y++) edge = Math.Max(edge, lens[(y * layer.W + layer.W / 2) * 4 + 3]);
+                bool contour = lens[middle] == 0 && edge >= 96;
+                Console.WriteLine(FormattableString.Invariant($"{(contour ? "PASS" : "FAIL")}: {name}: the rim lens lies at the contour only (middle alpha {lens[middle]}, bottom edge up to {edge})"));
+            }
         }
         var under = (byte[])desktop.Clone();
         for (int y = 0; y < layer.H; y++)
@@ -340,7 +360,9 @@ internal static partial class LiquidPages
                 if (lx < 0 || lx >= layer.Width || y >= layer.Height) continue;
                 Over(layer.Pixels, (y * layer.Width + lx) * 4, composed, (y * dw + x) * 4);
             }
+        _unseen = !GlassBackdrop.Refraction && dark && layer.Open >= .5 && AcrylicEmulation.Luminosity <= GlassEffect.PanelBase(true) + 1e-6;
         Check(name, layer, glass, under, composed, dw, gx, gy);
+        _unseen = false;
         Body(name, layer, glass, under, desktop, dw, gx, gy);
         // Round 15: the cover seam (CoverSeam), on the light look's open panels: the same frame without its text cover.
         if (GlassBackdrop.Refraction && !dark && layer.Open >= .5 && layer.TextRects is { Length: > 0 })
@@ -621,7 +643,7 @@ internal static partial class LiquidPages
         double masked = Apca(yt, mean) / Math.Sqrt(1 + sigma / s0 * (sigma / s0));
         // Round 13b: the light look (dark text) wants 75 % of the opaque theme's and APCA's body text Lc 75; the dark look 90 %.
         double share = yt > .4 ? .9 : .75;
-        Report(masked >= opaque * share && masked >= 75, FormattableString.Invariant($"{name}: masked contrast: Lc {masked:0.0} (sigma {sigma:0.0000} linear Y, Sigma0 {s0:0.000}) against the opaque theme's {opaque:0.0}: {masked / opaque:P0} (wanted at least {share:P0} and Lc 75)"));
+        Known(masked >= opaque * share && masked >= 75, masked >= opaque * .8 && masked >= 75, FormattableString.Invariant($"{name}: masked contrast: Lc {masked:0.0} (sigma {sigma:0.0000} linear Y, Sigma0 {s0:0.000}) against the opaque theme's {opaque:0.0}: {masked / opaque:P0} (wanted at least {share:P0} and Lc 75)"));
     }
 
     // APCA's Y and |Lc| (its published formula, SAPC 0.0.98G; written from the formula alone), as Liquid.hlsl has them.
@@ -641,7 +663,8 @@ internal static partial class LiquidPages
         if (ratios.Count < 20) { Console.WriteLine($"NOTE: {name}: {ratios.Count} pixels of {which} text found; its contrast is not checked"); return; }
         ratios.Sort();
         double median = ratios[ratios.Count / 2], low = ratios[ratios.Count / 10];
-        Report(median >= wanted && low >= least, $"{name}: {which} text against the glass under it: median {median:0.00}:1, 10th percentile {low:0.00}:1, lowest {ratios[0]:0.00}:1 over {ratios.Count} pixels (wanted {wanted}:1 and {least}:1)");
+        double margin = wanted >= 4.5 ? 4.0 : 2.6;
+        Known(median >= wanted && low >= least, median >= margin && low >= least, $"{name}: {which} text against the glass under it: median {median:0.00}:1, 10th percentile {low:0.00}:1, lowest {ratios[0]:0.00}:1 over {ratios.Count} pixels (wanted {wanted}:1 and {least}:1)");
     }
 
     private static double Lightness(byte[] pixels, int at) => .2126 * pixels[at + 2] + .7152 * pixels[at + 1] + .0722 * pixels[at];
@@ -650,6 +673,14 @@ internal static partial class LiquidPages
     {
         static double Channel(int v) { double c = v / 255.0; return c <= .04045 ? c / 12.92 : Math.Pow((c + .055) / 1.055, 2.4); }
         return .2126 * Channel(r) + .7152 * Channel(g) + .0722 * Channel(b);
+    }
+
+    // A check the known case may miss by a little (_unseen): WARN within its margin, FAIL past it or anywhere else.
+    private static void Known(bool ok, bool within, string text)
+    {
+        if (ok || !_unseen || !within) { Report(ok, text); return; }
+        _warnings++;
+        Console.WriteLine("WARN: " + text + " (the known case: a bright part under the dark panel the probe's ring cannot see; accepted 10-27)");
     }
 
     private static void Report(bool ok, string text)

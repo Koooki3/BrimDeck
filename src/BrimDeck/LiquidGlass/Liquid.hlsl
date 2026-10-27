@@ -114,7 +114,9 @@ cbuffer Frame : register(b0)
     float4 LookInfo;      // x: the light look's luminosity opacity between the text regions; y: 1 for round 12's zones;
                           // z: the light look's reach of the opaque theme's masked contrast (0: ReachLight)
     float4 PresenceInfo;  // x: how far the glass has come into being (D13: the entrance and exit), 0..1; y: how plain the
-                          // backdrop is, eased by the caller (-1: from this frame's band, LiquidFrame.PlainOf)
+                          // backdrop is, eased by the caller (-1: from this frame's band, LiquidFrame.PlainOf); z: the rim
+                          // lens over the acrylic body (round 16, step 9), its strength at the rim, 0 for the whole glass;
+                          // w: the acrylic body's luminosity opacity under the lens (AcrylicBody)
 };
 
 Texture2D Background : register(t0);
@@ -643,6 +645,8 @@ float3 Material(float3 frosted, float3 port, float a)
 // surface with no seam: the refraction fades with the slope, the frost grows with the thickness, the tint and absorption
 // (Beer-Lambert) follow the thickness. Behind text the material covers locally (Acrylic's luminosity, as far as the text
 // needs), feathered.
+// The rim lens over acrylic (round 16, step 9): how far its colour goes toward the acrylic body's.
+static const float RimTint = .5;
 static const float SlabIor = 1.45, SlabRefraction = .9, SlabDispersion = 1, BevelDip = 19, BevelOfRadius = .6, EnvDip = 24, EnvGain = 6;
 static const float3 LensLightTint = float3(.97, .985, 1), LensDarkTint = float3(.16, .24, .34);
 
@@ -921,6 +925,20 @@ float3 Glass(float2 p, float sd, float2 n)
     return saturate(color * (1 - shadow));
 }
 
+// The acrylic body over a pixel as GlassBackdrop has DWM draw it (GlassEffect.AcrylicMatrix): the backdrop under a Gaussian
+// of AcrylicDip, its saturation 1.3 about its luma, its luma moved toward the look's by the luminosity opacity shown
+// (PresenceInfo.w), the look's tint laid over (#232323 at .23 dark, #F3F3F3 at .25 light). For the rim lens's colour.
+static const float AcrylicDip = 30;
+float3 AcrylicBody(float2 p)
+{
+    float3 c = Frost(p + Pad, AcrylicDip * Scale / .75);
+    float l = Luma(c);
+    c = l + (c - l) * 1.3;
+    float dark = saturate(Dark), target = lerp(.953, .1373, dark), t = lerp(.25, .23, dark);
+    c += saturate(PresenceInfo.w) * (target - Luma(c));
+    return saturate(c * (1 - t) + t * target);
+}
+
 // The pixel: one shader for each material (compiled apart, so the app builds only the slab's: the other is made when first asked).
 float4 Shade(float2 p, bool slab)
 {
@@ -941,6 +959,25 @@ float4 Shade(float2 p, bool slab)
     if (cover <= 0) return 0;
     float3 glass;
     if (!slab) glass = Glass(p, sd, n);
+    else if (PresenceInfo.z > 0)
+    {
+        // Round 16, step 9: only the slab's bevel, over the acrylic body (GlassBackdrop's rim lens): the refraction where it
+        // lives, at the contour, fading out before the bevel meets the flat top, so the body's middle stays the acrylic's. No
+        // inset shadow and no pressed glow of its own (the acrylic's rim light and pointer glow answer).
+        float corner = max(max(CornerTop, CornerBottom), 1), shorter = min(Size.x, Size.y);
+        float bevel = min(min(shorter * .48, BevelDip * Scale), corner * BevelOfRadius);
+        float edge = saturate(1 + sd / bevel);
+        float lens = smoothstep(.15, .75, edge) * saturate(PresenceInfo.z);
+        if (lens <= 0) return 0;
+        glass = Slab(p, sd, n);
+        // Toward the acrylic body as DWM draws it here (AcrylicBody): the lens bends what lies behind at the contour, its detail
+        // and its light kept at about half, rather than lay a ring of the bare backdrop's brightness around the body (offscreen:
+        // a light ring on dark glass over a bright page, a dark one at a page's dark edge) or one of a flat grey.
+        float shown = FrostShown;
+        glass = lerp(glass, AcrylicBody(p), RimTint);
+        FrostShown = shown;
+        cover *= lens;
+    }
     else
     {
         glass = Slab(p, sd, n);

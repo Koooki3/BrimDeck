@@ -41,6 +41,9 @@ namespace BrimDeck.LiquidGlass;
 //     slab's refraction and its rim's light grow with it, so the glass condenses as it fades in rather than only fading.
 //   Plain (round 15): how plain the backdrop is (nothing in it: the open panel's light look then grows denser evenly), eased by
 //     the caller (GlassBackdrop) over a measure's changes; -1 has the shader take it from this frame's band at once (previews).
+//   Rim (round 16, step 9): the rim lens over the acrylic body, its strength at the rim (0..1): only the slab's bevel is
+//     drawn, fading out before the flat top, with no inset shadow or pressed glow; 0 (the default): the whole glass.
+//     RimLuminosity: the acrylic body's luminosity opacity under it (GlassEffect.Shown), which its colour leans toward.
 //   ContentLeft..ContentBottom: the collapsed island's content row (its text and glyphs), device pixels from the island's
 //     top-left; all 0 for none. Behind it the backdrop's contrast is capped, with a light local frost (Liquid.hlsl).
 //   LinearFilters: the backdrop filtered in linear light, as the browser draws the source (see Liquid.hlsl); off, in sRGB.
@@ -65,7 +68,8 @@ internal readonly record struct LiquidFrame(
     bool LinearMap = false, bool LinearFilters = true, float CssWidth = 0, float CssHeight = 0,
     float FilterWidth = 0, float FilterHeight = 0,
     float ContentLeft = 0, float ContentTop = 0, float ContentRight = 0, float ContentBottom = 0, float Sigma0 = 0,
-    float[]? TextRects = null, float BodyLight = 0, bool Zoned = false, float ReachLight = 0, bool Probe = false, float Presence = 1, float Plain = -1)
+    float[]? TextRects = null, float BodyLight = 0, bool Zoned = false, float ReachLight = 0, bool Probe = false, float Presence = 1, float Plain = -1,
+    float Rim = 0, float RimLuminosity = 0)
 {
     // The source's height the inset shadow was made for (its buttons, about 44 CSS pixels): lower shapes (the capsule, the bar)
     // take it in proportion, and very low ones (under Thin) fainter still, so a 20-pixel bar is not one full-height gradient.
@@ -826,7 +830,8 @@ internal sealed class LiquidRenderer : IDisposable
             Sigma0 = f.Sigma0 > 0 ? f.Sigma0 : DefaultSigma0,
             TextTile = _textInfo.Tile, TextInverseX = _textInfo.InverseX, TextInverseY = _textInfo.InverseY, TextOn = _textInfo.On,
             BodyLight = f.BodyLight > 0 ? f.BodyLight : DefaultBodyLight, Zoned = f.Zoned ? 1 : 0, ReachLight = f.ReachLight, Probe = f.Probe ? 1 : 0,
-            Presence = Math.Clamp(f.Presence, 0, 1), Plain = f.Plain < 0 ? -1 : Math.Clamp(f.Plain, 0, 1)
+            Presence = Math.Clamp(f.Presence, 0, 1), Plain = f.Plain < 0 ? -1 : Math.Clamp(f.Plain, 0, 1),
+            Rim = Math.Clamp(f.Rim, 0, 1), RimLuminosity = Math.Clamp(f.RimLuminosity, 0, 1)
         };
         for (int k = 0; k < MostLevels; k++) Unsafe.Add(ref c.Level0, k) = Unsafe.Add(ref _pass.Level0, k);
         _context.UpdateSubresource(in c, _constants);
@@ -1003,7 +1008,7 @@ internal sealed class LiquidRenderer : IDisposable
         public System.Numerics.Vector4 Level0, Level1, Level2, Level3, Level4, Level5, Level6, Level7;
         public float TextTile, TextInverseX, TextInverseY, TextOn;
         public float BodyLight, Zoned, ReachLight, Probe;
-        public float Presence, Plain, Spare1, Spare2;
+        public float Presence, Plain, Rim, RimLuminosity;
     }
 
     // The frost passes' constant buffer (Frost.hlsl, FrostPass), in its order.
