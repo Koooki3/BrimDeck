@@ -124,7 +124,7 @@ public partial class MainWindow : Window
         InitializeThemeFade();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
-        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
+        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
         _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
         // The app under the same context changed. Only the app rules' answer can differ, so only a changed answer is
@@ -180,6 +180,16 @@ public partial class MainWindow : Window
     // Closes a panel whose monitor no longer shows one.
     internal void Retire() { _retiring = true; SetExpanded(false, true); Close(); }
     private void ScheduleClock() => _clock.Interval = ClockDelay(DateTime.Now);
+    // The rings take the off-peak color, so the collapsed island is drawn again when an application enters or leaves an off-peak period.
+    private string _offPeakState = "";
+    private bool OffPeakChanged()
+    {
+        var now = DateTime.Now;
+        string state = string.Concat(Settings.EnabledApps.Select(app => app.IsOffPeak(now) ? '1' : '0'));
+        if (state == _offPeakState) return false;
+        _offPeakState = state;
+        return true;
+    }
     internal static TimeSpan ClockDelay(DateTime now) => TimeSpan.FromMilliseconds(60_000 - now.Second * 1000 - now.Millisecond + 50);
     // Hidden or held open by a preview, the surface cannot be hovered, so the checks stop instead of returning early 25 times a
     // second. A collapsed preview keeps them running: hovering the island ends the preview (see TrackPointer).

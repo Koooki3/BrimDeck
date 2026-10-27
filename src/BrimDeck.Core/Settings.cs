@@ -105,10 +105,17 @@ public sealed class AppEntry
     [JsonIgnore] public string Theme => ThemeColor.Length > 0 ? ThemeColor : AppPresets.ThemeColor(QuotaSource);
     [JsonIgnore] public string Warning => WarningColor.Length > 0 ? WarningColor : AppPresets.WarningColor;
     [JsonIgnore] public string Critical => CriticalColor.Length > 0 ? CriticalColor : AppPresets.CriticalColor;
+    // Daily off-peak periods in local time. Inside one, the panel draws this row's quotas below the warning level in
+    // OffPeakColor instead of the theme color. Empty means the row has no off-peak time.
+    public List<OffPeakPeriod> OffPeak { get; set; } = [];
+    public string OffPeakColor { get; set; } = "";
+    [JsonIgnore] public string OffPeakTheme => OffPeakColor.Length > 0 ? OffPeakColor : AppPresets.OffPeakColor;
+    public bool IsOffPeak(DateTime local) => OffPeak?.Any(period => period.Contains(local)) == true;
     public AppEntry Copy()
     {
         var copy = (AppEntry)MemberwiseClone();
         copy.UsageSource = UsageSource;
+        copy.OffPeak = [.. (OffPeak ?? []).Select(period => period.Copy())];
         return copy;
     }
     public void Normalize()
@@ -123,6 +130,36 @@ public sealed class AppEntry
         ThemeColor = AppPresets.NormalizeColor(ThemeColor);
         WarningColor = AppPresets.NormalizeColor(WarningColor);
         CriticalColor = AppPresets.NormalizeColor(CriticalColor);
+        OffPeak = [.. (OffPeak ?? []).Where(period => period is not null).Take(AppPresets.MaximumOffPeakPeriods).Select(period => period.Normalized())];
+        OffPeakColor = AppPresets.NormalizeColor(OffPeakColor);
+    }
+}
+
+// One daily off-peak period: Start and End are minutes after local midnight. An End before Start runs past midnight
+// into the next day; an End equal to Start covers the whole day, as the settings bar dragged out to both edges gives.
+public sealed class OffPeakPeriod
+{
+    public const int Day = 24 * 60;
+    public int Start { get; set; }
+    public int End { get; set; } = 8 * 60;
+    public OffPeakPeriod Copy() => (OffPeakPeriod)MemberwiseClone();
+    public OffPeakPeriod Normalized() => new() { Start = Math.Clamp(Start, 0, Day - 1), End = Math.Clamp(End, 0, Day - 1) };
+    public bool Contains(DateTime local)
+    {
+        int minute = local.Hour * 60 + local.Minute;
+        return Start < End ? minute >= Start && minute < End : Start == End || minute >= Start || minute < End;
+    }
+    public static string Format(int minutes) => $"{minutes / 60:00}:{minutes % 60:00}";
+    // Accepts "8:30", "08:30", "0830" and "8"; anything else, or a time past 23:59, is refused.
+    public static bool TryParse(string text, out int minutes)
+    {
+        minutes = 0;
+        var match = Regex.Match(text.Trim().Replace('：', ':'), @"^(\d{1,2})(?::?(\d{2}))?$");
+        if (!match.Success) return false;
+        int hour = int.Parse(match.Groups[1].Value), minute = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : 0;
+        if (hour > 23 || minute > 59) return false;
+        minutes = hour * 60 + minute;
+        return true;
     }
 }
 
@@ -132,6 +169,9 @@ public static class AppPresets
     // A long list would be hard to review, and the exceptions are meant for a few shell-level apps.
     public const int MaximumFullscreenExceptions = 32;
     public const string WarningColor = "#E5C890", CriticalColor = "#E78284";
+    // The default off-peak color, a teal from the palette that none of the presets uses.
+    public const string OffPeakColor = "#7FD1C4";
+    public const int MaximumOffPeakPeriods = 6;
     public const double WarningPercent = 70, CriticalPercent = 90;
     // Each column needs this much width; the panel's minimum width follows the number of enabled applications.
     public const double MinimumColumnWidth = 150;

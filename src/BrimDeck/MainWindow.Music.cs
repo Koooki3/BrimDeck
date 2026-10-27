@@ -1009,7 +1009,7 @@ public partial class MainWindow
         double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
         string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-        return (used, PanelTheme.AppTheme(entry), tip);
+        return (used, PanelTheme.QuotaTheme(entry), tip);
     }).ToArray();
     private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
     private void MusicGliding(bool gliding) => UpdateMusicTimer();
