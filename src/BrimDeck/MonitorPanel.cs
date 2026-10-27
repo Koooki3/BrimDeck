@@ -136,20 +136,26 @@ public partial class MainWindow
     }
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
-    // The sort is not part of it: a new sort reorders the list in place. The page keeps lines for the drives (as many as were found,
-    // or as many as fit while they are not read yet, within the layout's room: MonitorLayout.StorageLines) and room for a
-    // temperature beside the small gauge (MonitorSensors), so it is built again only when the lines it shows or that room change:
-    // when the drives are first counted, a sensor turns out to have none or first shows, or a drive comes or goes past the room.
+    // The sort is not part of it: a new sort reorders the list in place. The page keeps places for the volumes (as many as were
+    // found, or as many as fit while they are not read yet, within the layout's room: MonitorLayout.StorageLines and StorageColumns)
+    // and room for a temperature beside the small gauge (MonitorSensors), so it is built again only when the places it shows or
+    // that room change: when the volumes are first counted, a sensor turns out to have none or first shows, or a volume comes or
+    // goes past the room.
     private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Settings.MonitorProcesses,
         Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors().Small, Settings.MonitorPower, Native.BatteryProvider.SystemHasBattery);
-    // What the shown page was built for: its drives' lines, the small gauge's room and the lines for power and the battery.
-    private (int Lines, bool Small, int Power) _monitorSensors;
-    private (int Lines, bool Small, int Power) BuiltSensors() => (CurrentMonitorLayout().StorageLines, MonitorSensors().Small, CurrentMonitorLayout().PowerLines);
-    // Drives: the drives to keep lines for, 0 for none; while they are not counted yet, as many as the page can hold.
+    // What the shown page was built for: its volumes' places, the small gauge's room and the lines for power and the battery.
+    private (int Lines, int Columns, bool Small, int Power) _monitorSensors;
+    private (int Lines, int Columns, bool Small, int Power) BuiltSensors()
+    {
+        var layout = CurrentMonitorLayout();
+        return (layout.StorageLines, layout.StorageColumns, MonitorSensors().Small, layout.PowerLines);
+    }
+    // Drives: the volumes to keep places for, 0 for none; while they are not counted yet, as many as the page can hold.
     private (int Drives, bool Small, int Power) MonitorSensors()
     {
         var monitor = _app.Monitor;
-        int lines = !Settings.MonitorStorage || monitor?.StorageState == SensorState.None ? 0 : monitor?.StorageCount is > 0 and var count ? count : 3;
+        int lines = !Settings.MonitorStorage || monitor?.StorageState == SensorState.None ? 0
+            : monitor?.StorageCount is > 0 and var count ? count : MonitorLayout.MaximumStorageLines * MonitorLayout.MaximumStorageColumns;
         // The processor's zones are reserved for only once one has shown (a fixed zone never does); a graphics adapter is
         // reserved for until it is known to have no sensor.
         bool small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor != SensorState.None : monitor?.CpuSensor == SensorState.Found;

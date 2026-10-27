@@ -156,7 +156,7 @@ public partial class MainWindow : Window
         IsVisibleChanged += (_, _) => { if (!IsVisible) EndThemeFade(); };
         Island.SizeChanged += (_, _) => EndThemeFade(quickly: true);
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
-        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
+        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         // An open panel closes as a closing, after the new context is laid out, so it gets the closing's timing and its
         // coordinator and hotkey hear of it; clearing _expanded first made it a relayout in place.
         _host.ContextChanged += context =>
@@ -224,6 +224,16 @@ public partial class MainWindow : Window
     // Closes a panel whose monitor no longer shows one.
     internal void Retire() { _retiring = true; SetExpanded(false, true); Close(); }
     private void ScheduleClock() => _clock.Interval = ClockDelay(DateTime.Now);
+    // The rings take the off-peak color, so the collapsed island is drawn again when an application enters or leaves an off-peak period.
+    private string _offPeakState = "";
+    private bool OffPeakChanged()
+    {
+        var now = DateTime.Now;
+        string state = string.Concat(Settings.EnabledApps.Select(app => app.IsOffPeak(now) ? '1' : '0'));
+        if (state == _offPeakState) return false;
+        _offPeakState = state;
+        return true;
+    }
     internal static TimeSpan ClockDelay(DateTime now) => TimeSpan.FromMilliseconds(60_000 - now.Second * 1000 - now.Millisecond + 50);
     // Hidden or held open by a preview, the surface cannot be hovered, so the checks stop instead of returning early 25 times a
     // second. A collapsed preview keeps them running: hovering the island ends the preview (see TrackPointer).
@@ -298,11 +308,12 @@ public partial class MainWindow : Window
             // squash the whole surface once it shows again (without a boot).
             ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
             ResetDotPose();
-            SetExpanded(false, true); Hide();
+            SetExpanded(false, true); HideBlank();
         }
         else
         {
-            bool appearing = !IsVisible;
+            bool appearing = !IsVisible || _hiding;
+            _hiding = false; ShowZone();
             // Drawn offscreen (MainWindow.Offscreen.cs), the window is never shown.
             if (!IsVisible && _offscreen is null) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
@@ -316,6 +327,33 @@ public partial class MainWindow : Window
         RenderUsage();
         NoticesLayoutChanged();
         UpdateAmbient();
+    }
+    // Windows keeps a layered window's last picture while it is hidden and puts it on screen the moment the window is shown,
+    // before WPF draws again. Hidden straight away, the panel came back showing the frame it was hidden on: after the expand
+    // hotkey opened it while the panels were hidden, the next press flashed the whole open panel before it opened again from
+    // the collapsed surface. The surface is cleared first and the window hidden once that empty frame has been drawn.
+    private bool _hiding;
+    // HoverZone's Visibility is the island's covered state (SetIslandCovered) and the blank frames before the window hides.
+    private void ShowZone() => HoverZone.Visibility = _islandCovered || _hiding ? Visibility.Hidden : Visibility.Visible;
+    private void HideBlank()
+    {
+        if (!IsVisible || _hiding) return;
+        _hiding = true;
+        SetImmediate(HoverZone, OpacityProperty, 0d);
+        // Out of sight for the glass too, which follows the island: the blank frames are not drawn under a glass sheet.
+        ShowZone();
+        int frames = 0;
+        void Rendered(object? sender, EventArgs e)
+        {
+            // Shown again meanwhile (ApplySettings clears _hiding), or closed.
+            if (!_hiding || PresentationSource.FromVisual(this) is null) { CompositionTarget.Rendering -= Rendered; return; }
+            // Rendering comes before each frame: by the third, the empty frame has been drawn.
+            if (++frames < 3) return;
+            CompositionTarget.Rendering -= Rendered;
+            _hiding = false; ShowZone();
+            Hide();
+        }
+        CompositionTarget.Rendering += Rendered;
     }
     // Sizes are DIPs as they will be on the target monitor, and WPF turns Left and Top into pixels with the DPI the window
     // has now. A window on a monitor with another scale is therefore first moved onto the target in one step, which gives

@@ -11,7 +11,8 @@ public readonly record struct SensorStates(SensorState Cpu, SensorState Gpu, Sen
 }
 
 // What CPU, GPU and the drives show after their glyph in the collapsed row (CompactReading.Figures): the share in use, the
-// temperature, or both, the share above the temperature in two smaller lines. A temperature the machine cannot read is left out,
+// temperature, or both, the share above the temperature in two smaller lines or, when chosen (CompactReading.FiguresInLine),
+// side by side in the row's type. A temperature the machine cannot read is left out,
 // so a reading set to show only that shows its glyph alone.
 public static class CompactFigures
 {

@@ -4,8 +4,10 @@ namespace BrimDeck.Core;
 // and which page the panel falls back to. The panel and the settings window ask here instead of comparing pages themselves.
 public static class DeckPages
 {
-    // The page switch, left to right.
+    // The page switch, left to right, until the order is changed in the settings (DeckSettings.PageOrder).
     public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor, DeckPage.Devices, DeckPage.Notices];
+    // Each known page once, in the saved order; a page missing from the file takes its default place after the others.
+    public static List<DeckPage> Normalize(IEnumerable<DeckPage>? order) => [.. (order ?? []).Where(page => Enum.IsDefined(page)).Concat(Order).Distinct()];
 
     // The recent notices page exists while dynamic notices are on.
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
@@ -14,7 +16,7 @@ public static class DeckPages
         DeckPage.Notices => settings.NoticesEnabled && settings.NoticesPage, _ => false
     };
 
-    public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => Order.Where(page => Shown(settings, page)).ToList();
+    public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => settings.PageOrder.Where(page => Shown(settings, page)).ToList();
 
     // The page shown when wanted is asked for: wanted while it is shown, otherwise the first shown page in switch order.
     // With every page switched off it is the usage page, which then says that it is off.

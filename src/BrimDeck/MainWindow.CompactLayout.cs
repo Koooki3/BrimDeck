@@ -89,7 +89,7 @@ public partial class MainWindow
         double nameWidth = Natural(name), usedWidth = Natural(used), resetWidth = reset is null ? 0 : Natural(reset);
         var layout = CompactAlertLayout.Calculate(double.MaxValue, scale, nameWidth, usedWidth, resetWidth);
         double row = Math.Max(layout.RingSize, layout.LineHeight);
-        var ring = UI.Ring(alert.Used, PanelTheme.AppTheme(alert.Entry), layout.RingSize, layout.RingThickness);
+        var ring = UI.Ring(alert.Used, PanelTheme.QuotaTheme(alert.Entry), layout.RingSize, layout.RingThickness);
         var parts = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         if (layout.RingWidth > 0) parts.Children.Add(CompactRegion(ring, layout.RingWidth, layout.RingSize, layout.RingSize, row, RegionAnchor.Left, dpi));
         if (layout.NameWidth > 0) parts.Children.Add(CompactRegion(name, layout.NameWidth, Math.Min(nameWidth, name.MaxWidth), line, row, RegionAnchor.Left, dpi));

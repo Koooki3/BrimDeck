@@ -173,7 +173,7 @@ public partial class MainWindow
         // A notice that ended before it had covered the island (within its first frame) leaves the island's content as it was.
         bool wasCovered = _islandCovered;
         _islandCovered = covered;
-        HoverZone.Visibility = covered ? Visibility.Hidden : Visibility.Visible;
+        ShowZone();
         // A boot under way lands the content itself.
         if (covered || !reveal || !wasCovered || _expanded || _poweringOff || BootHoldsPointer || Compact.Visibility != Visibility.Visible || Collapsed.Style == CompactStyle.Line) return;
         int duration = (int)(NoticeMotion.Length(Settings.AnimationDuration, Soft.Enabled) * NoticeMotion.RevealLength);

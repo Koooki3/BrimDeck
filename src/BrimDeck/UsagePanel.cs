@@ -523,7 +523,7 @@ public partial class MainWindow
     private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot)
     {
         double used = Math.Clamp(quota.UsedPercent ?? 100, 0, 100);
-        string color = quota.UsedPercent is null ? PanelTheme.AppTheme(entry) : PanelTheme.QuotaColor(entry, used);
+        string color = quota.UsedPercent is null ? PanelTheme.QuotaTheme(entry) : PanelTheme.QuotaColor(entry, used);
         int level = quota.UsedPercent is null ? 0 : AppPresets.Level(used);
         var block = new Grid();
         foreach (double height in new[] { layout.LabelRow, layout.RowGap, layout.NumberRow, layout.RowGap, layout.Track })

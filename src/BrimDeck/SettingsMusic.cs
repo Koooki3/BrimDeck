@@ -114,7 +114,22 @@ public sealed partial class SettingsWindow
         SectionTitle(Loc.T("网易云音乐", "NetEase Cloud Music"));
         Group(Toggle(Loc.T("始终显示“启用完整控制”按钮", "Always show \"Enable full control\""), S.NeteaseFullControlEntry, v => Change(s => s.NeteaseFullControlEntry = v), S.MusicPage,
             Loc.T("在音乐页面右上角的来源菜单末尾固定显示“网易云音乐 · 完整控制”，以便随时启用完整控制。启用完整控制后，可以在面板中拖动网易云音乐的播放进度，并切换播放模式。",
-                "Keeps \"NetEase Cloud Music · Full control\" at the end of the source menu at the top right of the music page, so full control can be enabled at any time. With full control, NetEase Cloud Music's playback position can be dragged in the panel and its playback mode switched.")));
+                "Keeps \"NetEase Cloud Music · Full control\" at the end of the source menu at the top right of the music page, so full control can be enabled at any time. With full control, NetEase Cloud Music's playback position can be dragged in the panel and its playback mode switched.")),
+            Toggle(Loc.T("启动后自动启用完整控制", "Enable full control when it starts"), S.NeteaseAutoFullControl, NeteaseAutoFullControl, S.MusicPage,
+                Loc.T("网易云音乐以普通方式启动后，BrimDeck 会自动将它重启一次，改为完整控制，通常需要几秒钟。",
+                    "When NetEase Cloud Music is started the normal way, BrimDeck restarts it once with full control, which usually takes a few seconds.")));
+        SectionTitle("Apple Music");
+        Group(Toggle(Loc.T("始终启用完整控制", "Always enable full control"), S.AppleMusicFullControl, v => Change(s => s.AppleMusicFullControl = v), S.MusicPage,
+            Loc.T("BrimDeck 启动后自动启用 Apple Music 的完整控制。", "Enables full control of Apple Music when BrimDeck starts.")));
+    }
+    // Switching it on is confirmed with the explanation of the debugging port; declining rebuilds the page with the switch off.
+    private void NeteaseAutoFullControl(bool on)
+    {
+        if (on && new NeteaseControlWindow(S.Theme, NeteaseControlAction.Auto) { Owner = this }.ShowDialog() != true)
+        {
+            Dispatcher.BeginInvoke(() => ShowPage(_page)); return;
+        }
+        Change(s => s.NeteaseAutoFullControl = on);
     }
     private void MusicSizeControls()
     {

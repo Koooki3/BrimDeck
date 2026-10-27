@@ -80,6 +80,7 @@ internal sealed class MediaSessions : IDisposable
     public bool NeteaseRunning => Netease?.ProcessId is not null;
     public bool NeteaseFullControl => Netease is { ProcessId: not null, IsLogMode: false };
     private NeteaseSource? Netease => _connections.OfType<NeteaseSource>().FirstOrDefault();
+    public bool NeteaseAutoFullControl { set { if (Netease is { } source) source.AutoFullControl = value; } }
     public async Task<bool> EnableFullControlAsync(bool quiet = false)
     {
         var source = Netease;
@@ -113,7 +114,7 @@ internal sealed class MediaSessions : IDisposable
     }
     // Apple Music's shuffle, repeat and seeking through the controls of its window (AppleMusicControls), enabled from the
     // music page's "Enable full control" entry after its explanation. It lasts while BrimDeck runs and is not saved, so the
-    // entry and its explanation come back after a restart.
+    // entry and its explanation come back after a restart, unless the setting AppleMusicFullControl enables it at start.
     public bool AppleMusicFullControl { get; private set; }
     public void EnableAppleMusicFullControl()
     {
