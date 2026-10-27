@@ -246,6 +246,9 @@ internal sealed class MusicMarquee : FrameworkElement
         set { if (_fontSize == value) return; _fontSize = value; ResetText(); }
     }
     public bool CenterWhenFits { get; init; } = true;
+    // The width a text takes in this type at this size, as the marquee draws it.
+    public static double NaturalWidth(string text, double fontSize, double pixelsPerDip) => new FormattedText(text, CultureInfo.CurrentUICulture,
+        FlowDirection.LeftToRight, Typeface, fontSize, Brushes.Black, pixelsPerDip > 0 ? pixelsPerDip : 1).Width;
     // The edge fade's width; the collapsed row scales it with its height. The scroll speed does not change.
     public double EdgeWidth { get; init; } = Edge;
     // False when the region is too narrow for a meaningful stretch of text: the text then rests at its start, cut at the edge.
@@ -623,32 +626,29 @@ internal abstract class GlideCarousel : Grid
     }
 }
 
-// Overflowing rings scroll through their region by whole ring steps.
+// Rings that do not all fit scroll through a window of whole rings, a ring step at a time.
 internal sealed class QuotaCarousel : GlideCarousel
 {
     private readonly Canvas _strip;
-    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, BrimDeck.Core.CompactMusicLayout layout, TimeSpan elapsed = default, bool animate = true)
+    // count: the whole rings the window holds (CompactSpacing.Window); gap: the row's gap, which the rings keep between them too.
+    public QuotaCarousel(IReadOnlyList<(double Used, string Color, string Tip)> items, double size, double thickness, double gap, int count, double edge,
+        TimeSpan elapsed = default, bool animate = true)
     {
-        // The region is the layout's ring width in whole device pixels; rings sit in fixed slots from its left edge and its
-        // right edge cuts whichever ring it falls on. Rotation only moves the rings through the region, never resizes it.
-        // Ring positions, the visible width and the travel all use whole device pixels. Layout rounding
-        // would otherwise widen each 5 DIP gap at 150 % and carry the last ring into the edge fade.
+        // Ring positions, the window and the travel all use whole device pixels. Layout rounding would otherwise widen each gap
+        // at 150 % and carry the last ring into the edge fade.
         double scale = VisualTreeHelper.GetDpi(Application.Current?.MainWindow ?? (Visual)this).DpiScaleX;
         double Snap(double value) => Math.Round(value * scale, MidpointRounding.AwayFromZero) / scale;
-        double step = Snap(layout.RingSize + layout.RingGap);
-        double span = Math.Floor(Math.Max(0, layout.RingWidth) * scale + .001) / scale, full = items.Count > 0 ? (items.Count - 1) * step + layout.RingSize : 0;
-        // Short of one whole ring, the first ring is cut at the region's edge and rests.
-        Rotates = layout.ScrollRings && items.Count > 1 && span >= layout.RingSize && span < full;
-        double edge = Rotates ? Snap(layout.RingEdge) : 0;
-        // The left fade lies outside, over the cover's gap, so the first ring is whole at rest; the right fade lies inside the
-        // region, so nothing is drawn past its right edge toward the lyric. It spans up to one ring gap: a ring the edge cuts
-        // fades out over what shows of it, so a sliver of a pixel or two is all but transparent instead of a hard line. It
-        // never reaches the first ring, and like the region its width follows the row's width continuously.
-        Width = span + edge; Height = layout.RingSize; ClipToBounds = true;
-        _strip = new Canvas { Width = items.Count * step, Height = layout.RingSize, RenderTransform = new TranslateTransform() };
+        double step = Snap(size + gap);
+        int shown = Math.Clamp(count, 0, items.Count);
+        double window = shown == 0 ? 0 : (shown - 1) * step + size;
+        Rotates = shown >= 1 && shown < items.Count;
+        // The fades lie outside the window, over the gaps beside it, so every ring in the window is whole at rest.
+        edge = Rotates ? Math.Min(Snap(edge), Snap(gap)) : 0;
+        Width = edge + window + edge; Height = size; ClipToBounds = true;
+        _strip = new Canvas { Width = items.Count * step, Height = size, RenderTransform = new TranslateTransform() };
         for (int i = 0; i < items.Count; i++)
         {
-            var ring = UI.Ring(items[i].Used, items[i].Color, layout.RingSize, layout.RingThickness);
+            var ring = UI.Ring(items[i].Used, items[i].Color, size, thickness);
             Canvas.SetLeft(ring, edge + i * step); _strip.Children.Add(ring);
         }
         // A Canvas measures the strip at its full width. Inside the Grid the strip would be
@@ -658,46 +658,41 @@ internal sealed class QuotaCarousel : GlideCarousel
         ToolTip = string.Join("\n", items.Select(i => i.Tip));
         AutomationProperties.SetName(this, Loc.T("配额环 ", "Quota rings ") + ToolTip);
         if (!Rotates) return;
-        Margin = new Thickness(-edge, 0, 0, 0);
-        double fade = Math.Clamp(span - layout.RingSize, 0, Snap(layout.RingGap));
-        OpacityMask = new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), new(Colors.White, edge / Width),
-            new(Colors.White, (Width - fade) / Width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(Width, 0)) { MappingMode = BrushMappingMode.Absolute };
+        Margin = new Thickness(-edge, 0, -edge, 0);
+        OpacityMask = EdgeFades(Width, edge);
         // The masked content is composited from a layer the size of what is drawn. A transparent
         // background extends that layer to the box, so its resampled edge column falls on empty
         // space instead of repeating a ring's outermost pixels.
         Background = Brushes.Transparent;
-        // The glide moves by whole ring steps, so at the end the rings stand in the same slots as at the start: the first is
-        // whole at the left edge, and the last is whole before the right fade. Since the fade is at most span - ring, this
-        // never moves the last ring out of the region.
-        Glide(_strip, Math.Ceiling((full + fade - span) / step - 1e-6) * step, elapsed, animate);
+        // The glide moves by whole ring steps, so at the end the last rings stand whole in the window, as the first did.
+        Glide(_strip, (items.Count - shown) * step, elapsed, animate);
     }
+
+    // Transparent at both ends of the box, opaque over the window between the fades.
+    internal static LinearGradientBrush EdgeFades(double width, double edge) => new(new GradientStopCollection { new(Colors.Transparent, 0),
+        new(Colors.White, edge / width), new(Colors.White, (width - edge) / width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(width, 0))
+    { MappingMode = BrushMappingMode.Absolute };
 }
 
-// System readings wider than their region scroll through it instead of dropping readings. The strip is drawn tight (each
-// figure at its own width, MonitorStrip.Tight), so it scrolls no blanks; its width and the travel follow the readings. The
-// left fade lies outside the region, over the gap before it, so the first reading is whole at rest, and the right fade lies
-// inside, so nothing is drawn past the region toward the equalizer or the clock.
+// System readings that do not all fit scroll through a window of whole readings (CompactSpacing.Window): it rests with the
+// first readings whole in it, glides until the last ones stand whole from its left edge, and rests there. The readings keep the
+// width of their widest figures (MonitorStrip), so the window and the travel do not move with the figures. The fades lie
+// outside the window, over the gaps beside it, so nothing at rest is cut or faded.
 internal sealed class ReadingsCarousel : GlideCarousel
 {
-    public ReadingsCarousel(MonitorStrip strip, double span, double edge, TimeSpan elapsed, bool animate)
+    public ReadingsCarousel(MonitorStrip strip, double window, double travel, double edge, TimeSpan elapsed, bool animate)
     {
-        span = Math.Max(0, span); edge = Math.Max(0, edge);
-        Rotates = span > 0;
-        Width = span + edge; Height = strip.Height; ClipToBounds = true;
-        strip.Tight = true;
-        strip.Width = strip.TightWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        window = Math.Max(0, window); travel = Math.Max(0, travel); edge = Math.Max(0, edge);
+        Rotates = travel > 0;
+        Width = edge + window + edge; Height = strip.Height; ClipToBounds = true;
+        strip.Width = strip.PreferredWidth; strip.Paired = true; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
         strip.RenderTransform = new TranslateTransform();
         Canvas.SetLeft(strip, edge);
         // A Canvas measures the strip at its full width, as for the rings.
         var host = new Canvas(); host.Children.Add(strip); Children.Add(host);
-        Margin = new Thickness(-edge, 0, 0, 0);
-        double fade = Math.Min(edge, span / 2);
-        OpacityMask = new LinearGradientBrush(new GradientStopCollection { new(Colors.Transparent, 0), new(Colors.White, edge / Width),
-            new(Colors.White, (Width - fade) / Width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(Width, 0)) { MappingMode = BrushMappingMode.Absolute };
+        Margin = new Thickness(-edge, 0, -edge, 0);
+        OpacityMask = QuotaCarousel.EdgeFades(Width, edge);
         Background = Brushes.Transparent;
-        // At the end the last reading stands whole before the right fade.
-        double TravelFor(double full) => Math.Ceiling(full + fade - span);
-        Glide(strip, TravelFor(strip.Width), elapsed, animate);
-        strip.TightWidthChanged += () => { strip.Width = strip.TightWidth; Retarget(TravelFor(strip.Width)); };
+        Glide(strip, travel, elapsed, animate);
     }
 }

@@ -295,9 +295,11 @@ public partial class MainWindow : Window
         Collapsed = ShapeFor(EffectiveStyle);
     }
     private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
-        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null);
+        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null, _compactRequired);
     // The width the collapsed content asks for (see CollapsedGeometry); NaN until the row is first built, which keeps the saved width.
     private double _compactWanted = double.NaN;
+    // The width of what the collapsed content must show (CompactMusicLayout.RequiredWidth), which the surface always keeps.
+    private double _compactRequired;
     // Where the pointer was when hovering opened the panel, in DIPs from the monitor's left edge; null when the panel was opened
     // another way (the hotkey) or is closed.
     private double? _openCentre;
@@ -317,10 +319,13 @@ public partial class MainWindow : Window
     // OffsetMax is the largest offset either way (OffsetMin = -OffsetMax) for a surface of the given width. TopMin and TopMax
     // are distances from the top of the work area for a capsule of the given height or a line of the given thickness; 0 and 0
     // for the notch, which always touches the screen edge. WidthMin and WidthMax are the style's width (line length) range,
-    // narrowed by what the monitor or its work area can hold.
+    // narrowed by what the monitor or its work area can hold; WidthMin is never below what the content must show.
     public (double OffsetMin, double OffsetMax, double TopMin, double TopMax, double WidthMin, double WidthMax) CurrentCollapsedRanges(CompactStyle style, double width, double height)
     {
         var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip);
+        // At the height the surface takes, which a short screen or work area can lower below the saved one (as Resolve does).
+        double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, MonitorBoundsDip, WorkDip);
+        widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, surfaceHeight, _compactRequired)));
         var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width, MonitorBoundsDip, WorkDip);
         var (topMin, topMax) = style switch
         {
