@@ -17,8 +17,9 @@ internal static class MonitorThemeColors
     {
         Warning = Warning(settings), Critical = Critical(settings)
     };
-    public static string Warning(DeckSettings settings) => Drawn(settings.CompactWarningColor ?? PanelTheme.WarningDefault);
-    public static string Critical(DeckSettings settings) => Drawn(settings.CompactCriticalColor ?? PanelTheme.CriticalDefault);
+    // They color the readings' values too, so they are held to the text minimum (PanelThemes.LevelContrast).
+    public static string Warning(DeckSettings settings) => Drawn(settings.CompactWarningColor ?? PanelTheme.WarningDefault, PanelThemes.LevelContrast);
+    public static string Critical(DeckSettings settings) => Drawn(settings.CompactCriticalColor ?? PanelTheme.CriticalDefault, PanelThemes.LevelContrast);
 
     public static MonitorColors For(MonitorPalette palette, MonitorCustomColors custom)
     {
@@ -32,7 +33,8 @@ internal static class MonitorThemeColors
         return MonitorColors.For(palette, theme.IsDark).Map(Drawn);
     }
     // Opaque "#RRGGBB" as drawn on the theme, which ColorMath needs for the core groups' shades and for telling colors apart.
-    private static string Drawn(string color) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color)));
+    private static string Drawn(string color) => Drawn(color, PanelThemes.GraphicContrast);
+    private static string Drawn(string color, double minimum) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color), minimum));
 
     public static StripColors Strip(DeckSettings settings) => new(For(settings));
 }

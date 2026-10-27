@@ -93,7 +93,7 @@ public static partial class PanelThemes
         // App colors are opaque, as the color picker and the settings store them, and read on every surface stop. The warning and
         // critical colors are also text ("quota nearly used up"), so they are held to the body-text minimum.
         var graphic = surfaces.Select(background => new ContrastNeed(background, GraphicContrast)).ToList();
-        var text = surfaces.Select(background => new ContrastNeed(background, TextContrast)).ToList();
+        var text = surfaces.Select(background => new ContrastNeed(background, LevelContrast)).ToList();
         foreach (var key in apps.Keys.ToList())
         {
             apps[key] = apps[key].Over(surface);
