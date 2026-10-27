@@ -84,21 +84,49 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     private Pen? _rim;
     private SolidColorBrush? _islandBrush;
     private (Size, double, double, double, double, double)? _key;
-    private Geometry _outline = Geometry.Empty;
+    private Geometry _body = Geometry.Empty, _outline = Geometry.Empty;
+    private Geometry? _attachments, _attachedTo;
+
+    // What is joined to the surface while the liquid motion plays (NoticeFxShape): the necks and the droplets they have not parted
+    // from, or the notch's bulges, in the surface's own coordinates. The surface's outline is then the union of its own and these,
+    // one outline for the fill, the rim, the material and the clip, so no line runs inside it and the rim follows the motion. A parted
+    // droplet is not part of it and has an outline of its own.
+    public Geometry? Attachments
+    {
+        get => _attachments;
+        set { if (ReferenceEquals(_attachments, value)) return; _attachments = value; InvalidateArrange(); InvalidateVisual(); }
+    }
 
     public Geometry Outline()
     {
         double left = Math.Max(0, InsetLeft), right = Math.Max(0, InsetRight);
         var key = (RenderSize, TopRadius, BottomRadius, Shoulder, left, right);
-        if (_key == key) return _outline;
-        _key = key;
-        if (left <= 0 && right <= 0) return _outline = IslandBorder.BuildOutline(RenderSize.Width, RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius));
-        // Drawn in at its ends: the outline of the narrower body, moved to where the left end now is.
-        var drawn = IslandBorder.BuildOutline(Math.Max(1, RenderSize.Width - left - right), RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius)).Clone();
-        drawn.Transform = new TranslateTransform(left, 0);
-        drawn.Freeze();
-        return _outline = drawn;
+        if (_key != key)
+        {
+            _key = key; _attachedTo = null;
+            if (left <= 0 && right <= 0) _body = IslandBorder.BuildOutline(RenderSize.Width, RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius));
+            else
+            {
+                // Drawn in at its ends: the outline of the narrower body, moved to where the left end now is.
+                var drawn = IslandBorder.BuildOutline(Math.Max(1, RenderSize.Width - left - right), RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius)).Clone();
+                drawn.Transform = new TranslateTransform(left, 0);
+                drawn.Freeze();
+                _body = drawn;
+            }
+            _outline = _body;
+        }
+        if (_attachments is null) { if (!ReferenceEquals(_outline, _body)) _outline = _body; _attachedTo = null; return _outline; }
+        if (ReferenceEquals(_attachedTo, _attachments)) return _outline;
+        _attachedTo = _attachments;
+        // The surface and the shadow copy behind it have the same body: the union is made once for both.
+        if (s_joined is { } joined && ReferenceEquals(joined.Attachments, _attachments) && joined.Key == key) return _outline = joined.Outline;
+        var union = Geometry.Combine(_body, _attachments, GeometryCombineMode.Union, null, .5, ToleranceType.Absolute);
+        union.Freeze();
+        s_joined = (_attachments, key, union);
+        return _outline = union;
     }
+
+    private static (Geometry Attachments, (Size, double, double, double, double, double) Key, Geometry Outline)? s_joined;
 
     protected override Geometry GetLayoutClip(Size layoutSlotSize) => Outline();
 

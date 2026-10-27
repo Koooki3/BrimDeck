@@ -24,12 +24,16 @@ public readonly record struct LiquidPoint(double X, double Y)
 }
 
 // A circle: a droplet, a bead of the notch's edge, or the end cap a neck starts from. Side: -1 left end, 1 right end, 0 absolute.
-public readonly record struct LiquidDisc(int Side, double X, double Y, double R);
+// Attached: the droplet is still joined to the surface (its neck to the end has not broken, or it hangs on one that has not), so it
+// is part of the surface's own outline; once it has parted it has an outline of its own.
+public readonly record struct LiquidDisc(int Side, double X, double Y, double R, bool Attached = false);
 
 // The neck between two circles pulling apart, as two cubic curves: P1 to P3 along one side (handles H1, H3), P4 back to P2
 // along the other (handles H4, H2). Side as for LiquidDisc. Mouth: the neck starts on the end itself (not on another droplet),
-// so its first two points lie on the end's outline, where the surface's own rim crosses it.
-public readonly record struct LiquidNeck(int Side, LiquidPoint P1, LiquidPoint H1, LiquidPoint H3, LiquidPoint P3, LiquidPoint P4, LiquidPoint H4, LiquidPoint H2, LiquidPoint P2, bool Mouth = false);
+// so its first two points lie on the end's outline. First and Second: the droplets (indices in LiquidFrame.Discs) it joins, -1 for the
+// end. Attached: it joins the surface, directly or through attached droplets, so it too is part of the surface's outline.
+public readonly record struct LiquidNeck(int Side, LiquidPoint P1, LiquidPoint H1, LiquidPoint H3, LiquidPoint P3, LiquidPoint P4, LiquidPoint H4, LiquidPoint H2, LiquidPoint P2,
+    bool Mouth = false, int First = -1, int Second = -1, bool Attached = false);
 
 public readonly record struct LiquidSpec(
     LiquidForm Form, double Width, double Height, int Seed,
@@ -58,6 +62,8 @@ public sealed class LiquidFrame
     // The notch's bulges: runs of points, each run its outer edge in order followed by its base back (a closed polygon).
     public readonly List<LiquidPoint> BumpPoints = [];
     public readonly List<int> BumpRuns = [];
+    // How far each point of Outline stands out from it (the notch's bulges); the surface's outline is Outline displaced by it.
+    public double[] Offsets = [];
     // The notch's whole outline as it is for this size, with the outward normal of each point and how far along it is: the glow
     // is drawn on it, and its taper follows the distance.
     public LiquidPoint[] Outline = [];
@@ -68,7 +74,7 @@ public sealed class LiquidFrame
 
     internal void Clear()
     {
-        Glow = 0; InsetLeft = InsetRight = 0; Discs.Clear(); Necks.Clear(); BumpPoints.Clear(); BumpRuns.Clear(); Alive = false;
+        Glow = 0; InsetLeft = InsetRight = 0; Offsets = []; Discs.Clear(); Necks.Clear(); BumpPoints.Clear(); BumpRuns.Clear(); Alive = false;
     }
 }
 
@@ -358,22 +364,59 @@ public sealed class NoticeLiquid
                 x = Math.Min(x, room + _over - r);
                 frame.Discs.Add(new LiquidDisc(side, x, y, r)); discs++;
                 // A droplet that is fading no longer hangs on the end (the refilling end would sprout a small knob).
-                if (p < .6) AddNeck(frame, side, capX, 0, capR, x, y, r, r * .7, .65, mouth: true);
+                int before = frame.Necks.Count;
+                if (p < .6) AddNeck(frame, side, capX, 0, capR, x, y, r, r * .7, .65, true, -1, frame.Discs.Count - 1);
+                // Joined by its neck, or still overlapping the end (the neck is not drawn while the droplet is mostly inside it): part of the surface.
+                if (frame.Necks.Count > before || Math.Sqrt((x - capX) * (x - capX) + y * y) < capR + r + Touch) frame.Discs[^1] = frame.Discs[^1] with { Attached = true };
             }
             // Neighbouring droplets of one end join while they are close.
             for (int i = 0; i < discs; i++)
                 for (int j = i + 1; j < discs; j++)
                 {
                     var a = frame.Discs[firstDisc + i]; var b = frame.Discs[firstDisc + j];
-                    AddNeck(frame, side, a.X, a.Y, a.R, b.X, b.Y, b.R, Math.Min(a.R, b.R) * .45, .55);
+                    AddNeck(frame, side, a.X, a.Y, a.R, b.X, b.Y, b.R, Math.Min(a.R, b.R) * .45, .55, false, firstDisc + i, firstDisc + j);
                 }
+        }
+        MarkAttached(frame);
+    }
+
+    // What is still joined to the surface: the droplets whose neck to the end has not broken, and the droplets hanging on those, with
+    // the necks between. Everything else has parted and is drawn on its own.
+    private const double Touch = 1.5;
+    private static void MarkAttached(LiquidFrame frame)
+    {
+        var attached = new bool[frame.Discs.Count];
+        for (int i = 0; i < attached.Length; i++) attached[i] = frame.Discs[i].Attached;
+        foreach (var neck in frame.Necks) if (neck.Mouth && neck.Second >= 0) attached[neck.Second] = true;
+        for (bool grew = true; grew;)
+        {
+            grew = false;
+            // A droplet touching one that is joined is joined too: its outline would run through the other's.
+            for (int i = 0; i < attached.Length; i++)
+                for (int j = 0; j < attached.Length; j++)
+                {
+                    if (!attached[i] || attached[j] || frame.Discs[i].Side != frame.Discs[j].Side) continue;
+                    double dx = frame.Discs[i].X - frame.Discs[j].X, dy = frame.Discs[i].Y - frame.Discs[j].Y;
+                    if (Math.Sqrt(dx * dx + dy * dy) < frame.Discs[i].R + frame.Discs[j].R + Touch) { attached[j] = true; grew = true; }
+                }
+            foreach (var neck in frame.Necks)
+            {
+                if (neck.Mouth || neck.First < 0 || neck.Second < 0 || attached[neck.First] == attached[neck.Second]) continue;
+                attached[neck.First] = attached[neck.Second] = true; grew = true;
+            }
+        }
+        for (int i = 0; i < frame.Discs.Count; i++) if (attached[i]) frame.Discs[i] = frame.Discs[i] with { Attached = true };
+        for (int i = 0; i < frame.Necks.Count; i++)
+        {
+            var neck = frame.Necks[i];
+            if (neck.Mouth || (neck.First >= 0 && neck.Second >= 0 && attached[neck.First] && attached[neck.Second])) frame.Necks[i] = neck with { Attached = true };
         }
     }
 
     // The neck between two circles pulling apart, as two cubic curves. `soft` widens the neck and lengthens its handles; it
     // narrows smoothly as the gap grows and is gone at `snap`. Nothing while the smaller circle is still mostly inside the
     // larger one (the curves would fold over).
-    private static void AddNeck(LiquidFrame frame, int side, double x1, double y1, double r1, double x2, double y2, double r2, double snap, double soft, bool mouth = false)
+    private static void AddNeck(LiquidFrame frame, int side, double x1, double y1, double r1, double x2, double y2, double r2, double snap, double soft, bool mouth, int first, int second)
     {
         double dx = x2 - x1, dy = y2 - y1, d = Math.Sqrt(dx * dx + dy * dy);
         if (r1 <= .5 || r2 <= .5 || d <= Math.Max(r1, r2) - .2 * Math.Min(r1, r2) || d >= r1 + r2 + snap) return;
@@ -391,7 +434,7 @@ public sealed class NoticeLiquid
         double handle = Math.Min(v * 2.6, reach / (r1 + r2)) * Math.Min(1, d * 2 / (r1 + r2));
         var h1 = At(p1.X, p1.Y, r1 * handle, a1 - Math.PI / 2); var h2 = At(p2.X, p2.Y, r1 * handle, a2 + Math.PI / 2);
         var h3 = At(p3.X, p3.Y, r2 * handle, a3 + Math.PI / 2); var h4 = At(p4.X, p4.Y, r2 * handle, a4 - Math.PI / 2);
-        frame.Necks.Add(new LiquidNeck(side, p1, h1, h3, p3, p4, h4, h2, p2, mouth));
+        frame.Necks.Add(new LiquidNeck(side, p1, h1, h3, p3, p4, h4, h2, p2, mouth, first, second));
     }
 
     // ----- The notch -----
@@ -502,6 +545,7 @@ public sealed class NoticeLiquid
         int n = _points.Length;
         double[] offsets = Offsets(n);
         for (int i = 0; i < n; i++) offsets[i] = EdgeOut(_along[i], time, fade);
+        frame.Offsets = offsets;
         int start = -1;
         for (int i = 0; i <= n; i++)
         {
