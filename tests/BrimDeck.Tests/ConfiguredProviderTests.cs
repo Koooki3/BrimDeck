@@ -142,9 +142,9 @@ internal static class ConfiguredProviderTests
         check("A rejected DeepSeek key explains what to check", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false, StatusLabel: "密钥无效" } rejected && rejected.Status.Contains("DeepSeek"));
         // Kimi Code API: a key from the Kimi Code console reads the plan quota the Kimi Code sign-in reads.
         var manual = ProviderCatalog.Sources.Where(id => !ProviderCatalog.IsBuiltIn(id)).ToList();
-        check("Kimi Code API is entered by hand, right after DeepSeek, then OpenCode Go, then New API",
+        check("Kimi Code API is entered by hand, right after DeepSeek, then OpenCode Go, then OpenRouter, then New API",
             manual.IndexOf(ProviderId.KimiApi) == manual.IndexOf(ProviderId.DeepSeek) + 1 && manual.IndexOf(ProviderId.OpenCodeGo) == manual.IndexOf(ProviderId.KimiApi) + 1 &&
-            manual.IndexOf(ProviderId.NewApi) == manual.IndexOf(ProviderId.OpenCodeGo) + 1 &&
+            manual.IndexOf(ProviderId.NewApi) == manual.IndexOf(ProviderId.OpenRouter) + 1 &&
             ProviderCatalog.Group(ProviderId.KimiApi) == "手动填写" && ProviderCatalog.Name(ProviderId.KimiApi) == "Kimi Code API" && !ProviderCatalog.NeedsSite(ProviderId.KimiApi) &&
             !ProviderCatalog.IsUsageSource(ProviderId.KimiApi) && (int)ProviderId.KimiApi == 16);
         var kimiSaved = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { Apps = [new AppEntry { QuotaSource = ProviderId.KimiApi }] }))!;
@@ -214,6 +214,40 @@ internal static class ConfiguredProviderTests
         check("A Cloudflare refusal is not taken for a missing Go plan", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } blocked && !blocked.Status.Contains("没有订阅"));
         handler.Respond = request => GoReply(request, () => Reply("""{"usage":{}}"""));
         check("An answer without windows is reported as unrecognized", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false } empty && empty.Status.Contains("无法识别"));
+        // OpenRouter: the account balance from /credits, then the key's cap and its UTC-day and UTC-month spending from /key.
+        entry.QuotaSource = ProviderId.OpenRouter;
+        check("OpenRouter is entered by hand after OpenCode Go and before New API, sharing the manual color",
+            manual.IndexOf(ProviderId.OpenRouter) == manual.IndexOf(ProviderId.OpenCodeGo) + 1 && ProviderCatalog.Name(ProviderId.OpenRouter) == "OpenRouter" &&
+            ProviderCatalog.Key(ProviderId.OpenRouter) == "openrouter" && (int)ProviderId.OpenRouter == 19 && !ProviderCatalog.NeedsSite(ProviderId.OpenRouter) &&
+            !ProviderCatalog.IsUsageSource(ProviderId.OpenRouter) && AppPresets.ThemeColor(ProviderId.OpenRouter) == AppPresets.ManualColor && PanelThemes.AppKey(ProviderId.OpenRouter) == "manual");
+        string routerKey = """{"data":{"limit":null,"limit_reset":null,"limit_remaining":null,"effective_budget":null,"usage":82.47,"usage_daily":1.5,"usage_weekly":3,"usage_monthly":12.25}}""";
+        string routerCredits = """{"data":{"total_credits":95,"total_usage":82.47}}""";
+        HttpResponseMessage RouterReply(HttpRequestMessage request) => request.RequestUri!.AbsoluteUri switch
+        {
+            "https://openrouter.ai/api/v1/key" => Reply(routerKey),
+            "https://openrouter.ai/api/v1/credits" => routerCredits.Length > 0 ? Reply(routerCredits) : new(HttpStatusCode.Forbidden) { Content = new StringContent("""{"error":{"message":"Management key required"}}""") },
+            _ => new(HttpStatusCode.NotFound) { Content = new StringContent("") }
+        };
+        handler.Respond = RouterReply;
+        handler.Calls.Clear();
+        var router = (await providers.TestAsync(entry)).Snapshot;
+        check("An OpenRouter key without a cap shows the account balance and today's and this month's spending, resetting at UTC midnight",
+            handler.Calls.All(c => c.Authorization == "Bearer fixture-key-a") && router.LiveQuota && router.Scope == "account" && router.Metrics.Count == 3 &&
+            router.Metrics[0] is { Kind: MetricKind.Balance, Label: "账户余额", Currency: "USD", ValueText: "$12.53" } &&
+            router.Metrics[1] is { Kind: MetricKind.Spend, Label: "今日扣费", Amount: 1.5m } && router.Metrics[1].ResetAt == DateTimeOffset.Parse("2026-09-21T00:00:00Z") &&
+            router.Metrics[2] is { Kind: MetricKind.Spend, Label: "本月扣费", Amount: 12.25m } && router.Metrics[2].ResetAt == DateTimeOffset.Parse("2026-10-01T00:00:00Z"));
+        routerKey = """{"data":{"limit":20,"limit_reset":"weekly","limit_remaining":15,"effective_budget":null,"usage_daily":0,"usage_monthly":5,"expires_at":"2027-01-01T00:00:00Z"}}""";
+        routerCredits = "";
+        router = (await providers.TestAsync(entry)).Snapshot;
+        check("A capped key shows its remaining limit, reset on the next UTC Monday, and the balance is left out when /credits refuses the key",
+            router.LiveQuota && router.Scope == "key" && router.Metrics.Count == 3 && router.Metrics[0] is { Kind: MetricKind.Balance, Label: "密钥余额", Amount: 15, Total: 20, UsedPercent: 25 } &&
+            router.Metrics[0].ResetAt == DateTimeOffset.Parse("2026-09-21T00:00:00Z") && router.Metrics[0].ExpiresAt == DateTimeOffset.Parse("2027-01-01T00:00:00Z"));
+        routerKey = """{"data":{"limit":20,"limit_reset":"weekly","limit_remaining":15,"effective_budget":{"scope":"member","limit_usd":50,"remaining_usd":5,"reset_interval":"monthly","resets_at":"2026-10-01T00:00:00.000Z"},"usage_daily":0,"usage_monthly":5}}""";
+        router = (await providers.TestAsync(entry)).Snapshot;
+        check("The budget that blocks requests first replaces the key's own cap", router.Metrics[0] is { Label: "预算余额", Amount: 5, Total: 50, UsedPercent: 90 } &&
+            router.Metrics[0].ResetAt == DateTimeOffset.Parse("2026-10-01T00:00:00Z"));
+        handler.Respond = _ => new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":{"message":"User not found.","code":401}}""") };
+        check("A rejected OpenRouter key explains what to check", (await providers.TestAsync(entry)).Snapshot is { LiveQuota: false, StatusLabel: "密钥无效" } routerRejected && routerRejected.Status.Contains("OpenRouter"));
         entry.QuotaSource = ProviderId.Custom;
         entry.Script = """async function fetchUsage(ctx) { const [a,b] = await Promise.all([ctx.http.get("https://example.test/a"),ctx.http.post("https://example.test/b",{body:{value:1}})]); ctx.log(ctx.secrets.key); return {metrics:[{kind:"balance",label:"余额",amount:a.json().balance+b.json().balance,currency:"USD"}]}; }""";
         handler.Respond = _ => Reply("""{"balance":2}""");
