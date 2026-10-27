@@ -58,6 +58,10 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public static readonly DependencyProperty BottomRadiusProperty = Register(nameof(BottomRadius), 0d);
     public static readonly DependencyProperty ShoulderProperty = Register(nameof(Shoulder), 0d);
     public static readonly DependencyProperty IslandOpacityProperty = Register(nameof(IslandOpacity), 0d);
+    // How far each end of the outline is drawn in from the surface's bounds, while the capsule's ends give way to the droplets
+    // leaving them (NoticeLiquid). The surface keeps its size and place; only its outline, and so its clip, draws in.
+    public static readonly DependencyProperty InsetLeftProperty = Register(nameof(InsetLeft), 0d);
+    public static readonly DependencyProperty InsetRightProperty = Register(nameof(InsetRight), 0d);
     public static readonly DependencyProperty IslandColorProperty = DependencyProperty.Register(nameof(IslandColor), typeof(Color), typeof(NoticeSurface),
         new FrameworkPropertyMetadata(Colors.Black, FrameworkPropertyMetadataOptions.AffectsRender));
     private static DependencyProperty Register(string name, double value) => DependencyProperty.Register(name, typeof(double), typeof(NoticeSurface),
@@ -67,6 +71,8 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public double BottomRadius { get => (double)GetValue(BottomRadiusProperty); set => SetValue(BottomRadiusProperty, value); }
     public double Shoulder { get => (double)GetValue(ShoulderProperty); set => SetValue(ShoulderProperty, value); }
     public double IslandOpacity { get => (double)GetValue(IslandOpacityProperty); set => SetValue(IslandOpacityProperty, value); }
+    public double InsetLeft { get => (double)GetValue(InsetLeftProperty); set => SetValue(InsetLeftProperty, value); }
+    public double InsetRight { get => (double)GetValue(InsetRightProperty); set => SetValue(InsetRightProperty, value); }
     public Color IslandColor { get => (Color)GetValue(IslandColorProperty); set => SetValue(IslandColorProperty, value); }
     // Drawn with the look's material, or only its fill (Shadow: the black copy that casts a shadow behind the notice).
     public NoticeLook? Look { get => _look; set { _look = value; _fill = null; _rim = null; InvalidateVisual(); } }
@@ -77,15 +83,21 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     private Brush? _fill, _fillOverride;
     private Pen? _rim;
     private SolidColorBrush? _islandBrush;
-    private (Size, double, double, double)? _key;
+    private (Size, double, double, double, double, double)? _key;
     private Geometry _outline = Geometry.Empty;
 
     public Geometry Outline()
     {
-        var key = (RenderSize, TopRadius, BottomRadius, Shoulder);
+        double left = Math.Max(0, InsetLeft), right = Math.Max(0, InsetRight);
+        var key = (RenderSize, TopRadius, BottomRadius, Shoulder, left, right);
         if (_key == key) return _outline;
         _key = key;
-        return _outline = IslandBorder.BuildOutline(RenderSize.Width, RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius));
+        if (left <= 0 && right <= 0) return _outline = IslandBorder.BuildOutline(RenderSize.Width, RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius));
+        // Drawn in at its ends: the outline of the narrower body, moved to where the left end now is.
+        var drawn = IslandBorder.BuildOutline(Math.Max(1, RenderSize.Width - left - right), RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius)).Clone();
+        drawn.Transform = new TranslateTransform(left, 0);
+        drawn.Freeze();
+        return _outline = drawn;
     }
 
     protected override Geometry GetLayoutClip(Size layoutSlotSize) => Outline();
