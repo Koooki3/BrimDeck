@@ -16,8 +16,6 @@ try
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
-    CompactRowTests.Run(Check);
-    CompactSpacingTests.Run(Check);
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
     PanelThemeTests.Run(root, Check);

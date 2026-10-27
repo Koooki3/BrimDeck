@@ -61,46 +61,37 @@ public sealed record MediaTrack
     }
 }
 
-// The collapsed row, left to right: the cover, the quota rings, the lyric or title, the system readings, the equalizer and the
-// clock, with one gap between neighbours. Every part but the title (which scrolls) is shown whole or not at all. Parts are taken
-// in priority order while they fit: first what the row must show (the clock; while media plays, the cover, the equalizer and
-// the title at its shortest), then the quota rings one by one, then the system readings one by one in the order they stay
-// (CompactMonitor.Priority). The first part that does not fit ends the row, so a wider row only ever adds parts and a narrower
-// one only removes them. The title takes the space that is left; without a title that space is free. Where the parts then
-// stand, evenly spaced, is CompactSpacing's. The quota rings, the title and the readings stand in the order chosen for the style
-// (CompactPart); the order only places them, and which parts show and their widths are the same in any order.
-// Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are whole or half DIPs.
+// The collapsed row, left to right: the cover region, the middle (quota rings, the lyric or track notice and the system
+// readings, in the order of CompactPart chosen for the style), the equalizer region and the clock region. The order only
+// places the regions; their widths are the same in any order. Each region has a width and clips what does not fit; nothing is hidden as a
+// whole. Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are
+// whole or half DIPs. The width only moves the middle: the side regions keep their size until the middle is empty.
 public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, double RingGap, int VisibleRings, double RingWidth, double TextWidth, bool ScrollRings)
 {
-    // The shortest title the row keeps while media plays: about four characters, scrolling. The surface grows to hold it; a row
-    // that still cannot gives the title what is left, down to ScrollingText (about one and a half characters).
-    public const double MinimumText = 48, ScrollingText = 18;
+    // The narrowest scrolling lyric: about one and a half characters. Below it the lyric rests, clipped.
+    private const double MinimumText = 18;
     public double Scale { get; init; } = 1;
     public double ContentWidth { get; init; }
     public double RowHeight { get; init; } = 24;
-    // The space between two neighbouring parts.
-    public double Gap { get; init; } = 8;
-    // Each part's width when shown, 0 when not.
+    // Cover region: the cover, then the gap to the middle. The region shrinks the gap first, then cuts the cover's right side.
     public double CoverWidth { get; init; }
     public double CoverSize { get; init; } = 20;
     public double CoverRadius { get; init; } = 4;
+    // Equalizer region: the gap from the middle, then the bars; the gap goes first, then the bars' left side.
     public double EqualizerWidth { get; init; }
     public double EqualizerSize { get; init; } = 18;
     public double EqualizerHeight { get; init; } = 14;
     public double EqualizerBar { get; init; } = 3;
-    // The system readings (CompactMonitor): the first MonitorItems of those offered, in their priority order, with their own gaps.
+    // System readings region (CompactMonitor), with a gap toward its neighbour; alone in the row it is centred.
     public double MonitorWidth { get; init; }
-    public int MonitorItems { get; init; }
+    public double MonitorFace { get; init; }
+    public bool MonitorAlone { get; init; }
+    // Clock region: the gap, then the face; a lone clock has no gap and is centred.
     public double ClockWidth { get; init; }
     public double ClockFace { get; init; }
-    // The gap between the rings and the title, while both show.
+    public bool ClockAlone { get; init; }
+    // Space between the rings and the lyric, only while both have room.
     public double Between { get; init; }
-    // Width left over when there is no title to take it.
-    public double Free { get; init; }
-    // The width the parts the row must show take (Required), and the width every part takes with the title at its shortest
-    // (Natural). The collapsed surface never gets narrower than Required (CollapsedGeometry.Resolve).
-    public double Required { get; init; }
-    public double Natural { get; init; }
     public double RingThickness { get; init; } = 2;
     // Fade beside rotating rings and at the lyric's edges.
     public double RingEdge { get; init; } = 3;
@@ -115,101 +106,108 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public static double SafeScale(double scale) => double.IsFinite(scale) && scale > 0 ? Math.Clamp(scale, .25, 8) : 1;
     private static double Safe(double width) => double.IsFinite(width) && width > 0 ? width : 0;
 
-    // The width a row with this content takes with every part shown and the title at its shortest.
-    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
-        => Calculate(0, scale, media, rings, text, clockFace, monitorFace).Natural;
-
     // The width an auto-width row keeps for the lyric or the title at scale 1. It does not follow the text, so the surface
     // keeps its width from line to line; a longer line scrolls in it.
     public const double TextSlot = 160;
 
-    // The width an auto-width surface takes (CollapsedGeometry.Resolve): every part shown, the title in its fixed slot
-    // (TextSlot) instead of at its shortest. monitorItems and monitorGap as for Calculate.
-    public static double AutoWidth(double scale, bool media, int rings, bool text, double clockFace, IReadOnlyList<double> monitorItems, double monitorGap)
+    // The width a row with this content takes without cutting or rotating anything: the cover, every ring, the lyric's fixed
+    // slot, the system readings, the equalizer and the clock, with their gaps. An auto-width surface takes it
+    // (CollapsedGeometry.Resolve).
+    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
     {
-        double s = SafeScale(scale), natural = Calculate(0, scale, media, rings, text, clockFace, monitorItems, monitorGap).Natural;
-        return text ? natural + Math.Max(0, Whole(TextSlot * s) - Whole(MinimumText * s)) : natural;
+        double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace);
+        rings = Math.Max(0, rings);
+        double width = media ? Whole(20 * s) + Whole(8 * s) + Whole(8 * s) + Math.Max(1, Whole(18 * s)) : 0;
+        width += RingsAndText(s, rings, text);
+        bool alone = monitor > 0 && !media && rings == 0 && !text && face == 0;
+        width += monitor == 0 ? 0 : alone ? monitor : monitor + Whole(8 * s);
+        width += face == 0 ? 0 : !media && rings == 0 && !text && monitor == 0 ? face : face + Whole(8 * s);
+        return width;
+    }
+
+    // The width the rings and the lyric's fixed slot take without cutting or rotating the rings.
+    private static double RingsAndText(double s, int rings, bool text)
+    {
+        double ringSpan = rings == 0 ? 0 : rings * Math.Max(1, Whole(12 * s)) + (rings - 1) * Whole(8 * s);
+        // Beside a lyric the rings may take at most 40 % of the middle (Calculate), so the middle is wide enough for that too.
+        double desired = Whole(TextSlot * s);
+        return !text ? ringSpan : rings == 0 ? desired : Math.Max(Math.Ceiling(ringSpan / .4), ringSpan + Whole(8 * s) + desired);
     }
 
     // contentWidth here excludes the clock, as before custom sizes: the cover, middle and equalizer share it.
     public static CompactMusicLayout Calculate(double contentWidth, bool media, int rings, bool text)
         => Calculate(contentWidth, 1, media, rings, text, 0);
 
-    // monitorFace: the system readings as one part of this width, or 0 without them.
+    // contentWidth is the whole row in DIPs; clockFace is the clock's reserved width at this scale, or 0 without a clock;
+    // monitorFace is the width all chosen system readings want, or 0 without them; readings wider than their region scroll in it.
     public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0)
-        => Calculate(contentWidth, scale, media, rings, text, clockFace, Safe(monitorFace) > 0 ? [monitorFace] : [], 0);
-
-    // contentWidth is the whole row in DIPs; clockFace is the clock's reserved width at this scale, or 0 without a clock.
-    // monitorItems: the width of each system reading on offer, in the order they stay when the row is short; monitorGap is the
-    // space between two readings.
-    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace,
-        IReadOnlyList<double> monitorItems, double monitorGap)
     {
-        double s = SafeScale(scale), width = Safe(contentWidth), face = Safe(clockFace), inner = Safe(monitorGap);
+        double s = SafeScale(scale), width = Safe(contentWidth), face = Safe(clockFace), monitorWanted = Safe(monitorFace);
         rings = Math.Max(0, rings);
-        double cover = Math.Max(1, Whole(20 * s)), gap = Whole(8 * s);
-        double eqW = Math.Max(1, Whole(18 * s)), eqH = Math.Max(1, Whole(14 * s)), bar = Math.Max(1, Whole(3 * s));
-        double size = Math.Max(1, Whole(12 * s)), minimum = Whole(MinimumText * s);
-        var readings = monitorItems ?? [];
+        double cover = Math.Max(1, Whole(20 * s)), coverGap = Whole(8 * s);
+        double eqW = Math.Max(1, Whole(18 * s)), eqH = Math.Max(1, Whole(14 * s)), eqGap = Whole(8 * s), bar = Math.Max(1, Whole(3 * s));
+        // Beside system readings the clock is not alone: it keeps its place at the right after them.
+        bool clockAlone = face > 0 && !media && rings == 0 && monitorWanted == 0;
+        double coverRegion = media ? cover + coverGap : 0, eqRegion = media ? eqGap + eqW : 0;
+        double clockRegion = face == 0 ? 0 : clockAlone ? face : face + Whole(8 * s);
+        // The middle gives way first. When it is empty, the equalizer, then the cover, then the clock shrink in turn,
+        // each to nothing before the next starts, so a 1 DIP change in width changes one region by at most 1 DIP.
+        double deficit = Math.Max(0, coverRegion + eqRegion + clockRegion - width);
+        double Take(double region) { double cut = Math.Min(region, deficit); deficit -= cut; return region - cut; }
+        eqRegion = Take(eqRegion); coverRegion = Take(coverRegion); clockRegion = Take(clockRegion);
+        double middle = Math.Max(0, width - coverRegion - eqRegion - clockRegion);
+        // A middle too short for everything narrows the readings first, while the rings and the lyric keep their width; once
+        // the two halves are even they narrow together. The readings scroll in what they keep, as the rings and the lyric do.
+        // One ring and the shortest lyric always stay. Alone, the readings have the row. All are min and max of linear
+        // functions of the width, with slopes from 0 to 1, as above.
+        bool monitorAlone = monitorWanted > 0 && !media && rings == 0 && !text && face == 0;
+        double monitorNeed = monitorWanted + Whole(8 * s);
+        double monitorRegion = monitorWanted == 0 ? 0 : monitorAlone ? Math.Min(monitorWanted, middle)
+            : Math.Min(Math.Min(monitorNeed, Math.Max(middle - RingsAndText(s, rings, text), middle / 2)),
+                Math.Max(0, middle - (rings > 0 ? Math.Max(1, Whole(12 * s)) : 0) - (text ? Whole(MinimumText * s) : 0)));
+        middle = Math.Max(0, middle - monitorRegion);
 
-        // Every part in priority order, as its width and the space before it when something already stands in the row (a ring
-        // or a reading after another of its kind uses its own spacing). Required parts come first.
-        double used = 0, required = 0, natural = 0; int count = 0, naturalCount = 0; bool open = true;
-        bool Take(double part, double before, double after, bool must)
+        // Rings have one size for a given height: the width never shrinks them. The ring region is cut at its edge, through a
+        // ring if need be, and rotates while it is narrower than all the rings.
+        double size = Math.Max(1, Whole(12 * s)), gap = Whole(8 * s);
+        double between = Whole(8 * s), desired = Whole(56 * s), minimum = Whole(MinimumText * s);
+        static double Span(int count, double size, double gap) => count == 0 ? 0 : count * size + (count - 1) * gap;
+        double all = Span(rings, size, gap);
+        double ringWidth, textWidth, used = 0;
+        if (!text) { ringWidth = Math.Min(middle, all); textWidth = 0; }
+        else if (rings == 0) { ringWidth = 0; textWidth = middle; }
+        else
         {
-            natural += part + (naturalCount > 0 ? after : 0); naturalCount++;
-            if (must) required = natural;
-            if (!open) return false;
-            double need = part + (count > 0 ? before : 0);
-            if (used + need > width + 1e-9) { open = false; return false; }
-            used += need; count++;
-            return true;
+            // Every share is a min or max of linear functions of the middle with slopes from 0 to 1, so one DIP of width moves
+            // each region by at most one DIP; no threshold reallocates the row, and no lyric text, ring rotation or clock digit
+            // takes part. The lyric fills to its minimum first, then the space between, then the rings: at least one ring, and
+            // otherwise 40 % of the middle as long as the lyric keeps its preferred width, never more than all the rings.
+            textWidth = Math.Min(middle, minimum);
+            used = Math.Min(middle - textWidth, between);
+            double rest = middle - textWidth - used;
+            ringWidth = Math.Min(all, Math.Max(Math.Min(rest, size), Math.Min(middle * .4, rest - (desired - minimum))));
+            textWidth = middle - used - ringWidth;
         }
-        bool clockShown = face > 0 && Take(face, gap, gap, true);
-        bool coverShown = media && Take(cover, gap, gap, true);
-        bool eqShown = media && Take(eqW, gap, gap, true);
-        bool textShown = text && Take(minimum, gap, gap, true);
-        // The title alone may show in part, since it scrolls: a row too short for its shortest still gives it what is left, down
-        // to about one and a half characters, and then holds nothing more.
-        double textFloor = minimum;
-        if (text && !textShown && (face == 0 || clockShown) && (!media || eqShown))
+        textWidth = Math.Max(0, textWidth); ringWidth = Math.Max(0, ringWidth);
+        // Whole rings inside the region, for reference; the region itself is not rounded to them.
+        int visible = Math.Clamp((int)Math.Floor((ringWidth + gap) / (size + gap) + 1e-9), 0, rings);
+        return new(middle, size, gap, visible, ringWidth, textWidth, rings > 0 && ringWidth >= size && ringWidth < all - 1e-9)
         {
-            double left = width - used - (count > 0 ? gap : 0);
-            if (left >= Whole(ScrollingText * s) - 1e-9) { textShown = true; textFloor = left; used = width; count++; }
-        }
-        int ringsShown = 0, readingsShown = 0;
-        for (int i = 0; i < rings; i++) if (Take(size, gap, gap, false)) ringsShown++;
-        for (int i = 0; i < readings.Count; i++)
-        {
-            double reading = Safe(readings[i]);
-            // The first reading stands a gap from its neighbour; the others its own spacing from the reading before.
-            if (Take(reading, i == 0 ? gap : inner, i == 0 ? gap : inner, false)) readingsShown++;
-        }
-        double rest = Math.Max(0, width - used);
-        double textWidth = textShown ? textFloor + rest : 0;
-        double ringWidth = ringsShown == 0 ? 0 : ringsShown * size + (ringsShown - 1) * gap;
-        double monitorWidth = 0;
-        for (int i = 0; i < readingsShown; i++) monitorWidth += Safe(readings[i]) + (i > 0 ? inner : 0);
-        double between = ringsShown > 0 && textShown ? gap : 0;
-        return new(ringWidth + between + textWidth, size, gap, ringsShown, ringWidth, textWidth, ringsShown > 0 && ringsShown < rings)
-        {
-            Scale = s, ContentWidth = width, RowHeight = Math.Max(1, Whole(24 * s)), Gap = gap,
-            CoverWidth = coverShown ? cover : 0, CoverSize = cover, CoverRadius = Whole(4 * s),
-            EqualizerWidth = eqShown ? eqW : 0, EqualizerSize = eqW, EqualizerHeight = eqH, EqualizerBar = bar,
-            ClockWidth = clockShown ? face : 0, ClockFace = face,
-            MonitorWidth = monitorWidth, MonitorItems = readingsShown,
-            Between = between, Free = textShown ? 0 : rest, Required = required, Natural = natural,
-            RingThickness = Math.Max(.5, Half(2 * s)), RingEdge = Whole(3 * s), TextEdge = Whole(6 * s),
-            TextFont = Math.Max(1, Half(11.5 * s)), TextHeight = Math.Max(1, Whole(22 * s)), TextScrolls = textShown
+            Scale = s, ContentWidth = width, RowHeight = Math.Max(1, Whole(24 * s)),
+            CoverWidth = coverRegion, CoverSize = cover, CoverRadius = Whole(4 * s),
+            EqualizerWidth = eqRegion, EqualizerSize = eqW, EqualizerHeight = eqH, EqualizerBar = bar,
+            ClockWidth = clockRegion, ClockFace = face, ClockAlone = clockAlone,
+            MonitorWidth = monitorRegion, MonitorFace = monitorWanted, MonitorAlone = monitorAlone,
+            Between = used, RingThickness = Math.Max(.5, Half(2 * s)), RingEdge = Whole(3 * s), TextEdge = Whole(6 * s),
+            TextFont = Math.Max(1, Half(11.5 * s)), TextHeight = Math.Max(1, Whole(22 * s)), TextScrolls = text && textWidth >= minimum
         };
     }
 }
 
 // The quota notice that replaces the collapsed row: ring, application name, "used" text and reset time, centred.
-// As in the collapsed row, each part shows whole or not at all. The used text always stays; then the ring, the name and the
-// reset time are taken in turn while they fit, and the first that does not fit ends the row. Only a row too short for the used
-// text alone cuts it. The window does not cut the notice this way: it measures it with unlimited width and scrolls it when it is
-// longer than the row (Scroll).
+// Each part has a region that clips; when the row is short, the reset time gives way first, then the name, then the
+// ring, and the used text last, each down to nothing before the next starts. The window does not cut the notice this way:
+// it measures it with unlimited width and scrolls it when it is longer than the row (Scroll).
 public sealed record CompactAlertLayout(double Scale, double RingSize, double RingThickness, double FontSize, double LineHeight, double Gap,
     double RingWidth, double NameWidth, double TextWidth, double ResetWidth)
 {
@@ -222,16 +220,12 @@ public sealed record CompactAlertLayout(double Scale, double RingSize, double Ri
         double width = Safe(contentWidth);
         double ring = Math.Max(1, CompactMusicLayout.Whole(14 * s)), gap = CompactMusicLayout.Whole(8 * s);
         double nameW = Math.Min(Safe(name), CompactMusicLayout.Whole(76 * s));
-        // The ring and the name each hold the gap after them, the reset time the gap before it.
-        double textR = Math.Min(Safe(text), width), left = width - textR;
-        bool open = true;
-        double Take(double region)
-        {
-            if (!open || region <= 0) return 0;
-            if (region > left + 1e-9) { open = false; return 0; }
-            left -= region; return region;
-        }
-        double ringR = Take(ring + gap), nameR = nameW > 0 ? Take(nameW + gap) : 0, resetR = Safe(reset) > 0 ? Take(gap + Safe(reset)) : 0;
+        // The ring and the name each hold the gap after them, the reset time the gap before it. A region that shrinks loses
+        // its right side first: the gap after the ring or the name, then the content's end.
+        double ringR = ring + gap, nameR = nameW > 0 ? nameW + gap : 0, textR = Safe(text), resetR = Safe(reset) > 0 ? gap + Safe(reset) : 0;
+        double deficit = Math.Max(0, ringR + nameR + textR + resetR - width);
+        double Take(double region) { double cut = Math.Min(region, deficit); deficit -= cut; return region - cut; }
+        resetR = Take(resetR); nameR = Take(nameR); ringR = Take(ringR); textR = Take(textR);
         return new(s, ring, 2.2 * s, Math.Max(1, CompactMusicLayout.Half(11.5 * s)), Math.Max(1, CompactMusicLayout.Whole(16 * s)), gap, ringR, nameR, textR, resetR);
     }
 

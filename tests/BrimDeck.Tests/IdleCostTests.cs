@@ -1,8 +1,8 @@
 using BrimDeck.Core;
 
 // What the collapsed row costs while nothing changes: the scrolling title and the carousels wait out their rests on a timer and
-// run a clock only while they move, with the values of the storyboards they replace; the readings are sampled only while the
-// row admits one or one fades out; a reading's width starts frames only for a change that shows; measuring allocates nothing.
+// run a clock only while they move, with the values of the storyboards they replace; the readings are sampled only while they
+// have room; the strip's measuring and arranging allocate nothing per reading.
 internal static class IdleCostTests
 {
     public static void Run(Action<string, bool> check)
@@ -67,46 +67,6 @@ internal static class IdleCostTests
         }
         var wrap = new MarqueeCycle(48, 24, 6, .05);
         check("Idle cost: the scrolling title's cycle wraps", Near(wrap.Wrap(wrap.Period + .25), .25) && Near(wrap.Wrap(-.25), wrap.Period - .25) && wrap.Wrap(double.NaN) == 0);
-        Resized(check);
-    }
-
-    // The title's room changes on every frame while a reading beside it eases its width: the scroll carries on from where it is,
-    // only its end moving, and never jumps back to the start.
-    private static void Resized(Action<string, bool> check)
-    {
-        var cycle = new MarqueeCycle(100, 24, 6, .04);
-        // Mid-glide (40 DIP scrolled), the room widens so only 60 or 30 DIP overflow, or narrows so 140 do.
-        double at = 1.5 + 40 / 24.0;
-        var (wider, a1) = cycle.Resized(60, .05, at);
-        var (widest, a2) = cycle.Resized(30, .05, at);
-        var (narrower, a3) = cycle.Resized(140, .03, at);
-        check("Idle cost: a title whose room changes mid-glide keeps the distance scrolled",
-            Near(a1, at) && Near(wider.Shift(a1), -40) && Near(narrower.Shift(a3), -40) && Near(a3, at) && wider.Overflow == 60 && narrower.EdgeStop == .03);
-        check("Idle cost: a title whose new end is nearer than it has scrolled stops at that end", Near(widest.Shift(a2), -30) && Near(a2, widest.GlideEnd));
-        check("Idle cost: a title resting at its start keeps its time", cycle.Resized(80, .04, .9) is var (r1, s1) && Near(s1, .9) && r1.Shift(s1) == 0);
-        check("Idle cost: a title resting at its end carries on resting there", cycle.Resized(80, .04, cycle.GlideEnd + .5) is var (r2, s2)
-            && Near(s2, r2.GlideEnd + .5) && Near(r2.Shift(s2), -80) && cycle.Resized(80, .04, cycle.Period - .01).At < r2.Period);
-        check("Idle cost: a title with nothing left to scroll comes to rest", cycle.Resized(0, 0, at) is { At: 0 } && cycle.Resized(double.NaN, 0, at).Cycle.Overflow == 0);
-
-        // A neighbour easing over 0.42 s on 60 frames a second while the title glides, as on screen: the room changes on every frame.
-        bool steady = true, forward = true;
-        double now = 1.5 + 20 / 24.0, shift = cycle.Shift(now), overflow = 100;
-        var running = cycle;
-        for (int frame = 1; frame <= 120; frame++)
-        {
-            double step = 1 / 60.0;
-            now += step;
-            double target = frame <= 25 ? 100 - 40 * Eases(frame / 25.0) : 60;
-            (running, now) = running.Resized(target, .04, now);
-            overflow = target;
-            double next = running.Shift(now);
-            // Each frame the text moves by at most one frame's glide, and only towards its end.
-            if (next > shift + 1e-9) forward = false;
-            if (shift - next > 24 * step + 1e-9) steady = false;
-            shift = next;
-        }
-        check("Idle cost: while the room eases, the title glides on without jumping back", steady && forward && running.Overflow == overflow);
-        static double Eases(double s) => s * s * (3 - 2 * s);
     }
 
     private static void Carousel(Action<string, bool> check)
@@ -203,45 +163,27 @@ internal static class IdleCostTests
 
     private static void Readings(Action<string, bool> check)
     {
-        // The readings are sampled while the row admits any or one still fades out (MonitorStrip.Showing); with none admitted and
-        // none fading, the sampler is not run for them.
-        check("Idle cost: readings the row admits are sampled", CompactMonitor.Sampled(CompactMonitorItems.Cpu, false) && CompactMonitor.Sampled(CompactMonitorItems.All, false));
-        check("Idle cost: a reading still fading out is sampled", CompactMonitor.Sampled(CompactMonitorItems.None, true));
-        check("Idle cost: readings the row has no room for are not sampled", !CompactMonitor.Sampled(CompactMonitorItems.None, false) && !CompactMonitor.Sampled((CompactMonitorItems)(1 << 20), false));
-
-        // A reading's width (ReadingWidth) starts frames only for a change that shows: a reading that does not show, or a change of
-        // less than a device pixel, takes its new width at once; one that shows eases to a wider figure.
-        var hidden = new ReadingWidth();
-        hidden.Update(30, 0, false, true, 1.5);
-        bool hiddenMoves = hidden.Update(41, 1, false, true, 1.5);
-        check("Idle cost: a reading that does not show takes a new width at once, with no frames", !hiddenMoves && hidden.At(1) == 41 && !hidden.Moving(1));
-        var visible = new ReadingWidth();
-        visible.Update(30, 0, true, true, 1.5);
-        bool subPixel = visible.Update(30.5, 1, true, true, 1.5), wider = visible.Update(41, 2, true, true, 1.5);
-        check("Idle cost: a change of less than a device pixel takes no frames", !subPixel && visible.At(1.01) == 30.5);
-        check("Idle cost: a shown reading eases to a wider figure", wider && visible.Moving(2.1) && visible.At(2.1) > 30.5 && visible.At(2.1) < 41 && visible.At(3) == 41);
-        check("Idle cost: without motion a shown reading takes its width at once", !visible.Update(50, 4, true, false, 1.5) && visible.At(4) == 50);
-        // Readings that keep their widths ask for no frames, and asking allocates nothing.
-        var steady = new ReadingWidth[6];
-        bool quiet = true;
-        for (int i = 0; i < steady.Length; i++) steady[i].Update(40 + i, 0, i % 2 == 0, true, 1.25);
-        long start = GC.GetAllocatedBytesForCurrentThread();
-        for (int t = 1; t <= 1000; t++) for (int i = 0; i < steady.Length; i++) quiet &= !steady[i].Update(40 + i, t, i % 2 == 0, true, 1.25);
-        long spent = GC.GetAllocatedBytesForCurrentThread() - start;
-        check($"Idle cost: readings whose figures keep their width take no frames and allocate nothing ({spent} B for 1000 readings)", quiet && spent == 0);
+        // Only a region with room shows readings; squeezed to nothing, the sampler is not run for them.
+        check("Idle cost: readings with room are sampled", CompactMonitor.HasRoom(.5) && CompactMonitor.HasRoom(120));
+        check("Idle cost: readings without room are not sampled", !CompactMonitor.HasRoom(0) && !CompactMonitor.HasRoom(-3) && !CompactMonitor.HasRoom(double.NaN) && !CompactMonitor.HasRoom(double.PositiveInfinity));
 
         // The figure kept for each whole percent is the one the format gives.
         check("Idle cost: every whole percent's figure is the formatted one", Enumerable.Range(0, 2001).Select(i => i / 2000d - .0001)
             .Append(double.NaN).Append(2).Append(-1).All(share => MonitorFormat.WholePercent(share).ToString(System.Globalization.CultureInfo.InvariantCulture) == MonitorFormat.Percent(share)));
 
-        // Measuring and fitting the readings (MonitorStrip's own fit) allocates nothing.
-        var chosen = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Download | CompactMonitorItems.Columns;
-        Func<CompactMonitorItems, double> width = item => item == CompactMonitorItems.Columns ? 30 : 41;
-        double total = CompactMonitor.Width(chosen, width, 6);
+        // Arranging into a kept list gives what the old arrangement gave, and allocates nothing.
+        CompactMonitorItems[] order = [CompactMonitorItems.Download, CompactMonitorItems.Cpu, CompactMonitorItems.Columns, CompactMonitorItems.Upload, CompactMonitorItems.Memory, CompactMonitorItems.Gpu];
+        var shown = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Download | CompactMonitorItems.Columns;
+        double now = .3;
+        Func<CompactMonitorItems, double> width = item => item == CompactMonitorItems.Columns ? 30 : 41, presence = item => item == CompactMonitorItems.Memory ? now : 1;
+        var (old, oldTotal) = CompactMonitor.Arrange(order, shown, width, 6, presence);
+        var kept = new List<(CompactMonitorItems Item, double X, double Width, double Presence)>();
+        double total = CompactMonitor.Arrange(order, shown, width, 6, presence, kept);
+        check("Idle cost: the kept arrangement is the old one", total == oldTotal && kept.SequenceEqual(old));
         long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++) { total += CompactMonitor.Width(chosen, width, 6); total += (int)CompactMonitor.Fit(chosen, width, 6, 100 + i % 80); }
+        for (int i = 0; i < 1000; i++) { total = CompactMonitor.Arrange(order, shown, width, 6, presence, kept); total += CompactMonitor.Width(shown, width, 6); }
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        check($"Idle cost: measuring and fitting the readings allocates nothing ({allocated} B for 1000)", allocated == 0 && total > 0);
+        check($"Idle cost: arranging and measuring the readings allocates nothing ({allocated} B for 1000)", allocated == 0);
 
         // The busiest core sets the columns' level as Max did, a share that is not a number passed over.
         static MonitorSnapshot Cores(params double[] usage) => MonitorSnapshot.Empty(usage.Length, "") with

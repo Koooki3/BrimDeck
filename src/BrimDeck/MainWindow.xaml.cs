@@ -292,13 +292,9 @@ public partial class MainWindow : Window
         Collapsed = ShapeFor(EffectiveStyle);
     }
     private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
-        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null, _compactRequired);
+        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null);
     // The width the collapsed content asks for (see CollapsedGeometry); NaN until the row is first built, which keeps the saved width.
     private double _compactWanted = double.NaN;
-    // The width of what the collapsed content must show (CompactMusicLayout.Required); the surface is never narrower.
-    private double _compactRequired;
-    // The collapsed row last built; the next one carries its parts over (CompactRow).
-    private CompactRow? _compactRow;
     // Where the pointer was when hovering opened the panel, in DIPs from the monitor's left edge; null when the panel was opened
     // another way (the hotkey) or is closed.
     private double? _openCentre;
@@ -308,9 +304,8 @@ public partial class MainWindow : Window
     {
         var before = Collapsed;
         UpdateCollapsedGeometry();
-        // The settings' width slider starts at what the content must show, which may have changed with the same surface.
-        _app.CollapsedChanged();
         if (Equals(Collapsed.Surface, before.Surface)) return;
+        _app.CollapsedChanged();
         if (_expanded) return;
         // A surface that no longer lies within the window (wider, or moved along a screen edge) places the window again.
         if (Collapsed.Surface.X < _windowOffset || Collapsed.Surface.X + Collapsed.Surface.Width > _windowOffset + Width) ApplySettings(); else SetExpanded(false);
@@ -323,10 +318,6 @@ public partial class MainWindow : Window
     public (double OffsetMin, double OffsetMax, double TopMin, double TopMax, double WidthMin, double WidthMax) CurrentCollapsedRanges(CompactStyle style, double width, double height)
     {
         var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip);
-        // The notch and the capsule are never narrower than what their content must show (CollapsedGeometry.Resolve), so the slider
-        // does not offer widths the surface would not take.
-        if (style is CompactStyle.Notch or CompactStyle.Capsule)
-            widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, height, _compactRequired)));
         var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width, MonitorBoundsDip, WorkDip);
         var (topMin, topMax) = style switch
         {
@@ -427,10 +418,11 @@ public partial class MainWindow : Window
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
-        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _compactClock = null; _compactStrip = null;
+        if (_stripCarousel is not null) { _stripElapsed = _stripCarousel.Elapsed; _stripCarousel.SetRunning(false, false); }
+        _compactEqualizer = null; _compactMarquee = null; _quotaCarousel = null; _stripCarousel = null; _compactClock = null; _compactStrip = null;
         if (_alert is not null)
         {
-            CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed; _compactRow = null;
+            CompactAlert.Visibility = Visibility.Visible; CompactRings.Visibility = Visibility.Collapsed;
             // LayoutCompactAlert (MainWindow.CompactLayout.cs) builds the alert row from _alert and sizes it for the shape.
             ApplyCollapsedLayout();
             // The notice hides the system readings, which then need none.

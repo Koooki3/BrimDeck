@@ -98,18 +98,4 @@ public readonly record struct MarqueeCycle(double Overflow, double Speed, double
     public double Right(double at) => at < GlideEnd - Ramp ? 1 - EdgeStop : at < GlideEnd ? 1 - EdgeStop + EdgeStop * ((at - (GlideEnd - Ramp)) / Ramp) : 1;
 
     public CycleStretch StretchAt(double at) => at < Rest ? new(false, 0, Rest) : at < GlideEnd ? new(true, Rest, GlideEnd) : new(false, GlideEnd, Period);
-
-    // The same scroll over a new overflow (the text's room changed while it scrolls, as when a reading beside it eases its width),
-    // and the time within the new cycle that keeps the text where it is: the glide moves at one speed whatever the overflow, so a
-    // glide keeps its time unless the new end is nearer than the distance already scrolled, where it stops at that end; the rest at
-    // the start keeps its time, and the rest at the end carries on as long as it already has. Nothing starts over.
-    public (MarqueeCycle Cycle, double At) Resized(double overflow, double edgeStop, double at)
-    {
-        var next = this with { Overflow = double.IsFinite(overflow) ? Math.Max(0, overflow) : 0, EdgeStop = edgeStop };
-        at = Wrap(at);
-        if (next.Overflow <= 0 || next.Period <= 0) return (next, 0);
-        if (at < Rest) return (next, at);
-        if (at < GlideEnd) return (next, Math.Min(at, next.GlideEnd));
-        return (next, Math.Min(next.GlideEnd + (at - GlideEnd), next.Period - 1e-9));
-    }
 }

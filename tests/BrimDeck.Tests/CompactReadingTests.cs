@@ -89,29 +89,35 @@ internal static class CompactReadingTests
 
     private static void Layout(Action<string, bool> check)
     {
-        // A ring with its figure (12 + 30) or alone (14), the core columns (20), a rate (50).
-        static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values) => item => item switch
-        {
-            Columns => 20,
-            Cpu or Memory or Gpu => (values & item) != 0 ? 12 + 30 : 14,
-            Download or Upload => 50,
-            _ => 0
-        };
-        var width = Widths(CompactMonitor.Rings);
-        check("Compact readings: readings side by side take their widths and the gaps between them",
-            CompactMonitor.Width(All & ~Download, width, 10) == 50 + 42 + 42 + 20 + 42 + 4 * 10 && CompactMonitor.Width(CompactMonitorItems.None, width, 10) == 0);
+        CompactMonitorItems[] order = [Upload, Gpu, Cpu, Columns, Download, Memory];
+        var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, 30, 14, 20, 50);
+        var arranged = CompactMonitor.Arrange(order, All & ~Download, width, 10, _ => 1);
+        check("Compact readings: the strip follows the table's order", arranged.Items.Select(i => i.Item).SequenceEqual([Upload, Gpu, Cpu, Columns, Memory]));
+        check("Compact readings: each reading starts after the one before it", arranged.Items[0].X == 0 && arranged.Items[1].X == 60 && arranged.Items[2].X == 112
+            && arranged.Items[3].X == 164 && arranged.Items[4].X == 194 && arranged.Total == 236);
+        var half = CompactMonitor.Arrange(order, All, width, 10, item => item == Gpu ? .5 : 1);
+        check("Compact readings: a leaving reading gives back its room in proportion", half.Items[2].X == 60 + 26);
 
         foreach (var space in new[] { 300.0, 200, 150, 100, 60, 40, 20 })
         {
             var fit = CompactMonitor.Fit(All, width, 10, space);
             check($"Compact readings: drop order at {space} is the fixed one", fit == Expected(space));
         }
+        // Fit takes no order, so the table's order cannot change which readings leave; the arranged width matches Width.
+        var fitted = CompactMonitor.Fit(All, width, 10, 200);
+        check("Compact readings: the arranged width of what fits is its measured width in any order",
+            Math.Abs(CompactMonitor.Arrange(order, fitted, width, 10, _ => 1).Total - CompactMonitor.Width(fitted, width, 10)) < 1e-9
+            && Math.Abs(CompactMonitor.Arrange(CompactMonitor.Order, fitted, width, 10, _ => 1).Total - CompactMonitor.Width(fitted, width, 10)) < 1e-9);
 
-        var bare = Widths(CompactMonitorItems.None);
-        var some = Widths(Cpu);
+        var bare = CompactMonitor.Widths(CompactMonitorItems.None, 12, 30, 14, 20, 50);
+        var some = CompactMonitor.Widths(Cpu, 12, 30, 14, 20, 50);
+        check("Compact readings: a ring without its figure is narrower", bare(Memory) == 14 && width(Memory) == 42 && some(Cpu) == 42 && some(Gpu) == 14
+            && bare(Download) == 50 && bare(Columns) == 20);
         check("Compact readings: hiding figures shrinks the strip",
             CompactMonitor.Width(All, bare, 10) < CompactMonitor.Width(All, some, 10) && CompactMonitor.Width(All, some, 10) < CompactMonitor.Width(All, width, 10));
         check("Compact readings: hiding figures lets more readings fit", CompactMonitor.Fit(All, bare, 10, 200) == (All & ~Upload) && CompactMonitor.Fit(All, width, 10, 200) == (Cpu | Memory | Columns | Download));
+        check("Compact readings: rings alone sit closer only without figures",
+            CompactMonitor.RingsOnly(CompactMonitor.Rings, CompactMonitorItems.None) && !CompactMonitor.RingsOnly(CompactMonitor.Rings, Cpu) && !CompactMonitor.RingsOnly(All, CompactMonitorItems.None));
 
         // Upload, GPU, download, columns and memory leave in turn; widths 50, 42, 50, 20, 42 and CPU 42, gaps 10.
         static CompactMonitorItems Expected(double space) => space switch

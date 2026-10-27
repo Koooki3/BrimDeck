@@ -27,12 +27,12 @@ public partial class MainWindow
     // Asked whenever the panel opens, closes, changes page or is hidden, and whenever the collapsed row is built.
     private void UpdateMonitorDemand()
     {
-        // Nothing is read for a display that is off (DisplayPower). A page left open while the display is off stays as it was (its
-        // card, the list held under the pointer); it only stops being read, and takes the current readings when the display is back.
+        // Nothing is read for a display that is off (DisplayPower), nor for a row whose readings got no room (RenderCompactMusic).
+        // A page left open while the display is off stays as it was (its card, the list held under the pointer); it only stops
+        // being read, and takes the current readings when the display is back.
         bool shown = _expanded && IsMonitorPage && IsVisible && !IsSuppressed;
         bool page = shown && !DisplayPower.Off;
-        // The collapsed readings are read only while the row admits one or one is still fading out (MonitorStrip.Showing).
-        bool strip = !_expanded && _compactStrip?.Showing(Eased.Now) == true && IsVisible && !IsSuppressed && !DisplayPower.Off && _alert is null && EffectiveStyle != CompactStyle.Line;
+        bool strip = !_expanded && _compactStrip is not null && IsVisible && !IsSuppressed && !DisplayPower.Off && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -54,13 +54,7 @@ public partial class MainWindow
     private void MonitorUpdated(MonitorSnapshot snapshot)
     {
         Motion.Enabled = MonitorMotion;
-        if (!_expanded)
-        {
-            _compactStrip?.Update(snapshot);
-            // The last reading has faded out of a row that stays as it is: the sampler may rest.
-            if (_stripShowing && _compactStrip?.Showing(Eased.Now) != true) UpdateMonitorDemand();
-            return;
-        }
+        if (!_expanded) { _compactStrip?.Update(snapshot); return; }
         if (!IsMonitorPage || _monitorView is null) return;
         if (MonitorKey() != _monitorKey) { RenderMonitor(); return; }
         _monitorView.Update(snapshot, MonitorMotion);
