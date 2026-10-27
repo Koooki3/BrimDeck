@@ -16,6 +16,27 @@ internal static class KeyboardResizeTests
             && HotkeyText.PlanArrows("Arrows", Key, "", "").Status == HotkeyStatus.Invalid
             && HotkeyText.PlanArrows("Ctrl+Alt+Left", Key, "", "").Status == HotkeyStatus.Invalid
             && HotkeyText.PlanArrows("", Key, "", "").Status == HotkeyStatus.Unset);
+        // Shift, Ctrl and Win with the arrow keys select and move through text or arrange windows in every program.
+        check("Resize shortcut: Alt and one more modifier, never the system's own arrow shortcuts",
+            HotkeyText.TryParseArrows("Ctrl+Alt+Arrows", out _) && HotkeyText.TryParseArrows("Alt+Shift+Arrows", out _) && HotkeyText.TryParseArrows("Alt+Win+Arrows", out _)
+            && !HotkeyText.TryParseArrows("Alt+Arrows", out _) && !HotkeyText.TryParseArrows("Shift+Arrows", out _) && !HotkeyText.TryParseArrows("Ctrl+Arrows", out _)
+            && !HotkeyText.TryParseArrows("Ctrl+Shift+Arrows", out _) && !HotkeyText.TryParseArrows("Win+Arrows", out _) && !HotkeyText.TryParseArrows("Ctrl+Win+Arrows", out _)
+            && HotkeyText.PlanArrows("Shift+Arrows", Key, "", "").Status == HotkeyStatus.Invalid
+            && HotkeyText.Combinations("Arrows").Length == 0);
+        // The settings row reads "Alt + [box] + arrow keys": the box shows and records only the modifiers other than Alt.
+        check("Resize shortcut: the box shows only the modifiers besides Alt, in the fixed order",
+            HotkeyText.ArrowExtras("Ctrl+Alt+Arrows") == "Ctrl" && HotkeyText.ArrowExtras("win+shift+alt+ctrl+arrows") == "Ctrl+Shift+Win"
+            && HotkeyText.ArrowExtras("Alt+Win+Arrows") == "Win" && HotkeyText.ArrowExtras("") == "" && HotkeyText.ArrowExtras("Ctrl+Alt+Left") == ""
+            && HotkeyText.ArrowExtras("Ctrl+Shift+Arrows") == "" && HotkeyText.ArrowExtras("Alt+Arrows") == ""
+            && HotkeyText.FormatModifiers(HotkeyModifiers.None) == "" && HotkeyText.FormatModifiers(HotkeyModifiers.Win | HotkeyModifiers.Ctrl) == "Ctrl+Win");
+        check("Resize shortcut: the recorded modifiers save with Alt and Arrows; Alt among them changes nothing, Alt alone saves nothing",
+            HotkeyText.FromArrowExtras(HotkeyModifiers.Ctrl) == "Ctrl+Alt+Arrows"
+            && HotkeyText.FromArrowExtras(HotkeyModifiers.Shift | HotkeyModifiers.Ctrl) == "Ctrl+Alt+Shift+Arrows"
+            && HotkeyText.FromArrowExtras(HotkeyModifiers.Ctrl | HotkeyModifiers.Alt) == "Ctrl+Alt+Arrows"
+            && HotkeyText.FromArrowExtras(HotkeyModifiers.Win) == "Alt+Win+Arrows"
+            && HotkeyText.FromArrowExtras(HotkeyModifiers.Alt) == "" && HotkeyText.FromArrowExtras(HotkeyModifiers.None) == ""
+            && HotkeyText.ArrowExtras(HotkeyText.FromArrowExtras(HotkeyModifiers.Shift | HotkeyModifiers.Win)) == "Shift+Win"
+            && HotkeyText.PlanArrows(HotkeyText.FromArrowExtras(HotkeyModifiers.Ctrl), Key, "", "") == (null, "Ctrl+Alt+Arrows"));
         check("Resize shortcut: it stands for its four arrow keys, Left, Right, Up, Down",
             HotkeyText.Combinations("Ctrl+Alt+Arrows").SequenceEqual(["Ctrl+Alt+Left", "Ctrl+Alt+Right", "Ctrl+Alt+Up", "Ctrl+Alt+Down"])
             && HotkeyText.Combinations("ctrl+k").SequenceEqual(["Ctrl+k"]) && HotkeyText.Combinations("").Length == 0);
