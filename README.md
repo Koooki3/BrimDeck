@@ -91,7 +91,7 @@ Works with players that use Windows media controls, with extra support for some 
 
 <img src="docs/en-US/images/monitor.png" width="100%" alt="System monitor page: CPU usage and each core, GPU, memory, network speed and the busiest apps">
 
-- Shows CPU, GPU and memory usage and network speed in real time, along with the usage of each core.
+- Shows CPU, GPU and memory usage and network speed in real time, along with the usage of each core. With more than one graphics card, the discrete one shows by default; click the large GPU reading to show the next card, or choose one under Settings › System monitor › GPU.
 - Lists the busiest apps by CPU or memory; click an app for its details.
 - Shows the space in use on each physical drive, one line per drive, with a segment per letter for a drive split into several; only internal drives are listed, not USB sticks, SD cards, external or network drives.
 - Shows CPU, GPU and solid-state drive temperatures (you can turn them off in settings; the CPU, GPU and drive readings in the notch or capsule can show them too). No administrator rights or drivers are needed; sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it.
