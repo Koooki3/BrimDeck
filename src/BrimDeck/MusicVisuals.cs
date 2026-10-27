@@ -381,6 +381,10 @@ internal abstract class GlideCarousel : Grid
 {
     internal const double StartHold = QuotaCycle.StartHold, EndHold = QuotaCycle.EndHold, Speed = QuotaCycle.Speed, Fade = QuotaCycle.Fade, FadeEdge = 3;
     private FrameworkElement _strip = null!;
+    // The strip's shift is this carousel's own: the readings strip is handed from row to row, and a carousel that let go of it
+    // (Unloaded, after the next row took the strip) must not stop or move the next carousel's glide, nor leave its own running
+    // on a transform no longer drawn, which kept WPF's frame clock going for nothing.
+    private TranslateTransform _shift = new();
     private bool _discrete;
     private bool _enabled, _paused;
     private TimeSpan _elapsed;
@@ -408,7 +412,7 @@ internal abstract class GlideCarousel : Grid
         Rotates = travel > 0;
         edge = Rotates ? Math.Max(0, edge) : 0;
         Width = edge + window + edge; ClipToBounds = true;
-        strip.RenderTransform = new TranslateTransform();
+        strip.RenderTransform = _shift;
         Canvas.SetLeft(strip, edge);
         // A Canvas measures the strip at its full width. Inside the Grid the strip would be layout-clipped to the visible width,
         // and that clip moves with the translation, so what scrolls in from the right would render blank.
@@ -442,7 +446,7 @@ internal abstract class GlideCarousel : Grid
     private void Turn()
     {
         double now = Eased.Now, at = At(now);
-        var shift = (TranslateTransform)_strip.RenderTransform;
+        var shift = _shift;
         bool running = !double.IsNaN(_since);
         double next;
         if (_discrete)
@@ -478,11 +482,13 @@ internal abstract class GlideCarousel : Grid
     // reads as a backwards scroll. Each holds its last value until the next turn takes it off.
     private void Move(double start, double end, double into)
     {
-        var shift = (TranslateTransform)_strip.RenderTransform;
+        var shift = _shift;
         var begin = TimeSpan.FromSeconds(-into);
         if (start < _cycle.GlideEnd)
         {
-            shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, -Travel, TimeSpan.FromSeconds(end - start)) { BeginTime = begin, EasingFunction = GlideEase });
+            var glide = new DoubleAnimation(0, -Travel, TimeSpan.FromSeconds(end - start)) { BeginTime = begin, EasingFunction = GlideEase };
+            Timeline.SetDesiredFrameRate(glide, GlideRate(VisualTreeHelper.GetDpi(this).PixelsPerDip));
+            shift.BeginAnimation(TranslateTransform.XProperty, glide);
             return;
         }
         static KeyTime Key(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
@@ -496,6 +502,14 @@ internal abstract class GlideCarousel : Grid
         shift.BeginAnimation(TranslateTransform.XProperty, back);
         _strip.BeginAnimation(OpacityProperty, fade);
     }
+
+    // The glide moves at most PeakSlope times its average speed (the curve's steepest point); drawn half a device pixel a step at
+    // that speed, which is 40 frames a second at 100 % and 60 at 150 %. At the display's own rate (144 a second) each frame
+    // moved it a fifth of a pixel, and every one of them redrew the layered island: the collapsed row's readings and rings
+    // cost about 120 ms of CPU a second while they glided (regress, bcc93c6).
+    internal const double PeakSlope = 1.67;
+    internal static int GlideRate(double pixelsPerDip)
+        => (int)Math.Clamp(Math.Ceiling(2 * Speed * PeakSlope * (pixelsPerDip > 0 ? pixelsPerDip : 1)), 24, Motion.FrameRate);
 
     // Runs while it is loaded, visible, enabled and not paused; held, it still shows where the cycle stands (a carousel built
     // in place of one that was past its glide), with no clock or timer left behind.
