@@ -27,6 +27,9 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly double _scale, _font, _small, _dial, _gap, _row, _dpi;
     private readonly Func<CompactMonitorItems, double> _width;
     private MonitorSnapshot? _snapshot;
+    // The look of the power and charge readings on the theme in use, and the threshold under which the charge is low.
+    private readonly PowerStyle _powerStyle;
+    private readonly int _low;
     // The lowest battery among the devices shown (MainWindow.LowestBattery), for the battery reading.
     private BatteryReading? _battery;
     // Made once, as the strip measures and draws on every reading: the readings in order, each once, the delegates it hands to
@@ -46,9 +49,9 @@ internal sealed class MonitorStrip : FrameworkElement
     // without them, so the row never shows a dash for them. admission: which temperatures and letters have given their first
     // figures (StripAdmission.Shows); without it every chosen one shows.
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi,
-        CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null)
+        CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null, int low = Devices.DefaultLowPercent)
     {
-        _presence = presence; _dpi = dpi; _colors = colors; _centered = centered;
+        _presence = presence; _dpi = dpi; _colors = colors; _centered = centered; _low = low; _powerStyle = PowerStyle.For(colors.Palette);
         _order = [.. readings.Select(reading => reading.Item)];
         _orderOnce = [.. _order.Distinct()];
         _presenceNow = item => _presence.At(item, _now); _ringFigure = RingFigure;
@@ -88,7 +91,8 @@ internal sealed class MonitorStrip : FrameworkElement
         // at most five characters (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent));
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("≈112W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent));
     }
 
     private const string WidestDegrees = "125°", WidestPercent = "100%";
@@ -218,7 +222,8 @@ internal sealed class MonitorStrip : FrameworkElement
             }
             double left = Math.Round(x);
             // Each reading in the color of its level (ReadingLevels); the core columns take theirs core by core.
-            var level = item == CompactMonitorItems.Battery ? _battery?.Level ?? MemoryLevel.Normal : ReadingLevels.Of(item, s);
+            var level = item == CompactMonitorItems.Battery ? _battery?.Level ?? MemoryLevel.Normal
+                : item == CompactMonitorItems.Charge ? BatteryModel.Level(s?.Battery.OrDefault, _low) : ReadingLevels.Of(item, s);
             string color = _colors.At(item, level);
             switch (item)
             {
@@ -232,6 +237,8 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Upload: Rate(drawing, left, center, MonitorGlyph.Up, s?.Network.OrDefault?.UpBytesPerSecond, color, level, ppd); break;
                 case CompactMonitorItems.Storage: Drives(drawing, left, center, s, ppd); break;
                 case CompactMonitorItems.Battery: Battery(drawing, left, center, _battery, color, level, ppd); break;
+                case CompactMonitorItems.Power: Power(drawing, left, center, s?.Power.OrDefault, ppd); break;
+                case CompactMonitorItems.Charge: Charge(drawing, left, center, s?.Battery.OrDefault, level, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
         }
@@ -371,6 +378,29 @@ internal sealed class MonitorStrip : FrameworkElement
         var text = MonitorDraw.Text(Devices.Figure(battery?.Percent), _font, FigureColor(level, color), ppd);
         MonitorDraw.Baseline(drawing, text, x + width + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
+    // The whole machine's power: a bolt in the theme's curve color, then the draw in watts, "38W", with "≈" before an estimate; a dash
+    // while there is no reading. The room is kept for the widest figure ("≈112W").
+    private void Power(DrawingContext drawing, double x, double center, PowerSample? power, double ppd)
+    {
+        double size = Math.Round(11 * _scale), slot = Math.Round(9 * _scale);
+        DeviceGlyphs.Bolt(drawing, new Rect(x, Math.Round(center - size / 2), slot, size), power is null ? UI.Tertiary : _powerStyle.Draw);
+        string figure = power is { } p ? (p.Estimated ? "≈" : "") + PowerFormat.Compact(p.Watts) + "W" : "—";
+        MonitorDraw.Baseline(drawing, MonitorDraw.Text(figure, _font, UI.Primary, ppd), x + slot + Math.Round(3 * _scale), Math.Round(center + _font * .36));
+    }
+
+    // The machine's own battery in the shape of the theme's look (PowerGlyphs.Battery), filled to the charge, with the bolt in its tip
+    // while it charges, the leaf while Battery saver is on and an exclamation mark when low; then the figure: "96%".
+    private void Charge(DrawingContext drawing, double x, double center, BatterySample? battery, MemoryLevel level, double ppd)
+    {
+        double height = Math.Round(9 * _scale * ppd) / ppd;
+        var visual = battery is null ? new BatteryVisual(0, BatteryState.Discharging, false, MemoryLevel.Normal) : BatteryVisual.Of(battery, _low);
+        PowerGlyphs.Battery(drawing, new Rect(x, Math.Round((center - height / 2) * ppd) / ppd, BatteryWidth, height), visual, _powerStyle, ppd,
+            battery is null ? 0 : battery.Percent / 100, compact: true, unknown: battery is null);
+        string color = battery is null ? UI.Tertiary : _powerStyle.Fill(level, battery.State);
+        var text = MonitorDraw.Text(battery is null ? "—" : GaugeFigure(battery.Percent / 100), _font, FigureColor(level, color), ppd);
+        MonitorDraw.Baseline(drawing, text, x + BatteryWidth + Math.Round(3 * _scale), Math.Round(center + _font * .36));
+    }
+
     // The battery's outline pen, one per color (a reading changes color with its level): made on first use, as the strip keeps its size.
     private readonly Dictionary<string, Pen> _outlines = [];
     private Pen OutlinePen(string color, double thickness)

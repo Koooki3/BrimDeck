@@ -321,6 +321,9 @@ public sealed class DeckSettings
     public bool MonitorTemperatures { get; set; } = true;
     // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
     public bool MonitorStorage { get; set; } = true;
+    // The expanded page shows the whole machine's power draw with its curve, and the machine's own battery when it has one (PowerResolver,
+    // BatteryModel); off, neither is read for it. The collapsed row's Power and Charge readings are chosen in its table.
+    public bool MonitorPower { get; set; } = true;
     // The devices page: the battery of the connected wireless devices (Devices); it reads them only while it shows.
     public bool DevicesPage { get; set; } = true;
     public double DevicesWidth { get; set; } = 460;

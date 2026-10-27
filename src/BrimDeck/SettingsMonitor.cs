@@ -78,6 +78,11 @@ public sealed partial class SettingsWindow
                 Loc.T("在内存和网速下方按物理硬盘逐行显示已用空间：一块硬盘分成多个盘符时，一行内按盘符分段。只列出内置硬盘上 1 GB 以上的固定分区，不含 U 盘、SD 卡、移动硬盘、网络盘和光驱；Dev Drive 和长期挂载的 VHD 照常列出。面板放不下时，其余硬盘合并为最后一行。每 10 秒读取一次。",
                     "Shows the space in use on each physical drive, one line per drive, under memory and network: a drive split into several letters has a segment per letter. Only fixed volumes of 1 GB or more on internal drives are listed, not USB sticks, SD cards, external, network or optical drives; a Dev Drive or a VHD mounted for good is listed. When the panel has no room for all, the rest share the last line. Read every 10 seconds."),
                 keepPreview: true),
+            Toggle(Loc.T("显示功耗与电池", "Show power and battery"), S.MonitorPower, v => Resize(s => s.MonitorPower = v, DeckPage.Monitor),
+                help:
+                Loc.T("在硬盘下方显示整机功耗和最近一分钟的曲线（含峰值与平均值），以及本机电池的电量、充放电功率、剩余或充满时间、电源模式和电池健康；没有电池的电脑不显示电池。功耗来源按优先级：整机能量计、电池放电功率（用电池时是整机实测）、CPU 与 NVIDIA 显卡功率之和（估算，标有“≈”，不含显示屏、硬盘、风扇等）；读不到时显示破折号和原因。只在此页打开时读取。",
+                    "Shows the whole machine's power draw with its last minute as a curve (peak and average included) under the drives, and this PC's own battery: charge, charge or discharge rate, time left or to full, power mode and health; a PC without a battery shows none. The draw comes from, in order: a whole-system meter, the battery's discharge power (a true measurement of the whole machine while on battery), or the sum of the CPU and NVIDIA graphics power (an estimate, marked “≈”, without the display, drives or fans); when none can be read it shows a dash and the reason. Read only while this page is open."),
+                keepPreview: true),
             Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
                 Loc.T("在 CPU 和 GPU 读数后、各硬盘行的末尾显示温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供；热区读数变化过才显示，从不变化的固定值不显示，此后 10 分钟不变也会隐藏；硬盘温度每 30 秒读取一次。",
@@ -294,7 +299,8 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
-        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Battery => Loc.T("设备最低电量", "Lowest device battery"), _ => "CPU"
+        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Battery => Loc.T("设备最低电量", "Lowest device battery"),
+        CompactMonitorItems.Power => Loc.T("整机功耗", "System power"), CompactMonitorItems.Charge => Loc.T("本机电量", "This PC's battery"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -330,7 +336,7 @@ public sealed partial class SettingsWindow
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage or CompactMonitorItems.Battery };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage or CompactMonitorItems.Battery or CompactMonitorItems.Power or CompactMonitorItems.Charge };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
@@ -339,6 +345,8 @@ public sealed partial class SettingsWindow
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
                 CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值，在左侧的菜单中选择显示什么。", "The drives always show figures; choose which in the menu at the left."),
                 CompactMonitorItems.Battery => Loc.T("始终显示数值：设备页上电量最低的无线设备。", "Always shows its figure: the wireless device with the lowest charge on the devices page."),
+                CompactMonitorItems.Power => Loc.T("始终显示瓦数；“≈”表示估算，没有整机功率读数的电脑不显示这一项。", "Always shows the watts; “≈” marks an estimate, and a PC with no power reading does not show this item."),
+                CompactMonitorItems.Charge => Loc.T("始终显示本机电池的电量（不是外设）；没有电池的电脑不显示这一项。", "Always shows this PC's own battery charge (not a peripheral's); a PC without a battery does not show this item."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);

@@ -34,7 +34,12 @@ internal sealed class SystemSampler : IDisposable
     private readonly GpuTemperatures _gpuTemperatures = new();
     private readonly StorageReader _storage = new();
     // Whether the processor's and the graphics adapter's temperatures are read, the drives, and the drives' temperatures (SetExtras).
-    private volatile bool _temperatures, _storageWanted, _driveTemperatures;
+    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted;
+    // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
+    private PowerProvider? _power;
+    private BatteryProvider? _battery;
+    private readonly Queue<double> _powerHistory = new(HistoryLength);
+    private readonly PowerStats _powerStats = new();
     private readonly NetworkProvider _network = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
@@ -98,9 +103,9 @@ internal sealed class SystemSampler : IDisposable
     // with temperatures on, or the collapsed row's temperature); storage, the drives (the page with storage on, or the collapsed
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
     // page knows early how many lines it needs for them.
-    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures)
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false)
     {
-        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures;
+        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power;
         if (storage && (_storage.Drives == SensorState.Unknown || _driveTemperatures && _storage.Temperatures == SensorState.Unknown)) _storage.Start(_driveTemperatures);
     }
     // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
@@ -110,6 +115,9 @@ internal sealed class SystemSampler : IDisposable
     public SensorState DriveSensor => _storage.Temperatures;
     public SensorState StorageState => _storage.Drives;
     public int StorageCount => _storage.Count;
+    // Whether the machine gives a power reading and has a battery of its own; Unknown until read.
+    public SensorState PowerSensor => _power?.State ?? SensorState.Unknown;
+    public SensorState BatterySensor => _battery?.State ?? SensorState.Unknown;
 
     private void Run()
     {
@@ -120,12 +128,14 @@ internal sealed class SystemSampler : IDisposable
         _cpu = new CpuProvider(_pdh);
         _gpu = new GpuProvider(_pdh);
         _zones = new ThermalZones(_pdh);
+        _power = new PowerProvider(_pdh);
+        _battery = new BatteryProvider();
         bool primed = false, first = false;
         while (!_disposed)
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _storage.Rest(); _wake.WaitOne(); continue; }
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _wake.WaitOne(); continue; }
                 if (!primed || _primeProcesses)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
@@ -183,11 +193,41 @@ internal sealed class SystemSampler : IDisposable
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         var adapters = gpus.TryGet(out var read) ? Remember(read) : [];
+        // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
+        Reading<PowerSample> power = default;
+        Reading<BatterySample> battery = default;
+        if (_powerWanted)
+        {
+            // Apart from the rest: a battery or a driver that fails in an unexpected way costs these two readings, never the page's.
+            try
+            {
+                var (batteryInputs, batterySample) = _battery!.Sample();
+                battery = batterySample;
+                power = _power!.Sample(pdh, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
+                if (power.TryGet(out var drawn))
+                {
+                    if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
+                    _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts);
+                }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Debug.WriteLine(ex);
+                power = Reading<PowerSample>.Unavailable(ex.Message); battery = Reading<BatterySample>.Unavailable(ex.Message);
+            }
+        }
+        else
+        {
+            if (_powerHistory.Count > 0) { _powerHistory.Clear(); _powerStats.Reset(); }
+            _power!.Sample(false, false, now, [], default, false);
+        }
         var snapshot = new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network,
             Reading<GpuSample>.Unavailable(gpus.Reason), _lastProcesses)
         {
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
-            CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage
+            CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage,
+            Power = power, Battery = battery, PowerHistory = _powerHistory.ToArray(),
+            PowerSummary = _powerStats.Count > 0 ? new PowerSummary(_powerStats.Peak, _powerStats.Average, _powerStats.Count) : null
         };
         var shown = WithGpu(snapshot, _autoGpu, out bool automatic);
         if (automatic && shown.Gpu.TryGet(out var gpu)) Volatile.Write(ref _autoGpu, gpu.Luid);
@@ -260,7 +300,7 @@ internal sealed class SystemSampler : IDisposable
         _disposed = true; _wanted = false; _linger.Stop();
         _wake.Set();
         // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
-        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures.Dispose(); _wake.Dispose(); }
+        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _power?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures.Dispose(); _wake.Dispose(); }
     }
 }
 

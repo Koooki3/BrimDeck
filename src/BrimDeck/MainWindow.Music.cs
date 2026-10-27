@@ -965,7 +965,7 @@ public partial class MainWindow
         // say so: its admission is taken again as the row is built.
         if (StripChoosesBattery) _stripPresence.Arrive(UpdateStripAdmission(_app.Monitor?.Latest).Arriving);
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
-            !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission) : null;
+            !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission, Settings.DeviceLowPercent) : null;
         _stripLayout = _stripAdmission.Layout;
         if (StripChoosesBattery) strip?.SetBattery(StripBattery());
         double rowWidth = SnapDown(contentWidth, dpi);

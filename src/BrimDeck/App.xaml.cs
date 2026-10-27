@@ -188,7 +188,6 @@ public partial class App : Application
         // The panel's music part subscribes to the lyrics service when it is made.
         Lyrics = new LyricsService(appleLyricsFile: System.IO.Path.Combine(folder, "apple-music-lyrics.json"));
         Settings = settings;
-        Lyrics = new LyricsService();
         UseLanguage();
         Notices = new NoticeCenter(this);
         Deck = new MainWindow(this);
@@ -523,8 +522,12 @@ public partial class App : Application
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
         Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
             page && Settings.MonitorStorage || stripDrives,
-            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage));
+            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage),
+            page && Settings.MonitorPower && PowerKnownToExist || (shown & (CompactMonitorItems.Power | CompactMonitorItems.Charge)) != 0);
     }
+    // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
+    // source nor a battery (a desktop with nothing), so such a page does not keep asking.
+    private bool PowerKnownToExist => Monitor is null || Monitor.PowerSensor != SensorState.None || Monitor.BatterySensor != SensorState.None || Native.BatteryProvider.SystemHasBattery;
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
     // The settings are turned into text here, where they live, and written on the thread pool: writing the file (and the virus

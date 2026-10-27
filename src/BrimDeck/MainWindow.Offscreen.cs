@@ -42,6 +42,8 @@ public partial class MainWindow
     // A reading of the system, as SystemSampler hands it over: the open monitor page and the collapsed row's readings.
     internal void OffscreenMonitor(MonitorSnapshot snapshot)
     {
+        // The readings that join the collapsed row with their first figure (the drives, the machine's power and battery) are admitted.
+        AdmitStrip(snapshot);
         _compactStrip?.Update(snapshot);
         _monitorView?.Update(snapshot, motion: false);
     }
