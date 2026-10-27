@@ -100,6 +100,15 @@ internal static class NoticeLiquidTests
         for (double t = 0; t < narrow.Length; t += 1d / 120) { narrow.Sample(t, frameNarrow); most2 = Math.Max(most2, Math.Max(frameNarrow.InsetLeft, frameNarrow.InsetRight)); }
         check("Liquid capsule: a toast narrower than the kept body still leaves its ends room, a width of 16 at the least in all",
             most2 > 0 && most2 <= 16 + 1e-9);
+        var padded = new NoticeLiquid(Spec(LiquidForm.Capsule) with { MaxInset = 10 });
+        var framePadded = new LiquidFrame(); double most3 = 0, drops3 = 0;
+        for (double t = 0; t < padded.Length; t += 1d / 120) { padded.Sample(t, framePadded); most3 = Math.Max(most3, Math.Max(framePadded.InsetLeft, framePadded.InsetRight)); drops3 = Math.Max(drops3, framePadded.Discs.Count); }
+        check("Liquid capsule: an end never draws in further than it is allowed (the room the content leaves it), and the droplets still leave",
+            most3 > 5 && most3 <= 10 + 1e-9 && drops3 >= 2);
+        // The curve takes more of the padding the taller the content: a 44 high pill with 16 of padding and content 16 up and down.
+        double allowed = NoticeLiquid.MaxInset(44, 16, 16);
+        check("Liquid capsule: the room the content leaves an end is its padding less the end's own curve at the content's height",
+            Math.Abs(NoticeLiquid.MaxInset(44, 16, 0) - 13) < 1e-9 && allowed > 4 && allowed < 7 && NoticeLiquid.MaxInset(44, 2, 16) == 0 && NoticeLiquid.MaxInset(44, 30, 99) < NoticeLiquid.MaxInset(44, 30, 0));
         var tall = new NoticeLiquid(Spec(LiquidForm.Capsule, 376, 60));
         var frameTall = new LiquidFrame(); bool inside = true;
         for (double t = 0; t < tall.Length; t += 1d / 120) { tall.Sample(t, frameTall); inside &= frameTall.Discs.All(d => Math.Abs(d.Y) + d.R <= 30 + 1e-6); }

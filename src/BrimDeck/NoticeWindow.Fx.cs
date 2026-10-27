@@ -56,7 +56,7 @@ internal sealed partial class NoticeWindow
         var frame = _toastFrame;
         var form = Indicator ? LiquidForm.Line : _deck.Collapsed.Style == CompactStyle.Notch ? LiquidForm.Notch : LiquidForm.Capsule;
         var liquid = new NoticeLiquid(new LiquidSpec(form, frame.Rect.Width, frame.Rect.Height, NoticeLiquid.DesignSeed, Intensity: plan.Intensity, Separation: plan.Separation,
-            Shoulder: frame.Shoulder, CornerRadius: frame.BottomRadius));
+            Shoulder: frame.Shoulder, CornerRadius: frame.BottomRadius, MaxInset: NoticeLiquid.MaxInset(frame.Rect.Height, ToastMetrics(frame.Rect.Height).Padding, frame.Rect.Height / 2 - 6)));
         if (_fxLookCache is not { } cached || !ReferenceEquals(cached.Look, _look) || cached.Tone != plan.Tone)
             _fxLookCache = cached = (_look, plan.Tone, NoticeFxLook.Create(_look, plan));
         _fx = new NoticeFxState { Liquid = liquid, Look = cached.Fx, Plan = plan, Form = form, Start = Eased.Now, Pace = NoticeFx.Pace(Settings.AnimationDuration) };

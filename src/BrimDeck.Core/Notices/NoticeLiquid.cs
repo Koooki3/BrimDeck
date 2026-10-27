@@ -40,7 +40,10 @@ public readonly record struct LiquidSpec(
     // that brings a droplet back to the middle line.
     double Zone = 16, double Keep = 300, double Intensity = 5, double Separation = .6, double MaxAngle = 80, double Pull = 3,
     // The notch's outline: its shoulder and the radius of its bottom corners.
-    double Shoulder = 16, double CornerRadius = 12)
+    double Shoulder = 16, double CornerRadius = 12,
+    // How far an end may draw in at most: what the surface's content leaves it (its padding, less what the end's own curve already
+    // takes at the content's height; see NoticeLiquid.MaxInset), so that the content is not cut by the outline as it gives way.
+    double MaxInset = double.PositiveInfinity)
 {
     // The design's own height, at which its sizes are given; a taller surface keeps the droplets' sizes.
     public const double DesignHeight = 32;
@@ -84,7 +87,7 @@ public sealed class NoticeLiquid
     private const double Kappa = .5522847498307936;
 
     private readonly LiquidSpec _spec;
-    private readonly double _width, _height, _radius, _body, _budget, _over;
+    private readonly double _width, _height, _radius, _body, _budget, _reach, _over;
     private readonly bool _short;
     private readonly List<Drop> _drops = [];
     private readonly List<Ripple> _ripples = [];
@@ -118,11 +121,23 @@ public sealed class NoticeLiquid
         // surface that is already narrower than keep would give nothing, so keep is lowered to leave the ends a little room.
         double keep = Math.Min(spec.Keep, _width - Math.Min(16, _width / 4));
         _body = Math.Max(_width - 2 * zone, Math.Min(_width, keep));
-        _budget = Math.Max(0, (_width - _body) / 2);
+        // _reach is the room an end's droplets have (the zone); _budget how far the end itself may draw in, within what the content leaves.
+        _reach = Math.Max(0, (_width - _body) / 2);
+        _budget = Math.Min(_reach, Math.Max(0, spec.MaxInset));
         _over = zone / 2;
-        _short = _budget < _radius * .5;
+        _short = _reach < _radius * .5;
         Separation = Math.Clamp(spec.Separation, .2, 2);
         Seed(spec);
+    }
+
+    // How far the end of a pill may draw in before the outline reaches content that stands `padding` from its end and reaches
+    // `contentHalf` up and down from its middle: the outline's own curve takes R - sqrt(R^2 - contentHalf^2) of the padding at that
+    // height already, and a little is left over.
+    public static double MaxInset(double height, double padding, double contentHalf)
+    {
+        double r = Math.Max(1, height / 2), half = Math.Min(Math.Max(0, contentHalf), r);
+        double curve = r - Math.Sqrt(Math.Max(0, r * r - half * half));
+        return Math.Max(0, padding - curve - 3);
     }
 
     public LiquidForm Form => _spec.Form;
@@ -180,7 +195,7 @@ public sealed class NoticeLiquid
         return cap * (u < .3 ? .25 + random.Next() * .17 : u < .8 ? .42 + random.Next() * .23 : .65 + random.Next() * .25);
     }
     // How far a droplet may go past the end: the zone, but never less than about two of its own widths.
-    private double Room(double r) => Math.Max(_budget, r * 2.4);
+    private double Room(double r) => Math.Max(_reach, r * 2.4);
 
     private void SeedDrops(Random32 random, double intensity, bool line)
     {
@@ -192,7 +207,7 @@ public sealed class NoticeLiquid
             int made = 0;
             while (s < separation && made < 14)
             {
-                double twinChance = (.15 + intensity * .05) * Math.Min(1, (_budget * 2) / 72);
+                double twinChance = (.15 + intensity * .05) * Math.Min(1, (_reach * 2) / 72);
                 int twins = random.Next() < twinChance ? 2 : 1;
                 // The indicator sheds about a droplet to each end in all, not a stream of them.
                 if (line && made >= 1 + (intensity >= 7 ? 1 : 0)) break;
@@ -204,7 +219,7 @@ public sealed class NoticeLiquid
                 }
                 double progress = s / separation;
                 // Fewer at a time in a narrow zone.
-                double sparse = Math.Max(1, 36 / Math.Max(1, _budget));
+                double sparse = Math.Max(1, 36 / Math.Max(1, _reach));
                 double mean = (.17 - intensity * .025) * sparse * (progress < .8 ? 1 : 1 + 4 * (progress - .8));
                 s += .03 + -Math.Log(1 - random.Next()) * mean * (line ? 1.6 : 1);
             }

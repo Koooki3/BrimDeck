@@ -195,20 +195,18 @@ internal sealed class NoticeFxBody : FrameworkElement
         return new Rect(Snap(center.X - side / 2, step), Snap(center.Y - side / 2, step), side, side);
     }
 
-    // A neck of blocks: squares from the one end to the other, narrowing as the neck does (the pixel theme has no curves).
+    // A neck of one block: a bar from the end to the droplet, as thick as the neck is at its thinnest, on the grid (the pixel theme
+    // has no curves). It thins to nothing as the neck does, and the droplet is left a block alone.
     private static void DrawBridge(DrawingContext drawing, NoticeFxLook look, LiquidNeck neck, Func<int, LiquidPoint, Point> at, double step, double left, double right)
     {
         Point a = Mid(at(neck.Side, neck.P1), at(neck.Side, neck.P2)), b = Mid(at(neck.Side, neck.P3), at(neck.Side, neck.P4));
-        double wa = Distance(at(neck.Side, neck.P1), at(neck.Side, neck.P2)), wb = Distance(at(neck.Side, neck.P3), at(neck.Side, neck.P4));
-        for (int i = 1; i <= 3; i++)
-        {
-            double t = i / 4d, width = Math.Min(wa, wb) * .6 + (Math.Abs(wa - wb) * .1) * (1 - t);
-            if (width < step * .7) continue;
-            var center = new Point(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t);
-            var square = Block(center, width / 2, step);
-            if (look.Rim((center.X - left) / Math.Max(1, right - left)) is { } rim) drawing.DrawRectangle(null, rim, square);
-            drawing.DrawRectangle(look.Fill(.5), null, square);
-        }
+        double thickness = Math.Round(Math.Min(Distance(at(neck.Side, neck.P1), at(neck.Side, neck.P2)), Distance(at(neck.Side, neck.P3), at(neck.Side, neck.P4))) * .7 / step) * step;
+        if (thickness < step) return;
+        double x0 = Math.Round(Math.Min(a.X, b.X) / step) * step, x1 = Math.Round(Math.Max(a.X, b.X) / step) * step, y = Math.Round(((a.Y + b.Y) / 2 - thickness / 2) / step) * step;
+        if (x1 - x0 < step) return;
+        var bar = new Rect(x0, y, x1 - x0, thickness);
+        if (look.Rim((Math.Min(a.X, b.X) - left) / Math.Max(1, right - left)) is { } rim) drawing.DrawRectangle(null, rim, bar);
+        drawing.DrawRectangle(look.Fill(.5), null, bar);
     }
     private static Point Mid(Point a, Point b) => new((a.X + b.X) / 2, (a.Y + b.Y) / 2);
     private static double Distance(Point a, Point b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
@@ -277,8 +275,9 @@ internal sealed class NoticeFxGlow : FrameworkElement
         }
     }
 
-    // Where a neck leaves the end, the surface's own rim crosses its mouth and would close it with a line. A disc of the surface's
-    // fill a little smaller than the mouth covers that stretch of rim, and the neck's outline carries on from either side of it.
+    // Where a neck leaves the end, the surface's own rim crosses its mouth and would close it with a line. A thin bar of the surface's
+    // fill across the mouth, 2.5 DIPs to either side of the outline (so it never reaches the content), covers that stretch of rim,
+    // and the neck's outline carries on from either side of it.
     private static void DrawMouths(DrawingContext drawing, NoticeFxState state, LiquidFrame frame, NoticeFxLook look)
     {
         if (!look.HasRim) return;
@@ -290,8 +289,9 @@ internal sealed class NoticeFxGlow : FrameworkElement
             double chord = Math.Sqrt((neck.P1.X - neck.P2.X) * (neck.P1.X - neck.P2.X) + (neck.P1.Y - neck.P2.Y) * (neck.P1.Y - neck.P2.Y)) / 2;
             if (chord < 1) continue;
             var center = new Point(neck.Side > 0 ? right + x : left - x, mid + y);
-            if (look.Step > 0) { double side = Math.Round(chord * 1.6 / look.Step) * look.Step; if (side >= look.Step) drawing.DrawRectangle(look.Fill(.5), null, new Rect(Math.Round((center.X - side / 2) / look.Step) * look.Step, Math.Round((center.Y - side / 2) / look.Step) * look.Step, side, side)); }
-            else drawing.DrawEllipse(look.Fill(.5), null, center, chord * .8, chord * .8);
+            double height = chord * 1.7;
+            if (look.Step > 0) { height = Math.Round(height / look.Step) * look.Step; if (height >= look.Step) drawing.DrawRectangle(look.Fill(.5), null, new Rect(Math.Round((center.X - 2) / look.Step) * look.Step, Math.Round((center.Y - height / 2) / look.Step) * look.Step, look.Step, height)); }
+            else drawing.DrawRoundedRectangle(look.Fill(.5), null, new Rect(center.X - 2.5, center.Y - height / 2, 5, height), 2, 2);
         }
     }
 
