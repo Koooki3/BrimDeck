@@ -193,7 +193,8 @@ static class KimiUsageTests
         bool fail = false, failEndpoints = false; var asked = new List<string>();
         using var server = new PriceServer(uri =>
         {
-            asked.Add(uri.AbsolutePath);
+            // Pricing asks for several models' endpoints at once (Parallel.ForEachAsync), so the handler runs on several threads.
+            lock (asked) asked.Add(uri.AbsolutePath);
             if (fail || failEndpoints && uri.AbsolutePath.EndsWith("/endpoints", StringComparison.Ordinal)) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("") };
             return Reply(uri.AbsolutePath switch
             {
