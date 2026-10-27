@@ -170,7 +170,7 @@ public partial class MainWindow
         var old = shown ? _monitorView : null;
         old?.CloseCard();
         _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
-            Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; },
+            Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
             Settings.MonitorTemperatures, _monitorSensors.Small);
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         if (old is not null) MonitorCrossfade.Swap(MonitorContent, _monitorView, old, MonitorMotion);
@@ -207,6 +207,14 @@ public partial class MainWindow
         if (Settings.MonitorMain == main) return;
         Settings.MonitorMain = main; _app.QueueSave();
         RefreshMonitorPages();
+    }
+    // The adapter shown on the page is the one the monitor shows everywhere, the collapsed readings too, so a click on the page
+    // keeps it as the choice under the monitor's settings. Every page and strip shows it at once, without waiting for a reading.
+    private void SwitchMonitorGpu(GpuSample gpu)
+    {
+        if (Settings.MonitorGpu == gpu.Key) return;
+        Settings.MonitorGpu = gpu.Key; Settings.MonitorGpuName = gpu.Name; _app.QueueSave();
+        _app.Monitor?.ShowGpuChoice();
     }
     private void RefreshMonitorPages()
     {

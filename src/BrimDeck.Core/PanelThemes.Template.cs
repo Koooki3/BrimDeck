@@ -60,6 +60,9 @@ public static partial class PanelThemes
         // Every numeric effect, those the settings page cannot edit (pixel, texture) included, so a copy keeps them.
         foreach (var key in EffectKeys)
             text = Regex.Replace(text, $"\"{key}\": [0-9.]+", $"\"{key}\": {Effect(effects, key).ToString("0.###", CultureInfo.InvariantCulture)}");
+        // The motifs follow the last numeric effect.
+        if (effects.Decor is { } decor)
+            text = new Regex(@"(""texture"": [0-9.]+)(,?)").Replace(text, match => match.Groups[1].Value + ", \"decor\": " + DecorJson(decor) + match.Groups[2].Value, 1);
         // A theme with a night look keeps it, and its hours, after everything the template lists (start is its day look).
         return source?.Night is { } night ? AppendNight(text, night, source.Daylight) : text;
     }
@@ -86,6 +89,18 @@ public static partial class PanelThemes
         members.Add("\"night\": " + Indent(json.ToJsonString(Json)));
         int end = text.LastIndexOf('}');
         return end < 0 ? text : text[..end].TrimEnd() + ",\n  " + string.Join(",\n  ", members) + "\n}\n";
+    }
+
+    private static string DecorJson(PanelDecor decor)
+    {
+        var file = new PanelThemeDecor
+        {
+            Horizon = decor.Horizon is { } h ? new PanelThemeHorizon { At = h.At, Sea = h.Sea.ToString(), Line = h.Line?.ToString() } : null,
+            Caustics = decor.Caustics is { } caustics ? new PanelThemeMotif { Color = caustics.ToString() } : null,
+            Palm = decor.Palm is { } palm ? new PanelThemeMotif { Color = palm.ToString() } : null
+        };
+        // On one line, where the template has it.
+        return Regex.Replace(JsonSerializer.Serialize(file, Json), @"\s*\n\s*", " ");
     }
 
     // Every palette has every token and, from the dark theme it is built on, every app color.

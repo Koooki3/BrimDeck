@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Shell;
+using BrimDeck.Core;
 using BrimDeck.Native;
 
 internal static class Program
@@ -18,6 +19,7 @@ internal static class Program
             CheckSettledClip();
             CheckPageToolTips();
             BrimDeck.MainWindow.CheckShadowLifetime();
+            CheckGpus();
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();
             Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
                 && work.Width > 0 && work.Height > 0 && scale > 0);
@@ -58,6 +60,30 @@ internal static class Program
         }
         finally { window.Close(); }
     }
+
+    // Reads every graphics adapter as the monitor does and lists them. A machine may have none with counters (a virtual machine
+    // with the software rasterizer only), which is not a failure.
+    private static void CheckGpus()
+    {
+        using var pdh = new PdhQuery();
+        var provider = new GpuProvider(pdh);
+        pdh.Collect();
+        Thread.Sleep(1000);
+        var reading = provider.Sample(pdh.Collect());
+        var gpus = reading.OrDefault ?? [];
+        if (!reading.HasValue) Console.WriteLine("SKIP: no GPU readings: " + reading.Reason);
+        foreach (var gpu in gpus)
+            Console.WriteLine($"GPU: {gpu.Name ?? "(unnamed)"} [{gpu.Kind}] usage {gpu.Usage:P0}, dedicated {Gigabytes(gpu.DedicatedBytes)} of {(gpu.DedicatedTotal is { } total ? $"{total / 1e9:0.0} GB" : "?")}, "
+                + $"shared {Gigabytes(gpu.SharedBytes)}, key {gpu.Key}, {GpuReadings.LuidText(gpu.Luid)}, engines {string.Join(" ", gpu.Engines.Select(e => $"{e.Kind} {e.Usage:P0}"))}");
+        var (adapters, described, _) = GpuAdapters.Read();
+        foreach (var adapter in adapters.Values)
+            Console.WriteLine($"DXGI: {adapter.Name} [{adapter.Kind}{(adapter.Software ? ", software" : "")}] {adapter.DedicatedTotal / 1e9:0.0} GB, at {adapter.Location ?? "?"}, key {adapter.Key}, {GpuReadings.LuidText(adapter.Luid)}");
+        Check("GPU readings keep only the hardware adapters DXGI describes", gpus.All(gpu => described ? adapters.TryGetValue(gpu.Luid, out var adapter) && !adapter.Software : gpu.Name is null));
+        Check("GPU readings give each adapter its own key", gpus.Select(gpu => gpu.Key).Distinct().Count() == gpus.Count);
+        if (gpus.Any(gpu => gpu.Kind == GpuKind.Discrete))
+            Check("GPU auto shows a discrete adapter", GpuChoice.Auto(gpus, 0)?.Kind == GpuKind.Discrete);
+    }
+    private static string Gigabytes(Reading<ulong> bytes) => bytes.TryGet(out var value) ? $"{value / 1e9:0.00} GB" : "?";
 
     // The collapsed island at rest clips to a rectangle (IslandBorder.SettledClip): nothing of it, its rim included, may then reach
     // past the rounded outline it shows with the rounded clip, at the notch's shoulders or the capsule's ends.
