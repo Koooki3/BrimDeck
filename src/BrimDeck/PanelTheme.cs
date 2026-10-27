@@ -159,6 +159,7 @@ internal static class PanelTheme
         if (resources is null) return;
         var next = new ResourceDictionary();
         foreach (var (resource, token) in Resources) next[resource] = UI.Brush(Hex(token));
+        next["PanelScrollThumbRest"] = Current.ThumbRestOpacity;
         // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
         for (int r = 1; r <= 16; r++) next["PanelR" + r] = new CornerRadius(Corner(r));
         next["SegmentCorner"] = new CornerRadius(Corner(5));
@@ -185,9 +186,10 @@ internal static class PanelTheme
     }
 
     // An application column's colors: the color chosen for it, else the theme's default for its source, as the panel draws them.
-    public static string AppTheme(AppEntry entry) => entry.ThemeColor.Length > 0 ? Readable(entry.ThemeColor) : DefaultAppColor(entry.QuotaSource);
-    public static string AppWarning(AppEntry entry) => entry.WarningColor.Length > 0 ? Readable(entry.WarningColor) : _warningColor ??= Readable(WarningDefault);
-    public static string AppCritical(AppEntry entry) => entry.CriticalColor.Length > 0 ? Readable(entry.CriticalColor) : _criticalColor ??= Readable(CriticalDefault);
+    // Under high contrast every application shows the system's colors (PanelThemes.HighContrast), whatever was chosen for it.
+    public static string AppTheme(AppEntry entry) => entry.ThemeColor.Length > 0 && !HighContrast ? Readable(entry.ThemeColor) : DefaultAppColor(entry.QuotaSource);
+    public static string AppWarning(AppEntry entry) => entry.WarningColor.Length > 0 && !HighContrast ? Readable(entry.WarningColor) : _warningColor ??= Readable(WarningDefault);
+    public static string AppCritical(AppEntry entry) => entry.CriticalColor.Length > 0 && !HighContrast ? Readable(entry.CriticalColor) : _criticalColor ??= Readable(CriticalDefault);
     public static string QuotaColor(AppEntry entry, double usedPercent)
         => usedPercent >= AppPresets.CriticalPercent ? AppCritical(entry) : usedPercent >= AppPresets.WarningPercent ? AppWarning(entry) : AppTheme(entry);
     public static string DefaultAppColor(ProviderId id) => _appColors.TryGetValue(id, out var color) ? color : _appColors[id] = Current.AppColor(id).ToString();

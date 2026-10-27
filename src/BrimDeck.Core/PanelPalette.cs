@@ -67,6 +67,10 @@ public sealed class PanelPalette
     public ThemeColor Surface => _colors["surface"];
     // The surface, every gradient stop and a texture's lightest and darkest squares: text must read on each of them.
     public IReadOnlyList<ThemeColor> SurfaceStops { get; }
+    // The opacity the scroll bar's handle rests at while the pointer is elsewhere (App.xaml): faint, at ThumbRest, where the
+    // thumb still reaches its 2:1 on every surface stop there, else just as much more as it takes.
+    public double ThumbRestOpacity => _thumbRest ??= PanelThemes.ThumbRestOpacity(this["scrollThumb"], SurfaceStops);
+    private double? _thumbRest;
     public bool IsDark { get; }
 
     public PanelThemeEffectValues Effects { get; }
