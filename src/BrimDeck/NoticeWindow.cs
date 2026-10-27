@@ -69,7 +69,8 @@ internal sealed partial class NoticeWindow : Window
         System.Windows.Documents.Typography.SetNumeralAlignment(this, FontNumeralAlignment.Tabular);
         TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
         Content = _stage;
-        _stage.Children.Add(_glow); _stage.Children.Add(_surface);
+        // Behind the surface the liquid motion's droplets, in front of it its edge glow (NoticeWindow.Fx.cs).
+        _stage.Children.Add(_glow); _stage.Children.Add(_fxBody); _stage.Children.Add(_surface); _stage.Children.Add(_fxGlow);
         _surface.Child = _content;
         _content.Children.Add(_toast); _content.Children.Add(_detail);
         // The text sits on the theme's opaque surface, as the island's does, so ClearType stays on for it; over glass WPF chooses
@@ -98,7 +99,7 @@ internal sealed partial class NoticeWindow : Window
         PreviewKeyDown += KeyPressed;
         Deactivated += (_, _) => { if (_keyboard) EndKeyboard(); };
         _app.Notices.Icons.Loaded += IconLoaded;
-        Closed += (_, _) => { if (_hiding) { CompositionTarget.Rendering -= BlankFrame; _hiding = false; } _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _announceLater?.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
+        Closed += (_, _) => { FxStop(); if (_hiding) { CompositionTarget.Rendering -= BlankFrame; _hiding = false; } _escape?.Dispose(); _hoverOpen.Stop(); _leaveClose.Stop(); _announceLater?.Stop(); _app.Notices.Icons.Loaded -= IconLoaded; _item = null; WatchLive(); };
         // ui-3: moved to a monitor with another scale while it shows, the material is made again for that scale.
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
@@ -117,6 +118,7 @@ internal sealed partial class NoticeWindow : Window
         // Still on screen only to draw its empty frame before it hides (Finish): this notice starts afresh, from the island.
         bool continuing = IsVisible && !_hiding;
         StopHiding();
+        if (!continuing) FxStop();
         _item = item; _leaving = false; _openFailed = false;
         int generation = ++_generation;
         _showingDetail = false; _keyboard = false; _detailFor = null; _keyMove = false;
@@ -165,6 +167,7 @@ internal sealed partial class NoticeWindow : Window
         Animate(_detail, OpacityProperty, 0, duration, NoticeMotion.ReturnContent, Soft.Out, () => { if (!_showingDetail && _detailFor is null) _detail.Visibility = Visibility.Collapsed; });
         Animate(_toast, OpacityProperty, 1, duration, continuing ? NoticeMotion.FollowContent : NoticeMotion.ArriveContent, Soft.Out);
         GlowIn(duration);
+        FxBegin(continuing);
     }
 
     // The shown notice changed in place (a task's progress, a burst from the same application).
@@ -198,6 +201,7 @@ internal sealed partial class NoticeWindow : Window
         _item = null; _leaving = true;
         InteractionFx.Clear(this);
         WatchLive();
+        FxAbort();
         _hoverOpen.Stop(); _leaveClose.Stop();
         if (_keyboard) EndKeyboard();
         _escape?.SetEnabled(false);
@@ -281,6 +285,7 @@ internal sealed partial class NoticeWindow : Window
 
     private void Finish(bool reveal = false)
     {
+        FxStop();
         _leaving = false; _showingDetail = false; _detailFor = null;
         // The notice ended in the island's outline and material: the island shows again in the same frame as the window hides,
         // and its own content lands as it does when the panel closes.
@@ -305,6 +310,7 @@ internal sealed partial class NoticeWindow : Window
     public void Refresh()
     {
         if (_item is null || _leaving) return;
+        FxStop();
         Layout();
         Dress();
         BuildToast();
@@ -323,7 +329,7 @@ internal sealed partial class NoticeWindow : Window
         _toastFrame = Frame(NoticeForm.Toast, ToastSize());
         _detailFrame = Frame(NoticeForm.Detail, new Size(NoticeGeometry.DetailMaxWidth, NoticeGeometry.DetailMaxHeight));
         var union = Rect.Union(Rect.Union(ToRect(_collapsed.Rect), ToRect(_toastFrame.Rect)), ToRect(_detailFrame.Rect));
-        union.Inflate(GlowMargin, GlowMargin);
+        union.Inflate(GlowMargin + FxSideMargin, GlowMargin);
         var monitor = _deck.MonitorBoundsDip;
         union.Intersect(new Rect(0, 0, monitor.Width, monitor.Height));
         if (union.IsEmpty) union = new Rect(0, 0, 1, 1);
@@ -336,6 +342,7 @@ internal sealed partial class NoticeWindow : Window
         }
         _stageRect = union;
         Place();
+        FxSized();
     }
 
     // Keeps the surface where it is on screen while the stage's origin moves.
@@ -868,6 +875,7 @@ internal sealed partial class NoticeWindow : Window
     {
         if (_item is null || _showingDetail) return;
         _showingDetail = true;
+        FxAbort();
         _hoverOpen.Stop();
         Center.Hold(_deck, true);
         if (Notice is { } notice) Center.Hub.MarkViewed(notice.Id);

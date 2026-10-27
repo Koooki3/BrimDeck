@@ -75,6 +75,10 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     // The surface's opacity: below 1 while a held blur lies under glass (GlassBackdrop.Held).
     public static readonly DependencyProperty FillOpacityProperty = DependencyProperty.Register(nameof(FillOpacity), typeof(double), typeof(NoticeSurface),
         new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsRender));
+    // How far each end of the outline is drawn in from the surface's bounds, while the capsule's ends give way to the droplets
+    // leaving them (NoticeLiquid). The surface keeps its size and place; only its outline, and so its clip, draws in.
+    public static readonly DependencyProperty InsetLeftProperty = Register(nameof(InsetLeft), 0d);
+    public static readonly DependencyProperty InsetRightProperty = Register(nameof(InsetRight), 0d);
     public static readonly DependencyProperty IslandColorProperty = DependencyProperty.Register(nameof(IslandColor), typeof(Color), typeof(NoticeSurface),
         new FrameworkPropertyMetadata(Colors.Black, FrameworkPropertyMetadataOptions.AffectsRender));
     private static DependencyProperty Register(string name, double value) => DependencyProperty.Register(name, typeof(double), typeof(NoticeSurface),
@@ -85,6 +89,8 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public double Shoulder { get => (double)GetValue(ShoulderProperty); set => SetValue(ShoulderProperty, value); }
     public double IslandOpacity { get => (double)GetValue(IslandOpacityProperty); set => SetValue(IslandOpacityProperty, value); }
     public double FillOpacity { get => (double)GetValue(FillOpacityProperty); set => SetValue(FillOpacityProperty, value); }
+    public double InsetLeft { get => (double)GetValue(InsetLeftProperty); set => SetValue(InsetLeftProperty, value); }
+    public double InsetRight { get => (double)GetValue(InsetRightProperty); set => SetValue(InsetRightProperty, value); }
     public Color IslandColor { get => (Color)GetValue(IslandColorProperty); set => SetValue(IslandColorProperty, value); }
     // Drawn with the look's material, or only its fill (Shadow: the black copy that casts a shadow behind the notice).
     public NoticeLook? Look { get => _look; set { _look = value; _fill = null; _rim = null; _edge = null; _tabBrush = null; _framePen = null; _frame = null; _key = null; InvalidateArrange(); InvalidateVisual(); } }
@@ -98,7 +104,7 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     private SolidColorBrush? _islandBrush, _tabBrush;
     private Pen? _framePen;
     private Geometry? _frame;
-    private (Size, double, double, double, double, double)? _key;
+    private (Size, double, double, double, double, double, double, double)? _key;
     private Geometry _outline = Geometry.Empty;
     private (Geometry Light, Geometry Shade)? _bevel;
 
@@ -106,12 +112,29 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public Geometry Outline()
     {
         double step = IslandBorder.PixelStep(_look?.Pixel ?? 0, this);
-        var key = (RenderSize, TopRadius, BottomRadius, Shoulder, step, step > 0 ? 0 : _look?.Cut ?? 0);
+        double left = Math.Max(0, InsetLeft), right = Math.Max(0, InsetRight);
+        // A pixel theme's outline stays on its grid while the ends give way.
+        if (step > 0) { left = Math.Round(left / step) * step; right = Math.Round(right / step) * step; }
+        var key = (RenderSize, TopRadius, BottomRadius, Shoulder, step, step > 0 ? 0 : _look?.Cut ?? 0, left, right);
         if (_key == key) return _outline;
         _key = key; _frame = null;
-        (_outline, _bevel) = IslandBorder.Shape(RenderSize.Width, RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius), 0, step,
+        // Drawn in at its ends: the outline (and bevel) of the narrower body, moved to where the left end now is.
+        (_outline, _bevel) = IslandBorder.Shape(Math.Max(1, RenderSize.Width - left - right), RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius), 0, step,
             _look?.RimWidth ?? 0, VisualTreeHelper.GetDpi(this).PixelsPerDip, _look?.Cut ?? 0);
+        if (left > 0 || right > 0)
+        {
+            _outline = Moved(_outline, left);
+            if (_bevel is { } bevel) _bevel = (Moved(bevel.Light, left), Moved(bevel.Shade, left));
+        }
         return _outline;
+    }
+
+    private static Geometry Moved(Geometry geometry, double x)
+    {
+        var moved = geometry.Clone();
+        moved.Transform = new TranslateTransform(x, 0);
+        moved.Freeze();
+        return moved;
     }
 
     // A pixel theme's steps are whole device pixels, so a new scale needs a new outline.

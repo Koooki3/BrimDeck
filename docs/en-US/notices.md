@@ -9,6 +9,18 @@ Settings › Live notices › Turn on live notices (off by default). Then:
 - The open panel gains a "Notice history" page (bell icon, with a red dot while there are notices you have not seen; a notice that popped up but that you did not hover, open or see on the page still counts as unseen). It lists the notices kept, where each can be expanded, opened in its application or deleted; notices can be paused or cleared.
 - Notices take the [panel theme](themes.md): they share the surface, gradient, scan lines, rim, shadow or glow and text colors of the notch, capsule, indicator and open panel. A glowing theme flashes once as a notice arrives. An application's color only marks a small dot, the progress ring and its initial, adjusted to read clearly on the theme.
 
+## Arrival motion
+
+Once a notice has grown to size, its surface moves like a viscous liquid for a moment and settles back to its shape:
+
+- **Capsule**: both ends throw droplets and take them back as they refill; the glow along the top and bottom edges lights twice.
+- **Notch**: the two lower corners swell and the bulges run round the outline (always within 5 DIPs of it); the glow lights twice round the whole outline, thinning towards the shoulders.
+- **Indicator bar**: the card it grows into sheds a small drop at each end, and a glow sweeps from the middle to the ends twice; it keeps to a thin line's restraint.
+
+The motion follows the weight of the notice: an ordinary notice plays as designed; a high priority one longer and with more droplets; an alarm, a call or an error stronger, in the warning or danger color; what only informs (a summary, an application set to low priority) lights briefly and throws a few droplets. The glow's and the droplets' colors and edges follow the [panel theme](themes.md); the pixel theme uses blocks. With animations off (BrimDeck's setting or Windows' own "animation effects") or in high contrast it does not play, and the notice is as it was; it takes the display's frames only while it plays, about two seconds, and nothing otherwise. Quota alerts and track-change prompts are drawn by the island itself and do not play it.
+
+The capsule's and the notch's liquid motion is the design "胶囊通知动效" provided for BrimDeck by the maintainer MoFeng2223 (<https://claude.ai/artifact/JU9bvJp5PPNY85vpGgUX6C>); the indicator bar's motion and the adaptation to every kind of notice and every theme are BrimDeck's own implementation.
+
 ## Sources
 
 | Source | What it is | Default |
