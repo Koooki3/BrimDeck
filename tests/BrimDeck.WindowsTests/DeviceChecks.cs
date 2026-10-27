@@ -43,11 +43,26 @@ internal static class DeviceChecks
             counts.Add(Handles());
             threadCounts.Add(Threads());
         }
+        // A leak adds handles on every cycle, so the last two cycles both stand above the first two; a handle the thread pool or
+        // WinRT holds for a moment raises one reading only. Over 12 cycles the steady counts here wander within some 15 handles
+        // without growing, at times two cycles in a row at the top: a bound missed is measured again over two more cycles, up to
+        // twice, which a leak, still growing, misses every time. A leak of 4 handles a cycle, the least the earlier bound of 12
+        // over three cycles caught, misses the bound of 8 below.
+        int early = Math.Min(counts[1], counts[2]), late = Math.Min(counts[^1], counts[^2]);
+        for (int again = 0; again < 2 && late - early >= 8; again++)
+        {
+            Console.WriteLine($"  device handles: {late - early:+0;-0;0} after the cycles; two more cycles");
+            for (int i = 0; i < 2; i++)
+            {
+                batteries.SetDemand(DeviceDemand.Watch); Pump(TimeSpan.FromSeconds(1.5));
+                batteries.SetDemand(DeviceDemand.None); Pump(TimeSpan.FromSeconds(11));
+                counts.Add(Handles());
+            }
+            late = Math.Min(counts[^1], counts[^2]);
+        }
         Console.WriteLine($"  device handles: {handles} before the first start, then {string.Join(", ", counts)} after each stop");
         Console.WriteLine($"  threads: {threads} before the first start, then {string.Join(", ", threadCounts)} after each stop");
-        // A leak adds handles on every cycle, so the last two cycles both stand above the first; a handle the thread pool or WinRT
-        // holds for a moment raises one reading only.
-        check("devices: starting and stopping again leaves no handles behind", Math.Min(counts[^1], counts[^2]) - counts[1] < 12);
+        check($"devices: starting and stopping again leaves no handles behind ({late - early:+0;-0;0})", late - early < 8);
         // The HID worker ends when nothing is wanted, so the threads after the last stop are no more than after the first; one
         // more is allowed for the thread pool and WinRT, which start and end threads of their own.
         check("devices: starting and stopping again leaves no threads behind", threadCounts[^1] <= threadCounts[0] + 1);
