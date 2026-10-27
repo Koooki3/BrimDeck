@@ -139,7 +139,7 @@ public partial class MainWindow
         // the middle of the switch, which stalled it. Marked now, the change arrives while another page still shows.
         if (page == DeckPage.Notices && changed && _expanded) NoticesPageShown();
         ShowPage(page, animatePage: changed && _expanded && !_preview);
-        bool back = DeckPages.Order.ToList().IndexOf(page) < DeckPages.Order.ToList().IndexOf(before);
+        bool back = Settings.PageOrder.IndexOf(page) < Settings.PageOrder.IndexOf(before);
         _handover.Send(picture, place, PageContent(page), back ? Handover.Back : Handover.Forward);
         // Chosen again while it shows (the notices hotkey on an open panel): what arrived since counts as seen too.
         if (page == DeckPage.Notices && !changed && _expanded) NoticesPageShown();
@@ -171,6 +171,19 @@ public partial class MainWindow
         { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
     }
     private bool _capsulePending;
+    // The buttons stand in the order chosen in the settings; the first has no gap before it.
+    private void OrderPageButtons()
+    {
+        if (AIUsageButton.Parent is not Panel buttons) return;
+        var order = Settings.PageOrder.Select(PageButton).ToList();
+        if (!buttons.Children.Cast<UIElement>().SequenceEqual(order))
+        {
+            buttons.Children.Clear();
+            foreach (var button in order) buttons.Children.Add(button);
+        }
+        for (int i = 0; i < order.Count; i++) order[i].Margin = new Thickness(i == 0 ? 0 : 1, 0, 0, 0);
+    }
+    private Button PageButton(DeckPage page) => page switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Notices => NoticesPageButton, _ => AIUsageButton };
     // The wheel walks the shown pages (down moves along the switch, up moves back) or steps the system volume. A wheel that
     // a scrolling part of a page uses (the lyrics, the model details) never arrives, as those mark it handled on the way up;
     // an open menu or the detail popup keeps the wheel to itself as well.
@@ -234,6 +247,7 @@ public partial class MainWindow
         foreach (var control in new FrameworkElement[] { AIUsageButton, MonitorPageButton, MusicPageButton, NoticesPageButton, MediaSourceButton, ClockLabel })
             ToolTipService.SetIsEnabled(control, !IsMusicPage);
         PageSwitch.Visibility = _details && IsUsagePage ? Visibility.Collapsed : Visibility.Visible;
+        OrderPageButtons();
         foreach (var (button, page) in new[] { (AIUsageButton, DeckPage.Usage), (MusicPageButton, DeckPage.Music), (MonitorPageButton, DeckPage.Monitor), (NoticesPageButton, DeckPage.Notices) })
         {
             bool current = CurrentPage == page;
@@ -1023,7 +1037,7 @@ public partial class MainWindow
         double used = percentages.Length > 0 ? percentages.Max() : snapshot.Metrics.Count > 0 ? 100 : 0;
         string tip = entry.Name + " · " + (percentages.Length > 0 ? Loc.T($"已用 {used:0.#}%", $"{used:0.#}% used")
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
-        return (used, PanelTheme.AppTheme(entry), tip);
+        return (used, PanelTheme.QuotaTheme(entry), tip);
     }).ToArray();
     private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
     private void MusicGliding(bool gliding) => UpdateMusicTimer();

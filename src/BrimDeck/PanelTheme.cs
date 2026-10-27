@@ -192,8 +192,17 @@ internal static class PanelTheme
     // theme's (PanelThemes.LevelContrast).
     public static string AppWarning(AppEntry entry) => entry.WarningColor.Length > 0 && !HighContrast ? Readable(entry.WarningColor, PanelThemes.LevelContrast) : _warningColor ??= Readable(WarningDefault, PanelThemes.LevelContrast);
     public static string AppCritical(AppEntry entry) => entry.CriticalColor.Length > 0 && !HighContrast ? Readable(entry.CriticalColor, PanelThemes.LevelContrast) : _criticalColor ??= Readable(CriticalDefault, PanelThemes.LevelContrast);
+    // A quota's color below the warning level: the off-peak color, when one is chosen, while the row is in one of its off-peak periods.
+    public static string QuotaTheme(AppEntry entry) => entry.OffPeakColor.Length > 0 && !HighContrast && entry.IsOffPeak(DateTime.Now) ? Readable(entry.OffPeakColor) : AppTheme(entry);
+    // At the warning and critical levels, an off-peak color chosen for that level replaces the usual one.
     public static string QuotaColor(AppEntry entry, double usedPercent)
-        => usedPercent >= AppPresets.CriticalPercent ? AppCritical(entry) : usedPercent >= AppPresets.WarningPercent ? AppWarning(entry) : AppTheme(entry);
+    {
+        if (usedPercent < AppPresets.WarningPercent) return QuotaTheme(entry);
+        bool critical = usedPercent >= AppPresets.CriticalPercent;
+        string offPeak = critical ? entry.OffPeakCriticalColor : entry.OffPeakWarningColor;
+        if (offPeak.Length > 0 && !HighContrast && entry.IsOffPeak(DateTime.Now)) return Readable(offPeak, PanelThemes.LevelContrast);
+        return critical ? AppCritical(entry) : AppWarning(entry);
+    }
     public static string DefaultAppColor(ProviderId id) => _appColors.TryGetValue(id, out var color) ? color : _appColors[id] = Current.AppColor(id).ToString();
     // The theme's defaults as written, for the settings swatches and the color picker.
     public static string AppDefault(ProviderId id) => Current.AppDefault(id)?.ToString() ?? AppPresets.ThemeColor(id);
