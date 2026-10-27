@@ -81,10 +81,14 @@ internal sealed partial class NoticeWindow
         bool shows = frame.Alive && (frame.Glow > .004 || frame.Discs.Count > 0 || frame.BumpRuns.Count > 0 || frame.InsetLeft > .02 || frame.InsetRight > .02);
         if (!shows && t > fx.Liquid.Separation) { FxStop(); return false; }
         SetInsets(frame.InsetLeft, frame.InsetRight);
+        SetAttachments(NoticeFxShape.Build(frame, fx.Form, fx.Width, fx.Height, fx.Look.Step));
         _fxBody.InvalidateVisual(); _fxGlow.InvalidateVisual();
         if (fx.Liquid.Finished(t)) { FxStop(); return false; }
         return true;
     }
+
+    // What is joined to the surface goes into its outline (and its shadow copy's), so the joined parts share the surface's boundary.
+    private void SetAttachments(System.Windows.Media.Geometry? attachments) { _surface.Attachments = attachments; _glow.Attachments = attachments; }
 
     private void SetInsets(double left, double right)
     {
@@ -107,7 +111,7 @@ internal sealed partial class NoticeWindow
         if (_fx is null) return;
         _fx = null;
         _fxBody.State = null; _fxGlow.State = null;
-        _fxGlow.Forget();
+        SetAttachments(null);
         SetInsets(0, 0);
         _fxBody.InvalidateVisual(); _fxGlow.InvalidateVisual();
     }

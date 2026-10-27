@@ -9,7 +9,9 @@ using BrimDeck.Core.Notices;
 
 // Checks the notice glyphs as WPF draws them (every geometry parses, is frozen and stays on the grid) and, given a folder,
 // renders the whole set on each built-in theme into one PNG per theme: the glyphs at 20 and 14 DIP, icon plates with
-// application-type glyphs, the state badges, the source badges and the high contrast colors. It never starts BrimDeck and
+// application-type glyphs, the state badges, the source badges and the high contrast colors. It also checks the boundary of the
+// liquid motion on every built-in theme (NoticeFxCheck: no line inside the surface's outline at any moment of the capsule's or the
+// notch's motion). It never starts BrimDeck and
 // reads no settings or theme files; the colors come from the built-in palettes. Not part of BrimDeck.sln; run it by hand:
 //   dotnet run -c Release --project tests/BrimDeck.GlyphPreview -- <output folder>
 internal static class Program
@@ -27,6 +29,7 @@ internal static class Program
                 if (!ok) { failures++; Console.WriteLine($"FAIL: {glyph}{(badge ? " (badge)" : "")} frozen={geometry.IsFrozen} bounds={bounds}"); }
             }
         Console.WriteLine(failures == 0 ? $"PASS: {NoticeGlyphs.All.Count} notice glyphs parse, are frozen and stay on the grid" : $"{failures} glyph checks failed");
+        failures += BoundaryChecks();
         if (args.Length > 0)
         {
             Directory.CreateDirectory(args[0]);
@@ -40,6 +43,40 @@ internal static class Program
             Console.WriteLine("Wrote previews to " + Path.GetFullPath(args[0]));
         }
         return failures == 0 ? 0 : 1;
+    }
+
+    // The liquid motion's boundary: the surface with the parts joined to it in one outline has no line inside it, on every built-in
+    // theme (a theme with a pattern over its surface is skipped), and the detector does find a line where one is drawn.
+    private static int BoundaryChecks()
+    {
+        if (Application.Current is null) _ = new Application();
+        int failures = 0, checks = 0;
+        foreach (var theme in PanelThemes.BuiltIns)
+        {
+            PanelTheme.Use(new DeckSettings { PanelTheme = theme.Id });
+            foreach (var form in new[] { LiquidForm.Capsule, LiquidForm.Notch })
+            {
+                var result = NoticeFxCheck.Sweep(form);
+                checks++;
+                if (!result.Skipped && result.Failed > 0) { failures++; Console.WriteLine($"FAIL: {theme.Id} {form}: lines inside the outline: {result}"); }
+            }
+        }
+        var backdrop = Color.FromRgb(0x58, 0x62, 0x74);
+        BitmapSource Picture(bool line)
+        {
+            var visual = new DrawingVisual();
+            using (var dc = visual.RenderOpen())
+            {
+                dc.DrawRectangle(new SolidColorBrush(backdrop), null, new Rect(0, 0, 200, 80));
+                dc.DrawRoundedRectangle(Brushes.Black, null, new Rect(20, 10, 160, 60), 20, 20);
+                if (line) dc.DrawLine(new Pen(Brushes.White, 2), new Point(60, 12), new Point(110, 68));
+            }
+            var bitmap = new RenderTargetBitmap(200, 80, 96, 96, PixelFormats.Pbgra32); bitmap.Render(visual); return bitmap;
+        }
+        bool found = NoticeFxCheck.Lines(Picture(true), backdrop, 6) > 0, clean = NoticeFxCheck.Lines(Picture(false), backdrop, 6) == 0;
+        if (!found || !clean) { failures++; Console.WriteLine($"FAIL: the line detector: finds a line {found}, leaves a plain shape alone {clean}"); }
+        if (failures == 0) Console.WriteLine($"PASS: the liquid motion has no line inside its outline at any moment ({checks} theme and form combinations), and the detector finds a line drawn in it");
+        return failures;
     }
 
     private static Color C(ThemeColor color) => PanelTheme.ToColor(color);
