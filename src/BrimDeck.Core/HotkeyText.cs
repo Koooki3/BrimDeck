@@ -92,6 +92,23 @@ public static class HotkeyText
     public static bool TryParseArrows(string? text, out HotkeyModifiers modifiers)
         => TryParse(text, out modifiers, out var key) && string.Equals(key, Arrows, StringComparison.OrdinalIgnoreCase) && ArrowModifiersAllowed(modifiers);
 
+    // The settings show the resize shortcut as "Alt + [box] + arrow keys": Alt and the arrows are fixed, and the box records
+    // only the other modifiers. ArrowExtras is what the box shows ("Ctrl", "Ctrl+Shift"), or "" when the text is not a resize
+    // shortcut. FromArrowExtras is the text to save for the recorded modifiers (Alt among them changes nothing), or "" when no
+    // other modifier was recorded.
+    public static string ArrowExtras(string? text)
+        => TryParseArrows(text, out var modifiers) ? FormatModifiers(modifiers & ~HotkeyModifiers.Alt) : "";
+
+    public static string FromArrowExtras(HotkeyModifiers extras)
+    {
+        var modifiers = (extras & (HotkeyModifiers.Ctrl | HotkeyModifiers.Shift | HotkeyModifiers.Win)) | HotkeyModifiers.Alt;
+        return ArrowModifiersAllowed(modifiers) ? Format(modifiers, Arrows) : "";
+    }
+
+    // Modifiers alone, in the fixed order ("Ctrl+Shift"), or "" for none.
+    public static string FormatModifiers(HotkeyModifiers modifiers)
+        => string.Join("+", Order.Where(o => modifiers.HasFlag(o.Flag)).Select(o => o.Name));
+
     // The combinations a saved text stands for: the four arrow keys for a resize shortcut, otherwise the text itself.
     public static string[] Combinations(string? text)
         => TryParseArrows(text, out var modifiers) ? [.. ArrowKeys.Select(key => Format(modifiers, key))] : Normalize(text) is { Length: > 0 } one ? [one] : [];
