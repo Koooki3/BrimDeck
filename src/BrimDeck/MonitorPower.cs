@@ -6,26 +6,29 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // What the page needs to build the power lines: the look of the theme, the low-battery threshold and whether this machine has a battery.
-internal sealed record PowerOptions(PowerStyle Style, int Low, bool Battery);
+// Quick: the battery as the system itself says it at once (BatteryProvider.Quick), shown until the sampler's first reading arrives.
+internal sealed record PowerOptions(PowerStyle Style, int Low, bool Battery, Reading<BatterySample> Quick = default);
 
 // The whole machine's power draw and its own battery, under the drives on the monitor page. As memory and network are drawn, it is one
 // element that renders directly: a new reading changes what it draws, never the layout, and the battery's fill eases to each reading.
 // The rows carry figures and marks, no words (PowerIcons, in the theme's graphic language); the words are in the tooltip (PowerText).
-//   Line 1: the power. A badge, the figure ("≈" before an estimate) and "W", a mark for where it comes from (a chip for the sum of the
-//   processor's and the graphics' power, a battery for the discharge, an instrument for a meter of the machine; dashed for an estimate),
-//   the last minute as a curve, and at the right end the peak and the mean, each a mark and its figure.
-//   Line 2: the battery. The battery in the theme's shape, the charge, a plug while on mains and not charging, the rate (+ charging, − discharging)
-//   and a clock with the time left or to full; at the right Battery saver (a leaf), the power mode (a dial whose needle is low, middle or high)
-//   and the battery's health (a heart and its share).
-// On a page with room for one line only, and a machine with a battery, the two share it: power at the left, the battery at the right. A figure
-// that cannot be read is a dash, with the reason in the tooltip; a machine without a battery has no battery line at all.
+//
+// Both rows sit on one set of columns (PowerColumns), each as wide as the widest thing it can hold, so nothing moves when a figure changes
+// length: the lead (the badge, the battery), the figure (right-aligned, "≈" inside its room) and its unit, a mark, then the middle, and at
+// the right end two slots. Line 1: the badge, the figure and "W", where it comes from (a chip for the sum of the processor's and the
+// graphics' power, a battery for the discharge, an instrument for a meter; dashed for an estimate), the last minute as a curve, and the
+// peak and the mean (a mark and a figure each). Line 2: the battery, the charge and "%", a plug while on mains and not charging, the rate
+// (+ charging, − discharging) and a clock with the time; at the right the saver (a leaf), the power mode (a dial) and the health (a heart).
+// On a page with room for one line only, and a machine with a battery, the two share it: power at the left, the battery at the right.
+// Before the first reading the columns hold dashes; the figures and marks then fade in as the monitor page's other parts do.
 internal sealed class PowerBlock : FrameworkElement
 {
     private readonly MonitorColors _colors;
     private readonly PowerOptions _options;
     private readonly double _body, _caption, _row;
     private readonly int _lines;
-    private Eased _fill;
+    private Eased _fill, _appear;
+    private bool _appeared;
     private Reading<PowerSample> _power;
     private Reading<BatterySample> _battery;
     private IReadOnlyList<double> _history = [];
@@ -39,6 +42,7 @@ internal sealed class PowerBlock : FrameworkElement
         _colors = colors; _options = options; _body = body; _caption = caption; _row = row; _lines = Math.Max(1, lines);
         Height = _lines * row;
         SnapsToDevicePixels = true;
+        _battery = options.Quick;
     }
 
     // For screen readers: the items in one line (PowerText.Spoken).
@@ -50,9 +54,14 @@ internal sealed class PowerBlock : FrameworkElement
 
     public void Set(MonitorSnapshot snapshot, bool motion)
     {
-        _power = snapshot.Power; _battery = snapshot.Battery; _history = snapshot.PowerHistory; _summary = snapshot.PowerSummary;
+        _power = snapshot.Power; _history = snapshot.PowerHistory; _summary = snapshot.PowerSummary;
+        // The sampler's battery reading once it has one, the system's own until then.
+        _battery = snapshot.Battery.HasValue || !_options.Quick.HasValue ? snapshot.Battery : _options.Quick;
         _top = _history.Count == 0 ? 10 : Math.Max(10, _history.Max() * 1.15);
         bool moving = _fill.Set(_battery.TryGet(out var sample) ? sample.Percent / 100 : 0, motion);
+        // The figures and marks come in with the first reading, easing as the page's other parts do; one that is there when the page is built
+        // (a resize) is shown at once.
+        if (!_appeared && (_power.HasValue || _battery.HasValue)) { _appeared = true; moving |= _appear.Set(1, motion); }
         // One tooltip for the block: the power's lines, then the battery's, in the same form.
         ToolTip = PowerText.Power(_power, _summary) + (_options.Battery ? "\n" + PowerText.Battery(_battery) : "");
         string spoken = PowerText.Spoken(_power, _battery, _options.Battery);
@@ -63,7 +72,7 @@ internal sealed class PowerBlock : FrameworkElement
             if (AutomationPeer.ListenerExists(AutomationEvents.PropertyChanged) && UIElementAutomationPeer.FromElement(this) is { } peer)
                 peer.RaisePropertyChangedEvent(System.Windows.Automation.AutomationElementIdentifiers.NameProperty, old, spoken);
         }
-        if (moving) Motion.Start(this, now => { InvalidateVisual(); return _fill.Moving(now); }); else InvalidateVisual();
+        if (moving) Motion.Start(this, now => { InvalidateVisual(); return _fill.Moving(now) || _appear.Moving(now); }); else InvalidateVisual();
     }
 
     protected override Size MeasureOverride(Size availableSize) => new(0, Height);
@@ -74,14 +83,57 @@ internal sealed class PowerBlock : FrameworkElement
     private double Mark => Math.Round(_body + 1);
     private const double Gap = 6;
 
+    // The columns of both rows, from the widest thing each can hold; made once per scale.
+    private readonly record struct Columns(double Lead, double Number, double UnitAt, double Unit, double State, double Middle, double Slot, double Rate)
+    {
+        public double NumberRight => Lead + Number;
+    }
+    private (double Ppd, Columns Columns)? _columns;
+    private Columns ColumnsAt(double ppd)
+    {
+        if (_columns is { } known && known.Ppd == ppd) return known.Columns;
+        double Width(string text, double size, bool strong = false) => Math.Ceiling(MonitorDraw.Text(text, size, UI.Primary, ppd, strong: strong).WidthIncludingTrailingWhitespace);
+        double badge = Math.Round(_body + 5), battery = Math.Round(Math.Round(_body * .95) * 2.2);
+        double lead = Math.Max(badge, battery) + Math.Round(_body * .5);
+        double number = Math.Max(Width("≈199.9", _body + 1, strong: true), Width("100", _body + 1, strong: true));
+        double unit = Math.Max(Width("W", _caption), Width("%", _caption));
+        double unitAt = lead + number + 3;
+        double state = unitAt + unit + Gap + 2;
+        double middle = state + Mark + Gap + 2;
+        // The right end: two slots, each a mark and a figure of the widest it can show ("199.9", "100%").
+        double slot = Mark + 3 + Math.Max(Width("199.9", _caption), Width("100%", _caption));
+        double rate = Width("−199.9 W", _caption);
+        var columns = new Columns(lead, number, unitAt, unit, state, middle, slot, rate);
+        _columns = (ppd, columns);
+        return columns;
+    }
+
     protected override void OnRender(DrawingContext drawing)
     {
         double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), now = Eased.Now;
         drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
+        var c = ColumnsAt(ppd);
+        double appear = Math.Clamp(_appear.At(now), 0, 1);
+        // Until the first reading: the figures' places hold dashes. They give way to the figures as those come in.
+        if (appear < .999) { drawing.PushOpacity(1 - appear); Placeholders(drawing, w, ppd, c); drawing.Pop(); }
+        if (appear <= .001) return;
+        if (appear < .999) drawing.PushOpacity(appear);
         double right = w;
         if (Shared) right = BatteryShared(drawing, new Rect(0, 0, w, _row), ppd, now, leftLimit: w * .5);
-        Power(drawing, new Rect(0, 0, Math.Max(0, right - (Shared ? 12 : 0)), _row), ppd);
-        if (BatteryLine) BatteryFull(drawing, new Rect(0, _row, w, _row), ppd, now);
+        Power(drawing, new Rect(0, 0, Math.Max(0, right - (Shared ? 12 : 0)), _row), ppd, c);
+        if (BatteryLine) BatteryFull(drawing, new Rect(0, _row, w, _row), ppd, now, c);
+        if (appear < .999) drawing.Pop();
+    }
+
+    // A dash in the figure's place of each row, right-aligned where the figure will be.
+    private void Placeholders(DrawingContext drawing, double w, double ppd, Columns c)
+    {
+        var dash = MonitorDraw.Text("—", _body + 1, UI.Tertiary, ppd, strong: true);
+        for (int row = 0; row < (BatteryLine ? 2 : 1); row++)
+        {
+            double mid = row * _row + _row / 2, baseline = Math.Round(mid + _body * .38);
+            MonitorDraw.Baseline(drawing, dash, c.NumberRight - dash.WidthIncludingTrailingWhitespace, baseline);
+        }
     }
 
     // A mark centred on the line.
@@ -91,43 +143,47 @@ internal sealed class PowerBlock : FrameworkElement
     private static PowerIcon SourceIcon(PowerSample power) => power.Source switch
     { PowerSource.SystemMeter => PowerIcon.Meter, PowerSource.Battery => PowerIcon.BatteryOut, _ => PowerIcon.Chip };
 
-    // Line 1: the badge, the figure, the source mark, the curve, the peak and the mean.
-    private void Power(DrawingContext drawing, Rect line, double ppd)
+    // A figure and its unit in their columns: the figure's right edge on the column's, the unit after it.
+    private void FigureAt(DrawingContext drawing, string figure, string unit, Rect line, double ppd, Columns c, double origin = 0)
     {
-        double badge = Math.Round(_body + 5), baseline = Math.Round(line.Y + line.Height / 2 + _body * .38), x = line.X;
+        double baseline = Math.Round(line.Y + line.Height / 2 + _body * .38);
+        var number = MonitorDraw.Text(figure, _body + 1, UI.Primary, ppd, strong: true);
+        MonitorDraw.Baseline(drawing, number, origin + c.NumberRight - number.WidthIncludingTrailingWhitespace, baseline);
+        if (unit.Length > 0) MonitorDraw.Baseline(drawing, MonitorDraw.Text(unit, _caption, UI.Tertiary, ppd), origin + c.UnitAt, baseline);
+    }
+
+    // The right end's two slots (mark, figure): where they begin, or none where the line is too short for them and the curve.
+    private static (double A, double B)? RightSlots(Rect line, Columns c)
+    {
+        double b = line.Right - c.Slot, a = b - 8 - c.Slot;
+        return a - Gap >= line.X + c.Middle + 40 ? (a, b) : null;
+    }
+
+    // Line 1: the badge, the figure, the source mark, the curve, the peak and the mean.
+    private void Power(DrawingContext drawing, Rect line, double ppd, Columns c)
+    {
+        double badge = Math.Round(_body + 5), baseline = Math.Round(line.Y + line.Height / 2 + _body * .38);
         bool known = _power.TryGet(out var power);
-        PowerGlyphs.Badge(drawing, new Point(x + badge / 2, line.Y + line.Height / 2), badge, Skin.Draw, known, Skin);
-        x += badge + Math.Round(_body * .5);
-        var figure = MonitorDraw.Text(known ? Figure(power!) : "—", _body + 1, UI.Primary, ppd, strong: true);
-        MonitorDraw.Baseline(drawing, figure, x, baseline); x += figure.WidthIncludingTrailingWhitespace;
+        PowerGlyphs.Badge(drawing, new Point(line.X + badge / 2, line.Y + line.Height / 2), badge, Skin.Draw, known, Skin);
+        FigureAt(drawing, known ? Figure(power!) : "—", known ? "W" : "", line, ppd, c, line.X);
         if (!known) return;
-        var unit = MonitorDraw.Text("W", _caption, UI.Tertiary, ppd);
-        MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace;
         // Where the figure comes from; dashed while it is an estimate.
-        x += Gap + 2;
-        if (x + Mark <= line.Right) { DrawMark(drawing, SourceIcon(power!), x, line, UI.Secondary, ppd, dashed: power!.Estimated); x += Mark; }
-        double afterSource = x + Gap;
-        // The peak and the mean at the right end: a mark and its figure each, where there is room for them.
-        double reserved = 0;
-        FormattedText? peak = null, mean = null;
-        if (_summary is { Count: > 2 } summary)
+        double stateX = line.X + c.State;
+        if (stateX + Mark <= line.Right) DrawMark(drawing, SourceIcon(power!), stateX, line, UI.Secondary, ppd, dashed: power!.Estimated);
+        double curveLeft = line.X + c.Middle, curveRight = line.Right;
+        if (RightSlots(line, c) is { } slots)
         {
-            peak = MonitorDraw.Text(PowerFormat.Watts(summary.Peak), _caption, UI.Tertiary, ppd);
-            mean = MonitorDraw.Text(PowerFormat.Watts(summary.Average), _caption, UI.Tertiary, ppd);
-            reserved = Mark + 3 + peak.WidthIncludingTrailingWhitespace + 8 + Mark + 3 + mean.WidthIncludingTrailingWhitespace;
+            curveRight = slots.A - Gap;
+            if (_summary is { Count: > 2 } summary)
+            {
+                DrawMark(drawing, PowerIcon.Peak, slots.A, line, UI.Tertiary, ppd);
+                MonitorDraw.Baseline(drawing, MonitorDraw.Text(PowerFormat.Watts(summary.Peak), _caption, UI.Tertiary, ppd), slots.A + Mark + 3, baseline);
+                DrawMark(drawing, PowerIcon.Mean, slots.B, line, UI.Tertiary, ppd);
+                MonitorDraw.Baseline(drawing, MonitorDraw.Text(PowerFormat.Watts(summary.Average), _caption, UI.Tertiary, ppd), slots.B + Mark + 3, baseline);
+            }
         }
-        if (reserved > 0 && line.Right - reserved < afterSource) { peak = mean = null; reserved = 0; }
-        if (peak is not null && mean is not null)
-        {
-            double at = line.Right - reserved;
-            DrawMark(drawing, PowerIcon.Peak, at, line, UI.Tertiary, ppd); at += Mark + 3;
-            MonitorDraw.Baseline(drawing, peak, at, baseline); at += peak.WidthIncludingTrailingWhitespace + 8;
-            DrawMark(drawing, PowerIcon.Mean, at, line, UI.Tertiary, ppd); at += Mark + 3;
-            MonitorDraw.Baseline(drawing, mean, at, baseline);
-        }
-        double curveRight = line.Right - (reserved > 0 ? reserved + Gap : 0);
-        if (curveRight - afterSource >= 40 && _history.Count >= 3)
-            PowerGlyphs.Curve(drawing, new Rect(afterSource, line.Y + 2, curveRight - afterSource, line.Height - 4), _history, _top, Skin);
+        if (curveRight - curveLeft >= 40 && _history.Count >= 3)
+            PowerGlyphs.Curve(drawing, new Rect(curveLeft, line.Y + 2, curveRight - curveLeft, line.Height - 4), _history, _top, Skin);
     }
 
     // The mark for the power mode: a dial with its needle low, in the middle or high.
@@ -137,82 +193,64 @@ internal sealed class PowerBlock : FrameworkElement
         PowerMode.BestPerformance or PowerMode.BetterPerformance => PowerIcon.GaugeHigh, _ => null
     };
 
-    // The battery on its line, at the right edge of a line it shares: the battery, its charge and a plug while on mains and not charging.
-    // Returns the left edge it took, so the line it shares can end before it.
+    // The battery on a line it shares with the power, at the right edge on columns of its own that count from that edge: the plug's place,
+    // the unit, the figure, the battery. Returns the left edge it took, so the line it shares can end before it.
     private double BatteryShared(DrawingContext drawing, Rect line, double ppd, double now, double leftLimit)
     {
         double height = Math.Round(_body * .95), width = Math.Round(height * 2.2), mid = line.Y + line.Height / 2, baseline = Math.Round(mid + _body * .38);
+        var c = ColumnsAt(ppd);
+        double plugX = line.Right - Mark, unitX = plugX - Gap - c.Unit, numberRight = unitX - 2, left = numberRight - c.Number - 7 - width;
+        left = Math.Max(leftLimit, left);
         bool known = _battery.TryGet(out var battery);
-        var figure = MonitorDraw.Text(known ? MonitorFormat.Percent(battery!.Percent / 100) : "—", _body + 1, UI.Primary, ppd, strong: true);
-        var unit = known ? MonitorDraw.Text("%", _caption, UI.Tertiary, ppd) : null;
-        bool plug = known && battery!.State is BatteryState.PluggedIn or BatteryState.Full;
-        double total = width + 7 + figure.WidthIncludingTrailingWhitespace + (unit is null ? 0 : 2 + unit.WidthIncludingTrailingWhitespace) + (plug ? Gap + Mark : 0);
-        double left = Math.Max(leftLimit, line.Right - total);
         var visual = known ? BatteryVisual.Of(battery!, _options.Low) : new BatteryVisual(0, BatteryState.Discharging, false, MemoryLevel.Normal);
         PowerGlyphs.Battery(drawing, new Rect(left, Math.Round(mid - height / 2), width, height), visual, Skin, ppd, _fill.At(now), compact: false, unknown: !known);
-        double x = left + width + 7;
-        MonitorDraw.Baseline(drawing, figure, x, baseline); x += figure.WidthIncludingTrailingWhitespace;
-        if (unit is not null) { MonitorDraw.Baseline(drawing, unit, x + 2, baseline); x += 2 + unit.WidthIncludingTrailingWhitespace; }
-        if (plug) DrawMark(drawing, PowerIcon.Plug, x + Gap, line, UI.Secondary, ppd);
+        var figure = MonitorDraw.Text(known ? MonitorFormat.Percent(battery!.Percent / 100) : "—", _body + 1, UI.Primary, ppd, strong: true);
+        MonitorDraw.Baseline(drawing, figure, numberRight - figure.WidthIncludingTrailingWhitespace, baseline);
+        if (known) MonitorDraw.Baseline(drawing, MonitorDraw.Text("%", _caption, UI.Tertiary, ppd), unitX, baseline);
+        if (known && battery!.State is BatteryState.PluggedIn or BatteryState.Full) DrawMark(drawing, PowerIcon.Plug, plugX, line, UI.Secondary, ppd);
         return left;
     }
 
-    // Line 2: the battery, its charge, the mains, the rate and the time; at the right the saver, the power mode and the health.
-    private void BatteryFull(DrawingContext drawing, Rect line, double ppd, double now)
+    // Line 2, on the same columns as line 1: the battery in the lead, the charge and "%", the plug in the mark's column; in the middle the
+    // rate and the time in columns of their own; at the right the saver, the power mode and the health in the slots under the peak and the mean.
+    private void BatteryFull(DrawingContext drawing, Rect line, double ppd, double now, Columns c)
     {
         double height = Math.Round(_body * .95), width = Math.Round(height * 2.2), mid = line.Y + line.Height / 2, baseline = Math.Round(mid + _body * .38);
         bool known = _battery.TryGet(out var battery);
         var visual = known ? BatteryVisual.Of(battery!, _options.Low) : new BatteryVisual(0, BatteryState.Discharging, false, MemoryLevel.Normal);
         PowerGlyphs.Battery(drawing, new Rect(line.X, Math.Round(mid - height / 2), width, height), visual, Skin, ppd, _fill.At(now), compact: false, unknown: !known);
-        double x = line.X + width + 7;
-        var figure = MonitorDraw.Text(known ? MonitorFormat.Percent(battery!.Percent / 100) : "—", _body + 1, UI.Primary, ppd, strong: true);
-        MonitorDraw.Baseline(drawing, figure, x, baseline); x += figure.WidthIncludingTrailingWhitespace;
+        FigureAt(drawing, known ? MonitorFormat.Percent(battery!.Percent / 100) : "—", known ? "%" : "", line, ppd, c, line.X);
         if (!known) return;
-        var unit = MonitorDraw.Text("%", _caption, UI.Tertiary, ppd);
-        MonitorDraw.Baseline(drawing, unit, x + 2, baseline); x += 2 + unit.WidthIncludingTrailingWhitespace;
         var b = battery!;
-
-        // The right end first, so the left part gives way to it: saver, mode, health, as far as they fit after the left part's minimum.
-        var right = new List<(PowerIcon Icon, string? Text, string Color)>();
-        if (b.BatterySaver) right.Add((PowerIcon.Leaf, null, Skin.Saver));
-        if (ModeIcon(b.Mode) is { } mode) right.Add((mode, null, UI.Secondary));
-        if (b.Health is { } health) right.Add((PowerIcon.Heart, MonitorFormat.Percent(health) + "%", UI.Secondary));
-        double RightWidth((PowerIcon Icon, string? Text, string Color) item) => Mark + (item.Text is null ? 0 : 3 + MonitorDraw.Text(item.Text, _caption, UI.Tertiary, ppd).WidthIncludingTrailingWhitespace);
-        double used = 0;
-        var shown = new List<(PowerIcon Icon, string? Text, string Color)>();
-        for (int i = right.Count - 1; i >= 0; i--)
-        {
-            double take = RightWidth(right[i]) + (shown.Count > 0 ? Gap + 2 : 0);
-            if (x + 24 + used + take > line.Right) break;
-            shown.Insert(0, right[i]); used += take;
-        }
-        double end = line.Right - used - (used > 0 ? Gap : 0);
-
-        // The left part: a plug while on mains and not charging, the rate with its sign, a clock and the time.
-        if (b.State is BatteryState.PluggedIn or BatteryState.Full && x + Gap + Mark <= end) { x += Gap; DrawMark(drawing, PowerIcon.Plug, x, line, UI.Secondary, ppd); x += Mark; }
-        if (b.HasRate && b.State is BatteryState.Charging or BatteryState.Discharging)
+        if (b.State is BatteryState.PluggedIn or BatteryState.Full) DrawMark(drawing, PowerIcon.Plug, line.X + c.State, line, UI.Secondary, ppd);
+        var slots = RightSlots(line, c);
+        double end = slots is { } s ? s.A - Gap : line.Right;
+        // The rate in a column of its own, the time after it in another; either is left out where it does not fit, the other keeps its place.
+        double x = line.X + c.Middle;
+        if (b.HasRate && b.State is BatteryState.Charging or BatteryState.Discharging && x + c.Rate <= end)
         {
             var rate = MonitorDraw.Text((b.State == BatteryState.Charging ? "+" : "−") + PowerFormat.Watts(b.Watts) + " W", _caption, UI.Secondary, ppd);
-            if (x + Gap + rate.WidthIncludingTrailingWhitespace <= end) { x += Gap + 2; MonitorDraw.Baseline(drawing, rate, x, baseline); x += rate.WidthIncludingTrailingWhitespace; }
+            MonitorDraw.Baseline(drawing, rate, x + c.Rate - rate.WidthIncludingTrailingWhitespace, baseline);
         }
-        var time = b.TimeLeft ?? b.TimeToFull;
-        if (time is { } span)
+        x += c.Rate + Gap;
+        if ((b.TimeLeft ?? b.TimeToFull) is { } span)
         {
             var text = MonitorDraw.Text(PowerFormat.Clock(span), _caption, UI.Secondary, ppd);
-            double take = Gap + Mark + 3 + text.WidthIncludingTrailingWhitespace;
-            if (x + take <= end)
+            double wide = Mark + 3 + Math.Ceiling(MonitorDraw.Text("99:59", _caption, UI.Secondary, ppd).WidthIncludingTrailingWhitespace);
+            if (x + wide <= end)
             {
-                x += Gap + 2; DrawMark(drawing, PowerIcon.Clock, x, line, UI.Tertiary, ppd); x += Mark + 3;
-                MonitorDraw.Baseline(drawing, text, x, baseline);
+                DrawMark(drawing, PowerIcon.Clock, x, line, UI.Tertiary, ppd);
+                MonitorDraw.Baseline(drawing, text, x + Mark + 3, baseline);
             }
         }
-
-        double at = line.Right - used;
-        foreach (var (icon, text, color) in shown)
+        if (slots is not { } slot) return;
+        // The slot under the peak holds the saver and the power mode (two marks), the slot under the mean the health (a mark and its figure).
+        if (b.BatterySaver) DrawMark(drawing, PowerIcon.Leaf, slot.A, line, Skin.Saver, ppd);
+        if (ModeIcon(b.Mode) is { } mode) DrawMark(drawing, mode, slot.A + Mark + Gap, line, UI.Secondary, ppd);
+        if (b.Health is { } health)
         {
-            DrawMark(drawing, icon, at, line, color, ppd); at += Mark;
-            if (text is not null) { at += 3; var label = MonitorDraw.Text(text, _caption, UI.Tertiary, ppd); MonitorDraw.Baseline(drawing, label, at, baseline); at += label.WidthIncludingTrailingWhitespace; }
-            at += Gap + 2;
+            DrawMark(drawing, PowerIcon.Heart, slot.B, line, UI.Secondary, ppd);
+            MonitorDraw.Baseline(drawing, MonitorDraw.Text(MonitorFormat.Percent(health) + "%", _caption, UI.Tertiary, ppd), slot.B + Mark + 3, baseline);
         }
     }
 }

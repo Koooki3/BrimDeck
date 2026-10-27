@@ -142,6 +142,7 @@ public partial class App : Application
         Notices.ApplySettings();
         InitializeHotkeys();
         StartBackgroundUpdates();
+        PowerWarm.Start(Dispatcher);
         DisplayPower.Install(Dispatcher);
         DisplayPower.Changed += UpdateDeviceDemand;
         _save.Tick += (_, _) => FlushSettings();

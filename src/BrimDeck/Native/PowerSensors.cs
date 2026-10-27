@@ -199,6 +199,17 @@ internal sealed class BatteryProvider
     public static bool SystemHasBattery => ForceBattery ?? (GetSystemPowerStatus(out var status) && status.BatteryFlag is not (128 or 255));
     // The page sheets (tests/BrimDeck.FxPreview) draw a laptop and a desktop whatever this machine is.
     internal static bool? ForceBattery { get; set; }
+    // The battery as the system itself reports it, at once and without the battery listing (a charge, the mains, Battery saver, the time Windows
+    // estimates, the power mode): shown by the page until the sampler's first reading arrives. Unavailable on a machine without a battery.
+    public static Reading<BatterySample> Quick()
+    {
+        if (!GetSystemPowerStatus(out var status) || status.BatteryFlag is 128 or 255 || status.BatteryLifePercent > 100) return Reading<BatterySample>.Unavailable(BatteryModel.NoBattery);
+        bool? ac = status.ACLineStatus switch { 0 => false, 1 => true, _ => null };
+        var cell = new BatteryCell("system", null, null, null, null, (status.BatteryFlag & 8) != 0, ac == false);
+        return BatteryModel.Build(new BatteryInputs([cell], ac, (status.SystemStatusFlag & 1) != 0, BatteryModel.ModeOf(Overlay()), status.BatteryLifePercent,
+            status.BatteryLifeTime != uint.MaxValue ? TimeSpan.FromSeconds(status.BatteryLifeTime) : null));
+    }
+
     // Whether the machine is on mains now (a laptop that gives no power reading there may give one on battery).
     public static bool OnMains => GetSystemPowerStatus(out var status) && status.ACLineStatus == 1;
 

@@ -75,7 +75,9 @@ public partial class MainWindow
         if (!Settings.ShowsMonitor(EffectiveStyle)) return false;
         return _stripAdmission.Awaits(Settings.CompactReadings, _app.Monitor?.Latest, StripSensors);
     }
-    private PowerOptions PowerBlockFor() => new(PowerStyle.For(MonitorThemeColors.For(Settings)), Settings.DeviceLowPercent, Native.BatteryProvider.SystemHasBattery);
+    private PowerOptions PowerBlockFor() => Native.BatteryProvider.SystemHasBattery
+        ? new(PowerStyle.For(MonitorThemeColors.For(Settings)), Settings.DeviceLowPercent, true, Native.BatteryProvider.Quick())
+        : new(PowerStyle.For(MonitorThemeColors.For(Settings)), Settings.DeviceLowPercent, false);
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
     private static bool MonitorMotion => Soft.Enabled;

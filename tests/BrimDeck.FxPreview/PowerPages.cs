@@ -246,4 +246,139 @@ internal static partial class LiquidPages
             }
         return 0;
     }
+
+    // How long the UI thread takes to show the monitor page the first time (cold: nothing of the process warm yet) and again after leaving it
+    // (warm), with the power lines asked for or not, in the offscreen panel; and how long the sampler takes to give its first snapshot and the
+    // first with a power or battery figure. Each in a process of its own: --power-open on|off, --power-first on|off.
+    public static int RunPowerOpen(bool power, bool prewarm = false)
+    {
+        var (app, deck, root, source) = Offscreen(animations: false);
+        using var _ = source;
+        var settings = app.Settings;
+        settings.MonitorStorage = false; settings.MonitorPower = power;
+        BatteryProvider.ForceBattery = true;
+        var cover = Cover(); var track = Track();
+        var scenes = PowerScenes(Snapshot(), false);
+        var snapshot = scenes[0].Snapshot;
+        DeckPages.SetSize(settings, DeckPage.Monitor, 680, 300);
+        deck.ApplySettings();
+        // As the app does once it has started: a pool thread builds the icons and compiles the rows' code while the UI has nothing to do.
+        if (prewarm)
+        {
+            PowerWarm.Start(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+            var idle = new System.Windows.Threading.DispatcherFrame();
+            var wait = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+            wait.Tick += (_, _) => { wait.Stop(); idle.Continue = false; };
+            wait.Start();
+            System.Windows.Threading.Dispatcher.PushFrame(idle);
+        }
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Show(deck, root, Page.Monitor, track, cover, snapshot);
+        double cold = watch.Elapsed.TotalMilliseconds;
+        Show(deck, root, Page.Usage, track, cover, snapshot);
+        watch.Restart();
+        Show(deck, root, Page.Monitor, track, cover, snapshot);
+        double warm = watch.Elapsed.TotalMilliseconds;
+        // The page's own update with a new reading, once it is shown.
+        watch.Restart();
+        for (int i = 0; i < 20; i++) deck.OffscreenMonitor(snapshot);
+        double update = watch.Elapsed.TotalMilliseconds / 20;
+        Console.WriteLine($"power lines {(power ? "on " : "off")}{(prewarm ? " + warm-up" : "")}: first show {cold,7:0.0} ms, shown again {warm,6:0.0} ms, one update {update,5:0.00} ms");
+        BatteryProvider.ForceBattery = null;
+        return 0;
+    }
+
+    public static int RunPowerFirst(bool power)
+    {
+        var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        using var sampler = new SystemSampler(dispatcher, () => (null, null));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        double first = -1, withFigure = -1;
+        sampler.Updated += snapshot =>
+        {
+            if (first < 0) first = watch.Elapsed.TotalMilliseconds;
+            if (withFigure < 0 && (snapshot.Power.HasValue || snapshot.Battery.HasValue)) withFigure = watch.Elapsed.TotalMilliseconds;
+        };
+        sampler.SetExtras(false, false, false, power);
+        sampler.SetDemand(true, 1, false);
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(7) };
+        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        timer.Start();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+        Console.WriteLine($"power {(power ? "on " : "off")}: first snapshot {first,7:0} ms, first with a power or battery figure {(withFigure < 0 ? "never" : withFigure.ToString("0") + " ms")}");
+        sampler.SetDemand(false, 1, false);
+        return 0;
+    }
+
+    // The power block alone, step by step on the UI thread, cold and then warm, in a theme: the look and the icons' first use, building the
+    // block with a reading, laying it out, and drawing it. --power-block <theme id>
+    public static int RunPowerBlock(string themeId)
+    {
+        var (app, deck, root, source) = Offscreen(animations: false);
+        using var _ = source;
+        var theme = PanelThemes.BuiltIn(themeId) ?? PanelThemes.BuiltIn(PanelThemes.Dark)!;
+        PanelTheme.Show(PanelThemes.Resolve(theme));
+        BatteryProvider.ForceBattery = true;
+        var snapshot = PowerScenes(Snapshot(), false)[0].Snapshot;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        double Lap() { double t = watch.Elapsed.TotalMilliseconds; watch.Restart(); return t; }
+        var colors = MonitorThemeColors.For(MonitorPalette.Theme, new MonitorCustomColors());
+        var style = PowerStyle.For(colors);
+        var visual = new System.Windows.Media.DrawingVisual();
+        using (var dc = visual.RenderOpen()) { foreach (var icon in Enum.GetValues<PowerIcon>()) PowerIcons.Draw(dc, icon, new System.Windows.Rect(0, 0, 13, 13), "#FFFFFF", style, 1.5); }
+        double icons = Lap();
+        var block = new PowerBlock(colors, new PowerOptions(style, 15, true), 12, 10.5, 22, 2) { Width = 360 };
+        block.Set(snapshot, false);
+        double build = Lap();
+        block.Measure(new System.Windows.Size(360, 44)); block.Arrange(new System.Windows.Rect(0, 0, 360, 44)); block.UpdateLayout();
+        double layout = Lap();
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(540, 66, 144, 144, System.Windows.Media.PixelFormats.Pbgra32);
+        bitmap.Render(block);
+        double first = Lap();
+        block.Set(snapshot, false); bitmap.Render(block);
+        double second = Lap();
+        Console.WriteLine($"{theme.Id,-24} icons {icons,6:0.0}  build {build,6:0.0}  layout {layout,5:0.0}  first draw {first,6:0.0}  next update + draw {second,5:0.0} ms");
+        BatteryProvider.ForceBattery = null;
+        return 0;
+    }
+
+    // The power rows coming in: a block with motion on is given its first reading and drawn every 60 ms for a second; the share of ink in each
+    // frame shows the dashes giving way to the figures, and how many frames the UI thread had to draw. --power-appear
+    public static int RunPowerAppear()
+    {
+        var (app, deck, root, source) = Offscreen(animations: true);
+        using var _ = source;
+        BatteryProvider.ForceBattery = true;
+        PanelTheme.Show(PanelThemes.Resolve(PanelThemes.BuiltIn(PanelThemes.Dark)!));
+        var snapshot = PowerScenes(Snapshot(), false)[0].Snapshot;
+        var colors = MonitorThemeColors.For(MonitorPalette.Theme, new MonitorCustomColors());
+        var block = new PowerBlock(colors, new PowerOptions(PowerStyle.For(colors), 15, true), 12, 10.5, 22, 2) { Width = 360 };
+        var host = new System.Windows.Controls.Canvas { Width = 360, Height = 44, Background = System.Windows.Media.Brushes.Black };
+        host.Children.Add(block);
+        root.Children.Add(host);
+        host.Measure(new System.Windows.Size(360, 44)); host.Arrange(new System.Windows.Rect(0, 0, 360, 44)); host.UpdateLayout();
+        double Ink()
+        {
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(360, 44, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(host);
+            var pixels = new byte[360 * 44 * 4]; bitmap.CopyPixels(pixels, 360 * 4, 0);
+            double sum = 0; for (int i = 0; i < pixels.Length; i += 4) sum += pixels[i] + pixels[i + 1] + pixels[i + 2];
+            return sum / (360 * 44 * 3 * 255.0) * 100;
+        }
+        Console.WriteLine($"before the reading: {Ink():0.00} % ink (dashes)");
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        block.Set(snapshot, motion: true);
+        for (int step = 0; step <= 16; step++)
+        {
+            var frame = new System.Windows.Threading.DispatcherFrame();
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
+            timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+            timer.Start();
+            System.Windows.Threading.Dispatcher.PushFrame(frame);
+            Console.WriteLine($"  {watch.Elapsed.TotalMilliseconds,6:0} ms: {Ink():0.00} % ink");
+        }
+        BatteryProvider.ForceBattery = null;
+        return 0;
+    }
 }

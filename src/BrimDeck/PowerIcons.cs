@@ -1,5 +1,8 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using BrimDeck.Core;
 
 namespace BrimDeck;
@@ -117,5 +120,34 @@ internal static class PowerIcons
                 if (dashed && (row + column) % 2 == 1) continue;
                 drawing.DrawRectangle(brush, null, new Rect(left + column * cell, top + row * cell, cell, cell));
             }
+    }
+}
+
+// The first time the power rows are shown, the UI thread built the icons' geometry and compiled the rows' code on the spot (about 25 ms, with
+// the page's own first layout). Once the app has started and has nothing else to do, a pool thread does both: the geometry (frozen, so any
+// thread may use it) and the code of the rows, the tooltip's words and the figures. One pass, a few milliseconds of one pool thread, and
+// nothing runs again while the panel is idle.
+internal static class PowerWarm
+{
+    public static void Start(Dispatcher dispatcher) => dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => ThreadPool.QueueUserWorkItem(_ => Run()));
+
+    private static void Run()
+    {
+        try
+        {
+            RuntimeHelpers.RunClassConstructor(typeof(PowerIcons).TypeHandle);
+            const BindingFlags All = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+            foreach (var type in new[] { typeof(PowerBlock), typeof(PowerGlyphs), typeof(PowerIcons), typeof(PowerStyle), typeof(PowerText), typeof(PowerResolver), typeof(BatteryModel), typeof(PowerFormat) })
+                foreach (var method in type.GetMethods(All))
+                    if (!method.IsAbstract && !method.ContainsGenericParameters && method.GetMethodBody() is not null) RuntimeHelpers.PrepareMethod(method.MethodHandle);
+            // The words and the figures once, with made-up readings.
+            var sample = new PowerSample(20, PowerOrigin.Estimated, PowerSource.Components, [new PowerPart("cpu", "CPU", 12, "RAPL")]);
+            var battery = BatteryModel.Build(new BatteryInputs([new BatteryCell("warm", 30_000, 60_000, 66_000, -10_000, false, true)], false, false, PowerMode.Balanced));
+            PowerText.Power(Reading<PowerSample>.Of(sample), new PowerSummary(30, 20, 3));
+            PowerText.Battery(battery);
+            PowerText.Spoken(Reading<PowerSample>.Of(sample), battery, true);
+            PowerFormat.Clock(TimeSpan.FromMinutes(90)); PowerFormat.Duration(TimeSpan.FromMinutes(90)); PowerFormat.Watts(12.3);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine(ex); }
     }
 }
