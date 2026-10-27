@@ -310,10 +310,14 @@ internal sealed class MusicMarquee : FrameworkElement
         SetHooked(false);
         return false;
     }
-    // Places the text and the fades where the scroll stands; the frames of a rest set nothing.
+    // Places the text and the fades where the scroll stands; the frames of a rest set nothing. The glide moves in steps of half a
+    // device pixel: at 24 DIP a second a 144 Hz display would otherwise redraw the whole layered island every frame for a sixth
+    // of a pixel (measured: a gliding title kept the collapsed row at about 110 ms of CPU a second), while half-pixel steps of
+    // text drawn in the animated quality still glide evenly, 48 times a second at 100 % scaling.
     private void Apply()
     {
-        double offset = _scroll.At(_overflow), edge = EdgeStop;
+        double ppd = VisualTreeHelper.GetDpi(this).PixelsPerDip, step = .5 / Math.Max(.5, ppd);
+        double raw = _scroll.At(_overflow), offset = raw >= _overflow ? _overflow : Math.Round(raw / step) * step, edge = EdgeStop;
         var (left, right) = MarqueeScroll.Fades(offset, _overflow, EdgeWidth);
         if ((offset, left, right, edge) == _applied) return;
         _applied = (offset, left, right, edge);
