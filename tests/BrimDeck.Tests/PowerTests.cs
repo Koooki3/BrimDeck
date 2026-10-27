@@ -24,6 +24,7 @@ static class PowerTests
             Readings(check);
             Layout(check);
             Looks(check);
+            Texts(check);
         }
         finally { Loc.Use(language); }
     }
@@ -34,7 +35,7 @@ static class PowerTests
         var desktop = PowerResolver.Resolve(new PowerInputs { Cpu = W(42.5), Gpus = [new GpuPowerInput("NVIDIA GeForce RTX 4070", W(118.2))] });
         check("Power: a desktop sums the processor and the graphics board, marked an estimate",
             desktop.TryGet(out var sum) && Math.Abs(sum.Watts - 160.7) < 1e-9 && sum.Estimated && sum.Source == PowerSource.Components && sum.Parts.Count == 2);
-        check("Power: the estimate names its parts and where each is read", sum!.Parts[0].Name == "CPU" && sum.Parts[0].Source.Contains("RAPL") && sum.Parts[1].Source == "nvidia-smi");
+        check("Power: the estimate names its parts and where each is read", sum!.Parts[0].Name == "CPU 封装" && sum.Parts[0].Source == "RAPL" && sum.Parts[1].Source == PowerResolver.GpuSource && sum.Parts[1].Name == "GPU");
         check("Power: an estimate is labelled 估算, a measurement 实测", PowerResolver.OriginName(sum) == "估算" && PowerResolver.SourceName(sum) == "部件合计");
 
         // A desktop with nothing to read: unavailable with a reason, never a zero.
@@ -332,5 +333,46 @@ static class PowerTests
         check("Look: no state of a normal battery takes the warning or critical color" + (warm.Count > 0 ? ": " + string.Join("; ", warm) : ""), warm.Count == 0);
         check("Look: a normal battery's fill is the text color or a cool one in every look", PowerLooks.Default.Normal == "textPrimary" && PowerLooks.Ids.All(id => PowerLooks.For(PanelThemes.Resolve(PanelThemes.BuiltIn(id)!)).Normal is "textPrimary" or "accent"));
         check("Look: every color a look takes from a theme reads on that theme" + (failures.Count > 0 ? ": " + string.Join("; ", failures) : ""), failures.Count == 0);
+    }
+
+    // The tooltips: a title line and short "item  value" lines, in the terms of the field, in both languages; no sentences, no implementation names.
+    private static void Texts(Action<string, bool> check)
+    {
+        PowerPart[] parts = [new("cpu", "CPU 封装", 9.1, "RAPL"), new("gpu", "GPU", 7.9, PowerResolver.GpuSource)];
+        var estimate = new PowerSample(17.0, PowerOrigin.Estimated, PowerSource.Components, parts);
+        var summary = new PowerSummary(78.5, 63.4, 40);
+        var text = PowerText.Power(Reading<PowerSample>.Of(estimate), summary).Split('\n');
+        check("Text: the power tooltip's title is the item, the figure and its quality", text[0] == "整机功耗  17.0 W（估算）");
+        check("Text: the source line lists the parts with where each is read", text[1] == "来源  CPU 封装 9.1 W（RAPL） + GPU 7.9 W（NVIDIA 驱动）");
+        check("Text: an estimate says what it leaves out, then the peak and the mean", text[2] == "不含  显示器、存储、风扇、主板、供电损耗" && text[3] == "峰值 / 均值  78.5 / 63.4 W（自打开）" && text.Length == 4);
+        var measured = new PowerSample(23.4, PowerOrigin.Measured, PowerSource.Battery, [parts[0]]);
+        var battery = PowerText.Power(Reading<PowerSample>.Of(measured), null).Split('\n');
+        check("Text: a measurement names its source and has no exclusion line", battery[0] == "整机功耗  23.4 W（实测）" && battery[1] == "来源  电池放电" && battery[2] == "其中  CPU 封装 9.1 W（RAPL）" && battery.Length == 3);
+        var missing = PowerText.Power(Reading<PowerSample>.Of(estimate with { Missing = ["GPU（空闲）"] }), null);
+        check("Text: what could not be read is listed with its reason", missing.Contains("\n未读取  GPU（空闲）"));
+        check("Text: no reading is a dash and the reason", PowerText.Power(Reading<PowerSample>.Unavailable("无功率来源"), null) == "整机功耗  —\n原因  无功率来源");
+
+        var cell = BatteryModel.Build(new BatteryInputs([Cell(57_000, 59_400, 60_000, 0)], AcOnline: true, Mode: PowerMode.BestPerformance)).OrDefault!;
+        var lines = PowerText.Battery(Reading<BatterySample>.Of(cell)).Split('\n');
+        check("Text: the battery tooltip: charge, state, mode, health", lines[0] == "电池  96%（57.0 Wh）" && lines[1] == "状态  交流供电，未充电" && lines[2] == "电源模式  最佳性能" && lines[3].StartsWith("健康度  ") && lines[3].Contains("满充") && lines.Length == 4);
+        var discharging = BatteryModel.Build(new BatteryInputs([Cell(40_000, 60_000, 66_000, -23_400, discharging: true)], AcOnline: false, BatterySaver: true, WindowsRemaining: TimeSpan.FromMinutes(165))).OrDefault!;
+        var more = PowerText.Battery(Reading<BatterySample>.Of(discharging));
+        check("Text: discharging has its rate, the time left and the saver", more.Contains("状态  放电 23.4 W") && more.Contains("剩余  2 小时 45 分") && more.Contains("节电  开启"));
+        var charging = BatteryModel.Build(new BatteryInputs([Cell(40_000, 60_000, 66_000, 31_000, charging: true)], AcOnline: true)).OrDefault!;
+        check("Text: charging has its rate and the time to full", PowerText.Battery(Reading<BatterySample>.Of(charging)) is { } c && c.Contains("状态  充电 31.0 W") && c.Contains("充满需  "));
+
+        Loc.Use(Loc.English);
+        PowerPart[] partsEn = [new("cpu", "CPU package", 9.1, "RAPL"), new("gpu", "GPU", 7.9, PowerResolver.GpuSource)];
+        var estimateEn = new PowerSample(17.0, PowerOrigin.Estimated, PowerSource.Components, partsEn);
+        var english = PowerText.Power(Reading<PowerSample>.Of(estimateEn), summary).Split('\n');
+        check("Text: the English tooltip is the same form",
+            english[0] == "System power  17.0 W (estimated)" && english[1] == "Source  CPU package 9.1 W (RAPL) + GPU 7.9 W (NVIDIA driver)" && english[2] == "Excludes  display, storage, fans, board, PSU loss"
+            && english[3] == "Peak / mean  78.5 / 63.4 W (since opened)");
+        var englishBattery = PowerText.Battery(Reading<BatterySample>.Of(cell)).Split('\n');
+        check("Text: the English battery lines", englishBattery[0] == "Battery  96% (57.0 Wh)" && englishBattery[1] == "State  AC power, not charging" && englishBattery[2] == "Power mode  Best performance");
+        check("Text: the English reading's name", PowerText.Spoken(Reading<PowerSample>.Of(estimateEn), Reading<BatterySample>.Of(cell), true) == "System power ≈17.0 W, estimated; battery 96%, AC power, not charging; power mode Best performance");
+        Loc.Use(Loc.Chinese);
+        var all = new[] { PowerText.Power(Reading<PowerSample>.Of(estimate), summary), PowerText.Battery(Reading<BatterySample>.Of(discharging)), PowerText.Spoken(Reading<PowerSample>.Of(estimate), Reading<BatterySample>.Of(cell), true) };
+        check("Text: no tool name and no full stop in any of them", all.All(line => !line.Contains("nvidia-smi", StringComparison.OrdinalIgnoreCase) && !line.Contains("NVML") && !line.Contains('。')));
     }
 }

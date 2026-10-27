@@ -180,18 +180,18 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Download when s?.Network.OrDefault is { } down: parts.Add(Loc.T("下载 ", "Download ") + MonitorFormat.Rate(down.DownBytesPerSecond).Text); break;
                 case CompactMonitorItems.Upload when s?.Network.OrDefault is { } up: parts.Add(Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(up.UpBytesPerSecond).Text); break;
                 case CompactMonitorItems.Battery when _battery is { } device:
-                    parts.Add(Loc.T($"设备最低电量（鼠标、键盘、耳机等外设中最低的一个）：{device.Name} {device.Percent}%", $"Lowest device battery (the lowest of the mouse, keyboard, headphones and other peripherals): {device.Name} {device.Percent}%")
-                        + (device.Charging ? Loc.T("，充电中", ", charging") : "") + LevelWords(device.Level)); break;
+                    parts.Add(Loc.T("设备最低电量（外设）", "Lowest device battery (peripherals)") + " " + device.Name + " " + device.Percent + "%"
+                        + (device.Charging ? Loc.T("，充电", ", charging") : "") + LevelWords(device.Level)); break;
                 case CompactMonitorItems.Power when s?.Power.OrDefault is { } power:
-                    parts.Add(Loc.T("整机功耗 ", "System power ") + (power.Estimated ? "≈" : "") + PowerFormat.Watts(power.Watts) + " W" + (power.Estimated ? Loc.T("（估算）", " (estimate)") : "")); break;
+                    parts.Add(Loc.T("整机功耗 ", "System power ") + (power.Estimated ? "≈" : "") + PowerText.Watts(power.Watts) + Loc.T("，", ", ") + (power.Estimated ? Loc.T("估算", "estimated") : Loc.T("实测", "measured"))); break;
                 case CompactMonitorItems.Charge when s?.Battery.OrDefault is { } own:
-                    parts.Add(Loc.T("本机电池 ", "This PC's battery ") + MonitorFormat.Percent(own.Percent / 100) + "%，" + BatteryModel.StateName(own.State) + LevelWords(BatteryModel.Level(own, _low))); break;
+                    parts.Add(Loc.T("本机电池 ", "This PC's battery ") + PowerText.Percent(own.Percent) + Loc.T("，", ", ") + PowerText.State(own) + LevelWords(BatteryModel.Level(own, _low))); break;
             }
         }
         return string.Join(Loc.T("；", "; "), parts);
     }
     private static string LevelWords(MemoryLevel level) => level switch
-    { MemoryLevel.Critical => Loc.T("，电量低", ", low"), MemoryLevel.Elevated => Loc.T("，电量偏低", ", getting low"), _ => "" };
+    { MemoryLevel.Critical => Loc.T("，低电量", ", low"), MemoryLevel.Elevated => Loc.T("，电量偏低", ", getting low"), _ => "" };
     // Whether the settings choose the battery reading, shown yet or not (StripAdmission); and whether any reading other than the
     // battery is chosen, which the system sampler reads.
     public bool ChoosesBattery => (_chosen & CompactMonitorItems.Battery) != 0;
@@ -420,7 +420,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private void Power(DrawingContext drawing, double x, double center, PowerSample? power, double ppd)
     {
         double size = Math.Round(11 * _scale), slot = Math.Round(9 * _scale);
-        DeviceGlyphs.Bolt(drawing, new Rect(x, Math.Round(center - size / 2), slot, size), power is null ? UI.Tertiary : _powerStyle.Draw);
+        PowerIcons.Draw(drawing, PowerIcon.Bolt, new Rect(x, Math.Round(center - size / 2), slot, size), power is null ? UI.Tertiary : _powerStyle.Draw, _powerStyle, ppd);
         string figure = power is { } p ? (p.Estimated ? "≈" : "") + PowerFormat.Compact(p.Watts) + "W" : "—";
         MonitorDraw.Baseline(drawing, MonitorDraw.Text(figure, _font, UI.Primary, ppd), x + slot + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
