@@ -15,7 +15,9 @@
     <Resource Include="Assets\Fonts\*.ttf" />
     <EmbeddedResource Include="LiquidGlass\Liquid.hlsl" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl" />
     <EmbeddedResource Include="LiquidGlass\Liquid.vs.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.vs.cso" />
-    <EmbeddedResource Include="LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" />
+    <!-- WithCulture: MSBuild would otherwise read ".ps." as the Pashto culture and move the bytecode into a satellite assembly
+         (ps\BrimDeck.resources.dll), where the renderer does not find it and compiles the shaders at run time. -->
+    <EmbeddedResource Include="LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" WithCulture="false" />
     <EmbeddedResource Include="LiquidGlass\Liquid.zoned.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.zoned.cso" />
     <EmbeddedResource Include="LiquidGlass\Liquid.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl.sha256" />
     <EmbeddedResource Include="LiquidGlass\Frost.hlsl" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl" />

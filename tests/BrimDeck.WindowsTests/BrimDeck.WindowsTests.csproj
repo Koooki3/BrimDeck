@@ -25,7 +25,8 @@
     <Compile Include="..\..\src\BrimDeck\LiquidGlass\*.cs" LinkBase="LiquidGlass" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.hlsl" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.vs.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.vs.cso" />
-    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" />
+    <!-- WithCulture: as in BrimDeck.csproj, ".ps." is not the Pashto culture. -->
+    <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.ps.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.ps.cso" WithCulture="false" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.zoned.cso" LogicalName="BrimDeck.LiquidGlass.Liquid.zoned.cso" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Liquid.hlsl.sha256" LogicalName="BrimDeck.LiquidGlass.Liquid.hlsl.sha256" />
     <EmbeddedResource Include="..\..\src\BrimDeck\LiquidGlass\Frost.hlsl" LogicalName="BrimDeck.LiquidGlass.Frost.hlsl" />

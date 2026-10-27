@@ -577,7 +577,7 @@ internal sealed class ReadingsCarousel : GlideCarousel
     public ReadingsCarousel(MonitorStrip strip, double window, double travel, double edge, TimeSpan elapsed, bool animate)
     {
         Height = strip.Height;
-        strip.Width = strip.PreferredWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        strip.Width = strip.PreferredWidth; strip.Paired = true; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
         Glide(strip, window, travel, edge, elapsed, animate);
     }
 }

@@ -958,41 +958,46 @@ public partial class MainWindow
         int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count(HasQuotaReading) : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
         double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi));
-        // The surface is never narrower than what the row shows needs (CompactMusicLayout.RequiredWidth): a clock alone, or rings
-        // alone, make a short surface. Like the width it asks for, this leaves out the track notice.
+        // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
+        // for, this leaves out the track notice, so the surface does not move for it.
+        var readingWidths = strip?.ItemWidths() ?? [];
         double required = CompactMusicLayout.RequiredWidth(scale, media, steadyText, clock?.ReservedWidth ?? 0,
-            steadyRings > 0 ? Math.Max(1, CompactMusicLayout.Whole(12 * scale)) : 0, strip?.ItemWidths() is [var firstReading, ..] ? firstReading : 0);
+            steadyRings > 0 ? Math.Max(1, CompactMusicLayout.Whole(12 * scale)) : 0, CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0));
         if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5 || Math.Abs(required - _compactRequired) > .5)
         { _compactWanted = wanted; _compactRequired = required; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         double row = layout.RowHeight, unit = CompactMusicLayout.Gap(scale);
         var grid = new Grid { Width = rowWidth, Height = row };
-        // Each part shows whole or not at all. The rings and the readings show the whole ones that fit the room the layout gives
-        // them and scroll through those (CompactSpacing.Window); room a title shorter than its share leaves goes to the readings,
-        // then to the rings, before the row spreads it out.
+        // Each part shows whole or not at all. The title keeps the share the layout gives it (no more than its text needs); the
+        // rings and the readings share what the other parts and the gaps between all of them leave (CompactSpacing.Share): each
+        // shows at least its narrowest window and scrolls through the rest, and they widen by turns. Room neither can use goes
+        // back to the title, then to the gaps between the parts, before the row is centred (CompactSpacing.Arrange).
         bool hasCover = media && layout.CoverWidth >= layout.CoverSize - .001, hasEqualizer = media && layout.EqualizerWidth >= layout.EqualizerSize - .001;
         bool hasClock = clock is not null && layout.ClockWidth >= clock.ReservedWidth - .001, hasText = layout.TextWidth > 0 && text.Length > 0;
         double titleText = hasText ? MusicMarquee.NaturalWidth(text, layout.TextFont, VisualTreeHelper.GetDpi(this).PixelsPerDip) : 0;
         double shortest = CompactMusicLayout.Whole(CompactMusicLayout.MinimumText * scale);
-        double spare = hasText ? Math.Max(0, layout.TextWidth - Math.Max(shortest, Math.Min(titleText, CompactMusicLayout.Whole(CompactSpacing.TitleMax * scale)))) : 0;
-        var readingWidths = strip?.ItemWidths() ?? [];
-        double readingsRoom = strip is null || layout.MonitorWidth <= 0 ? 0 : (layout.MonitorAlone ? layout.MonitorWidth : layout.MonitorWidth - unit) + spare;
-        var readings = CompactSpacing.Window(readingWidths, unit, readingsRoom);
-        if (readings.Count > 0) spare = Math.Max(0, spare - Math.Max(0, readingsRoom - readings.Window));
-        // Readings with room for none of them give that room, gap and all, to the rings.
-        else if (!layout.MonitorAlone) spare += Math.Max(0, layout.MonitorWidth);
-        var rings = CompactSpacing.Window([.. apps.Select(_ => layout.RingSize)], unit, layout.RingWidth > 0 ? layout.RingWidth + spare : 0);
+        double titleShare = hasText ? Math.Min(layout.TextWidth, Math.Max(shortest, Math.Min(titleText, CompactMusicLayout.Whole(CompactSpacing.TitleMax * scale)))) : 0;
+        double titleFloor = hasText ? Math.Min(shortest, Math.Ceiling(titleText)) : 0;
+        var ringWidths = apps.Select(_ => layout.RingSize).ToList();
+        bool hasRings = ringWidths.Count > 0, hasReadings = readingWidths.Count > 0;
+        int parts = (hasCover ? 1 : 0) + (hasEqualizer ? 1 : 0) + (hasClock ? 1 : 0) + (hasText ? 1 : 0) + (hasRings ? 1 : 0) + (hasReadings ? 1 : 0);
+        double others = (hasCover ? layout.CoverSize : 0) + (hasEqualizer ? layout.EqualizerSize : 0) + (hasClock ? clock!.ReservedWidth : 0) + Math.Max(0, parts - 1) * unit;
+        double pool = rowWidth - others - titleShare;
+        // Too short for both narrowest windows, the title gives way down to its shortest.
+        double needed = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
+        if (pool < needed) pool += Math.Min(needed - pool, Math.Max(0, titleShare - titleFloor));
+        var (rings, readings) = CompactSpacing.Share(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool);
         var shown = new List<(object Part, CompactSpacing.Part Size)>();
         if (hasCover) shown.Add(("cover", new(layout.CoverSize)));
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
-            if (part == CompactPart.Rings && rings.Count > 0) shown.Add((part, new(rings.Window - rings.Gaps * unit, rings.Gaps)));
+            if (part == CompactPart.Rings && rings.Count > 0) shown.Add((part, new(rings.Window)));
             else if (part == CompactPart.Music && hasText) shown.Add((part, new(0)));
-            else if (part == CompactPart.Monitor && readings.Count > 0) shown.Add((part, new(readings.Window - readings.Gaps * unit, readings.Gaps)));
+            else if (part == CompactPart.Monitor && readings.Count > 0) shown.Add((part, new(readings.Window)));
         }
         if (hasEqualizer) shown.Add(("equalizer", new(layout.EqualizerSize)));
         if (hasClock) shown.Add(("clock", new(clock!.ReservedWidth)));
         int title = shown.FindIndex(entry => entry.Part is CompactPart.Music);
-        // One gap between every two parts, rings and readings; what is left widens them evenly and then centres the row.
+        // One gap between every two parts; what is left widens them evenly and then centres the row.
         var place = CompactSpacing.Arrange([.. shown.Select(entry => entry.Size)], title, titleText, shortest, grid.Width, unit, scale, dpi);
         bool animate = Soft.Enabled;
         for (int i = 0; i < shown.Count; i++)
@@ -1012,7 +1017,7 @@ public partial class MainWindow
                 case "clock":
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
                 case CompactPart.Rings:
-                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, place.Gap, rings.Count, layout.RingEdge, scale, _quotaElapsed, animate); break;
+                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), scale, _quotaElapsed, animate); break;
                 case CompactPart.Music:
                     // The title's scroll position carries over from the row before (MarqueeScroll).
                     _compactMarquee = new MusicMarquee { Text = text, Scroll = _compactScroll, Width = room, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
@@ -1021,9 +1026,9 @@ public partial class MainWindow
                     element = _compactMarquee; break;
                 default:
                     // The readings that fit stand still; more scroll through the window. Either way they need sampling.
-                    strip!.Gap = place.Gap; strip.Margin = new Thickness(0); _compactStrip = strip;
-                    double travel = readings.Travel > 0 ? CompactSpacing.Travel(readingWidths, place.Gap, room) : 0;
-                    if (travel > 0) element = _stripCarousel = new ReadingsCarousel(strip, room, travel, Snap(layout.TextEdge, dpi), _stripElapsed, animate);
+                    strip!.Margin = new Thickness(0); _compactStrip = strip;
+                    // The fades lie over the gaps beside the window, no wider than those.
+                    if (readings.Travel > 0) element = _stripCarousel = new ReadingsCarousel(strip, readings.Window, readings.Travel, Math.Min(Snap(layout.TextEdge, dpi), place.Gap), _stripElapsed, animate);
                     else { strip.Width = room; element = strip; }
                     break;
             }

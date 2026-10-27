@@ -34,16 +34,24 @@ internal static class ShaderTests
         }
         using var capture = DesktopSource.TryCreate();
         if (capture is null) { Console.WriteLine("SKIP: liquid glass renderer (no Direct3D device on a desktop output)."); return; }
+        int compiles = LiquidRenderer.RuntimeCompiles;
         var clock = Stopwatch.StartNew();
         using (new LiquidRenderer(capture.Device)) { }
         var first = clock.Elapsed.TotalMilliseconds;
-        // Cold, the driver turns the precompiled bytecode into its own (some 375-600 ms here, varying run to run; compiling the
-        // source at run time took some 4 s): the bound only tells the two apart. Warm, on the same device, it takes next to
-        // nothing: what the app's glass pays, its shaders made once before on a worker (SourceStart.Warm).
-        check($"liquid glass: a renderer is made without compiling ({first:0} ms)", first < 1500);
+        // Whether the renderer compiled is counted rather than told by its time: cold, the driver turns the precompiled bytecode
+        // into its own in some 375-600 ms here, slower while a game or a video loads the GPU, and a compile at run time takes from
+        // about 1.4 s (three shaders) to 4 s. The count is what tells them apart: it found Liquid.ps.cso left out of the assembly
+        // (MSBuild took ".ps." for a culture), the renderer compiling at every start. The times are printed, and held to a bound
+        // only with BRIMDECK_TIMING=1 (a quiet machine).
+        check($"liquid glass: a renderer is made without compiling ({first:0} ms; compiled {LiquidRenderer.RuntimeCompiles - compiles}, last {LiquidRenderer.LastCompile})", LiquidRenderer.RuntimeCompiles == compiles);
         clock.Restart();
         using (new LiquidRenderer(capture.Device)) { }
         var again = clock.Elapsed.TotalMilliseconds;
-        check($"liquid glass: a renderer made again on the same device is quick ({again:0.0} ms)", again < 50);
+        // Warm, on the same device, it takes next to nothing: what the app's glass pays, its shaders made once before on a worker
+        // (SourceStart.Warm). Held against the cold make on the same machine at the same moment, so a loaded GPU stretches both.
+        check($"liquid glass: a renderer made again on the same device is quick ({again:0.0} ms, cold {first:0} ms)",
+            LiquidRenderer.RuntimeCompiles == compiles && again < Math.Max(50, first / 4));
+        if (Environment.GetEnvironmentVariable("BRIMDECK_TIMING") == "1")
+            check($"liquid glass (timing): a renderer is made in under 1.5 s cold ({first:0} ms)", first < 1500);
     }
 }

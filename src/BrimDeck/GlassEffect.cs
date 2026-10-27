@@ -57,16 +57,19 @@ internal static class GlassEffect
     // moving frame at 150 %, tertiary text 2.93:1 for 3:1; the pages report it as a warning, LiquidPages.Known); the primary text
     // keeps 4.5:1, and the probe still thickens the glass wherever its ring sees light.
     // Then once more ("浅色/深色液态玻璃都再透一些（0.05）"): the open panel .45 to .40, the collapsed island .40 to .35, both looks.
-    public const double LuminosityBase = .40, LuminosityBaseLight = .40, LuminosityMost = .95;
+    // And again ("液态玻璃再调透0.05，磨砂质感做淡一点"): the open panel .40 to .35, the collapsed island .35 to .30; the frost
+    // lighter by a thinner tint layer (the even veil over the blur: .23 dark and .25 light to .20 both) and half the noise
+    // (AcrylicNoise). The blur itself is DWM's host backdrop, its radius not ours to set.
+    public const double LuminosityBase = .35, LuminosityBaseLight = .35, LuminosityMost = .95;
     // Size makes thickness (step 4 of round 16): the collapsed island, the control layer, thinner and clearer (.35); the open
     // panel, the content layer, its full base - in between with the opening.
-    public const double LuminosityCapsule = .35;
+    public const double LuminosityCapsule = .30;
     public static double PanelBase(bool dark) => dark ? LuminosityBase : LuminosityBaseLight;
     public static double Thickness(double openness, bool dark) => LuminosityCapsule + (PanelBase(dark) - LuminosityCapsule) * Math.Clamp(openness, 0, 1);
     // The luminosity opacity shown: what the text needs (LuminosityFor) and never under the thickness for the opening; in steps.
     public static double Shown(double needed, double openness, bool dark) => Math.Ceiling(Math.Max(needed, Thickness(openness, dark)) * 20 - 1e-9) / 20;
-    public static readonly AcrylicLook AcrylicDark = new(1.3, LuminosityBase, .1373, .1373, .1373, .1373, .23);
-    public static readonly AcrylicLook AcrylicLight = new(1.3, LuminosityBase, .953, .953, .953, .953, .25);
+    public static readonly AcrylicLook AcrylicDark = new(1.3, LuminosityBase, .1373, .1373, .1373, .1373, .20);
+    public static readonly AcrylicLook AcrylicLight = new(1.3, LuminosityBase, .953, .953, .953, .953, .20);
     // The lightness the body may reach for the looks' text: the dark look's light text over at most DarkMost, the light look's
     // dark text over at least LightLeast (sRGB luma; 4.5:1 and more with the text's own colours, #F6F7F9 and #101217).
     // (DarkMost .27 to .26 with the lower floors of 10-27: a moving wallpaper's frame at 100 % left the dark look's open panel at

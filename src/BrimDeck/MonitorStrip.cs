@@ -10,7 +10,8 @@ namespace BrimDeck;
 // the settings' table (CompactReading). It asks for the width of everything chosen (PreferredWidth); when its region in the row
 // is narrower, the row scrolls it through a window of whole readings (ReadingsCarousel, CompactSpacing.Window). Each reading
 // keeps the width of the widest figure it can show (every digit as wide as the widest one), so the window and the readings in
-// it never move with the figures, and two readings stand the row's gap apart (Gap). On its own it shows what fits the width it
+// it never move with the figures; the readings keep their own close spacing (Gap), which the row does not widen. While they
+// scroll, the download and the upload after it are drawn as a pair (Paired). On its own it shows what fits the width it
 // gets (CompactMonitor.Fit), so it never cuts through a figure. It draws itself once per reading; the collapsed row stays still
 // between readings. A reading that joins once its first figures arrive (StripAdmission) fades into its place while the others
 // slide aside; the panel keeps those transitions (StripPresence) across rebuilds of the row.
@@ -23,7 +24,7 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly bool _centered;
     private readonly StripColors _colors;
     private readonly double _scale, _font, _dial, _row, _inner, _arrow, _stroke;
-    private double _gap;
+    private readonly double _gap;
     private MonitorSnapshot? _snapshot;
     // The lowest battery among the devices shown (MainWindow.LowestBattery), for the battery reading.
     private BatteryReading? _battery;
@@ -41,8 +42,9 @@ internal sealed class MonitorStrip : FrameworkElement
         _font = Math.Max(1, CompactMusicLayout.Half(11.5 * _scale));
         // Each ring is a dial carrying its letter, with its figure after it or alone.
         _dial = Math.Max(4, CompactMusicLayout.Whole(16 * _scale));
-        // The row's own gap (CompactMusicLayout.Gap), so the readings stand as far apart as every other part; the row may widen it.
-        _gap = CompactMusicLayout.Gap(_scale);
+        // Closer than the row's gap between its parts, which never widens this one; the dials alone a little further apart, as
+        // the readings were set before the row's spacing (upstream).
+        _gap = CompactMusicLayout.Whole((CompactMonitor.RingsOnly(_shown, _values) ? 7 : 6) * _scale);
         // The space between a reading's mark (dial or arrow) and its figure, from ink to ink.
         _inner = Math.Max(1, CompactMusicLayout.Whole(4 * _scale));
         _arrow = Math.Round(9 * _scale); _stroke = Math.Max(1, 1.4 * _scale);
@@ -117,14 +119,27 @@ internal sealed class MonitorStrip : FrameworkElement
     private CompactMonitorItems Shown => _shown;
     // Rounded up to whole device pixels by the row (DevicePixels.Up), which must not drop a reading.
     public double PreferredWidth => CompactMonitor.Width(Shown, ItemWidth, _gap);
-    // The gap between two readings: the row's, widened with the row's other gaps (CompactSpacing.Arrange).
-    public double Gap
+    // The gap between two readings.
+    public double Gap => _gap;
+    // While the readings scroll (ReadingsCarousel), the download and the upload right after it are drawn as a pair: the upload
+    // follows the download's figure, not the room kept for its widest, and the room their figures do not use lies after the
+    // upload. Standing still, each keeps the room of its widest figure.
+    public bool Paired { get; set; }
+    // The width of each reading shown, left to right, for the window the row scrolls them through (CompactSpacing.Window). The
+    // upload right after the download is one item with it, with the gap between them, so the carousel never stops between them.
+    public List<double> ItemWidths()
     {
-        get => _gap;
-        set { if (_gap == value || !double.IsFinite(value) || value < 0) return; _gap = value; InvalidateArrange(); InvalidateVisual(); }
+        var widths = new List<double>();
+        var previous = CompactMonitorItems.None;
+        foreach (var item in _order)
+        {
+            double width = ItemWidth(item);
+            if (item == CompactMonitorItems.Upload && previous == CompactMonitorItems.Download) widths[^1] += _gap + width;
+            else widths.Add(width);
+            previous = item;
+        }
+        return widths;
     }
-    // The width of each reading shown, left to right, for the window the row scrolls them through (CompactSpacing.Window).
-    public List<double> ItemWidths() => [.. _order.Select(ItemWidth)];
     // Whether any reading is chosen and available: the row then shows the strip, and it needs readings
     // (MainWindow.UpdateMonitorDemand).
     public bool Showing(double now) => Shown != CompactMonitorItems.None;
@@ -171,11 +186,16 @@ internal sealed class MonitorStrip : FrameworkElement
         // From the left: the row gives the strip its own width, or a carousel scrolls it from its first reading.
         double x = _centered ? (w - total) / 2 : 0;
         var s = _snapshot;
+        // Paired, the upload right after the download is drawn this much further left: the room the download's figure leaves.
+        double pull = 0;
         foreach (var item in _order)
         {
             double presence = _presence.At(item, now), width = ItemWidth(item);
-            if (presence <= 0) continue;
-            double advance = presence;
+            if (presence <= 0) { pull = 0; continue; }
+            double advance = presence, at = x;
+            if (item == CompactMonitorItems.Upload && presence >= .999) x -= pull;
+            pull = Paired && item == CompactMonitorItems.Download && presence >= .999
+                ? Math.Max(0, width - FigureWidth(item, Figure(item, s))) : 0;
             // A reading on its way in or out is drawn smaller and fainter, within the room it has (CompactSpacing.Zoom), so it
             // never lies over the reading or the part beside it.
             bool partial = presence < .999;
@@ -206,7 +226,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Battery: Battery(drawing, left, center, _battery, color, level, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
-            x += (width + _gap) * advance;
+            x = at + (width + _gap) * advance;
         }
     }
 

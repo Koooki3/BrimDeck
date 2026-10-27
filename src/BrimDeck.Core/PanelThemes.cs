@@ -35,6 +35,10 @@ public static partial class PanelThemes
     public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
     public const string GlassLight = "liquid-glass-light", GlassDark = "liquid-glass-dark", IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2", PixelBlocks = "pixel-blocks";
     public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2, ThumbContrast = 2;
+    // The warning and critical colors, the theme's and those chosen for an application or the collapsed readings: they color a
+    // quota's number and a reading's value as well as bars and rings, so they are held to the body-text minimum everywhere,
+    // and a number and its bar keep one color.
+    public const double LevelContrast = TextContrast;
     // The scroll bar's handle at rest is drawn at this opacity or, where that would leave it under ThumbContrast, at the least
     // opacity in steps of 0.05 that reaches it (PanelPalette.ThumbRestOpacity).
     public const double ThumbRest = .55;

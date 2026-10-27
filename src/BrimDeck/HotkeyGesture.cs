@@ -71,7 +71,7 @@ public static class HotkeyGesture
         _ => key.ToString()
     };
 
-    private static HotkeyModifiers FromWpf(ModifierKeys modifiers)
+    internal static HotkeyModifiers FromWpf(ModifierKeys modifiers)
         => (modifiers.HasFlag(ModifierKeys.Control) ? HotkeyModifiers.Ctrl : 0) | (modifiers.HasFlag(ModifierKeys.Alt) ? HotkeyModifiers.Alt : 0)
            | (modifiers.HasFlag(ModifierKeys.Shift) ? HotkeyModifiers.Shift : 0) | (modifiers.HasFlag(ModifierKeys.Windows) ? HotkeyModifiers.Win : 0);
 

@@ -927,14 +927,14 @@ float3 Glass(float2 p, float sd, float2 n)
 
 // The acrylic body over a pixel as GlassBackdrop has DWM draw it (GlassEffect.AcrylicMatrix): the backdrop under a Gaussian
 // of AcrylicDip, its saturation 1.3 about its luma, its luma moved toward the look's by the luminosity opacity shown
-// (PresenceInfo.w), the look's tint laid over (#232323 at .23 dark, #F3F3F3 at .25 light). For the rim lens's colour.
+// (PresenceInfo.w), the look's tint laid over (#232323 dark, #F3F3F3 light, both at .20: GlassEffect.AcrylicDark, AcrylicLight). For the rim lens's colour.
 static const float AcrylicDip = 30;
 float3 AcrylicBody(float2 p)
 {
     float3 c = Frost(p + Pad, AcrylicDip * Scale / .75);
     float l = Luma(c);
     c = l + (c - l) * 1.3;
-    float dark = saturate(Dark), target = lerp(.953, .1373, dark), t = lerp(.25, .23, dark);
+    float dark = saturate(Dark), target = lerp(.953, .1373, dark), t = .20;
     c += saturate(PresenceInfo.w) * (target - Luma(c));
     return saturate(c * (1 - t) + t * target);
 }
@@ -959,42 +959,50 @@ float4 Shade(float2 p, bool slab)
     if (cover <= 0) return 0;
     float3 glass;
     if (!slab) glass = Glass(p, sd, n);
-    else if (PresenceInfo.z > 0)
-    {
-        // Round 16, step 9: only the slab's bevel, over the acrylic body (GlassBackdrop's rim lens): the refraction where it
-        // lives, at the contour, fading out before the bevel meets the flat top, so the body's middle stays the acrylic's. No
-        // inset shadow and no pressed glow of its own (the acrylic's rim light and pointer glow answer).
-        float corner = max(max(CornerTop, CornerBottom), 1), shorter = min(Size.x, Size.y);
-        float bevel = min(min(shorter * .48, BevelDip * Scale), corner * BevelOfRadius);
-        float edge = saturate(1 + sd / bevel);
-        float lens = smoothstep(.15, .75, edge) * saturate(PresenceInfo.z);
-        if (lens <= 0) return 0;
-        glass = Slab(p, sd, n);
-        // Toward the acrylic body as DWM draws it here (AcrylicBody): the lens bends what lies behind at the contour, its detail
-        // and its light kept at about half, rather than lay a ring of the bare backdrop's brightness around the body (offscreen:
-        // a light ring on dark glass over a bright page, a dark one at a page's dark edge) or one of a flat grey.
-        float shown = FrostShown;
-        glass = lerp(glass, AcrylicBody(p), RimTint);
-        FrostShown = shown;
-        cover *= lens;
-    }
     else
     {
-        glass = Slab(p, sd, n);
-        // The lgw inner shadow and its press, over the slab as over the port.
-        float2 halfSize = float2(Size.x, Size.y + TopExtra) * .5, centred = float2(p.x, p.y + TopExtra) - halfSize;
-        float r = (CornerTop > 0 ? CornerTop : CornerBottom), sigma = max(InsetBlur * .5 * Scale, .5);
-        float shadow = InsetAlpha * (1 - BoxCoverage(centred - float2(0, InsetY * Scale), halfSize, r, sigma, Narrow));
-        if (Press > 0)
+        // Round 16, step 9 (PresenceInfo.z > 0): only the slab's bevel, over the acrylic body (GlassBackdrop's rim lens): the
+        // refraction where it lives, at the contour, fading out before the bevel meets the flat top, so the body's middle stays
+        // the acrylic's. No inset shadow and no pressed glow of its own (the acrylic's rim light and pointer glow answer).
+        // The slab is called once for both (a second call site inlines it again: the bytecode half as large again, and the
+        // driver's first build of it, which a renderer's first frame waits for, slower alike).
+        bool rim = PresenceInfo.z > 0;
+        float lens = 1;
+        [branch] if (rim)
         {
-            float k = InsetBlur / 20;
-            float deep = .18 * (1 - BoxCoverage(centred - float2(0, -8 * k * Scale), halfSize, r, max(8 * k * Scale, .5), Narrow));
-            shadow = 1 - (1 - shadow) * (1 - Press * deep);
-            float spread = 3 * k * Scale;
-            float glow = .55 * (1 - BoxCoverage(centred, halfSize - spread, max(r - spread, 0), max(8 * k * Scale, .5), Narrow));
-            glass = lerp(glass, 1, Press * glow);
+            float corner = max(max(CornerTop, CornerBottom), 1), shorter = min(Size.x, Size.y);
+            float bevel = min(min(shorter * .48, BevelDip * Scale), corner * BevelOfRadius);
+            lens = smoothstep(.15, .75, saturate(1 + sd / bevel)) * saturate(PresenceInfo.z);
+            if (lens <= 0) return 0;
         }
-        glass = saturate(glass * (1 - shadow));
+        glass = Slab(p, sd, n);
+        [branch] if (rim)
+        {
+            // Toward the acrylic body as DWM draws it here (AcrylicBody): the lens bends what lies behind at the contour, its
+            // detail and its light kept at about half, rather than lay a ring of the bare backdrop's brightness around the body
+            // (offscreen: a light ring on dark glass over a bright page, a dark one at a page's dark edge) or one of a flat grey.
+            float shown = FrostShown;
+            glass = lerp(glass, AcrylicBody(p), RimTint);
+            FrostShown = shown;
+            cover *= lens;
+        }
+        else
+        {
+            // The lgw inner shadow and its press, over the slab as over the port.
+            float2 halfSize = float2(Size.x, Size.y + TopExtra) * .5, centred = float2(p.x, p.y + TopExtra) - halfSize;
+            float r = (CornerTop > 0 ? CornerTop : CornerBottom), sigma = max(InsetBlur * .5 * Scale, .5);
+            float shadow = InsetAlpha * (1 - BoxCoverage(centred - float2(0, InsetY * Scale), halfSize, r, sigma, Narrow));
+            if (Press > 0)
+            {
+                float k = InsetBlur / 20;
+                float deep = .18 * (1 - BoxCoverage(centred - float2(0, -8 * k * Scale), halfSize, r, max(8 * k * Scale, .5), Narrow));
+                shadow = 1 - (1 - shadow) * (1 - Press * deep);
+                float spread = 3 * k * Scale;
+                float glow = .55 * (1 - BoxCoverage(centred, halfSize - spread, max(r - spread, 0), max(8 * k * Scale, .5), Narrow));
+                glass = lerp(glass, 1, Press * glow);
+            }
+            glass = saturate(glass * (1 - shadow));
+        }
     }
     return float4(Grain(glass, p) * cover, cover);
 }
