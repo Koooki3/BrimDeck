@@ -34,8 +34,11 @@ internal sealed class NoticeFxLook
     private readonly Dictionary<(int Kind, int Alpha), Brush> _brushes = [];
     private readonly Pen?[] _rims;
     private readonly Brush[] _fills;
-    private NoticeFxLook(Brush[] fills, Pen?[] rims, Color glow, double step, bool glows) { _fills = fills; _rims = rims; Glow = glow; Step = step; Glows = glows; }
+    private NoticeFxLook(Brush[] fills, Pen?[] rims, Color glow, double step, bool glows, bool translucent) { _fills = fills; _rims = rims; Glow = glow; Step = step; Glows = glows; Translucent = translucent; }
 
+    // Whether the surface lets what is behind it show (a theme file may make it so; the glass themes do): its droplets are then
+    // filled as one shape, so that where two overlap they are not drawn twice as dense, and nothing is drawn over the surface.
+    public bool Translucent { get; }
     // The surface's fill at a place down its height (0 at its top, 1 at its bottom): its color with the theme's gradient over it,
     // which runs from top to bottom (PanelTheme.SurfaceGradient), so a droplet is the color of the surface where it leaves it.
     public Brush Fill(double down) => _fills[(int)Math.Round(Math.Clamp(down, 0, 1) * (_fills.Length - 1))];
@@ -96,7 +99,7 @@ internal sealed class NoticeFxLook
             }
             fills[i] = Frozen(new SolidColorBrush(color));
         }
-        return new(fills, rims, GlowColor(look, palette, plan.Tone), step, !look.HighContrast);
+        return new(fills, rims, GlowColor(look, palette, plan.Tone), step, !look.HighContrast, look.Surface.A < 255);
     }
 
     // The glow of the theme in the notice's tone. The design's own color for a dark theme; the accent where a theme glows or is
@@ -157,6 +160,7 @@ internal sealed class NoticeFxBody : FrameworkElement
         {
             bool rim = pass == 0;
             if (rim && !look.HasRim) continue;
+            if (!rim && look.Translucent && step <= 0) { FillTogether(drawing, frame, look, At); continue; }
             foreach (var disc in frame.Discs)
             {
                 var center = At(disc.Side, new LiquidPoint(disc.X, disc.Y));
@@ -186,6 +190,33 @@ internal sealed class NoticeFxBody : FrameworkElement
                 drawing.DrawGeometry(rim ? null : look.Fill(.5), rim ? look.Rim(Along(p1.X)) : null, geometry);
             }
         }
+    }
+
+    // A translucent surface's droplets and necks as one shape. Every figure runs clockwise on the screen, so that where figures
+    // overlap the nonzero rule fills the union once.
+    private static void FillTogether(DrawingContext drawing, LiquidFrame frame, NoticeFxLook look, Func<int, LiquidPoint, Point> at)
+    {
+        var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
+        using (var path = geometry.Open())
+        {
+            foreach (var disc in frame.Discs)
+            {
+                var c = at(disc.Side, new LiquidPoint(disc.X, disc.Y));
+                path.BeginFigure(new Point(c.X - disc.R, c.Y), true, true);
+                path.ArcTo(new Point(c.X + disc.R, c.Y), new Size(disc.R, disc.R), 0, false, SweepDirection.Clockwise, true, false);
+                path.ArcTo(new Point(c.X - disc.R, c.Y), new Size(disc.R, disc.R), 0, false, SweepDirection.Clockwise, true, false);
+            }
+            foreach (var neck in frame.Necks)
+            {
+                Point p1 = at(neck.Side, neck.P1), h1 = at(neck.Side, neck.H1), h3 = at(neck.Side, neck.H3), p3 = at(neck.Side, neck.P3);
+                Point p4 = at(neck.Side, neck.P4), h4 = at(neck.Side, neck.H4), h2 = at(neck.Side, neck.H2), p2 = at(neck.Side, neck.P2);
+                double area = (p1.X * p3.Y - p3.X * p1.Y) + (p3.X * p4.Y - p4.X * p3.Y) + (p4.X * p2.Y - p2.X * p4.Y) + (p2.X * p1.Y - p1.X * p2.Y);
+                if (area >= 0) { path.BeginFigure(p1, true, true); path.BezierTo(h1, h3, p3, true, false); path.LineTo(p4, true, false); path.BezierTo(h4, h2, p2, true, false); }
+                else { path.BeginFigure(p2, true, true); path.BezierTo(h2, h4, p4, true, false); path.LineTo(p3, true, false); path.BezierTo(h3, h1, p1, true, false); }
+            }
+        }
+        geometry.Freeze();
+        drawing.DrawGeometry(look.Fill(.5), null, geometry);
     }
 
     // A block as the pixel theme draws a droplet: as wide as the droplet, in whole steps, on the grid.
@@ -264,7 +295,7 @@ internal sealed class NoticeFxGlow : FrameworkElement
     {
         if (State is not { } state || !state.Frame.Alive) return;
         var frame = state.Frame; var look = state.Look;
-        if (state.Form != LiquidForm.Notch) DrawMouths(drawing, state, frame, look);
+        if (state.Form != LiquidForm.Notch && !look.Translucent) DrawMouths(drawing, state, frame, look);
         if (!look.Glows) return;
         double strength = Math.Clamp(state.Plan.Glow, 0, 1.25);
         switch (state.Form)
