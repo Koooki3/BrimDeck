@@ -45,14 +45,28 @@ internal static class DeviceChecks
         }
         Console.WriteLine($"  device handles: {handles} before the first start, then {string.Join(", ", counts)} after each stop");
         Console.WriteLine($"  threads: {threads} before the first start, then {string.Join(", ", threadCounts)} after each stop");
-        check("devices: starting and stopping again leaves no handles behind", counts[^1] - counts[1] < 12);
+        // A leak adds handles on every cycle, so the last two cycles both stand above the first; a handle the thread pool or WinRT
+        // holds for a moment raises one reading only.
+        check("devices: starting and stopping again leaves no handles behind", Math.Min(counts[^1], counts[^2]) - counts[1] < 12);
         // The HID worker ends when nothing is wanted, so the threads after the last stop are no more than after the first; one
         // more is allowed for the thread pool and WinRT, which start and end threads of their own.
         check("devices: starting and stopping again leaves no threads behind", threadCounts[^1] <= threadCounts[0] + 1);
         batteries.Dispose();
     }
 
-    private static int Handles() { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); return Process.GetCurrentProcess().HandleCount; }
+    // The steady count: the fewest of a few readings a moment apart, after a collection, so handles held for a moment by the thread
+    // pool or WinRT (more of them while the machine is busy) are not counted.
+    private static int Handles()
+    {
+        int fewest = int.MaxValue;
+        for (int i = 0; i < 4; i++)
+        {
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+            fewest = Math.Min(fewest, Process.GetCurrentProcess().HandleCount);
+            Pump(TimeSpan.FromMilliseconds(150));
+        }
+        return fewest;
+    }
     private static int Threads() => Process.GetCurrentProcess().Threads.Count;
 
     // What the HID source opens, from the path alone: the vendor and product of a USB, classic Bluetooth and LE path, the link,

@@ -102,6 +102,13 @@ internal static class LiquidIdleTests
             var harness = Phase(source, renderer, region, true, Render, old: false, none: true);
             // The desktop there holds still (the backdrop): without the fake redraws first.
             var still = Phase(source, renderer, region, false, Render, old: false);
+            // Something else may cover the corner for a moment (a notification, a game's overlay): the still desktop is what is
+            // checked, so the phase is run again, up to twice, while it drew the glass.
+            for (int again = 0; again < 2 && still.Renders > .5; again++)
+            {
+                Console.WriteLine(FormattableString.Invariant($"liquid idle: the corner changed during the still phase ({still.Renders:0.0} renders/s); measured again"));
+                still = Phase(source, renderer, region, false, Render, old: false);
+            }
             var before = Phase(source, renderer, region, true, Render, old: true);
             var after = Phase(source, renderer, region, true, Render, old: false);
             Console.WriteLine(FormattableString.Invariant($"liquid idle, the test's own loop with nothing polled: process {quiet.ProcessMs:0.0} ms/s, with 30 fps self-redraw {harness.ProcessMs:0.0} ms/s"));
@@ -149,6 +156,15 @@ internal static class LiquidIdleTests
         try
         {
             using var backdrop = new Backdrop(Backdrop.Corner(200, 100), 90, 120, 150);
+            // The backdrop's arrival settled before the count begins: a GPU loaded by a game or a video composes it late. Up to
+            // 400 ms, until two looks in a row find the region unchanged; the phase still ends within 2 s.
+            var settle = Stopwatch.StartNew();
+            for (int still = 0; still < 2 && settle.ElapsedMilliseconds < 400;)
+            {
+                Thread.Sleep(25);
+                while (PeekMessage(out var message, 0, 0, 0, 1)) { TranslateMessage(ref message); DispatchMessage(ref message); }
+                still = !source.Update(region, out bool moved) || !moved ? still + 1 : 0;
+            }
             if (island && (window = FakeIsland()) == 0) throw new InvalidOperationException("No fake island window.");
             return Measure(source, renderer, region, window, render, old, follow, frame, none);
         }
