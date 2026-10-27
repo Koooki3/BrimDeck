@@ -113,13 +113,11 @@ internal sealed class NoticeFxLook
         return Color.FromRgb(0xD8, 0xDD, 0xE6);
     }
 
-    // The glow at an alpha, as a band that fades out towards both its ends (the capsule's edge) or as a spot (the indicator's
-    // sweep). Made once per alpha.
+    // The glow at an alpha, as a band that fades out towards both its ends (the capsule's edge). Made once per alpha.
     public Brush Fade(double alpha) => Cached(0, alpha, a => new LinearGradientBrush(new GradientStopCollection
     {
         new(WithAlpha(0), 0), new(WithAlpha(a), .22), new(WithAlpha(a), .78), new(WithAlpha(0), 1)
     }, new Point(0, 0), new Point(1, 0)));
-    public Brush Spot(double alpha) => Cached(1, alpha, a => new RadialGradientBrush(new GradientStopCollection { new(WithAlpha(a), 0), new(WithAlpha(a * .45), .45), new(WithAlpha(0), 1) }));
     public Brush Plain(double alpha) => Cached(2, alpha, a => new SolidColorBrush(WithAlpha(a)));
 
     private Brush Cached(int kind, double alpha, Func<double, Brush> make)
@@ -302,7 +300,6 @@ internal sealed class NoticeFxGlow : FrameworkElement
         switch (state.Form)
         {
             case LiquidForm.Notch: DrawOutline(drawing, state, frame, look, strength); break;
-            case LiquidForm.Line: DrawSweeps(drawing, state, frame, look, strength); break;
             default: DrawEdges(drawing, state, look, Math.Min(1, frame.Glow * strength)); break;
         }
     }
@@ -343,29 +340,6 @@ internal sealed class NoticeFxGlow : FrameworkElement
             var brush = look.Fade(alpha * amount);
             drawing.DrawRectangle(brush, null, new Rect(x0, top - thickness / 2, x1 - x0, thickness));
             drawing.DrawRectangle(brush, null, new Rect(x0, bottom - thickness / 2, x1 - x0, thickness));
-        }
-    }
-
-    private static void DrawSweeps(DrawingContext drawing, NoticeFxState state, LiquidFrame frame, NoticeFxLook look, double strength)
-    {
-        double radius = state.Height / 2, middle = state.Left + state.Width / 2, half = Math.Max(0, (state.Width - 2 * radius) / 2);
-        if (half < 4) return;
-        for (int i = 0; i < frame.SweepCount; i++)
-        {
-            var sweep = frame.Sweeps[i];
-            double amount = Math.Min(1, sweep.Amount * strength);
-            if (amount <= .02) continue;
-            foreach (int side in new[] { -1, 1 })
-            {
-                double x = middle + side * sweep.Position * half;
-                foreach (double y in new[] { state.Top, state.Top + state.Height })
-                {
-                    if (look.Step > 0) { drawing.DrawRectangle(look.Plain(amount), null, new Rect(Math.Round(x / look.Step) * look.Step - look.Step * 2, y - look.Step / 2, look.Step * 4, look.Step)); continue; }
-                    // A halo a little wider than the line it lights, and the line itself.
-                    drawing.DrawEllipse(look.Spot(amount * .5), null, new Point(x, y), 38, 6);
-                    drawing.DrawRectangle(look.Fade(amount), null, new Rect(x - 22, y - .65, 44, 1.3));
-                }
-            }
         }
     }
 

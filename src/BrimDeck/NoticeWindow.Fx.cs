@@ -7,8 +7,9 @@ namespace BrimDeck;
 
 // The liquid motion of the arriving notice (NoticeLiquid, NoticeFxVisuals). It plays on the notice's surface once the surface has
 // grown to size: the capsule's ends throw droplets and flow back, the notch swells at its lower corners and the bulges run
-// round its outline, the indicator's card sheds a drop at each end, and an edge glow lights twice. The capsule's and the
-// notch's motion is the maintainer's design (see NoticeFxVisuals); the rest is ours.
+// round its outline, and an edge glow lights twice. The capsule's and the notch's motion is the maintainer's design (see
+// NoticeFxVisuals); the rest is ours. The indicator has no such layer: its motion is the surface's own, a draw-back before it
+// grows and a carry past its size as it returns (NoticeWindow.Line.cs).
 //
 // It costs nothing while it does not play. While it does (a second and a half to two seconds), the display's own frames drive it
 // (Motion, the clock the monitor page's readings use), which lets go of the display as soon as the motion has nothing left to
@@ -24,10 +25,10 @@ internal sealed partial class NoticeWindow
     private (NoticeLook Look, NoticeFxTone Tone, NoticeFxLook Fx)? _fxLookCache;
 
     // Whether the motion may play: with animations on, in the theme's own colors (high contrast drops the glow and is left still).
-    private bool FxAllowed => Soft.Enabled && !_look.HighContrast && Duration() > 0;
+    private bool FxAllowed => Soft.Enabled && !Indicator && !_look.HighContrast && Duration() > 0;
 
-    // Extra room to the sides of the window for the droplets of a capsule or a card; the notch's bulges stay in the glow's margin.
-    private double FxSideMargin => Soft.Enabled && !SystemParameters.HighContrast && _deck.Collapsed.Style != CompactStyle.Notch ? LiquidReach : 0;
+    // Extra room to the sides of the window for the capsule's droplets; the notch's bulges stay in the glow's margin.
+    private double FxSideMargin => Soft.Enabled && !SystemParameters.HighContrast && _deck.Collapsed.Style == CompactStyle.Capsule ? LiquidReach : 0;
 
     private void FxSized()
     {
@@ -52,9 +53,9 @@ internal sealed partial class NoticeWindow
         // Whatever still plays from before goes at once; the notice has its own motion now.
         FxStop();
         var notice = Notice;
-        var plan = NoticeFx.For(item.Kind, item.Priority, item.Urgent, notice?.Call ?? false, notice?.Category);
+        var plan = PlanOf(item);
         var frame = _toastFrame;
-        var form = Indicator ? LiquidForm.Line : _deck.Collapsed.Style == CompactStyle.Notch ? LiquidForm.Notch : LiquidForm.Capsule;
+        var form = _deck.Collapsed.Style == CompactStyle.Notch ? LiquidForm.Notch : LiquidForm.Capsule;
         var liquid = new NoticeLiquid(new LiquidSpec(form, frame.Rect.Width, frame.Rect.Height, NoticeLiquid.DesignSeed, Intensity: plan.Intensity, Separation: plan.Separation,
             Shoulder: frame.Shoulder, CornerRadius: frame.BottomRadius, MaxInset: NoticeLiquid.MaxInset(frame.Rect.Height, ToastMetrics(frame.Rect.Height).Padding, frame.Rect.Height / 2 - 6)));
         if (_fxLookCache is not { } cached || !ReferenceEquals(cached.Look, _look) || cached.Tone != plan.Tone)
@@ -77,7 +78,7 @@ internal sealed partial class NoticeWindow
         fx.Liquid.Sample(t, fx.Frame, fx.Width, fx.Height);
         var frame = fx.Frame;
         // The rest at the end draws nothing: the motion lets go of the display as soon as there is nothing left to show.
-        bool shows = frame.Alive && (frame.Glow > .004 || frame.SweepCount > 0 || frame.Discs.Count > 0 || frame.BumpRuns.Count > 0 || frame.InsetLeft > .02 || frame.InsetRight > .02);
+        bool shows = frame.Alive && (frame.Glow > .004 || frame.Discs.Count > 0 || frame.BumpRuns.Count > 0 || frame.InsetLeft > .02 || frame.InsetRight > .02);
         if (!shows && t > fx.Liquid.Separation) { FxStop(); return false; }
         SetInsets(frame.InsetLeft, frame.InsetRight);
         _fxBody.InvalidateVisual(); _fxGlow.InvalidateVisual();
