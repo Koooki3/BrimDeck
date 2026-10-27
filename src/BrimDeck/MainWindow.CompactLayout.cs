@@ -109,7 +109,7 @@ public partial class MainWindow
         view.Children.Add(parts);
         RenderOptions.SetClearTypeHint(parts, ClearTypeHint.Enabled);
         CompactAlert.Children.Add(view);
-        double shown = _alertTimer.Interval.TotalSeconds;
+        double shown = AlertShown.TotalSeconds;
         var (start, end) = CompactAlertLayout.Scroll(overflow, shown);
         static KeyTime At(double seconds) => KeyTime.FromTimeSpan(TimeSpan.FromSeconds(seconds));
         var glide = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(shown), FillBehavior = FillBehavior.HoldEnd };
@@ -124,6 +124,8 @@ public partial class MainWindow
         if (elapsed > 0) clock.Controller!.Seek(TimeSpan.FromSeconds(elapsed), TimeSeekOrigin.BeginTime);
     }
 
+    // How long a quota notice shows (NoticeCenter.SubmitQuota gives it this duration); a longer notice scrolls once in it.
+    internal static readonly TimeSpan AlertShown = TimeSpan.FromSeconds(5);
     private enum RegionAnchor { Left, Center, Right }
     // Rounded down to whole device pixels, so regions never add up to more than the row.
     private static double SnapDown(double value, double dpi) => DevicePixels.Down(value, dpi);

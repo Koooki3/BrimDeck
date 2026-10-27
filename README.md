@@ -106,6 +106,12 @@ The page is adapted from [ftop](https://github.com/Nongfsq/ftop) by Nongfsq (MIT
 - Built-in themes include Dark, Light, One Dark Pro, GitHub Dark, GitHub Light, Dracula, Night Owl and Cyberpunk: Edgerunners.
 - On the Panel theme page in settings, you can change the background, foreground, accent and other colors and save them as a custom theme, or write a theme file by following the [theme guide](docs/en-US/themes.md).
 
+### Live notices
+
+- When a notification arrives, the notch, capsule or indicator grows out of its place with the application's icon, title and summary; hover for the details or open the application, and it returns to its shape. Notices take the panel theme.
+- Receives Windows app notifications; alarms, mail and event reminders among them are recognized and shown by kind.
+- Never takes the focus or interrupts the open panel; nothing pops up while locked, in full screen, in a focus session or presenting, with one summary afterwards; notice history is kept encrypted on this PC for 24 hours, which can be switched off. Off by default; see [Live notices](docs/en-US/notices.md).
+
 ## Install
 
 Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited support.

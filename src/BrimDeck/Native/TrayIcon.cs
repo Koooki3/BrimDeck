@@ -29,6 +29,8 @@ public sealed class TrayIcon : IDisposable
     }
     private bool _ownsIcon;
     private long _dpi;
+    // An extra entry above Settings while dynamic notices are on: pausing or resuming them.
+    public Func<(string Header, Action Click)?>? NoticeEntry { get; set; }
     // The notification area shows the small icon size at the primary monitor's scale. The executable's icon group carries
     // every size, so the exact one is extracted instead of scaling another.
     private static IntPtr LoadTrayIcon(out bool owned)
@@ -63,6 +65,11 @@ public sealed class TrayIcon : IDisposable
         {
             SetForegroundWindow(hwnd);
             var menu = CreateMenu(_settings, _exit, _toggleHidden, _hidden?.Invoke() ?? false);
+            if (NoticeEntry?.Invoke() is { } entry)
+            {
+                var item = new MenuItem { Header = entry.Header }; item.Click += (_, _) => entry.Click();
+                menu.Items.Insert(_toggleHidden is null ? 0 : 1, item);
+            }
             menu.Placement = PlacementMode.MousePoint;
             menu.IsOpen = true;
         }

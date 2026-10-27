@@ -1,7 +1,8 @@
 namespace BrimDeck.Core;
 
-// Resize is one setting for four registrations: its modifiers with each arrow key (see Arrows).
-public enum HotkeyKind { Hide, Expand, Resize }
+// Notices opens the shown notice's details for the keyboard, or the notice history page. Resize is one setting for four
+// registrations: its modifiers with each arrow key (see Arrows).
+public enum HotkeyKind { Hide, Expand, Notices, Resize }
 
 // Unset: no combination saved. Active: registered. InUse: another program holds the combination. Invalid: the text is not
 // an allowed combination. Duplicate: a combination another hotkey has, which keeps it (see Plan and PlanArrows).
@@ -65,17 +66,22 @@ public static class HotkeyText
     public static bool Same(string? first, string? second)
         => Normalize(first) is { Length: > 0 } a && string.Equals(a, Normalize(second), StringComparison.OrdinalIgnoreCase);
 
-    // What each hotkey should do before registration: Unset, Invalid, Duplicate (the expand hotkey yields to the hide hotkey
-    // when both name the same combination), or null to register its canonical text. isKey checks the main key's name.
+    // What each hotkey should do before registration: Unset, Invalid, Duplicate (a later hotkey yields to an earlier one that
+    // names the same combination: expand to hide, notices to both), or null to register its canonical text. isKey checks the
+    // main key's name.
     public static (HotkeyStatus? Status, string Text) Plan(HotkeyKind kind, string? hide, string? expand, Func<string, bool> isKey)
+        => Plan(kind, hide, expand, null, isKey);
+    public static (HotkeyStatus? Status, string Text) Plan(HotkeyKind kind, string? hide, string? expand, string? notices, Func<string, bool> isKey)
     {
-        string own = kind == HotkeyKind.Hide ? hide ?? "" : expand ?? "";
+        string?[] texts = [hide, expand, notices];
+        string own = texts[(int)kind] ?? "";
         if (IsUnset(own)) return (HotkeyStatus.Unset, "");
         if (!TryParse(own, out var modifiers, out var key) || !isKey(key)) return (HotkeyStatus.Invalid, "");
         string text = Format(modifiers, key);
-        if (kind == HotkeyKind.Expand && Normalize(hide) is { Length: > 0 } other && string.Equals(other, text, StringComparison.OrdinalIgnoreCase)
-            && TryParse(hide, out _, out var otherKey) && isKey(otherKey))
-            return (HotkeyStatus.Duplicate, text);
+        for (int earlier = 0; earlier < (int)kind; earlier++)
+            if (Normalize(texts[earlier]) is { Length: > 0 } other && string.Equals(other, text, StringComparison.OrdinalIgnoreCase)
+                && TryParse(texts[earlier], out _, out var otherKey) && isKey(otherKey))
+                return (HotkeyStatus.Duplicate, text);
         return (null, text);
     }
 
