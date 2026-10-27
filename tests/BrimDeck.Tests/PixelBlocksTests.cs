@@ -62,7 +62,7 @@ internal static class PixelBlocksTests
             && PanelThemes.LoadFolder(pixelClockFolder).Single() is { Usable: true } blocky && PanelThemes.Resolve(blocky).Clock is { Style: "Pixel" });
         var pixelClockSettings = new DeckSettings { ClockStyle = ClockStyle.Pixel };
         pixelClockSettings.Normalize();
-        var beyondClockSettings = new DeckSettings { ClockStyle = (ClockStyle)10 };
+        var beyondClockSettings = new DeckSettings { ClockStyle = (ClockStyle)((int)Enum.GetValues<ClockStyle>().Max() + 1) };
         beyondClockSettings.Normalize();
         check("Settings keep the pixel clock and reset a style beyond it", pixelClockSettings.ClockStyle == ClockStyle.Pixel && beyondClockSettings.ClockStyle == ClockStyle.Minimal);
 
