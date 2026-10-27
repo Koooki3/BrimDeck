@@ -452,7 +452,7 @@ internal sealed class GlassBackdrop : IDisposable
             // lies along that outline.
             if (_brushFor is not null && _rimDark is { } was && was != PanelTheme.Current.IsDark) _brushFor = null;
             // The luminosity layer for the text (the probe's) and the thickness for the island's size (GlassEffect.Shown).
-            double shownLuminosity = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0);
+            double shownLuminosity = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0, PanelTheme.Current.IsDark);
             if (shownLuminosity != _luminosityShown) { _luminosityShown = shownLuminosity; _brushFor = null; }
             Dress();
             // The body's sides (the shoulders are not the body: a rectangle as wide as the flare would stand out past the sides);
@@ -1061,7 +1061,7 @@ internal sealed class GlassBackdrop : IDisposable
 
         void Redress()
         {
-            double shown = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0);
+            double shown = GlassEffect.Shown(_luminosity, Openness?.Invoke() ?? 0, PanelTheme.Current.IsDark);
             if (shown == _luminosityShown) return;
             _luminosityShown = shown; _brushFor = null; Dress();
         }
