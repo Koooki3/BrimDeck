@@ -18,6 +18,9 @@ internal static class PanelTheme
     public static bool KeptLastGood { get; private set; }
     // Whether the theme on screen shows its night look (PanelThemeFile.Night).
     public static bool Night { get; private set; }
+    // Whether Windows' high contrast is shown: the system's colors on the whole panel, whatever theme is chosen
+    // (PanelThemes.HighContrast).
+    public static bool HighContrast { get; private set; }
     // When the theme on screen changes between its day and night looks next, or null for a theme without a night look.
     public static DateTime? NextDaylightChange(DeckSettings settings) => PanelThemes.NextDaylightChange(ShownTheme.File, DateTime.Now, settings.ThemeDaylight);
     public static int Generation { get; private set; }
@@ -61,7 +64,8 @@ internal static class PanelTheme
     {
         var chosen = PanelThemes.NormalizeId(settings.PanelTheme);
         // The hour reaching the other look, or new hours for it, counts as a change too.
-        if (!reload && !systemChanged && _loaded && chosen == _chosen && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night) return false;
+        bool high = SystemParameters.HighContrast;
+        if (!reload && !systemChanged && _loaded && chosen == _chosen && PanelThemes.IsNight(ShownTheme.File, DateTime.Now, settings.ThemeDaylight) == Night && high == HighContrast) return false;
         if (reload || !_loaded) Reload();
         _chosen = chosen;
         var theme = Find(chosen);
@@ -74,9 +78,10 @@ internal static class PanelTheme
         // A theme with a night look shows it by the local clock (PanelThemes.IsNight).
         bool night = PanelThemes.IsNight(theme.File, DateTime.Now, settings.ThemeDaylight);
         // The same theme and look as now (the common case for "system") needs no new palette.
-        if (!reload && ReferenceEquals(theme, ShownTheme) && night == Night && _signature.Length > 0) return false;
-        ShownTheme = theme; Night = night;
-        var palette = PanelThemes.Resolve(theme, night);
+        // Under high contrast the system's colors may have changed with the same theme chosen, so its palette is always made anew.
+        if (!reload && !high && !HighContrast && ReferenceEquals(theme, ShownTheme) && night == Night && _signature.Length > 0) return false;
+        ShownTheme = theme; Night = night; HighContrast = high;
+        var palette = high ? SystemPalette() : PanelThemes.Resolve(theme, night);
         var signature = Signature(theme, palette);
         if (signature == _signature) return false;
         // Panels on screen take a picture of their old look now, before any brush changes (MainWindow.ThemeFade).
@@ -88,17 +93,26 @@ internal static class PanelTheme
         return true;
     }
 
+    private static PanelPalette SystemPalette()
+    {
+        static ThemeColor C(Color color) => new(color.A, color.R, color.G, color.B);
+        return PanelThemes.HighContrast(C(SystemColors.WindowColor), C(SystemColors.WindowTextColor), C(SystemColors.GrayTextColor),
+            C(SystemColors.HighlightColor), C(SystemColors.HighlightTextColor));
+    }
+
     // Everything a palette draws, by value: a file theme is built anew for every reading, so an edit shows as a new signature.
     private static string Signature(PanelThemeInfo theme, PanelPalette palette)
     {
         var e = palette.Effects;
         var clock = palette.Clock;
         return string.Join("|", theme.Id, palette.IsNight, string.Join(",", palette.Colors.Values), string.Join(",", palette.Apps.Select(pair => pair.Key + pair.Value)),
-            string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}"),
+            string.Join(",", e.SurfaceGradient), string.Join(",", e.RimGradient), FormattableString.Invariant($"{e.RimWidth}/{e.ShadowBlur}/{e.ShadowDepth}/{e.ShadowOpacity}/{e.Scanlines}/{e.Pixel}/{e.Texture}") + DecorKey(e.Decor),
             $"{clock?.Style}/{clock?.Color}/{clock?.Custom}/{string.Join(",", clock?.Gradient ?? [])}",
             string.Join(",", ClockColors.Swatches.Select(palette.ClockPreset)), string.Join(";", palette.ClockGradients.Select(g => g.Name + g.NameEn + string.Join(",", g.Stops))),
             string.Join(",", palette.Swatches));
     }
+    private static string DecorKey(PanelDecor? decor) => decor is null ? "" : FormattableString.Invariant(
+        $"/{decor.Horizon?.At}/{decor.Horizon?.Sea}/{decor.Horizon?.Line}/{decor.Caustics}/{decor.Palm}");
     private static Dictionary<string, string> Hexes(PanelPalette palette) => palette.Colors.ToDictionary(pair => pair.Key, pair => pair.Value.ToString());
 
     // A theme as the theme page edits it: its file with the unsaved changes made to it, if any.
@@ -145,6 +159,7 @@ internal static class PanelTheme
         if (resources is null) return;
         var next = new ResourceDictionary();
         foreach (var (resource, token) in Resources) next[resource] = UI.Brush(Hex(token));
+        next["PanelScrollThumbRest"] = Current.ThumbRestOpacity;
         // Corners in the panel's XAML (App.xaml has the defaults): square in a pixel theme.
         for (int r = 1; r <= 16; r++) next["PanelR" + r] = new CornerRadius(Corner(r));
         next["SegmentCorner"] = new CornerRadius(Corner(5));
@@ -171,18 +186,21 @@ internal static class PanelTheme
     }
 
     // An application column's colors: the color chosen for it, else the theme's default for its source, as the panel draws them.
-    public static string AppTheme(AppEntry entry) => entry.ThemeColor.Length > 0 ? Readable(entry.ThemeColor) : DefaultAppColor(entry.QuotaSource);
-    public static string AppWarning(AppEntry entry) => entry.WarningColor.Length > 0 ? Readable(entry.WarningColor) : _warningColor ??= Readable(WarningDefault);
-    public static string AppCritical(AppEntry entry) => entry.CriticalColor.Length > 0 ? Readable(entry.CriticalColor) : _criticalColor ??= Readable(CriticalDefault);
+    // Under high contrast every application shows the system's colors (PanelThemes.HighContrast), whatever was chosen for it.
+    public static string AppTheme(AppEntry entry) => entry.ThemeColor.Length > 0 && !HighContrast ? Readable(entry.ThemeColor) : DefaultAppColor(entry.QuotaSource);
+    // The warning and critical colors also color the quota's number, so a chosen one is held to the text minimum like the
+    // theme's (PanelThemes.LevelContrast).
+    public static string AppWarning(AppEntry entry) => entry.WarningColor.Length > 0 && !HighContrast ? Readable(entry.WarningColor, PanelThemes.LevelContrast) : _warningColor ??= Readable(WarningDefault, PanelThemes.LevelContrast);
+    public static string AppCritical(AppEntry entry) => entry.CriticalColor.Length > 0 && !HighContrast ? Readable(entry.CriticalColor, PanelThemes.LevelContrast) : _criticalColor ??= Readable(CriticalDefault, PanelThemes.LevelContrast);
     // A quota's color below the warning level: the off-peak color, when one is chosen, while the row is in one of its off-peak periods.
-    public static string QuotaTheme(AppEntry entry) => entry.OffPeakColor.Length > 0 && entry.IsOffPeak(DateTime.Now) ? Readable(entry.OffPeakColor) : AppTheme(entry);
+    public static string QuotaTheme(AppEntry entry) => entry.OffPeakColor.Length > 0 && !HighContrast && entry.IsOffPeak(DateTime.Now) ? Readable(entry.OffPeakColor) : AppTheme(entry);
     // At the warning and critical levels, an off-peak color chosen for that level replaces the usual one.
     public static string QuotaColor(AppEntry entry, double usedPercent)
     {
         if (usedPercent < AppPresets.WarningPercent) return QuotaTheme(entry);
         bool critical = usedPercent >= AppPresets.CriticalPercent;
         string offPeak = critical ? entry.OffPeakCriticalColor : entry.OffPeakWarningColor;
-        if (offPeak.Length > 0 && entry.IsOffPeak(DateTime.Now)) return Readable(offPeak);
+        if (offPeak.Length > 0 && !HighContrast && entry.IsOffPeak(DateTime.Now)) return Readable(offPeak, PanelThemes.LevelContrast);
         return critical ? AppCritical(entry) : AppWarning(entry);
     }
     public static string DefaultAppColor(ProviderId id) => _appColors.TryGetValue(id, out var color) ? color : _appColors[id] = Current.AppColor(id).ToString();
@@ -191,12 +209,13 @@ internal static class PanelTheme
     public static string WarningDefault => Current.WarningDefault?.ToString() ?? AppPresets.WarningColor;
     public static string CriticalDefault => Current.CriticalDefault?.ToString() ?? AppPresets.CriticalColor;
 
-    // Gives an island the theme's layers over its base color: the gradient, the scan lines or texture, the rim and a pixel
+    // Gives an island the theme's layers over its base color: the gradient, the motifs, the scan lines or texture, the rim and a pixel
     // theme's steps and bevel. The base color is the caller's, as the panel animates it between the surface and the indicator.
     public static void Dress(IslandBorder island, PanelPalette? palette = null, double dpiScale = 1)
     {
         palette ??= Current;
         island.Gradient = SurfaceGradient(palette); island.Pattern = Texture(palette, dpiScale) ?? Scanlines(palette, dpiScale);
+        island.Decor = IslandDecor.For(palette);
         island.RimBrush = RimBrush(palette); island.RimWidth = palette.Effects.RimWidth;
         island.Pixel = palette.Effects.Pixel; island.BevelBrush = BevelBrush(palette);
     }

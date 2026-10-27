@@ -8,7 +8,8 @@
     <Setter Property="BorderBrush" Value="{DynamicResource SettingsBorder}"/>
   </Style>
   <SolidColorBrush x:Key="SettingsAccent" Color="#0A84FF"/>
-  <SolidColorBrush x:Key="SettingsAccentHover" Color="#3395FF"/>
+  <SolidColorBrush x:Key="SettingsAccentFill" Color="#2374DE"/>
+  <SolidColorBrush x:Key="SettingsAccentHover" Color="#1964C7"/>
   <SolidColorBrush x:Key="SettingsTextPrimary" Color="#F2F2F4"/>
   <SolidColorBrush x:Key="SettingsTextSecondary" Color="#9B9BA3"/>
   <SolidColorBrush x:Key="SettingsFillHover" Color="#14FFFFFF"/>
@@ -77,7 +78,7 @@
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="SettingsPrimaryButton" TargetType="Button" BasedOn="{StaticResource SettingsButton}">
-    <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="{DynamicResource SettingsAccent}"/><Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="{DynamicResource SettingsAccentFill}"/><Setter Property="FontWeight" Value="SemiBold"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
       <Border x:Name="Chrome" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
         <!-- Measured on the rendered button, the semibold Chinese label sits 1 unit below centre; this lifts it back. -->

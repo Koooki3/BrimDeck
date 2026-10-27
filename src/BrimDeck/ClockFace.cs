@@ -12,7 +12,7 @@ internal sealed class ClockFace : FrameworkElement
 {
     public const double FaceHeight = 24;
     public static readonly Color White = Color.FromRgb(0xF5, 0xF5, 0xF7);
-    private static readonly FontFamily Orbitron = Bundled("Orbitron"), InstrumentSerif = Bundled("Instrument Serif"), Unbounded = Bundled("Unbounded"), BebasNeue = Bundled("Bebas Neue");
+    private static readonly FontFamily Orbitron = Bundled("Orbitron"), InstrumentSerif = Bundled("Instrument Serif"), Unbounded = Bundled("Unbounded"), BebasNeue = Bundled("Bebas Neue"), Fredoka = Bundled("Fredoka");
     private static FontFamily Bundled(string name) => new(new Uri("pack://application:,,,/BrimDeck;component/"), "./Assets/Fonts/#" + name);
     private static readonly Typeface Plain = Face(UI.PanelFont), Bold = Face(UI.PanelFont, FontWeights.SemiBold);
     private static Typeface Face(FontFamily family, FontWeight? weight = null, bool italic = false)
@@ -26,6 +26,7 @@ internal sealed class ClockFace : FrameworkElement
     // The collapsed row's height scale. The face is laid out at 1 and its outlines are drawn scaled: every glyph is filled as
     // geometry, so a scaled outline is the same as one built at the larger size.
     private readonly double _scale;
+    private readonly bool _plain;
 
     // One color fills the face; more are spread evenly across it from left to right.
     public ClockFace(ClockStyle style, bool h24, Color[] colors, DateTime time, double scale = 1)
@@ -33,6 +34,9 @@ internal sealed class ClockFace : FrameworkElement
         _style = style; _h24 = h24; _colors = colors.Length > 0 ? colors : [ThemeWhite]; _time = time;
         _scale = CompactMusicLayout.SafeScale(scale);
         Height = FaceHeight * _scale; IsHitTestVisible = false;
+        // Under high contrast nothing is dimmed or glows (ClockColors.Glows).
+        _plain = PanelTheme.HighContrast;
+        if (!ClockColors.Glows(style, _plain)) return;
         var glow = _colors[_colors.Length / 2];
         // A glow lights up a dark surface; on a light one it only smears the digits, so it stays a faint halo there.
         bool dark = PanelTheme.Current.IsDark;
@@ -44,11 +48,13 @@ internal sealed class ClockFace : FrameworkElement
     {
         ClockStyle.Stacked => Loc.T("双行", "Two lines"), ClockStyle.Digits => Loc.T("叠放", "Stacked digits"), ClockStyle.Dots => Loc.T("点阵", "Dot matrix"),
         ClockStyle.Segment => Loc.T("数码管", "Seven segment"), ClockStyle.Neon => Loc.T("霓虹", "Neon"), ClockStyle.Serif => Loc.T("衬线", "Serif"),
-        ClockStyle.Wide => Loc.T("宽体", "Wide"), ClockStyle.Condensed => Loc.T("窄体", "Condensed"), ClockStyle.Pixel => Loc.T("像素", "Pixel"), _ => Loc.T("简约", "Simple")
+        ClockStyle.Wide => Loc.T("宽体", "Wide"), ClockStyle.Condensed => Loc.T("窄体", "Condensed"), ClockStyle.Pixel => Loc.T("像素", "Pixel"),
+        ClockStyle.Rounded => Loc.T("圆润", "Rounded"), _ => Loc.T("简约", "Simple")
     };
     // The cover color is used when a song with a cover is playing; otherwise the clock takes the theme's clock color, which
-    // "white" stands for. Every color is drawn as the theme can read it on its surface (see PanelTheme.Readable).
-    public static Color[] Palette(DeckSettings settings, Color? cover) => (settings.ClockColor switch
+    // "white" stands for. Every color is drawn as the theme can read it on its surface (see PanelTheme.Readable). Under high
+    // contrast it is always the theme's clock color, the system's window text (ClockColors.Shown).
+    public static Color[] Palette(DeckSettings settings, Color? cover) => (ClockColors.Shown(settings.ClockColor, PanelTheme.HighContrast) switch
     {
         ClockColor.Gradient => settings.ClockGradient.Select(Parse).ToArray(),
         ClockColor.Custom => [Parse(settings.ClockCustomColor)],
@@ -140,11 +146,14 @@ internal sealed class ClockFace : FrameworkElement
                     ClockStyle.Serif => new Run(clock, Face(InstrumentSerif, italic: true), 19, .01),
                     ClockStyle.Wide => new Run(clock, Face(Unbounded, FontWeights.SemiBold), 11.5, .01),
                     ClockStyle.Condensed => new Run(clock, Face(BebasNeue), 19, .05),
+                    // Fredoka SemiBold, round and soft. Its digits are 0.72 em tall like Orbitron's, so it takes the neon clock's size.
+                    ClockStyle.Rounded => new Run(clock, Face(Fredoka, FontWeights.SemiBold), 11.5, .02),
                     _ => new Run(clock, Bold, 12.5)
                 };
                 Run? label = period is null ? null : _style switch
                 {
                     ClockStyle.Neon => new Run(period, Face(Orbitron, FontWeights.SemiBold), 8, .04, Cells: false),
+                    ClockStyle.Rounded => new Run(period, Face(Fredoka, FontWeights.SemiBold), 8.5, .03, Opacity: .8, Cells: false),
                     ClockStyle.Minimal => new Run(period, Plain, 10, Opacity: .62, Cells: false),
                     _ => new Run(period, Plain, 10, Opacity: .7, Cells: false)
                 };
@@ -164,7 +173,8 @@ internal sealed class ClockFace : FrameworkElement
     private double Draw(DrawingContext? dc, double x, double baseline, Brush paint, Run run)
     {
         double spacing = run.Spacing * run.Size, cell = run.Cells ? DigitCell(run) : 0;
-        if (dc is not null && run.Opacity < 1) dc.PushOpacity(run.Opacity);
+        bool dim = dc is not null && run.Opacity < 1 && !_plain;
+        if (dim) dc!.PushOpacity(run.Opacity);
         if (!run.Cells && run.Spacing == 0)
         {
             var whole = Text(run.Text, run, paint);
@@ -178,7 +188,7 @@ internal sealed class ClockFace : FrameworkElement
             Paint(dc, text, new Point(x + (box - advance) / 2, baseline - text.Baseline), paint);
             x += box + (i < run.Text.Length - 1 ? spacing : 0);
         }
-        if (dc is not null && run.Opacity < 1) dc.Pop();
+        if (dim) dc!.Pop();
         return x;
     }
     // DrawText moves each line to the nearest whole device pixel, which undoes the sub-pixel baseline from Baseline below:

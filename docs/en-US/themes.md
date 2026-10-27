@@ -5,7 +5,7 @@ The Notch, Capsule and Indicator, the quota notice, the expanded panel and its p
 | Kind | Themes |
 | --- | --- |
 | Basics | System, Dark (the default: the original pure black look), Light |
-| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
+| Theme extensions | One Dark Pro, GitHub Dark, GitHub Light, Dracula Official, Night Owl, Island Holiday, Island Holiday 2, Pixel Blocks, Cyberpunk: Edgerunners (the demo) |
 | Custom | The theme files in the themes folder, which can be created, edited and deleted in settings |
 
 Each theme remembers the theme, warning and critical colors of the app columns and the clock's style and color you change while using it: they are saved when you switch to another theme and come back when you return. A theme chosen for the first time uses its own colors and suggested clock. Restoring defaults in "Quotas and usage" or "Collapsed view" restores the current theme's defaults.
@@ -57,15 +57,15 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 | `surface` | The notch, capsule and expanded panel; always opaque |
 | `textPrimary` | Titles and figures (7:1) |
 | `textSecondary` | Labels (4.5:1) |
-| `textTertiary` | Reset times and notes (3:1) |
-| `accent` / `onAccent` | Keyboard focus and chosen dates / text on them (3:1) |
+| `textTertiary` | Reset times, notes and other small text (4.5:1) |
+| `accent` / `onAccent` | Keyboard focus and chosen dates (3:1) / text on them, such as a notice's main button (4.5:1) |
 | `danger` | Errors and paused sync (4.5:1) |
 | `liked` | A liked song (3:1) |
 | `clock` | The clock when its color is "Theme default" (4.5:1) |
 | `equalizer` | The equalizer when it does not follow the cover (3:1) |
 | `hairline` `track` `ringTrack` `fill` `fillSelected` `hover` `pressed` `outline` | Dividers, tracks, joined switches, hover and pressed states, outlines |
 | `popup` `popupBorder` `input` `rangeFill` | Menus and pop-ups, date fields and date ranges |
-| `coverPlaceholder` `coverOutline` `scrollThumb` | A missing cover, the cover outline, scroll bars |
+| `coverPlaceholder` `coverOutline` `scrollThumb` | A missing cover, the cover outline, scroll bars (the thumb 2:1 on the surface) |
 | `rim` `shadow` | The line along the surface's inner edge; the collapsed shadow (a bright color with no depth is a glow) |
 | `indicator` `indicatorProgress` | The Indicator and the playback progress on it (2:1) |
 | `switchFill` `seekRail` `rowDivider` `rowHover` | The toolbar page switch, the seek bar track, model detail row dividers and hover |
@@ -74,7 +74,7 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 
 ### App colors (apps)
 
-The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `kimi`, `opencode`, `manual` (every source entered by hand), `other`, and `warning` and `critical`. A color chosen for a column in "Quotas and usage" takes precedence.
+The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `kimi`, `opencode`, `manual` (every source entered by hand), `other`, and `warning` and `critical` (these two are also text, so 4.5:1). A color chosen for a column in "Quotas and usage" takes precedence.
 
 ### Clock
 
@@ -84,7 +84,7 @@ The clock style and color that suit the theme. Choosing the theme in settings sw
 "clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
 ```
 
-`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`, `pixel` (a block dot matrix, suggested by Pixel Blocks); `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
+`style` is one of `minimal`, `stacked`, `digits`, `dots`, `segment`, `neon`, `serif`, `wide`, `condensed`, `pixel` (a block dot matrix, suggested by Pixel Blocks), `rounded` (the round Fredoka face, suggested by Island Holiday 2); `color` is `default` (the `clock` color above), `amber`, `cyan`, `pink`, `lime`, `custom`, `gradient` or `cover`. `palette` sets this theme's colors for the amber, cyan, pink and lime swatches, and `gradients` the preset gradients it offers (one to eight, each exactly three colors); both need 4.5:1 on the surface. When the theme changes, a preset gradient in use becomes the new theme's preset in the same place. `custom` is used when `color` is `custom`; `gradient`, exactly three colors, when `color` is `gradient`. On light themes the glow of the neon and seven-segment styles is softened so the digits stay sharp.
 
 ### Picker swatches (swatches)
 
@@ -101,6 +101,7 @@ The twelve colors under the color picker in settings. Without this list the pick
 | `scanlines` | Horizontal scan lines in the primary text color at this opacity | 0–0.12 |
 | `pixel` | Pixel art: the outline's curves become steps of this many DIP (rounded to whole device pixels), the panel's rounded corners become square and its text is drawn unsmoothed; with a `rimGradient` the rim becomes a bevel, its first color lighting the edges that face up and left and its last shading those that face down and right | 0, or 1–4 |
 | `texture` | With `pixel`: squares of the pixel size a little lighter or darker than the surface, a block's grain. Its lightest and darkest squares are checked for contrast like gradient stops; without `pixel` it has no effect | 0–0.12 |
+| `decor` | Quiet pictures drawn into the surface under the content, each value inherited on its own (a night look that names only `sea` keeps the day's `at` and `line`): `horizon` a sea (`sea`) below `at` of the height (0.62 when not set) with a line of light (`line`, any opacity, checked like the rest) along it; `caustics` a net of soft light lines below the horizon (over the whole surface without one); `palm` a palm frond's shadow in the open panel's top-right corner, above the horizon. A fully transparent color turns a part off, e.g. in a night look; a transparent `sea` removes the whole horizon, so the caustics then cover the surface. Nothing is drawn on the small collapsed island, so the horizon never crosses the clock; the motifs fade in as the panel opens. Text is held to its minimums over the sea (at the horizon and at its deepest), the line and the motifs, each over what it is drawn on | `at` 0.3–0.9, caustics alpha ≤ 0.2, palm alpha ≤ 0.12 |
 
 ### Day and night looks (night, daylight)
 
@@ -134,12 +135,14 @@ The demo theme was made in these five steps.
 1. **Collect references**: frames of the work or brand; note the light and dark, the main and accent colors, and the shapes that recur.
 2. **Assign roles**: the surface (the largest area), three text levels, the accent, the semantic colors (warning, critical, error) and the decoration (rim, shadow, gradient, texture).
 3. **Surface and text first**: the surface sets every contrast; space the text levels at 7 : 4.5 : 3.
-4. **Then accents and app colors**: app colors must be told apart and reach 3:1 on the surface; warning and critical should read as yellow and red.
+4. **Then accents and app colors**: app colors must be told apart and reach 3:1 on the surface (warning and critical, which are also text, 4.5:1); warning and critical should read as yellow and red.
 5. **Check**: look at the collapsed and expanded panel, the notice and the pop-ups, and make sure "Readability" is empty or acceptable; otherwise go back to step 3.
 
 ## The newer themes
 
 **Island Holiday**: by day, warm sand (`#FFF6E8`) fading into sea foam, deep-sea text, a lagoon accent, a coral serif clock, a shoreline rim (turquoise, sky, sand) and a faintly sea-green shadow. By night, a moonlit sea from navy into teal, a lantern-gold clock, a moonlit shoreline along the rim and, instead of a shadow, a soft teal glow under the island. Neither look needs any readability adjustment.
+
+**Island Holiday 2**: the same island as a postcard, kept alongside the first. By day, a clear sky (`#A8E1F8`) fading into the warm haze of the horizon, and below a horizon about two thirds down a turquoise lagoon (`decor.horizon`) with a line of sunlight along it, the soft net of light a sunlit sea throws (`decor.caustics`) and a palm frond's shade in the open panel's corner (`decor.palm`); deep-sea text, a lagoon accent, a sunburnt coral clock in the round Fredoka face (the `rounded` style), a mango indicator, hibiscus for liked songs, a shore rim (lagoon, sky, sand, coral) and a faintly sea-green shadow. By night, a deep ocean navy (`#001E3C`) over a dark teal sea under a horizon lit faintly in moon gold, moonlight playing on the water, a lantern-gold clock and, instead of a shadow, a soft teal glow under the island. The small collapsed island keeps the plain sky, so the horizon never crosses the clock. Neither look needs any readability adjustment.
 
 ## Pixel Blocks
 

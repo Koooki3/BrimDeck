@@ -236,7 +236,8 @@ static class SystemMonitorTests
         check("Compact fit: a capsule grows to its content plus its insets", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 300).Surface.Width == 332);
         check("Compact fit: narrower content narrows the surface, down to the style's smallest width",
             CollapsedGeometry.Resolve(new DeckSettings { CapsuleWidth = 500 }, CompactStyle.Capsule, screen, area, 1, 150).Surface.Width == 182
-            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 50).Surface.Width == CollapsedLimits.CapsuleWidthMin
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 50).Surface.Width == 82
+            && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 10).Surface.Width == CollapsedLimits.CapsuleWidthMin
             && CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area, 1, 0).Surface.Width == CollapsedLimits.CapsuleWidthMin
             && CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Notch, screen, area, 1, 0).Surface.Width == CollapsedLimits.NotchWidthMin);
         check("Compact fit: without auto width the saved width stays", CollapsedGeometry.Resolve(capsule, CompactStyle.Capsule, screen, area).Surface.Width == 196);

@@ -48,7 +48,8 @@ public static class CompactParts
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
 }
-public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel }
+// Saved settings keep the number, so a new style goes at the end.
+public enum ClockStyle { Minimal, Stacked, Digits, Dots, Segment, Neon, Serif, Wide, Condensed, Pixel, Rounded }
 // Every clock style takes this one color. Gradient spreads ClockGradient across the digits, Custom is ClockCustomColor,
 // and Cover follows the color picked from the playing song's cover. Saved as numbers, so new members go at the end.
 public enum ClockColor { White, Amber, Cyan, Pink, Lime, Gradient, Cover, Custom }
@@ -72,6 +73,11 @@ public static class ClockColors
         (Loc.T("火焰", "Ember"), ["#FFE27A", "#FF9F43", "#FF5E5E"]),
         (Loc.T("霓虹", "Neon"), ["#FF5CF0", "#A66BFF", "#5CE1E6"])
     ];
+    // Under Windows' high contrast the clock is the system's window text (the high contrast palette's clock color, which "white"
+    // stands for) whatever color, gradient or cover was chosen, at full strength and with no glow. The choice itself is kept,
+    // so the clock is drawn as chosen again when high contrast is turned off.
+    public static ClockColor Shown(ClockColor chosen, bool highContrast) => highContrast ? ClockColor.White : chosen;
+    public static bool Glows(ClockStyle style, bool highContrast) => !highContrast && style is ClockStyle.Neon or ClockStyle.Segment;
 }
 
 // A dashboard column has an identity independent of either data source.
@@ -271,6 +277,8 @@ public sealed class DeckSettings
     public double LineOffsetX { get; set; } = CollapsedLimits.OffsetDefault;
     public string HideHotkey { get; set; } = "";
     public string ExpandHotkey { get; set; } = "";
+    // The resize shortcut: modifiers with the arrow keys ("Ctrl+Alt+Arrows", HotkeyText.Arrows); unset by default.
+    public string ResizeHotkey { get; set; } = "";
     public bool MusicPage { get; set; } = true;
     public double MusicWidth { get; set; } = 440;
     public double MusicHeight { get; set; } = 200;
@@ -346,6 +354,10 @@ public sealed class DeckSettings
     public bool MonitorProcesses { get; set; } = true;
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }
+    // The graphics adapter the monitor shows, by its key (GpuSample.Key), and its name to find it by should its ids change and to
+    // name it while it is not connected; null for 自动 (GpuChoice.Auto). Files saved before there was a choice read as 自动.
+    public string? MonitorGpu { get; set; }
+    public string? MonitorGpuName { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
     // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it.
     public bool MonitorTemperatures { get; set; } = true;
@@ -506,6 +518,8 @@ public sealed class DeckSettings
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
+        MonitorGpu = string.IsNullOrWhiteSpace(MonitorGpu) ? null : MonitorGpu.Trim();
+        MonitorGpuName = MonitorGpu is null || string.IsNullOrWhiteSpace(MonitorGpuName) ? null : MonitorGpuName.Trim();
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
@@ -547,6 +561,7 @@ public sealed class DeckSettings
         LineOffsetX = Offset(LineOffsetX);
         HideHotkey ??= "";
         ExpandHotkey ??= "";
+        ResizeHotkey ??= "";
         if (QuickSize is { } quick && !Enum.IsDefined(quick)) QuickSize = null;
         if (!Enum.IsDefined(Maximized)) Maximized = WindowBehavior.Line;
         if (!Enum.IsDefined(Borderless)) Borderless = WindowBehavior.Hide;
