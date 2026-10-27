@@ -33,10 +33,10 @@ internal sealed class QuotaBar : FrameworkElement
     {
         double w = ActualWidth, h = ActualHeight, radius = h / 2;
         if (w <= 0 || h <= 0) return;
-        drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, new Rect(0, 0, w, h), radius, radius);
+        UI.Bar(drawing, UI.Brush(UI.Track), new Rect(0, 0, w, h), radius);
         double share = Math.Clamp(_share.At(Eased.Now), 0, 1);
         if (share <= 0) return;
         // A sliver keeps its rounded ends, as the old bar's star column did.
-        drawing.DrawRoundedRectangle(UI.Brush(_color), null, new Rect(0, 0, Math.Max(Math.Min(h, w), w * share), h), radius, radius);
+        UI.Bar(drawing, UI.Brush(_color), new Rect(0, 0, Math.Max(Math.Min(h, w), w * share), h), radius);
     }
 }

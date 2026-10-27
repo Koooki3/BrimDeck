@@ -15,18 +15,21 @@ namespace BrimDeck;
 // color, drawn as a soft disc (no bitmap effect).
 internal static class NoticeBadges
 {
-    private static readonly Dictionary<(NoticeGlyph, bool), Geometry> Geometries = [];
+    private static readonly Dictionary<(NoticeGlyph, bool, bool), Geometry> Geometries = [];
     private static readonly Dictionary<Color, SolidColorBrush> Brushes = [];
-    private static readonly Dictionary<(Color, double), Pen> Pens = [];
+    private static readonly Dictionary<(Color, double, bool), Pen> Pens = [];
     private static readonly Dictionary<Color, Brush> Halos = [];
     private static (int Generation, bool HighContrast, Color Highlight, NoticeGlyphColors Colors)? _colors;
 
     public static Geometry Geometry(NoticeGlyph glyph, bool badge = false)
     {
-        if (Geometries.TryGetValue((glyph, badge), out var known)) return known;
+        bool plated = PanelTheme.Plated;
+        if (Geometries.TryGetValue((glyph, badge, plated), out var known)) return known;
         var geometry = System.Windows.Media.Geometry.Parse(badge ? NoticeGlyphs.BadgeData(glyph, out _) : NoticeGlyphs.PathData(glyph));
         geometry.Freeze();
-        return Geometries[(glyph, badge)] = geometry;
+        // On a plate the drawing's curves are straight edges (IconStyle); the glyphs sit on a 20 unit grid.
+        if (plated) geometry = IconStyle.Angular(geometry, 20);
+        return Geometries[(glyph, badge, plated)] = geometry;
     }
 
     // The glyph colors of the theme on screen, or of the high contrast scheme.
@@ -57,10 +60,11 @@ internal static class NoticeBadges
 
     internal static Pen Pen(Color color, double width)
     {
-        if (Pens.TryGetValue((color, width), out var pen)) return pen;
-        pen = new Pen(Brush(color), width) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
+        bool plated = PanelTheme.Plated;
+        if (Pens.TryGetValue((color, width, plated), out var pen)) return pen;
+        pen = plated ? IconStyle.Pen(Brush(color), width) : new Pen(Brush(color), width) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
         pen.Freeze();
-        return Pens[(color, width)] = pen;
+        return Pens[(color, width, plated)] = pen;
     }
 
     internal static Brush Halo(Color color)

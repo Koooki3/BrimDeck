@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     // Null for the main panel. The panels of other monitors take their usage data from it instead of reading their own.
     private readonly MainWindow? _lead;
     private bool _retiring;
+    private int _iconStyleGeneration = -1;
     // The monitor this panel sits on; App assigns it. Without one, or while it is not connected, the primary monitor.
     internal DisplayInfo? Display { get; set; }
     private IntPtr MonitorHandle => Display is { } display && WindowsHost.MonitorScreen(display.Handle) is not null ? display.Handle : WindowsHost.PrimaryMonitor();
@@ -135,6 +136,14 @@ public partial class MainWindow : Window
         HoverZone.Opacity = 0;
         _handover = new PageHandover(LeavingContent);
         InitializeMusic();
+        // The toolbar's icons take the industrial drawing of a plated theme (IconStyle); done on the layout after a theme change, when
+        // the icons' paths exist.
+        Island.LayoutUpdated += (_, _) =>
+        {
+            if (_iconStyleGeneration == PanelTheme.Generation) return;
+            _iconStyleGeneration = PanelTheme.Generation;
+            IconStyle.Apply(Island, PanelTheme.Plated);
+        };
         InitializeMonitor();
         InitializeDevices();
         InitializeResize();

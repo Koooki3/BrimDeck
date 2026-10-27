@@ -24,13 +24,13 @@ internal static class EndfieldTests
         check("The looks follow Windows, not the clock",
             PanelThemes.DaylightModeOf(theme.File) == DaylightMode.System && PanelThemes.LookAt(theme.File, new DateTime(2026, 10, 27, 3, 0, 0), appsLight: true) == DaylightLook.Day
             && PanelThemes.LookAt(theme.File, new DateTime(2026, 10, 27, 12, 0, 0), appsLight: false) == DaylightLook.Night && PanelThemes.NextDaylightChange(theme.File, DateTime.Now) is null);
-        check("Cut corners and the two marks are in both looks, in the look's signal and a faint hatching",
+        check("Cut corners and the marks are in both looks: on paper a faint hatching, on graphite a hazard strip, the same yellow bar",
             day.Effects.Cut == 10 && night.Effects.Cut == 10 && day.Effects.Pixel == 0 && day.Effects.Glass is null && day.Effects.SurfaceGradient.Count == 0 && day.Effects.Scanlines == 0
-            && day.Effects.Decor is { Tab: { } dayTab, Hatch: { } dayHatch, Frame: not null, Horizon: null, Hud: null } && night.Effects.Decor is { Tab: { } nightTab, Hatch: { } nightHatch }
-            && dayTab == ThemeColor.Parse("#FFFA00") && nightTab == night["accent"] && dayHatch.A < 80 && nightHatch.A < 80 && dayHatch != nightHatch);
+            && day.Effects.Decor is { Tab: { } dayTab, Hatch: { } dayHatch, Frame: not null, Diamond: not null, Cross: not null, Horizon: null, Hud: null } && night.Effects.Decor is { Tab: { } nightTab, Hatch: { } nightHatch, Diamond: { } nightDiamond, Cross: not null }
+            && dayTab == ThemeColor.Parse("#FFD400") && nightTab == dayTab && nightDiamond == ThemeColor.Parse("#FC6C00") && dayHatch.A < 80 && nightHatch.A > 150 && dayHatch != nightHatch);
         check("Signal yellow is a fill on paper (the selected segment, the indicator, ink on it); on graphite the signal is the HUD's yellow-green, a line and text",
-            day["fillSelected"] == ThemeColor.Parse("#FFFA00") && day["indicator"] == day["fillSelected"] && day["textPrimary"].MinimumContrast([day["fillSelected"]]) >= 7
-            && day["accent"] == day["textPrimary"] && day["onAccent"] == ThemeColor.Parse("#FFFA00") && night["accent"] == ThemeColor.Parse("#C6CA4C") && night["indicator"] == night["accent"] && night["accent"].MinimumContrast(night.SurfaceStops) >= 7
+            day["fillSelected"] == ThemeColor.Parse("#FFD400") && day["indicator"] == day["fillSelected"] && night["indicator"] == day["indicator"] && day["textPrimary"].MinimumContrast([day["fillSelected"]]) >= 7
+            && day["accent"] == day["textPrimary"] && day["onAccent"] == ThemeColor.Parse("#FFD400") && night["accent"] == ThemeColor.Parse("#C6CA4C") && night["accent"].MinimumContrast(night.SurfaceStops) >= 7
             && day["indicatorProgress"].MinimumContrast([day["indicator"]]) >= 7);
         check("The clock is the wide face in both looks, and offers five readable preset gradients each",
             day.Clock is { Style: "wide" } && night.Clock is { Style: "wide" } && day.ClockGradients.Count == 5 && night.ClockGradients.Count == 5
@@ -73,7 +73,7 @@ internal static class EndfieldTests
         // The template and copies.
         check("The template lists cut, off", PanelThemes.Parse(PanelThemes.Template).Effects is { Cut: 0 } && PanelThemes.Build("t", PanelThemes.Parse(PanelThemes.Template)).Effects.Cut == 0);
         var copy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", day, PanelThemes.Endfield)));
-        check("A theme made from Endfield writes out its cut and its three marks",
-            copy.Effects is { Cut: 10, Decor: { Tab: not null, Hatch: not null, Frame: not null } } && copy.Effects.Decor!.Tab == day.Effects.Decor!.Tab && copy.Effects.Decor.Hatch == day.Effects.Decor.Hatch && copy.Effects.Decor.Frame == day.Effects.Decor.Frame && copy.Adjustments.Count == 0);
+        check("A theme made from Endfield writes out its cut and its five marks",
+            copy.Effects is { Cut: 10, Decor: { Tab: not null, Hatch: not null, Frame: not null, Diamond: not null, Cross: not null } } && copy.Effects.Decor!.Tab == day.Effects.Decor!.Tab && copy.Effects.Decor.Hatch == day.Effects.Decor.Hatch && copy.Effects.Decor.Frame == day.Effects.Decor.Frame && copy.Effects.Decor.Diamond == day.Effects.Decor.Diamond && copy.Effects.Decor.Cross == day.Effects.Decor.Cross && copy.Adjustments.Count == 0);
     }
 }

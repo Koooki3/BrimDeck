@@ -120,7 +120,9 @@ public static partial class PanelThemes
             Hud = decor.Hud is { } hud ? new PanelThemeHud { Color = hud.Color.ToString(), Chamfer = hud.Chamfer } : null,
             Hatch = decor.Hatch is { } hatch ? new PanelThemeMotif { Color = hatch.ToString() } : null,
             Tab = decor.Tab is { } tab ? new PanelThemeMotif { Color = tab.ToString() } : null,
-            Frame = decor.Frame is { } frame ? new PanelThemeMotif { Color = frame.ToString() } : null
+            Frame = decor.Frame is { } frame ? new PanelThemeMotif { Color = frame.ToString() } : null,
+            Diamond = decor.Diamond is { } diamond ? new PanelThemeMotif { Color = diamond.ToString() } : null,
+            Cross = decor.Cross is { } cross ? new PanelThemeMotif { Color = cross.ToString() } : null
         };
         return JsonSerializer.Serialize(file, Json);
     }

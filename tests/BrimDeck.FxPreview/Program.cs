@@ -179,6 +179,7 @@ internal static class Program
             PixelChecks();
             StairChecks();
             CutChecks();
+            IconChecks();
         }
         // A bundled face that fails to load falls back to another font without an error, so each must be the file's own face.
         Check("The clock's bundled fonts load from BrimDeck's resources", new[]
@@ -520,6 +521,26 @@ internal static class Program
         var stepped = IslandBorder.Shape(230, 32, 0, new CornerRadius(16), 0, 2, 1, 1, cut).Outline;
         Check("A pixel theme's steps win over cut corners", stepped.Bounds == IslandBorder.Shape(230, 32, 0, new CornerRadius(16), 0, 2, 1, 1).Outline.Bounds);
         Check("Cut zero keeps the curves", IslandBorder.Shape(230, 32, 0, new CornerRadius(16), 0, 0, 1, 1, 0).Outline.ToString() == IslandBorder.BuildOutline(230, 32, 0, new CornerRadius(16), 0).ToString());
+    }
+
+    // The industrial icons (IconStyle): curves become a few straight edges, lines stay, and a plated theme's toolbar icons are restyled
+    // and given back their plain look with the theme.
+    private static void IconChecks()
+    {
+        static (int Segments, bool Straight) Describe(Geometry geometry) => (
+            geometry.GetFlattenedPathGeometry().Figures.Sum(figure => figure.Segments.OfType<PolyLineSegment>().Sum(segment => segment.Points.Count)),
+            geometry.GetFlattenedPathGeometry(.05, ToleranceType.Absolute) is { } fine && IconStyle.Angular(geometry, 24) is PathGeometry angular
+                && angular.Figures.All(figure => figure.Segments.All(segment => segment is PolyLineSegment or LineSegment)));
+        var circle = Geometry.Parse("M 9,18 A 3,3 0 1 1 3,18 A 3,3 0 1 1 9,18");
+        var fine = Describe(circle); var coarse = IconStyle.Angular(circle, 24).Figures.Sum(figure => figure.Segments.OfType<PolyLineSegment>().Sum(segment => segment.Points.Count));
+        Check($"IconStyle: a small circle is a polygon of a few edges ({coarse}), far fewer than the fine curve ({fine.Segments}), and all straight", fine.Straight && coarse is >= 3 and <= 8 && coarse < fine.Segments);
+        var path = new Path { Data = circle, Stroke = Brushes.White, StrokeThickness = 1.65, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round };
+        var holder = new Canvas(); holder.Children.Add(path);
+        IconStyle.Apply(holder, true);
+        bool styled = path.StrokeLineJoin == PenLineJoin.Miter && path.StrokeStartLineCap == PenLineCap.Square && path.StrokeThickness > 1.65 && !ReferenceEquals(path.Data, circle);
+        IconStyle.Apply(holder, false);
+        bool plain = ReferenceEquals(path.Data, circle) && path.StrokeLineJoin == PenLineJoin.Round && path.StrokeStartLineCap == PenLineCap.Round && path.StrokeThickness == 1.65;
+        Check("IconStyle: a plated theme's icon is angular, heavier and square-ended, and the plain look comes back", styled && plain);
     }
 
     private static void PixelChecks()

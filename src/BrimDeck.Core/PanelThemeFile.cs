@@ -108,7 +108,9 @@ public sealed class PanelThemeEffects
 //   hatch: a strip of 45-degree hatching along the bottom edge's right end, in "color", the print of a panel that is closed up;
 //   tab: a short bar of "color" along the bottom edge's left end, where a cut corner begins, as the marker beside a current item;
 //   frame: a hairline of "color" 4 DIP inside the outline's sides and bottom (not its top, which hangs from the screen's edge), as the
-//     second line of a framed plate; it follows the outline, cut corners included.
+//     second line of a framed plate; it follows the outline, cut corners included;
+//   diamond: a small diamond of "color" sitting on the frame's right side near the foot (the marker at a panel's corner on the game's
+//     screens); cross: a small crosshair of "color" on the frame's left side at the same height.
 // A fully transparent color turns a part off, so a night or dusk look can drop a motif the day has.
 // Text is held to its minimums over every color the motifs can lay under it (PanelThemes.DecorStops).
 public sealed class PanelThemeDecor
@@ -120,6 +122,8 @@ public sealed class PanelThemeDecor
     public PanelThemeMotif? Hatch { get; set; }
     public PanelThemeMotif? Tab { get; set; }
     public PanelThemeMotif? Frame { get; set; }
+    public PanelThemeMotif? Diamond { get; set; }
+    public PanelThemeMotif? Cross { get; set; }
 }
 
 public sealed class PanelThemeHorizon

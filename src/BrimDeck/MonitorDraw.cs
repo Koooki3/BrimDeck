@@ -28,6 +28,13 @@ internal static partial class MonitorDraw
         [MonitorGlyph.Drive] = Frozen("M3.5,4.5 H12.5 A1.5,1.5 0 0 1 14,6 V10 A1.5,1.5 0 0 1 12.5,11.5 H3.5 A1.5,1.5 0 0 1 2,10 V6 A1.5,1.5 0 0 1 3.5,4.5 Z M2,7.6 H14 M10.6,9.6 H11.6"),
     };
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
+    // The same glyphs on a plate: curves as straight edges (IconStyle), the thermometer's bulb and the drive's case chamfered.
+    private static readonly Dictionary<MonitorGlyph, Geometry> AngularGlyphs = [];
+    private static Geometry Glyph(MonitorGlyph glyph)
+    {
+        if (!PanelTheme.Plated) return Glyphs[glyph];
+        return AngularGlyphs.TryGetValue(glyph, out var known) ? known : AngularGlyphs[glyph] = IconStyle.Angular(Glyphs[glyph], 16);
+    }
 
     // Text set once per string, size, weight and color: the same figures come back every second, so they are not laid out again.
     private static readonly Dictionary<(string, double, bool, bool, string, double, bool), FormattedText> Texts = [];
@@ -125,7 +132,8 @@ internal static partial class MonitorDraw
             geometry = new PathGeometry([figure]); geometry.Freeze();
             if (track) { if (Tracks.Count > 32) Tracks.Clear(); Tracks[(c, radius, thickness)] = geometry; }
         }
-        drawing.DrawGeometry(null, Stroke(ArcPens, color, thickness, PenLineJoin.Miter), geometry);
+        // On a plate (PanelTheme.Plated) the whole track is a ring of ticks, the scale of a gauge; the share's arc stays solid.
+        drawing.DrawGeometry(null, track && PanelTheme.Plated ? Ticks(color, thickness) : Stroke(ArcPens, color, thickness, PenLineJoin.Miter), geometry);
     }
 
     // A rate's arrow (or the thermometer) in the color, stroked, in a square of the size with its top left corner at the point.
@@ -133,7 +141,7 @@ internal static partial class MonitorDraw
     {
         double scale = size / 16;
         drawing.PushTransform(Placed(new Matrix(scale, 0, 0, scale, at.X, at.Y)));
-        drawing.DrawGeometry(null, Stroke(ArrowPens, color, thickness / scale, PenLineJoin.Round), Glyphs[glyph]);
+        drawing.DrawGeometry(null, Stroke(PanelTheme.Plated ? AngularPens : ArrowPens, color, thickness / scale, PenLineJoin.Round, PanelTheme.Plated), Glyph(glyph));
         drawing.Pop();
     }
 
@@ -143,13 +151,23 @@ internal static partial class MonitorDraw
     // grows past a handful of entries, as when a dial moves across the row.
     private static readonly Dictionary<(string Letter, double Size, double Ppd, string Color), (Geometry Glyph, Rect Bounds, Pen Weight)> Letters = [];
     private static readonly Dictionary<(Point Center, double Radius, double Thickness), Geometry> Tracks = [];
-    private static readonly Dictionary<(string Color, double Thickness), Pen> ArcPens = [], ArrowPens = [];
+    private static readonly Dictionary<(string Color, double Thickness), Pen> ArcPens = [], ArrowPens = [], AngularPens = [];
     private static readonly Dictionary<Matrix, Transform> Places = [];
 
-    private static Pen Stroke(Dictionary<(string Color, double Thickness), Pen> pens, string color, double thickness, PenLineJoin join)
+    private static readonly Dictionary<(string Color, double Thickness), Pen> TickPens = [];
+    private static Pen Ticks(string color, double thickness)
+    {
+        if (TickPens.TryGetValue((color, thickness), out var pen)) return pen;
+        pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Flat, EndLineCap = PenLineCap.Flat, LineJoin = PenLineJoin.Miter, DashStyle = new DashStyle([.5, 1.1], 0), DashCap = PenLineCap.Flat };
+        pen.Freeze();
+        if (TickPens.Count > 64) TickPens.Clear();
+        return TickPens[(color, thickness)] = pen;
+    }
+    private static Pen Stroke(Dictionary<(string Color, double Thickness), Pen> pens, string color, double thickness, PenLineJoin join, bool angular = false)
     {
         if (pens.TryGetValue((color, thickness), out var pen)) return pen;
-        pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = join };
+        pen = angular ? IconStyle.Pen(UI.Brush(color), thickness)
+            : new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = join };
         pen.Freeze();
         if (pens.Count > 64) pens.Clear();
         return pens[(color, thickness)] = pen;

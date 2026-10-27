@@ -32,7 +32,8 @@ internal sealed class IslandDecor
     // The frame: its outline (the cut outline's, or the curved one, a few DIP in), its pen and the clip that leaves the top edge out.
     internal const double FrameInset = 4;
     private readonly double _cut;
-    private readonly Pen? _framePen;
+    private readonly Pen? _framePen, _crossPen;
+    private readonly Brush? _diamond;
     private (Size Size, CornerRadius Corners, double Shoulder)? _frameFor;
     private Geometry? _frame;
     private Geometry? _frameClip;
@@ -51,6 +52,8 @@ internal sealed class IslandDecor
     {
         _decor = decor; _cut = cut;
         if (decor.Tab is { } tab) _tab = Frozen(new SolidColorBrush(ToColor(tab)));
+        if (decor.Diamond is { } diamond) _diamond = Frozen(new SolidColorBrush(ToColor(diamond)));
+        if (decor.Cross is { } cross) _crossPen = Frozen(new Pen(Frozen(new SolidColorBrush(ToColor(cross))), 1) { StartLineCap = PenLineCap.Flat, EndLineCap = PenLineCap.Flat });
         if (decor.Frame is { } frame) _framePen = Frozen(new Pen(Frozen(new SolidColorBrush(ToColor(frame))), 1) { LineJoin = PenLineJoin.Miter });
     }
 
@@ -61,7 +64,7 @@ internal sealed class IslandDecor
         if (size.Width < 2) return;
         bool scene = size.Height > SeaMinHeight && (_decor.Horizon is not null || _decor.Caustics is not null || _decor.Palm is not null);
         bool hud = _decor.Hud is not null && size.Height >= HudMinHeight;
-        bool plate = (_decor.Hatch is not null || _decor.Tab is not null || _decor.Frame is not null) && size.Height > MarksMinHeight;
+        bool plate = (_decor.Hatch is not null || _decor.Tab is not null || _decor.Frame is not null || _decor.Diamond is not null || _decor.Cross is not null) && size.Height > MarksMinHeight;
         if (!scene && !hud && !plate) return;
         dc.PushClip(outline);
         if (scene)
@@ -102,6 +105,29 @@ internal sealed class IslandDecor
             dc.PushClip(_frameClip);
             dc.DrawGeometry(null, _framePen, _frame);
             dc.Pop();
+            if (fade < 1) dc.Pop();
+        }
+        if (_diamond is not null || _crossPen is not null)
+        {
+            // Beads on the frame's two sides, level with each other a little above the cuts.
+            double level = size.Height - 30, left = shoulder + FrameInset, right = size.Width - shoulder - FrameInset;
+            if (fade < 1) dc.PushOpacity(fade);
+            if (_diamond is not null && right > left + 40)
+            {
+                var g = new StreamGeometry();
+                using (var s = g.Open())
+                {
+                    s.BeginFigure(new Point(right, level - 4), true, true);
+                    s.LineTo(new Point(right + 4, level), true, false); s.LineTo(new Point(right, level + 4), true, false); s.LineTo(new Point(right - 4, level), true, false);
+                }
+                g.Freeze();
+                dc.DrawGeometry(_diamond, null, g);
+            }
+            if (_crossPen is not null && right > left + 40)
+            {
+                dc.DrawLine(_crossPen, new Point(left - 3.5, level), new Point(left + 3.5, level));
+                dc.DrawLine(_crossPen, new Point(left, level - 3.5), new Point(left, level + 3.5));
+            }
             if (fade < 1) dc.Pop();
         }
         double y = size.Height - MarkBand, tabX = shoulder + corners.BottomLeft + 4, hatchX = size.Width - shoulder - corners.BottomRight - 4 - HatchWidth;

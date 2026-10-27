@@ -212,7 +212,7 @@ internal sealed class DevicesView : FrameworkElement
     {
         bool high = SystemParameters.HighContrast;
         double radius = PanelTheme.Corner(Radius.Md);
-        drawing.DrawRoundedRectangle(high ? null : UI.Brush(UI.Fill), high ? DeviceGlyphs.Stroke(UI.Outline, 1) : null, r, radius, radius);
+        UI.Plate(drawing, high ? null : UI.Brush(UI.Fill), high ? DeviceGlyphs.Stroke(UI.Outline, 1) : null, r, radius);
         double pad = Math.Round(Math.Clamp(r.Height * .22, 8, 14)), icon = Math.Round(Math.Clamp(r.Height * .4, 16, 22)), middle = r.Y + r.Height / 2;
         double figureSize = _layout.Figure, right = r.Right - pad, baseline = Math.Round(middle + figureSize * .36);
         // Figures as the monitor page sets them (FigureGauge): the number in the display face, the unit small after it.
@@ -350,6 +350,8 @@ internal sealed class DevicesView : FrameworkElement
 internal static class DeviceGlyphs
 {
     private static readonly Dictionary<DeviceKind, Geometry> Icons = Enum.GetValues<DeviceKind>().ToDictionary(kind => kind, kind => Frozen(DeviceIcons.PathData(kind)));
+    // The same drawings on a plate: curves as straight edges (IconStyle), built when first wanted.
+    private static readonly Dictionary<DeviceKind, Geometry> AngularIcons = [];
     private static readonly Geometry BoltShape = Frozen("M13.5,0.5 L4.5,13.5 H11 L10,23.5 L19.5,9.5 H13 Z");
     private static readonly Geometry MoreShape = Frozen("M5.5,12 H5.51 M12,12 H12.01 M18.5,12 H18.51");
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
@@ -364,6 +366,15 @@ internal static class DeviceGlyphs
         if (Pens.Count > 64) Pens.Clear();
         return Pens[(color, thickness)] = pen;
     }
+    // The icons' pen on a plate: heavier, mitered, square ends.
+    private static readonly Dictionary<(string Color, double Thickness), Pen> AngularPens = [];
+    private static Pen IconPen(string color, double thickness)
+    {
+        if (!PanelTheme.Plated) return Stroke(color, thickness);
+        if (AngularPens.TryGetValue((color, thickness), out var pen)) return pen;
+        if (AngularPens.Count > 64) AngularPens.Clear();
+        return AngularPens[(color, thickness)] = IconStyle.Pen(UI.Brush(color), thickness);
+    }
 
     // Transforms that place a glyph, by their matrix, made once.
     private static readonly Dictionary<Matrix, Transform> Places = [];
@@ -376,12 +387,17 @@ internal static class DeviceGlyphs
         return Places[matrix] = transform;
     }
 
-    public static Geometry Icon(DeviceKind kind) => Icons.TryGetValue(kind, out var icon) ? icon : Icons[DeviceKind.Other];
+    public static Geometry Icon(DeviceKind kind)
+    {
+        if (!Icons.ContainsKey(kind)) kind = DeviceKind.Other;
+        if (!PanelTheme.Plated) return Icons[kind];
+        return AngularIcons.TryGetValue(kind, out var angular) ? angular : AngularIcons[kind] = IconStyle.Angular(Icons[kind], DeviceIcons.Grid);
+    }
 
     public static void Draw(DrawingContext drawing, DeviceKind kind, Rect at, string color)
     {
         drawing.PushTransform(Placed(at.Width / DeviceIcons.Grid, at.X, at.Y));
-        drawing.DrawGeometry(null, Stroke(color, 1.65), Icon(kind));
+        drawing.DrawGeometry(null, IconPen(color, 1.65), Icon(kind));
         drawing.Pop();
     }
 

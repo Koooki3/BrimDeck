@@ -87,6 +87,35 @@ internal static class UI
         return cut;
     }
     // A progress ring: a faint track with a colored arc that starts at the top and runs counterclockwise.
+    // A slanted bar (a parallelogram, its ends cut at 45 degrees as far as the bar is tall) for a plated theme; a rounded bar otherwise.
+    public static void Bar(DrawingContext dc, Brush brush, Rect r, double radius)
+    {
+        if (!PanelTheme.Plated) { dc.DrawRoundedRectangle(brush, null, r, radius, radius); return; }
+        double s = Math.Min(r.Height, r.Width / 2);
+        var g = new StreamGeometry();
+        using (var c = g.Open())
+        {
+            c.BeginFigure(new Point(r.X + s, r.Y), true, true);
+            c.LineTo(new Point(r.Right, r.Y), true, false); c.LineTo(new Point(r.Right - s, r.Bottom), true, false); c.LineTo(new Point(r.X, r.Bottom), true, false);
+        }
+        g.Freeze();
+        dc.DrawGeometry(brush, null, g);
+    }
+    // A plate (a card): on a plated theme two opposite corners are cut, the top left and the bottom right; otherwise rounded.
+    public static void Plate(DrawingContext dc, Brush? fill, Pen? pen, Rect r, double radius)
+    {
+        if (!PanelTheme.Plated) { dc.DrawRoundedRectangle(fill, pen, r, radius, radius); return; }
+        double cut = Math.Min(6, Math.Min(r.Width, r.Height) / 3);
+        var g = new StreamGeometry();
+        using (var c = g.Open())
+        {
+            c.BeginFigure(new Point(r.X + cut, r.Y), true, true);
+            c.LineTo(new Point(r.Right, r.Y), true, false); c.LineTo(new Point(r.Right, r.Bottom - cut), true, false);
+            c.LineTo(new Point(r.Right - cut, r.Bottom), true, false); c.LineTo(new Point(r.X, r.Bottom), true, false); c.LineTo(new Point(r.X, r.Y + cut), true, false);
+        }
+        g.Freeze();
+        dc.DrawGeometry(fill, pen, g);
+    }
     public static Grid Ring(double percent, string color, double size, double thickness, string? track = null, string? plate = null)
     {
         var ring = new Grid { Width = size, Height = size };
@@ -94,7 +123,8 @@ internal static class UI
         // in the ring's color.
         plate ??= PanelTheme.Plated ? PanelTheme.Hex("input") : "";
         if (plate.Length > 0) ring.Children.Add(new Ellipse { Fill = Brush(plate) });
-        ring.Children.Add(new Ellipse { Stroke = Brush(track ?? PanelTheme.Hex("ringTrack")), StrokeThickness = thickness });
+        // On a plate the track is a ring of ticks (dashes), the scale of a gauge.
+        ring.Children.Add(new Ellipse { Stroke = Brush(track ?? PanelTheme.Hex("ringTrack")), StrokeThickness = thickness, StrokeDashArray = plate.Length > 0 ? [.55, 1.1] : null });
         if (plate.Length > 0 && size >= 10) ring.Children.Add(new Rectangle { Width = Math.Round(size * .3), Height = Math.Round(size * .3), Fill = Brush(color), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         double fraction = Math.Clamp(percent / 100, 0, 1);
         if (fraction >= .999) ring.Children.Add(new Ellipse { Stroke = Brush(color), StrokeThickness = thickness });
