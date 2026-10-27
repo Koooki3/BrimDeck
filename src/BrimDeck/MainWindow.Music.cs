@@ -1057,20 +1057,22 @@ public partial class MainWindow
     private void UpdateMusicTimer()
     {
         bool musicVisible = MusicPresentationVisible;
-        _app.PresentMedia(this, musicVisible);
+        _app.PresentMedia(this, musicVisible && !CompactMusicRests);
         bool progressVisible = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && _mediaTrack is { HasTimeline: true, State: not MediaState.Stopped };
         bool animations = MusicMotion;
         // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours. So does a
         // display that is off: the line rests until it is back.
-        _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line);
+        _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line && !CompactMusicRests);
         UpdateLyricScrolling();
         UpdateQuotaCarousel();
         bool needed = IsVisible && !IsSuppressed && !ScreenOff && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
-        bool bars = animations && MusicAudioActive && musicVisible;
-        _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? BarsMs : 250);
+        bool bars = animations && MusicAudioActive && musicVisible && !CompactMusicRests;
+        // Without bars the tick only moves the open page's position and ends a track notice; collapsed, nothing else it drives
+        // shows more often than once a second (the indicator's progress moves a pixel every few seconds).
+        _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? BarsMs : _expanded || _trackNoticeUntil > DateTimeOffset.UtcNow ? 250 : 1000);
         // One analysis of the captured audio per move of the bars, the fastest any panel shows them at.
-        _media?.SetBarsInterval(_app.Decks.Any(deck => deck.IsExpanded) ? 33 : 50);
+        _media?.SetBarsInterval(_app.Decks.Any(deck => deck.IsExpanded) ? 33 : CompactBarsMs);
         // While the collapsed title glides, WPF draws a frame every refresh for it; the bars move on those frames (MusicFrame), so
         // the timer's own frames, which fell between them, are not drawn as well. In its rests, and when it does not scroll, the
         // timer runs as before.
@@ -1090,10 +1092,15 @@ public partial class MainWindow
     // The panel closed: a collapsed title that has rested scrolls its laps again, as the row comes back into view. (Reaching
     // the island opens the panel, so the collapsed title is not seen while the pointer is on it.)
     private void ReplayCompactTitle() { if (_compactMarquee is not null) _compactMarquee.Replay(); else _compactScroll.Replay(); }
-    // How often the bars move: 30 times a second on the music page; 20 on the collapsed row, where each move redraws the whole
+    // How often the bars move: 30 times a second on the music page; 15 on the collapsed row, where each move redraws the whole
     // layered island and the bars are a few device pixels tall (measured: the row's bars and title cost about 50 ms of CPU a
-    // second while music played, the largest part of the idle panel).
-    private int BarsMs => _expanded ? 33 : 50;
+    // second while music played, the largest part of the idle panel; 20 a second still cost about 20).
+    private const int CompactBarsMs = 66;
+    private int BarsMs => _expanded ? 33 : CompactBarsMs;
+    // Over a full-screen window (a video, a game in a borderless window) the collapsed row's music rests: the bars stand at rest,
+    // the title does not scroll and the audio is not read. What is watched there is the window, not the island; the open panel
+    // moves as ever.
+    private bool CompactMusicRests => !_expanded && _context is ScreenContext.Borderless or ScreenContext.Exclusive;
     private bool TitleGliding => !_expanded && _alert is null && _compactEqualizer is not null && _compactMarquee?.IsGliding == true;
     // The bars on the display's frames (Motion), keyed by an element of their own so a row built again never adds a second step.
     // _musicFrameAt is the frame time (Motion.FrameTime) the bars last moved at.
@@ -1139,9 +1146,9 @@ public partial class MainWindow
     {
         var now = DateTimeOffset.UtcNow; double seconds = Math.Min(.5, (now - _lastMusicTick).TotalSeconds); _lastMusicTick = now;
         // motion-review F18: the bars rest whenever the music's motion does (animations off, the display off).
-        bool playing = MusicMotion && MusicAudioActive;
+        bool playing = MusicMotion && MusicAudioActive && !CompactMusicRests;
         bool musicVisible = MusicPresentationVisible;
-        _app.PresentMedia(this, musicVisible);
+        _app.PresentMedia(this, musicVisible && !CompactMusicRests);
         float peak = musicVisible ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the flowing bars; the session peak is the fallback.
         bool flowing = musicVisible && _media?.FlowLevels(_flowLevels) == true;
