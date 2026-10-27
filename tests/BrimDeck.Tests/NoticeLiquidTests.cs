@@ -23,8 +23,6 @@ internal static class NoticeLiquidTests
         var call = NoticeFx.For(AttentionKind.Notice, NoticePriority.Normal, false, true, NoticeCategory.Message);
         var low = NoticeFx.For(AttentionKind.Notice, NoticePriority.Low, false, false, NoticeCategory.Message);
         var summary = NoticeFx.For(AttentionKind.Summary, NoticePriority.Normal, false, false, null);
-        var track = NoticeFx.For(AttentionKind.Track, NoticePriority.Normal, false, false, null);
-        var quota = NoticeFx.For(AttentionKind.Quota, NoticePriority.Normal, false, false, null);
         var error = NoticeFx.For(AttentionKind.Notice, NoticePriority.Normal, false, false, NoticeCategory.Error);
         var warning = NoticeFx.For(AttentionKind.Notice, NoticePriority.Normal, false, false, NoticeCategory.Warning);
         // A message from brim-notify: its category and priority hint reach the plan through the notice BrimDeck keeps.
@@ -38,12 +36,12 @@ internal static class NoticeLiquidTests
             low.Intensity < normal.Intensity && normal.Intensity < high.Intensity && high.Intensity < urgent.Intensity
             && low.Separation < normal.Separation && normal.Separation < high.Separation && high.Separation <= urgent.Separation
             && low.Glow < normal.Glow && normal.Glow < high.Glow && high.Glow < urgent.Glow);
-        check("Liquid plans: what only informs (a summary, a track change) plays lightly, and in the theme's own color",
-            summary.Intensity <= 2 && track.Intensity <= 2 && summary.Separation < low.Separation && track.Glow < low.Glow && summary.Tone == NoticeFxTone.Theme && track.Tone == NoticeFxTone.Theme);
-        check("Liquid plans: a quota alert, a warning, an alarm and a call take the warning color; an error the danger color",
-            quota.Tone == NoticeFxTone.Warning && warning.Tone == NoticeFxTone.Warning && urgent.Tone == NoticeFxTone.Warning && call.Tone == NoticeFxTone.Warning && error.Tone == NoticeFxTone.Danger);
+        check("Liquid plans: what only informs (a summary) plays lightly, and in the theme's own color",
+            summary.Intensity <= 2 && summary.Separation < low.Separation && summary.Glow < low.Glow && summary.Tone == NoticeFxTone.Theme);
+        check("Liquid plans: a warning, an alarm and a call take the warning color; an error the danger color",
+            warning.Tone == NoticeFxTone.Warning && urgent.Tone == NoticeFxTone.Warning && call.Tone == NoticeFxTone.Warning && error.Tone == NoticeFxTone.Danger);
         check("Liquid plans: an error is stronger than an ordinary notice and no stronger than an alarm", error.Glow > normal.Glow && error.Glow <= urgent.Glow);
-        bool ranges = new[] { normal, high, urgent, call, low, summary, track, quota, error, warning }.All(p => p.Intensity is >= 1 and <= 10 && p.Separation is >= .2 and <= 2 && p.Glow is > 0 and <= 1.25);
+        bool ranges = new[] { normal, high, urgent, call, low, summary, error, warning }.All(p => p.Intensity is >= 1 and <= 10 && p.Separation is >= .2 and <= 2 && p.Glow is > 0 and <= 1.25);
         check("Liquid plans: every plan is within the motion's own ranges", ranges);
         check("Liquid pace: the panel's animation duration sets it, 1 at the default, within 0.75 to 1.5",
             NoticeFx.Pace(360) == 1 && NoticeFx.Pace(100) == .75 && NoticeFx.Pace(1000) == 1.5 && NoticeFx.Pace(540) == 1.5 && NoticeFx.Pace(0) == .75 && NoticeFx.Pace(9999) == 1.5 && Math.Abs(NoticeFx.Pace(450) - 1.25) < 1e-9);
