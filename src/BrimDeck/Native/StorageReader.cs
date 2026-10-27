@@ -30,7 +30,7 @@ internal sealed class StorageReader
     private int _running;
     private volatile Task _reading = Task.CompletedTask;
 
-    // Whether any internal drive with a lettered volume was found, and how many; whether any drive gave a temperature.
+    // Whether any internal drive with a lettered volume was found, and how many such volumes; whether any drive gave a temperature.
     public SensorState Drives => _drives;
     public int Count => _count;
     public SensorState Temperatures => _temperatures;
@@ -112,7 +112,7 @@ internal sealed class StorageReader
         var plain = Core.Storage.Group(described, disks, solid: solid);
         _plain = plain;
         _heated = Core.Storage.Group(described, disks, _known, solid);
-        _count = plain.Count;
+        _count = Core.Storage.VolumeCount(plain);
         if (plain.Count > 0) _drives = SensorState.Found; else if (_drives == SensorState.Unknown) _drives = SensorState.None;
     }
 

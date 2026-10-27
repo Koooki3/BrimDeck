@@ -79,7 +79,7 @@ static class ResizeMotionTests
         var page = MonitorLayout.For(700, 290, true, 2);
         var held = page.Parts(290, foot: 10);
         check("Resize parts: the foot gives its room from the graph", Math.Abs(page.Parts(290)[1].Height - held[1].Height - 10) < 1e-9 && held[3].Height == page.Parts(290)[3].Height);
-        check("Resize parts: the drives' lines take their rows", page.StorageLines == 2 && held[3].Height == 8 + 2 * page.RowHeight);
+        check("Resize parts: the drives' lines take their rows, tighter than the list's", page.StorageLines == 2 && held[3].Height == 8 + 2 * page.StorageRow && page.StorageRow < page.RowHeight);
     }
 
     // The list's foot steps by a row as the page grows; the readings' foot holds through the drag, then eases there in small steps.
