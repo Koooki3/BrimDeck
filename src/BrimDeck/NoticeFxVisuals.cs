@@ -160,7 +160,7 @@ internal sealed class NoticeFxBody : FrameworkElement
         {
             bool rim = pass == 0;
             if (rim && !look.HasRim) continue;
-            if (!rim && look.Translucent && step <= 0) { FillTogether(drawing, frame, look, At); continue; }
+            if (look.Translucent && step <= 0) { DrawTogether(drawing, frame, look, At, rim); continue; }
             foreach (var disc in frame.Discs)
             {
                 var center = At(disc.Side, new LiquidPoint(disc.X, disc.Y));
@@ -192,9 +192,10 @@ internal sealed class NoticeFxBody : FrameworkElement
         }
     }
 
-    // A translucent surface's droplets and necks as one shape. Every figure runs clockwise on the screen, so that where figures
-    // overlap the nonzero rule fills the union once.
-    private static void FillTogether(DrawingContext drawing, LiquidFrame frame, NoticeFxLook look, Func<int, LiquidPoint, Point> at)
+    // A translucent surface's droplets and necks as one shape, filled once and with one rim round the whole, so that where droplets
+    // overlap nothing is drawn twice and no outline shows inside the union. Every figure runs clockwise on the screen, so that where
+    // figures overlap the nonzero rule fills the union once.
+    private static void DrawTogether(DrawingContext drawing, LiquidFrame frame, NoticeFxLook look, Func<int, LiquidPoint, Point> at, bool rim)
     {
         var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
         using (var path = geometry.Open())
@@ -215,8 +216,8 @@ internal sealed class NoticeFxBody : FrameworkElement
                 else { path.BeginFigure(p2, true, true); path.BezierTo(h2, h4, p4, true, false); path.LineTo(p3, true, false); path.BezierTo(h3, h1, p1, true, false); }
             }
         }
-        geometry.Freeze();
-        drawing.DrawGeometry(look.Fill(.5), null, geometry);
+        if (rim) drawing.DrawGeometry(null, look.Rim(.5), geometry.GetOutlinedPathGeometry());
+        else { geometry.Freeze(); drawing.DrawGeometry(look.Fill(.5), null, geometry); }
     }
 
     // A block as the pixel theme draws a droplet: as wide as the droplet, in whole steps, on the grid.
