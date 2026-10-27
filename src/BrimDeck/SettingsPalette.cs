@@ -12,7 +12,8 @@ internal sealed record SettingsPalette(bool Dark)
     public string Sidebar => Dark ? "#0D0D0F" : "#F3F3F5";
     public string Primary => Dark ? "#F1F1F4" : "#202027";
     public string Secondary => Dark ? "#A5A5AF" : "#62626F";
-    public string Tertiary => Dark ? "#858591" : "#747481";
+    // At least 4.5:1 on the surface and on inset fields, where units and hints in this color sit.
+    public string Tertiary => Dark ? "#8E8E9A" : "#6B6B78";
     public string Divider => Dark ? "#2D2D33" : "#E0E0E6";
     public string RowDivider => Dark ? "#242429" : "#EDEDF1";
     public string Inset => Dark ? "#25252B" : "#EFF0F4";
@@ -29,7 +30,10 @@ internal sealed record SettingsPalette(bool Dark)
         Brush("SettingsFillSelected", Dark ? "#41414A" : "#FFFFFF");
         Brush("SettingsNavSelected", Dark ? "#27272D" : "#FFFFFF");
         Brush("SettingsAccent", Dark ? "#348AEB" : "#2374DE");
-        Brush("SettingsAccentHover", Dark ? "#529AF0" : "#1964C7");
+        // The fill of buttons with white text on the accent: at least 4.5:1 for that text, at rest and under the pointer, in both
+        // modes (the dark mode's own accent is too light for it).
+        Brush("SettingsAccentFill", "#2374DE");
+        Brush("SettingsAccentHover", "#1964C7");
         Brush("SettingsSliderAccent", Accent); Brush("SettingsTrackBrush", Dark ? "#42424A" : "#D3D6DF");
         Brush("SettingsBorder", Border); Brush("SettingsInput", Input); Brush("SettingsPopup", Popup);
         Brush("SettingsSwatchBorder", Dark ? "#65656F" : "#B0B3BE");

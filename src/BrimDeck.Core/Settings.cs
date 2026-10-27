@@ -76,6 +76,11 @@ public static class ClockColors
         (Loc.T("火焰", "Ember"), ["#FFE27A", "#FF9F43", "#FF5E5E"]),
         (Loc.T("霓虹", "Neon"), ["#FF5CF0", "#A66BFF", "#5CE1E6"])
     ];
+    // Under Windows' high contrast the clock is the system's window text (the high contrast palette's clock color, which "white"
+    // stands for) whatever color, gradient or cover was chosen, at full strength and with no glow. The choice itself is kept,
+    // so the clock is drawn as chosen again when high contrast is turned off.
+    public static ClockColor Shown(ClockColor chosen, bool highContrast) => highContrast ? ClockColor.White : chosen;
+    public static bool Glows(ClockStyle style, bool highContrast) => !highContrast && style is ClockStyle.Neon or ClockStyle.Segment;
 }
 
 // A dashboard column has an identity independent of either data source.

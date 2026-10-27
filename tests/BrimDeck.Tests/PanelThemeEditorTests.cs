@@ -93,7 +93,7 @@ internal static class PanelThemeEditorTests
             !navy.ContainsKey("textPrimary") && navy["popup"] == ThemeColor.Mix(C("#0B1530"), C("#F5F5F7"), .10) && navy["hairline"] == C("#F5F5F7").WithAlpha(0x17) && !navy.ContainsKey("onAccent"));
         var warm = PanelThemes.Derive(darkPalette, PanelThemes.ForegroundKey, C("#FFE8C0"));
         check("A new foreground brings the text, clock and lines in its color",
-            warm["clock"] == C("#FFE8C0") && warm["textTertiary"] == C("#FFE8C0").WithAlpha(0x61) && !warm.ContainsKey("surface") && !warm.ContainsKey("accent"));
+            warm["clock"] == C("#FFE8C0") && warm["textTertiary"] == C("#FFE8C0").WithAlpha(0x8C) && !warm.ContainsKey("surface") && !warm.ContainsKey("accent"));
         var yellow = PanelThemes.Derive(darkPalette, PanelThemes.AccentKey, C("#FFD60A"));
         var blue = PanelThemes.Derive(darkPalette, PanelThemes.AccentKey, C("#0A3DFF"));
         check("A new accent brings readable text on it and the date range, and nothing else",

@@ -57,15 +57,15 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 | `surface` | The notch, capsule and expanded panel; always opaque |
 | `textPrimary` | Titles and figures (7:1) |
 | `textSecondary` | Labels (4.5:1) |
-| `textTertiary` | Reset times and notes (3:1) |
-| `accent` / `onAccent` | Keyboard focus and chosen dates / text on them (3:1) |
+| `textTertiary` | Reset times, notes and other small text (4.5:1) |
+| `accent` / `onAccent` | Keyboard focus and chosen dates (3:1) / text on them, such as a notice's main button (4.5:1) |
 | `danger` | Errors and paused sync (4.5:1) |
 | `liked` | A liked song (3:1) |
 | `clock` | The clock when its color is "Theme default" (4.5:1) |
 | `equalizer` | The equalizer when it does not follow the cover (3:1) |
 | `hairline` `track` `ringTrack` `fill` `fillSelected` `hover` `pressed` `outline` | Dividers, tracks, joined switches, hover and pressed states, outlines |
 | `popup` `popupBorder` `input` `rangeFill` | Menus and pop-ups, date fields and date ranges |
-| `coverPlaceholder` `coverOutline` `scrollThumb` | A missing cover, the cover outline, scroll bars |
+| `coverPlaceholder` `coverOutline` `scrollThumb` | A missing cover, the cover outline, scroll bars (the thumb 2:1 on the surface) |
 | `rim` `shadow` | The line along the surface's inner edge; the collapsed shadow (a bright color with no depth is a glow) |
 | `indicator` `indicatorProgress` | The Indicator and the playback progress on it (2:1) |
 | `switchFill` `seekRail` `rowDivider` `rowHover` | The toolbar page switch, the seek bar track, model detail row dividers and hover |
@@ -74,7 +74,7 @@ Colors are `#RRGGBB` or `#AARRGGBB` (AA is the opacity). The minimum in brackets
 
 ### App colors (apps)
 
-The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `kimi`, `opencode`, `manual` (every source entered by hand), `other`, and `warning` and `critical`. A color chosen for a column in "Quotas and usage" takes precedence.
+The default colors of the quota columns, bars and rings: `claude`, `codex`, `antigravity`, `cursor`, `zcode`, `dsh`, `grokBot`, `kimi`, `opencode`, `manual` (every source entered by hand), `other`, and `warning` and `critical` (these two are also text, so 4.5:1). A color chosen for a column in "Quotas and usage" takes precedence.
 
 ### Clock
 
@@ -135,7 +135,7 @@ The demo theme was made in these five steps.
 1. **Collect references**: frames of the work or brand; note the light and dark, the main and accent colors, and the shapes that recur.
 2. **Assign roles**: the surface (the largest area), three text levels, the accent, the semantic colors (warning, critical, error) and the decoration (rim, shadow, gradient, texture).
 3. **Surface and text first**: the surface sets every contrast; space the text levels at 7 : 4.5 : 3.
-4. **Then accents and app colors**: app colors must be told apart and reach 3:1 on the surface; warning and critical should read as yellow and red.
+4. **Then accents and app colors**: app colors must be told apart and reach 3:1 on the surface (warning and critical, which are also text, 4.5:1); warning and critical should read as yellow and red.
 5. **Check**: look at the collapsed and expanded panel, the notice and the pop-ups, and make sure "Readability" is empty or acceptable; otherwise go back to step 3.
 
 ## The newer themes
