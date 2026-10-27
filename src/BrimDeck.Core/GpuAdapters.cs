@@ -126,8 +126,9 @@ public static class GpuReadings
     public static string? Location(uint bus, uint device, uint function) =>
         bus > 0xFFFF || device > 31 || function > 7 ? null : $"{bus}:{device}.{function}";
 
-    // One sample per adapter with counters. With adapters described (DXGI listed any), only the hardware adapters it lists are
-    // kept: the software rasterizer has engines of its own, and NPUs and other compute-only devices have counters but are not
+    // One sample per adapter. With adapters described (DXGI listed any), the hardware adapters it lists are kept, those without
+    // engine counters at the moment too (NoReadings), so a connected adapter never drops out of the list while it has nothing to
+    // read; the software rasterizer has engines of its own, and NPUs and other compute-only devices have counters but are not
     // graphics adapters. Without a description every adapter with counters is kept, unnamed. Discrete adapters come first, then
     // integrated ones, each by name, so the order is the same after a restart.
     public static List<GpuSample> Samples(Dictionary<ulong, GpuTotals> totals, IReadOnlyDictionary<ulong, GpuAdapter> adapters, bool described, string noMemory)
@@ -146,6 +147,15 @@ public static class GpuReadings
                 Luid = luid, Key = adapter?.Key is { Length: > 0 } key ? key : LuidText(luid), LegacyKey = adapter?.LegacyKey ?? "", Kind = adapter?.Kind ?? GpuKind.Unknown
             });
         }
+        if (described)
+            foreach (var (luid, adapter) in adapters)
+                if (!adapter.Software && !totals.ContainsKey(luid))
+                    samples.Add(new GpuSample(0, Reading<ulong>.Unavailable(noMemory))
+                    {
+                        NoReadings = true, SharedBytes = Reading<ulong>.Unavailable(noMemory), Name = adapter.Name.Length > 0 ? adapter.Name : null,
+                        DedicatedTotal = adapter.DedicatedTotal > 0 ? adapter.DedicatedTotal : null, Luid = luid, Key = adapter.Key.Length > 0 ? adapter.Key : LuidText(luid),
+                        LegacyKey = adapter.LegacyKey, Kind = adapter.Kind
+                    });
         samples.Sort(static (a, b) => Rank(a.Kind) != Rank(b.Kind) ? Rank(a.Kind).CompareTo(Rank(b.Kind))
             : string.CompareOrdinal(a.Name ?? "", b.Name ?? "") is var byName and not 0 ? byName : a.Luid.CompareTo(b.Luid));
         return samples;
@@ -162,43 +172,50 @@ public static class GpuChoice
     // before while it is there, else the busiest at the time. It never moves to another adapter because that one became busier:
     // on a laptop the integrated adapter draws the desktop and is busy whenever the discrete one rests, so following the load
     // would bring back the jumping between adapters this choice is for. The other adapters are a click away on the page.
+    // Adapters with readings come first; one without (NoReadings) is taken only when no adapter has readings.
     public static GpuSample? Auto(IReadOnlyList<GpuSample> gpus, ulong previous)
     {
         GpuSample? discrete = null, before = null, busiest = null;
         foreach (var gpu in gpus)
         {
+            if (gpu.NoReadings) continue;
             if (gpu.Kind == GpuKind.Discrete && (discrete is null || (gpu.DedicatedTotal ?? 0) > (discrete.DedicatedTotal ?? 0))) discrete = gpu;
             if (gpu.Luid == previous && previous != 0) before = gpu;
             if (busiest is null || gpu.Usage > busiest.Usage) busiest = gpu;
         }
-        return discrete ?? before ?? busiest;
+        return discrete ?? before ?? busiest ?? (gpus.Count > 0 ? gpus[0] : null);
     }
 
     // The saved adapter: by its key; then by the key saved before adapters had a location (LegacyKey), for a choice saved then;
     // then by the LUID it was saved under, for an adapter with no ids; then by its name, for an adapter whose ids changed with its
     // driver, when no other adapter has that name. Null while it is not there (an external GPU unplugged); the choice is kept for
     // when it returns. A choice found any other way than by its key is saved again under the adapter's key (Resolve's upgrade).
-    public static GpuSample? Saved(IReadOnlyList<GpuSample> gpus, string key, string? name)
+    public static GpuSample? Saved(IReadOnlyList<GpuSample> gpus, string key, string? name) =>
+        Find(gpus, gpu => (gpu.Key, gpu.LegacyKey, gpu.Name, gpu.Luid), key, name) is var at and >= 0 ? gpus[at] : null;
+
+    // Where the saved adapter is among items described by of (Saved's rules), or -1: the settings page finds the choice it shows
+    // as the monitor does, so it never shows another card of the same model as chosen when the chosen one is not there.
+    public static int Find<T>(IReadOnlyList<T> items, Func<T, (string Key, string LegacyKey, string? Name, ulong Luid)> of, string key, string? name)
     {
-        foreach (var gpu in gpus) if (gpu.Key == key) return gpu;
+        for (int i = 0; i < items.Count; i++) if (of(items[i]).Key == key) return i;
         // A key with a location names one card: another card of the model is not it, though it has the same ids and name (the
         // chosen card may be the one removed). By name only an adapter whose ids changed (a new driver) is found.
         if (key.IndexOf('@') is var at and > 0)
         {
             string identity = key[..at];
-            return Named(gpus, name) is { } named && named.Key.Split('@')[0] != identity ? named : null;
+            return Named(items, of, name) is var named and >= 0 && of(items[named]).Key.Split('@')[0] != identity ? named : -1;
         }
-        foreach (var gpu in gpus) if (gpu.LegacyKey.Length > 0 && gpu.LegacyKey == key) return gpu;
-        foreach (var gpu in gpus) if (GpuReadings.LuidText(gpu.Luid) == key) return gpu;
-        return Named(gpus, name);
+        for (int i = 0; i < items.Count; i++) if (of(items[i]).LegacyKey is { Length: > 0 } legacy && legacy == key) return i;
+        for (int i = 0; i < items.Count; i++) if (of(items[i]).Luid != 0 && GpuReadings.LuidText(of(items[i]).Luid) == key) return i;
+        return Named(items, of, name);
     }
     // Two cards of one model have one name: only an adapter that is the only one with the name is taken by it.
-    private static GpuSample? Named(IReadOnlyList<GpuSample> gpus, string? name)
+    private static int Named<T>(IReadOnlyList<T> items, Func<T, (string Key, string LegacyKey, string? Name, ulong Luid)> of, string? name)
     {
-        if (name is not { Length: > 0 }) return null;
-        GpuSample? named = null; int count = 0;
-        foreach (var gpu in gpus) if (gpu.Name == name) { named = gpu; count++; }
-        return count == 1 ? named : null;
+        if (name is not { Length: > 0 }) return -1;
+        int named = -1, count = 0;
+        for (int i = 0; i < items.Count; i++) if (of(items[i]).Name == name) { named = i; count++; }
+        return count == 1 ? named : -1;
     }
 
     // The adapter to show for a saved choice (null for 自动), falling back to 自动 while the chosen one is not there. automatic:

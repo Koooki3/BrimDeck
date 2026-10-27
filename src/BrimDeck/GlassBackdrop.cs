@@ -175,6 +175,10 @@ internal sealed class GlassBackdrop : IDisposable
     private double _luminosity = GlassEffect.LuminosityCapsule, _luminosityShown = GlassEffect.LuminosityBase;
     private long _lowerSince = -1;
     private bool _riseSeen;
+    // The look the luminosity was settled for; null when the glass was shown again or the look turned (user 10-27: the light
+    // glass came up very dark at first, at the dark look's or the floor's luminosity for the half second or more the rise
+    // rule waited for a second reading): the first reading then sets it at once, up or down, in the frame it is shown.
+    private bool? _luminosityLook;
     private DispatcherTimer? _probe;
     private GlassAppearance? _probeLook;
     private const int ProbeMs = 500, ProbeDwellMs = 2500;
@@ -663,6 +667,8 @@ internal sealed class GlassBackdrop : IDisposable
     internal bool HoldsWindowOrCapture => _window is not null || _host is not null;
     // For the offscreen edge check (FxPreview --edge-probe): the glass's own window, once made.
     internal IntPtr GlassWindow => _window?.Handle ?? IntPtr.Zero;
+    // For the offscreen checks: the acrylic body's luminosity opacity shown now.
+    internal double LuminosityShown => _luminosityShown;
     // For the same check: the acrylic body drawn in this solid color instead (DWM leaves the host backdrop out of a print).
     internal static Windows.UI.Color? ProbeColor { get; set; }
 
@@ -1077,7 +1083,9 @@ internal sealed class GlassBackdrop : IDisposable
             _probe = new DispatcherTimer(DispatcherPriority.Background, _owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(ProbeMs) };
             _probe.Tick += (_, _) => ProbeTick();
         }
-        if (!_probe.IsEnabled) { _probe.Start(); ProbeTick(); }
+        if (!_probe.IsEnabled) { _luminosityLook = null; _probe.Start(); ProbeTick(); }
+        // The look turned while shown: read at once, so the new look's first frame is settled too.
+        else if (_luminosityLook is { } look && look != PanelTheme.Current.IsDark) ProbeTick();
     }
 
     // The reading copies three strips of the screen through GDI, which waits for the desktop compositor: 20 to 30 ms each time
@@ -1087,7 +1095,7 @@ internal sealed class GlassBackdrop : IDisposable
     private void ProbeTick()
     {
         if (_disposed || !AcrylicBody || _last is not { } frame || _windowRect is not { } window) { _probe?.Stop(); return; }
-        if (_probing) return;
+        if (_probing) { _probeAgain = _luminosityLook != PanelTheme.Current.IsDark; return; }
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
         var island = new LiquidGlass.RECT(window.X + (int)frame.Left, window.Y + (int)frame.Top, window.X + (int)frame.Right, window.Y + (int)frame.Bottom);
         int gap = (int)(24 * scale), band = (int)(40 * scale);
@@ -1095,14 +1103,21 @@ internal sealed class GlassBackdrop : IDisposable
         Task.Run(() => LiquidGlass.AcrylicProbe.Read(island, gap, band)).ContinueWith(task =>
         {
             _probing = false;
-            if (!_disposed && AcrylicBody && task.Status == TaskStatus.RanToCompletion && task.Result is { } reading) ProbeApply(reading);
+            if (_disposed || !AcrylicBody) return;
+            var reading = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
+            // Nothing read: the look is taken as settled as it is (not read again on every frame until a reading comes).
+            if (reading is null) _luminosityLook = PanelTheme.Current.IsDark;
+            else ProbeApply(reading.Value);
+            // Shown afresh or the look turned while this read was out (Probe): read again at once for the new look.
+            if (_probeAgain) { _probeAgain = false; ProbeTick(); }
         }, TaskScheduler.FromCurrentSynchronizationContext());
     }
+    private bool _probeAgain;
 
     private void ProbeApply(LiquidGlass.AcrylicProbe.Reading reading)
     {
-        long now = Environment.TickCount64;
         bool dark = PanelTheme.Current.IsDark;
+        long now = Environment.TickCount64;
         double openness = Openness?.Invoke() ?? 0;
         // The island's shadow takes its tone from the same reading (MainWindow.ShadowLook: deeper over a busy backdrop, lighter
         // over a plain light one), as it took it from the refraction renderer's measure.
@@ -1110,7 +1125,8 @@ internal sealed class GlassBackdrop : IDisposable
         double wanted = GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness));
         // Up after two readings in a row ask for it (a second: one flash of a video or a window passing never lifts it), down
         // after the backdrop stayed calmer for ProbeDwellMs.
-        if (wanted > _luminosity && _riseSeen) { _luminosity = wanted; _lowerSince = -1; _riseSeen = false; Redress(); }
+        if (_luminosityLook != dark) { _luminosityLook = dark; _luminosity = wanted; _lowerSince = -1; _riseSeen = false; Redress(); }
+        else if (wanted > _luminosity && _riseSeen) { _luminosity = wanted; _lowerSince = -1; _riseSeen = false; Redress(); }
         else if (wanted > _luminosity) _riseSeen = true;
         else if (wanted < _luminosity)
         {

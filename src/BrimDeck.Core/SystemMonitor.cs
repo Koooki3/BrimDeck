@@ -146,6 +146,9 @@ public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
     // The key saved before adapters had a location (GpuAdapter.LegacyKey), to find a choice saved then.
     public string LegacyKey { get; init; } = "";
     public GpuKind Kind { get; init; }
+    // A connected adapter without engine readings at the moment (a laptop's discrete GPU asleep, a driver between readings): it
+    // stays listed and choosable, and shows "暂无读数" in place of its figures.
+    public bool NoReadings { get; init; }
     public IReadOnlyList<double> History { get; init; } = [];
     public double? DedicatedFraction => DedicatedBytes.TryGet(out var used) && DedicatedTotal is { } total && total > 0 ? Math.Clamp((double)used / total, 0, 1) : null;
 }

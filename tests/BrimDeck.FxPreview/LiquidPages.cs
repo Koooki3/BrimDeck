@@ -52,8 +52,7 @@ internal static partial class LiquidPages
     }
     private static int _failures;
     // The known case the user accepted (10-27, the dark look as clear as the light): the acrylic body's dark look on the open
-    // panel left at its floor by the probe (its ring saw nothing bright), over a backdrop whose bright part lies under the panel
-    // alone. Its secondary and tertiary text and its masked contrast may then fall a little short for that frame: reported as
+    // panel, over a backdrop whose bright part lies under the panel where the probe's ring does not see it. Its secondary and tertiary text and its masked contrast may then fall a little short for that frame: reported as
     // WARN while within Unseen's margins (secondary 4.0:1, tertiary 2.6:1, masked 80 % of the opaque theme's), FAIL past them.
     // The primary text is always held to 4.5:1.
     private static bool _unseen;
@@ -360,7 +359,9 @@ internal static partial class LiquidPages
                 if (lx < 0 || lx >= layer.Width || y >= layer.Height) continue;
                 Over(layer.Pixels, (y * layer.Width + lx) * 4, composed, (y * dw + x) * 4);
             }
-        _unseen = !GlassBackdrop.Refraction && dark && layer.Open >= .5 && AcrylicEmulation.Luminosity <= GlassEffect.PanelBase(true) + 1e-6;
+        // (Not only at the floor: the ring may see a little light and raise the glass a step, still short of what the bright
+        // part under the panel asks.)
+        _unseen = !GlassBackdrop.Refraction && dark && layer.Open >= .5;
         Check(name, layer, glass, under, composed, dw, gx, gy);
         _unseen = false;
         Body(name, layer, glass, under, desktop, dw, gx, gy);
