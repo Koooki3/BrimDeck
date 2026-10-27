@@ -22,7 +22,14 @@ internal static class AcrylicProbe
     private static byte[]? _last;
 
     // gap and band in device pixels; island in screen pixels. Null when nothing could be read.
+    // Called from the thread pool (GlassBackdrop.ProbeTick); one read at a time, as _last holds the previous one.
+    private static readonly object Gate = new();
     public static Reading? Read(RECT island, int gap, int band)
+    {
+        lock (Gate) return ReadLocked(island, gap, band);
+    }
+
+    private static Reading? ReadLocked(RECT island, int gap, int band)
     {
         var strips = new[]
         {

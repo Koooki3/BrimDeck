@@ -984,12 +984,27 @@ internal sealed class GlassBackdrop : IDisposable
         if (!_probe.IsEnabled) { _probe.Start(); ProbeTick(); }
     }
 
+    // The reading copies three strips of the screen through GDI, which waits for the desktop compositor: 20 to 30 ms each time
+    // (live check 10-27, twice a second). On the UI thread that held every opening, closing and glide to every other frame, so
+    // the copy runs on the thread pool and only what it found is applied here. A tick while one is still out is skipped.
+    private bool _probing;
     private void ProbeTick()
     {
         if (_disposed || !AcrylicBody || _last is not { } frame || _windowRect is not { } window) { _probe?.Stop(); return; }
+        if (_probing) return;
         double scale = VisualTreeHelper.GetDpi(_island).DpiScaleX;
         var island = new LiquidGlass.RECT(window.X + (int)frame.Left, window.Y + (int)frame.Top, window.X + (int)frame.Right, window.Y + (int)frame.Bottom);
-        if (LiquidGlass.AcrylicProbe.Read(island, (int)(24 * scale), (int)(40 * scale)) is not { } reading) return;
+        int gap = (int)(24 * scale), band = (int)(40 * scale);
+        _probing = true;
+        Task.Run(() => LiquidGlass.AcrylicProbe.Read(island, gap, band)).ContinueWith(task =>
+        {
+            _probing = false;
+            if (!_disposed && AcrylicBody && task.Status == TaskStatus.RanToCompletion && task.Result is { } reading) ProbeApply(reading);
+        }, TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    private void ProbeApply(LiquidGlass.AcrylicProbe.Reading reading)
+    {
         long now = Environment.TickCount64;
         bool dark = PanelTheme.Current.IsDark;
         double openness = Openness?.Invoke() ?? 0;
