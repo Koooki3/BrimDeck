@@ -2,20 +2,21 @@ namespace BrimDeck.Core.Notices;
 
 // The liquid motion of an arriving notice: while it settles, its surface behaves like a viscous liquid. The capsule throws
 // droplets off both ends and takes them back as the ends flow out to refill, the notch swells at its two lower corners with
-// bulges that run round its outline, and the indicator's card sheds one small drop at each end; an edge glow lights twice.
+// bulges that run round its outline; an edge glow lights twice. (The indicator does not use it: its motion is the surface's own,
+// see Curves.LineArrive and Curves.LineReturn.)
 //
 // The capsule's and the notch's motion follows the design "胶囊通知动效" that the maintainer MoFeng2223 provided for BrimDeck
 // (https://claude.ai/artifact/JU9bvJp5PPNY85vpGgUX6C): a body of max(width - 2 zones, min(width, keep)), a glow, then a
 // separation of droplets with necks that thin and break, a refill, and an end where the droplets shrink away and the ends flow
 // back. Its parameters and defaults are that design's. This is our own implementation of the described model for WPF (no code
-// of the design is used); the indicator's motion and the adaptation to every notice and theme are ours (see DESIGN.md).
+// of the design is used); the adaptation to every notice and theme is ours.
 //
 // Everything is worked out here from the notice's size and a seed, with no UI types, and sampled by time: the droplets' births,
-// sizes, directions and lives are decided once, and a frame only evaluates positions. Positions are in DIPs. Capsule and
-// indicator droplets are given relative to the end they leave (x outward from the surface's edge at rest, y from its middle),
+// sizes, directions and lives are decided once, and a frame only evaluates positions. Positions are in DIPs. Capsule
+// droplets are given relative to the end they leave (x outward from the surface's edge at rest, y from its middle),
 // so a surface that changes size meanwhile (a burst making the toast wider) keeps its droplets at its ends; the notch's bulges
 // and beads are given in the surface's own coordinates from its top-left corner.
-public enum LiquidForm { Capsule, Notch, Line }
+public enum LiquidForm { Capsule, Notch }
 
 public readonly record struct LiquidPoint(double X, double Y)
 {
@@ -29,9 +30,6 @@ public readonly record struct LiquidDisc(int Side, double X, double Y, double R)
 // along the other (handles H4, H2). Side as for LiquidDisc. Mouth: the neck starts on the end itself (not on another droplet),
 // so its first two points lie on the end's outline, where the surface's own rim crosses it.
 public readonly record struct LiquidNeck(int Side, LiquidPoint P1, LiquidPoint H1, LiquidPoint H3, LiquidPoint P3, LiquidPoint P4, LiquidPoint H4, LiquidPoint H2, LiquidPoint P2, bool Mouth = false);
-
-// A bright spot travelling along an edge from the middle outward (the indicator): Position 0 is the middle, 1 an end.
-public readonly record struct LiquidSweep(double Position, double Amount);
 
 public readonly record struct LiquidSpec(
     LiquidForm Form, double Width, double Height, int Seed,
@@ -51,10 +49,8 @@ public readonly record struct LiquidSpec(
 
 public sealed class LiquidFrame
 {
-    // The edge glow's brightness, 0 to 1 (the capsule's and the notch's flash); the indicator's sweeps instead.
+    // The edge glow's brightness, 0 to 1 (the capsule's and the notch's flash).
     public double Glow;
-    public readonly LiquidSweep[] Sweeps = new LiquidSweep[2];
-    public int SweepCount;
     // How far each end of the capsule has drawn in (the droplets took some of it), 0 at rest.
     public double InsetLeft, InsetRight;
     public readonly List<LiquidDisc> Discs = [];
@@ -72,7 +68,7 @@ public sealed class LiquidFrame
 
     internal void Clear()
     {
-        Glow = 0; SweepCount = 0; InsetLeft = InsetRight = 0; Discs.Clear(); Necks.Clear(); BumpPoints.Clear(); BumpRuns.Clear(); Alive = false;
+        Glow = 0; InsetLeft = InsetRight = 0; Discs.Clear(); Necks.Clear(); BumpPoints.Clear(); BumpRuns.Clear(); Alive = false;
     }
 }
 
@@ -181,23 +177,22 @@ public sealed class NoticeLiquid
         switch (spec.Form)
         {
             case LiquidForm.Notch: SeedRipples(random, intensity); break;
-            case LiquidForm.Line: SeedDrops(random, intensity, line: true); break;
-            default: SeedDrops(random, intensity, line: false); break;
+            default: SeedDrops(random, intensity); break;
         }
     }
 
     // The sizes at the design's own height; a droplet is a fraction of the end cap's radius there: a few small, mostly middling,
-    // now and then one nearly as big as the cap. The indicator's are half of them.
+    // now and then one nearly as big as the cap.
     private double CapRadius => Math.Min(_radius, LiquidSpec.DesignHeight / 2 * 1.25);
-    private double DropSize(Random32 random, bool line)
+    private double DropSize(Random32 random)
     {
-        double u = random.Next(), cap = CapRadius * (line ? .45 : 1);
+        double u = random.Next(), cap = CapRadius;
         return cap * (u < .3 ? .25 + random.Next() * .17 : u < .8 ? .42 + random.Next() * .23 : .65 + random.Next() * .25);
     }
     // How far a droplet may go past the end: the zone, but never less than about two of its own widths.
     private double Room(double r) => Math.Max(_reach, r * 2.4);
 
-    private void SeedDrops(Random32 random, double intensity, bool line)
+    private void SeedDrops(Random32 random, double intensity)
     {
         double separation = Separation;
         for (int side = -1; side <= 1; side += 2)
@@ -209,11 +204,9 @@ public sealed class NoticeLiquid
             {
                 double twinChance = (.15 + intensity * .05) * Math.Min(1, (_reach * 2) / 72);
                 int twins = random.Next() < twinChance ? 2 : 1;
-                // The indicator sheds about a droplet to each end in all, not a stream of them.
-                if (line && made >= 1 + (intensity >= 7 ? 1 : 0)) break;
                 for (int i = 0; i < twins; i++)
                 {
-                    double r = DropSize(random, line);
+                    double r = DropSize(random);
                     _drops.Add(NewDrop(random, side, s + i * (.03 + random.Next() * .05), r));
                     made++;
                 }
@@ -221,7 +214,7 @@ public sealed class NoticeLiquid
                 // Fewer at a time in a narrow zone.
                 double sparse = Math.Max(1, 36 / Math.Max(1, _reach));
                 double mean = (.17 - intensity * .025) * sparse * (progress < .8 ? 1 : 1 + 4 * (progress - .8));
-                s += .03 + -Math.Log(1 - random.Next()) * mean * (line ? 1.6 : 1);
+                s += .03 + -Math.Log(1 - random.Next()) * mean;
             }
         }
         _drops.Sort((a, b) => a.Born.CompareTo(b.Born));
@@ -310,8 +303,7 @@ public sealed class NoticeLiquid
         switch (_spec.Form)
         {
             case LiquidForm.Notch: SampleNotch(time, frame, width > 0 ? width : _width, height > 0 ? height : _height, fade); break;
-            case LiquidForm.Line: SampleDrops(time, frame, fade, line: true); frame.Glow = 0; SampleSweeps(time, frame, fade); break;
-            default: SampleDrops(time, frame, fade, line: false); frame.Glow = GlowAt(time) * fade; break;
+            default: SampleDrops(time, frame, fade); frame.Glow = GlowAt(time) * fade; break;
         }
     }
 
@@ -329,19 +321,7 @@ public sealed class NoticeLiquid
         return 0;
     }
 
-    // The indicator's glow: a bright spot sweeps from the middle to the ends twice, the second pass behind the first.
-    private static void SampleSweeps(double s, LiquidFrame frame, double fade)
-    {
-        double[] begin = [.05, .4];
-        for (int i = 0; i < 2; i++)
-        {
-            double p = (s - begin[i]) / .45;
-            if (p <= 0 || p >= 1) continue;
-            frame.Sweeps[frame.SweepCount++] = new LiquidSweep(1 - Math.Pow(1 - p, 2.2), Math.Sin(Math.PI * Math.Pow(p, .7)) * fade * (i == 0 ? 1 : .8));
-        }
-    }
-
-    private void SampleDrops(double s, LiquidFrame frame, double fade, bool line)
+    private void SampleDrops(double s, LiquidFrame frame, double fade)
     {
         double capR = _radius;
         frame.InsetLeft = InsetAt(s, -1, fade); frame.InsetRight = InsetAt(s, 1, fade);

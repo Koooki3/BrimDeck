@@ -87,6 +87,23 @@ public sealed class FollowEase : EasingFunctionBase
     protected override double EaseInCore(double normalizedTime) => Curves.Follow(normalizedTime);
 }
 
+// Curves.LineArrive and Curves.LineReturn as WPF easings (the indicator's surface; see BezierEase for the mode).
+public sealed class LineArriveEase : EasingFunctionBase
+{
+    private readonly double _windUp;
+    public LineArriveEase(double windUp = 0) { _windUp = windUp; EasingMode = EasingMode.EaseIn; }
+    protected override Freezable CreateInstanceCore() => new LineArriveEase(_windUp);
+    protected override double EaseInCore(double normalizedTime) => Curves.LineArrive(normalizedTime, _windUp);
+}
+
+public sealed class LineReturnEase : EasingFunctionBase
+{
+    private readonly double _carry;
+    public LineReturnEase(double carry = 0) { _carry = carry; EasingMode = EasingMode.EaseIn; }
+    protected override Freezable CreateInstanceCore() => new LineReturnEase(_carry);
+    protected override double EaseInCore(double normalizedTime) => Curves.LineReturn(normalizedTime, _carry);
+}
+
 // Curves.Bounce as a WPF easing; see BezierEase for the mode.
 public sealed class BounceEase : EasingFunctionBase
 {
