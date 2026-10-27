@@ -381,6 +381,31 @@ internal static class PanelThemeTests
         check("A preset gradient is recognized however its colors are written", PanelThemes.CarryGradient(dracula, githubDark, lowercase)
             && lowercase.ClockGradient.SequenceEqual(githubDark.ClockGradients[0].Stops) && PanelThemes.CarryGradient(translucent, githubDark, fromTranslucent));
 
+        // Windows' high contrast: the system's colors on the whole panel and nothing drawn over the surface.
+        ThemeColor S(string hex) => ThemeColor.Parse(hex);
+        var hcBlack = PanelThemes.HighContrast(S("#000000"), S("#FFFFFF"), S("#3FF23F"), S("#1AEBFF"), S("#000000"));
+        var hcWhite = PanelThemes.HighContrast(S("#FFFFFF"), S("#000000"), S("#600000"), S("#37006E"), S("#FFFFFF"));
+        check("High contrast shows the system's colors as they are", hcBlack.IsDark && !hcWhite.IsDark && hcBlack.Adjustments.Count == 0 && hcWhite.Adjustments.Count == 0
+            && hcBlack.Surface == S("#000000") && hcBlack["textPrimary"] == S("#FFFFFF") && hcBlack["textTertiary"] == S("#3FF23F") && hcBlack["accent"] == S("#1AEBFF")
+            && hcBlack["onAccent"] == S("#000000") && hcWhite["textPrimary"] == S("#000000") && hcWhite.Apps.Values.All(color => color == S("#37006E")));
+        check("High contrast draws nothing over the surface", new[] { hcBlack, hcWhite }.All(palette => palette.Effects is { SurfaceGradient.Count: 0, RimGradient.Count: 0, Scanlines: 0, Pixel: 0, Texture: 0, ShadowOpacity: 0 }
+            && !palette.HasOverlay && palette.Colors.Count == PanelThemes.Tokens.Count));
+        check("A system gray text too faint to read is moved like a theme's", PanelThemes.HighContrast(S("#000000"), S("#FFFFFF"), S("#404040"), S("#1AEBFF"), S("#000000")) is var faint
+            && faint.Adjustments.Any(a => a.Key == "textTertiary") && faint["textTertiary"].MinimumContrast([faint.Surface]) >= PanelThemes.TextContrast - .001);
+        // The clock under high contrast: the system's window text whatever was chosen, no glow, and the choice kept for later.
+        check("High contrast shows the clock in the window text and without glow", Enum.GetValues<ClockColor>().All(color => ClockColors.Shown(color, true) == ClockColor.White
+                && ClockColors.Shown(color, false) == color)
+            && Enum.GetValues<ClockStyle>().All(style => !ClockColors.Glows(style, true))
+            && ClockColors.Glows(ClockStyle.Neon, false) && ClockColors.Glows(ClockStyle.Segment, false) && !ClockColors.Glows(ClockStyle.Minimal, false)
+            && hcBlack.ClockPreset(ClockColors.Shown(ClockColor.Custom, true)) == S("#FFFFFF") && hcWhite.ClockPreset(ClockColors.Shown(ClockColor.Gradient, true)) == S("#000000"));
+
+        // Warning and critical colors, the theme's and those chosen by the user, color a quota's number, so they read as text.
+        var faintLevels = new[] { "#7A4A00", "#8A2020", "#FFE9A0", "#FFB0B0", "#606060" }.Select(S).ToList();
+        check("Chosen warning and critical colors are held to the text minimum like the theme's", PanelThemes.LevelContrast >= PanelThemes.TextContrast
+            && PanelThemes.BuiltIns.Select(theme => PanelThemes.Resolve(theme)).All(palette =>
+                faintLevels.All(color => palette.Readable(color, PanelThemes.LevelContrast).MinimumContrast(palette.SurfaceStops) >= PanelThemes.TextContrast - .001)
+                && new[] { palette.WarningDefault, palette.CriticalDefault }.All(color => color is null || color.Value.MinimumContrast(palette.SurfaceStops) >= PanelThemes.TextContrast - .001)));
+
         // Settings.
         var settings = new DeckSettings { PanelTheme = "  GitHub-Dark " }; settings.Normalize();
         var empty = new DeckSettings { PanelTheme = "" }; empty.Normalize();

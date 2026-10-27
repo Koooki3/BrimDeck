@@ -73,10 +73,20 @@ public sealed class TrayIcon : IDisposable
     {
         var menu = new ContextMenu();
         // Tray menus belong to the shell, so they follow the system's app theme rather than the settings window's palette.
-        if (!SettingsPalette.IsDark(SettingsTheme.System))
+        // In a high contrast theme the menu takes the theme's own menu and highlight colors, as the shell's menus do.
+        if (SystemParameters.HighContrast)
+        {
+            menu.Resources["MenuSurface"] = SystemColors.MenuBrush;
+            menu.Resources["MenuInk"] = SystemColors.MenuTextBrush;
+            menu.Resources["MenuEdge"] = SystemColors.MenuTextBrush;
+            menu.Resources["MenuHover"] = SystemColors.HighlightBrush;
+            menu.Resources["MenuInkHover"] = SystemColors.HighlightTextBrush;
+            menu.Resources["MenuRule"] = SystemColors.GrayTextBrush;
+        }
+        else if (!SettingsPalette.IsDark(SettingsTheme.System))
         {
             menu.Resources["MenuSurface"] = new SolidColorBrush(Color.FromRgb(0xF9, 0xF9, 0xF9));
-            menu.Resources["MenuInk"] = new SolidColorBrush(Color.FromRgb(0x1B, 0x1B, 0x1B));
+            menu.Resources["MenuInk"] = menu.Resources["MenuInkHover"] = new SolidColorBrush(Color.FromRgb(0x1B, 0x1B, 0x1B));
             menu.Resources["MenuEdge"] = new SolidColorBrush(Color.FromArgb(0x17, 0, 0, 0));
             menu.Resources["MenuHover"] = new SolidColorBrush(Color.FromRgb(0xE9, 0xE9, 0xE9));
             menu.Resources["MenuRule"] = new SolidColorBrush(Color.FromRgb(0xE1, 0xE1, 0xE1));
