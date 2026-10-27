@@ -78,9 +78,8 @@ public sealed partial class SettingsWindow
             bool own = theme.Path is not null;
             // The chosen theme of the user's with unsaved changes offers to save them over it in place of its card.
             if (own && id == chosen && !PanelTheme.KeptLastGood && PanelTheme.DraftOf(id) is not null) { grid.Children.Add(OverwriteCard(theme)); continue; }
-            // A stage in the name ("alpha") stays in the name and is also shown as a badge on the preview (SW-13).
-            Stage(name, out string? stage);
-            string caption = name;
+            // A stage in the name ("alpha") is shown as a badge on the preview, not as part of the name (SW-13).
+            string caption = Stage(name, out string? stage);
             var card = KeepPreview(new RadioButton { Style = (Style)FindResource("SettingsChoice"), Content = ThemePreview(id, theme, stage),
                 Margin = new Thickness(Space.Tight, 3, Space.Tight, Space.Tight), Tag = own ? "" : caption, GroupName = "PanelTheme", IsChecked = id == chosen });
             AutomationProperties.SetName(card, Loc.T("面板主题 ", "Panel theme ") + name);
