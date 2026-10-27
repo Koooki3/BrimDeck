@@ -441,6 +441,13 @@ internal static class PanelThemeTests
             && !palette.HasOverlay && !palette.Motion.AnyInteraction && !palette.Motion.Ambient.Any && palette.Colors.Count == PanelThemes.Tokens.Count));
         check("A system gray text too faint to read is moved like a theme's", PanelThemes.HighContrast(S("#000000"), S("#FFFFFF"), S("#404040"), S("#1AEBFF"), S("#000000")) is var faint
             && faint.Adjustments.Any(a => a.Key == "textTertiary") && faint["textTertiary"].MinimumContrast([faint.Surface]) >= PanelThemes.TextContrast - .001);
+        // The clock under high contrast: the system's window text whatever was chosen, no glow, and the choice kept for later.
+        check("High contrast shows the clock in the window text and without glow", Enum.GetValues<ClockColor>().All(color => ClockColors.Shown(color, true) == ClockColor.White
+                && ClockColors.Shown(color, false) == color)
+            && Enum.GetValues<ClockStyle>().All(style => !ClockColors.Glows(style, true))
+            && ClockColors.Glows(ClockStyle.Neon, false) && ClockColors.Glows(ClockStyle.Segment, false) && !ClockColors.Glows(ClockStyle.Minimal, false)
+            && hcBlack.ClockPreset(ClockColors.Shown(ClockColor.Custom, true)) == S("#FFFFFF") && hcWhite.ClockPreset(ClockColors.Shown(ClockColor.Gradient, true)) == S("#000000"));
+
         // Warning and critical colors, the theme's and those chosen by the user, color a quota's number, so they read as text.
         var faintLevels = new[] { "#7A4A00", "#8A2020", "#FFE9A0", "#FFB0B0", "#606060" }.Select(S).ToList();
         check("Chosen warning and critical colors are held to the text minimum like the theme's", PanelThemes.LevelContrast >= PanelThemes.TextContrast
