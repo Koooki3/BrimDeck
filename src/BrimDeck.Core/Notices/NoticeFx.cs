@@ -23,6 +23,20 @@ public static class NoticeFx
     // racing ahead of the surface it leaves and a fast one does not leave it dawdling. 1 at the default.
     public static double Pace(int animationDuration) => Math.Clamp(Math.Clamp(animationDuration, 100, 1000) / 360d, .75, 1.5);
 
+    // The indicator's own motion (Curves.LineArrive, Curves.LineReturn) is the same for every notice but for its amplitude, which
+    // follows the notice's weight as the liquid's intensity does: half to one and a half times the standard.
+    public static double LineScale(NoticeFxPlan plan) => Math.Clamp(plan.Intensity / 5, .5, 1.5);
+
+    // How far the line draws back before it grows into a card of cardWidth (at most 5 DIPs, and under a tenth of its length), as a
+    // fraction of the whole move; none where the card is hardly wider than the line.
+    public static double LineWindUp(double lineWidth, double cardWidth, NoticeFxPlan plan)
+        => cardWidth - lineWidth < 24 ? 0 : Math.Min(5, .09 * lineWidth) * LineScale(plan) / (cardWidth - lineWidth);
+
+    // How far the surface carries on past the line's length (shorter, and thinner) as it returns from fromWidth (at most 7 DIPs, and
+    // about an eighth of its length), as a fraction of the whole move.
+    public static double LineCarry(double lineWidth, double fromWidth, NoticeFxPlan plan)
+        => fromWidth - lineWidth < 24 ? 0 : Math.Min(7, .12 * lineWidth) * LineScale(plan) / (fromWidth - lineWidth);
+
     // category: the notice's own category (null for a summary); call: an incoming call.
     public static NoticeFxPlan For(AttentionKind kind, NoticePriority priority, bool urgent, bool call, NoticeCategory? category)
     {
