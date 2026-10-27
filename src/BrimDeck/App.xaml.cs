@@ -213,7 +213,9 @@ public partial class App : Application
         Dispatcher.BeginInvoke(() =>
         {
             if (Exiting) return;
-            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId) ApplyPanelTheme(systemChanged: true);
+            // High contrast turned on or off, or its scheme changed, shows the system's colors on the panel (PanelTheme.HighContrast).
+            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId || SystemParameters.HighContrast || PanelTheme.HighContrast)
+                ApplyPanelTheme(systemChanged: true);
             // The theme page's "System" card shows the Windows mode whichever theme is chosen.
             else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
         });
@@ -223,10 +225,12 @@ public partial class App : Application
     internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false)
     {
         var previous = PanelTheme.Current;
+        bool wasHigh = PanelTheme.HighContrast;
         bool changed = PanelTheme.Use(Settings, reload, systemChanged);
         ScheduleDaylight();
         if (!changed) return;
-        if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
+        // Into or out of high contrast the theme itself has not changed, so the clock's gradient stays as the user left it.
+        if (systemChanged && !wasHigh && !PanelTheme.HighContrast && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         if (!reload) _settingsWindow?.PanelThemeChanged();
     }

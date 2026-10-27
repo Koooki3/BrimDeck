@@ -21,9 +21,9 @@
     "surface": "#000000",           // The notch, capsule and panel. Always drawn opaque.
     "textPrimary": "#F5F5F7",       // Titles and figures. At least 7:1 against the surface and pop-ups.
     "textSecondary": "#9EEBEBF5",   // Labels. At least 4.5:1.
-    "textTertiary": "#61EBEBF5",    // Reset times and notes. At least 3:1.
+    "textTertiary": "#8CEBEBF5",    // Reset times, notes and other small text. At least 4.5:1.
     "accent": "#0A84FF",            // Keyboard focus and chosen dates. At least 3:1.
-    "onAccent": "#FFFFFF",          // Text on the accent (a chosen date). At least 3:1 against the accent.
+    "onAccent": "#000000",          // Text on the accent (a chosen date, a notice's main button). At least 4.5:1 against the accent.
     "danger": "#F2777F",            // Errors and the paused sync button. At least 4.5:1.
     "liked": "#EC4141",             // The heart of a liked song. At least 3:1.
     "clock": "#F5F5F7",             // The clock when its color is "Theme default" ("default" below). At least 4.5:1.
@@ -42,7 +42,7 @@
     "rangeFill": "#382B87FF",       // Days inside a chosen date range.
     "coverPlaceholder": "#0FFFFFFF",// Where a song has no cover.
     "coverOutline": "#14FFFFFF",
-    "scrollThumb": "#515665",
+    "scrollThumb": "#515665",       // At least 2:1.
     "rim": "#12FFFFFF",             // A thin line along the inner edge of the surface.
     "shadow": "#000000",            // The shadow under the collapsed notch and capsule; use a bright color with no depth for a glow.
     "indicator": "#8E8E93",         // The indicator line (collapsed style "Indicator").
@@ -59,7 +59,8 @@
   },
 
   // Default colors of the application columns, used until a color is chosen for a column in Settings › Quotas and usage.
-  // At least 3:1 against the surface. "manual" covers every source entered by hand; "other" anything not listed.
+  // At least 3:1 against the surface, and warning and critical, which are also text, 4.5:1. "manual" covers every source entered
+  // by hand; "other" anything not listed.
   "apps": {
     "claude": "#E5A385", "codex": "#98DBB0", "antigravity": "#9CB9FF", "cursor": "#D4D5DF", "zcode": "#4A64A6",
     "dsh": "#6081DA", "grokBot": "#D4D5DF", "kimi": "#68CDEB", "opencode": "#8E8E93", "manual": "#CC9EED", "other": "#D4D5DF", "warning": "#E5C890", "critical": "#E78284"
