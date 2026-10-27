@@ -90,16 +90,18 @@ public sealed partial class SettingsWindow
     // that is not connected stays in the list, marked, so the choice can be seen and changed.
     private Grid GpuChoiceRow()
     {
-        var found = _app.Monitor?.Latest?.Gpus is { Count: > 0 } read ? read.Select(gpu => (gpu.Key, gpu.Name, gpu.Kind)).ToList()
+        var found = _app.Monitor?.Latest?.Gpus is { Count: > 0 } read ? read.Select(gpu => (gpu.Key, gpu.LegacyKey, gpu.Name, gpu.Luid, gpu.Kind, gpu.NoReadings)).ToList()
             : Native.GpuAdapters.Read().Adapters.Values.Where(adapter => !adapter.Software).OrderBy(adapter => GpuReadings.Rank(adapter.Kind))
-                .ThenBy(adapter => adapter.Name, StringComparer.Ordinal).Select(adapter => (adapter.Key, Name: (string?)adapter.Name, adapter.Kind)).ToList();
+                .ThenBy(adapter => adapter.Name, StringComparer.Ordinal).Select(adapter => (adapter.Key, adapter.LegacyKey, Name: (string?)adapter.Name, adapter.Luid, adapter.Kind, NoReadings: false)).ToList();
         var options = new List<(string? Key, string? Name, string Label)> { (null, null, Loc.T("自动", "Auto")) };
-        options.AddRange(found.Select(gpu => ((string?)gpu.Key, gpu.Name, GpuChoice.Describe(gpu.Name, gpu.Kind))));
-        int selected = S.MonitorGpu is not { } saved ? 0 : options.FindIndex(option => option.Key == saved) is var byKey and > 0 ? byKey
-            : options.FindIndex(1, option => S.MonitorGpuName is { Length: > 0 } name && option.Name == name);
+        // An adapter without readings at the moment stays in the list, marked.
+        options.AddRange(found.Select(gpu => ((string?)gpu.Key, gpu.Name, GpuChoice.Describe(gpu.Name, gpu.Kind) + (gpu.NoReadings ? Loc.T("（暂无读数）", " (no reading)") : ""))));
+        // The saved card is found as the monitor finds it (GpuChoice.Find): while it is not connected, another card of the same model
+        // is never shown as chosen; the saved one is listed as not connected instead, and the monitor shows 自动 meanwhile.
+        int selected = S.MonitorGpu is not { } saved ? 0 : GpuChoice.Find(found, gpu => (gpu.Key, gpu.LegacyKey, gpu.Name, gpu.Luid), saved, S.MonitorGpuName) is var at and >= 0 ? at + 1 : -1;
         if (selected < 0)
         {
-            options.Add((S.MonitorGpu, S.MonitorGpuName, Loc.T($"{S.MonitorGpuName ?? "GPU"}（未连接）", $"{S.MonitorGpuName ?? "GPU"} (not connected)")));
+            options.Add((S.MonitorGpu, S.MonitorGpuName, Loc.T($"{S.MonitorGpuName ?? "GPU"}（未连接，暂按自动显示）", $"{S.MonitorGpuName ?? "GPU"} (not connected; showing Auto meanwhile)")));
             selected = options.Count - 1;
         }
         var choice = new ComboBox { Width = 292, Style = (Style)FindResource("SettingsCombo"), ItemsSource = options.Select(option => option.Label).ToList(), SelectedIndex = selected };
