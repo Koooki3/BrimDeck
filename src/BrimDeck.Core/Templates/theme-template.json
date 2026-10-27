@@ -15,7 +15,7 @@
   "license": "",
   "homepage": "",
   "base": "dark",                   // Any built-in theme: dark, light, one-dark-pro, github-dark, github-light, dracula, night-owl,
-                                    // island-holiday, pixel-blocks, cyberpunk-edgerunners (a base's night look is not inherited)
+                                    // island-holiday, island-holiday-2, pixel-blocks, cyberpunk-edgerunners (a base's night look is not inherited)
 
   "colors": {
     "surface": "#000000",           // The notch, capsule and panel. Always drawn opaque.
@@ -66,7 +66,7 @@
   },
 
   // The clock that suits the theme. Choosing the theme in settings switches the clock to it; the clock can still be changed after.
-  // style: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel
+  // style: minimal, stacked, digits, dots, segment, neon, serif, wide, condensed, pixel, rounded
   // color: default (the "clock" color above), amber, cyan, pink, lime, custom, gradient, cover (the playing song's cover)
   // custom is used when color is "custom"; gradient, exactly three colors, when color is "gradient".
   // palette: the colors of the amber, cyan, pink and lime swatches in this theme. At least 4.5:1 against the surface.
@@ -99,5 +99,11 @@
                                     // and with a rimGradient the rim is a bevel: its first color lights the edges facing up and
                                     // left, its last shades the others
     "texture": 0                    // 0 to 0.12, with pixel art: squares a little lighter or darker than the surface, a block's grain
+    // Motifs: remove the "//" to draw quiet pictures into the surface, under the content. horizon: a sea below "at" (0.3 to 0.9
+    // of the height, 0.62 when not set) and a line of light along it; caustics: a net of soft light lines on the sea (alpha at
+    // most 0.2); palm: a palm frond's shadow in the open panel's top-right corner, above the horizon (alpha at most 0.12). Each
+    // value is inherited on its own, a fully transparent color turns a part off, and text is held to its minimums over the sea,
+    // the line and the motifs too.
+    // , "decor": { "horizon": { "at": 0.62, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#1AFFFFFF" } }
   }
 }
