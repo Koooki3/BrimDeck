@@ -29,6 +29,7 @@ try
     NoticeEventLogTests.Run(Check);
     NoticeBannerTests.Run(root, Check);
     NoticeOpsTests.Run(Check);
+    NoticeLiquidTests.Run(Check);
     NoticeGlyphTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
