@@ -55,6 +55,8 @@ internal static class Program
         // The glass's answers to the pointer and its accessibility (GlassAccess): hover and press, the content row, transparency
         // effects off and animations off, on the real panel offscreen: --glass-access.
         if (args.Length > 0 && args[0] == "--glass-access") return GlassAccess.Run();
+        // The acrylic body's edge as composition draws it, on an off-screen window: --edge-probe <folder>.
+        if (args.Length > 1 && args[0] == "--edge-probe") return EdgeProbe.Run(args[1]);
         // What the island's shadow costs while the panel opens and closes over liquid glass (ShadowCost): --shadow-cost [cycles].
         if (args.Length > 0 && args[0] == "--shadow-cost") return ShadowCost.Run(args.Length > 1 && int.TryParse(args[1], out int cycles) ? cycles : 6);
         // What liquid glass costs against the blur, collapsed with music, open and animating (PerfCost): --perf [seconds] [rounds] [--hidden].

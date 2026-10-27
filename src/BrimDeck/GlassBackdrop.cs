@@ -445,6 +445,7 @@ internal sealed class GlassBackdrop : IDisposable
         double outerLeft = left - shoulder - inset, outerRight = right + shoulder + inset, outerBottom = bottom + inset;
         bool acrylic = AcrylicBody;
         bool liquid = !acrylic && Liquid(shown, outerLeft, clipTop, outerRight, outerBottom, radius, opacity);
+        double regionCorner = radius;
         if (acrylic)
         {
             // The acrylic body covers the island's whole outline as liquid glass did (its surface steps aside), and the rim
@@ -469,7 +470,9 @@ internal sealed class GlassBackdrop : IDisposable
             _clip.Size = new Vector2((float)Math.Max(0, bodyRight - bodyLeft), (float)Math.Max(0, outerBottom - acrylicTop));
             _clip.CornerRadius = new Vector2((float)round);
             clipTop = acrylicTop;
+            regionCorner = round;
             Rim(bodyLeft, acrylicTop, bodyRight, outerBottom, round, opacity);
+            RimBelow(shoulder >= 1 ? top + shoulder : double.NaN);
             Glow(shown, opacity);
             Probe(true);
         }
@@ -483,6 +486,11 @@ internal sealed class GlassBackdrop : IDisposable
         _sprite!.Opacity = liquid ? 0 : (float)opacity;
         Decided(liquid || acrylic, frame.Material);
         if (liquid || acrylic) { left = outerLeft; right = outerRight; bottom = outerBottom; corner = radius; }
+        // Over acrylic the body's own edge is the glass's edge (no island surface over it): composition draws it antialiased,
+        // and the region, which Windows cuts with no antialiasing (and GDI's rounded corner only near the circle), lies two
+        // device pixels outside it all round, concentric, so it never cuts the edge's partly covered pixels into steps (user
+        // report 10-27: the liquid glass themes' corners jagged where the other themes', under the island's own edge, are smooth).
+        if (acrylic) { left -= RegionMargin; clipTop -= RegionMargin; right += RegionMargin; bottom += RegionMargin; corner = regionCorner + RegionMargin; }
         // The window region: the clip's rectangle, rounded alike, so the window takes no clicks and shows nothing outside it.
         // A square top reaches above the window, as the clip does, so the region's rounded top corners fall outside it.
         var region = ((int)Math.Floor(left), (int)Math.Floor(clipTop), (int)Math.Ceiling(right), (int)Math.Ceiling(bottom), (int)Math.Round(corner));
@@ -603,6 +611,10 @@ internal sealed class GlassBackdrop : IDisposable
             width, height, scale);
     }
     internal bool HoldsWindowOrCapture => _window is not null || _host is not null;
+    // For the offscreen edge check (FxPreview --edge-probe): the glass's own window, once made.
+    internal IntPtr GlassWindow => _window?.Handle ?? IntPtr.Zero;
+    // For the same check: the acrylic body drawn in this solid color instead (DWM leaves the host backdrop out of a print).
+    internal static Windows.UI.Color? ProbeColor { get; set; }
 
     // The capture being made off the UI thread is done: liquid glass is tried again at once.
     private Action? _sourceDone;
@@ -833,7 +845,7 @@ internal sealed class GlassBackdrop : IDisposable
             try
             {
                 var look = (PanelTheme.Current.IsDark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = _luminosityShown };
-                _sprite.Brush = GlassEffect.Acrylic(compositor, look);
+                _sprite.Brush = ProbeColor is { } probe ? compositor.CreateColorBrush(probe) : GlassEffect.Acrylic(compositor, look);
                 DressShoulder(_shoulderLeft, compositor, look, left: true);
                 DressShoulder(_shoulderRight, compositor, look, left: false);
                 return;
@@ -881,14 +893,14 @@ internal sealed class GlassBackdrop : IDisposable
         if (sprite is null) return;
         if (sprite.Brush is CompositionMaskBrush old) { GlassEffect.Release(old.Source); old.Mask?.Dispose(); old.Dispose(); }
         var mask = compositor.CreateRadialGradientBrush();
-        // Relative to the square: clear inside the quarter circle about the corner under the flare, the acrylic outside it.
-        mask.EllipseCenter = new Vector2(left ? 0 : 1, 1);
-        mask.EllipseRadius = new Vector2(1, 1);
+        // In device pixels from the square's corner: clear inside the quarter circle about the corner under the flare, the
+        // acrylic outside it, the arc antialiased over a device pixel about the flare's radius (ShoulderArc, per frame).
+        mask.MappingMode = CompositionMappingMode.Absolute;
         mask.ColorStops.Add(compositor.CreateColorGradientStop(0, Windows.UI.Color.FromArgb(0, 0, 0, 0)));
-        mask.ColorStops.Add(compositor.CreateColorGradientStop(.985f, Windows.UI.Color.FromArgb(0, 0, 0, 0)));
+        mask.ColorStops.Add(compositor.CreateColorGradientStop(.97f, Windows.UI.Color.FromArgb(0, 0, 0, 0)));
         mask.ColorStops.Add(compositor.CreateColorGradientStop(1, Windows.UI.Color.FromArgb(255, 0, 0, 0)));
         var brush = compositor.CreateMaskBrush();
-        brush.Source = GlassEffect.Acrylic(compositor, look);
+        brush.Source = ProbeColor is { } probe ? compositor.CreateColorBrush(probe) : GlassEffect.Acrylic(compositor, look);
         brush.Mask = mask;
         sprite.Brush = brush;
     }
@@ -899,11 +911,27 @@ internal sealed class GlassBackdrop : IDisposable
         bool shown = shoulder >= 1;
         _shoulderLeft.IsVisible = _shoulderRight.IsVisible = shown;
         if (!shown) return;
-        var size = new Vector2((float)shoulder, (float)shoulder);
+        // Each square reaches a device pixel into the body (the body's antialiased side and the square's would otherwise leave a
+        // faint seam between them where both cover a part of the same pixel); the acrylic is opaque, so the overlap shows nothing.
+        var size = new Vector2((float)shoulder + ShoulderOverlap, (float)shoulder);
         _shoulderLeft.Size = _shoulderRight.Size = size;
         _shoulderLeft.Offset = new Vector3((float)(bodyLeft - shoulder), (float)top, 0);
-        _shoulderRight.Offset = new Vector3((float)bodyRight, (float)top, 0);
+        _shoulderRight.Offset = new Vector3((float)bodyRight - ShoulderOverlap, (float)top, 0);
         _shoulderLeft.Opacity = _shoulderRight.Opacity = (float)opacity;
+        ShoulderArc(_shoulderLeft, shoulder, left: true);
+        ShoulderArc(_shoulderRight, shoulder, left: false);
+    }
+
+    // The flare's arc in the shoulder's mask: about the square's outer bottom corner, clear to half a device pixel inside the
+    // flare's radius and whole half a pixel outside it (the island's own outline, IslandBorder, is antialiased alike).
+    private const float ShoulderOverlap = 1, RegionMargin = 2;
+    private void ShoulderArc(SpriteVisual sprite, double shoulder, bool left)
+    {
+        if (sprite.Brush is not CompositionMaskBrush { Mask: CompositionRadialGradientBrush mask } || mask.ColorStops.Count < 3) return;
+        float radius = (float)shoulder + .5f;
+        mask.EllipseCenter = new Vector2(left ? 0 : (float)shoulder + ShoulderOverlap, (float)shoulder);
+        mask.EllipseRadius = new Vector2(radius, radius);
+        mask.ColorStops[1].Offset = Math.Clamp(((float)shoulder - .5f) / radius, 0, 1);
     }
 
     private void MakeGlow(Compositor compositor, Windows.UI.Composition.ContainerVisual root)
@@ -971,6 +999,16 @@ internal sealed class GlassBackdrop : IDisposable
             geometry.Size = new Vector2((float)Math.Max(0, right - left - 2 * off), (float)Math.Max(0, bottom - top - 2 * off));
             geometry.CornerRadius = new Vector2((float)Math.Max(0, radius - off));
         }
+    }
+
+    // The notch: the rim's sides begin below its shoulders. Above, the body's side runs inside the glass, between the shoulder's
+    // flare and the body (the flare is the outline there), where the hairline and the light would draw a line through the glass.
+    private void RimBelow(double y)
+    {
+        if (_rim is null) return;
+        if (double.IsNaN(y)) { if (_rim.Clip is not null) { _rim.Clip.Dispose(); _rim.Clip = null; } return; }
+        var clip = _rim.Clip as InsetClip ?? (InsetClip)(_rim.Clip = _rim.Compositor.CreateInsetClip());
+        clip.TopInset = (float)y;
     }
 
     private void Probe(bool on)
