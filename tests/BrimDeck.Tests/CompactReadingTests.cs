@@ -47,7 +47,7 @@ internal static class CompactReadingTests
 
         var odd = Read("""{"AppVersion":"0.1.0","CompactMonitor":0,"CompactReadings":[{"Item":4096,"Visible":true},null,{"Item":16,"Visible":true,"ShowValue":false,"Color":"#12ab3c"},{"Item":2,"Visible":false,"Color":"red"},{"Item":16,"Visible":false}]}""");
         check("Compact readings: unknown and repeated readings are dropped, missing ones join hidden",
-            Same(odd.CompactReadings, Download, Cpu, Columns, Memory, Gpu, Upload, CompactMonitorItems.Storage, Temperature, CompactMonitorItems.Battery) && odd.CompactReadings[0].Visible && !odd.CompactReadings[1].Visible
+            Same(odd.CompactReadings, Download, Cpu, Columns, Memory, Gpu, Upload, CompactMonitorItems.Storage, CompactMonitorItems.Battery) && odd.CompactReadings[0].Visible && !odd.CompactReadings[1].Visible
             && odd.CompactReadings.Skip(2).All(r => !r.Visible) && odd.CompactMonitorItems == Download && odd.CompactMonitor == CompactMonitorMode.Custom);
         check("Compact readings: an older own color moves into the custom scheme, normalized", odd.MonitorPalette == MonitorPalette.Custom
             && odd.MonitorCustomColors is { Base: MonitorPalette.Theme, Download: "#12AB3C", Cpu: null } && odd.CompactReadings.All(r => !r.HasOwnColors));
@@ -91,7 +91,7 @@ internal static class CompactReadingTests
     private static void Layout(Action<string, bool> check)
     {
         CompactMonitorItems[] order = [Upload, Gpu, Cpu, Columns, Download, Memory];
-        var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, 30, 14, 20, 50);
+        var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, _ => 30, 14, 20, 50);
         var arranged = CompactMonitor.Arrange(order, All & ~Download, width, 10, _ => 1);
         check("Compact readings: the strip follows the table's order", arranged.Items.Select(i => i.Item).SequenceEqual([Upload, Gpu, Cpu, Columns, Memory]));
         check("Compact readings: each reading starts after the one before it", arranged.Items[0].X == 0 && arranged.Items[1].X == 60 && arranged.Items[2].X == 112
@@ -110,8 +110,8 @@ internal static class CompactReadingTests
             Math.Abs(CompactMonitor.Arrange(order, fitted, width, 10, _ => 1).Total - CompactMonitor.Width(fitted, width, 10)) < 1e-9
             && Math.Abs(CompactMonitor.Arrange(CompactMonitor.Order, fitted, width, 10, _ => 1).Total - CompactMonitor.Width(fitted, width, 10)) < 1e-9);
 
-        var bare = CompactMonitor.Widths(CompactMonitorItems.None, 12, 30, 14, 20, 50);
-        var some = CompactMonitor.Widths(Cpu, 12, 30, 14, 20, 50);
+        var bare = CompactMonitor.Widths(CompactMonitorItems.None, 12, _ => 30, 14, 20, 50);
+        var some = CompactMonitor.Widths(Cpu, 12, _ => 30, 14, 20, 50);
         check("Compact readings: a ring without its figure is narrower", bare(Memory) == 14 && width(Memory) == 42 && some(Cpu) == 42 && some(Gpu) == 14
             && bare(Download) == 50 && bare(Columns) == 20);
         check("Compact readings: hiding figures shrinks the strip",
@@ -194,7 +194,7 @@ internal static class CompactReadingTests
         check("Level colors: normalized, an invalid one follows the panel theme", levels is { CompactWarningColor: "#ABCDEF", CompactCriticalColor: null }
             && SettingsMigrations.Read(JsonSerializer.Serialize(levels)).CompactWarningColor == "#ABCDEF");
         check("Older colors: they leave the readings, which keep the rest", read.CompactReadings.All(r => !r.HasOwnColors)
-            && !read.CompactReadings.First(r => r.Item == Columns).Visible && Same(read.CompactReadings, Memory, Cpu, Columns, Download, Gpu, Upload, CompactMonitorItems.Storage, Temperature, CompactMonitorItems.Battery));
+            && !read.CompactReadings.First(r => r.Item == Columns).Visible && Same(read.CompactReadings, Memory, Cpu, Columns, Download, Gpu, Upload, CompactMonitorItems.Storage, CompactMonitorItems.Battery));
         var plain = Read("""{"AppVersion":"0.1.0","MonitorPalette":1,"CompactReadings":[{"Item":4}]}""");
         check("Older colors: without own colors the scheme stays", plain.MonitorPalette == MonitorPalette.Graphite && !plain.MonitorCustomColors.Changed);
         var readings = JsonSerializer.Serialize(read.CompactReadings);

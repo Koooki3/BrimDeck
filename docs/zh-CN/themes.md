@@ -74,7 +74,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 
 ### 应用颜色（apps）
 
-配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`（这两种同时也是文字，需 4.5:1）。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
+配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`opencode`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`（这两种同时也是文字，需 4.5:1）。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
 
 ### 时间（clock）
 
@@ -84,7 +84,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 "clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
 ```
 
-`style` 取 `minimal`、`stacked`、`digits`、`dots`、`segment`、`neon`、`serif`、`wide`、`condensed`、`pixel`（方块点阵，像素方块主题推荐）、`tektur`、`rounded`；`color` 取 `default`（即上面的 `clock` 颜色）、`amber`、`cyan`、`pink`、`lime`、`custom`、`gradient`、`cover`。`palette` 给出本主题下“琥珀、青色、粉色、柠檬绿”四个色块的颜色，`gradients` 给出本主题提供的预设渐变（一到八组，每组正好三个颜色），二者都需在底色上达到 4.5:1。切换主题时，正在使用的预设渐变会换成新主题同一位置的那一组。`custom` 在 `color` 为 `custom` 时使用；`gradient` 必须正好三个颜色，在 `color` 为 `gradient` 时使用。浅色主题下霓虹与数码管的辉光会自动减弱，避免数字发虚。
+`style` 取 `minimal`、`stacked`、`digits`、`dots`、`segment`、`neon`、`serif`、`wide`、`condensed`、`pixel`（方块点阵，像素方块主题推荐）、`tektur`、`rounded`（圆润的 Fredoka 字体，海岛假日 2 主题推荐）；`color` 取 `default`（即上面的 `clock` 颜色）、`amber`、`cyan`、`pink`、`lime`、`custom`、`gradient`、`cover`。`palette` 给出本主题下“琥珀、青色、粉色、柠檬绿”四个色块的颜色，`gradients` 给出本主题提供的预设渐变（一到八组，每组正好三个颜色），二者都需在底色上达到 4.5:1。切换主题时，正在使用的预设渐变会换成新主题同一位置的那一组。`custom` 在 `color` 为 `custom` 时使用；`gradient` 必须正好三个颜色，在 `color` 为 `gradient` 时使用。浅色主题下霓虹与数码管的辉光会自动减弱，避免数字发虚。
 
 ### 颜色选择器预设色（swatches）
 
@@ -102,7 +102,7 @@ One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植�
 | `glass` | 玻璃材质：`tint` 是叠在桌面上的半透明色调（不透明度须在 0 和 1 之间），`edge` 是沿内缘聚集的光（0–1），`highlight` 是这道光的颜色。见下方“玻璃” | |
 | `pixel` | 像素风：轮廓的曲线变成这么多 DIP 的阶梯（按整设备像素取整），面板上的圆角变成直角，文字不做平滑；配合 `rimGradient` 时描线变成斜面，第一个颜色照亮朝上和朝左的边，最后一个颜色压暗朝下和朝右的边。不能与 `glass` 同时使用（含从基础主题继承来的），否则文件报错 | 0，或 1–4 |
 | `texture` | 配合 `pixel`：以像素大小为单位、略亮或略暗于底色的方块，像方块的颗粒。最亮和最暗的方块与渐变色标一样参与对比度检查；没有 `pixel` 时不生效 | 0–0.12 |
-| `decor` | 画在表面里、内容之下的安静图案，每个值分别继承（夜间外观只写 `sea` 时沿用白天的 `at` 与 `line`）：`horizon` 在高度 `at` 处以下铺一片海（`sea`），沿海平线有一道光（`line`）；`caustics` 是海平线以下柔和的水波光纹（没有海平线时铺满整个表面）；`palm` 是展开面板右上角、海平线以上的棕榈叶影；`hud` 是左下角与右上角（悬挂在屏幕边上的岛改为右下角）的 45° 切角（`chamfer`），各配一个六边形刻点。完全透明的颜色会关掉该部分（例如在夜间外观里）。文字对比度按海面（海平线处与最深处）、海平线光带和图案叠加后的颜色检查 | `at` 0.3–0.9，水光不透明度 ≤ 0.2，叶影 ≤ 0.12，`chamfer` 0–10 |
+| `decor` | 画在表面里、内容之下的安静图案，每个值分别继承（夜间外观只写 `sea` 时沿用白天的 `at` 与 `line`）：`horizon` 在高度 `at`（未设置时为 0.62）处以下铺一片海（`sea`），沿海平线有一道光（`line`，不透明度不限，同样检查对比度）；`caustics` 是海平线以下柔和的水波光纹（没有海平线时铺满整个表面）；`palm` 是展开面板右上角、海平线以上的棕榈叶影；`hud` 是左下角与右上角（悬挂在屏幕边上的岛改为右下角）的 45° 切角（`chamfer`），各配一个六边形刻点。完全透明的颜色会关掉该部分（例如在夜间外观里）。文字对比度按海面（海平线处与最深处）、海平线光带和图案叠加后的颜色检查 | `at` 0.3–0.9，水光不透明度 ≤ 0.2，叶影 ≤ 0.12，`chamfer` 0–10 |
 
 #### 玻璃（glass）
 

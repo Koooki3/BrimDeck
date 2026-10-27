@@ -57,7 +57,7 @@
   },
   "apps": {
     "claude": "#EDAE90", "codex": "#9DDFB4", "antigravity": "#A3BEFF", "cursor": "#D6D8E0", "zcode": "#A5B4EC",
-    "dsh": "#9AB3F2", "grokBot": "#D6D8E0", "kimi": "#7AD3EE", "manual": "#D4A9F2", "other": "#D6D8E0", "warning": "#EDCF94", "critical": "#F3A0A3"
+    "dsh": "#9AB3F2", "grokBot": "#D6D8E0", "kimi": "#7AD3EE", "opencode": "#9A9CA2", "manual": "#D4A9F2", "other": "#D6D8E0", "warning": "#EDCF94", "critical": "#F3A0A3"
   },
   "clock": {
     "style": "minimal", "color": "default",

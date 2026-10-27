@@ -31,49 +31,93 @@ public sealed class StripPresence
     }
 
     public double At(CompactMonitorItems item, double now) => _items.TryGetValue(item, out var eased) ? Math.Clamp(eased.At(now), 0, 1) : 0;
-    // Whether any reading still shows, even fading out.
-    public bool Any(double now) => _items.Values.Any(eased => eased.At(now) > 0 || eased.Target > 0);
-    public bool Moving(double now) => _items.Values.Any(eased => eased.Moving(now));
+    public bool Moving(double now)
+    {
+        // Asked on every frame of a transition; the dictionary's own enumerator allocates nothing.
+        foreach (var eased in _items.Values) if (eased.Moving(now)) return true;
+        return false;
+    }
 }
 
-// Which of the collapsed row's later readings (the temperature, the system drive) it leaves out, and when they join. Neither joins
-// before its first figure arrives, so the row never shows a dash for a sensor still being read, nor builds itself again when the
-// sensor turns out to be missing: a machine without one never shows the reading at all. Once a reading has shown it stays
-// (a figure missing for a moment shows a dash) until its sensor is known to be missing.
+// Which parts of the collapsed row wait for their first figures, and when they join: the temperatures of CPU and GPU, and each
+// chosen drive letter's space and temperature (CompactFigures, CompactSources). No part shows before its first figure arrives,
+// so the row never shows a dash for a sensor still being read, nor builds itself again when the sensor turns out to be missing:
+// a machine without one never shows it, and the drives with none of their letters showing are left out. Once a part has shown it
+// stays (a figure missing for a moment shows a dash) until its sensor is known to be missing. The battery (lowest charge among the
+// wireless devices) waits likewise for its first figure from the devices.
 public sealed class StripAdmission
 {
-    public const CompactMonitorItems Later = CompactMonitorItems.Temperature | CompactMonitorItems.Storage | CompactMonitorItems.Battery;
-    private CompactMonitorItems _seen = CompactMonitorItems.None;
-    // The readings left out of the row as it was last built; all of them until the first figures.
+    public const CompactMonitorItems Later = CompactMonitorItems.Storage | CompactMonitorItems.Battery;
+    // A part: a ring's temperature (Heat), a letter's space ("C:"), or a letter's temperature ("C:" + Heat).
+    public const string Heat = "°";
+    private readonly HashSet<(CompactMonitorItems Item, string Part)> _seen = [], _showing = [];
+    // A device has reported a charge, and has not since all gone.
+    private bool _batterySeen;
+    // The readings left out of the row as it was last built; the drives until their first figures.
     public CompactMonitorItems Hidden { get; private set; } = Later;
+    // The parts showing, as text: when it changes, the row is built again for the new widths.
+    public string Layout { get; private set; } = "";
 
-    // Whether the system must still be read for the row although it shows none of these readings yet: a chosen reading (chosen,
-    // CompactMonitor.Shown) left out only because its first figure has not come. Without this a row showing only the temperature
-    // or the system drive would show nothing, so no readings would be asked for, so the first figure would never come. False
-    // once each such reading's sensor is known to be missing, so a machine without them stops reading for them. The battery
-    // waits for the devices, not the system (MainWindow.UpdateDevicesDemand).
-    public bool Awaits(CompactMonitorItems chosen, SensorState cpu, SensorState gpu, SensorState storage)
+    // The parts the chosen figures and letters ask for, and whether each is known to be missing.
+    private static IEnumerable<(CompactMonitorItems Item, string Part, bool Missing)> Wanted(IEnumerable<CompactReading> readings, MonitorSnapshot? latest, SensorStates states)
     {
-        var waiting = chosen & Hidden & Later & ~CompactMonitorItems.Battery;
-        if (!Temperatures.Readable(cpu, gpu)) waiting &= ~CompactMonitorItems.Temperature;
-        if (storage == SensorState.None) waiting &= ~CompactMonitorItems.Storage;
-        return waiting != CompactMonitorItems.None;
+        foreach (var reading in readings)
+        {
+            if (!CompactFigures.Has(reading.Item)) continue;
+            bool usage = CompactFigures.Shows(reading, CompactFigures.Usage), heat = CompactFigures.Shows(reading, CompactFigures.Temperature);
+            if (reading.Item == CompactMonitorItems.Storage)
+                foreach (var letter in CompactSources.Of(reading))
+                {
+                    if (usage) yield return (reading.Item, letter, CompactSources.Missing(letter, latest, states));
+                    if (heat) yield return (reading.Item, letter + Heat, CompactSources.HeatMissing(letter, latest, states));
+                }
+            else if (heat && reading.ShowValue)
+                yield return (reading.Item, Heat, (reading.Item == CompactMonitorItems.Cpu ? states.Cpu : states.Gpu) == SensorState.None);
+        }
+    }
+    private static bool Seen(CompactMonitorItems item, string part, MonitorSnapshot? latest) => item == CompactMonitorItems.Storage
+        ? part.EndsWith(Heat, StringComparison.Ordinal) ? CompactSources.Heat(part[..^Heat.Length], latest) is not null : CompactSources.Share(part, latest) is not null
+        : CompactFigures.Heat(item, latest) is not null;
+
+    // Whether a part of a reading shows: a ring's temperature (Heat), a letter's space or temperature.
+    public bool Shows(CompactMonitorItems item, string part) => _showing.Contains((item, part));
+    // The drive letters that show, of those chosen, in order: a letter with its space or its temperature showing.
+    public IReadOnlyList<string> Letters(CompactReading drives) =>
+        [.. CompactSources.Of(drives).Where(letter => (CompactFigures.Shows(drives, CompactFigures.Usage) && Shows(CompactMonitorItems.Storage, letter))
+            || (CompactFigures.Shows(drives, CompactFigures.Temperature) && Shows(CompactMonitorItems.Storage, letter + Heat)))];
+
+    // Whether the system must still be read for the row although it does not show the drives yet, only because their first
+    // figures have not come. Without this a row showing only the drives would have no width, so no readings would be asked for,
+    // so the first figure would never come. False once each part is known to be missing, so a machine without them stops asking.
+    // The battery waits for the devices, not the system (MainWindow.UpdateDevicesDemand).
+    public bool Awaits(IReadOnlyList<CompactReading> readings, MonitorSnapshot? latest, SensorStates states)
+    {
+        if ((CompactMonitor.Shown(readings) & Hidden & Later & ~CompactMonitorItems.Battery) == 0) return false;
+        return Wanted(readings.Where(reading => reading.Item == CompactMonitorItems.Storage), latest, states).Any(part => !part.Missing);
     }
 
     // The readings to leave out for this snapshot and the sensors' states, and those that join now (Hidden before, not now).
     // battery: Found while a device reports a charge, None once the devices are listed and none does, else Unknown.
-    public (CompactMonitorItems Hidden, CompactMonitorItems Arriving) Update(MonitorSnapshot? latest, SensorState cpu, SensorState gpu, SensorState storage,
+    public (CompactMonitorItems Hidden, CompactMonitorItems Arriving) Update(MonitorSnapshot? latest, IReadOnlyList<CompactReading> readings, SensorStates states,
         SensorState battery = SensorState.Unknown)
     {
-        if (battery == SensorState.Found) _seen |= CompactMonitorItems.Battery;
-        if (Temperatures.Hottest(latest) is not null) _seen |= CompactMonitorItems.Temperature;
-        if (latest is not null && Storage.System(latest.Storage, Storage.WindowsLetter) is not null) _seen |= CompactMonitorItems.Storage;
-        var hidden = Later & ~_seen;
-        if (!Temperatures.Readable(cpu, gpu)) hidden |= CompactMonitorItems.Temperature;
-        if (storage == SensorState.None) hidden |= CompactMonitorItems.Storage;
-        if (battery == SensorState.None) { hidden |= CompactMonitorItems.Battery; _seen &= ~CompactMonitorItems.Battery; }
+        _showing.Clear();
+        var hidden = Later;
+        var layout = new System.Text.StringBuilder();
+        foreach (var (item, part, missing) in Wanted(readings, latest, states))
+        {
+            if (Seen(item, part, latest)) _seen.Add((item, part));
+            if (missing || !_seen.Contains((item, part))) continue;
+            _showing.Add((item, part));
+            hidden &= ~item;
+            layout.Append((int)item).Append(part).Append(' ');
+        }
+        if (battery == SensorState.Found) _batterySeen = true;
+        else if (battery == SensorState.None) _batterySeen = false;
+        if (_batterySeen) { hidden &= ~CompactMonitorItems.Battery; layout.Append((int)CompactMonitorItems.Battery).Append(' '); }
         var arriving = Hidden & ~hidden;
         Hidden = hidden;
+        Layout = layout.ToString();
         return (hidden, arriving);
     }
 }

@@ -6,11 +6,11 @@ using BrimDeck.Core;
 namespace BrimDeck;
 
 // A theme's motifs drawn into the island's surface, under its content (PanelDecor): a sea below a horizon, the caustics a sea
-// throws, a palm frond's shadow in the open panel's corner, HUD cuts and ticks in the corners. Nothing here moves: a theme's
-// motion (AmbientGlow) may drift them later, but the picture itself is still.
-// The island animates its size every frame while it opens and closes, so what does not depend on the size is made once: the
-// sea's and the line's brushes, the palm's shape in unit coordinates and the caustics' tile (shared by every island of a
-// color, and made the first time a sea is drawn). A size only places them, in a small group kept until the size changes.
+// throws, a palm frond's shadow in the open panel's corner and HUD cuts with ticks in the corners. Nothing here moves: the picture is still, so it costs nothing
+// while the island is idle.
+// The island animates its size every frame while it opens and closes, so the picture is made once, the first time it is
+// drawn (the caustics' tile is shared by every island of a color), and a new size only moves its parts: the rectangles, the
+// transforms and the fade are changed in place, nothing is allocated.
 internal sealed class IslandDecor
 {
     // The open panel shows the sea and the palm; on the small collapsed island the horizon would cross the clock like a
@@ -19,100 +19,123 @@ internal sealed class IslandDecor
     private const double SeaMinHeight = 90, SeaFullHeight = 140, HudMinHeight = 40, HudFullHeight = 60;
     // The caustics' tile, in DIP: lines a few DIP wide, far enough apart to read as light, not as a pattern.
     private const double Tile = 150;
+    // Tiles kept for the colors last used; a theme file being edited through many colors does not keep them all.
+    private const int TilesKept = 8;
     private static readonly Dictionary<Color, Brush> CausticTiles = [];
     private readonly PanelDecor _decor;
-    private readonly Brush? _water, _glint;
-    private readonly Drawing? _palm;
-    private (Size Size, CornerRadius Corners, double Shoulder)? _for;
-    private DrawingGroup? _drawing;
+    private Size? _for;
+    // The picture and the parts a size moves.
+    private DrawingGroup? _scene;
+    private RectangleGeometry? _water, _glint, _light, _shadeClip;
+    private GuidelineSet? _guides;
+    private TranslateTransform? _lightShift;
+    private MatrixTransform? _shadePlace;
+    // The HUD marks follow the corners' shapes, so they are made again when the size or the corners change (only a theme with them).
+    private Drawing? _hud;
+    private (Size Size, CornerRadius Corners, double Shoulder)? _hudFor;
 
-    public IslandDecor(PanelDecor decor)
-    {
-        _decor = decor;
-        if (decor.Horizon is { } horizon)
-        {
-            // The sea is lightest at the horizon, where the sky's light lies on it, and deepens toward the bottom. Its top fades
-            // in, so where the horizon falls between a row's text and its bar it reads as a haze, not a cut through the row.
-            Color shallow = ToColor(horizon.Sea), deep = ToColor(horizon.Deep);
-            _water = Frozen(new LinearGradientBrush(new GradientStopCollection
-            {
-                new(Color.FromArgb(0, shallow.R, shallow.G, shallow.B), 0), new(shallow, .08), new(deep, 1)
-            }, new Point(0, 0), new Point(0, 1)));
-            if (horizon.Line is { } line)
-            {
-                // A line of light along the horizon, brightest in the middle, as the sun lays on the water far off.
-                var light = ToColor(line);
-                _glint = Frozen(new LinearGradientBrush(new GradientStopCollection
-                {
-                    new(Color.FromArgb(0, light.R, light.G, light.B), 0), new(light, .5), new(Color.FromArgb(0, light.R, light.G, light.B), 1)
-                }, new Point(0, 0), new Point(1, 0)));
-            }
-        }
-        if (decor.Palm is { } palm) _palm = Palm(ToColor(palm));
-    }
+    public IslandDecor(PanelDecor decor) => _decor = decor;
 
     public static IslandDecor? For(PanelPalette palette) => palette.Effects.Decor is { } decor ? new IslandDecor(decor) : null;
 
     public void Draw(DrawingContext dc, Size size, CornerRadius corners, double shoulder, Geometry outline)
     {
-        if (size.Width < 2 || size.Height < 2) return;
-        if (_for != (size, corners, shoulder) || _drawing is null) { _drawing = Build(size, corners, shoulder); _for = (size, corners, shoulder); }
-        if (_drawing.Children.Count == 0) return;
+        if (size.Width < 2) return;
+        bool scene = size.Height > SeaMinHeight && (_decor.Horizon is not null || _decor.Caustics is not null || _decor.Palm is not null);
+        bool hud = _decor.Hud is not null && size.Height >= HudMinHeight;
+        if (!scene && !hud) return;
         dc.PushClip(outline);
-        dc.DrawDrawing(_drawing);
+        if (scene)
+        {
+            _scene ??= Build();
+            if (_for != size) { Place(size); _for = size; }
+            if (_scene.Children.Count > 0) dc.DrawDrawing(_scene);
+        }
+        if (hud && _decor.Hud is { } marks)
+        {
+            if (_hudFor != (size, corners, shoulder) || _hud is null)
+            {
+                // The marks fade in too, so they do not appear on one frame as the island grows past the collapsed height.
+                var color = ToColor(marks.Color);
+                color.A = (byte)Math.Round(color.A * Math.Min(1, (size.Height - HudMinHeight) / (HudFullHeight - HudMinHeight)));
+                _hud = Hud(color, marks.Chamfer, size.Width, size.Height, corners, Math.Clamp(shoulder, 0, Math.Min(size.Width / 4, size.Height / 2)));
+                _hudFor = (size, corners, shoulder);
+            }
+            dc.DrawDrawing(_hud);
+        }
         dc.Pop();
     }
 
-    private DrawingGroup Build(Size size, CornerRadius corners, double shoulder)
+    private DrawingGroup Build()
     {
-        var group = new DrawingGroup();
+        var scene = new DrawingGroup();
+        if (_decor.Horizon is { } horizon)
+        {
+            // The sea is lightest at the horizon, where the sky's light lies on it, and deepens toward the bottom. Its top fades
+            // in, so where the horizon falls between a row's text and its bar it reads as a haze, not a cut through the row.
+            Color shallow = ToColor(horizon.Sea), deep = ToColor(horizon.Deep);
+            var water = Frozen(new LinearGradientBrush(new GradientStopCollection
+            {
+                new(Color.FromArgb(0, shallow.R, shallow.G, shallow.B), 0), new(shallow, .08), new(deep, 1)
+            }, new Point(0, 0), new Point(0, 1)));
+            scene.Children.Add(new GeometryDrawing(water, null, _water = new RectangleGeometry()));
+            if (horizon.Line is { } line)
+            {
+                // A line of light along the horizon, brightest in the middle, as the sun lays on the water far off; on whole
+                // device pixels, so it stays one sharp line at any scale.
+                var light = ToColor(line);
+                var glint = Frozen(new LinearGradientBrush(new GradientStopCollection
+                {
+                    new(Color.FromArgb(0, light.R, light.G, light.B), 0), new(light, .5), new(Color.FromArgb(0, light.R, light.G, light.B), 1)
+                }, new Point(0, 0), new Point(1, 0)));
+                scene.GuidelineSet = _guides = new GuidelineSet(null, [0, 0]);
+                scene.Children.Add(new GeometryDrawing(glint, null, _glint = new RectangleGeometry()));
+            }
+        }
+        if (_decor.Caustics is { } caustics)
+        {
+            // Without a horizon the caustics cover the whole surface. The tile is anchored at the island's centre, which stays
+            // put while the island widens around it, so the light does not slide as the island opens.
+            scene.Children.Add(new DrawingGroup
+            {
+                Transform = _lightShift = new TranslateTransform(),
+                Children = { new GeometryDrawing(Caustics(ToColor(caustics)), null, _light = new RectangleGeometry()) }
+            });
+        }
+        if (_decor.Palm is { } palm)
+        {
+            // It is shade on the sand, so it stops at the horizon (and its contrast is checked over the sky alone).
+            var shade = new DrawingGroup { Transform = _shadePlace = new MatrixTransform(), Children = { Palm(ToColor(palm)) } };
+            scene.Children.Add(_decor.Horizon is null ? shade : new DrawingGroup { ClipGeometry = _shadeClip = new RectangleGeometry(), Children = { shade } });
+        }
+        return scene;
+    }
+
+    private void Place(Size size)
+    {
         double w = size.Width, h = size.Height;
-        if (h >= SeaMinHeight)
+        _scene!.Opacity = Math.Min(1, (h - SeaMinHeight) / (SeaFullHeight - SeaMinHeight));
+        double seaTop = _decor.Horizon is { } horizon ? Math.Round(h * horizon.At) : 0;
+        if (_water is not null) _water.Rect = new Rect(0, seaTop, w, h - seaTop);
+        if (_glint is not null)
         {
-            var scene = new DrawingGroup { Opacity = Math.Min(1, (h - SeaMinHeight) / (SeaFullHeight - SeaMinHeight)) };
-            double seaTop = 0;
-            if (_decor.Horizon is not null)
-            {
-                seaTop = Math.Round(h * _decor.Horizon.At);
-                scene.Children.Add(new GeometryDrawing(_water, null, new RectangleGeometry(new Rect(0, seaTop, w, h - seaTop))));
-                if (_glint is not null)
-                {
-                    // On whole device pixels, so the line stays one sharp line at any scale.
-                    scene.GuidelineSet = new GuidelineSet(null, [seaTop - .5, seaTop + .5]);
-                    scene.Children.Add(new GeometryDrawing(_glint, null, new RectangleGeometry(new Rect(0, seaTop - .5, w, 1))));
-                }
-            }
-            if (_decor.Caustics is { } caustics)
-            {
-                // Without a horizon the caustics cover the whole surface. The tile is anchored at the island's centre, which
-                // stays put while the island widens around it, so the light does not slide as the island opens.
-                double dx = w / 2 % Tile;
-                scene.Children.Add(new DrawingGroup
-                {
-                    Transform = new TranslateTransform(dx, 0),
-                    Children = { new GeometryDrawing(Caustics(ToColor(caustics)), null, new RectangleGeometry(new Rect(-dx, seaTop, w, h - seaTop))) }
-                });
-            }
-            if (_palm is not null)
-            {
-                // At most 120 DIP, set well beyond the top-right corner, so it stays in the corner, clear of the clock column
-                // below it and of the settings button in the corner itself.
-                // It is shade on the sand, so it stops at the horizon (and its contrast is checked over the sky alone).
-                double frond = Math.Min(120, h * .5);
-                var shade = new DrawingGroup { Transform = new MatrixTransform(frond, 0, 0, frond, w - frond * .72, -frond * .2), Children = { _palm } };
-                scene.Children.Add(_decor.Horizon is null ? shade : new DrawingGroup { ClipGeometry = new RectangleGeometry(new Rect(0, 0, w, seaTop)), Children = { shade } });
-            }
-            if (scene.Children.Count > 0) group.Children.Add(scene);
+            _glint.Rect = new Rect(0, seaTop - .5, w, 1);
+            _guides!.GuidelinesY[0] = seaTop - .5; _guides.GuidelinesY[1] = seaTop + .5;
         }
-        if (_decor.Hud is { } hud && h >= HudMinHeight)
+        if (_light is not null)
         {
-            // The marks fade in too, so they do not appear on one frame as the island grows past the collapsed height.
-            var color = ToColor(hud.Color);
-            color.A = (byte)Math.Round(color.A * Math.Min(1, (h - HudMinHeight) / (HudFullHeight - HudMinHeight)));
-            group.Children.Add(Hud(color, hud.Chamfer, w, h, corners, Math.Clamp(shoulder, 0, Math.Min(w / 4, h / 2))));
+            double dx = w / 2 % Tile;
+            _lightShift!.X = dx;
+            _light.Rect = new Rect(-dx, seaTop, w, h - seaTop);
         }
-        group.Freeze();
-        return group;
+        if (_shadePlace is not null)
+        {
+            // At most 120 DIP, set well beyond the top-right corner, so it stays in the corner and clear of the clock column
+            // below it; the settings button in the corner sits over its faint tips.
+            double frond = Math.Min(120, h * .5);
+            _shadePlace.Matrix = new Matrix(frond, 0, 0, frond, w - frond * .72, -frond * .2);
+            if (_shadeClip is not null) _shadeClip.Rect = new Rect(0, 0, w, seaTop);
+        }
     }
 
     // A tile of caustic light: two sine fields, each warped by the other, light where either crosses zero, so the lines meet
@@ -120,7 +143,9 @@ internal sealed class IslandDecor
     private static Brush Caustics(Color color)
     {
         if (CausticTiles.TryGetValue(color, out var cached)) return cached;
-        const int size = 192;
+        if (CausticTiles.Count >= TilesKept) CausticTiles.Clear();
+        // 256 pixels for 150 DIP: sharp up to about 170 % scale.
+        const int size = 256;
         var pixels = new byte[size * size * 4];
         for (int y = 0; y < size; y++)
             for (int x = 0; x < size; x++)
@@ -141,7 +166,6 @@ internal sealed class IslandDecor
         bitmap.Freeze();
         // About 150 DIP across: lines a few DIP wide, wide apart enough to read as light, not as a pattern.
         var brush = new ImageBrush(bitmap) { TileMode = TileMode.Tile, Viewport = new Rect(0, 0, Tile, Tile), ViewportUnits = BrushMappingMode.Absolute, Stretch = Stretch.Fill };
-        RenderOptions.SetCachingHint(brush, CachingHint.Cache);
         brush.Freeze();
         return CausticTiles[color] = brush;
     }

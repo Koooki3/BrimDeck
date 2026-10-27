@@ -35,7 +35,9 @@ public partial class App : Application
     // Every panel shows the one set of players, and their lyrics are looked up once.
     internal MediaSessions? Media { get; private set; }
     internal event Action? MediaChanged;
-    internal LyricsService Lyrics { get; } = new();
+    internal LyricsService Lyrics { get; private set; } = null!;
+    // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
+    internal WindowDrags WindowDrags { get; private set; } = null!;
     private readonly HashSet<MainWindow> _presentingMedia = [];
     // The system monitor page's readings, shared by every panel; created when a panel first shows the page.
     internal SystemSampler? Monitor { get; private set; }
@@ -114,8 +116,10 @@ public partial class App : Application
         Prices = new Pricing(folder);
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
+        Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
+        WindowDrags = new WindowDrags();
         InteractionFx.Install(this);
         Notices = new NoticeCenter(this);
         Displays = Native.Displays.Current();
@@ -144,6 +148,8 @@ public partial class App : Application
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(OpenSettings), null, Timeout.Infinite, false);
         if (e.Args.Contains("--settings")) OpenSettings();
+        // A portable update that kept this version says why on the About page.
+        else if (Updates.RestartFailed) OpenUpdateSettings();
         // The start reads and builds a lot; what it leaves behind is returned once the panel has been left alone (App.Memory).
         RequestTrim();
     }
@@ -506,9 +512,14 @@ public partial class App : Application
     private void UpdateMonitorExtras()
     {
         bool page = _presentingMonitor.Count > 0;
-        var shown = _stripMonitor.Count > 0 ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
-        Monitor?.SetExtras(page && Settings.MonitorTemperatures || (shown & CompactMonitorItems.Temperature) != 0,
-            page && Settings.MonitorStorage || (shown & CompactMonitorItems.Storage) != 0, page && Settings.MonitorStorage && Settings.MonitorTemperatures);
+        bool strip = _stripMonitor.Count > 0;
+        var shown = strip ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
+        bool Heat(CompactMonitorItems item) => (shown & item) != 0 && Settings.CompactReadings.FirstOrDefault(reading => reading.Item == item) is { } reading
+            && (item == CompactMonitorItems.Storage || reading.ShowValue) && CompactFigures.Shows(reading, CompactFigures.Temperature);
+        bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
+        Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
+            page && Settings.MonitorStorage || stripDrives,
+            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage));
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
@@ -556,7 +567,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         // A settings change still waiting for its timer (made during the exit animation) is written before the last wait (life-L13).
-        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; MotionEnvironment.Changed -= GlassEnvironmentChanged; GlassBackdrop.LiquidFailed -= GlassEnvironmentChanged; InteractionFx.Uninstall(); UnwatchSurface(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; MotionEnvironment.Changed -= GlassEnvironmentChanged; GlassBackdrop.LiquidFailed -= GlassEnvironmentChanged; InteractionFx.Uninstall(); UnwatchSurface(); _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         Media?.Dispose(); Monitor?.Dispose(); Devices?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);

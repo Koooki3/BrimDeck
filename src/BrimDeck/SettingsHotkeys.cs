@@ -69,9 +69,10 @@ public sealed partial class SettingsWindow
         string waiting = arrows ? Loc.T("请按 Ctrl、Shift 或 Win…", "Press Ctrl, Shift or Win…") : Loc.T("请按下组合键…", "Press a combination…");
         string Saved() => SavedHotkey(S, kind);
         // The other shortcuts, with the names a clash message gives them; the notices one only while notices are on, as only then
-        // is it registered (App.ApplyHotkeys) and its row shown to clear it.
+        // is it registered (App.ApplyHotkeys) and its row shown to clear it. The resize shortcut yields to the others (App.Hotkeys),
+        // so only its own row speaks of a clash with them.
         IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>()
-            .Where(other => other != kind && (other != HotkeyKind.Notices || S.NoticesEnabled))
+            .Where(other => other != kind && (other != HotkeyKind.Notices || S.NoticesEnabled) && (kind == HotkeyKind.Resize || other != HotkeyKind.Resize))
             .Select(other => (SavedHotkey(S, other), HotkeyName(other)));
 
         // The box keeps one size and place in every state: the text on the left, trimmed before the clear button, which
@@ -260,8 +261,8 @@ public sealed partial class SettingsWindow
     // The app raises HotkeysChanged on the UI thread after registering again.
     private void AppHotkeysChanged() { foreach (var refresh in _hotkeyRows.ToList()) refresh(); }
 
-    // What is wrong with a saved shortcut, or "" when nothing is: the same combination as the other shortcut, or a
-    // registration the app could not complete.
+    // What is wrong with a saved shortcut, or "" when nothing is: a combination another shortcut has, or a registration the app
+    // could not complete.
     private string HotkeyProblem(HotkeyKind kind, string saved, IEnumerable<(string Text, string Name)> others)
     {
         if (saved.Length == 0) return "";
@@ -300,7 +301,7 @@ public sealed partial class SettingsWindow
     private static string HotkeyDisplay(string saved)
     {
         if (HotkeyText.TryParseArrows(saved, out var arrowModifiers))
-            return HotkeyText.Format(arrowModifiers, HotkeyText.Arrows)[..^HotkeyText.Arrows.Length] + Loc.T("方向键", "Arrow keys");
+            return HotkeyText.Format(arrowModifiers, Loc.T("方向键", "Arrow keys"));
         if (!ParseHotkey(saved, out var modifiers, out var key)) return saved;
         string name = key switch
         {

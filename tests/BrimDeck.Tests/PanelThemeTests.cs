@@ -325,17 +325,30 @@ internal static class PanelThemeTests
         check("Text is held over the sea the horizon lays under it, at the horizon and at its deepest", deepSea.SurfaceStops.Contains(sea)
             && deepSea.SurfaceStops.Contains(deepSea.Effects.Decor!.Horizon!.Deep.Over(deepSea.Surface))
             && deepSea["textPrimary"].MinimumContrast([sea]) >= 4.5 - .001 && deepSea.Adjustments.Count > 0);
-        var dusky = PanelThemes.Build("dusky", PanelThemes.Parse("""{ "formatVersion": 1, "id": "dusky", "base": "light", "effects": { "surfaceGradient": ["#00FFFFFF", "#FF8FB8C8"], "decor": { "horizon": { "sea": "#A000A6A6" } } } }"""));
-        var duskySea = dusky.Effects.Decor!.Horizon!.Sea.Over(dusky.Effects.SurfaceGradient[1].Over(dusky.Surface));
-        check("The sea is measured over the gradient it lies on", dusky.SurfaceStops.Contains(duskySea) && dusky["textPrimary"].MinimumContrast([duskySea]) >= 7 - .001);
+        var tinted = PanelThemes.Build("tinted", PanelThemes.Parse("""{ "formatVersion": 1, "id": "tinted", "base": "light", "effects": { "surfaceGradient": ["#00FFFFFF", "#FF8FB8C8"], "decor": { "horizon": { "sea": "#A000A6A6" } } } }"""));
+        var tintedSea = tinted.Effects.Decor!.Horizon!.Sea.Over(tinted.Effects.SurfaceGradient[1].Over(tinted.Surface));
+        check("The sea is measured over the gradient it lies on", tinted.SurfaceStops.Contains(tintedSea) && tinted["textPrimary"].MinimumContrast([tintedSea]) >= 7 - .001);
         var lit = Decor("""{ "horizon": { "sea": "#2000A6A6", "line": "#FFFFC24B" } }""");
         check("The horizon's line is measured too", lit.SurfaceStops.Contains(ThemeColor.Parse("#FFFFC24B")));
-        // Each motif is measured over what it is drawn on: the palm over the sky (it stops at the horizon), the caustics over the sea.
+        // Each motif is measured over what it is drawn on: the palm over the sky (it stops at the horizon), the caustics over the sea
+        // and over the sky where the sea's top fades in.
         var shaded = Decor("""{ "horizon": { "sea": "#4000A6A6" }, "palm": { "color": "#1F000000" }, "caustics": { "color": "#33FFFFFF" } }""");
         var shadedSea = shaded.Effects.Decor!.Horizon!.Sea.Over(shaded.Surface);
-        check("The palm is measured over the sky and the caustics over the sea", shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shaded.Surface))
+        check("The palm is measured over the sky and the caustics over the sea and the sky it fades in over", shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shaded.Surface))
             && !shaded.SurfaceStops.Contains(shaded.Effects.Decor.Palm!.Value.Over(shadedSea)) && shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shadedSea))
-            && !shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shaded.Surface)));
+            && shaded.SurfaceStops.Contains(shaded.Effects.Decor.Caustics!.Value.Over(shaded.Surface)));
+        // The texture is drawn over the motifs, so its squares are measured over the sea too.
+        var blocky = PanelThemes.Build("blocky", PanelThemes.Parse("""{ "formatVersion": 1, "id": "blocky", "base": "light", "effects": { "pixel": 2, "texture": 0.12, "decor": { "horizon": { "sea": "#FFAAAAAA" } } } }"""));
+        var blockySea = blocky.Effects.Decor!.Horizon!.Sea.Over(blocky.Surface);
+        check("A texture over the motifs is measured over them", blocky.SurfaceStops.Contains(new ThemeColor(31, 0, 0, 0).Over(blockySea))
+            && blocky["textPrimary"].MinimumContrast([new ThemeColor(31, 0, 0, 0).Over(blockySea)]) >= 7 - .001);
+        check("A theme with motifs alone has an overlay, so scrolling text fades itself", Decor("""{ "palm": { "color": "#1F000000" } }""").HasOverlay);
+        // The motifs do not decide whether a theme is dark: a deep sea under a light sky leaves it light.
+        check("A theme's motifs do not make it dark", !Decor("""{ "horizon": { "at": 0.3, "sea": "#FF001020" } }""").IsDark);
+        // Without a horizon the caustics cover the surface and the palm falls over them as well.
+        var open = Decor("""{ "palm": { "color": "#1F000000" }, "caustics": { "color": "#33FFFFFF" } }""");
+        check("Without a horizon the palm is measured over the caustics too",
+            open.SurfaceStops.Contains(open.Effects.Decor!.Palm!.Value.Over(open.Effects.Decor.Caustics!.Value.Over(open.Surface))));
         var badDecor = PanelThemes.LoadFolder(Folder("decor-bad", ("sea.json", """{ "formatVersion": 1, "id": "sea", "effects": { "decor": { "horizon": { "sea": "teal" } } } }"""),
             ("hud.json", """{ "formatVersion": 1, "id": "hud", "effects": { "decor": { "hud": { "color": "#12345" } } } }""")));
         check("A motif color that is not a color is refused", badDecor.Count == 2 && badDecor.All(theme => theme.Error is not null));
@@ -361,6 +374,13 @@ internal static class PanelThemeTests
         check("The first island holiday is left as it was: no motifs, its serif clock, no dusk",
             PanelThemes.Resolve(firstIsland).Effects.Decor is null && PanelThemes.Resolve(firstIsland, true).Effects.Decor is null
             && PanelThemes.Resolve(firstIsland).Clock?.Style == "serif" && firstIsland.File.Dusk is null);
+        var holidayTheme = PanelThemes.BuiltIn(PanelThemes.IslandHoliday)!;
+        var holidayCopyText = PanelThemes.FillTemplate("copy", PanelThemes.Resolve(holidayTheme), PanelThemes.IslandHoliday, holidayTheme.File);
+        var holidayCopy = PanelThemes.Parse(holidayCopyText);
+        check("The copied night look writes only what it sets", holidayCopy.Night is { Id: "", Name: "", Base: "", Swatches: null, Night: null, Daylight: null } && holidayCopy.Night.Clock is { Style: "", Color: "" }
+            && !holidayCopyText.Contains("displayName", StringComparison.OrdinalIgnoreCase) && PanelThemes.LoadFolder(Folder("holiday-copy", ("copy.json", holidayCopyText))).Single().Usable);
+        check("A theme without a night look gets none from the template",
+            PanelThemes.Parse(PanelThemes.FillTemplate("plain", BuiltIn("dracula"), "dracula", PanelThemes.BuiltIn("dracula")!.File)) is { Night: null, Daylight: null });
         var nightOwl = BuiltIn("night-owl");
         // No built-in theme suggests a gradient clock, so a theme of its own carries one.
         var glow = PanelThemes.Build("glow", new PanelThemeFile { Base = "night-owl", Clock = new PanelThemeClock { Style = "neon", Color = "gradient", Gradient = ["#C792EA", "#82AAFF", "#7FDBCA"] } });

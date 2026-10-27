@@ -72,7 +72,7 @@
   // by hand; "other" anything not listed.
   "apps": {
     "claude": "#E5A385", "codex": "#98DBB0", "antigravity": "#9CB9FF", "cursor": "#D4D5DF", "zcode": "#4A64A6",
-    "dsh": "#6081DA", "grokBot": "#D4D5DF", "kimi": "#68CDEB", "manual": "#CC9EED", "other": "#D4D5DF", "warning": "#E5C890", "critical": "#E78284"
+    "dsh": "#6081DA", "grokBot": "#D4D5DF", "kimi": "#68CDEB", "opencode": "#8E8E93", "manual": "#CC9EED", "other": "#D4D5DF", "warning": "#E5C890", "critical": "#E78284"
   },
 
   // The clock that suits the theme. Choosing the theme in settings switches the clock to it; the clock can still be changed after.
@@ -110,9 +110,10 @@
                                     // left, its last shades the others. Not with glass: a theme with both is refused
     "texture": 0                    // 0 to 0.12, with pixel art: squares a little lighter or darker than the surface, a block's grain
     // Motifs: remove the "//" to draw quiet pictures into the surface, under the content. horizon: a sea below "at" (0.3 to 0.9
-    // of the height) and a line of light along it; caustics: a net of soft light lines; palm: a palm frond's shadow in the open
-    // panel's top-right corner (both at most 0.12 alpha); hud: 45-degree cuts across two corners ("chamfer", 0 to 10 DIP) with
-    // hexagonal ticks. Text is held to its minimums over the sea and the motifs too.
+    // of the height, 0.62 when not set) and a line of light along it; caustics: a net of soft light lines on the sea (alpha at
+    // most 0.2); palm: a palm frond's shadow in the open panel's top-right corner, above the horizon (alpha at most 0.12); hud:
+    // 45-degree cuts across two corners ("chamfer", 0 to 10 DIP) with hexagonal ticks. Each value is inherited on its own, a fully
+    // transparent color turns a part off, and text is held to its minimums over the sea, the line and the motifs too.
     // , "decor": { "horizon": { "at": 0.62, "sea": "#4000A6A6", "line": "#80FFFFFF" }, "caustics": { "color": "#1AFFFFFF" } }
     // Glass: remove the "//" to make the surface a tint over the desktop instead of a solid color. Text is held to its minimums
     // over the tint on both a black and a white desktop, so a light tint needs to be fairly dense (about 75 %). "surface" above

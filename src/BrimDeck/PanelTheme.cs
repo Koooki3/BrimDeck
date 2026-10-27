@@ -219,7 +219,7 @@ internal static class PanelTheme
     public static string WarningDefault => Current.WarningDefault?.ToString() ?? AppPresets.WarningColor;
     public static string CriticalDefault => Current.CriticalDefault?.ToString() ?? AppPresets.CriticalColor;
 
-    // Gives an island the theme's layers over its base color: the gradient, the scan lines or texture, the rim and a pixel
+    // Gives an island the theme's layers over its base color: the gradient, the motifs, the scan lines or texture, the rim and a pixel
     // theme's steps and bevel. The base color is the caller's, as the panel animates it between the surface and the indicator.
     public static void Dress(IslandBorder island, PanelPalette? palette = null, double dpiScale = 1)
     {

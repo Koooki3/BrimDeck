@@ -100,18 +100,18 @@ public partial class App
     // Resizes the open panel, or the collapsed surface on the monitor under the pointer (KeyboardResize).
     public void ResizeFromHotkey(int arrow)
     {
-        var deck = Decks.FirstOrDefault(deck => deck.IsOpenForHotkey);
-        if (deck is null) { var monitor = GlobalHotkeys.CursorMonitor(); deck = Decks.FirstOrDefault(deck => deck.HotkeyMonitor == monitor) ?? Deck; }
-        deck.ResizeFromKeyboard(KeyboardResize.Of(arrow));
+        var target = Decks.FirstOrDefault(deck => deck.IsOpenForHotkey);
+        if (target is null) { var monitor = GlobalHotkeys.CursorMonitor(); target = Decks.FirstOrDefault(deck => deck.HotkeyMonitor == monitor) ?? Deck; }
+        target.ResizeFromKeyboard(KeyboardResize.Of(arrow));
     }
 
     private void RegisterHotkeys()
     {
-        RegisterResizeHotkey();
+        // Everything is released first, so a combination one hotkey gives up is free for another this time round.
+        foreach (var kind in Enum.GetValues<HotkeyKind>()) _hotkeys?.Unregister(kind);
         foreach (var kind in new[] { HotkeyKind.Hide, HotkeyKind.Expand, HotkeyKind.Notices })
         {
             var (status, text) = HotkeyText.Plan(kind, _hideHotkey, _expandHotkey, _noticesHotkey, HotkeyGesture.IsKeyName);
-            _hotkeys?.Unregister(kind);
             if (status is null)
             {
                 HotkeyGesture.TryParse(text, out var modifiers, out var key);
@@ -120,6 +120,7 @@ public partial class App
             }
             _hotkeyStatus[kind] = status.Value;
         }
+        RegisterResizeHotkey();
         HotkeysChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -129,11 +130,10 @@ public partial class App
     {
         const HotkeyKind kind = HotkeyKind.Resize;
         var (status, text) = HotkeyText.PlanArrows(_resizeHotkey, HotkeyGesture.IsKeyName, _hideHotkey, _expandHotkey, _noticesHotkey);
-        _hotkeys?.Unregister(kind);
         if (status is null && HotkeyText.TryParseArrows(text, out var modifiers))
         {
             status = HotkeyStatus.Active;
-            for (int arrow = 0; arrow < HotkeyText.ArrowKeys.Length && status == HotkeyStatus.Active; arrow++)
+            for (int arrow = 0; arrow < HotkeyText.ArrowKeys.Count && status == HotkeyStatus.Active; arrow++)
             {
                 HotkeyGesture.TryParse(HotkeyText.Format(modifiers, HotkeyText.ArrowKeys[arrow]), out var wpfModifiers, out var key);
                 status = !HotkeyGesture.ToNative(wpfModifiers, key, out uint fs, out uint vk, repeat: true) ? HotkeyStatus.Invalid

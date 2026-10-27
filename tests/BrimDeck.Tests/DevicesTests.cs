@@ -157,13 +157,14 @@ static class DevicesTests
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
         check("Battery reading: the Brief preset hides it", !readings.Single(r => r.Item == CompactMonitorItems.Battery).Visible);
         var admission = new StripAdmission();
-        var (hidden, _) = admission.Update(null, SensorState.Unknown, SensorState.Unknown, SensorState.Unknown, SensorState.Unknown);
+        var table = CompactMonitor.Normalize(null);
+        var (hidden, _) = admission.Update(null, table, SensorStates.Unknown, SensorState.Unknown);
         check("Battery reading: left out until a device reports", (hidden & CompactMonitorItems.Battery) != 0);
-        var (found, arriving) = admission.Update(null, SensorState.Unknown, SensorState.Unknown, SensorState.Unknown, SensorState.Found);
+        var (found, arriving) = admission.Update(null, table, SensorStates.Unknown, SensorState.Found);
         check("Battery reading: joins with the first reading", (found & CompactMonitorItems.Battery) == 0 && (arriving & CompactMonitorItems.Battery) != 0);
-        var (held, _) = admission.Update(null, SensorState.Unknown, SensorState.Unknown, SensorState.Unknown, SensorState.Unknown);
+        var (held, _) = admission.Update(null, table, SensorStates.Unknown, SensorState.Unknown);
         check("Battery reading: stays while the reading is away a moment", (held & CompactMonitorItems.Battery) == 0);
-        var (none, _) = admission.Update(null, SensorState.Unknown, SensorState.Unknown, SensorState.Unknown, SensorState.None);
+        var (none, _) = admission.Update(null, table, SensorStates.Unknown, SensorState.None);
         check("Battery reading: leaves once no device reports", (none & CompactMonitorItems.Battery) != 0);
     }
 }

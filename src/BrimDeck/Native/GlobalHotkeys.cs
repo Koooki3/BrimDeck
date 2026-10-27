@@ -10,6 +10,7 @@ namespace BrimDeck.Native;
 // resize shortcut's four arrow keys).
 internal sealed class GlobalHotkeys : IDisposable
 {
+    // Slots per hotkey in the registration ids: room for more combinations than the four arrow keys need.
     private const int WmHotkey = 0x0312, ErrorHotkeyAlreadyRegistered = 1409, Slots = 8;
     private readonly HwndSource _source;
     private readonly HashSet<(HotkeyKind Kind, int Slot)> _registered = [];
@@ -32,7 +33,7 @@ internal sealed class GlobalHotkeys : IDisposable
     // Every combination of the hotkey.
     public void Unregister(HotkeyKind kind)
     {
-        for (int slot = 0; slot < Slots; slot++) Unregister(kind, slot);
+        foreach (var (registered, slot) in _registered.Where(entry => entry.Kind == kind).ToList()) Unregister(registered, slot);
     }
 
     private void Unregister(HotkeyKind kind, int slot)

@@ -235,6 +235,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
         if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
         if (id == ProviderId.Kimi) _kimi.Read(snapshot, _locations.KimiHome, start, now);
+        if (id == ProviderId.OpenCode) OpenCodeUsage.Read(snapshot, desktop, _locations.OpenCodeDatabase, start, now);
         try
         {
             switch (id)
@@ -278,6 +279,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                     break;
                 case ProviderId.Kimi:
                     await ReadKimiAsync(snapshot, now, ct);
+                    break;
+                case ProviderId.OpenCode:
+                    await ReadOpenCodeAsync(snapshot, now, ct);
                     break;
             }
         }
@@ -916,6 +920,45 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (doc.RootElement.Get("code").Number() == 40003) { Expired(); return; }
         snapshot.Metrics = DshUsage.Summary(doc.RootElement) ?? throw new InvalidDataException();
         Connected(snapshot, Loc.T("DeepSeek Harness · DeepSeek 账户", "DeepSeek Harness · DeepSeek account"), now);
+    }
+
+    // OpenCode's own sign-in to OpenCode Console reads the Go allowance of its workspace (OpenCodeUsage). The token is used as
+    // it is and never renewed; an expired one is not sent. A workspace without Go is refused with HTTP 403.
+    private async Task ReadOpenCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var credential = OpenCodeUsage.ReadCredential(desktop, _locations.OpenCodeDatabase, _locations.OpenCodeData);
+        if (credential is null)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请先在 OpenCode 中登录 OpenCode Console", "Sign in to OpenCode Console in OpenCode first.");
+            return;
+        }
+        if (credential.Expired(now))
+        {
+            snapshot.StatusLabel = Loc.T("登录已过期", "Sign-in expired");
+            snapshot.Status = Loc.T("OpenCode 的登录已过期，在 OpenCode 中使用一次即可续期", "The OpenCode sign-in has expired. Using OpenCode once renews it.");
+            return;
+        }
+        if (OpenCodeUsage.UsageAddress(credential.Server) is not { } address) throw new InvalidDataException();
+        snapshot.Scope = "account";
+        using var request = Bearer(HttpMethod.Get, address.AbsoluteUri, credential.Token);
+        if (credential.Workspace.Length > 0) request.Headers.TryAddWithoutValidation("x-opencode-org-id", credential.Workspace);
+        using var response = await _http.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.Forbidden)
+        {
+            // Cloudflare in front of opencode.ai answers 403 as well when it blocks a request; only OpenCode's own 403 means no Go.
+            if ((await response.Content.ReadAsStringAsync(ct)).Contains("\"cloudflare_error\"", StringComparison.Ordinal)) throw new HttpRequestException(null, null, HttpStatusCode.ServiceUnavailable);
+            snapshot.StatusLabel = Loc.T("未订阅 Go", "No Go plan");
+            snapshot.Status = Loc.T("OpenCode 登录的工作区没有订阅 OpenCode Go", "The workspace OpenCode signed in to has no OpenCode Go plan.");
+            return;
+        }
+        response.EnsureSuccessStatusCode();
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var quotas = OpenCodeUsage.Allowance(doc.RootElement, out bool limited);
+        if (quotas.Count == 0) throw new InvalidDataException();
+        snapshot.Quotas = quotas;
+        Connected(snapshot, "OpenCode Go", now);
+        if (limited) snapshot.Status = Loc.T("已达到 OpenCode Go 的用量上限，重置前请求会被拒绝", "The OpenCode Go limit is reached; requests are refused until it resets.");
     }
 
     // Kimi Code's own sign-in reads the plan quota. The token is used as it is: an expired one is not sent and never renewed,

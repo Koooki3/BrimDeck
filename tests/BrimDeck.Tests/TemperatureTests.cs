@@ -106,49 +106,36 @@ static class TemperatureTests
 
     private static void Snapshots(Action<string, bool> check)
     {
-        check("Hottest: nothing while neither has a temperature", Temperatures.Hottest(null) is null && Temperatures.Hottest(Snapshot(null, null)) is null
-            && Temperatures.Hottest(MonitorSnapshot.Empty(4, "waiting")) is null);
-        check("Hottest: the processor alone (no graphics counters)", Temperatures.Hottest(Snapshot(61, null, gpuRead: false)) is { Celsius: 61, Level: MemoryLevel.Normal });
-        check("Hottest: the graphics adapter alone (no thermal zone)", Temperatures.Hottest(Snapshot(null, 47.3)) is { Celsius: 47.3, Level: MemoryLevel.Normal });
-        check("Hottest: the hotter of the two", Temperatures.Hottest(Snapshot(70, 55))?.Celsius == 70 && Temperatures.Hottest(Snapshot(50, 66))?.Celsius == 66);
-        check("Hottest: the higher level even when the other reads hotter", Temperatures.Hottest(Snapshot(84, 82)) is { Celsius: 84, Level: MemoryLevel.Elevated }
-            && Temperatures.Hottest(Snapshot(84, 91)) is { Celsius: 91, Level: MemoryLevel.Critical });
-        check("Hottest: the collapsed reading's level", ReadingLevels.Of(CompactMonitorItems.Temperature, Snapshot(96, 40)) == MemoryLevel.Critical
-            && ReadingLevels.Of(CompactMonitorItems.Temperature, Snapshot(null, null)) == MemoryLevel.Normal && ReadingLevels.Of(CompactMonitorItems.Temperature, null) == MemoryLevel.Normal);
+        check("Ring temperatures: none while there is none", CompactFigures.Heat(CompactMonitorItems.Cpu, null) is null && CompactFigures.Heat(CompactMonitorItems.Cpu, Snapshot(null, null)) is null
+            && CompactFigures.Heat(CompactMonitorItems.Gpu, MonitorSnapshot.Empty(4, "waiting")) is null && CompactFigures.Heat(CompactMonitorItems.Memory, Snapshot(60, 60)) is null);
+        check("Ring temperatures: each its own, at its own level", CompactFigures.Heat(CompactMonitorItems.Cpu, Snapshot(61, null, gpuRead: false)) is { Celsius: 61, Level: MemoryLevel.Normal }
+            && CompactFigures.Heat(CompactMonitorItems.Gpu, Snapshot(null, 47.3)) is { Celsius: 47.3 } && CompactFigures.Heat(CompactMonitorItems.Cpu, Snapshot(96, 40)) is { Level: MemoryLevel.Critical }
+            && CompactFigures.Heat(CompactMonitorItems.Gpu, Snapshot(96, 82)) is { Level: MemoryLevel.Elevated });
         check("Snapshots: no drives until they are read", MonitorSnapshot.Empty(4, "waiting").Storage.Count == 0);
     }
 
+    // The temperatures show with CPU, GPU and the drives, as their second figure (CompactFigures), not as a reading of their own.
     private static void Strip(Action<string, bool> check)
     {
-        const CompactMonitorItems Temperature = CompactMonitorItems.Temperature, All = CompactMonitorItems.All;
-        check("Compact temperature: a reading of the table, not of the Full preset", CompactMonitor.Order.Contains(Temperature) && (All & Temperature) == 0
-            && CompactMonitor.Every == (All | CompactMonitorItems.Storage | Temperature | CompactMonitorItems.Battery) && !CompactMonitor.HasValueChoice(Temperature) && CompactMonitor.Channels(Temperature) == 1);
-        var defaults = new DeckSettings(); defaults.Normalize();
-        check("Compact temperature: hidden by default", defaults.CompactReadings.Single(r => r.Item == Temperature) is { Visible: false }
-            && CompactMonitor.Preset(defaults.CompactReadings) == CompactMonitorMode.Full && defaults.MonitorTemperatures);
-        var readings = CompactMonitor.Normalize(defaults.CompactReadings);
-        readings.Single(r => r.Item == Temperature).Visible = true;
-        check("Compact temperature: chosen, it shows and Full still matches", (CompactMonitor.Visible(readings) & Temperature) != 0
-            && (CompactMonitor.Shown(readings) & Temperature) != 0 && CompactMonitor.Preset(readings) == CompactMonitorMode.Full);
-        CompactMonitor.Apply(readings, CompactMonitorMode.Full);
-        check("Compact temperature: Full leaves it shown", readings.Single(r => r.Item == Temperature).Visible);
-        CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
-        check("Compact temperature: Brief hides it", !readings.Single(r => r.Item == Temperature).Visible && CompactMonitor.Preset(readings) == CompactMonitorMode.Brief);
-        readings.Single(r => r.Item == Temperature).Visible = true;
-        check("Compact temperature: added to Brief, no preset matches", CompactMonitor.Preset(readings) is null);
-        CompactMonitor.Apply(readings, CompactMonitorMode.Full);
-        readings.ForEach(r => r.Visible = r.Item == Temperature);
-        check("Compact temperature: alone it is what the strip shows", CompactMonitor.Shown(readings) == Temperature);
-
-        var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, 30, 14, 20, 50, 34);
-        check("Compact temperature: its own width", width(Temperature) == 34 && CompactMonitor.Widths(CompactMonitor.Rings, 12, 30, 14, 20, 50)(Temperature) == 0);
-        var every = All | Temperature;
-        double full = CompactMonitor.Width(every, width, 10);
-        check("Compact temperature: it leaves first when the row is short", CompactMonitor.Fit(every, width, 10, full) == every
-            && CompactMonitor.Fit(every, width, 10, full - 1) == All && CompactMonitor.Fit(every, width, 10, full - 45) == (All & ~CompactMonitorItems.Upload));
+        const CompactMonitorItems Temperature = CompactMonitorItems.Temperature, Cpu = CompactMonitorItems.Cpu, Gpu = CompactMonitorItems.Gpu, Storage_ = CompactMonitorItems.Storage;
+        check("Compact temperature: not a reading of the table", !CompactMonitor.Order.Contains(Temperature) && (CompactMonitor.Every & Temperature) == 0
+            && !CompactMonitor.LeaveOrder.Contains(Temperature));
         var settings = SettingsMigrations.Read("""{"AppVersion":"1.2.0","CompactReadings":[{"Item":64,"Visible":true},{"Item":2,"Visible":true}]}""");
-        check("Compact temperature: a saved table keeps it shown and in its place", settings.CompactReadings[0] is { Item: Temperature, Visible: true }
-            && settings.CompactReadings[1] is { Item: CompactMonitorItems.Cpu, Visible: true } && CompactMonitor.Visible(settings.CompactReadings) == (Temperature | CompactMonitorItems.Cpu));
+        check("Compact temperature: a table saved with it drops it and keeps the rest in order", settings.CompactReadings.All(r => r.Item != Temperature)
+            && settings.CompactReadings[0] is { Item: Cpu, Visible: true } && CompactMonitor.Visible(settings.CompactReadings) == Cpu);
+
+        check("Compact figures: CPU, GPU and the drives have them, the others not", CompactFigures.Has(Cpu) && CompactFigures.Has(Gpu) && CompactFigures.Has(Storage_)
+            && !CompactFigures.Has(CompactMonitorItems.Memory) && !CompactFigures.Has(CompactMonitorItems.Download));
+        check("Compact figures: the share in use by default", CompactFigures.Of(new CompactReading { Item = Cpu }).SequenceEqual([CompactFigures.Usage]));
+        check("Compact figures: a choice in order, each once, without unknown ones", CompactFigures.Normalize(Gpu, ["temperature", "Usage", "x", null, "Temperature"])!.SequenceEqual([CompactFigures.Usage, CompactFigures.Temperature])
+            && CompactFigures.Normalize(Cpu, ["Temperature"])!.SequenceEqual([CompactFigures.Temperature]) && CompactFigures.Normalize(Cpu, ["x"]) is null
+            && CompactFigures.Normalize(CompactMonitorItems.Memory, ["Temperature"]) is null);
+        var saved = SettingsMigrations.Read("""{"AppVersion":"1.2.0","CompactReadings":[{"Item":2,"Figures":["Temperature","Usage"]},{"Item":4,"Figures":["Temperature"]}]}""");
+        check("Compact figures: a saved choice is kept, and dropped where a reading has none", saved.CompactReadings.Single(r => r.Item == Cpu).Figures!.SequenceEqual([CompactFigures.Usage, CompactFigures.Temperature])
+            && saved.CompactReadings.Single(r => r.Item == CompactMonitorItems.Memory).Figures is null);
+        var copy = saved.CompactReadings.Single(r => r.Item == Cpu).Copy();
+        copy.Figures!.Clear();
+        check("Compact figures: a copied reading has its own choice", saved.CompactReadings.Single(r => r.Item == Cpu).Figures!.Count == 2);
         var off = SettingsMigrations.Read("""{"AppVersion":"1.2.0","MonitorTemperatures":false}""");
         check("Temperatures setting: saved off stays off", !off.MonitorTemperatures);
     }

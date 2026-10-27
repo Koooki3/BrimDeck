@@ -62,7 +62,7 @@ public static partial class PanelThemes
         colors["bubble"] = colors["bubble"].Over(surface);
         var values = EffectValues(effects);
         // Glass is read over the darkest and the lightest backdrop it can stand on; its surface color is what shows without it.
-        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? [], .. TextureStops(values, colors, surface), .. DecorStops(values, surface)];
+        List<ThemeColor> surfaces = [surface, .. values.SurfaceGradient.Select(stop => stop.Over(surface)), .. values.Glass?.Extremes ?? [], .. TextureStops(values, colors, surface), .. DecoratedStops(values, colors, surface)];
 
         var adjustments = new List<PanelThemeAdjustment>();
         var popup = colors["popup"].Over(surface);
@@ -105,8 +105,28 @@ public static partial class PanelThemes
         return new PanelPalette(id, colors, apps, values, adjustments, clock, swatches, writtenColors, writtenApps) { Motion = MotionValues(chain), Look = look };
     }
 
-    // What the motifs lay under the content: the sea (the surface where the horizon puts it), and the caustics' and the palm's
-    // colors over the surface and over the sea. The HUD marks sit in the corners, away from any text.
+    // A texture's lightest and darkest squares (PanelTheme.Texture draws them in the primary text color and in black, at most the
+    // texture's opacity), which text must read on as on the surface.
+    internal static IEnumerable<ThemeColor> TextureStops(PanelThemeEffectValues values, IReadOnlyDictionary<string, ThemeColor> colors, ThemeColor surface)
+    {
+        if (values.Texture <= 0) yield break;
+        var light = colors["textPrimary"]; var alpha = (byte)Math.Round(255 * values.Texture);
+        yield return new ThemeColor(alpha, light.R, light.G, light.B).Over(surface);
+        yield return new ThemeColor(alpha, 0, 0, 0).Over(surface);
+    }
+
+    // The motifs' colors, and the texture's squares over each of them: the texture is drawn after the motifs, over them.
+    internal static IEnumerable<ThemeColor> DecoratedStops(PanelThemeEffectValues values, IReadOnlyDictionary<string, ThemeColor> colors, ThemeColor surface)
+    {
+        foreach (var stop in DecorStops(values, surface))
+        {
+            yield return stop;
+            foreach (var square in TextureStops(values, colors, stop)) yield return square;
+        }
+    }
+
+    // What the motifs lay under the content: the sea (the surface where the horizon puts it, from its color at the horizon to its
+    // deep color at the bottom) and the line of light along its top, and each motif over what it is drawn on.
     internal static IEnumerable<ThemeColor> DecorStops(PanelThemeEffectValues values, ThemeColor surface)
     {
         if (values.Decor is not { } decor) yield break;
@@ -117,15 +137,14 @@ public static partial class PanelThemes
         if (decor.Horizon is { } horizon)
             foreach (var ground in surfaces)
             {
-                // The sea from its color at the horizon to its deep color at the bottom, and the line of light along its top.
                 foreach (var water in new[] { horizon.Sea, horizon.Deep }) { var sea = water.Over(ground); grounds.Add(sea); yield return sea; }
-                if (horizon.Line is { } line) { yield return line.Over(ground); yield return line.Over(horizon.Sea.Over(ground)); }
+                if (horizon.Line is { } line)
+                    foreach (var lit in new[] { line.Over(ground), line.Over(horizon.Sea.Over(ground)) }) { grounds.Add(lit); yield return lit; }
             }
-        // Each motif over what it is drawn on: the caustics over the sea (over the whole surface without a horizon), the palm
-        // over the sky above the horizon, where it is clipped.
-        var seas = decor.Horizon is null ? surfaces : grounds.Skip(surfaces.Count).ToList();
+        // The caustics over everything from the horizon down: the sea, and the sky where the sea's top is still fading in
+        // (over the whole surface without a horizon). The palm over the sky above the horizon, where it is clipped.
         if (decor.Caustics is { } caustics)
-            foreach (var ground in seas) yield return caustics.Over(ground);
+            foreach (var ground in grounds) yield return caustics.Over(ground);
         if (decor.Palm is { } palm)
             foreach (var ground in surfaces)
             {
@@ -133,16 +152,6 @@ public static partial class PanelThemes
                 // Without a horizon the caustics' light lies on the same surface, so the shade falls over it too.
                 if (decor.Horizon is null && decor.Caustics is { } light) yield return palm.Over(light.Over(ground));
             }
-    }
-
-    // A texture's lightest and darkest squares (PanelTheme.Texture draws them in the primary text color and in black, at most the
-    // texture's opacity), which text must read on as on the surface.
-    internal static IEnumerable<ThemeColor> TextureStops(PanelThemeEffectValues values, IReadOnlyDictionary<string, ThemeColor> colors, ThemeColor surface)
-    {
-        if (values.Texture <= 0) yield break;
-        var light = colors["textPrimary"]; var alpha = (byte)Math.Round(255 * values.Texture);
-        yield return new ThemeColor(alpha, light.R, light.G, light.B).Over(surface);
-        yield return new ThemeColor(alpha, 0, 0, 0).Over(surface);
     }
 
     // The file and its base themes, from the dark theme up to the file. The length bound guards against a cycle.

@@ -74,8 +74,10 @@ public sealed class PanelPalette
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
         WrittenColors = writtenColors; WrittenApps = writtenApps;
-        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. effects.Glass?.Extremes ?? [], .. PanelThemes.TextureStops(effects, colors, Surface), .. PanelThemes.DecorStops(effects, Surface)];
-        IsDark = SurfaceStops.Average(stop => stop.Luminance) < .18;
+        List<ThemeColor> plain = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. effects.Glass?.Extremes ?? [], .. PanelThemes.TextureStops(effects, colors, Surface)];
+        SurfaceStops = [.. plain, .. PanelThemes.DecoratedStops(effects, colors, Surface)];
+        // Dark or light by the surface itself, its gradient, the glass and its texture; the motifs drawn into it do not change which.
+        IsDark = plain.Average(stop => stop.Luminance) < .18;
     }
 
     public string Id { get; }
@@ -100,7 +102,7 @@ public sealed class PanelPalette
     // How the theme moves: ambient light and the answers to the pointer, held to MotionSafety's limits.
     public ThemeMotion Motion { get; init; } = ThemeMotion.Default;
     // A glass surface shows the desktop through it, so like a gradient it has no single color to fade text into.
-    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Glass is not null || Effects.Texture > 0;
+    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Glass is not null || Effects.Texture > 0 || Effects.Decor is not null;
     public bool IsGlass => Effects.Glass is not null;
     // Which of a theme's looks this is (PanelThemes.Resolve); the day look for a theme with only one.
     public DaylightLook Look { get; init; }

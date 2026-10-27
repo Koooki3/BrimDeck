@@ -5,7 +5,7 @@ namespace BrimDeck.Core;
 public enum HotkeyKind { Hide, Expand, Notices, Resize }
 
 // Unset: no combination saved. Active: registered. InUse: another program holds the combination. Invalid: the text is not
-// an allowed combination. Duplicate: the same combination as the other hotkey, which keeps it.
+// an allowed combination. Duplicate: a combination another hotkey has, which keeps it (see Plan and PlanArrows).
 public enum HotkeyStatus { Unset, Active, InUse, Invalid, Duplicate }
 
 [Flags]
@@ -88,7 +88,7 @@ public static class HotkeyText
     // The resize shortcut is saved as its modifiers and "Arrows" ("Ctrl+Alt+Arrows"): the four arrow keys with those modifiers,
     // in the order Left, Right, Up, Down. Which modifiers are allowed is ArrowModifiersAllowed's.
     public const string Arrows = "Arrows";
-    public static readonly string[] ArrowKeys = ["Left", "Right", "Up", "Down"];
+    public static readonly IReadOnlyList<string> ArrowKeys = ["Left", "Right", "Up", "Down"];
 
     // The modifiers must include Alt and one more: the arrow keys with Shift, Ctrl or both select and move through text in every
     // program, and with Win they arrange windows, so taking those over would break them everywhere.
@@ -121,12 +121,15 @@ public static class HotkeyText
 
     // Whether two saved texts share a combination (a resize shortcut and Ctrl+Alt+Left do).
     public static bool Overlap(string? first, string? second)
-        => Combinations(first).Any(a => Combinations(second).Any(b => string.Equals(a, b, StringComparison.OrdinalIgnoreCase)));
+    {
+        var others = Combinations(second);
+        return Combinations(first).Any(a => others.Contains(a, StringComparer.OrdinalIgnoreCase));
+    }
 
     // What the resize shortcut should do before registration, as Plan does for the others: it yields to the other shortcuts
     // (others, such as the hide and expand shortcuts) when one of its four combinations is theirs. Its text is the canonical
     // modifiers with Arrows.
-    public static (HotkeyStatus? Status, string Text) PlanArrows(string? resize, Func<string, bool> isKey, params string?[] others)
+    public static (HotkeyStatus? Status, string Text) PlanArrows(string? resize, Func<string, bool> isKey, params ReadOnlySpan<string?> others)
     {
         if (IsUnset(resize)) return (HotkeyStatus.Unset, "");
         if (!TryParseArrows(resize, out var modifiers)) return (HotkeyStatus.Invalid, "");
