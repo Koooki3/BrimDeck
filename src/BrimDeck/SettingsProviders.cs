@@ -397,7 +397,7 @@ public sealed partial class SettingsWindow
     {
         var grid = AppColumns();
         string id = entry.InstanceId.ToString("N");
-        void Line(string label, FrameworkElement control, Func<string>? help = null)
+        void Line(string label, FrameworkElement control)
         {
             var line = new Grid();
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
@@ -405,7 +405,6 @@ public sealed partial class SettingsWindow
             // The heading stands level with the first control, which is 34 high under a margin of 5.
             var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 5, 16, 0), Height = 34, MinWidth = 52, VerticalAlignment = VerticalAlignment.Top };
             var caption = TextLine(label, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center; heading.Children.Add(caption);
-            if (help is not null) heading.Children.Add(SmallHelp(label, help));
             line.Children.Add(heading);
             Grid.SetColumn(control, 1); line.Children.Add(control);
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -424,13 +423,13 @@ public sealed partial class SettingsWindow
             period.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var bar = new OffPeakBar(saved.Start, saved.End)
             {
-                Track = UI.Brush(_palette.Border), Range = UI.Brush(PanelTheme.Readable(entry.OffPeakTheme)), Knobs = Brushes.White,
+                Track = UI.Brush(_palette.Border), Range = UI.Brush(entry.OffPeakColor.Length > 0 ? PanelTheme.Readable(entry.OffPeakColor) : PanelTheme.AppTheme(entry)), Knobs = Brushes.White,
                 Outline = UI.Brush(_palette.Border), FocusRing = UI.Brush(_palette.Accent), Scale = UI.Brush(TextTertiary),
                 VerticalAlignment = VerticalAlignment.Bottom
             };
             AutomationProperties.SetAutomationId(bar, "offpeak-bar-" + index + "-" + id);
             var times = TextLine(Span(saved.Start, saved.End), 12.5, TextPrimary); times.VerticalAlignment = VerticalAlignment.Center;
-            times.MinWidth = 120; times.Margin = new Thickness(16, 0, 0, 0);
+            times.Margin = new Thickness(16, 0, 0, 0);
             void Describe() => AutomationProperties.SetName(bar, Loc.T($"低峰时段 {index + 1}：", $"Off-peak period {index + 1}: ") + Span(bar.Start, bar.End));
             Describe();
             bar.Moved += () => { times.Text = Span(bar.Start, bar.End); Describe(); };
@@ -467,21 +466,27 @@ public sealed partial class SettingsWindow
         if (full) { add.ToolTip = Loc.T($"最多 {AppPresets.MaximumOffPeakPeriods} 个时段", $"Up to {AppPresets.MaximumOffPeakPeriods} periods"); ToolTipService.SetShowOnDisabled(add, true); }
         AutomationProperties.SetName(add, Loc.T("添加低峰时段", "Add off-peak period")); AutomationProperties.SetAutomationId(add, "offpeak-add-" + id);
         periods.Children.Add(add);
-        Line(Loc.T("低峰时间", "Off-peak time"), periods, () => Loc.T(
-            "拖动时间条两端的圆点设置时段，中间是零点，以 15 分钟为单位。\n每天在这些时段内，面板上该应用的额度在未达到预警前显示低峰颜色；达到预警或告警时仍显示预警或告警颜色。按本机时间计算。",
-            "Drag the dots at the ends of the bar to set a period; midnight is in the middle, and times move in 15-minute steps.\nDuring these periods each day, the panel draws this app's quotas in the off-peak color until they reach the warning level; at the warning or critical level they keep those colors. Times follow this PC's clock."));
+        Line(Loc.T("低峰时间", "Off-peak time"), periods);
 
         if (entry.OffPeak.Count > 0)
         {
-            var swatch = ColorSwatch(entry.Name, Loc.T("低峰", "off-peak"), entry.OffPeakTheme, entry.OffPeakColor.Length == 0,
-                value => Change(s => s.Entry(entry.InstanceId)!.OffPeakColor = value), owner: entry.InstanceId);
-            swatch.VerticalAlignment = VerticalAlignment.Center;
-            AutomationProperties.SetAutomationId(swatch, "offpeak-color-" + id);
-            var note = TextLine(Loc.T("低峰时段内代替主题色", "Replaces the theme color during off-peak periods"), 12, TextTertiary);
-            note.VerticalAlignment = VerticalAlignment.Center; note.Margin = new Thickness(12, 0, 0, 0);
+            // Three swatches, as the row has them: an unchosen one shows the row's usual color for its level, which the panel
+            // keeps drawing during off-peak periods.
             var swatchLine = new StackPanel { Orientation = Orientation.Horizontal, Height = 34, Margin = new Thickness(0, 5, 0, 5) };
-            swatchLine.Children.Add(swatch); swatchLine.Children.Add(note);
-            Line(Loc.T("低峰颜色", "Off-peak color"), swatchLine);
+            void Swatch(string label, string key, string chosen, string shown, Action<AppEntry, string> apply)
+            {
+                var caption = TextLine(label, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
+                caption.Margin = new Thickness(swatchLine.Children.Count == 0 ? 0 : 20, 0, 8, 0);
+                var swatch = ColorSwatch(entry.Name, Loc.T("低峰", "off-peak ") + label, chosen.Length > 0 ? chosen : shown, chosen.Length == 0,
+                    value => Change(s => apply(s.Entry(entry.InstanceId)!, value)), owner: entry.InstanceId);
+                swatch.VerticalAlignment = VerticalAlignment.Center;
+                AutomationProperties.SetAutomationId(swatch, "offpeak-" + key + "-" + id);
+                swatchLine.Children.Add(caption); swatchLine.Children.Add(swatch);
+            }
+            Swatch(Loc.T("主题", "Theme"), "theme", entry.OffPeakColor, entry.ThemeColor.Length > 0 ? entry.ThemeColor : PanelTheme.AppDefault(entry.QuotaSource), (e, v) => e.OffPeakColor = v);
+            Swatch(Loc.T("预警", "Warning"), "warning", entry.OffPeakWarningColor, entry.WarningColor.Length > 0 ? entry.WarningColor : PanelTheme.WarningDefault, (e, v) => e.OffPeakWarningColor = v);
+            Swatch(Loc.T("告警", "Critical"), "critical", entry.OffPeakCriticalColor, entry.CriticalColor.Length > 0 ? entry.CriticalColor : PanelTheme.CriticalDefault, (e, v) => e.OffPeakCriticalColor = v);
+            Line(Loc.T("低峰颜色", "Off-peak colors"), swatchLine);
         }
         return grid;
     }

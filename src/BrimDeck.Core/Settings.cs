@@ -105,11 +105,13 @@ public sealed class AppEntry
     [JsonIgnore] public string Theme => ThemeColor.Length > 0 ? ThemeColor : AppPresets.ThemeColor(QuotaSource);
     [JsonIgnore] public string Warning => WarningColor.Length > 0 ? WarningColor : AppPresets.WarningColor;
     [JsonIgnore] public string Critical => CriticalColor.Length > 0 ? CriticalColor : AppPresets.CriticalColor;
-    // Daily off-peak periods in local time. Inside one, the panel draws this row's quotas below the warning level in
-    // OffPeakColor instead of the theme color. Empty means the row has no off-peak time.
+    // Daily off-peak periods in local time. Inside one, the panel draws this row's quotas in the off-peak colors: below the
+    // warning level in OffPeakColor, and at the warning and critical levels in OffPeakWarningColor and OffPeakCriticalColor.
+    // Each one left unchosen keeps the row's usual color for that level. Empty periods mean no off-peak time.
     public List<OffPeakPeriod> OffPeak { get; set; } = [];
     public string OffPeakColor { get; set; } = "";
-    [JsonIgnore] public string OffPeakTheme => OffPeakColor.Length > 0 ? OffPeakColor : AppPresets.OffPeakColor;
+    public string OffPeakWarningColor { get; set; } = "";
+    public string OffPeakCriticalColor { get; set; } = "";
     public bool IsOffPeak(DateTime local) => OffPeak?.Any(period => period.Contains(local)) == true;
     public AppEntry Copy()
     {
@@ -132,6 +134,8 @@ public sealed class AppEntry
         CriticalColor = AppPresets.NormalizeColor(CriticalColor);
         OffPeak = [.. (OffPeak ?? []).Where(period => period is not null).Take(AppPresets.MaximumOffPeakPeriods).Select(period => period.Normalized())];
         OffPeakColor = AppPresets.NormalizeColor(OffPeakColor);
+        OffPeakWarningColor = AppPresets.NormalizeColor(OffPeakWarningColor);
+        OffPeakCriticalColor = AppPresets.NormalizeColor(OffPeakCriticalColor);
     }
 }
 
@@ -169,8 +173,6 @@ public static class AppPresets
     // A long list would be hard to review, and the exceptions are meant for a few shell-level apps.
     public const int MaximumFullscreenExceptions = 32;
     public const string WarningColor = "#E5C890", CriticalColor = "#E78284";
-    // The default off-peak color, a teal from the palette that none of the presets uses.
-    public const string OffPeakColor = "#7FD1C4";
     public const int MaximumOffPeakPeriods = 6;
     public const double WarningPercent = 70, CriticalPercent = 90;
     // Each column needs this much width; the panel's minimum width follows the number of enabled applications.

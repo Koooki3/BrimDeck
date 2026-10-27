@@ -25,7 +25,10 @@ internal static class OffPeakTests
         check("an application is off-peak inside any of its periods", entry.IsOffPeak(day.AddHours(3)) && entry.IsOffPeak(day.AddHours(23)) && !entry.IsOffPeak(day.AddHours(12)));
         var copy = entry.Copy(); copy.OffPeak[0].Start = 0; copy.OffPeak.Add(new OffPeakPeriod());
         check("a copied application keeps its own off-peak periods", entry.OffPeak.Count == 2 && entry.OffPeak[0].Start == 30);
-        check("an application without an off-peak color uses the default", entry.OffPeakTheme == AppPresets.OffPeakColor);
+        var levels = new AppEntry { QuotaSource = ProviderId.Codex, OffPeakWarningColor = "123abc", OffPeakCriticalColor = "nope" };
+        levels.Normalize();
+        check("off-peak warning and critical colors are normalized, and an invalid one is left unset",
+            levels.OffPeakWarningColor == "#123ABC" && levels.OffPeakCriticalColor == "");
 
         var store = new SettingsStore(Path.Combine(root, "off-peak"), "0.1.0");
         var settings = new DeckSettings();

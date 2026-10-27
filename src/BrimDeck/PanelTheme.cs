@@ -174,10 +174,17 @@ internal static class PanelTheme
     public static string AppTheme(AppEntry entry) => entry.ThemeColor.Length > 0 ? Readable(entry.ThemeColor) : DefaultAppColor(entry.QuotaSource);
     public static string AppWarning(AppEntry entry) => entry.WarningColor.Length > 0 ? Readable(entry.WarningColor) : _warningColor ??= Readable(WarningDefault);
     public static string AppCritical(AppEntry entry) => entry.CriticalColor.Length > 0 ? Readable(entry.CriticalColor) : _criticalColor ??= Readable(CriticalDefault);
-    // A quota's color below the warning level: the off-peak color while the row is in one of its off-peak periods.
-    public static string QuotaTheme(AppEntry entry) => entry.IsOffPeak(DateTime.Now) ? Readable(entry.OffPeakTheme) : AppTheme(entry);
+    // A quota's color below the warning level: the off-peak color, when one is chosen, while the row is in one of its off-peak periods.
+    public static string QuotaTheme(AppEntry entry) => entry.OffPeakColor.Length > 0 && entry.IsOffPeak(DateTime.Now) ? Readable(entry.OffPeakColor) : AppTheme(entry);
+    // At the warning and critical levels, an off-peak color chosen for that level replaces the usual one.
     public static string QuotaColor(AppEntry entry, double usedPercent)
-        => usedPercent >= AppPresets.CriticalPercent ? AppCritical(entry) : usedPercent >= AppPresets.WarningPercent ? AppWarning(entry) : QuotaTheme(entry);
+    {
+        if (usedPercent < AppPresets.WarningPercent) return QuotaTheme(entry);
+        bool critical = usedPercent >= AppPresets.CriticalPercent;
+        string offPeak = critical ? entry.OffPeakCriticalColor : entry.OffPeakWarningColor;
+        if (offPeak.Length > 0 && entry.IsOffPeak(DateTime.Now)) return Readable(offPeak);
+        return critical ? AppCritical(entry) : AppWarning(entry);
+    }
     public static string DefaultAppColor(ProviderId id) => _appColors.TryGetValue(id, out var color) ? color : _appColors[id] = Current.AppColor(id).ToString();
     // The theme's defaults as written, for the settings swatches and the color picker.
     public static string AppDefault(ProviderId id) => Current.AppDefault(id)?.ToString() ?? AppPresets.ThemeColor(id);
