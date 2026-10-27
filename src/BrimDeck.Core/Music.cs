@@ -112,17 +112,16 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // The narrowest content for what the row shows, so the surface is never narrower (CollapsedGeometry.Resolve) and is no
     // wider than that needs: the clock; while media plays the cover, the equalizer and the shortest lyric; one quota ring when
-    // the rings show (ring: its size, 0 without rings), which the carousel then shows in turn; all with the gaps between them.
-    // A row with none of those keeps room for its first system reading (reading: its width, 0 without readings). A clock alone,
-    // or rings alone, so make a short surface. In whole DIPs, rounded up, so rounding never takes a part away.
+    // the rings show (ring: its size, 0 without rings) and the narrowest window of the system readings when they show
+    // (reading: CompactSpacing.Minimum, 0 without readings), which their carousels then show in turn; all with the gaps between
+    // them. A clock alone, or rings alone, so make a short surface. In whole DIPs, rounded up, so rounding never takes a part away.
     public static double RequiredWidth(double scale, bool media, bool text, double clockFace, double ring = 0, double reading = 0)
     {
         double s = SafeScale(scale), gap = Gap(s), width = 0;
         int parts = 0;
         void Add(double part) { if (part <= 0) return; width += part; parts++; }
         if (media) { Add(Math.Max(1, Whole(20 * s))); Add(Math.Max(1, Whole(18 * s))); if (text) Add(Whole(MinimumText * s)); }
-        Add(Safe(ring)); Add(Safe(clockFace));
-        if (parts == 0) Add(Safe(reading));
+        Add(Safe(ring)); Add(Safe(reading)); Add(Safe(clockFace));
         return parts == 0 ? 0 : Math.Ceiling(width + (parts - 1) * gap - 1e-9);
     }
 
