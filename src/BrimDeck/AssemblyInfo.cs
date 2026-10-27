@@ -13,3 +13,6 @@ using System.Windows;
                                                 //(used if a resource is not found in the page,
                                                 // app, or any theme specific resource dictionaries)
 )]
+
+// The glyph preview (tests/BrimDeck.GlyphPreview) draws the notice glyphs with the app's own elements and checks the liquid motion's boundary.
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("BrimDeck.GlyphPreview")]

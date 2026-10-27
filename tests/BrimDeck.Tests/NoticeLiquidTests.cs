@@ -11,6 +11,7 @@ internal static class NoticeLiquidTests
         Capsule(check);
         Notch(check);
         Line(check);
+        Joined(check);
         Ending(check);
         Plans(check);
     }
@@ -166,6 +167,47 @@ internal static class NoticeLiquidTests
         check("Liquid notch: the same seed gives the same bulges", frame.BumpPoints.SequenceEqual(other.BumpPoints));
         liquid.Sample(.3, frame, 420, 44);
         check("Liquid notch: a toast that grows meanwhile gets the outline of its new size", frame.Outline.Max(p => p.X) > 400);
+    }
+
+    // What is joined to the surface shares its outline (LiquidFrame's Attached flags); what has parted has its own.
+    private static void Joined(Action<string, bool> check)
+    {
+        var liquid = new NoticeLiquid(Spec(LiquidForm.Capsule, 376, 44));
+        var frame = new LiquidFrame(); int joinedFrames = 0, partedFrames = 0; bool mouthsJoined = true, necksConsistent = true, separate = true, touchingJoined = true;
+        for (double t = 0; t < liquid.Length; t += 1d / 120)
+        {
+            liquid.Sample(t, frame, 376, 44);
+            if (frame.Discs.Any(d => d.Attached)) joinedFrames++;
+            if (frame.Discs.Any(d => !d.Attached)) partedFrames++;
+            foreach (var neck in frame.Necks)
+            {
+                if (neck.Mouth && !(neck.Attached && frame.Discs[neck.Second].Attached)) mouthsJoined = false;
+                if (neck.Attached && !neck.Mouth && !(frame.Discs[neck.First].Attached && frame.Discs[neck.Second].Attached)) necksConsistent = false;
+                if (!neck.Attached && !neck.Mouth && (frame.Discs[neck.First].Attached != frame.Discs[neck.Second].Attached)) necksConsistent = false;
+            }
+            foreach (var disc in frame.Discs)
+            {
+                // One overlapping the end (its cap is a circle of the surface's own radius, 22) is joined.
+                double inset = disc.Side < 0 ? frame.InsetLeft : frame.InsetRight;
+                double fromCap = Math.Sqrt(Math.Pow(disc.X + inset + 22, 2) + disc.Y * disc.Y);
+                if (!disc.Attached && fromCap < 22 + disc.R) touchingJoined = false;
+            }
+            foreach (var a in frame.Discs.Where(d => d.Attached))
+                foreach (var d in frame.Discs.Where(x => !x.Attached && x.Side == a.Side))
+                    if (Math.Sqrt((a.X - d.X) * (a.X - d.X) + (a.Y - d.Y) * (a.Y - d.Y)) < a.R + d.R) separate = false;
+        }
+        check("Liquid capsule: droplets are joined to the surface for most of the motion, and some part from it", joinedFrames > 100 && partedFrames >= 1);
+        check("Liquid capsule: a neck to the end, and the droplet at its far end, are joined; necks between droplets agree with their droplets", mouthsJoined && necksConsistent);
+        check("Liquid capsule: a droplet that touches a joined droplet or the end is itself joined (its outline would cross the other's)", separate && touchingJoined);
+        var notch = new NoticeLiquid(Spec(LiquidForm.Notch, 376, 44));
+        bool offsets = true; double most = 0;
+        for (double t = 0; t < notch.Length; t += 1d / 60)
+        {
+            notch.Sample(t, frame, 376, 44);
+            if (frame.Offsets.Length != frame.Outline.Length) offsets = false;
+            most = Math.Max(most, frame.Offsets.Length == 0 ? 0 : frame.Offsets.Max());
+        }
+        check("Liquid notch: every point of its outline has the offset the bulges give it, within the band", offsets && most > 1 && most <= NoticeLiquid.Band + 1e-9);
     }
 
     // The indicator's own motion: the surface's size on two curves (Curves.LineArrive, Curves.LineReturn), no liquid layer.

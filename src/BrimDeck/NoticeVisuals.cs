@@ -96,6 +96,8 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public NoticeLook? Look { get => _look; set { _look = value; _fill = null; _rim = null; _edge = null; _tabBrush = null; _framePen = null; _frame = null; _key = null; InvalidateArrange(); InvalidateVisual(); } }
     public Brush? FillOverride { get => _fillOverride; set { _fillOverride = value; _fill = null; InvalidateVisual(); } }
     public bool MaterialHidden { get; set; }
+    // The marks of a theme (its tab, frame and hatching) are not drawn: the boundary check looks at the surface alone (NoticeFxCheck).
+    public bool MarksHidden { get; set; }
 
     private NoticeLook? _look;
     private Brush? _fill, _fillOverride;
@@ -105,8 +107,21 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     private Pen? _framePen;
     private Geometry? _frame;
     private (Size, double, double, double, double, double, double, double)? _key;
-    private Geometry _outline = Geometry.Empty;
+    private Geometry _body = Geometry.Empty, _outline = Geometry.Empty;
+    private Geometry? _attachments, _attachedTo;
     private (Geometry Light, Geometry Shade)? _bevel;
+    // How far the ends are drawn in now: the marks (the tab, the frame, the hatching) follow the body's ends as the outline does.
+    private double _left, _right;
+
+    // What is joined to the surface while the liquid motion plays (NoticeFxShape): the necks and the droplets they have not parted
+    // from, or the notch's bulges, in the surface's own coordinates. The surface's outline is then the union of its own and these,
+    // one outline for the fill, the rim, the material, the glass edge and the clip, so no line runs inside it and the rim follows the
+    // motion. A parted droplet is not part of it and has an outline of its own.
+    public Geometry? Attachments
+    {
+        get => _attachments;
+        set { if (ReferenceEquals(_attachments, value)) return; _attachments = value; InvalidateArrange(); InvalidateVisual(); }
+    }
 
     // The island's outline, stepped for a pixel theme as the island's is.
     public Geometry Outline()
@@ -115,19 +130,33 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
         double left = Math.Max(0, InsetLeft), right = Math.Max(0, InsetRight);
         // A pixel theme's outline stays on its grid while the ends give way.
         if (step > 0) { left = Math.Round(left / step) * step; right = Math.Round(right / step) * step; }
+        _left = left; _right = right;
         var key = (RenderSize, TopRadius, BottomRadius, Shoulder, step, step > 0 ? 0 : _look?.Cut ?? 0, left, right);
-        if (_key == key) return _outline;
-        _key = key; _frame = null;
-        // Drawn in at its ends: the outline (and bevel) of the narrower body, moved to where the left end now is.
-        (_outline, _bevel) = IslandBorder.Shape(Math.Max(1, RenderSize.Width - left - right), RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius), 0, step,
-            _look?.RimWidth ?? 0, VisualTreeHelper.GetDpi(this).PixelsPerDip, _look?.Cut ?? 0);
-        if (left > 0 || right > 0)
+        if (_key != key)
         {
-            _outline = Moved(_outline, left);
-            if (_bevel is { } bevel) _bevel = (Moved(bevel.Light, left), Moved(bevel.Shade, left));
+            _key = key; _frame = null; _attachedTo = null;
+            // Drawn in at its ends: the outline (and bevel) of the narrower body, moved to where the left end now is.
+            (_body, _bevel) = IslandBorder.Shape(Math.Max(1, RenderSize.Width - left - right), RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius), 0, step,
+                _look?.RimWidth ?? 0, VisualTreeHelper.GetDpi(this).PixelsPerDip, _look?.Cut ?? 0);
+            if (left > 0 || right > 0)
+            {
+                _body = Moved(_body, left);
+                if (_bevel is { } bevel) _bevel = (Moved(bevel.Light, left), Moved(bevel.Shade, left));
+            }
+            _outline = _body;
         }
-        return _outline;
+        if (_attachments is null) { if (!ReferenceEquals(_outline, _body)) _outline = _body; _attachedTo = null; return _outline; }
+        if (ReferenceEquals(_attachedTo, _attachments)) return _outline;
+        _attachedTo = _attachments;
+        // The surface and the shadow copy behind it have the same body: the union is made once for both.
+        if (s_joined is { } joined && ReferenceEquals(joined.Attachments, _attachments) && joined.Key == key) return _outline = joined.Outline;
+        var union = Geometry.Combine(_body, _attachments, GeometryCombineMode.Union, null, .5, ToleranceType.Absolute);
+        union.Freeze();
+        s_joined = (_attachments, key, union);
+        return _outline = union;
     }
+
+    private static (Geometry Attachments, (Size, double, double, double, double, double, double, double) Key, Geometry Outline)? s_joined;
 
     private static Geometry Moved(Geometry geometry, double x)
     {
@@ -169,7 +198,7 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
             if (look.Gradient is { } gradient) drawing.DrawGeometry(gradient, null, outline);
             if (look.Pattern is { } pattern) drawing.DrawGeometry(pattern, null, outline);
             if (look.Edge is { } edge) IslandBorder.DrawEdge(drawing, _edge ??= IslandBorder.EdgePens(edge), outline);
-            if (look.RimWidth > 0 && _bevel is { } bevel && look.Bevel is { } shade)
+            if (look.RimWidth > 0 && _attachments is null && _bevel is { } bevel && look.Bevel is { } shade)
             {
                 drawing.DrawGeometry(look.Rim, null, bevel.Light);
                 drawing.DrawGeometry(shade, null, bevel.Shade);
@@ -180,7 +209,7 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
                 _rim ??= Freeze(new Pen(look.Rim, look.RimWidth * 2));
                 drawing.DrawGeometry(null, _rim, outline);
             }
-            if (look.Decor is { } marks) Marks(drawing, outline, marks);
+            if (look.Decor is { } marks && !MarksHidden) Marks(drawing, outline, marks);
         }
         if (IslandOpacity > 0)
         {
@@ -199,19 +228,19 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
         if (marks.Tab is { } tab)
         {
             _tabBrush ??= Freeze(new SolidColorBrush(Color.FromArgb(tab.A, tab.R, tab.G, tab.B)));
-            drawing.DrawRectangle(_tabBrush, null, new Rect(0, 0, 4, RenderSize.Height));
+            drawing.DrawRectangle(_tabBrush, null, new Rect(_attachments is null ? _left : Math.Min(_left, outline.Bounds.Left), 0, 4, RenderSize.Height));
         }
         if (marks.Frame is { } frame && RenderSize.Height > IslandDecor.MarksMinHeight)
         {
             _framePen ??= Freeze(new Pen(Freeze(new SolidColorBrush(Color.FromArgb(frame.A, frame.R, frame.G, frame.B))), 1) { LineJoin = PenLineJoin.Miter });
             var corners = new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius);
-            _frame ??= Freeze((_look?.Cut ?? 0) > 0 ? IslandBorder.BuildCut(RenderSize.Width, RenderSize.Height, Shoulder, corners, IslandDecor.FrameInset, _look!.Cut)
-                : IslandBorder.BuildOutline(RenderSize.Width, RenderSize.Height, Shoulder, corners, IslandDecor.FrameInset));
-            drawing.PushClip(new RectangleGeometry(new Rect(0, IslandDecor.FrameInset + 1, RenderSize.Width, Math.Max(0, RenderSize.Height - IslandDecor.FrameInset - 1))));
+            double bodyWidth = Math.Max(1, RenderSize.Width - _left - _right);
+            _frame ??= Freeze(_left > 0 ? Moved(FrameOutline(bodyWidth, corners), _left) : FrameOutline(bodyWidth, corners));
+            drawing.PushClip(new RectangleGeometry(new Rect(_left, IslandDecor.FrameInset + 1, bodyWidth, Math.Max(0, RenderSize.Height - IslandDecor.FrameInset - 1))));
             drawing.DrawGeometry(null, _framePen, _frame);
             drawing.Pop();
         }
-        double x = RenderSize.Width - Shoulder - BottomRadius - 4 - IslandDecor.HatchWidth;
+        double x = RenderSize.Width - _right - Shoulder - BottomRadius - 4 - IslandDecor.HatchWidth;
         if (marks.Hatch is { } hatch && x > 12 && RenderSize.Height > IslandDecor.MarksMinHeight)
         {
             drawing.PushTransform(new TranslateTransform(x, RenderSize.Height - IslandDecor.MarkBand));
@@ -220,6 +249,10 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
         }
         drawing.Pop();
     }
+
+    private Geometry FrameOutline(double width, CornerRadius corners) => (_look?.Cut ?? 0) > 0
+        ? IslandBorder.BuildCut(width, RenderSize.Height, Shoulder, corners, IslandDecor.FrameInset, _look!.Cut)
+        : IslandBorder.BuildOutline(width, RenderSize.Height, Shoulder, corners, IslandDecor.FrameInset);
 
     private static T Freeze<T>(T freezable) where T : Freezable { if (freezable.CanFreeze) freezable.Freeze(); return freezable; }
 }
