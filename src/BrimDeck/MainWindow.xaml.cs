@@ -502,8 +502,17 @@ public partial class MainWindow : Window
         RenderCompact(); RenderUsage();
     }
 
-    // The compact island shows one ring per enabled application: the highest used share among its quotas.
+    // The collapsed row is built at once; a quota alert coming, changing or ending swaps it with the one before on the compact
+    // content's own tracks (MainWindow.RowSwap.cs).
     internal void RenderCompact()
+    {
+        int swap = LeaveRow();
+        BuildCompact();
+        if (swap > 0) LandRow(swap);
+    }
+
+    // The compact island shows one ring per enabled application: the highest used share among its quotas.
+    private void BuildCompact()
     {
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;

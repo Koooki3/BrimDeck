@@ -183,7 +183,10 @@ public partial class App : Application
         _offscreen = true;
         AppInstance.ForTest();
         // A folder of its own for what the notices keep next to the settings (their banner ledger): never the user's.
-        Store = new SettingsStore(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-offscreen-" + Environment.ProcessId));
+        string folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "BrimDeck-offscreen-" + Environment.ProcessId);
+        Store = new SettingsStore(folder);
+        // The panel's music part subscribes to the lyrics service when it is made.
+        Lyrics = new LyricsService(appleLyricsFile: System.IO.Path.Combine(folder, "apple-music-lyrics.json"));
         Settings = settings;
         UseLanguage();
         Notices = new NoticeCenter(this);

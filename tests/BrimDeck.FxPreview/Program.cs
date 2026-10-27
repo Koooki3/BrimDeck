@@ -46,6 +46,14 @@ internal static class Program
             return LiquidPages.RunThemes(args[1], themeScale, listed > 0 && listed + 1 < args.Length ? args[listed + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
                 text > 0 ? TextScale.Clamp(textScale) : 1);
         }
+        // The collapsed row giving way to a quota alert and back, frame by frame in every theme and collapsed form (AlertReturn):
+        // --alert-return [<output folder>] [--themes ids].
+        if (args.Length > 0 && args[0] == "--alert-return")
+        {
+            int themes = Array.IndexOf(args, "--themes");
+            return AlertReturn.Run(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null,
+                themes > 0 && themes + 1 < args.Length ? args[themes + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null);
+        }
         if (args.Length > 2 && args[0] == "--liquid-pages")
         {
             if (LiquidPages.ScaleFrom(args) is not { } pagesScale) { Console.WriteLine("FAIL: --scale (or BRIMDECK_PAGES_SCALE) wants a display scale such as 100, 125, 150 or 175"); return 1; }

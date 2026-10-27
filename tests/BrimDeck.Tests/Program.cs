@@ -35,6 +35,7 @@ try
     ColorMathTests.Run(Check);
     CompactSpacingTests.Run(Check);
     AuditUiTests.Run(Check);
+    RowSwapTests.Run(Check);
     AuditFollowupTests.Run(Check);
     AuditWin2Tests.Run(Check);
     NoticeOpsTests.Run(Check);

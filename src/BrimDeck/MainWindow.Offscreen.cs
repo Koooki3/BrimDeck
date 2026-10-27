@@ -78,4 +78,13 @@ public partial class MainWindow
         OffscreenGlass();
         _glass?.Update();
     }
+
+    // A quota alert coming or ending as the coordinator hands it over (PresentAlert, EndAlert), without the coordinator: the
+    // swap of the collapsed row that follows (MainWindow.RowSwap.cs). Whether the alert shows now.
+    internal bool OffscreenAlert(AppEntry entry, bool shown)
+    {
+        if (shown) PresentAlert(new CompactAlertInfo(entry, entry.Name, "5 小时 ", 83, DateTimeOffset.Now.AddHours(2)));
+        else if (_alert is { } alert) EndAlert(alert);
+        return _alert is not null;
+    }
 }
