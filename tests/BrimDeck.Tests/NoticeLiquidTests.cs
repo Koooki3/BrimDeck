@@ -172,6 +172,8 @@ internal static class NoticeLiquidTests
         check("Line arrival: after the release it only grows until it is nearly there, and passes its size by under 2 percent", grows && high < 1.02);
         check("Line return: from the card to the line, and the closing curve alone without a carry",
             Return(0) == 0 && Return(1) == 1 && Curves.LineReturn(.3, 0) == Curves.Bezier(.45, 0, .12, 1, .3) && Curves.LineReturn(.8, 0) == Curves.Bezier(.45, 0, .12, 1, .8));
+        check("Line return: it carries on from whichever closing curve it is given",
+            Curves.LineReturn(.3, 0, .32, .72, 0, 1) == Curves.Bezier(.32, .72, 0, 1, .3) && Curves.LineReturn(.75, carry, .32, .72, 0, 1) > 1 + carry - 2e-3);
         double top = 0, at = 0; for (double x = 0; x <= 1; x += .001) { double v = Return(x); if (v > top) { top = v; at = x; } }
         check("Line return: it carries on past the line's size by the carry, at three quarters of the move, and is back at the end",
             Math.Abs(top - (1 + carry)) < 2e-3 && Math.Abs(at - .75) < .02 && Math.Abs(Return(.999) - 1) < 5e-3);
