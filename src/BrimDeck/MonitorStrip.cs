@@ -117,11 +117,25 @@ internal sealed class MonitorStrip : FrameworkElement
     public double PreferredWidth => DevicePixels.Up(CompactMonitor.Width(Shown, _width, _gap), _dpi);
     // The gap between two readings.
     public double Gap => _gap;
-    // The width of each reading shown, left to right, for the window the row scrolls them through (CompactSpacing.Window).
+    // While the readings scroll (ReadingsCarousel), the download and the upload after it are drawn as a pair, as close as the
+    // readings are, as the scrolling strip drew its figures at their own width before; standing still, each keeps the room of
+    // its widest figure.
+    public bool Paired { get; set; }
+    // The width of each reading shown, left to right, for the window the row scrolls them through (CompactSpacing.Window). The
+    // upload right after the download is one item with it, with the gap between them: the carousel never stops between them,
+    // and draws them as a pair (Paired).
     public List<double> ItemWidths()
     {
         var widths = new List<double>();
-        foreach (var item in _orderOnce) if ((Shown & item) != 0 && CompactMonitor.Order.Contains(item)) widths.Add(Math.Max(0, _width(item)));
+        var previous = CompactMonitorItems.None;
+        foreach (var item in _orderOnce)
+        {
+            if ((Shown & item) == 0 || !CompactMonitor.Order.Contains(item)) continue;
+            double width = Math.Max(0, _width(item));
+            if (item == CompactMonitorItems.Upload && previous == CompactMonitorItems.Download) widths[^1] += _gap + width;
+            else widths.Add(width);
+            previous = item;
+        }
         return widths;
     }
 
@@ -136,6 +150,8 @@ internal sealed class MonitorStrip : FrameworkElement
     // Every whole percent's figure, made once: the gauges show one on every reading.
     private static readonly string[] Percents = [.. Enumerable.Range(0, 101).Select(percent => MonitorFormat.Percent(percent / 100d) + "%")];
     private static string GaugeFigure(double? share) => share is { } v ? Percents[MonitorFormat.WholePercent(v)] : "—";
+    // A rate's arrow and figure as drawn (Rate), at this figure's own width.
+    private double RateWidth(double? rate) => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(rate));
     private static string RateFigure(double? rate)
     {
         var q = rate is { } r ? MonitorFormat.CompactRate(r) : new MonitorFormat.Quantity("—", "");
@@ -163,9 +179,15 @@ internal sealed class MonitorStrip : FrameworkElement
         if (total <= 0) return;
         double start = _centered ? (w - total) / 2 : w - total;
         var s = _snapshot;
+        // Paired, the upload right after the download follows the download's figure, not the room kept for its widest: the
+        // pair stays as close as the readings are, and the room its figures do not use lies after the upload.
+        double pull = 0;
         foreach (var (item, at, width, presence) in _arranged)
         {
             double x = start + at;
+            if (item == CompactMonitorItems.Upload && presence >= .999) x -= pull;
+            pull = Paired && item == CompactMonitorItems.Download && presence >= .999
+                ? Math.Max(0, width - RateWidth(s?.Network.OrDefault?.DownBytesPerSecond)) : 0;
             // A reading on its way in or out is drawn smaller and fainter, centred in the room it has.
             bool partial = presence < .999;
             double offset = (width * presence - width) / 2;
