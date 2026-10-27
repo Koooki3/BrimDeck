@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media;
 using BrimDeck.Core;
@@ -14,7 +15,7 @@ namespace BrimDeck;
 // (Arrow).
 internal enum MonitorGlyph { Down, Up, Thermometer, Drive }
 
-internal static class MonitorDraw
+internal static partial class MonitorDraw
 {
     // The arrows and the thermometer on a 16 unit grid, stroked.
     private static readonly Dictionary<MonitorGlyph, Geometry> Glyphs = new()
@@ -28,19 +29,38 @@ internal static class MonitorDraw
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
 
     // Text set once per string, size, weight and color: the same figures come back every second, so they are not laid out again.
-    private static readonly Dictionary<(string, double, bool, bool, string, double), FormattedText> Texts = [];
+    private static readonly Dictionary<(string, double, bool, bool, string, double, bool), FormattedText> Texts = [];
     private static readonly Typeface Regular = new(UI.PanelFont, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface Strong = new(UI.PanelFont, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
     private static readonly Typeface Display = new(UI.DisplayFont, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
 
     public static FormattedText Text(string text, double size, string color, double pixelsPerDip, bool strong = false, bool display = false)
     {
-        var key = (text, size, strong, display, color, pixelsPerDip);
+        bool plated = PanelTheme.Plated;
+        var key = (text, size, strong, display, color, pixelsPerDip, plated);
         if (Texts.TryGetValue(key, out var known)) return known;
         if (Texts.Count > 768) Texts.Clear();
         var formatted = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, display ? Display : strong ? Strong : Regular,
             size, UI.Brush(color), pixelsPerDip);
+        // On a plate (PanelTheme.Plated) a figure is large and its unit small and dimmer, as on the game's HUD: "36%", "8.4W", "62°",
+        // "4.8MB/s". Measured from the same text, so the row's layout follows.
+        if (plated && FigureUnit().Match(text) is { Success: true } figure && figure.Groups[2] is { Length: > 0 } unit)
+        {
+            formatted.SetFontSize(Math.Round(size * .78 * 4) / 4, unit.Index, unit.Length);
+            formatted.SetForegroundBrush(UnitBrush(color), unit.Index, unit.Length);
+        }
         return Texts[key] = formatted;
+    }
+    [GeneratedRegex(@"^(≈?[+-]?\d[\d.,]*)(%|°C?|W|[KMGT]?B/s|[KMGT]?B)$")] private static partial Regex FigureUnit();
+    // The unit's brush: the figure's color at 62 % of its strength.
+    private static readonly Dictionary<string, Brush> UnitBrushes = [];
+    private static Brush UnitBrush(string color)
+    {
+        if (UnitBrushes.TryGetValue(color, out var known)) return known;
+        var parsed = ThemeColor.TryParse(color, out var c) ? c : ThemeColor.White;
+        var brush = new SolidColorBrush(System.Windows.Media.Color.FromArgb((byte)Math.Round(parsed.A * .62), parsed.R, parsed.G, parsed.B)); brush.Freeze();
+        if (UnitBrushes.Count > 64) UnitBrushes.Clear();
+        return UnitBrushes[color] = brush;
     }
 
     // One line cut with an ellipsis to the width; not cached, as the width varies.

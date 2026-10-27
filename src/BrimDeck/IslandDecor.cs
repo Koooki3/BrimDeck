@@ -29,6 +29,13 @@ internal sealed class IslandDecor
     private static readonly Dictionary<Color, Brush> CausticTiles = [];
     private readonly PanelDecor _decor;
     private readonly Brush? _tab;
+    // The frame: its outline (the cut outline's, or the curved one, a few DIP in), its pen and the clip that leaves the top edge out.
+    internal const double FrameInset = 4;
+    private readonly double _cut;
+    private readonly Pen? _framePen;
+    private (Size Size, CornerRadius Corners, double Shoulder)? _frameFor;
+    private Geometry? _frame;
+    private Geometry? _frameClip;
     private Size? _for;
     // The picture and the parts a size moves.
     private DrawingGroup? _scene;
@@ -40,20 +47,21 @@ internal sealed class IslandDecor
     private Drawing? _hud;
     private (Size Size, CornerRadius Corners, double Shoulder)? _hudFor;
 
-    public IslandDecor(PanelDecor decor)
+    public IslandDecor(PanelDecor decor, double cut = 0)
     {
-        _decor = decor;
+        _decor = decor; _cut = cut;
         if (decor.Tab is { } tab) _tab = Frozen(new SolidColorBrush(ToColor(tab)));
+        if (decor.Frame is { } frame) _framePen = Frozen(new Pen(Frozen(new SolidColorBrush(ToColor(frame))), 1) { LineJoin = PenLineJoin.Miter });
     }
 
-    public static IslandDecor? For(PanelPalette palette) => palette.Effects.Decor is { } decor ? new IslandDecor(decor) : null;
+    public static IslandDecor? For(PanelPalette palette) => palette.Effects.Decor is { } decor ? new IslandDecor(decor, palette.Effects.Cut) : null;
 
     public void Draw(DrawingContext dc, Size size, CornerRadius corners, double shoulder, Geometry outline)
     {
         if (size.Width < 2) return;
         bool scene = size.Height > SeaMinHeight && (_decor.Horizon is not null || _decor.Caustics is not null || _decor.Palm is not null);
         bool hud = _decor.Hud is not null && size.Height >= HudMinHeight;
-        bool plate = (_decor.Hatch is not null || _decor.Tab is not null) && size.Height > MarksMinHeight;
+        bool plate = (_decor.Hatch is not null || _decor.Tab is not null || _decor.Frame is not null) && size.Height > MarksMinHeight;
         if (!scene && !hud && !plate) return;
         dc.PushClip(outline);
         if (scene)
@@ -82,6 +90,20 @@ internal sealed class IslandDecor
     private void Marks(DrawingContext dc, Size size, CornerRadius corners, double shoulder)
     {
         double fade = Math.Min(1, (size.Height - MarksMinHeight) / (MarksFullHeight - MarksMinHeight));
+        if (_framePen is not null)
+        {
+            if (_frameFor != (size, corners, shoulder))
+            {
+                _frame = _cut > 0 ? IslandBorder.BuildCut(size.Width, size.Height, shoulder, corners, FrameInset, _cut) : IslandBorder.BuildOutline(size.Width, size.Height, shoulder, corners, FrameInset);
+                _frameClip = Frozen(new RectangleGeometry(new Rect(0, FrameInset + 1, size.Width, Math.Max(0, size.Height - FrameInset - 1))));
+                _frameFor = (size, corners, shoulder);
+            }
+            if (fade < 1) dc.PushOpacity(fade);
+            dc.PushClip(_frameClip);
+            dc.DrawGeometry(null, _framePen, _frame);
+            dc.Pop();
+            if (fade < 1) dc.Pop();
+        }
         double y = size.Height - MarkBand, tabX = shoulder + corners.BottomLeft + 4, hatchX = size.Width - shoulder - corners.BottomRight - 4 - HatchWidth;
         bool tab = _tab is not null && tabX + TabWidth < size.Width, hatch = _decor.Hatch is not null && hatchX > (tab ? tabX + TabWidth + 8 : 0);
         if (!tab && !hatch) return;

@@ -25,9 +25,9 @@ public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGra
     PanelDecor? Decor = null, double Cut = 0);
 
 // A theme's motifs (PanelThemeDecor, fitted); null parts are not drawn.
-public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, ThemeColor? Palm, PanelHud? Hud, ThemeColor? Hatch = null, ThemeColor? Tab = null)
+public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, ThemeColor? Palm, PanelHud? Hud, ThemeColor? Hatch = null, ThemeColor? Tab = null, ThemeColor? Frame = null)
 {
-    public bool Any => Covers || Hatch is not null || Tab is not null;
+    public bool Any => Covers || Hatch is not null || Tab is not null || Frame is not null;
     // Whether the motifs lie where the content can: the bottom edge's two marks do not, so a theme with only those keeps the plain
     // surface color under a scrolling title's fade.
     public bool Covers => Horizon is not null || Caustics is not null || Palm is not null || Hud is not null;

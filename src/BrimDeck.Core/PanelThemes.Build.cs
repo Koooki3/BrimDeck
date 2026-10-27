@@ -208,7 +208,8 @@ public static partial class PanelThemes
                 Palm = decor.Palm is { } p ? new PanelThemeMotif { Color = p.Color ?? below?.Palm?.Color } : below?.Palm,
                 Hud = decor.Hud is { } u ? new PanelThemeHud { Color = u.Color ?? below?.Hud?.Color, Chamfer = u.Chamfer ?? below?.Hud?.Chamfer } : below?.Hud,
                 Hatch = decor.Hatch is { } t ? new PanelThemeMotif { Color = t.Color ?? below?.Hatch?.Color } : below?.Hatch,
-                Tab = decor.Tab is { } m ? new PanelThemeMotif { Color = m.Color ?? below?.Tab?.Color } : below?.Tab
+                Tab = decor.Tab is { } m ? new PanelThemeMotif { Color = m.Color ?? below?.Tab?.Color } : below?.Tab,
+                Frame = decor.Frame is { } f ? new PanelThemeMotif { Color = f.Color ?? below?.Frame?.Color } : below?.Frame
             };
         }
         if (layer.Glass is { } glass)
@@ -268,7 +269,7 @@ public static partial class PanelThemes
         }
         var horizon = decor.Horizon is { Sea: var seaText } h && Color(seaText) is { } sea ? new PanelHorizon(Fit(h.At, .3, .9, .62), sea, Color(h.Line)) : null;
         var hud = decor.Hud is { Color: var hudText } hudFile && Color(hudText) is { } hudColor ? new PanelHud(hudColor, Fit(hudFile.Chamfer, 0, 10, 6)) : null;
-        var values = new PanelDecor(horizon, Color(decor.Caustics?.Color, .2), Color(decor.Palm?.Color, .12), hud, Color(decor.Hatch?.Color), Color(decor.Tab?.Color));
+        var values = new PanelDecor(horizon, Color(decor.Caustics?.Color, .2), Color(decor.Palm?.Color, .12), hud, Color(decor.Hatch?.Color), Color(decor.Tab?.Color), Color(decor.Frame?.Color));
         return values.Any ? values : null;
     }
 

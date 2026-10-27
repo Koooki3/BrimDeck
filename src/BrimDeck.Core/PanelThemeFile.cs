@@ -106,7 +106,9 @@ public sealed class PanelThemeEffects
 //   hud: HUD marks, a 45-degree cut drawn across the bottom-left and the top-right corner (the bottom-right on an island hanging
 //     from the screen's edge), "chamfer" 0 to 10 DIP, with a hexagonal tick beside each, in "color";
 //   hatch: a strip of 45-degree hatching along the bottom edge's right end, in "color", the print of a panel that is closed up;
-//   tab: a short bar of "color" along the bottom edge's left end, where a cut corner begins, as the marker beside a current item.
+//   tab: a short bar of "color" along the bottom edge's left end, where a cut corner begins, as the marker beside a current item;
+//   frame: a hairline of "color" 4 DIP inside the outline's sides and bottom (not its top, which hangs from the screen's edge), as the
+//     second line of a framed plate; it follows the outline, cut corners included.
 // A fully transparent color turns a part off, so a night or dusk look can drop a motif the day has.
 // Text is held to its minimums over every color the motifs can lay under it (PanelThemes.DecorStops).
 public sealed class PanelThemeDecor
@@ -117,6 +119,7 @@ public sealed class PanelThemeDecor
     public PanelThemeHud? Hud { get; set; }
     public PanelThemeMotif? Hatch { get; set; }
     public PanelThemeMotif? Tab { get; set; }
+    public PanelThemeMotif? Frame { get; set; }
 }
 
 public sealed class PanelThemeHorizon

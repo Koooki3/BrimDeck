@@ -13,13 +13,20 @@ internal static class EndfieldTests
             theme.Kind == PanelThemeKind.Extension && theme.File.Stage == "alpha" && !theme.File.Name.Contains("alpha", StringComparison.OrdinalIgnoreCase)
             && !theme.File.NameEn.Contains("alpha", StringComparison.OrdinalIgnoreCase) && theme.File.Description.Contains("非官方") && theme.File.DescriptionEn.Contains("unofficial"));
         check("Its day look is paper and its night look charcoal, both read as written (no adjustment)",
-            !day.IsDark && night.IsDark && day.Adjustments.Count == 0 && night.Adjustments.Count == 0 && day.Surface == ThemeColor.Parse("#FAFAFA") && night.Surface == ThemeColor.Parse("#2B2B2B"));
+            !day.IsDark && night.IsDark && day.Adjustments.Count == 0 && night.Adjustments.Count == 0 && day.Surface == ThemeColor.Parse("#FAFAFA") && night.Surface == ThemeColor.Parse("#121212"));
+        // All three text levels are held to AAA (7:1), not only the primary: on the surface and on the pop-up, in both looks.
+        check("Every text level reads at 7:1 on the surface and the pop-up in both looks, and the deep look is deep",
+            new[] { day, night }.All(look => new[] { "textPrimary", "textSecondary", "textTertiary" }.All(key => look[key].MinimumContrast([.. look.SurfaceStops, look["popup"].Over(look.Surface)]) >= 7))
+            && night.Surface.Luminance < .01 && night["popup"].Over(night.Surface).Luminance < .014 && night["accent"].MinimumContrast(night.SurfaceStops) >= 9);
+        check("The signal is spent sparingly: the clock and the borders are neutral in the deep look, and the frame is a faint hairline",
+            night["clock"].MinimumContrast(night.SurfaceStops) >= 12 && night["clock"].R == night["clock"].B && night["bubbleBorder"].R == night["bubbleBorder"].B
+            && night["rim"].R == night["rim"].B && night["popupBorder"].R == night["popupBorder"].B && night.Effects.Decor is { Frame: { A: < 80 } } && day.Effects.Decor is { Frame: { A: < 80 } });
         check("The looks follow Windows, not the clock",
             PanelThemes.DaylightModeOf(theme.File) == DaylightMode.System && PanelThemes.LookAt(theme.File, new DateTime(2026, 10, 27, 3, 0, 0), appsLight: true) == DaylightLook.Day
             && PanelThemes.LookAt(theme.File, new DateTime(2026, 10, 27, 12, 0, 0), appsLight: false) == DaylightLook.Night && PanelThemes.NextDaylightChange(theme.File, DateTime.Now) is null);
         check("Cut corners and the two marks are in both looks, in the look's signal and a faint hatching",
             day.Effects.Cut == 10 && night.Effects.Cut == 10 && day.Effects.Pixel == 0 && day.Effects.Glass is null && day.Effects.SurfaceGradient.Count == 0 && day.Effects.Scanlines == 0
-            && day.Effects.Decor is { Tab: { } dayTab, Hatch: { } dayHatch, Horizon: null, Hud: null } && night.Effects.Decor is { Tab: { } nightTab, Hatch: { } nightHatch }
+            && day.Effects.Decor is { Tab: { } dayTab, Hatch: { } dayHatch, Frame: not null, Horizon: null, Hud: null } && night.Effects.Decor is { Tab: { } nightTab, Hatch: { } nightHatch }
             && dayTab == ThemeColor.Parse("#FFFA00") && nightTab == night["accent"] && dayHatch.A < 80 && nightHatch.A < 80 && dayHatch != nightHatch);
         check("Signal yellow is a fill on paper (the selected segment, the indicator, ink on it); on graphite the signal is the HUD's yellow-green, a line and text",
             day["fillSelected"] == ThemeColor.Parse("#FFFA00") && day["indicator"] == day["fillSelected"] && day["textPrimary"].MinimumContrast([day["fillSelected"]]) >= 7
@@ -66,7 +73,7 @@ internal static class EndfieldTests
         // The template and copies.
         check("The template lists cut, off", PanelThemes.Parse(PanelThemes.Template).Effects is { Cut: 0 } && PanelThemes.Build("t", PanelThemes.Parse(PanelThemes.Template)).Effects.Cut == 0);
         var copy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", day, PanelThemes.Endfield)));
-        check("A theme made from Endfield writes out its cut and both marks",
-            copy.Effects is { Cut: 10, Decor: { Tab: not null, Hatch: not null } } && copy.Effects.Decor!.Tab == day.Effects.Decor!.Tab && copy.Effects.Decor.Hatch == day.Effects.Decor.Hatch && copy.Adjustments.Count == 0);
+        check("A theme made from Endfield writes out its cut and its three marks",
+            copy.Effects is { Cut: 10, Decor: { Tab: not null, Hatch: not null, Frame: not null } } && copy.Effects.Decor!.Tab == day.Effects.Decor!.Tab && copy.Effects.Decor.Hatch == day.Effects.Decor.Hatch && copy.Effects.Decor.Frame == day.Effects.Decor.Frame && copy.Adjustments.Count == 0);
     }
 }
