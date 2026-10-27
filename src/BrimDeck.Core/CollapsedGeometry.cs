@@ -111,6 +111,19 @@ public static class CollapsedGeometry
         }
     }
 
+    // The height a notch or capsule takes on this monitor for a saved height, as Resolve takes it: within the style's range and
+    // no taller than the screen (notch) or the work area (capsule). The line's thickness is returned as it is.
+    public static double SurfaceHeight(CompactStyle style, double height, DipRect monitor, DipRect work)
+    {
+        var (screen, area) = Sanitize(monitor, work);
+        return style switch
+        {
+            CompactStyle.Notch => Math.Min(Value(height, CollapsedLimits.NotchHeightMin, CollapsedLimits.NotchHeightMax, CollapsedLimits.NotchHeightDefault), screen.Height),
+            CompactStyle.Capsule => Math.Min(Value(height, CollapsedLimits.CapsuleHeightMin, CollapsedLimits.CapsuleHeightMax, CollapsedLimits.CapsuleHeightDefault), area.Height),
+            _ => height
+        };
+    }
+
     // The surface width whose content area holds content DIPs at this height, up to the style's largest width; 0 for no content
     // and for the line. The content keeps clear of the capsule's inset, and of the notch's inset and, on a low notch where they are
     // wider, its shoulders and corners.
