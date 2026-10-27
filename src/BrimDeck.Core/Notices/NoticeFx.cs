@@ -17,6 +17,11 @@ public readonly record struct NoticeFxPlan(double Intensity, double Separation, 
 
 public static class NoticeFx
 {
+    // The motion keeps the panel's own pace: the animation duration set in the settings (360 ms by default) stretches or shortens
+    // it as it does every move of the panel and its notices, within 0.75 to 1.5 times, so a slow setting does not leave the liquid
+    // racing ahead of the surface it leaves and a fast one does not leave it dawdling. 1 at the default.
+    public static double Pace(int animationDuration) => Math.Clamp(Math.Clamp(animationDuration, 100, 1000) / 360d, .75, 1.5);
+
     // category: the notice's own category (null for a summary, a quota alert or a track change); call: an incoming call.
     public static NoticeFxPlan For(AttentionKind kind, NoticePriority priority, bool urgent, bool call, NoticeCategory? category)
     {

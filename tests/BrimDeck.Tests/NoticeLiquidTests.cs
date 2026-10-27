@@ -38,6 +38,8 @@ internal static class NoticeLiquidTests
         check("Liquid plans: an error is stronger than an ordinary notice and no stronger than an alarm", error.Glow > normal.Glow && error.Glow <= urgent.Glow);
         bool ranges = new[] { normal, high, urgent, call, low, summary, track, quota, error, warning }.All(p => p.Intensity is >= 1 and <= 10 && p.Separation is >= .2 and <= 2 && p.Glow is > 0 and <= 1.25);
         check("Liquid plans: every plan is within the motion's own ranges", ranges);
+        check("Liquid pace: the panel's animation duration sets it, 1 at the default, within 0.75 to 1.5",
+            NoticeFx.Pace(360) == 1 && NoticeFx.Pace(100) == .75 && NoticeFx.Pace(1000) == 1.5 && NoticeFx.Pace(540) == 1.5 && NoticeFx.Pace(0) == .75 && NoticeFx.Pace(9999) == 1.5 && Math.Abs(NoticeFx.Pace(450) - 1.25) < 1e-9);
     }
 
     private static LiquidSpec Spec(LiquidForm form, double width = 376, double height = 32, int seed = -1, double intensity = 5)

@@ -20,6 +20,8 @@ internal sealed class NoticeFxState
     public required NoticeFxPlan Plan { get; init; }
     public required LiquidForm Form { get; init; }
     public LiquidFrame Frame { get; } = new();
+    // How many seconds of real time one second of the motion takes (NoticeFx.Pace).
+    public double Pace { get; init; } = 1;
     // When it began (Eased.Now), and the surface as it stands now in the stage, as the player last read it.
     public double Start;
     public double Left, Top, Width, Height;

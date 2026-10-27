@@ -59,7 +59,7 @@ internal sealed partial class NoticeWindow
             Shoulder: frame.Shoulder, CornerRadius: frame.BottomRadius));
         if (_fxLookCache is not { } cached || !ReferenceEquals(cached.Look, _look) || cached.Tone != plan.Tone)
             _fxLookCache = cached = (_look, plan.Tone, NoticeFxLook.Create(_look, plan));
-        _fx = new NoticeFxState { Liquid = liquid, Look = cached.Fx, Plan = plan, Form = form, Start = Eased.Now };
+        _fx = new NoticeFxState { Liquid = liquid, Look = cached.Fx, Plan = plan, Form = form, Start = Eased.Now, Pace = NoticeFx.Pace(Settings.AnimationDuration) };
         _fxBody.State = _fx; _fxGlow.State = _fx;
         FxSized();
         Motion.Start(_fxBody, FxStep);
@@ -70,7 +70,7 @@ internal sealed partial class NoticeWindow
     private bool FxStep(double now)
     {
         if (_fx is not { } fx) return false;
-        double t = now - fx.Start;
+        double t = (now - fx.Start) / fx.Pace;
         double left = Canvas.GetLeft(_surface), top = Canvas.GetTop(_surface);
         fx.Left = double.IsFinite(left) ? left : 0; fx.Top = double.IsFinite(top) ? top : 0; fx.Width = _surface.Width; fx.Height = _surface.Height;
         if (!(fx.Width > 0 && fx.Height > 0)) { FxStop(); return false; }
@@ -96,7 +96,7 @@ internal sealed partial class NoticeWindow
     private void FxAbort()
     {
         _fxTimer?.Stop();
-        if (_fx is { } fx) fx.Liquid.Abort(Eased.Now - fx.Start);
+        if (_fx is { } fx) fx.Liquid.Abort((Eased.Now - fx.Start) / fx.Pace);
     }
 
     // Everything of the motion is gone at once: the window hides, the panel opens over it, or the notice is dressed again.
