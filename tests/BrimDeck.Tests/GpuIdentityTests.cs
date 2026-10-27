@@ -15,6 +15,40 @@ internal static class GpuIdentityTests
         RemovalAndReconnect(check);
         Migration(check);
         Descriptions(check);
+        SettingsChoice(check);
+        WithoutReadings(check);
+    }
+
+    // #83 review: with the chosen card disconnected, the settings page must not show the other card of the same model as chosen. It
+    // finds the choice as the monitor does (GpuChoice.Find); not found, it lists the saved card as not connected.
+    private static void SettingsChoice(Action<string, bool> check)
+    {
+        var both = Samples(Card(0x1000, "1:0.0"), Card(0x2000, "2:0.0"));
+        string chosen = both.Single(gpu => gpu.Key.EndsWith("@1:0.0")).Key;
+        var left = Samples(Card(0x2000, "2:0.0"));
+        var options = left.Select(gpu => (gpu.Key, gpu.LegacyKey, gpu.Name, gpu.Luid)).ToList();
+        check("GPU identity: with the chosen card gone, the page finds no card for the choice (not the other card of the model)",
+            GpuChoice.Find(options, option => option, chosen, "NVIDIA GeForce RTX 4060") == -1);
+        check("GPU identity: meanwhile the monitor shows 自动", GpuChoice.Resolve(left, chosen, "NVIDIA GeForce RTX 4060", 0, out bool automatic)?.Luid == 0x2000 && automatic);
+        check("GPU identity: with both cards there, the page finds the chosen one", GpuChoice.Find(both.Select(gpu => (gpu.Key, gpu.LegacyKey, gpu.Name, gpu.Luid)).ToList(),
+            option => option, chosen, "NVIDIA GeForce RTX 4060") is var at and >= 0 && both[at].Key == chosen);
+    }
+
+    // #83 review: a connected card without engine readings at the moment stays in the list, marked, and can stay chosen; 自动 takes
+    // a card with readings.
+    private static void WithoutReadings(Action<string, bool> check)
+    {
+        var cards = new[] { Card(0x1000, "1:0.0"), Card(0x2000, "2:0.0") with { Name = "Intel UHD Graphics", VendorId = 0x8086, DeviceId = 0x9A49, DedicatedTotal = 128UL << 20, Kind = GpuKind.Integrated } };
+        var keyed = GpuReadings.Keyed(cards).ToDictionary(adapter => adapter.Luid);
+        // Only the integrated adapter has counters: the discrete one is asleep.
+        var gpus = GpuReadings.Samples(new Dictionary<ulong, GpuTotals> { [0x2000] = new GpuTotals() }, keyed, described: true, "none");
+        check("GPU identity: an adapter without readings stays listed, marked", gpus.Count == 2 && gpus.Single(gpu => gpu.Luid == 0x1000).NoReadings
+            && !gpus.Single(gpu => gpu.Luid == 0x2000).NoReadings);
+        check("GPU identity: 自动 takes the adapter with readings over a discrete one without", GpuChoice.Auto(gpus, 0)?.Luid == 0x2000);
+        string asleep = gpus.Single(gpu => gpu.Luid == 0x1000).Key;
+        check("GPU identity: a chosen adapter without readings stays chosen", GpuChoice.Resolve(gpus, asleep, "NVIDIA GeForce RTX 4060", 0, out bool automatic)?.Luid == 0x1000 && !automatic);
+        var none = GpuReadings.Samples(new Dictionary<ulong, GpuTotals>(), keyed, described: true, "none");
+        check("GPU identity: with no adapter read, 自动 still shows one", none.Count == 2 && GpuChoice.Auto(none, 0) is not null);
     }
 
     private static GpuAdapter Card(ulong luid, string? location) => new(luid, "NVIDIA GeForce RTX 4060", Nvidia, Rtx4060, Subsystem, 8UL << 30, GpuKind.Discrete) { Location = location };
