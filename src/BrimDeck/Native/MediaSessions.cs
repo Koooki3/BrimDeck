@@ -666,6 +666,8 @@ internal sealed class MediaSessions : IDisposable
     public float Peak() => _meter.Peak;
     // Flowing bar values from the player's captured audio; false when only the peak meter is available.
     public bool FlowLevels(Span<double> levels) => _meter.TryFill(levels);
+    // How often the bars move, so the captured audio is analysed no more often (AudioLevelMeter.AnalysisMs).
+    public void SetBarsInterval(int milliseconds) => _meter.AnalysisMs = milliseconds;
     private void UpdateMeter() => _meter.SetSource(Current is not null && _routes.TryGetValue(Current.Id, out var route) ? route.ProcessName : null,
         _visible && Current?.State == MediaState.Playing);
 

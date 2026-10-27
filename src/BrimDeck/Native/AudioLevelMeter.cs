@@ -21,6 +21,9 @@ internal sealed class AudioLevelMeter : IDisposable
     private float _peak;
     private volatile ProcessLoopbackCapture? _capture;
     public float Peak => Volatile.Read(ref _peak);
+    // How often the captured audio is analysed (ProcessLoopbackCapture.AnalysisMs), for a capture running now and those to come.
+    private int _analysisMs = 33;
+    public int AnalysisMs { get => Volatile.Read(ref _analysisMs); set { Volatile.Write(ref _analysisMs, value); if (_capture is { } capture) capture.AnalysisMs = value; } }
     public static double Now => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
     public void SetSource(string? processName, bool enabled)
     {
@@ -124,7 +127,7 @@ internal sealed class AudioLevelMeter : IDisposable
         catch { Clear(); return; }
         // Capture the process that owns the playing session; its child processes are included.
         var playing = _sessions.FirstOrDefault(s => s.State == AudioSessionState.AudioSessionStateActive) ?? _sessions.FirstOrDefault();
-        if (playing is not null) _capture = ProcessLoopbackCapture.TryStart(playing.GetProcessID);
+        if (playing is not null && ProcessLoopbackCapture.TryStart(playing.GetProcessID) is { } capture) { capture.AnalysisMs = AnalysisMs; _capture = capture; }
     }
     private void StopCapture()
     {

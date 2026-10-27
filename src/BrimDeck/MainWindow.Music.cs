@@ -1038,6 +1038,8 @@ public partial class MainWindow
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
         bool bars = animations && MusicAudioActive && musicVisible;
         _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? BarsMs : 250);
+        // One analysis of the captured audio per move of the bars, the fastest any panel shows them at.
+        _media?.SetBarsInterval(_app.Decks.Any(deck => deck.IsExpanded) ? 33 : 50);
         // While the collapsed title glides, WPF draws a frame every refresh for it; the bars move on those frames (MusicFrame), so
         // the timer's own frames, which fell between them, are not drawn as well. In its rests, and when it does not scroll, the
         // timer runs as before.

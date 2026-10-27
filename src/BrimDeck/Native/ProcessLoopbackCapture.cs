@@ -20,7 +20,10 @@ internal sealed class ProcessLoopbackCapture : IDisposable
     private float[] _buffer = new float[4096];
     private short[] _pcm = new short[4096];
     private double _analysed = double.NegativeInfinity;
-    public const double AnalysisInterval = 1 / 30d;
+    // How often the captured audio is analysed: as often as the bars move (MainWindow.BarsMs), 30 times a second on the music page
+    // and 20 on the collapsed row; analyses in between are never read. Set from the UI thread, read here.
+    private int _analysisMs = 33;
+    public int AnalysisMs { get => Volatile.Read(ref _analysisMs); set => Volatile.Write(ref _analysisMs, Math.Clamp(value, 16, 100)); }
     public AutoResetEvent Ready { get; } = new(false);
     public EqualizerSignal Signal { get; } = new(Format.SampleRate);
     public uint ProcessId { get; }
@@ -88,11 +91,11 @@ internal sealed class ProcessLoopbackCapture : IDisposable
                 _capture.ReleaseBuffer(frames);
                 Signal.Push(_buffer.AsSpan(0, count), Format.Channels, now);
             }
-            // The bars move 30 times a second (MainWindow.TickMusic) and read the analyses in between, so 30 analyses serve them.
+            // The bars move AnalysisMs apart (MainWindow.TickMusic) and read the analyses in between, so as many analyses serve them.
             // Packets arrive about every 10 ms and are drained as each arrives (AudioLevelMeter): the stream keeps only a few
             // tens of ms whatever buffer is asked for, and draining once per analysis lost about 2 % of the audio unflagged. An
             // analysis is due a few ms early, so it lands every third packet rather than every fourth.
-            if (now - _analysed >= AnalysisInterval - .005) { _analysed = now; Signal.Advance(now); }
+            if (now - _analysed >= AnalysisMs / 1000d - .005) { _analysed = now; Signal.Advance(now); }
             return true;
         }
         catch (COMException) { return false; }
