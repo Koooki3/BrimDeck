@@ -80,8 +80,8 @@ public sealed partial class SettingsWindow
                 keepPreview: true),
             Toggle(Loc.T("显示功耗与电池", "Show power and battery"), S.MonitorPower, v => Resize(s => s.MonitorPower = v, DeckPage.Monitor),
                 help:
-                Loc.T("在硬盘下方显示整机功耗和最近一分钟的曲线（含峰值与平均值），以及本机电池的电量、充放电功率、剩余或充满时间、电源模式和电池健康；没有电池的电脑不显示电池。功耗来源按优先级：整机能量计、电池放电功率（用电池时是整机实测）、CPU 与 NVIDIA 显卡功率之和（估算，标有“≈”，不含显示屏、硬盘、风扇等）；读不到时显示破折号和原因。只在此页打开时读取。",
-                    "Shows the whole machine's power draw with its last minute as a curve (peak and average included) under the drives, and this PC's own battery: charge, charge or discharge rate, time left or to full, power mode and health; a PC without a battery shows none. The draw comes from, in order: a whole-system meter, the battery's discharge power (a true measurement of the whole machine while on battery), or the sum of the CPU and NVIDIA graphics power (an estimate, marked “≈”, without the display, drives or fans); when none can be read it shows a dash and the reason. Read only while this page is open."),
+                Loc.T("在硬盘下方显示整机功耗（曲线、峰值、均值）和本机电池。功耗来源按优先级：功率计、电池放电、CPU + GPU 估算（≈）。仅在此页打开时读取。",
+                    "Shows system power (curve, peak, mean) and this PC's battery under the drives. Power source, in order: system meter, battery discharge, CPU + GPU estimate (≈). Read only while this page is open."),
                 keepPreview: true),
             Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
@@ -313,8 +313,8 @@ public sealed partial class SettingsWindow
         row.Children.Add(handle);
         var label = TextLine(name, TextSize.Strong, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(Space.Tight, 0, Space.Tight, 0);
         // The two batteries are told apart where they are chosen: the devices' lowest has the device's icon, this PC's own a battery.
-        if (item == CompactMonitorItems.Battery) { label.ToolTip = Loc.T("鼠标、键盘、耳机等外设中电量最低的一个，用该设备的图标表示。", "The lowest of the peripherals (mouse, keyboard, headphones), drawn with that device's icon."); AutomationProperties.SetHelpText(label, (string)label.ToolTip); }
-        else if (item == CompactMonitorItems.Charge) { label.ToolTip = Loc.T("这台电脑自己的电池，用电池图形表示。", "This PC's own battery, drawn as a battery."); AutomationProperties.SetHelpText(label, (string)label.ToolTip); }
+        if (item == CompactMonitorItems.Battery) { label.ToolTip = Loc.T("外设中电量最低的一个，以设备图标显示。", "Lowest peripheral battery, shown with the device icon."); AutomationProperties.SetHelpText(label, (string)label.ToolTip); }
+        else if (item == CompactMonitorItems.Charge) { label.ToolTip = Loc.T("本机电池，以电池图形显示。", "This PC's battery, shown as a battery icon."); AutomationProperties.SetHelpText(label, (string)label.ToolTip); }
         Grid.SetColumn(label, 2); row.Children.Add(label);
         // CPU, GPU and the drives choose what they show in a menu at the right of their name.
         if (CompactFigures.Has(item))
@@ -347,9 +347,9 @@ public sealed partial class SettingsWindow
             {
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
                 CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值，在左侧的菜单中选择显示什么。", "The drives always show figures; choose which in the menu at the left."),
-                CompactMonitorItems.Battery => Loc.T("始终显示数值：设备页上电量最低的无线设备（鼠标、键盘、耳机等外设），用该设备的图标表示，不是本机电池。", "Always shows its figure: the wireless device with the lowest charge on the devices page (a mouse, keyboard, headphones and the like), drawn with that device's icon; not this PC's battery."),
-                CompactMonitorItems.Power => Loc.T("始终显示瓦数；“≈”表示估算，没有整机功率读数的电脑不显示这一项。", "Always shows the watts; “≈” marks an estimate, and a PC with no power reading does not show this item."),
-                CompactMonitorItems.Charge => Loc.T("始终显示本机电池的电量，用电池图形表示（不是外设）；没有电池的电脑不显示这一项。", "Always shows this PC's own battery charge, drawn as a battery (not a peripheral's); a PC without a battery does not show this item."),
+                CompactMonitorItems.Battery => Loc.T("外设中电量最低的一个（鼠标、键盘、耳机等），以设备图标显示；非本机电池。", "Lowest peripheral battery (mouse, keyboard, headphones), shown with the device icon; not this PC's battery."),
+                CompactMonitorItems.Power => Loc.T("整机功耗，单位 W；≈ 表示估算。无读数的电脑不显示。", "System power in W; ≈ marks an estimate. Hidden on PCs with no reading."),
+                CompactMonitorItems.Charge => Loc.T("本机电池电量，以电池图形显示。无电池的电脑不显示。", "This PC's battery charge, shown as a battery icon. Hidden on PCs without a battery."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);

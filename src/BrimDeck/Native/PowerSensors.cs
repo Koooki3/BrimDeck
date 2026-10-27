@@ -72,7 +72,7 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
             if (gpu.Usage >= Busy) _busyAt[key] = now;
             if (!_busyAt.TryGetValue(key, out var last) || now - last > Awake)
             {
-                read.Add(new GpuPowerInput(name, Reading<double>.Unavailable(Loc.T("空闲，未读取以免唤醒休眠的显卡", "idle; not read so a sleeping adapter stays asleep"))));
+                read.Add(new GpuPowerInput(name, Reading<double>.Unavailable(Loc.T("空闲", "idle"))));
                 continue;
             }
             _smi ??= new NvidiaSmi();
@@ -103,7 +103,7 @@ internal sealed class NvidiaSmi : IDisposable
     public NvidiaSmi()
     {
         string path = Path.Combine(Environment.SystemDirectory, "nvidia-smi.exe");
-        if (!File.Exists(path)) { _failure = Loc.T("驱动没有提供 nvidia-smi", "the driver provides no nvidia-smi"); return; }
+        if (!File.Exists(path)) { _failure = Loc.T("无 NVIDIA 驱动工具", "no NVIDIA driver tool"); return; }
         try
         {
             var start = new ProcessStartInfo(path, "--query-gpu=name,power.draw --format=csv,noheader,nounits -l 1")
@@ -111,7 +111,7 @@ internal sealed class NvidiaSmi : IDisposable
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8, WorkingDirectory = Environment.SystemDirectory
             };
             _process = Process.Start(start);
-            if (_process is null) { _failure = Loc.T("无法启动 nvidia-smi", "nvidia-smi did not start"); return; }
+            if (_process is null) { _failure = Loc.T("无法启动", "did not start"); return; }
             _job = CreateJobObjectW(IntPtr.Zero, null);
             if (_job != IntPtr.Zero)
             {
@@ -131,7 +131,7 @@ internal sealed class NvidiaSmi : IDisposable
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
-            Debug.WriteLine(ex); _failure = Loc.T("无法启动 nvidia-smi", "nvidia-smi did not start");
+            Debug.WriteLine(ex); _failure = Loc.T("无法启动", "did not start");
         }
     }
 
@@ -157,11 +157,11 @@ internal sealed class NvidiaSmi : IDisposable
     public Reading<double> Read(string adapter, int ordinal)
     {
         if (_failure is not null) return Reading<double>.Unavailable(_failure);
-        if (_process is { HasExited: true }) return Reading<double>.Unavailable(Loc.T("nvidia-smi 已退出", "nvidia-smi has stopped"));
+        if (_process is { HasExited: true }) return Reading<double>.Unavailable(Loc.T("读取已停止", "stopped"));
         List<(string Name, double? Watts)> ready; long at;
         lock (_lock) { ready = _ready; at = _readyAt; }
-        if (ready.Count == 0) return Reading<double>.Unavailable(Loc.T("等待 nvidia-smi 的第一次读数", "waiting for nvidia-smi's first reading"));
-        if ((Stopwatch.GetTimestamp() - at) * 1000 / Stopwatch.Frequency > 4000) return Reading<double>.Unavailable(Loc.T("nvidia-smi 没有新读数", "nvidia-smi gives no new reading"));
+        if (ready.Count == 0) return Reading<double>.Unavailable(Loc.T("启动中", "starting"));
+        if ((Stopwatch.GetTimestamp() - at) * 1000 / Stopwatch.Frequency > 4000) return Reading<double>.Unavailable(Loc.T("无新读数", "stale"));
         return PowerResolver.PickGpu(ready, adapter, ordinal);
     }
 
