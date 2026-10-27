@@ -47,12 +47,15 @@ public sealed class StripPresence
 // wireless devices) waits likewise for its first figure from the devices.
 public sealed class StripAdmission
 {
-    public const CompactMonitorItems Later = CompactMonitorItems.Storage | CompactMonitorItems.Battery;
+    public const CompactMonitorItems Later = CompactMonitorItems.Storage | CompactMonitorItems.Battery | CompactMonitorItems.Power | CompactMonitorItems.Charge;
     // A part: a ring's temperature (Heat), a letter's space ("C:"), or a letter's temperature ("C:" + Heat).
     public const string Heat = "°";
     private readonly HashSet<(CompactMonitorItems Item, string Part)> _seen = [], _showing = [];
     // A device has reported a charge, and has not since all gone.
     private bool _batterySeen;
+    // The machine's power draw and its own battery have given a reading, and the sampler has not since found it has none (a battery
+    // reading is the machine's own and a desktop never shows one; the power reading stays away on a machine with no source).
+    private bool _powerSeen, _chargeSeen;
     // The readings left out of the row as it was last built; the drives until their first figures.
     public CompactMonitorItems Hidden { get; private set; } = Later;
     // The parts showing, as text: when it changes, the row is built again for the new widths.
@@ -92,7 +95,10 @@ public sealed class StripAdmission
     // The battery waits for the devices, not the system (MainWindow.UpdateDevicesDemand).
     public bool Awaits(IReadOnlyList<CompactReading> readings, MonitorSnapshot? latest, SensorStates states)
     {
-        if ((CompactMonitor.Shown(readings) & Hidden & Later & ~CompactMonitorItems.Battery) == 0) return false;
+        var pending = CompactMonitor.Shown(readings) & Hidden;
+        if ((pending & CompactMonitorItems.Power) != 0 && states.Power != SensorState.None) return true;
+        if ((pending & CompactMonitorItems.Charge) != 0 && states.Charge != SensorState.None) return true;
+        if ((pending & Later & ~CompactMonitorItems.Battery & ~CompactMonitorItems.Power & ~CompactMonitorItems.Charge) == 0) return false;
         return Wanted(readings.Where(reading => reading.Item == CompactMonitorItems.Storage), latest, states).Any(part => !part.Missing);
     }
 
@@ -115,6 +121,11 @@ public sealed class StripAdmission
         if (battery == SensorState.Found) _batterySeen = true;
         else if (battery == SensorState.None) _batterySeen = false;
         if (_batterySeen) { hidden &= ~CompactMonitorItems.Battery; layout.Append((int)CompactMonitorItems.Battery).Append(' '); }
+        // A reading of the machine's own: seen once it gives a figure, gone once the sampler knows there is none.
+        if (latest?.Power.HasValue == true || states.Power == SensorState.Found) _powerSeen = true; else if (states.Power == SensorState.None) _powerSeen = false;
+        if (latest?.Battery.HasValue == true || states.Charge == SensorState.Found) _chargeSeen = true; else if (states.Charge == SensorState.None) _chargeSeen = false;
+        if (_powerSeen) { hidden &= ~CompactMonitorItems.Power; layout.Append((int)CompactMonitorItems.Power).Append(' '); }
+        if (_chargeSeen) { hidden &= ~CompactMonitorItems.Charge; layout.Append((int)CompactMonitorItems.Charge).Append(' '); }
         var arriving = Hidden & ~hidden;
         Hidden = hidden;
         Layout = layout.ToString();

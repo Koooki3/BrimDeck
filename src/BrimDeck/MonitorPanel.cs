@@ -57,13 +57,14 @@ public partial class MainWindow
     // good on a machine without them; and the temperatures and letters it was built with (StripAdmission.Layout).
     private CompactMonitorItems _stripUnavailable;
     private string _stripLayout = "";
-    private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor) : SensorStates.Unknown;
+    private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor) { Power = monitor.PowerSensor, Charge = monitor.BatterySensor } : SensorStates.Unknown;
     // Whether this surface shows the system readings and waits for the first figures of one it does not show yet.
     private bool StripAwaits()
     {
         if (!Settings.ShowsMonitor(EffectiveStyle)) return false;
         return _stripAdmission.Awaits(Settings.CompactReadings, _app.Monitor?.Latest, StripSensors);
     }
+    private PowerOptions PowerBlockFor() => new(PowerStyle.For(MonitorThemeColors.For(Settings)), Settings.DeviceLowPercent, Native.BatteryProvider.SystemHasBattery);
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
     private static bool MonitorMotion => Soft.Enabled;
@@ -120,7 +121,7 @@ public partial class MainWindow
     {
         double height = ContentCanvas.Height;
         return MonitorLayout.For(ContentCanvas.Width - 2 * _header.Side, height - _header.Row - MonitorBottom(height), Settings.MonitorProcesses, MonitorSensors().Drives,
-            _monitorView is not null ? _monitorLayout : null);
+            _monitorView is not null ? _monitorLayout : null, MonitorSensors().Power);
     }
 
     // What the view is built from: its layout step, not its exact size, so a page resized within a step is not built again.
@@ -129,19 +130,22 @@ public partial class MainWindow
     // temperature beside the small gauge (MonitorSensors), so it is built again only when the lines it shows or that room change:
     // when the drives are first counted, a sensor turns out to have none or first shows, or a drive comes or goes past the room.
     private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Settings.MonitorProcesses,
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors().Small);
-    // What the shown page was built for: its drives' lines and the small gauge's room.
-    private (int Lines, bool Small) _monitorSensors;
-    private (int Lines, bool Small) BuiltSensors() => (CurrentMonitorLayout().StorageLines, MonitorSensors().Small);
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors().Small, Settings.MonitorPower, Native.BatteryProvider.SystemHasBattery);
+    // What the shown page was built for: its drives' lines, the small gauge's room and the lines for power and the battery.
+    private (int Lines, bool Small, int Power) _monitorSensors;
+    private (int Lines, bool Small, int Power) BuiltSensors() => (CurrentMonitorLayout().StorageLines, MonitorSensors().Small, CurrentMonitorLayout().PowerLines);
     // Drives: the drives to keep lines for, 0 for none; while they are not counted yet, as many as the page can hold.
-    private (int Drives, bool Small) MonitorSensors()
+    private (int Drives, bool Small, int Power) MonitorSensors()
     {
         var monitor = _app.Monitor;
         int lines = !Settings.MonitorStorage || monitor?.StorageState == SensorState.None ? 0 : monitor?.StorageCount is > 0 and var count ? count : 3;
         // The processor's zones are reserved for only once one has shown (a fixed zone never does); a graphics adapter is
         // reserved for until it is known to have no sensor.
         bool small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor != SensorState.None : monitor?.CpuSensor == SensorState.Found;
-        return (lines, Settings.MonitorTemperatures && small);
+        // The power and the battery lines (PowerBlock) are asked for as many as the machine can show: both on a machine with a battery
+        // (known at once from the system), power alone on one without, none once the sampler finds no source.
+        int power = !Settings.MonitorPower ? 0 : Native.BatteryProvider.SystemHasBattery ? 2 : monitor?.PowerSensor == SensorState.None ? 0 : 1;
+        return (lines, Settings.MonitorTemperatures && small, power);
     }
 
     private void RenderMonitor()
@@ -170,7 +174,7 @@ public partial class MainWindow
         old?.CloseCard();
         _monitorView = new MonitorView(layout, MonitorThemeColors.For(Settings), Settings.MonitorMain, Settings.MonitorSort,
             Settings.MonitorProcessView, SwitchMonitorMain, SortProcesses, hold => { if (_app.Monitor is { } sampler) sampler.HoldProcesses = hold; }, SwitchMonitorGpu,
-            Settings.MonitorTemperatures, _monitorSensors.Small);
+            Settings.MonitorTemperatures, _monitorSensors.Small, PowerBlockFor());
         _monitorView.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
         // A drag across a layout step (and the spring settling after it) swaps at once: the page follows the pointer, and a
         // crossfade there laid both layouts over each other for most of its length (live check X-02).

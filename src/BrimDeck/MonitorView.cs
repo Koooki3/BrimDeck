@@ -55,6 +55,7 @@ internal sealed class MonitorView : Grid
     private readonly MemoryBlock _memory;
     private readonly NetworkBlock _network;
     private readonly StorageBlock? _storage;
+    private readonly PowerBlock? _power;
     private readonly bool _temperatures;
     private readonly Grid _readings = new();
     // How far the readings stop above the page's foot, so their last line ends level with the list's last row (AlignFoot).
@@ -72,7 +73,7 @@ internal sealed class MonitorView : Grid
     // lines theirs (the layout's StorageLines are the lines kept for the drives under memory and network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
     public MonitorView(MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
         Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged,
-        bool temperatures = false, bool smallTemperature = false)
+        bool temperatures = false, bool smallTemperature = false, PowerOptions? power = null)
     {
         _layout = layout; _colors = colors; _main = main; _temperatures = temperatures;
         bool cpuMain = main == MonitorMain.Cpu;
@@ -81,6 +82,7 @@ internal sealed class MonitorView : Grid
         var readings = _readings;
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
+        readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -143,6 +145,13 @@ internal sealed class MonitorView : Grid
             _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.RowHeight, layout.StorageLines, layout.StorageLines, temperatures)
             { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
             SetRow(_storage, layout.Metrics == MetricsMode.Line ? 3 : 4); readings.Children.Add(_storage);
+        }
+        if (layout.PowerLines > 0 && power is not null)
+        {
+            // Under the drives (or under network), at the same distance; the lines are list rows' height.
+            _power = new PowerBlock(colors, power, layout.Body, layout.Caption, layout.RowHeight, layout.PowerLines)
+            { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
+            SetRow(_power, 5); readings.Children.Add(_power);
         }
 
         if (layout.List == ListPlacement.None) Children.Add(readings);
@@ -272,6 +281,7 @@ internal sealed class MonitorView : Grid
         _memory.Set(snapshot.Memory, motion);
         _network.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
         _storage?.Set(snapshot.Storage, motion);
+        _power?.Set(snapshot, motion);
         _list?.Set(snapshot.Processes, _cores, motion);
         _processes = snapshot.Processes.OrDefault;
         // An open card follows its app's readings; it closes when the app has left the list.

@@ -519,7 +519,8 @@ public partial class App : Application
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
         Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
             page && Settings.MonitorStorage || stripDrives,
-            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage));
+            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage),
+            page && Settings.MonitorPower || (shown & (CompactMonitorItems.Power | CompactMonitorItems.Charge)) != 0);
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }

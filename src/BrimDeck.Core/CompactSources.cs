@@ -4,6 +4,9 @@ namespace BrimDeck.Core;
 // graphics adapters, the drives listed, and the drives' temperatures.
 public readonly record struct SensorStates(SensorState Cpu, SensorState Gpu, SensorState Storage, SensorState DiskTemperatures)
 {
+    // Whether the machine gives a power reading (PowerResolver), and whether it has a battery of its own (BatteryModel).
+    public SensorState Power { get; init; }
+    public SensorState Charge { get; init; }
     public static SensorStates Unknown => default;
 }
 
