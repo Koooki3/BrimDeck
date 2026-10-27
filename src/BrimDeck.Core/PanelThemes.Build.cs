@@ -195,6 +195,7 @@ public static partial class PanelThemes
         merged.Scanlines = layer.Scanlines ?? merged.Scanlines;
         merged.Pixel = layer.Pixel ?? merged.Pixel;
         merged.Texture = layer.Texture ?? merged.Texture;
+        merged.Cut = layer.Cut ?? merged.Cut;
         if (layer.Decor is { } decor)
         {
             // Field by field, into new parts, so a layer that moves only the horizon keeps the sea it inherits and the base's own
@@ -205,7 +206,9 @@ public static partial class PanelThemes
                 Horizon = decor.Horizon is { } h ? new PanelThemeHorizon { At = h.At ?? below?.Horizon?.At, Sea = h.Sea ?? below?.Horizon?.Sea, Line = h.Line ?? below?.Horizon?.Line } : below?.Horizon,
                 Caustics = decor.Caustics is { } c ? new PanelThemeMotif { Color = c.Color ?? below?.Caustics?.Color } : below?.Caustics,
                 Palm = decor.Palm is { } p ? new PanelThemeMotif { Color = p.Color ?? below?.Palm?.Color } : below?.Palm,
-                Hud = decor.Hud is { } u ? new PanelThemeHud { Color = u.Color ?? below?.Hud?.Color, Chamfer = u.Chamfer ?? below?.Hud?.Chamfer } : below?.Hud
+                Hud = decor.Hud is { } u ? new PanelThemeHud { Color = u.Color ?? below?.Hud?.Color, Chamfer = u.Chamfer ?? below?.Hud?.Chamfer } : below?.Hud,
+                Hatch = decor.Hatch is { } t ? new PanelThemeMotif { Color = t.Color ?? below?.Hatch?.Color } : below?.Hatch,
+                Tab = decor.Tab is { } m ? new PanelThemeMotif { Color = m.Color ?? below?.Tab?.Color } : below?.Tab
             };
         }
         if (layer.Glass is { } glass)
@@ -244,9 +247,13 @@ public static partial class PanelThemes
         // asking for both is refused (FileProblem); one that gets both through its base chain anyway is pixel art.
         if (pixel > 0) glass = null;
         double texture = pixel > 0 ? Value("texture") : 0;
+        // Cut corners are the island's third outline and give way to both: a stepped outline wins, and glass is refused for the
+        // same reason as pixel art (the blur and the shadow cut follow the curves).
+        double cut = pixel > 0 ? 0 : Value("cut");
+        if (cut > 0) glass = null;
         return new(surfaceGradient.Count >= 2 ? surfaceGradient : [], rimGradient.Count >= 2 ? rimGradient : [],
             Value("rimWidth"), Value("shadowBlur"), Value("shadowDepth"), Value("shadowOpacity"), Value("scanlines"),
-            glass, pixel, texture, DecorValues(effects.Decor));
+            glass, pixel, texture, DecorValues(effects.Decor), cut);
     }
 
     // The motifs in their ranges; a part without a color it can use is left out. The caustics and the palm stay faint (their
@@ -261,27 +268,27 @@ public static partial class PanelThemes
         }
         var horizon = decor.Horizon is { Sea: var seaText } h && Color(seaText) is { } sea ? new PanelHorizon(Fit(h.At, .3, .9, .62), sea, Color(h.Line)) : null;
         var hud = decor.Hud is { Color: var hudText } hudFile && Color(hudText) is { } hudColor ? new PanelHud(hudColor, Fit(hudFile.Chamfer, 0, 10, 6)) : null;
-        var values = new PanelDecor(horizon, Color(decor.Caustics?.Color, .2), Color(decor.Palm?.Color, .12), hud);
+        var values = new PanelDecor(horizon, Color(decor.Caustics?.Color, .2), Color(decor.Palm?.Color, .12), hud, Color(decor.Hatch?.Color), Color(decor.Tab?.Color));
         return values.Any ? values : null;
     }
 
     // The numeric effects by their names in the file, with their ranges and the values used when no theme sets them.
-    public static readonly IReadOnlyList<string> EffectKeys = ["rimWidth", "shadowBlur", "shadowDepth", "shadowOpacity", "scanlines", "pixel", "texture"];
+    public static readonly IReadOnlyList<string> EffectKeys = ["rimWidth", "shadowBlur", "shadowDepth", "shadowOpacity", "scanlines", "pixel", "texture", "cut"];
     public static (double Min, double Max, double Fallback) EffectRange(string key) => key switch
     {
         "rimWidth" => (0, 3, 1), "shadowBlur" => (0, 40, 14), "shadowDepth" => (0, 12, 4), "shadowOpacity" => (0, 1, .28), "scanlines" => (0, .12, 0),
-        "pixel" => (0, 4, 0), "texture" => (0, .12, 0),
+        "pixel" => (0, 4, 0), "texture" => (0, .12, 0), "cut" => (0, 16, 0),
         _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
     };
     public static double? Effect(PanelThemeEffects? effects, string key) => key switch
     {
         "rimWidth" => effects?.RimWidth, "shadowBlur" => effects?.ShadowBlur, "shadowDepth" => effects?.ShadowDepth,
-        "shadowOpacity" => effects?.ShadowOpacity, "scanlines" => effects?.Scanlines, "pixel" => effects?.Pixel, "texture" => effects?.Texture, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
+        "shadowOpacity" => effects?.ShadowOpacity, "scanlines" => effects?.Scanlines, "pixel" => effects?.Pixel, "texture" => effects?.Texture, "cut" => effects?.Cut, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
     };
     public static double Effect(PanelThemeEffectValues values, string key) => key switch
     {
         "rimWidth" => values.RimWidth, "shadowBlur" => values.ShadowBlur, "shadowDepth" => values.ShadowDepth,
-        "shadowOpacity" => values.ShadowOpacity, "scanlines" => values.Scanlines, "pixel" => values.Pixel, "texture" => values.Texture, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
+        "shadowOpacity" => values.ShadowOpacity, "scanlines" => values.Scanlines, "pixel" => values.Pixel, "texture" => values.Texture, "cut" => values.Cut, _ => throw new ArgumentException("Unknown effect: " + key, nameof(key))
     };
     private static void SetEffect(PanelThemeEffects effects, string key, double value)
     {
@@ -294,6 +301,7 @@ public static partial class PanelThemes
             case "scanlines": effects.Scanlines = value; break;
             case "pixel": effects.Pixel = value; break;
             case "texture": effects.Texture = value; break;
+            case "cut": effects.Cut = value; break;
             default: throw new ArgumentException("Unknown effect: " + key, nameof(key));
         }
     }

@@ -265,7 +265,7 @@ public partial class MainWindow
         // ClearType needs an opaque background under the text; over glass it washes the text out (PanelTheme.ClearType).
         if (Island.Child is Grid content) RenderOptions.SetClearTypeHint(content, PanelTheme.ClearType);
         if (palette.Effects.Pixel > 0) TextOptions.SetTextRenderingMode(Island, TextRenderingMode.Aliased); else Island.ClearValue(TextOptions.TextRenderingModeProperty);
-        if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) caster.Pixel = palette.Effects.Pixel;
+        if (IslandShadow.Children.OfType<IslandBorder>().FirstOrDefault() is { } caster) { caster.Pixel = palette.Effects.Pixel; caster.Cut = palette.Effects.Cut; }
         if (glass == _shadowCut) return;
         _shadowCut = glass;
         if (glass) { Island.LayoutUpdated += CutShadow; CutShadow(null, EventArgs.Empty); }

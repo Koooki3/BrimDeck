@@ -61,7 +61,7 @@ internal static class CompactStylePreview
             var detail = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             foreach (var (app, percent) in new[] { (ProviderId.Claude, 47d), (ProviderId.Codex, 23), (ProviderId.Antigravity, 16), (ProviderId.Cursor, 37) })
             {
-                var ring = UI.Ring(percent, palette.AppColor(app).ToString(), 4.6, .9, Hex("ringTrack")); ring.Margin = new Thickness(0, 0, 3.4, 0); detail.Children.Add(ring);
+                var ring = UI.Ring(percent, palette.AppColor(app).ToString(), 4.6, .9, Hex("ringTrack"), palette.Effects.Cut > 0 ? Hex("input") : ""); ring.Margin = new Thickness(0, 0, 3.4, 0); detail.Children.Add(ring);
             }
             detail.Margin = new Thickness(3.4, 0, 0, 0);
             if (clock)
@@ -98,7 +98,7 @@ internal static class CompactStylePreview
         var rings = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         foreach (var (app, percent) in new[] { (ProviderId.Claude, 47d), (ProviderId.Codex, 23), (ProviderId.Antigravity, 16), (ProviderId.Cursor, 37) })
         {
-            var arc = UI.Ring(percent, palette.AppColor(app).ToString(), ring, 2, Hex("ringTrack"));
+            var arc = UI.Ring(percent, palette.AppColor(app).ToString(), ring, 2, Hex("ringTrack"), palette.Effects.Cut > 0 ? Hex("input") : "");
             if (rings.Children.Count > 0) arc.Margin = new Thickness(gap, 0, 0, 0);
             rings.Children.Add(arc);
         }
@@ -139,7 +139,7 @@ internal static class CompactStylePreview
     // is kept as a bitmap (for up to a 200% display) instead of being drawn again whenever the page scrolls.
     private static Grid Shadow(IslandBorder shape, PanelPalette palette)
     {
-        shape.Inset = 1;
+        shape.Inset = 1; shape.Cut = palette.Effects.Cut;
         var glow = new System.Windows.Media.Effects.DropShadowEffect { Direction = 270 };
         PanelTheme.Dress(glow, palette); glow.Freeze();
         var shadow = new Grid { Effect = glow, CacheMode = new BitmapCache { RenderAtScale = 2 },

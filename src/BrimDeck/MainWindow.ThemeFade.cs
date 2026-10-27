@@ -34,7 +34,7 @@ public partial class MainWindow
         {
             Width = width, Height = height, CornerRadius = Island.CornerRadius, ShoulderRadius = Island.ShoulderRadius, MaterialOpacity = Island.MaterialOpacity,
             // The brush's opacity too: over a held blur glass is thinner than its color (GlassBackdrop.Held).
-            Background = new SolidColorBrush(_surface.Color) { Opacity = _surface.Opacity }, Pixel = Island.Pixel
+            Background = new SolidColorBrush(_surface.Color) { Opacity = _surface.Opacity }, Pixel = Island.Pixel, Cut = Island.Cut
         };
         PanelTheme.Dress(material, dpiScale: VisualTreeHelper.GetDpi(Island).DpiScaleX);
         _materialFade = Fade(Picture(material, width, height), daylight ? DaylightFadeMs : ThemeFadeMs);

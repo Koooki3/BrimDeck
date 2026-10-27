@@ -15,8 +15,8 @@ internal static class MotionUpgradeTests
         check("Spring tiers: firm 0.85, default the monitor's 0.70, jelly 0.50, all at 16 rad/s",
             SpringTiers.Damping(SpringTier.Firm) == .85 && SpringTiers.Damping(SpringTier.Default) == .7 && SpringTiers.Damping(SpringTier.Jelly) == .5
             && Spring.Frequency == 16 && Spring.DampingRatio == .7);
-        check("Only the cyberpunk demo chooses a tier (firm); every other built-in theme keeps the monitor's spring",
-            PanelThemes.BuiltIns.All(theme => palette(theme.Id).Motion.Spring == (theme.Id == PanelThemes.Demo ? SpringTier.Firm : SpringTier.Default))
+        check("Only the cyberpunk demo and Endfield choose a tier (firm); every other built-in theme keeps the monitor's spring",
+            PanelThemes.BuiltIns.All(theme => palette(theme.Id).Motion.Spring == (theme.Id is PanelThemes.Demo or PanelThemes.Endfield ? SpringTier.Firm : SpringTier.Default))
             && ThemeMotion.Default.Spring == SpringTier.Default);
         check("motion.spring is read by name, inherits, and an unknown or numeric name keeps the base's",
             custom("""{ "base": "dark", "motion": { "spring": "jelly" } }""").Motion.Spring == SpringTier.Jelly

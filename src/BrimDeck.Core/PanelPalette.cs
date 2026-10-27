@@ -22,12 +22,15 @@ public sealed record PanelThemeAdjustment(string Key, string Before, string Afte
 
 public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGradient, IReadOnlyList<ThemeColor> RimGradient, double RimWidth,
     double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, PanelGlass? Glass = null, double Pixel = 0, double Texture = 0,
-    PanelDecor? Decor = null);
+    PanelDecor? Decor = null, double Cut = 0);
 
 // A theme's motifs (PanelThemeDecor, fitted); null parts are not drawn.
-public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, ThemeColor? Palm, PanelHud? Hud)
+public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, ThemeColor? Palm, PanelHud? Hud, ThemeColor? Hatch = null, ThemeColor? Tab = null)
 {
-    public bool Any => Horizon is not null || Caustics is not null || Palm is not null || Hud is not null;
+    public bool Any => Covers || Hatch is not null || Tab is not null;
+    // Whether the motifs lie where the content can: the bottom edge's two marks do not, so a theme with only those keeps the plain
+    // surface color under a scrolling title's fade.
+    public bool Covers => Horizon is not null || Caustics is not null || Palm is not null || Hud is not null;
 }
 public sealed record PanelHorizon(double At, ThemeColor Sea, ThemeColor? Line)
 {
@@ -102,7 +105,7 @@ public sealed class PanelPalette
     // How the theme moves: ambient light and the answers to the pointer, held to MotionSafety's limits.
     public ThemeMotion Motion { get; init; } = ThemeMotion.Default;
     // A glass surface shows the desktop through it, so like a gradient it has no single color to fade text into.
-    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Glass is not null || Effects.Texture > 0 || Effects.Decor is not null;
+    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Glass is not null || Effects.Texture > 0 || Effects.Decor?.Covers == true;
     public bool IsGlass => Effects.Glass is not null;
     // Which of a theme's looks this is (PanelThemes.Resolve); the day look for a theme with only one.
     public DaylightLook Look { get; init; }

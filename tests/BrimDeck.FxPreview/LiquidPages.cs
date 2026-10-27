@@ -91,6 +91,8 @@ internal static partial class LiquidPages
             Language = Loc.Chinese, Style = CompactStyle.Capsule, Animations = animations, NoticesEnabled = true, NoticesPage = true,
             UsagePage = true, MusicPage = true, MonitorPage = true, LyricsEnabled = true,
         };
+        // BRIMDECK_PAGES_NARROW=1: every page at the narrowest width the panel allows (a narrow window, the least a user can make).
+        if (Environment.GetEnvironmentVariable("BRIMDECK_PAGES_NARROW") == "1") settings.Width = settings.MusicWidth = settings.MonitorWidth = DeckPages.MinWidth;
         settings.Normalize();
         var deck = app.UseOffscreen(settings, Monitor, Work, Scale);
         if (!MotionEnvironment.Transparency) Console.WriteLine("NOTE: Windows transparency effects are off, so glass themes are not shown as glass; the pages are drawn opaque.");

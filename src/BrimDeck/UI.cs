@@ -87,10 +87,15 @@ internal static class UI
         return cut;
     }
     // A progress ring: a faint track with a colored arc that starts at the top and runs counterclockwise.
-    public static Grid Ring(double percent, string color, double size, double thickness, string? track = null)
+    public static Grid Ring(double percent, string color, double size, double thickness, string? track = null, string? plate = null)
     {
         var ring = new Grid { Width = size, Height = size };
+        // On a plate (PanelTheme.Plated, or the color given; "" for none): a dark well under the ring and, in the middle, a small square
+        // in the ring's color.
+        plate ??= PanelTheme.Plated ? PanelTheme.Hex("input") : "";
+        if (plate.Length > 0) ring.Children.Add(new Ellipse { Fill = Brush(plate) });
         ring.Children.Add(new Ellipse { Stroke = Brush(track ?? PanelTheme.Hex("ringTrack")), StrokeThickness = thickness });
+        if (plate.Length > 0 && size >= 10) ring.Children.Add(new Rectangle { Width = Math.Round(size * .3), Height = Math.Round(size * .3), Fill = Brush(color), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         double fraction = Math.Clamp(percent / 100, 0, 1);
         if (fraction >= .999) ring.Children.Add(new Ellipse { Stroke = Brush(color), StrokeThickness = thickness });
         else if (fraction > 0)

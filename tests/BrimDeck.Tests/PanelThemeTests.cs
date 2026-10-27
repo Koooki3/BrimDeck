@@ -43,7 +43,7 @@ internal static class PanelThemeTests
         // Built-in themes.
         check("Built-in themes are listed in order and Monokai Pro is not among them",
             PanelThemes.BuiltIns.Select(theme => theme.Id).SequenceEqual(["dark", "light", "liquid-glass-light", "liquid-glass-dark", "one-dark-pro", "github-dark", "github-light", "dracula",
-                "night-owl", "island-holiday", "island-holiday-2", "pixel-blocks", "cyberpunk-edgerunners"]));
+                "night-owl", "island-holiday", "island-holiday-2", "pixel-blocks", "cyberpunk-edgerunners", "endfield-industrial"]));
         check("A built-in theme's id is its file name", PanelThemes.BuiltIns.All(theme => PanelThemes.NormalizeId(theme.File.Id) == theme.Id));
         check("Every built-in theme names an open license", PanelThemes.BuiltIns.All(theme => theme.File.License is "MIT" or "Apache-2.0"));
         bool allValid = true; var adjusted = new List<string>();

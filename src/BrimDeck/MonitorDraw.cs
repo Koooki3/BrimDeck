@@ -60,6 +60,7 @@ internal static class MonitorDraw
     {
         double radius = size / 2 - ring / 2;
         var c = new Point(center.X, center.Y + size / 32);
+        if (PanelTheme.Plated) drawing.DrawEllipse(UI.Brush(PanelTheme.Hex("input")), null, c, size / 2, size / 2);
         DialArc(drawing, c, radius, ring, 1, PanelTheme.Hex("ringTrack"));
         if (share is { } value && value > .002) DialArc(drawing, c, radius, ring, Math.Min(1, value), color);
         var text = Text(letter, letterSize, UI.Primary, ppd, strong: true);

@@ -188,6 +188,7 @@ public partial class App : Application
         // The panel's music part subscribes to the lyrics service when it is made.
         Lyrics = new LyricsService(appleLyricsFile: System.IO.Path.Combine(folder, "apple-music-lyrics.json"));
         Settings = settings;
+        Lyrics = new LyricsService();
         UseLanguage();
         Notices = new NoticeCenter(this);
         Deck = new MainWindow(this);

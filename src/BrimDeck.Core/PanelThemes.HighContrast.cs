@@ -30,7 +30,7 @@ public static partial class PanelThemes
             Apps = AppKeys.ToDictionary(key => key, _ => H),
             Effects = new PanelThemeEffects
             {
-                SurfaceGradient = [], RimGradient = [], RimWidth = 1, ShadowBlur = 0, ShadowDepth = 0, ShadowOpacity = 0, Scanlines = 0, Pixel = 0, Texture = 0
+                SurfaceGradient = [], RimGradient = [], RimWidth = 1, ShadowBlur = 0, ShadowDepth = 0, ShadowOpacity = 0, Scanlines = 0, Pixel = 0, Texture = 0, Cut = 0
             }
         };
         return Build(HighContrastId, file);

@@ -43,6 +43,10 @@ public sealed class IslandBorder : Border
     // ones that face down and right. 0 keeps the smooth outline.
     public static readonly DependencyProperty PixelProperty = DependencyProperty.Register(
         nameof(Pixel), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsArrange));
+    // Cut corners (a theme's "cut" effect): the outline's curves become 45-degree cuts of at most this many DIP, a notch's shoulders
+    // straight slants. 0 keeps the curves. Not with Pixel, whose steps win.
+    public static readonly DependencyProperty CutProperty = DependencyProperty.Register(
+        nameof(Cut), typeof(double), typeof(IslandBorder), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsArrange));
     public static readonly DependencyProperty BevelBrushProperty = DependencyProperty.Register(
         nameof(BevelBrush), typeof(Brush), typeof(IslandBorder), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
     // Glass (a theme's "glass" effect): light gathered along the inside of the outline, strongest at the edge and fading over a
@@ -62,7 +66,7 @@ public sealed class IslandBorder : Border
 
     private Pen? _rim;
     private Pen[]? _edge;
-    private (Size Size, double Shoulder, CornerRadius Corners, double Inset, double Step, double Rim)? _outlineKey;
+    private (Size Size, double Shoulder, CornerRadius Corners, double Inset, double Step, double Rim, double Cut)? _outlineKey;
     private Geometry _outline = Geometry.Empty;
     private (Geometry Light, Geometry Shade)? _bevel;
 
@@ -87,6 +91,7 @@ public sealed class IslandBorder : Border
     public double RimWidth { get => (double)GetValue(RimWidthProperty); set => SetValue(RimWidthProperty, value); }
     public double Inset { get => (double)GetValue(InsetProperty); set => SetValue(InsetProperty, value); }
     public double Pixel { get => (double)GetValue(PixelProperty); set => SetValue(PixelProperty, value); }
+    public double Cut { get => (double)GetValue(CutProperty); set => SetValue(CutProperty, value); }
     public Brush? BevelBrush { get => (Brush?)GetValue(BevelBrushProperty); set => SetValue(BevelBrushProperty, value); }
     public Brush? EdgeBrush { get => (Brush?)GetValue(EdgeBrushProperty); set => SetValue(EdgeBrushProperty, value); }
 
@@ -188,20 +193,20 @@ public sealed class IslandBorder : Border
     private Geometry Outline()
     {
         double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip, step = PixelStairs.Step(Pixel, dpi);
-        var key = (RenderSize, ShoulderRadius, CornerRadius, Inset, step, RimWidth);
+        var key = (RenderSize, ShoulderRadius, CornerRadius, Inset, step, RimWidth, step > 0 ? 0 : Cut);
         if (_outlineKey == key) return _outline;
         _outlineKey = key;
         // Stepped, the inset (the shadow caster's) is whole device pixels too, so its steps stay on them at 125 % or 175 %.
         double inset = step > 0 ? Math.Round(Inset * dpi, MidpointRounding.AwayFromZero) / dpi : Inset;
-        (_outline, _bevel) = Shape(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, inset, step, RimWidth, dpi);
+        (_outline, _bevel) = Shape(RenderSize.Width, RenderSize.Height, ShoulderRadius, CornerRadius, inset, step, RimWidth, dpi, Cut);
         return _outline;
     }
 
     // A surface drawn as the island (the island, a notice): its outline, stepped for a pixel theme, and then its bevel, a whole
     // number of device pixels thick and never thinner than one.
-    internal static (Geometry Outline, (Geometry Light, Geometry Shade)? Bevel) Shape(double w, double h, double shoulder, CornerRadius corners, double inset, double step, double rimWidth, double dpi)
+    internal static (Geometry Outline, (Geometry Light, Geometry Shade)? Bevel) Shape(double w, double h, double shoulder, CornerRadius corners, double inset, double step, double rimWidth, double dpi, double cut = 0)
     {
-        if (step <= 0) return (BuildOutline(w, h, shoulder, corners, inset), null);
+        if (step <= 0) return (cut > 0 ? BuildCut(w, h, shoulder, corners, inset, cut) : BuildOutline(w, h, shoulder, corners, inset), null);
         var stairs = BuildStairs(w, h, shoulder, corners, inset, step);
         return (Polygon(stairs), rimWidth > 0 && stairs.Count >= 3 ? Bevel(stairs, PixelStairs.Step(rimWidth, dpi)) : null);
     }
@@ -281,6 +286,59 @@ public sealed class IslandBorder : Border
         }
         light.Freeze(); shade.Freeze();
         return (light, shade);
+    }
+
+    // The cut outline: the island's shape with every curve replaced by a straight line. A corner of radius r is cut off by a 45-degree
+    // line, each leg min(cut, r) long, and a notch's shoulder is the straight slant between its ends. The measures are those of
+    // BuildOutline (shoulders on the full bounds, corners losing the inset from their radii), so the cut shape lies where the curved
+    // one would and the content keeps clear of it alike. A leg shortens by (2 - sqrt 2) of the inset, as an offset diagonal does.
+    // A capsule (every corner as round as its height allows) is a pill and keeps its round ends, as the game's resource readouts
+    // are pills; the corners turn to cuts as they fall short of half the height, over PillRun DIP, so a capsule that opens into a
+    // panel changes its shape continuously: each point of a corner is blended between the arc and the cut.
+    internal const double PillRun = 8;
+    internal static Geometry BuildCut(double w, double h, double shoulderRadius, CornerRadius corners, double insetBy, double cut)
+    {
+        if (!(w > 0) || !(h > 0)) return Geometry.Empty;
+        double shoulder = Math.Clamp(shoulderRadius, 0, Math.Min(w / 4, h / 2));
+        double shoulderDepth = shoulder * (7d / 16);
+        double inset = Math.Clamp(insetBy, 0, Math.Min(w, h) / 4), top = shoulder > 0 ? 0 : inset;
+        double shortfall = shoulder > 0 ? double.PositiveInfinity : h / 2 - Math.Min(Math.Min(corners.TopLeft, corners.TopRight), Math.Min(corners.BottomLeft, corners.BottomRight));
+        double cutting = Math.Clamp((shortfall - .5) / PillRun, 0, 1);
+        cutting = cutting * cutting * (3 - 2 * cutting);
+        w -= 2 * inset; h -= top + inset;
+        double left = shoulder, right = w - shoulder;
+        double limit = Math.Max(0, Math.Min(shoulder > 0 ? h - shoulderDepth : h / 2, (right - left) / 2));
+        double bl = Math.Clamp(corners.BottomLeft - inset, 0, limit), br = Math.Clamp(corners.BottomRight - inset, 0, limit);
+        double tl = Math.Clamp(corners.TopLeft - inset, 0, Math.Min(w, h) / 2), tr = Math.Clamp(corners.TopRight - inset, 0, Math.Min(w, h) / 2);
+        double legLoss = inset * (2 - Math.Sqrt(2));
+        var points = new List<Point>(40);
+        // One corner, from the end of the horizontal edge (u 0) to the end of the vertical one (u 1) or back: x and y measured inward
+        // from the corner (ex, ey: which way is inward), the arc blended with the cut by `cutting`. A square corner is one point.
+        void Corner(Point corner, double ex, double ey, double radius, bool fromHorizontal)
+        {
+            if (radius <= 0) { points.Add(corner); return; }
+            double leg = Math.Max(0, Math.Min(cut - legLoss, radius));
+            int n = cutting >= 1 ? 1 : 12;
+            for (int i = 0; i <= n; i++)
+            {
+                double u = fromHorizontal ? (double)i / n : 1 - (double)i / n, angle = u * Math.PI / 2;
+                double x = radius - radius * Math.Sin(angle), y = radius - radius * Math.Cos(angle);
+                x += (leg * (1 - u) - x) * cutting; y += (leg * u - y) * cutting;
+                points.Add(new Point(corner.X + ex * x, corner.Y + ey * y));
+            }
+        }
+        if (shoulder > 0) { points.Add(new Point(0, 0)); points.Add(new Point(w, 0)); points.Add(new Point(right, shoulderDepth)); }
+        else
+        {
+            // Clockwise from the left edge's top: the top left corner (vertical edge to horizontal), then the top right (horizontal to vertical).
+            Corner(new Point(0, 0), 1, 1, tl, fromHorizontal: false);
+            Corner(new Point(w, 0), -1, 1, tr, fromHorizontal: true);
+        }
+        Corner(new Point(right, h), -1, -1, br, fromHorizontal: false);
+        Corner(new Point(left, h), 1, -1, bl, fromHorizontal: true);
+        if (shoulder > 0) points.Add(new Point(left, shoulderDepth));
+        if (inset > 0) for (int i = 0; i < points.Count; i++) points[i] = new Point(points[i].X + inset, points[i].Y + top);
+        return Polygon(points);
     }
 
     // The island's outline for a size, shoulder and corners; dynamic notices draw the same outline, so that they start and end
