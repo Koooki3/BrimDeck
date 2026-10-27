@@ -8,7 +8,7 @@ namespace BrimDeck;
 // memory and GPU each as a dial with its letter inside, with its figure after it or alone (narrower), download and upload, and,
 // when chosen, the drives' space with a drive glyph, in the order and the colors set in the settings' table (CompactReading);
 // the rings alone sit closer together. CPU, GPU and the drives show their share in use, their temperature, or both one above the
-// other in two smaller lines (CompactFigures); the drives show each chosen letter after one glyph, each after its letter when
+// other in two smaller lines, or side by side when so chosen (CompactFigures); the drives show each chosen letter after one glyph, each after its letter when
 // there are several (CompactSources). It asks for the width of everything chosen (PreferredWidth); when its region is narrower,
 // the row draws it at that width and scrolls it through the region (ReadingsCarousel). It draws itself once per reading; the
 // collapsed row stays still between readings. Given a narrower width directly, it shows what fits, dropping whole readings
@@ -33,8 +33,9 @@ internal sealed class MonitorStrip : FrameworkElement
     private readonly List<(CompactMonitorItems Item, double X, double Width, double Presence)> _arranged = [];
     private double _now;
     // The rings showing their share in use and their temperature after them; the drive letters showing, the tag before each
-    // (empty when one shows), and whether each shows its space and its temperature.
-    private readonly CompactMonitorItems _usage, _heat;
+    // (empty when one shows), and whether each shows its space and its temperature. _inline: the readings showing both figures
+    // side by side rather than one above the other.
+    private readonly CompactMonitorItems _usage, _heat, _inline;
     private readonly string[] _letters, _tags;
     private readonly bool[] _letterUsage, _letterHeat;
 
@@ -55,9 +56,11 @@ internal sealed class MonitorStrip : FrameworkElement
             if (reading.Item is not (CompactMonitorItems.Cpu or CompactMonitorItems.Gpu)) continue;
             if (CompactFigures.Shows(reading, CompactFigures.Usage)) _usage |= reading.Item;
             if (CompactFigures.Shows(reading, CompactFigures.Temperature) && shows(reading.Item, StripAdmission.Heat)) _heat |= reading.Item;
+            if (reading.FiguresInLine) _inline |= reading.Item;
         }
         var drives = readings.FirstOrDefault(reading => reading.Item == CompactMonitorItems.Storage) ?? new CompactReading { Item = CompactMonitorItems.Storage };
         bool driveUsage = CompactFigures.Shows(drives, CompactFigures.Usage), driveHeat = CompactFigures.Shows(drives, CompactFigures.Temperature);
+        if (drives.FiguresInLine) _inline |= CompactMonitorItems.Storage;
         _letters = [.. admission?.Letters(drives) ?? CompactSources.Of(drives)];
         _tags = [.. _letters.Select(letter => _letters.Length > 1 ? CompactSources.Tag(letter) : "")];
         _letterUsage = [.. _letters.Select(letter => driveUsage && shows(CompactMonitorItems.Storage, letter))];
@@ -87,14 +90,18 @@ internal sealed class MonitorStrip : FrameworkElement
     }
 
     private const string WidestDegrees = "125°", WidestPercent = "100%";
-    // The figures after a ring or a drive letter: the share alone, the temperature alone, or both stacked in the smaller type. With
-    // figures (the snapshot's, while the strip scrolls) each takes its own width; without, the widest it can show.
-    private double Column(bool usage, bool heat, string? share = null, string? degrees = null)
+    // The figures after a ring or a drive letter: the share alone, the temperature alone, or both stacked in the smaller type or
+    // side by side in the row's type. With figures (the snapshot's, while the strip scrolls) each takes its own width; without,
+    // the widest it can show.
+    private double Column(CompactMonitorItems item, bool usage, bool heat, string? share = null, string? degrees = null)
     {
-        if (usage && heat) return Math.Max(SmallWidth(share ?? WidestPercent), SmallWidth(degrees ?? WidestDegrees));
+        if (usage && heat)
+            return (_inline & item) != 0 ? FigureWidth(share ?? WidestPercent) + InlineGap + FigureWidth(degrees ?? WidestDegrees)
+                : Math.Max(SmallWidth(share ?? WidestPercent), SmallWidth(degrees ?? WidestDegrees));
         return usage ? FigureWidth(share ?? WidestPercent) : heat ? FigureWidth(degrees ?? WidestDegrees) : 0;
     }
-    private double RingFigure(CompactMonitorItems item) => Math.Round(4 * _scale) + Column((_usage & item) != 0, (_heat & item) != 0);
+    private double InlineGap => Math.Round(3 * _scale);
+    private double RingFigure(CompactMonitorItems item) => Math.Round(4 * _scale) + Column(item, (_usage & item) != 0, (_heat & item) != 0);
 
     // The drives: a glyph, then each letter, its tag (if any) and its figures.
     private double Glyph => Math.Round(11 * _scale);
@@ -107,7 +114,7 @@ internal sealed class MonitorStrip : FrameworkElement
         {
             string? share = null, degrees = null;
             if (_tight) { share = GaugeFigure(CompactSources.Share(_letters[i], s)?.Share); degrees = TemperatureFigure(CompactSources.Heat(_letters[i], s)?.Celsius); }
-            width += (i > 0 ? EntryGap : 0) + (_tags[i].Length > 0 ? FigureWidth(_tags[i]) + TagGap : 0) + Column(_letterUsage[i], _letterHeat[i], share, degrees);
+            width += (i > 0 ? EntryGap : 0) + (_tags[i].Length > 0 ? FigureWidth(_tags[i]) + TagGap : 0) + Column(CompactMonitorItems.Storage, _letterUsage[i], _letterHeat[i], share, degrees);
         }
         return width;
     }
@@ -153,7 +160,7 @@ internal sealed class MonitorStrip : FrameworkElement
             _actual[item] = item switch
             {
                 CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu when (_values & item) != 0 =>
-                    _dial + Math.Round(4 * _scale) + Column((_usage & item) != 0, (_heat & item) != 0, GaugeFigure(share), TemperatureFigure(CompactFigures.Heat(item, s)?.Celsius)),
+                    _dial + Math.Round(4 * _scale) + Column(item, (_usage & item) != 0, (_heat & item) != 0, GaugeFigure(share), TemperatureFigure(CompactFigures.Heat(item, s)?.Celsius)),
                 CompactMonitorItems.Download => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.DownBytesPerSecond)),
                 CompactMonitorItems.Upload => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(s?.Network.OrDefault?.UpBytesPerSecond)),
                 CompactMonitorItems.Storage => DrivesWidth(s),
@@ -263,7 +270,8 @@ internal sealed class MonitorStrip : FrameworkElement
         Figures(drawing, x + _dial + Math.Round(4 * _scale), center, item, (_usage & item) != 0 ? (share, level) : null, (_heat & item) != 0, heat, ppd);
     }
 
-    // The share in use and the temperature at x: one in the row's type, or both stacked in the smaller type, the share above.
+    // The share in use and the temperature at x: one in the row's type, or both stacked in the smaller type, the share above, or
+    // side by side in the row's type, the share first.
     // Each keeps the text color while normal and takes its own level's color at the warning and critical levels.
     private void Figures(DrawingContext drawing, double x, double center, CompactMonitorItems item, (double? Share, MemoryLevel Level)? usage, bool heat,
         (double Celsius, MemoryLevel Level)? degrees, double ppd)
@@ -272,6 +280,14 @@ internal sealed class MonitorStrip : FrameworkElement
         string? shareText = usage is { } u ? GaugeFigure(u.Share) : null, heatText = heat ? TemperatureFigure(degrees?.Celsius) : null;
         string ShareColor() => FigureColor(usage!.Value.Level, _colors.At(item, usage.Value.Level));
         string HeatColor() => FigureColor(heatLevel, _colors.At(item, heatLevel));
+        double baseline = Math.Round(center + _font * .36);
+        if (shareText is not null && heatText is not null && (_inline & item) != 0)
+        {
+            var first = MonitorDraw.Text(shareText, _font, ShareColor(), ppd);
+            MonitorDraw.Baseline(drawing, first, x, baseline);
+            MonitorDraw.Baseline(drawing, MonitorDraw.Text(heatText, _font, HeatColor(), ppd), x + Math.Ceiling(first.WidthIncludingTrailingWhitespace) + InlineGap, baseline);
+            return;
+        }
         if (shareText is not null && heatText is not null)
         {
             // The baselines sit far enough apart for a gap of about four DIPs between the lines' digits, within the row's height.
@@ -279,7 +295,6 @@ internal sealed class MonitorStrip : FrameworkElement
             MonitorDraw.Baseline(drawing, MonitorDraw.Text(heatText, _small, HeatColor(), ppd), x, Math.Round(center + 8 * _scale));
             return;
         }
-        double baseline = Math.Round(center + _font * .36);
         if (shareText is not null) MonitorDraw.Baseline(drawing, MonitorDraw.Text(shareText, _font, ShareColor(), ppd), x, baseline);
         else if (heatText is not null) MonitorDraw.Baseline(drawing, MonitorDraw.Text(heatText, _font, HeatColor(), ppd), x, baseline);
     }
@@ -325,7 +340,7 @@ internal sealed class MonitorStrip : FrameworkElement
             var heat = _letterHeat[i] ? CompactSources.Heat(_letters[i], s) : null;
             Figures(drawing, at, center, item, _letterUsage[i] ? (share?.Share, share?.Level ?? MemoryLevel.Normal) : null, _letterHeat[i], heat, ppd);
             // Each letter keeps the room of the widest figures it can show, or, while the strip scrolls, its own.
-            at += _tight ? Column(_letterUsage[i], _letterHeat[i], GaugeFigure(share?.Share), TemperatureFigure(heat?.Celsius)) : Column(_letterUsage[i], _letterHeat[i]);
+            at += _tight ? Column(item, _letterUsage[i], _letterHeat[i], GaugeFigure(share?.Share), TemperatureFigure(heat?.Celsius)) : Column(item, _letterUsage[i], _letterHeat[i]);
         }
     }
 }

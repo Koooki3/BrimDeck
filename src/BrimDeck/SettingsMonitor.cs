@@ -328,8 +328,8 @@ public sealed partial class SettingsWindow
         return new Border { Child = row, Height = ReadingRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = item, RenderTransform = new TranslateTransform() };
     }
 
-    // The menu of what CPU, GPU or the drives show after their glyph: the share in use, the temperature or both (one above the
-    // other), at least one; for the drives also which lettered volumes, at least one. A chosen letter not found now (a drive taken
+    // The menu of what CPU, GPU or the drives show after their glyph: the share in use, the temperature or both, at least one, and
+    // whether both show one above the other (the default) or side by side; for the drives also which lettered volumes, at least one. A chosen letter not found now (a drive taken
     // out) is listed as not connected. The drives come from the sampler's last reading, or, when it has none, are read once as the
     // menu opens. The menu is as wide as its button.
     private Button FiguresMenu(CompactMonitorItems item, List<Action> refresh, Action<Action<DeckSettings>> edit)
@@ -385,8 +385,8 @@ public sealed partial class SettingsWindow
             CornerRadius = new CornerRadius(8), Padding = new Thickness(4)
         };
         menu.Child = surface;
-        // One line: a check when chosen, then the label. The last one chosen of its group stays.
-        void Entry(string label, bool on, bool last, string? help, Action toggle)
+        // One line: a check when chosen, then the label. The last one chosen of its group stays; blocked: why it cannot be chosen now.
+        void Entry(string label, bool on, bool last, string? help, Action toggle, string? blocked = null)
         {
             var line = new DockPanel();
             line.Children.Add(new TextBlock
@@ -398,8 +398,8 @@ public sealed partial class SettingsWindow
             line.Children.Add(text);
             var entry = ActionButton("", () => { }); entry.Content = line;
             entry.HorizontalContentAlignment = HorizontalAlignment.Stretch; entry.Padding = new Thickness(7, 3, 7, 3);
-            entry.IsEnabled = !last;
-            entry.ToolTip = last ? Loc.T("至少保留一项。", "At least one stays.") : help;
+            entry.IsEnabled = !last && blocked is null;
+            entry.ToolTip = last ? Loc.T("至少保留一项。", "At least one stays.") : blocked ?? help;
             ToolTipService.SetShowOnDisabled(entry, true);
             AutomationProperties.SetName(entry, label); AutomationProperties.SetHelpText(entry, on ? Loc.T("已选", "Chosen") : Loc.T("未选", "Not chosen"));
             entry.Click += (_, _) => { toggle(); Fill(); };
@@ -415,7 +415,7 @@ public sealed partial class SettingsWindow
             items.Children.Clear();
             var reading = Reading(S, item);
             var figures = CompactFigures.Of(reading);
-            if (drives) Header(Loc.T("数值", "Figures"));
+            Header(Loc.T("数值", "Figures"));
             foreach (var figure in new[] { CompactFigures.Usage, CompactFigures.Temperature })
             {
                 bool on = figures.Contains(figure);
@@ -429,6 +429,14 @@ public sealed partial class SettingsWindow
                     if (!next.Remove(figure)) next.Add(figure);
                     edit(s => Reading(s, item).Figures = CompactFigures.Normalize(item, next));
                 });
+            }
+            Header(Loc.T("排列", "Layout"));
+            string? single = figures.Count < 2 ? Loc.T("同时选择占用和温度时可用。", "Available when both usage and temperature are chosen.") : null;
+            foreach (var inLine in new[] { false, true })
+            {
+                bool on = reading.FiguresInLine == inLine;
+                Entry(inLine ? Loc.T("同一行", "One line") : Loc.T("分两行", "Two lines"), on, false, null,
+                    () => edit(s => Reading(s, item).FiguresInLine = inLine), single);
             }
             if (!drives) return;
             Header(Loc.T("盘符", "Letters"));
