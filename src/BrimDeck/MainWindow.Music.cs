@@ -891,7 +891,8 @@ public partial class MainWindow
         title.Gliding += gliding => { if (ReferenceEquals(_compactMarquee, title)) MusicGliding(gliding); };
         return title;
     }
-    // The pointer came over the island: the title scrolls its laps again.
+    // The panel closed: the collapsed title scrolls its laps again, as the row comes back into view. (Reaching the island
+    // opens the panel, so the collapsed title is not seen while the pointer is on it.)
     private void ReplayCompactTitle() { _compactTitleRested = null; _compactMarquee?.Replay(); }
     private void RenderCompactMusic()
     {

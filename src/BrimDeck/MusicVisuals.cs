@@ -300,7 +300,7 @@ internal sealed class MusicMarquee : FrameworkElement
         Typeface, FontSize, _ink ?? Foreground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
     public void SetScrolling(bool enabled) { _scrolling = enabled; UpdateAnimation(); }
     private void ResetText() { _formatted = null; _rested = false; ResetAnimation(); Painter.InvalidateVisual(); }
-    // Scrolls the laps again from the start (the pointer came over the island).
+    // Scrolls the laps again from the start (the panel closed and the row shows again).
     public void Replay()
     {
         if (!_rested) return;
