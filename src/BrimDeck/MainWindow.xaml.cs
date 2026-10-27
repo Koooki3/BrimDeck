@@ -585,6 +585,15 @@ public partial class MainWindow : Window
         _clipSettle.Interval = TimeSpan.FromMilliseconds(Math.Max(1, after) + 100);
         _clipSettle.Start();
     }
+    // The content's picture during a move, at the monitor's scale (BitmapCache already renders at the system's; MainWindow.Shadow).
+    private BitmapCache? _moveCache;
+    private BitmapCache MoveCache()
+    {
+        _moveCache ??= new BitmapCache { SnapsToDevicePixels = true };
+        double render = VisualTreeHelper.GetDpi(this).DpiScaleX / SystemScale;
+        if (render > 0 && _moveCache.RenderAtScale != render) _moveCache.RenderAtScale = render;
+        return _moveCache;
+    }
     private static bool ThemeSweeps => PanelTheme.Current.Motion.Ambient is { Sweep: > 0, SweepOpacity: > 0 };
     // keyboard: a hotkey or Escape asked for it (motion-review C4), so the move is quicker and has no give.
     public void SetExpanded(bool expanded, bool instant = false, bool keyboard = false)
@@ -750,7 +759,12 @@ public partial class MainWindow : Window
         // Over liquid glass the content never leads the glass: the glass follows the island's shape a couple of frames late
         // (GlassBackdrop.Lag), so opening, the content starts no earlier than LiquidLeadMs in (live check 10-26, LG-02).
         if (expanded && duration > 0 && LiquidTheme.Shown(_glass)) content = content with { Start = Math.Max(content.Start, Math.Min(.5, LiquidLeadMs / duration)) };
-        Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
+        // While the content scales in or out it is drawn once into a cached picture, and the picture is what scales: a scale that
+        // changes on every frame redraws every glyph and shape of the page on every frame (live check 10-27: openings ran at every
+        // other frame of a 144 Hz display, closings, where the content fades quickly, at nearly every frame). The cache is let go
+        // once the content has arrived, so the page is drawn sharp and live again.
+        if (duration > 0) ExpandedContent.CacheMode = MoveCache();
+        Animate(ExpandedContent, OpacityProperty, expanded ? 1 : 0, duration, content, easeOut, () => { ExpandedContent.CacheMode = null; if (!_expanded) ExpandedContent.Visibility = Visibility.Hidden; });
         // motion-review F13: what leaves eases out as what arrives does; InOut is for what changes in place.
         Animate(ContentScale, ScaleTransform.ScaleXProperty, expanded ? 1 : .96, duration, content, easeOut);
         Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, easeOut);
