@@ -301,6 +301,10 @@ public sealed class DeckSettings
     public bool MonitorProcesses { get; set; } = true;
     public ProcessSort MonitorSort { get; set; }
     public MonitorMain MonitorMain { get; set; }
+    // The graphics adapter the monitor shows, by its key (GpuSample.Key), and its name to find it by should its ids change and to
+    // name it while it is not connected; null for 自动 (GpuChoice.Auto). Files saved before there was a choice read as 自动.
+    public string? MonitorGpu { get; set; }
+    public string? MonitorGpuName { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
     // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it.
     public bool MonitorTemperatures { get; set; } = true;
@@ -461,6 +465,8 @@ public sealed class DeckSettings
         MonitorInterval = Math.Clamp(MonitorInterval, 1, 2);
         if (!Enum.IsDefined(MonitorSort)) MonitorSort = ProcessSort.Cpu;
         if (!Enum.IsDefined(MonitorMain)) MonitorMain = MonitorMain.Cpu;
+        MonitorGpu = string.IsNullOrWhiteSpace(MonitorGpu) ? null : MonitorGpu.Trim();
+        MonitorGpuName = MonitorGpu is null || string.IsNullOrWhiteSpace(MonitorGpuName) ? null : MonitorGpuName.Trim();
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
