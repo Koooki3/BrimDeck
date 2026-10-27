@@ -283,11 +283,19 @@ internal sealed class GlassBackdrop : IDisposable
         Decided(liquid || acrylic, Math.Clamp(_shape().Material, 0, 1));
     }
 
+    // Diagnosis only (memory-opt, the opening's frame rate under liquid glass): BRIMDECK_GLASS_TRIAL leaves one part of the
+    // glass's work out, for comparing; unset, everything is as it always is. nofollow: no frame-by-frame following (the glass
+    // moves only when the layout says so); noregion: the glass window's region is set once and not cut again on every frame;
+    // nobody: the acrylic body and its shoulders not drawn (no host backdrop, no noise); norim: no rim and pointer glow;
+    // noprobe: no luminosity probe.
+    private static readonly HashSet<string> Trial = (Environment.GetEnvironmentVariable("BRIMDECK_GLASS_TRIAL") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+
     // Follows the island frame by frame for at least the given milliseconds, and after that until it holds still: for motion
     // that changes no layout (a render transform, an opacity), which Update does not see.
     public void Follow(double milliseconds)
     {
         if (_disposed) return;
+        if (Trial.Contains("nofollow")) { if (Measure() is { } once) { _last = once; if (EnsureWindow()) { Dress(); Show(once); } } return; }
         // Offscreen there is no window to follow: the stand-in decides, as on every update.
         if (StandIn is not null) { StandInFrame(); return; }
         _followUntil = Math.Max(_followUntil, Environment.TickCount64 + (long)Math.Max(0, milliseconds));
@@ -488,7 +496,9 @@ internal sealed class GlassBackdrop : IDisposable
             Rim(bodyLeft, acrylicTop, bodyRight, outerBottom, round, opacity);
             RimBelow(shoulder >= 1 ? top + shoulder : double.NaN);
             Glow(shown, opacity);
-            Probe(true);
+            Probe(!Trial.Contains("noprobe"));
+            if (Trial.Contains("norim")) { if (_rim is not null) _rim.IsVisible = false; if (_glow is not null) _glow.IsVisible = false; }
+            if (Trial.Contains("nobody")) { if (_sprite is not null) _sprite.IsVisible = false; if (_shoulderLeft is not null) _shoulderLeft.IsVisible = false; if (_shoulderRight is not null) _shoulderRight.IsVisible = false; }
             Lens(shown, outerLeft, acrylicTop, outerRight, outerBottom, round, opacity);
         }
         else
@@ -509,6 +519,7 @@ internal sealed class GlassBackdrop : IDisposable
         // The window region: the clip's rectangle, rounded alike, so the window takes no clicks and shows nothing outside it.
         // A square top reaches above the window, as the clip does, so the region's rounded top corners fall outside it.
         var region = ((int)Math.Floor(left), (int)Math.Floor(clipTop), (int)Math.Ceiling(right), (int)Math.Ceiling(bottom), (int)Math.Round(corner));
+        if (Trial.Contains("noregion") && _region is { } kept) region = kept;
         if (region != _region)
         {
             _region = region;

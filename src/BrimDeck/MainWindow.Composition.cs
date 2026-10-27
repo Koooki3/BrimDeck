@@ -20,7 +20,6 @@ public partial class MainWindow
 {
     internal static readonly bool DwmComposed = Environment.GetEnvironmentVariable("BRIMDECK_COMPOSITION") == "dwm"
         && RenderCapability.Tier >> 16 >= 2 && !SystemParameters.IsRemoteSession;
-    private Int32Rect _regionShown = Int32Rect.Empty;
     private bool _regionQueued;
 
     // Before the window has a handle: from then on the choice cannot change.
@@ -97,6 +96,14 @@ public partial class MainWindow
     private Rect Drawn(Rect island)
     {
         if (island.IsEmpty) return island;
+        var drawn = Shadowed(island);
+        foreach (var extra in Beside()) drawn.Union(extra);
+        return drawn;
+    }
+
+    // The island with its shadow as far as it is seen.
+    private Rect Shadowed(Rect island)
+    {
         var drawn = island;
         if (ShadowHost.Visibility == Visibility.Visible && ShadowHost.Opacity > .01)
             foreach (var layer in new FrameworkElement[] { IslandShadow, IslandContact })
@@ -108,35 +115,59 @@ public partial class MainWindow
                 cast.Inflate(shadow.BlurRadius * ShadowSeen + 1, shadow.BlurRadius * ShadowSeen + 1);
                 drawn.Union(cast);
             }
-        if (_grips.Visibility == Visibility.Visible && VisualTreeHelper.GetDescendantBounds(_grips) is { IsEmpty: false } grips)
-            drawn.Union(new Rect(_grips.TranslatePoint(grips.TopLeft, this), grips.Size));
-        if (HoverExtension.Visibility == Visibility.Visible && HoverExtension.ActualHeight > 0)
-            drawn.Union(new Rect(HoverExtension.TranslatePoint(new Point(0, 0), this), HoverExtension.RenderSize));
         return drawn;
     }
 
+    // What takes clicks beside the island: the resize grips and the open panel's hover strip.
+    private IEnumerable<Rect> Beside()
+    {
+        if (_grips.Visibility == Visibility.Visible && VisualTreeHelper.GetDescendantBounds(_grips) is { IsEmpty: false } grips)
+            yield return new Rect(_grips.TranslatePoint(grips.TopLeft, this), grips.Size);
+        if (HoverExtension.Visibility == Visibility.Visible && HoverExtension.ActualHeight > 0)
+            yield return new Rect(HoverExtension.TranslatePoint(new Point(0, 0), this), HoverExtension.RenderSize);
+    }
+
+    // At rest the region keeps the island's rounded corners, widened by the shadow around them: a rectangle took clicks up to
+    // 28 px out from a corner of the open liquid glass panel where the layered window took them to 15 (live check 10-27).
     private void FitRegion()
     {
         if (Environment.TickCount64 < _regionHeldUntil) return;
-        SetRegion(IsVisible ? Drawn(new Rect(Island.TranslatePoint(new Point(0, 0), this), Island.RenderSize)) : Rect.Empty);
+        if (!IsVisible) { SetRegion([]); return; }
+        var island = new Rect(Island.TranslatePoint(new Point(0, 0), this), Island.RenderSize);
+        var around = Shadowed(island);
+        double side = Math.Max(0, island.Left - around.Left), corners = Island.CornerRadius.TopLeft, bottom = Island.CornerRadius.BottomLeft;
+        var pieces = new List<(Rect Bounds, double Radius)> { (around, bottom + side) };
+        // A flatter top than bottom (the notch, the open panel hanging from the screen's edge): its upper half rounds as the top.
+        if (corners < bottom) pieces.Add((new Rect(around.Left, around.Top, around.Width, around.Height / 2), corners + side));
+        foreach (var extra in Beside()) pieces.Add((extra, 0));
+        SetRegion(pieces);
     }
 
-    // The region in device pixels, whole pixels around the bounds; nothing at all while nothing is drawn.
-    private void SetRegion(Rect bounds)
+    private void SetRegion(Rect bounds) => SetRegion(bounds.IsEmpty ? [] : [(bounds, 0)]);
+
+    // The region in device pixels from rounded rectangles (radius in DIPs), whole pixels around each; nothing at all for none.
+    private string _regionKey = "";
+    private void SetRegion(List<(Rect Bounds, double Radius)> pieces)
     {
         if (PresentationSource.FromVisual(this) is not HwndSource source || source.CompositionTarget is null) return;
-        Int32Rect wanted;
-        if (bounds.IsEmpty) wanted = new Int32Rect(0, 0, 0, 0);
-        else
+        var device = source.CompositionTarget.TransformToDevice;
+        var shapes = new List<(int Left, int Top, int Right, int Bottom, int Round)>();
+        foreach (var (bounds, radius) in pieces)
         {
-            var device = source.CompositionTarget.TransformToDevice;
+            if (bounds.IsEmpty) continue;
             var corner = device.Transform(bounds.TopLeft); var far = device.Transform(bounds.BottomRight);
-            int left = Math.Max(0, (int)Math.Floor(corner.X)), top = Math.Max(0, (int)Math.Floor(corner.Y));
-            wanted = new Int32Rect(left, top, Math.Max(0, (int)Math.Ceiling(far.X) - left), Math.Max(0, (int)Math.Ceiling(far.Y) - top));
+            shapes.Add((Math.Max(0, (int)Math.Floor(corner.X)), Math.Max(0, (int)Math.Floor(corner.Y)), (int)Math.Ceiling(far.X), (int)Math.Ceiling(far.Y), (int)Math.Round(Math.Max(0, radius) * device.M11)));
         }
-        if (wanted == _regionShown) return;
-        _regionShown = wanted;
-        var region = CreateRectRgn(wanted.X, wanted.Y, wanted.X + wanted.Width, wanted.Y + wanted.Height);
+        string key = string.Join(";", shapes);
+        if (key == _regionKey) return;
+        _regionKey = key;
+        var region = CreateRectRgn(0, 0, 0, 0);
+        foreach (var (l, t, r, b, round) in shapes)
+        {
+            var piece = round > 0 ? CreateRoundRectRgn(l, t, r + 1, b + 1, 2 * round, 2 * round) : CreateRectRgn(l, t, r, b);
+            CombineRgn(region, region, piece, 2); // RGN_OR
+            DeleteObject(piece);
+        }
         // The system owns the region once it is set; it is deleted only if setting it failed.
         if (SetWindowRgn(source.Handle, region, false) == 0) DeleteObject(region);
     }
@@ -145,6 +176,8 @@ public partial class MainWindow
     [DllImport("dwmapi")] private static extern int DwmExtendFrameIntoClientArea(IntPtr window, ref Margins margins);
     [DllImport("dwmapi")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
     [DllImport("gdi32")] private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32")] private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
+    [DllImport("gdi32")] private static extern int CombineRgn(IntPtr destination, IntPtr first, IntPtr second, int mode);
     [DllImport("gdi32")] private static extern bool DeleteObject(IntPtr handle);
     [DllImport("user32")] private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
 }
