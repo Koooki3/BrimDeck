@@ -20,6 +20,7 @@ public sealed record PanelThemeInfo(string Id, PanelThemeKind Kind, PanelThemeFi
 }
 
 [JsonSerializable(typeof(PanelThemeFile))]
+[JsonSerializable(typeof(PanelThemeDecor))]
 [JsonSerializable(typeof(string))]
 internal sealed partial class PanelThemeJson : JsonSerializerContext;
 
@@ -32,17 +33,31 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 public static partial class PanelThemes
 {
     public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners", PixelBlocks = "pixel-blocks";
-    public const string IslandHoliday = "island-holiday";
-    public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2;
+    public const string IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2";
+    public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2, ThumbContrast = 2;
+    // The warning and critical colors, the theme's and those chosen for an application or the collapsed readings: they color a
+    // quota's number and a reading's value as well as bars and rings, so they are held to the body-text minimum everywhere,
+    // and a number and its bar keep one color.
+    public const double LevelContrast = TextContrast;
+    // The scroll bar's handle at rest is drawn at this opacity or, where that would leave it under ThumbContrast, at the least
+    // opacity in steps of 0.05 that reaches it (PanelPalette.ThumbRestOpacity).
+    public const double ThumbRest = .55;
+    public static double ThumbRestOpacity(ThemeColor thumb, IReadOnlyList<ThemeColor> surfaces)
+    {
+        for (double opacity = ThumbRest; opacity < 1; opacity = Math.Round(opacity + .05, 2))
+            if (thumb.WithAlpha((byte)Math.Round(thumb.A * opacity)).MinimumContrast(surfaces) >= ThumbContrast) return opacity;
+        return 1;
+    }
 
     public static readonly IReadOnlyList<PanelThemeToken> Tokens =
     [
         new("surface", "面板底色", "Panel surface"),
         new("textPrimary", "主要文字", "Primary text", StrongTextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("textSecondary", "次要文字", "Secondary text", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
-        new("textTertiary", "辅助文字", "Tertiary text", GraphicContrast, PanelThemeBackdrop.SurfaceAndPopup),
+        // Tertiary text is small real text (the clock, "used", times, a notice's source), so it is held to the body-text minimum.
+        new("textTertiary", "辅助文字", "Tertiary text", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("accent", "强调色（键盘焦点、选中日期）", "Accent (keyboard focus, chosen dates)", GraphicContrast, PanelThemeBackdrop.SurfaceAndPopup),
-        new("onAccent", "强调色上的文字（选中的日期）", "Text on the accent (chosen dates)", GraphicContrast, PanelThemeBackdrop.Accent),
+        new("onAccent", "强调色上的文字（选中的日期、通知主按钮）", "Text on the accent (chosen dates, a notice's main button)", TextContrast, PanelThemeBackdrop.Accent),
         new("danger", "错误与暂停同步", "Errors and paused sync", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("liked", "已喜欢", "Liked song", GraphicContrast, PanelThemeBackdrop.Surface),
         new("clock", "时间默认色", "Default clock color", TextContrast, PanelThemeBackdrop.Surface),
@@ -61,7 +76,7 @@ public static partial class PanelThemes
         new("rangeFill", "日期范围底色", "Date range fill"),
         new("coverPlaceholder", "无封面占位", "Missing cover"),
         new("coverOutline", "封面描边", "Cover outline"),
-        new("scrollThumb", "滚动条", "Scroll bar"),
+        new("scrollThumb", "滚动条", "Scroll bar", ThumbContrast, PanelThemeBackdrop.Surface),
         new("rim", "边缘描线", "Rim"),
         new("shadow", "阴影或辉光", "Shadow or glow"),
         new("indicator", "指示条", "Indicator"),
@@ -111,7 +126,7 @@ public static partial class PanelThemes
     // name, which a test keeps equal to the id inside the file.
     private const string ThemeResources = ".Themes.";
     // Dark and light first, then the ported editor themes, then BrimDeck's own extensions with the custom demo last.
-    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, PixelBlocks, Demo];
+    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, IslandHoliday2, PixelBlocks, Demo];
     private static (string Id, string Resource)[]? _builtInIndex;
     private static (string Id, string Resource)[] BuiltInIndex => _builtInIndex ??= [.. typeof(PanelThemes).Assembly.GetManifestResourceNames()
         .Where(name => name.Contains(ThemeResources, StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))

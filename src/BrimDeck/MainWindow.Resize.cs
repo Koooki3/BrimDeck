@@ -158,7 +158,7 @@ public partial class MainWindow
         double width = _resizeFrom.Width + (_resizeEdge.HasFlag(ResizeEdges.Right) ? 2 * dx : _resizeEdge.HasFlag(ResizeEdges.Left) ? -2 * dx : 0);
         if (_resizeCompact)
         {
-            var (min, max) = CollapsedGeometry.WidthRange(EffectiveStyle, MonitorBoundsDip, WorkDip);
+            var (min, max) = CompactWidthRange(EffectiveStyle);
             _springWidth.Target = Spring.Resist(width, min, max);
         }
         else
@@ -263,12 +263,20 @@ public partial class MainWindow
         return true;
     }
 
+    // The widths a drag can give the collapsed surface: the style's range on this monitor, but never narrower than what the content
+    // must show (CompactMusicLayout.RequiredWidth), which the surface keeps whatever width is saved.
+    private (double Min, double Max) CompactWidthRange(CompactStyle style)
+    {
+        var (min, max) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip);
+        return (Math.Min(max, Math.Max(min, CollapsedGeometry.SurfaceWidth(style, Collapsed.Surface.Height, _compactRequired))), max);
+    }
+
     private void ApplyResize(double width, double height)
     {
         if (_resizeCompact)
         {
             var style = EffectiveStyle;
-            var (min, max) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip);
+            var (min, max) = CompactWidthRange(style);
             width = Math.Clamp(width, min, max);
             if (width == Collapsed.Surface.Width && !Settings.CompactAutoWidth(style)) return;
             _resizeChanged = true;

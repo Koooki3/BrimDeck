@@ -14,12 +14,14 @@ namespace BrimDeck;
 // A dial with the reading's letter (MonitorDraw.Dial, as the collapsed strip has it), a figure with its unit, and a detail after
 // it, on one baseline: "(C) 47 % 3.41 GHz". Aligned right, the dial still leads and the whole line ends at the right edge. As a
 // button it lights its dial under the pointer and takes clicks.
-// The main gauge fills the room after its figure with the last minute's trend (Trend), a soft line in its own color.
+// The main gauge fills the room after its figure (and its detail) with the last minute's trend (Trend), a soft line in its own color.
 internal sealed class FigureGauge : FrameworkElement
 {
     private readonly string _letter, _color;
     private readonly double _figure, _small;
-    private readonly bool _right, _button;
+    private readonly bool _right;
+    private bool _button;
+    private string? _buttonName;
     private Eased _share, _hover = new(0, Eased.Hover);
     private bool _hasShare, _pressed;
     private string _number = "—", _unit = "", _detail = "", _tip = "", _detailColor = UI.Tertiary;
@@ -34,8 +36,22 @@ internal sealed class FigureGauge : FrameworkElement
     public FigureGauge(string letter, string color, double figure, double small, bool right = false, string? button = null)
     {
         _letter = letter; _color = color; _figure = figure; _small = small; _right = right; _button = button is not null;
-        Height = Math.Ceiling(figure * 1.4);
-        if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); Focusable = false; }
+        Height = Math.Ceiling(figure * 1.4); Focusable = false;
+        Button = button;
+    }
+
+    // What a click does, for screen readers, or null for a gauge that takes no clicks; the graphics gauge takes them only while
+    // there is another adapter to switch to.
+    public string? Button
+    {
+        set
+        {
+            if (value == _buttonName && _button == value is not null) return;
+            _buttonName = value;
+            if (!(_button = value is not null)) { _pressed = false; Hover(false); }
+            Cursor = _button ? Cursors.Hand : null;
+            AutomationProperties.SetName(this, value ?? "");
+        }
     }
 
     // detailColor: the detail's color, the tertiary text color by default (a temperature takes its level's).

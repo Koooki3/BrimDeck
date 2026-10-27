@@ -207,7 +207,9 @@ public partial class App : Application
         Dispatcher.BeginInvoke(() =>
         {
             if (Exiting) return;
-            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId) ApplyPanelTheme(systemChanged: true);
+            // High contrast turned on or off, or its scheme changed, shows the system's colors on the panel (PanelTheme.HighContrast).
+            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId || SystemParameters.HighContrast || PanelTheme.HighContrast)
+                ApplyPanelTheme(systemChanged: true);
             // The theme page's "System" card shows the Windows mode whichever theme is chosen.
             else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
         });
@@ -217,10 +219,12 @@ public partial class App : Application
     internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false)
     {
         var previous = PanelTheme.Current;
+        bool wasHigh = PanelTheme.HighContrast;
         bool changed = PanelTheme.Use(Settings, reload, systemChanged);
         ScheduleDaylight();
         if (!changed) return;
-        if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
+        // Into or out of high contrast the theme itself has not changed, so the clock's gradient stays as the user left it.
+        if (systemChanged && !wasHigh && !PanelTheme.HighContrast && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         if (!reload) _settingsWindow?.PanelThemeChanged();
     }
@@ -294,7 +298,14 @@ public partial class App : Application
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
         bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
         if (Exiting || Monitor is null && !wanted) return;
-        if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
+        // The sampler reads the choice of graphics adapter on its own thread, where each part is read whole.
+        if (Monitor is null)
+        {
+            Monitor = new SystemSampler(Dispatcher, () => (Settings.MonitorGpu, Settings.MonitorGpuName));
+            Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot);
+            // A choice saved under an older key is kept under the adapter's key from now on (GpuChoice.Resolve).
+            Monitor.GpuKeyUpgraded += (old, key) => { if (Settings.MonitorGpu == old) { Settings.MonitorGpu = key; QueueSave(); } };
+        }
         Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
         UpdateMonitorExtras();
     }
