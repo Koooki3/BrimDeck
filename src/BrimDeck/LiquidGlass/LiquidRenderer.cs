@@ -961,11 +961,13 @@ internal sealed class LiquidRenderer : IDisposable
             Compile(text, "Frost.hlsl", "Stats", "ps_5_0"));
     }
 
-    // How many shaders were compiled at run time in this process (the tests check a renderer compiles none).
+    // How many shaders were compiled at run time in this process, and the last one (the tests check a renderer compiles none).
     internal static int RuntimeCompiles;
+    internal static string LastCompile = "";
     private static byte[] Compile(string source, string name, string entry, string profile)
     {
         Interlocked.Increment(ref RuntimeCompiles);
+        LastCompile = name + ":" + entry;
         var result = Compiler.Compile(source, null!, null!, entry, name, profile, ShaderFlags.OptimizationLevel3, EffectFlags.None, out var code, out var errors);
         using (errors)
         using (code)

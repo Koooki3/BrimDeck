@@ -39,9 +39,11 @@ internal static class ShaderTests
         using (new LiquidRenderer(capture.Device)) { }
         var first = clock.Elapsed.TotalMilliseconds;
         // Whether the renderer compiled is counted rather than told by its time: cold, the driver turns the precompiled bytecode
-        // into its own in some 375-600 ms here, but over 1.8 s while a game or a video loads the GPU, near the 4 s a compile at run
-        // time took. The times are printed, and held to bounds only with BRIMDECK_TIMING=1 (a quiet machine).
-        check($"liquid glass: a renderer is made without compiling ({first:0} ms)", LiquidRenderer.RuntimeCompiles == compiles);
+        // into its own in some 375-600 ms here, slower while a game or a video loads the GPU, and a compile at run time takes from
+        // about 1.4 s (three shaders) to 4 s. The count is what tells them apart: it found Liquid.ps.cso left out of the assembly
+        // (MSBuild took ".ps." for a culture), the renderer compiling at every start. The times are printed, and held to a bound
+        // only with BRIMDECK_TIMING=1 (a quiet machine).
+        check($"liquid glass: a renderer is made without compiling ({first:0} ms; compiled {LiquidRenderer.RuntimeCompiles - compiles}, last {LiquidRenderer.LastCompile})", LiquidRenderer.RuntimeCompiles == compiles);
         clock.Restart();
         using (new LiquidRenderer(capture.Device)) { }
         var again = clock.Elapsed.TotalMilliseconds;
