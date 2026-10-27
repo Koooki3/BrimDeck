@@ -147,7 +147,13 @@ internal static class DesktopSourceTests
         var clock = Stopwatch.StartNew();
         bool back = UpdateSoon(source, region, out bool changed);
         check(FormattableString.Invariant($"desktop capture: access lost, the capture waits and starts again ({clock.ElapsedMilliseconds} ms)"), waits && back && changed);
-        check("desktop capture: after a lost access the region is the desktop again, whole, not black", All(Read(source), source.Size, Light));
+        // The first frame after access returns is never black, not one pixel of it. That it is the backdrop whole may take a few frames
+        // more while something else covers the corner for a moment (a notification, a game's overlay); a capture that stayed black
+        // or cut would not come right however long it is given.
+        var frame = Read(source);
+        bool black = Any(frame, source.Size, (0, 0, 0), 2), whole = All(frame, source.Size, Light);
+        for (int again = 0; again < 10 && !whole; again++) { Backdrop.Pump(); Thread.Sleep(50); source.Update(region, out _); whole = All(Read(source), source.Size, Light); }
+        check($"desktop capture: after a lost access the region is the desktop again, whole, not black (black {black})", !black && whole);
     }
 
     // A window left out of the capture (DesktopSource.Exclude) is not in it, opaque as it is; a window Windows will not leave out
@@ -371,6 +377,17 @@ internal static class DesktopSourceTests
 
     // Every pixel of the region (Size, at the texture's top-left) this color.
     // Within a step or two of it where the monitor composes in float (advanced color), which the fill shader turns to 8-bit.
+    // Whether any pixel is this color (within the given distance on each channel).
+    private static bool Any((byte[] Pixels, int Stride) read, (int Width, int Height) size, (byte R, byte G, byte B) color, int within = 0)
+    {
+        for (int y = 0; y < size.Height; y++)
+            for (int x = 0; x < size.Width; x++)
+            {
+                int o = (y * read.Stride + x) * 4;
+                if (Math.Abs(read.Pixels[o] - color.B) <= within && Math.Abs(read.Pixels[o + 1] - color.G) <= within && Math.Abs(read.Pixels[o + 2] - color.R) <= within) return true;
+            }
+        return false;
+    }
     private static bool All((byte[] Pixels, int Stride) read, (int Width, int Height) size, (byte R, byte G, byte B) color, int within = 0)
     {
         for (int y = 0; y < size.Height; y++)

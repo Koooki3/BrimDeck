@@ -97,7 +97,10 @@ internal static class CaptureExclusionTests
             using var second = DesktopSource.Open(island, 0, region, () => ready = true, out var opened);
             check(FormattableString.Invariant($"capture start: without one waiting the glass is told to wait ({call:0.0} ms on the UI thread), the source made off it in {made2} ms, then opened"),
                 none is null && opening == DesktopSource.Opening.Pending && call < 20 && second is not null && opened == DesktopSource.Opening.Opened && DesktopSource.Made == made + 2);
-            check("capture start: the glass waiting is called back once the source is there", ready);
+            // The callback is posted to the UI thread as the source is made, so it may come a pump or two after the source does.
+            var callback = Stopwatch.StartNew();
+            while (!ready && callback.ElapsedMilliseconds < 1000) { Backdrop.Pump(); Thread.Sleep(5); }
+            check(FormattableString.Invariant($"capture start: the glass waiting is called back once the source is there ({callback.ElapsedMilliseconds} ms after it)"), ready);
         }
         finally
         {
