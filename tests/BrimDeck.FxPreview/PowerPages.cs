@@ -14,7 +14,7 @@ using BrimDeck.Native;
 internal static partial class LiquidPages
 {
     private sealed record PowerScene(string Label, double Width, double Height, bool Laptop, MonitorSnapshot Snapshot);
-    private sealed record StripScene(string Label, MonitorSnapshot Snapshot, bool Laptop);
+    private sealed record StripScene(string Label, MonitorSnapshot Snapshot, bool Laptop, BatteryReading? Device = null);
 
     private static BatteryCell Cell(double remaining, double rate, bool charging = false, bool discharging = false)
         => new("fx", remaining, 60_000, 66_000, rate, charging, discharging);
@@ -65,11 +65,11 @@ internal static partial class LiquidPages
             [Cell(remaining, rate, charging, !charging && rate < 0)], ac, saver)).OrDefault!;
         return
         [
-            new("on battery, 62 %, 8.4 W measured", Powered(basis, discharge, null, B(37_000, -8_400, false, false)), true),
-            new("Battery saver, 62 %", Powered(basis, discharge, null, B(37_000, -8_400, false, false, saver: true)), true),
-            new("charging, 84 %, 42 W estimate", Powered(basis, estimate, null, B(50_400, 31_000, true, true)), true),
-            new("low, 12 %", Powered(basis, discharge with { Watts = 112.4 }, null, B(7_200, -14_200, false, false)), true),
-            new("a desktop: power only", Powered(basis, estimate, null, null), false),
+            new("on battery 62 % / mouse 83 %", Powered(basis, discharge, null, B(37_000, -8_400, false, false)), true, new(83, false, MemoryLevel.Normal, "MX Master 3S", DeviceKind.Mouse)),
+            new("Battery saver 62 % / headphones 45 % charging", Powered(basis, discharge, null, B(37_000, -8_400, false, false, saver: true)), true, new(45, true, MemoryLevel.Normal, "WH-1000XM4", DeviceKind.Headphones)),
+            new("charging 98 % / keyboard 98 %", Powered(basis, estimate, null, B(58_800, 31_000, true, true)), true, new(98, false, MemoryLevel.Normal, "MX Keys S", DeviceKind.Keyboard)),
+            new("low 12 % / mouse 22 % (elevated)", Powered(basis, discharge with { Watts = 112.4 }, null, B(7_200, -14_200, false, false)), true, new(22, false, MemoryLevel.Elevated, "MX Master 3S", DeviceKind.Mouse)),
+            new("a desktop: power only / keyboard 12 % (low)", Powered(basis, estimate, null, null), false, new(12, false, MemoryLevel.Critical, "F99 MAX", DeviceKind.Keyboard)),
         ];
     }
 
@@ -84,7 +84,7 @@ internal static partial class LiquidPages
         if (english) { settings.Language = Loc.English; Loc.Use(Loc.English); }
         // The sampler is not running here, so the page would keep room for three drives that are not there.
         settings.CapsuleMonitor = true; settings.NotchMonitor = true; settings.MonitorStorage = false;
-        foreach (var reading in settings.CompactReadings) reading.Visible = reading.Item is CompactMonitorItems.Cpu or CompactMonitorItems.Power or CompactMonitorItems.Charge;
+        foreach (var reading in settings.CompactReadings) reading.Visible = reading.Item is CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Power or CompactMonitorItems.Charge or CompactMonitorItems.Battery;
         foreach (var theme in PanelThemes.BuiltIns.Where(theme => only is null || only.Contains(theme.Id)))
             foreach (var look in new[] { DaylightLook.Day, DaylightLook.Dusk, DaylightLook.Night }
                 .Where(look => look == DaylightLook.Day || look == DaylightLook.Night && theme.File.Night is not null || look == DaylightLook.Dusk && theme.File.Dusk is not null))
@@ -112,6 +112,7 @@ internal static partial class LiquidPages
                 for (int i = 0; i < strips.Count; i++)
                 {
                     BatteryProvider.ForceBattery = strips[i].Laptop;
+                    deck.OffscreenLowest = strips[i].Device;
                     deck.ApplySettings();
                     Show(deck, root, Page.Capsule, track, cover, strips[i].Snapshot);
                     // The row's readings join with their first figure; the snapshot is handed over again once the row is built with them.

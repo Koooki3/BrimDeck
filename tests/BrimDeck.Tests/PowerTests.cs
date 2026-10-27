@@ -290,7 +290,7 @@ static class PowerTests
         var palettes = ThemeCoverageTests.Palettes().ToList();
         foreach (var id in PanelThemes.BuiltIns.Select(theme => theme.Id))
             check($"Look: {id} has a look of its own or the default", PowerLooks.For(PanelThemes.Resolve(PanelThemes.BuiltIn(id)!)) is { } look && look.References.Any());
-        foreach (var id in new[] { "cyberpunk-edgerunners", PanelThemes.IslandHoliday, PanelThemes.IslandHoliday2, PanelThemes.PixelBlocks, PanelThemes.GlassLight, PanelThemes.GlassDark })
+        foreach (var id in new[] { "cyberpunk-edgerunners", PanelThemes.IslandHoliday, PanelThemes.IslandHoliday2, PanelThemes.PixelBlocks, PanelThemes.GlassLight, PanelThemes.GlassDark, PanelThemes.Endfield })
             check($"Look: {id} is designed for it", PowerLooks.Ids.Contains(id, StringComparer.OrdinalIgnoreCase) && PowerLooks.For(PanelThemes.Resolve(PanelThemes.BuiltIn(id)!)) != PowerLooks.Default);
         check("Look: the shapes differ between the themes that have their own", new[] { "cyberpunk-edgerunners", PanelThemes.IslandHoliday, PanelThemes.PixelBlocks, PanelThemes.GlassDark }
             .Select(id => PowerLooks.For(PanelThemes.Resolve(PanelThemes.BuiltIn(id)!)).Gauge).Distinct().Count() == 4);
@@ -311,6 +311,22 @@ static class PowerTests
                 if (ratio < 3 - .005) failures.Add($"{id}: {name} {ratio:0.00} < 3");
             }
         }
+        // Orange and red belong to the low levels: a battery at a normal charge, charging or saving is never drawn in the theme's warning or
+        // critical color, so "83 %" is never mistaken for a warning. The roles come from the monitor scheme (its warning and critical are the
+        // theme's own), so only the tokens are compared.
+        var warm = new List<string>();
+        foreach (var (id, palette) in palettes.Where(item => !item.Id.StartsWith("high-contrast", StringComparison.Ordinal)))
+        {
+            var look = PowerLooks.For(palette);
+            string warning = (palette.WarningDefault ?? ThemeColor.Parse(AppPresets.WarningColor)).ToString(), critical = (palette.CriticalDefault ?? ThemeColor.Parse(AppPresets.CriticalColor)).ToString();
+            foreach (var name in new[] { look.Normal, look.Charge, look.Saver }.Distinct().Where(PowerLook.Tokens.Contains))
+            {
+                string color = palette[name].ToString();
+                if (ColorMath.Distance(color, warning) < 90 || ColorMath.Distance(color, critical) < 90) warm.Add($"{id}: {name} {color} is near {warning} or {critical}");
+            }
+        }
+        check("Look: no state of a normal battery takes the warning or critical color" + (warm.Count > 0 ? ": " + string.Join("; ", warm) : ""), warm.Count == 0);
+        check("Look: a normal battery's fill is the text color or a cool one in every look", PowerLooks.Default.Normal == "textPrimary" && PowerLooks.Ids.All(id => PowerLooks.For(PanelThemes.Resolve(PanelThemes.BuiltIn(id)!)).Normal is "textPrimary" or "accent"));
         check("Look: every color a look takes from a theme reads on that theme" + (failures.Count > 0 ? ": " + string.Join("; ", failures) : ""), failures.Count == 0);
     }
 }

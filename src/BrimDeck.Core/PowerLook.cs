@@ -16,6 +16,7 @@ public enum PowerCurve { Smooth, Wave, Sharp, Steps, Fine }
 // A color is named by what it takes from: a monitor color scheme role ("cpu", "efficiency", "memory", "gpu", "warning", "critical")
 // or a theme token ("accent", "liked", "equalizer", "clock", "textPrimary", "textTertiary"). Normal fills a battery on its own, Charge
 // while charging, Saver is the mark and outline of Battery saver, Draw the power curve.
+// Normal is the text color or a cool one: orange and red belong to the low levels and to nothing else (PowerTests holds every theme to it).
 public sealed record PowerLook(PowerGauge Gauge, PowerCurve Curve, string Normal, string Charge, string Saver, string Draw)
 {
     // The names a look may use; the theme tests resolve each on every theme.
@@ -26,7 +27,7 @@ public sealed record PowerLook(PowerGauge Gauge, PowerCurve Curve, string Normal
 
 public static class PowerLooks
 {
-    public static readonly PowerLook Default = new(PowerGauge.Pill, PowerCurve.Smooth, "cpu", "efficiency", "warning", "efficiency");
+    public static readonly PowerLook Default = new(PowerGauge.Pill, PowerCurve.Smooth, "textPrimary", "efficiency", "efficiency", "efficiency");
 
     // High contrast: outlines and text colors only, so the system's colors carry everything; the states are told by the mark and the
     // words (bolt, exclamation, leaf), never by color alone.
@@ -41,12 +42,13 @@ public static class PowerLooks
     {
         [PanelThemes.Dark] = Default,
         [PanelThemes.Light] = Default,
-        ["cyberpunk-edgerunners"] = new(PowerGauge.Chamfer, PowerCurve.Sharp, "accent", "clock", "warning", "liked"),
-        [PanelThemes.IslandHoliday] = new(PowerGauge.Round, PowerCurve.Wave, "accent", "equalizer", "warning", "equalizer"),
-        [PanelThemes.IslandHoliday2] = new(PowerGauge.Round, PowerCurve.Wave, "accent", "equalizer", "warning", "equalizer"),
-        [PanelThemes.PixelBlocks] = new(PowerGauge.Blocks, PowerCurve.Steps, "accent", "equalizer", "warning", "equalizer"),
-        [PanelThemes.GlassLight] = new(PowerGauge.Glass, PowerCurve.Fine, "accent", "efficiency", "warning", "accent"),
-        [PanelThemes.GlassDark] = new(PowerGauge.Glass, PowerCurve.Fine, "accent", "efficiency", "warning", "accent"),
+        ["cyberpunk-edgerunners"] = new(PowerGauge.Chamfer, PowerCurve.Sharp, "accent", "clock", "clock", "liked"),
+        [PanelThemes.Endfield] = new(PowerGauge.Chamfer, PowerCurve.Sharp, "textPrimary", "efficiency", "efficiency", "efficiency"),
+        [PanelThemes.IslandHoliday] = new(PowerGauge.Round, PowerCurve.Wave, "textPrimary", "equalizer", "equalizer", "equalizer"),
+        [PanelThemes.IslandHoliday2] = new(PowerGauge.Round, PowerCurve.Wave, "textPrimary", "equalizer", "equalizer", "equalizer"),
+        [PanelThemes.PixelBlocks] = new(PowerGauge.Blocks, PowerCurve.Steps, "textPrimary", "equalizer", "equalizer", "equalizer"),
+        [PanelThemes.GlassLight] = new(PowerGauge.Glass, PowerCurve.Fine, "textPrimary", "efficiency", "efficiency", "accent"),
+        [PanelThemes.GlassDark] = new(PowerGauge.Glass, PowerCurve.Fine, "textPrimary", "efficiency", "efficiency", "accent"),
     };
 
     // The built-in themes with a look of their own.

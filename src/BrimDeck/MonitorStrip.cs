@@ -91,7 +91,7 @@ internal sealed class MonitorStrip : FrameworkElement
         // at most five characters (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(), DeviceWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("≈112W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent));
     }
 
@@ -155,6 +155,37 @@ internal sealed class MonitorStrip : FrameworkElement
     // (MainWindow.UpdateMonitorDemand).
     public bool Showing(double now) => Shown != CompactMonitorItems.None;
     public bool Moving(double now) => _presence.Moving(now);
+
+    // For screen readers (the row's readings are drawn, not controls): every reading shown, named for what it is. The two batteries are
+    // told apart in words: the devices' lowest (with the device), and this PC's own.
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new DrawnPeer(this, System.Windows.Automation.Peers.AutomationControlType.Text, Spoken);
+    private string Spoken()
+    {
+        var parts = new List<string>();
+        var s = _snapshot;
+        foreach (var item in _orderOnce)
+        {
+            if ((Shown & item) == 0 || !CompactMonitor.Order.Contains(item)) continue;
+            switch (item)
+            {
+                case CompactMonitorItems.Cpu when s?.Cpu.OrDefault is { } cpu: parts.Add("CPU " + MonitorFormat.Percent(cpu.Usage) + "%"); break;
+                case CompactMonitorItems.Memory when s?.Memory.OrDefault is { } memory: parts.Add(Loc.T("内存 ", "Memory ") + MonitorFormat.Percent(memory.UsedFraction) + "%"); break;
+                case CompactMonitorItems.Gpu when s?.Gpu.OrDefault is { NoReadings: false } gpu: parts.Add("GPU " + MonitorFormat.Percent(gpu.Usage) + "%"); break;
+                case CompactMonitorItems.Download when s?.Network.OrDefault is { } down: parts.Add(Loc.T("下载 ", "Download ") + MonitorFormat.Rate(down.DownBytesPerSecond).Text); break;
+                case CompactMonitorItems.Upload when s?.Network.OrDefault is { } up: parts.Add(Loc.T("上传 ", "Upload ") + MonitorFormat.Rate(up.UpBytesPerSecond).Text); break;
+                case CompactMonitorItems.Battery when _battery is { } device:
+                    parts.Add(Loc.T($"设备最低电量（鼠标、键盘、耳机等外设中最低的一个）：{device.Name} {device.Percent}%", $"Lowest device battery (the lowest of the mouse, keyboard, headphones and other peripherals): {device.Name} {device.Percent}%")
+                        + (device.Charging ? Loc.T("，充电中", ", charging") : "") + LevelWords(device.Level)); break;
+                case CompactMonitorItems.Power when s?.Power.OrDefault is { } power:
+                    parts.Add(Loc.T("整机功耗 ", "System power ") + (power.Estimated ? "≈" : "") + PowerFormat.Watts(power.Watts) + " W" + (power.Estimated ? Loc.T("（估算）", " (estimate)") : "")); break;
+                case CompactMonitorItems.Charge when s?.Battery.OrDefault is { } own:
+                    parts.Add(Loc.T("本机电池 ", "This PC's battery ") + MonitorFormat.Percent(own.Percent / 100) + "%，" + BatteryModel.StateName(own.State) + LevelWords(BatteryModel.Level(own, _low))); break;
+            }
+        }
+        return string.Join(Loc.T("；", "; "), parts);
+    }
+    private static string LevelWords(MemoryLevel level) => level switch
+    { MemoryLevel.Critical => Loc.T("，电量低", ", low"), MemoryLevel.Elevated => Loc.T("，电量偏低", ", getting low"), _ => "" };
     // Whether the settings choose the battery reading, shown yet or not (StripAdmission); and whether any reading other than the
     // battery is chosen, which the system sampler reads.
     public bool ChoosesBattery => (_chosen & CompactMonitorItems.Battery) != 0;
@@ -350,34 +381,26 @@ internal sealed class MonitorStrip : FrameworkElement
         }
     }
 
-    // A small battery on its side, as tall as the drive glyph beside it and outlined in the reading's color as the drive is, filled
-    // to the lowest charge (none at 0%, as on the page); then the figure: "15%". On whole device pixels. Too small to carry a mark
-    // over its fill, the battery takes a bolt in place of its tip while that device charges (its body that much shorter), and
-    // an exclamation mark in its empty part when low, so color is not the only sign, as on the page.
-    private double BatteryWidth => Math.Round(17 * _scale);
+    // The lowest battery among the wireless devices (not this PC's own, which is the Charge reading and draws a battery): the icon of
+    // that device, a mouse, a keyboard, headphones, in the text color (the warning or critical color only at those levels, as every
+    // reading's level colors), a bolt after it while it charges, then the figure, drawn as the other readings' figures are (Figure):
+    // "83%". The device's name and the kind of reading are in the row's automation name (Spoken).
+    private double DeviceWidth => Math.Round(14 * _scale) + Math.Round(5 * _scale);
     private void Battery(DrawingContext drawing, double x, double center, BatteryReading? battery, string color, MemoryLevel level, double ppd)
     {
-        double Snap(double value) => Math.Round(value * ppd, MidpointRounding.AwayFromZero) / ppd;
-        bool charging = battery is { Charging: true };
-        double width = BatteryWidth, height = Snap(9 * _scale), stroke = Math.Max(1, Math.Round(1.2 * _scale * ppd)) / ppd;
-        double tip = charging ? Snap(height * 15 / 23) : Snap(Math.Max(1, 1.5 * _scale));
-        var body = new Rect(Snap(x) + stroke / 2, Snap(center - height / 2) + stroke / 2, Snap(width - tip - 1) - stroke, height - stroke);
-        string ink = battery is null ? UI.Tertiary : color;
-        double radius = PanelTheme.Corner(1.5 * _scale), tipX = Snap(body.Right + stroke / 2 + 1 / ppd);
-        drawing.DrawRoundedRectangle(null, OutlinePen(ink, stroke), body, radius, radius);
-        if (charging) DeviceGlyphs.Bolt(drawing, new Rect(tipX, Snap(center - height / 2), tip, height), ink);
-        else drawing.DrawRectangle(UI.Brush(ink), null, new Rect(tipX, Snap(center - height * .2), tip, Snap(height * .4)));
-        if (battery is { } b)
-        {
-            double inset = stroke + 1 / ppd, room = Math.Max(0, body.Width - 2 * inset + stroke), left = body.X - stroke / 2 + inset;
-            double fill = b.Percent <= 0 ? 0 : Snap(Math.Max(Math.Min(room, 1.5 * _scale), room * Math.Clamp(b.Percent / 100.0, 0, 1)));
-            if (fill > 0) drawing.DrawRectangle(UI.Brush(color), null, new Rect(left, body.Y - stroke / 2 + inset, fill, Math.Max(1, body.Height + stroke - 2 * inset)));
-            if (!b.Charging && b.Level != MemoryLevel.Normal)
-                DeviceGlyphs.Exclamation(drawing, new Rect(left + fill, body.Y + stroke / 2, Math.Max(0, room - fill), Math.Max(0, body.Height - stroke)), color, null, ppd);
-        }
-        var text = MonitorDraw.Text(Devices.Figure(battery?.Percent), _font, FigureColor(level, color), ppd);
-        MonitorDraw.Baseline(drawing, text, x + width + Math.Round(3 * _scale), Math.Round(center + _font * .36));
+        double size = Math.Round(14 * _scale), scale = size / DeviceIcons.Grid;
+        string ink = battery is null ? UI.Tertiary : level == MemoryLevel.Normal ? UI.Secondary : color;
+        drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, x, Math.Round(center - size / 2)));
+        drawing.DrawGeometry(null, DeviceGlyphs.Stroke(ink, 2.1), DeviceGlyphs.Icon(battery?.Kind ?? DeviceKind.Other));
+        drawing.Pop();
+        if (battery is { Charging: true }) DeviceGlyphs.Bolt(drawing, new Rect(x + size + Math.Round(.5 * _scale), Math.Round(center - size * .4), Math.Round(4 * _scale), Math.Round(size * .8)), ink);
+        Figure(drawing, x + DeviceWidth + Math.Round(3 * _scale), center, battery is { } device ? device.Percent / 100.0 : null, "", FigureColor(level, color), ppd);
     }
+    // The figure of a reading that is a share: "83%", one size, weight and baseline for every reading that has one (the dials' figures,
+    // the drives', the battery's).
+    private void Figure(DrawingContext drawing, double x, double center, double? share, string unused, string color, double ppd)
+        => MonitorDraw.Baseline(drawing, MonitorDraw.Text(GaugeFigure(share), _font, color, ppd), x, Math.Round(center + _font * .36));
+
     // The whole machine's power: a bolt in the theme's curve color, then the draw in watts, "38W", with "≈" before an estimate; a dash
     // while there is no reading. The room is kept for the widest figure ("≈112W").
     private void Power(DrawingContext drawing, double x, double center, PowerSample? power, double ppd)
@@ -388,6 +411,7 @@ internal sealed class MonitorStrip : FrameworkElement
         MonitorDraw.Baseline(drawing, MonitorDraw.Text(figure, _font, UI.Primary, ppd), x + slot + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 
+    private double BatteryWidth => Math.Round(17 * _scale);
     // The machine's own battery in the shape of the theme's look (PowerGlyphs.Battery), filled to the charge, with the bolt in its tip
     // while it charges, the leaf while Battery saver is on and an exclamation mark when low; then the figure: "96%".
     private void Charge(DrawingContext drawing, double x, double center, BatterySample? battery, MemoryLevel level, double ppd)
@@ -397,20 +421,6 @@ internal sealed class MonitorStrip : FrameworkElement
         PowerGlyphs.Battery(drawing, new Rect(x, Math.Round((center - height / 2) * ppd) / ppd, BatteryWidth, height), visual, _powerStyle, ppd,
             battery is null ? 0 : battery.Percent / 100, compact: true, unknown: battery is null);
         string color = battery is null ? UI.Tertiary : _powerStyle.Fill(level, battery.State);
-        var text = MonitorDraw.Text(battery is null ? "—" : GaugeFigure(battery.Percent / 100), _font, FigureColor(level, color), ppd);
-        MonitorDraw.Baseline(drawing, text, x + BatteryWidth + Math.Round(3 * _scale), Math.Round(center + _font * .36));
-    }
-
-    // The battery's outline pen, one per color (a reading changes color with its level): made on first use, as the strip keeps its size.
-    private readonly Dictionary<string, Pen> _outlines = [];
-    private Pen OutlinePen(string color, double thickness)
-    {
-        if (!_outlines.TryGetValue(color, out var pen))
-        {
-            pen = new Pen(UI.Brush(color), thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-            pen.Freeze();
-            _outlines[color] = pen;
-        }
-        return pen;
+        Figure(drawing, x + BatteryWidth + Math.Round(3 * _scale), center, battery is null ? null : battery.Percent / 100, "", FigureColor(level, color), ppd);
     }
 }

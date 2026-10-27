@@ -299,8 +299,8 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
-        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Battery => Loc.T("设备最低电量", "Lowest device battery"),
-        CompactMonitorItems.Power => Loc.T("整机功耗", "System power"), CompactMonitorItems.Charge => Loc.T("本机电量", "This PC's battery"), _ => "CPU"
+        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Battery => Loc.T("设备最低电量（外设）", "Lowest device battery (peripherals)"),
+        CompactMonitorItems.Power => Loc.T("整机功耗", "System power"), CompactMonitorItems.Charge => Loc.T("本机电池", "This PC's battery"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -312,6 +312,9 @@ public sealed partial class SettingsWindow
         var handle = new GripHandle { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
         row.Children.Add(handle);
         var label = TextLine(name, TextSize.Strong, TextPrimary); label.VerticalAlignment = VerticalAlignment.Center; label.Margin = new Thickness(Space.Tight, 0, Space.Tight, 0);
+        // The two batteries are told apart where they are chosen: the devices' lowest has the device's icon, this PC's own a battery.
+        if (item == CompactMonitorItems.Battery) { label.ToolTip = Loc.T("鼠标、键盘、耳机等外设中电量最低的一个，用该设备的图标表示。", "The lowest of the peripherals (mouse, keyboard, headphones), drawn with that device's icon."); AutomationProperties.SetHelpText(label, (string)label.ToolTip); }
+        else if (item == CompactMonitorItems.Charge) { label.ToolTip = Loc.T("这台电脑自己的电池，用电池图形表示。", "This PC's own battery, drawn as a battery."); AutomationProperties.SetHelpText(label, (string)label.ToolTip); }
         Grid.SetColumn(label, 2); row.Children.Add(label);
         // CPU, GPU and the drives choose what they show in a menu at the right of their name.
         if (CompactFigures.Has(item))
@@ -344,9 +347,9 @@ public sealed partial class SettingsWindow
             {
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
                 CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值，在左侧的菜单中选择显示什么。", "The drives always show figures; choose which in the menu at the left."),
-                CompactMonitorItems.Battery => Loc.T("始终显示数值：设备页上电量最低的无线设备。", "Always shows its figure: the wireless device with the lowest charge on the devices page."),
+                CompactMonitorItems.Battery => Loc.T("始终显示数值：设备页上电量最低的无线设备（鼠标、键盘、耳机等外设），用该设备的图标表示，不是本机电池。", "Always shows its figure: the wireless device with the lowest charge on the devices page (a mouse, keyboard, headphones and the like), drawn with that device's icon; not this PC's battery."),
                 CompactMonitorItems.Power => Loc.T("始终显示瓦数；“≈”表示估算，没有整机功率读数的电脑不显示这一项。", "Always shows the watts; “≈” marks an estimate, and a PC with no power reading does not show this item."),
-                CompactMonitorItems.Charge => Loc.T("始终显示本机电池的电量（不是外设）；没有电池的电脑不显示这一项。", "Always shows this PC's own battery charge (not a peripheral's); a PC without a battery does not show this item."),
+                CompactMonitorItems.Charge => Loc.T("始终显示本机电池的电量，用电池图形表示（不是外设）；没有电池的电脑不显示这一项。", "Always shows this PC's own battery charge, drawn as a battery (not a peripheral's); a PC without a battery does not show this item."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);

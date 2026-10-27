@@ -70,10 +70,13 @@ public partial class MainWindow
     private bool StripChoosesBattery => Settings.ShowsMonitor(EffectiveStyle) && (CompactMonitor.Shown(Settings.CompactReadings) & CompactMonitorItems.Battery) != 0;
 
     // The collapsed reading: the device with the lowest charge among those shown, null while none reports one.
+    // The page sheets (tests/BrimDeck.FxPreview) show a device's battery without devices to read.
+    internal BatteryReading? OffscreenLowest { get; set; }
     internal BatteryReading? LowestBattery()
     {
+        if (OffscreenLowest is { } shown) return shown;
         var lowest = ShownDevices.Where(device => device.Lowest is not null).OrderBy(device => device.Lowest).FirstOrDefault();
-        return lowest is null ? null : new BatteryReading(lowest.Lowest!.Value, lowest.Charging, Devices.Level(lowest.Lowest, lowest.Charging, Settings.DeviceLowPercent), lowest.Name);
+        return lowest is null ? null : new BatteryReading(lowest.Lowest!.Value, lowest.Charging, Devices.Level(lowest.Lowest, lowest.Charging, Settings.DeviceLowPercent), lowest.Name, lowest.Kind);
     }
     // What the collapsed row shows: the lowest battery, kept while the devices are being listed again (the display came back
     // on, a suppression ended), so the reading does not drop to a dash for the moment the sources take to report.
@@ -121,4 +124,4 @@ public partial class MainWindow
 }
 
 // The collapsed row's battery reading: the lowest charge among the devices shown, and the device it is.
-internal readonly record struct BatteryReading(int Percent, bool Charging, MemoryLevel Level, string Name);
+internal readonly record struct BatteryReading(int Percent, bool Charging, MemoryLevel Level, string Name, DeviceKind Kind = DeviceKind.Other);
