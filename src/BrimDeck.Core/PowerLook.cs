@@ -36,6 +36,7 @@ public static class PowerLooks
     //   Cyberpunk: HUD-cut battery with neon cyan, charging in the pale glow of a lit window (the magenta is the curve's, and the low battery's red is not to be mistaken for it), a sharp scope-like curve with a bright head.
     //   Island Holiday (both): a capsule like a lagoon bubble, charging in the sea's own color, a wave curve over a deeper fill.
     //   Pixel Blocks: ten stepped squares in the bright chat palette, charging cyan, a stair curve.
+    //   Endfield: a HUD-cut battery in the signal color (ink on paper), charging in the primary text color, a hairline curve in the signal.
     //   Liquid Glass: a thin glass body with a light edge, a hairline curve.
     private static readonly Dictionary<string, PowerLook> Table = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -45,6 +46,7 @@ public static class PowerLooks
         [PanelThemes.IslandHoliday] = new(PowerGauge.Round, PowerCurve.Wave, "accent", "equalizer", "warning", "equalizer"),
         [PanelThemes.IslandHoliday2] = new(PowerGauge.Round, PowerCurve.Wave, "accent", "equalizer", "warning", "equalizer"),
         [PanelThemes.PixelBlocks] = new(PowerGauge.Blocks, PowerCurve.Steps, "accent", "equalizer", "warning", "equalizer"),
+        [PanelThemes.Endfield] = new(PowerGauge.Chamfer, PowerCurve.Fine, "accent", "textPrimary", "warning", "accent"),
         [PanelThemes.GlassLight] = new(PowerGauge.Glass, PowerCurve.Fine, "accent", "efficiency", "warning", "accent"),
         [PanelThemes.GlassDark] = new(PowerGauge.Glass, PowerCurve.Fine, "accent", "efficiency", "warning", "accent"),
     };

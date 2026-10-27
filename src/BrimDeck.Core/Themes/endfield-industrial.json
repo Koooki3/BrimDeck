@@ -22,43 +22,43 @@
   "base": "dark",
   "colors": {
     "surface": "#FAFAFA",
-    "textPrimary": "#191919",
-    "textSecondary": "#3C3C3C",
-    "textTertiary": "#5C5C5C",
-    "accent": "#191919",
+    "textPrimary": "#141414",
+    "textSecondary": "#333333",
+    "textTertiary": "#4F4F4F",
+    "accent": "#141414",
     "onAccent": "#FFFA00",
     "danger": "#C61218",
     "liked": "#C61218",
-    "clock": "#191919",
-    "equalizer": "#191919",
-    "hairline": "#D9D9D9",
-    "track": "#DADADA",
-    "ringTrack": "#DADADA",
+    "clock": "#141414",
+    "equalizer": "#141414",
+    "hairline": "#D0D0D0",
+    "track": "#D6D6D6",
+    "ringTrack": "#D6D6D6",
     "fill": "#F0F0F0",
     "fillSelected": "#FFFA00",
-    "hover": "#EBEBEB",
-    "pressed": "#E0E0E0",
-    "outline": "#BFBFBF",
+    "hover": "#E8E8E8",
+    "pressed": "#DCDCDC",
+    "outline": "#A8A8A8",
     "popup": "#FFFFFF",
-    "popupBorder": "#8A8A8A",
+    "popupBorder": "#707070",
     "input": "#F2F2F2",
     "rangeFill": "#80FFFA00",
     "coverPlaceholder": "#E6E6E6",
     "coverOutline": "#B3B3B3",
-    "scrollThumb": "#8A8A8A",
-    "rim": "#B3B3B3",
+    "scrollThumb": "#7A7A7A",
+    "rim": "#A8A8A8",
     "shadow": "#000000",
     "indicator": "#FFFA00",
-    "indicatorProgress": "#191919",
+    "indicatorProgress": "#141414",
     "switchFill": "#F0F0F0",
-    "seekRail": "#D9D9D9",
-    "rowDivider": "#E0E0E0",
+    "seekRail": "#D0D0D0",
+    "rowDivider": "#DCDCDC",
     "rowHover": "#F0F0F0",
-    "menuDetail": "#3C3C3C",
+    "menuDetail": "#333333",
     "tooltip": "#FFFFFF",
-    "tooltipBorder": "#191919",
+    "tooltipBorder": "#141414",
     "bubble": "#FFFFFF",
-    "bubbleBorder": "#191919"
+    "bubbleBorder": "#141414"
   },
   // Identity by hue only where a column needs telling apart: the rarity ladder of blue, teal, green and violet, amber for the
   // brand that is orange; the rest are grays. Warning is the notice orange, critical the danger red.
@@ -69,7 +69,7 @@
   // The clock in the wide face, white-on-charcoal or ink-on-paper; the signal yellow is a preset, not the default.
   "clock": {
     "style": "wide", "color": "default",
-    "palette": { "amber": "#6B5D00", "cyan": "#1F6FA3", "pink": "#C61218", "lime": "#4D7A1C" },
+    "palette": { "amber": "#6B5D00", "cyan": "#1F6FA3", "pink": "#6B6B6B", "lime": "#4D7A1C" },
     "gradients": [
       { "name": "信号", "nameEn": "Signal", "stops": ["#6B5D00", "#B84A00", "#C61218"] },
       { "name": "量测", "nameEn": "Gauge", "stops": ["#1F6FA3", "#047A7A", "#4D7A1C"] },
@@ -86,7 +86,7 @@
     // Cut corners (each at most its corner's radius; a collapsed capsule stays a pill, as a readout is a pill in the game) and, along
     // the open panel's bottom edge, the signal bar at the left and a strip of hatching at the right, in ink at a fifth of its strength.
     "cut": 10,
-    "decor": { "tab": { "color": "#FFFA00" }, "hatch": { "color": "#38191919" } }
+    "decor": { "tab": { "color": "#FFFA00" }, "hatch": { "color": "#38141414" }, "frame": { "color": "#26141414" } }
   },
   // Mechanical, never springy: a hovered control gets the line highlight and a bar at its left (a record shifting into focus), a
   // press shades the plate as a graphite button does, keyboard focus is the four corner brackets of a selected item. The springs are
@@ -97,65 +97,68 @@
     "focus": "brackets", "pace": 1, "steps": 0, "color": "accent", "secondary": "textSecondary", "highlight": "indicator"
   },
   "daylight": { "mode": "system" },
-  // The night look: the graphite operation screen (the game's own panel gray, #1F1F1F). Yellow here is a line and text, as on the game's dark menus.
+  // The night look: a deep charcoal (#121212), the game's HUD dark, in which the layers come from hairlines (the rim, the frame, the
+  // dividers) and faint steps of brightness, never from lightening the base. All three text levels read at 7:1 or more. Its signal is the
+  // yellow-green of that HUD (#C6CA4C, as the Endfield Charge Plus project measured and a screenshot confirms), not the site's pure
+  // #FFFA00, and it is spent sparingly: progress, the indicator, the current page, focus, the bar at the panel's foot.
   "night": {
     "colors": {
-      "surface": "#2B2B2B",
-      "textPrimary": "#EDEDED",
-      "textSecondary": "#D2D2D2",
-      "textTertiary": "#A8A8A8",
+      "surface": "#121212",
+      "textPrimary": "#F5F5F5",
+      "textSecondary": "#D4D4D4",
+      "textTertiary": "#A9A9A9",
       "accent": "#C6CA4C",
-      "onAccent": "#191919",
+      "onAccent": "#121212",
       "danger": "#FF6F67",
       "liked": "#FF6F67",
-      "clock": "#EDEDED",
+      "clock": "#F5F5F5",
       "equalizer": "#C6CA4C",
-      "hairline": "#484848",
-      "track": "#464646",
-      "ringTrack": "#464646",
-      "fill": "#323232",
-      "fillSelected": "#474747",
-      "hover": "#3B3B3B",
-      "pressed": "#454545",
-      "outline": "#5C5C5C",
-      "popup": "#353535",
-      "popupBorder": "#5C5C5C",
-      "input": "#212121",
+      "hairline": "#2A2A2A",
+      "track": "#2E2E2E",
+      "ringTrack": "#2E2E2E",
+      "fill": "#191919",
+      "fillSelected": "#2C2C2C",
+      "hover": "#222222",
+      "pressed": "#2A2A2A",
+      "outline": "#3D3D3D",
+      "popup": "#1A1A1A",
+      "popupBorder": "#4D4D4D",
+      "input": "#0B0B0B",
       "rangeFill": "#33C6CA4C",
-      "coverPlaceholder": "#363636",
-      "coverOutline": "#5C5C5C",
-      "scrollThumb": "#808080",
-      "rim": "#5C5C5C",
+      "coverPlaceholder": "#1C1C1C",
+      "coverOutline": "#4A4A4A",
+      "scrollThumb": "#6B6B6B",
+      "rim": "#4D4D4D",
       "shadow": "#000000",
       "indicator": "#C6CA4C",
-      "indicatorProgress": "#191919",
-      "switchFill": "#323232",
-      "seekRail": "#4A4A4A",
-      "rowDivider": "#3E3E3E",
-      "rowHover": "#323232",
-      "menuDetail": "#CCCCCC",
-      "tooltip": "#383838",
-      "tooltipBorder": "#707070",
-      "bubble": "#383838",
-      "bubbleBorder": "#C6CA4C"
+      "indicatorProgress": "#121212",
+      "switchFill": "#181818",
+      "seekRail": "#303030",
+      "rowDivider": "#242424",
+      "rowHover": "#191919",
+      "menuDetail": "#D4D4D4",
+      "tooltip": "#1E1E1E",
+      "tooltipBorder": "#5A5A5A",
+      "bubble": "#1E1E1E",
+      "bubbleBorder": "#5A5A5A"
     },
     "apps": {
-      "claude": "#FC9C1E", "codex": "#24BAFC", "antigravity": "#06C2C2", "cursor": "#CCCCCC", "zcode": "#9B6BF7",
+      "claude": "#FC9C1E", "codex": "#4BB4E6", "antigravity": "#06C2C2", "cursor": "#CCCCCC", "zcode": "#9B6BF7",
       "dsh": "#8BC34A", "grokBot": "#9A9A9A", "kimi": "#D272FC", "opencode": "#8A8A8A", "manual": "#CCCCCC", "other": "#CCCCCC", "warning": "#FC6C00", "critical": "#FF6F67"
     },
     "clock": {
-      "palette": { "amber": "#C6CA4C", "cyan": "#24BAFC", "pink": "#FF6F67", "lime": "#E4FC00" },
+      "palette": { "amber": "#C6CA4C", "cyan": "#4BB4E6", "pink": "#9C9C9C", "lime": "#B4D44A" },
       "gradients": [
         { "name": "信号", "nameEn": "Signal", "stops": ["#C6CA4C", "#FC9C1E", "#FF6F67"] },
-        { "name": "量测", "nameEn": "Gauge", "stops": ["#24BAFC", "#06C2C2", "#8BC34A"] },
-        { "name": "石墨", "nameEn": "Graphite", "stops": ["#EDEDED", "#CCCCCC", "#A0A0A0"] },
-        { "name": "地区", "nameEn": "Region", "stops": ["#06C2C2", "#24BAFC", "#B79BFF"] },
-        { "name": "稀有", "nameEn": "Rarity", "stops": ["#9A9A9A", "#8BC34A", "#FC9C1E"] }
+        { "name": "量测", "nameEn": "Gauge", "stops": ["#4BB4E6", "#06C2C2", "#8BC34A"] },
+        { "name": "石墨", "nameEn": "Graphite", "stops": ["#F5F5F5", "#D4D4D4", "#A9A9A9"] },
+        { "name": "地区", "nameEn": "Region", "stops": ["#06C2C2", "#4BB4E6", "#B79BFF"] },
+        { "name": "稀有", "nameEn": "Rarity", "stops": ["#A9A9A9", "#8BC34A", "#FC9C1E"] }
       ]
     },
     "effects": {
-      "shadowOpacity": 0.5,
-      "decor": { "tab": { "color": "#C6CA4C" }, "hatch": { "color": "#40EDEDED" } }
+      "shadowOpacity": 0.6,
+      "decor": { "tab": { "color": "#C6CA4C" }, "hatch": { "color": "#2EF5F5F5" }, "frame": { "color": "#30FFFFFF" } }
     }
   }
 }

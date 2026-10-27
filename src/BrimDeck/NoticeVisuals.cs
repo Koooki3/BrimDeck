@@ -43,7 +43,7 @@ internal sealed record NoticeLook(
             // A theme without depth whose shadow is drawn anyway gives its surface a glow rather than a shadow.
             Glow: effects.ShadowDepth <= 0 && effects.ShadowOpacity > 0, HighContrast: false)
         {
-            Pixel = effects.Pixel, Cut = effects.Cut, Decor = effects.Decor is { Hatch: not null } or { Tab: not null } ? effects.Decor : null, Bevel = PanelTheme.BevelBrush(palette), Edge = glass ? PanelTheme.EdgeBrush(palette) : null, Glass = glass
+            Pixel = effects.Pixel, Cut = effects.Cut, Decor = effects.Decor is { Hatch: not null } or { Tab: not null } or { Frame: not null } ? effects.Decor : null, Bevel = PanelTheme.BevelBrush(palette), Edge = glass ? PanelTheme.EdgeBrush(palette) : null, Glass = glass
         };
         _cached = (PanelTheme.Generation, glass, dpiScale, look);
         return look;
@@ -87,7 +87,7 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     public double FillOpacity { get => (double)GetValue(FillOpacityProperty); set => SetValue(FillOpacityProperty, value); }
     public Color IslandColor { get => (Color)GetValue(IslandColorProperty); set => SetValue(IslandColorProperty, value); }
     // Drawn with the look's material, or only its fill (Shadow: the black copy that casts a shadow behind the notice).
-    public NoticeLook? Look { get => _look; set { _look = value; _fill = null; _rim = null; _edge = null; _tabBrush = null; _key = null; InvalidateArrange(); InvalidateVisual(); } }
+    public NoticeLook? Look { get => _look; set { _look = value; _fill = null; _rim = null; _edge = null; _tabBrush = null; _framePen = null; _frame = null; _key = null; InvalidateArrange(); InvalidateVisual(); } }
     public Brush? FillOverride { get => _fillOverride; set { _fillOverride = value; _fill = null; InvalidateVisual(); } }
     public bool MaterialHidden { get; set; }
 
@@ -96,6 +96,8 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
     private Pen? _rim;
     private Pen[]? _edge;
     private SolidColorBrush? _islandBrush, _tabBrush;
+    private Pen? _framePen;
+    private Geometry? _frame;
     private (Size, double, double, double, double, double)? _key;
     private Geometry _outline = Geometry.Empty;
     private (Geometry Light, Geometry Shade)? _bevel;
@@ -106,7 +108,7 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
         double step = IslandBorder.PixelStep(_look?.Pixel ?? 0, this);
         var key = (RenderSize, TopRadius, BottomRadius, Shoulder, step, step > 0 ? 0 : _look?.Cut ?? 0);
         if (_key == key) return _outline;
-        _key = key;
+        _key = key; _frame = null;
         (_outline, _bevel) = IslandBorder.Shape(RenderSize.Width, RenderSize.Height, Shoulder, new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius), 0, step,
             _look?.RimWidth ?? 0, VisualTreeHelper.GetDpi(this).PixelsPerDip, _look?.Cut ?? 0);
         return _outline;
@@ -175,6 +177,16 @@ internal sealed class NoticeSurface : System.Windows.Controls.Decorator
         {
             _tabBrush ??= Freeze(new SolidColorBrush(Color.FromArgb(tab.A, tab.R, tab.G, tab.B)));
             drawing.DrawRectangle(_tabBrush, null, new Rect(0, 0, 4, RenderSize.Height));
+        }
+        if (marks.Frame is { } frame && RenderSize.Height > IslandDecor.MarksMinHeight)
+        {
+            _framePen ??= Freeze(new Pen(Freeze(new SolidColorBrush(Color.FromArgb(frame.A, frame.R, frame.G, frame.B))), 1) { LineJoin = PenLineJoin.Miter });
+            var corners = new CornerRadius(TopRadius, TopRadius, BottomRadius, BottomRadius);
+            _frame ??= Freeze((_look?.Cut ?? 0) > 0 ? IslandBorder.BuildCut(RenderSize.Width, RenderSize.Height, Shoulder, corners, IslandDecor.FrameInset, _look!.Cut)
+                : IslandBorder.BuildOutline(RenderSize.Width, RenderSize.Height, Shoulder, corners, IslandDecor.FrameInset));
+            drawing.PushClip(new RectangleGeometry(new Rect(0, IslandDecor.FrameInset + 1, RenderSize.Width, Math.Max(0, RenderSize.Height - IslandDecor.FrameInset - 1))));
+            drawing.DrawGeometry(null, _framePen, _frame);
+            drawing.Pop();
         }
         double x = RenderSize.Width - Shoulder - BottomRadius - 4 - IslandDecor.HatchWidth;
         if (marks.Hatch is { } hatch && x > 12 && RenderSize.Height > IslandDecor.MarksMinHeight)

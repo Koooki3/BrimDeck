@@ -496,12 +496,25 @@ public partial class MainWindow
         block.Children.Add(label);
         var number = new TextBlock { FontFamily = UI.DisplayFont, LineHeight = layout.NumberRow, LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Height = layout.NumberRow,
             TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
-        number.Inlines.Add(new Run("—%") { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(UI.Tertiary) });
+        AddFigure(number.Inlines, "—%", layout.Number, UI.Tertiary);
         Grid.SetRow(number, 2); block.Children.Add(number);
         var track = new QuotaBar($"{entry.InstanceId:N}:{slot}", 0, PanelTheme.AppTheme(entry)); Grid.SetRow(track, 4);
         block.Children.Add(track);
         AutomationProperties.SetName(block, Loc.T("正在读取配额", "Reading the quota"));
         return block;
+    }
+
+    // A figure as a run; on a plate (PanelTheme.Plated) its percent sign is a smaller, dimmer run, the unit of the game's HUD.
+    private static void AddFigure(InlineCollection inlines, string text, double size, string color)
+    {
+        if (!PanelTheme.Plated || !text.EndsWith('%') || text.Length < 2)
+        {
+            inlines.Add(new Run(text) { FontSize = size, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(color) });
+            return;
+        }
+        var parsed = ThemeColor.TryParse(color, out var c) ? c : ThemeColor.White;
+        inlines.Add(new Run(text[..^1]) { FontSize = size, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(color) });
+        inlines.Add(new Run("%") { FontSize = Math.Round(size * .55 * 4) / 4, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(parsed.WithAlpha((byte)Math.Round(parsed.A * .62)).ToString()) });
     }
 
     // Three rows per quota: the period name, the used share with its reset countdown, and the track.
@@ -524,7 +537,7 @@ public partial class MainWindow
         var number = new TextBlock { FontFamily = UI.DisplayFont, LineHeight = layout.NumberRow, LineStackingStrategy = LineStackingStrategy.BlockLineHeight, Height = layout.NumberRow,
             TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
         // A custom item without a value leaves the row empty; the row keeps its height so blocks stay aligned.
-        if (quota.ValueText.Length > 0) number.Inlines.Add(new Run(quota.ValueText) { FontSize = layout.Number, FontWeight = FontWeights.SemiBold, Foreground = UI.Brush(level > 0 ? color : UI.Primary) });
+        if (quota.ValueText.Length > 0) AddFigure(number.Inlines, quota.ValueText, layout.Number, level > 0 ? color : UI.Primary);
         if (layout.UsedWord && quota.ValueSuffix.Length > 0) number.Inlines.Add(new Run(" " + quota.ValueSuffix) { FontSize = TextSize.Caption, FontFamily = UI.PanelFont, Foreground = UI.Brush(UI.Tertiary) });
         number.ToolTip = quota.Kind switch
         {
