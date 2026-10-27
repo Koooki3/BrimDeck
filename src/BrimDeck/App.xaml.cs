@@ -139,12 +139,8 @@ public partial class App : Application
         DisplayPower.Install(Dispatcher);
         DisplayPower.Changed += UpdateDeviceDemand;
         _save.Tick += (_, _) => FlushSettings();
-        _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden)
-        {
-            NoticeEntry = () => !Settings.NoticesEnabled ? null
-                : Notices.Paused ? (Loc.T("恢复通知提醒", "Resume notices"), () => Notices.Pause(null))
-                : (Loc.T("暂停通知提醒 1 小时", "Pause notices for 1 hour"), () => Notices.Pause(TimeSpan.FromHours(1)))
-        };
+        MakeTray();
+        WatchSurface();
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(OpenSettings), null, Timeout.Infinite, false);
         if (e.Args.Contains("--settings")) OpenSettings();
@@ -175,6 +171,7 @@ public partial class App : Application
     // run (its OnStartup returns at once, so nothing is read, saved, listened to or shown) takes these settings, a notice center whose
     // sources are never started, and its main panel, laid out for the given monitor and never shown.
     private bool _offscreen;
+    internal bool Offscreen => _offscreen;
     internal MainWindow UseOffscreen(DeckSettings settings, Rect bounds, Rect work, double scale)
     {
         _offscreen = true;
@@ -292,6 +289,7 @@ public partial class App : Application
         if (systemChanged && !wasHigh && !PanelTheme.HighContrast && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         if (!reload) _settingsWindow?.PanelThemeChanged();
+        CheckSurface();
     }
     // The look automatic liquid glass takes before the island is shown (at start, and when the theme is chosen), set as
     // LiquidTheme.Dark: the Windows app theme's at first, so nothing waits for the desktop to be measured. Where liquid glass
@@ -558,7 +556,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         // A settings change still waiting for its timer (made during the exit animation) is written before the last wait (life-L13).
-        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; MotionEnvironment.Changed -= GlassEnvironmentChanged; GlassBackdrop.LiquidFailed -= GlassEnvironmentChanged; InteractionFx.Uninstall(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; MotionEnvironment.Changed -= GlassEnvironmentChanged; GlassBackdrop.LiquidFailed -= GlassEnvironmentChanged; InteractionFx.Uninstall(); UnwatchSurface(); _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
         Media?.Dispose(); Monitor?.Dispose(); Devices?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);

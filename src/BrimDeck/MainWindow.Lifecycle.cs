@@ -90,7 +90,8 @@ public partial class MainWindow
     private void Boot()
     {
         if (_poweringOff || _app.Exiting || _retiring) return;
-        if (_expanded || IsSuppressed || !CanAnimateLifecycle)
+        // Made in place of another panel (App.RebuildPanels), the island is simply there again, as it was.
+        if (_expanded || IsSuppressed || !CanAnimateLifecycle || _rebuilt)
         {
             if (_expanded || IsSuppressed || !_app.Glancing) { SetImmediate(HoverZone, OpacityProperty, 1d); return; }
             // No boot to play: the island appears once the first look is decided (a hotkey opening it meanwhile, EndBoot, sooner).

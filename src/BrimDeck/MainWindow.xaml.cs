@@ -81,6 +81,12 @@ public partial class MainWindow : Window
     private CompactAlertInfo? _alert;
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
+    internal bool Previewing => _preview;
+    // The panel this one is made in place of (App.RebuildPanels): it takes its data, and shows at once, without a boot or a
+    // refresh of its own. Let go once taken (each panel holding the one before kept every panel ever made).
+    internal MainWindow? TakesOver { get => _takesOver; init { _takesOver = value; _rebuilt = value is not null; } }
+    private MainWindow? _takesOver;
+    private readonly bool _rebuilt;
     public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Hide || HiddenByUser);
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     public string? LastRefreshError { get; private set; }
@@ -170,13 +176,14 @@ public partial class MainWindow : Window
         {
             _virtualDesktops ??= new VirtualDesktopPresence(this);
             _context = _host.DetectNow();
-            if (_lead is { } lead) { Snapshots = lead.Snapshots; _updatedAt = lead._updatedAt; DetectThresholds(); UpdateNotice(); }
+            if ((_lead ?? _takesOver) is { } lead) { Snapshots = lead.Snapshots; _updatedAt = lead._updatedAt; DetectThresholds(); UpdateNotice(); }
+            _takesOver = null;
             ApplySettings();
             Boot();
             _trackPointer = true; UpdatePointerTracking();
             SubscribeNotices();
             ScheduleClock(); _clock.Start(); StartMusic();
-            if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
+            if (_lead is null) { _app.AssignDisplays(); if (!_rebuilt) await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
         Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _clipSettle?.Stop(); StopFill(); };
@@ -475,13 +482,16 @@ public partial class MainWindow : Window
     public void Preview(bool enabled, bool expanded = true)
     {
         if (!enabled && !_preview) return;
-        _preview = enabled;_previewExpanded = enabled && expanded; if (enabled) _pageSwitchHold.Stop(); ApplySettings(); SetExpanded(enabled && expanded, true); }
+        _preview = enabled;_previewExpanded = enabled && expanded; if (enabled) _pageSwitchHold.Stop(); ApplySettings(); SetExpanded(enabled && expanded, true);
+        if (!enabled) _app.CheckSurface();
+    }
     internal void ResumeAfterPreview()
     {
         if (!_preview) return;
         _preview = false; _previewExpanded = false; _pageSwitchHold.Stop();
         ApplySettings();
         PointerChanged(_pointerInside);
+        _app.CheckSurface();
     }
     public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots)
     {
@@ -616,7 +626,7 @@ public partial class MainWindow : Window
         if (wasExpanded != expanded && !_preview) Dispatcher.BeginInvoke(() => _app.Notices?.DeckExpanded(this, _expanded));
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
-        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); }
+        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); if (!_retiring) Dispatcher.BeginInvoke(DispatcherPriority.Background, () => _app.CheckSurface()); }
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;

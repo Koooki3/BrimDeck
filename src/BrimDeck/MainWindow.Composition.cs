@@ -3,28 +3,40 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shell;
+using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// How the island's window reaches the screen (prototype, memory-opt). As a layered window (AllowsTransparency) WPF hands every
-// frame to Windows through UpdateLayeredWindow; for a window as wide as the monitor that kept the opening at every other refresh
-// at 144 Hz (live check 10-27, LayerProbe: a layered window of the monitor's width opened at half the rate, a window DWM composes
-// at the full rate). Composed by DWM instead, the window is an ordinary one whose frame is extended over all of it, so its
-// transparent pixels show what lies below, and WPF presents to it as to any window.
+// How the island's window reaches the screen (WindowComposition). As a layered window (AllowsTransparency) WPF hands every frame
+// to Windows through UpdateLayeredWindow; for a window as wide as the monitor that kept the opening at every other refresh at
+// 144 Hz (live check 10-27: LayerProbe, a layered window of the monitor's width opened at half the rate, a window DWM composes at
+// the full rate; BrimDeck in github-dark opened at 12.7 ms a frame layered, 7.7 composed). Composed by DWM, the window is an
+// ordinary one whose frame is extended over all of it, so its transparent pixels show what lies below, and WPF presents to it
+// as to any window.
 // A layered window lets clicks through its fully transparent pixels; this one would take them all. So its region is cut to
 // what it draws (the island, its shadow as far as it reaches, the resize grips and the hover strip of an open panel): at rest
 // it follows the layout, and for a move it is set once to cover the move (HoldRegion).
-// Without a graphics card (software rendering, a remote session) DWM would show the transparent pixels black, so the window
-// stays layered there. Chosen once per process: BRIMDECK_COMPOSITION=dwm while this is a prototype.
+// The choice is made when the window is made and cannot change after: the app makes the panels again when it should
+// (App.Composition: a liquid glass theme chosen or left, software drawing, a remote session).
 public partial class MainWindow
 {
-    internal static readonly bool DwmComposed = Environment.GetEnvironmentVariable("BRIMDECK_COMPOSITION") == "dwm"
-        && RenderCapability.Tier >> 16 >= 2 && !SystemParameters.IsRemoteSession;
+    // BRIMDECK_COMPOSITION=layered or dwm chooses regardless of the theme (for comparing, and to go back).
+    internal static readonly string? ForcedComposition = Environment.GetEnvironmentVariable("BRIMDECK_COMPOSITION");
+    // For the checks only: drawing taken as done in software, as after a lost graphics device or a remote connection.
+    internal static bool SoftwareForTest { get; set; }
+    internal static bool DrawsWithCard => !SoftwareForTest && RenderCapability.Tier >> 16 >= 2;
+    internal static bool RemoteSession => SystemParameters.IsRemoteSession || GetSystemMetrics(0x1000) != 0; // SM_REMOTESESSION
+    // What a panel window made now would be.
+    internal static WindowSurface WantedSurface => WindowComposition.Choose(ForcedComposition, PanelThemes.IsLiquid(PanelTheme.Current), DrawsWithCard, RemoteSession);
+    // What this window is.
+    internal bool DwmComposed { get; private set; }
     private bool _regionQueued;
 
     // Before the window has a handle: from then on the choice cannot change.
     private void InitializeComposition()
     {
+        // The offscreen page sheets draw the window's content only; their window is never shown.
+        DwmComposed = !_app.Offscreen && WantedSurface == WindowSurface.Composed;
         if (!DwmComposed) return;
         AllowsTransparency = false;
         WindowChrome.SetWindowChrome(this, new WindowChrome
@@ -175,6 +187,7 @@ public partial class MainWindow
     [StructLayout(LayoutKind.Sequential)] private struct Margins { public int Left, Right, Top, Bottom; }
     [DllImport("dwmapi")] private static extern int DwmExtendFrameIntoClientArea(IntPtr window, ref Margins margins);
     [DllImport("dwmapi")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+    [DllImport("user32")] private static extern int GetSystemMetrics(int index);
     [DllImport("gdi32")] private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
     [DllImport("gdi32")] private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
     [DllImport("gdi32")] private static extern int CombineRgn(IntPtr destination, IntPtr first, IntPtr second, int mode);

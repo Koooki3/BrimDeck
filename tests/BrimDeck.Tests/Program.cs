@@ -50,6 +50,7 @@ try
     PanelThemeEditorTests.Run(root, Check);
     PixelBlocksTests.Run(root, Check);
     DisplayLayoutTests.Run(Check);
+    WindowCompositionTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
     HotkeyTests.Run(Check);
