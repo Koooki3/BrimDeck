@@ -312,16 +312,20 @@ static class PowerTests
             }
         }
         // Orange and red belong to the low levels: a battery at a normal charge, charging or saving is never drawn in the theme's warning or
-        // critical color, so "83 %" is never mistaken for a warning. The roles come from the monitor scheme (its warning and critical are the
-        // theme's own), so only the tokens are compared.
+        // critical color, so "83 %" is never mistaken for a warning. A token is the theme's own; a role comes from the monitor's Theme color scheme
+        // (the default), worked out as the app does (MonitorColors.FromTheme over the theme's accent and its cyan, pink, lime and amber), with
+        // the theme's warning and critical beside it. Every theme, its night and dusk looks included.
         var warm = new List<string>();
         foreach (var (id, palette) in palettes.Where(item => !item.Id.StartsWith("high-contrast", StringComparison.Ordinal)))
         {
             var look = PowerLooks.For(palette);
             string warning = (palette.WarningDefault ?? ThemeColor.Parse(AppPresets.WarningColor)).ToString(), critical = (palette.CriticalDefault ?? ThemeColor.Parse(AppPresets.CriticalColor)).ToString();
-            foreach (var name in new[] { look.Normal, look.Charge, look.Saver }.Distinct().Where(PowerLook.Tokens.Contains))
+            var scheme = MonitorColors.FromTheme(palette["accent"].ToString(), [.. new[] { ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Amber }.Select(color => palette.ClockPreset(color).ToString())], warning, critical);
+            foreach (var name in new[] { look.Normal, look.Charge, look.Saver, look.Draw }.Distinct())
             {
-                string color = palette[name].ToString();
+                string color = PowerLook.Tokens.Contains(name) ? palette[name].ToString() : name switch
+                { "cpu" => scheme.Performance, "efficiency" => scheme.Efficiency, "memory" => scheme.Memory, "gpu" => scheme.Gpu, _ => "" };
+                if (color.Length == 0 || name is "warning" or "critical") continue;
                 if (ColorMath.Distance(color, warning) < 90 || ColorMath.Distance(color, critical) < 90) warm.Add($"{id}: {name} {color} is near {warning} or {critical}");
             }
         }

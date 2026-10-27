@@ -22,8 +22,10 @@ internal static partial class LiquidPages
     private static MonitorSnapshot Powered(MonitorSnapshot basis, PowerSample? power, string? why, BatterySample? battery, double[]? history = null)
     {
         var curve = history ?? (power is null ? [] : Enumerable.Range(0, 60).Select(i => power.Watts * (1 + .35 * Math.Sin(i / 4.0) + .15 * Math.Sin(i / 1.7)) * (i > 40 ? 1.25 : 1)).ToArray());
+        // The system drive 83 % full (a warning level, as a drive's reading shows it): it is no battery, and must not look like one.
         return basis with
         {
+            Storage = [new StorageDrive(0, "SSD", [new StorageVolume(Storage.WindowsLetter?.ToUpperInvariant() ?? "C:", "", 100UL << 30, 17UL << 30)])],
             Power = power is null ? Reading<PowerSample>.Unavailable(why ?? "") : Reading<PowerSample>.Of(power),
             Battery = battery is null ? Reading<BatterySample>.Unavailable(BatteryModel.NoBattery) : Reading<BatterySample>.Of(battery),
             PowerHistory = curve,
@@ -84,7 +86,7 @@ internal static partial class LiquidPages
         if (english) { settings.Language = Loc.English; Loc.Use(Loc.English); }
         // The sampler is not running here, so the page would keep room for three drives that are not there.
         settings.CapsuleMonitor = true; settings.NotchMonitor = true; settings.MonitorStorage = false;
-        foreach (var reading in settings.CompactReadings) reading.Visible = reading.Item is CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Power or CompactMonitorItems.Charge or CompactMonitorItems.Battery;
+        foreach (var reading in settings.CompactReadings) reading.Visible = reading.Item is CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Storage or CompactMonitorItems.Power or CompactMonitorItems.Charge or CompactMonitorItems.Battery;
         foreach (var theme in PanelThemes.BuiltIns.Where(theme => only is null || only.Contains(theme.Id)))
             foreach (var look in new[] { DaylightLook.Day, DaylightLook.Dusk, DaylightLook.Night }
                 .Where(look => look == DaylightLook.Day || look == DaylightLook.Night && theme.File.Night is not null || look == DaylightLook.Dusk && theme.File.Dusk is not null))
@@ -226,6 +228,22 @@ internal static partial class LiquidPages
         Console.WriteLine("reading: " + (smi.Read("NVIDIA GeForce RTX 4060 Laptop GPU", 0).TryGet(out var w) ? w.ToString("0.0") + " W" : "none") + "; ending without cleaning up");
         Console.Out.Flush();
         Environment.FailFast("smi-crash test");
+        return 0;
+    }
+
+    // The colors the power and battery readings resolve to on every theme with the Theme color scheme (the default): what the strip and the
+    // page draw with. --power-colors
+    public static int RunPowerColors()
+    {
+        foreach (var theme in PanelThemes.BuiltIns)
+            foreach (var look in new[] { DaylightLook.Day, DaylightLook.Night }.Where(look => look == DaylightLook.Day || theme.File.Night is not null))
+            {
+                var palette = PanelThemes.Resolve(theme, look);
+                PanelTheme.Show(palette);
+                var colors = MonitorThemeColors.For(MonitorPalette.Theme, new MonitorCustomColors()) with { Warning = MonitorThemeColors.Warning(new DeckSettings()), Critical = MonitorThemeColors.Critical(new DeckSettings()) };
+                var style = PowerStyle.For(colors);
+                Console.WriteLine($"{theme.Id,-24}{(look == DaylightLook.Night ? "night" : "     ")} {style.Look.Gauge,-8} normal {style.Normal} charge {style.Charge} saver {style.Saver} draw {style.Draw} | warning {style.Warning} critical {style.Critical} | cpu {colors.Performance} eff {colors.Efficiency}");
+            }
         return 0;
     }
 }

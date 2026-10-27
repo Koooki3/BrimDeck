@@ -27,7 +27,7 @@ public sealed record PowerLook(PowerGauge Gauge, PowerCurve Curve, string Normal
 
 public static class PowerLooks
 {
-    public static readonly PowerLook Default = new(PowerGauge.Pill, PowerCurve.Smooth, "textPrimary", "efficiency", "efficiency", "efficiency");
+    public static readonly PowerLook Default = new(PowerGauge.Pill, PowerCurve.Smooth, "textPrimary", "accent", "accent", "accent");
 
     // High contrast: outlines and text colors only, so the system's colors carry everything; the states are told by the mark and the
     // words (bolt, exclamation, leaf), never by color alone.
@@ -39,17 +39,19 @@ public static class PowerLooks
     //   Pixel Blocks: ten stepped squares in the bright chat palette, charging cyan, a stair curve.
     //   Endfield: a HUD-cut battery in the signal color (ink on paper), charging in the primary text color, a hairline curve in the signal.
     //   Liquid Glass: a thin glass body with a light edge, a hairline curve.
+    // Charging, Battery saver and the curve take the theme's accent (default, glass) or its own cool color; the monitor scheme's efficiency color
+    // is used only where it is not near the theme's warning or critical color (Endfield), which a plain theme's scheme can land on.
     private static readonly Dictionary<string, PowerLook> Table = new(StringComparer.OrdinalIgnoreCase)
     {
         [PanelThemes.Dark] = Default,
         [PanelThemes.Light] = Default,
-        ["cyberpunk-edgerunners"] = new(PowerGauge.Chamfer, PowerCurve.Sharp, "accent", "clock", "clock", "liked"),
+        ["cyberpunk-edgerunners"] = new(PowerGauge.Chamfer, PowerCurve.Sharp, "accent", "clock", "clock", "accent"),
         [PanelThemes.Endfield] = new(PowerGauge.Chamfer, PowerCurve.Fine, "accent", "textPrimary", "efficiency", "accent"),
         [PanelThemes.IslandHoliday] = new(PowerGauge.Round, PowerCurve.Wave, "textPrimary", "equalizer", "equalizer", "equalizer"),
         [PanelThemes.IslandHoliday2] = new(PowerGauge.Round, PowerCurve.Wave, "textPrimary", "equalizer", "equalizer", "equalizer"),
         [PanelThemes.PixelBlocks] = new(PowerGauge.Blocks, PowerCurve.Steps, "textPrimary", "equalizer", "equalizer", "equalizer"),
-        [PanelThemes.GlassLight] = new(PowerGauge.Glass, PowerCurve.Fine, "textPrimary", "efficiency", "efficiency", "accent"),
-        [PanelThemes.GlassDark] = new(PowerGauge.Glass, PowerCurve.Fine, "textPrimary", "efficiency", "efficiency", "accent"),
+        [PanelThemes.GlassLight] = new(PowerGauge.Glass, PowerCurve.Fine, "textPrimary", "accent", "accent", "accent"),
+        [PanelThemes.GlassDark] = new(PowerGauge.Glass, PowerCurve.Fine, "textPrimary", "accent", "accent", "accent"),
     };
 
     // The built-in themes with a look of their own.
