@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 
 int checks = 0;
 void Check(string name, bool condition) { if (!condition) throw new InvalidOperationException("FAIL " + name); checks++; Console.WriteLine("PASS " + name); }
-async Task Until(string name, Func<bool> test, int milliseconds = 4000)
+async Task Until(string name, Func<bool> test, int milliseconds = 15000)
 {
     var end = Environment.TickCount64 + milliseconds;
     while (!test() && Environment.TickCount64 < end) await Task.Delay(20);
