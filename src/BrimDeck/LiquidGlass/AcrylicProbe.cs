@@ -19,7 +19,15 @@ internal static class AcrylicProbe
         public double DarkFor(double openness) => Median + (Dark - Median) * Math.Clamp(openness, 0, 1);
     }
     private const int Cells = 24;
+    // The brightest and darkest the open panel answers for: the ring's 95th and 5th percentiles (user 10-27, "再透一点": with the
+    // floors lowered the 90th left a moving wallpaper's bright streak, which reaches the body under the panel, unanswered).
+    internal const double Tail = .95;
     private static byte[]? _last;
+
+    // The cells a strip is shrunk to: at most Cells along a side. (Coarser cells, about the body's blur, were tried for user
+    // 10-27's "再透一点": they missed bright detail that does reach the body over a moving wallpaper - the dark look's secondary
+    // text fell to 4.47:1 - so the ring keeps its fine grain; the clearer glass comes from the lower floors, GlassEffect.)
+    internal static (int Width, int Height) Grid(int width, int height) => (Math.Min(Cells, width), Math.Min(Cells, height));
 
     // gap and band in device pixels; island in screen pixels. Null when nothing could be read.
     public static Reading? Read(RECT island, int gap, int band)
@@ -40,7 +48,7 @@ internal static class AcrylicProbe
             foreach (var strip in strips)
             {
                 if (strip.Right - strip.Left < 2 || strip.Bottom - strip.Top < 2) continue;
-                int w = Math.Min(Cells, strip.Right - strip.Left), h = Math.Min(Cells, strip.Bottom - strip.Top);
+                var (w, h) = Grid(strip.Right - strip.Left, strip.Bottom - strip.Top);
                 IntPtr bitmap = CreateCompatibleBitmap(screen, w, h);
                 IntPtr old = SelectObject(memory, bitmap);
                 SetStretchBltMode(memory, Halftone);
@@ -75,7 +83,7 @@ internal static class AcrylicProbe
         }
         _last = now;
         lumas.Sort();
-        return new Reading(lumas.Average(), lumas[(int)(lumas.Count * .9)], lumas[(int)(lumas.Count * .1)], changed, lumas[lumas.Count / 2]);
+        return new Reading(lumas.Average(), lumas[(int)(lumas.Count * Tail)], lumas[(int)(lumas.Count * (1 - Tail))], changed, lumas[lumas.Count / 2]);
     }
 
     private const int Halftone = 4, SrcCopy = 0x00CC0020;

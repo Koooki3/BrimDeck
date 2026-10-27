@@ -19,22 +19,33 @@ internal static class AcrylicEmulation
         // 64 DIPs outside it.
         int gap = (int)Math.Round(24 * scale), band = (int)Math.Round(40 * scale);
         var ring = new List<double>();
+        // Each strip shrunk to the probe's cells (AcrylicProbe.Grid) by an area average, as GDI's HALFTONE does.
         void Ring(int l, int t, int r, int b)
         {
-            for (int y = Math.Max(0, t); y < Math.Min(dh, b); y += 2)
-                for (int x = Math.Max(0, l); x < Math.Min(dw, r); x += 2)
+            if (r - l < 2 || b - t < 2) return;
+            var (cw, ch) = BrimDeck.LiquidGlass.AcrylicProbe.Grid(r - l, b - t);
+            for (int j = 0; j < ch; j++)
+                for (int i = 0; i < cw; i++)
                 {
-                    int o = (y * dw + x) * 4;
-                    ring.Add((.2126 * desktop[o + 2] + .7152 * desktop[o + 1] + .0722 * desktop[o]) / 255);
+                    int x0 = l + (r - l) * i / cw, x1 = l + (r - l) * (i + 1) / cw, y0 = t + (b - t) * j / ch, y1 = t + (b - t) * (j + 1) / ch;
+                    double sum = 0; int n = 0;
+                    for (int y = Math.Max(0, y0); y < Math.Min(dh, y1); y++)
+                        for (int x = Math.Max(0, x0); x < Math.Min(dw, x1); x++)
+                        {
+                            int o = (y * dw + x) * 4;
+                            sum += .2126 * desktop[o + 2] + .7152 * desktop[o + 1] + .0722 * desktop[o]; n++;
+                        }
+                    if (n > 0) ring.Add(sum / n / 255);
                 }
         }
         Ring(gx - gap - band, gy, gx - gap, gy + h + gap);
         Ring(gx + w + gap, gy, gx + w + gap + band, gy + h + gap);
         Ring(gx - gap - band, gy + h + gap, gx + w + gap + band, gy + h + gap + band);
         ring.Sort();
-        double bright = ring.Count > 0 ? ring[(int)(ring.Count * .9)] : .5, darkest = ring.Count > 0 ? ring[(int)(ring.Count * .1)] : .5;
+        double tail = BrimDeck.LiquidGlass.AcrylicProbe.Tail;
+        double bright = ring.Count > 0 ? ring[(int)(ring.Count * tail)] : .5, darkest = ring.Count > 0 ? ring[(int)(ring.Count * (1 - tail))] : .5;
         var reading = new BrimDeck.LiquidGlass.AcrylicProbe.Reading(.5, bright, darkest, 0, ring.Count > 0 ? ring[ring.Count / 2] : .5);
-        Luminosity = GlassEffect.Shown(GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness)), openness);
+        Luminosity = GlassEffect.Shown(GlassEffect.LuminosityFor(dark, reading.BrightFor(openness), reading.DarkFor(openness)), openness, dark);
         var look = (dark ? GlassEffect.AcrylicDark : GlassEffect.AcrylicLight) with { LuminosityOpacity = Luminosity };
         var m = GlassEffect.AcrylicMatrix(look);
         // The blurred desktop over the island and a margin as wide as the blur reaches.

@@ -49,18 +49,25 @@ internal static class GlassEffect
     // 管理器的透明度是合适的"); a brighter backdrop (a darker one for the light look) raises it just as far as the text needs
     // (LuminosityFor, from what lies around the island, AcrylicProbe).
     public readonly record struct AcrylicLook(double Saturation, double LuminosityOpacity, double Luminosity, double TintR, double TintG, double TintB, double TintOpacity);
-    public const double LuminosityBase = .55, LuminosityMost = .95;
-    // Size makes thickness (step 4 of round 16): the collapsed island, the control layer, thinner and clearer (.45); the open
-    // panel, the content layer, its full base (.55) - in between with the opening.
-    public const double LuminosityCapsule = .45;
-    public static double Thickness(double openness) => LuminosityCapsule + (LuminosityBase - LuminosityCapsule) * Math.Clamp(openness, 0, 1);
+    // User 10-27 ("各个液态玻璃主题都能再透一点"): a notch clearer, the tint and the saturation as they were, the probe raising
+    // it where the text needs it as before. The collapsed island .45 to .40 in both looks;
+    // the light look's open panel .55 to .45; the dark look's open panel stays .55 - at .50 its secondary text fell to 4.47:1
+    // over a moving wallpaper's frame whose bright part lies under the panel, where the probe's ring cannot see it.
+    public const double LuminosityBase = .55, LuminosityBaseLight = .45, LuminosityMost = .95;
+    // Size makes thickness (step 4 of round 16): the collapsed island, the control layer, thinner and clearer (.40); the open
+    // panel, the content layer, its full base - in between with the opening.
+    public const double LuminosityCapsule = .40;
+    public static double PanelBase(bool dark) => dark ? LuminosityBase : LuminosityBaseLight;
+    public static double Thickness(double openness, bool dark) => LuminosityCapsule + (PanelBase(dark) - LuminosityCapsule) * Math.Clamp(openness, 0, 1);
     // The luminosity opacity shown: what the text needs (LuminosityFor) and never under the thickness for the opening; in steps.
-    public static double Shown(double needed, double openness) => Math.Ceiling(Math.Max(needed, Thickness(openness)) * 20 - 1e-9) / 20;
+    public static double Shown(double needed, double openness, bool dark) => Math.Ceiling(Math.Max(needed, Thickness(openness, dark)) * 20 - 1e-9) / 20;
     public static readonly AcrylicLook AcrylicDark = new(1.3, LuminosityBase, .1373, .1373, .1373, .1373, .23);
     public static readonly AcrylicLook AcrylicLight = new(1.3, LuminosityBase, .953, .953, .953, .953, .25);
     // The lightness the body may reach for the looks' text: the dark look's light text over at most DarkMost, the light look's
     // dark text over at least LightLeast (sRGB luma; 4.5:1 and more with the text's own colours, #F6F7F9 and #101217).
-    public const double DarkMost = .27, LightLeast = .82;
+    // (DarkMost .27 to .26 with the lower floors of 10-27: a moving wallpaper's frame at 100 % left the dark look's open panel at
+    // 89.9 % of the opaque theme's masked contrast.)
+    public const double DarkMost = .26, LightLeast = .82;
 
     // The luminosity opacity the text needs over a backdrop whose brightest tenth reaches bright (the dark look) or whose
     // darkest tenth reaches dark (the light look), from the recipe's lightness ((1 - L) b + L t)(1 - k) + k t: never under
