@@ -41,14 +41,17 @@ internal static class CompactDragTests
         int jerks = 0, next = 0;
         var previous = Row(previousWidth, 0, -1, false);
         double rest = previous.Whole;
+        bool held = true;
         for (double t = frame; t <= seconds; t += frame)
         {
             double width = Math.Round(surface(t));
             while (next < changes.Length && changes[next] <= t) { if (flowing) flow.NoteChange(changes[next]); next++; }
             bool drag = dragging(t);
             flow.Advance(t, drag, true);
-            var row = Row(width, flowing ? flow.Eased : 0, rest, flow.Target(drag) > 0);
-            if (!flowing || flow.Eased <= 0) rest = row.Whole;
+            bool rising = flow.Target(drag) > 0, active = flowing && flow.Eased > 0;
+            if (active) { if (!rising) held = false; else if (!held) { rest = Row(width, 0, -1, false).Whole; held = true; } }
+            var row = Row(width, active ? flow.Eased : 0, rest, rising && held);
+            if (!active) { rest = row.Whole; held = true; }
             double moved = Math.Abs(width - previousWidth);
             double jump = Math.Max(Math.Max(Math.Abs(row.Window - previous.Window) - moved, Math.Abs(row.Left - previous.Left)), Math.Abs(row.Clock - previous.Clock) - moved);
             worst = Math.Max(worst, jump); if (jump > 3) jerks++;
@@ -85,6 +88,16 @@ internal static class CompactDragTests
                 double sliderLimit = limit + 2;
                 check($"Entries ({fps:0} fps): the {name} moves no frame's row by more than {sliderLimit} DIPs beyond the surface's own move, and the flow is back to 0 after", flowing.Worst <= sliderLimit && flowing.FlowAtEnd == 0);
                 check($"Entries ({fps:0} fps): the {name} without the flow jumps the row by more than 10 DIPs (what the flow spares)", whole.Worst > 10);
+            }
+
+            // A slider dragged again after the last one stopped, while its flow is still falling: the flow rises again from where it is.
+            {
+                double gap = 1.52, start = 216 + 420;
+                double[] first = Enumerable.Range(0, 71).Select(k => k * .016).ToArray();
+                double[] second = Enumerable.Range(0, 300).Select(k => gap + k * .045).ToArray();
+                double Width(double t) => t < gap ? 216 + Math.Min(Math.Floor(t / .016 + 1e-9) * 6, 420) : start - Math.Min(Math.Floor((t - gap) / .045 + 1e-9), 299);
+                var again = Run(gap + 300 * .045 + 1.5, fps, Width, _ => false, [.. first, .. second], true);
+                check($"Entries ({fps:0} fps): a slider dragged again while the flow of the last one falls moves no frame's row by more than {limit + 2} DIPs beyond the surface's own move", again.Worst <= limit + 2 && again.FlowAtEnd == 0);
             }
 
             // One change (a number typed, a reset): a new layout, not a motion; the flow stays 0.
