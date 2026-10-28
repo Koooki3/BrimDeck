@@ -677,11 +677,29 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
             }
             return SettingsMigrations.Read(root, running, out _);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
+        // Any exception, since a faulty migration step can throw anything. Defaults replace the file at the next save,
+        // so the file is copied aside first and can still be restored by hand.
+        catch (Exception)
         {
-            _loadWarning = () => Loc.T("无法读取已保存的设置，本次使用默认值。", "The saved settings could not be read. Default settings are used this time.");
+            var kept = KeepUnreadable();
+            _loadWarning = kept is null
+                ? () => Loc.T("无法读取已保存的设置，本次使用默认值。", "The saved settings could not be read. Default settings are used this time.")
+                : () => Loc.T($"无法读取已保存的设置，本次使用默认值。原文件已另存为 {kept}。", $"The saved settings could not be read. Default settings are used this time. The original file is kept as {kept}.");
             return FirstStart();
         }
+    }
+
+    // Copies an unreadable settings file next to it and returns the copy's name, or null when there is nothing to copy.
+    private string? KeepUnreadable()
+    {
+        try
+        {
+            if (!File.Exists(FilePath)) return null;
+            var name = $"settings.unreadable-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            File.Copy(FilePath, Path.Combine(DirectoryPath, name), true);
+            return name;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
     public void Save(DeckSettings settings) => Write(Serialize(settings));
 
