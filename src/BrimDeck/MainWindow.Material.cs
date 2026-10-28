@@ -80,18 +80,16 @@ public partial class MainWindow
         {
             _contentAreaMiddle = Compact.TransformToAncestor(Island).Transform(new Point(Compact.ActualWidth / 2, Compact.ActualHeight / 2));
             // The row's parts (the row and the alert's row are panels of them); anything else as a whole.
-            // A row on its way out (MainWindow.RowSwap.cs) is still drawn and keeps its place under the glass until it is gone.
-            foreach (var shown in _leavingRows.Prepend(row))
+            var children = row.Children;
+            for (int i = 0; i < children.Count; i++)
             {
-                var children = shown.Children;
-                for (int i = 0; i < children.Count; i++)
-                {
-                    if (children[i] is not FrameworkElement { IsVisible: true } child) continue;
-                    if (child is Panel { Children: { Count: > 0 } parts })
-                        for (int j = 0; j < parts.Count; j++) { if (parts[j] is FrameworkElement part) Add(part, ref area); }
-                    else Add(child, ref area);
-                }
+                if (children[i] is not FrameworkElement { IsVisible: true } child) continue;
+                if (child is Panel { Children: { Count: > 0 } parts })
+                    for (int j = 0; j < parts.Count; j++) { if (parts[j] is FrameworkElement part) Add(part, ref area); }
+                else Add(child, ref area);
             }
+            // A row on its way out (MainWindow.RowSwap.cs, a picture of it) is still drawn and keeps its place under the glass until it is gone.
+            foreach (var leaving in _leavingRows) Add(leaving, ref area);
         }
         catch (InvalidOperationException) { return Rect.Empty; }
         return area;
