@@ -19,6 +19,7 @@ internal static class Program
             CheckSettledClip();
             CheckPageToolTips();
             LayoutRetryTests.Run(Check);
+            BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
             CheckGpus();
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();

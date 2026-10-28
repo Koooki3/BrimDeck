@@ -10,7 +10,7 @@ internal static class LayoutRetryTests
     {
         var button = new Button { Content = "Usage", Width = 60, Height = 20 };
         var parent = new Border { Child = button };
-        var window = new Window { Width = 200, Height = 100, ShowInTaskbar = false, Content = parent, WindowStyle = WindowStyle.None, Left = -3000, Top = -3000 };
+        var window = new Window { Width = 200, Height = 100, ShowInTaskbar = false, ShowActivated = false, Content = parent, WindowStyle = WindowStyle.None, Left = -20000, Top = -20000 };
         try
         {
             window.Show();
