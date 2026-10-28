@@ -260,8 +260,12 @@ public sealed partial class SettingsWindow
             levels.Children.Add(SwatchCell(LevelName(level), LevelHelp(level), () => LevelSwatch(level, Refresh), refresh, info: true));
         var status = Row(Loc.T("状态颜色", "Level colors"), levels, help: () => Loc.T("用于收起时的读数；展开时只有温度会变色，占用不变色。",
             "Used by the collapsed readings; on the expanded page only temperatures change color, usage does not."));
+        // How the dials and the core columns move to a new reading; the figures always take it at once.
+        var smoothing = MusicChoice(Loc.T("平滑过渡", "Smoothing"), S.CompactSmoothing,
+            [(CompactSmoothing.Off, Loc.T("不平滑", "Off")), (CompactSmoothing.Ten, Loc.T("10 帧", "10 fps")), (CompactSmoothing.Thirty, Loc.T("30 帧", "30 fps"))],
+            v => Change(s => s.CompactSmoothing = v));
         Refresh();
-        Group(table, quick, status);
+        Group(table, quick, status, smoothing);
     }
 
     private static Grid ReadingColumns()
