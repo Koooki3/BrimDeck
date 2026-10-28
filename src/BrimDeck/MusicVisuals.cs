@@ -246,9 +246,6 @@ internal sealed class MusicMarquee : FrameworkElement
         set { if (_fontSize == value) return; _fontSize = value; ResetText(); }
     }
     public bool CenterWhenFits { get; init; } = true;
-    // The width a text takes in this type at this size, as the marquee draws it.
-    public static double NaturalWidth(string text, double fontSize, double pixelsPerDip) => new FormattedText(text, CultureInfo.CurrentUICulture,
-        FlowDirection.LeftToRight, Typeface, fontSize, Brushes.Black, pixelsPerDip > 0 ? pixelsPerDip : 1).Width;
     // The edge fade's width; the collapsed row scales it with its height. The scroll speed does not change.
     public double EdgeWidth { get; init; } = Edge;
     // False when the region is too narrow for a meaningful stretch of text: the text then rests at its start, cut at the edge.
@@ -502,7 +499,7 @@ internal abstract class GlideCarousel : Grid
         Retarget(travel);
     }
 
-    // A new travel for a strip whose width changed; the cycle carries on from the same time. No travel leaves it at rest.
+    // Sets the travel; a cycle already running carries on from the same time. No travel leaves it at rest.
     protected void Retarget(double travel)
     {
         if (_cycle is not null)
@@ -685,7 +682,7 @@ internal sealed class ReadingsCarousel : GlideCarousel
         window = Math.Max(0, window); travel = Math.Max(0, travel); edge = Math.Max(0, edge);
         Rotates = travel > 0;
         Width = edge + window + edge; Height = strip.Height; ClipToBounds = true;
-        strip.Width = strip.PreferredWidth; strip.Paired = true; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        strip.Width = strip.PreferredWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
         strip.RenderTransform = new TranslateTransform();
         Canvas.SetLeft(strip, edge);
         // A Canvas measures the strip at its full width, as for the rings.
