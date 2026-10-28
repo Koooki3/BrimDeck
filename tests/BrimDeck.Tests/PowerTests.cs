@@ -255,8 +255,9 @@ static class PowerTests
         // Their widths come in through the same table as the others.
         var width = CompactMonitor.Widths(CompactMonitorItems.None, 16, _ => 0, 16, 40, 30, power: 41, charge: 52);
         check("Readings: the widths of Power and Charge", width(CompactMonitorItems.Power) == 41 && width(CompactMonitorItems.Charge) == 52 && CompactMonitor.Width(CompactMonitorItems.Power | CompactMonitorItems.Charge, width, 6) == 41 + 6 + 52);
-        check("Readings: a short row drops Power first, then Charge", CompactMonitor.Fit(CompactMonitorItems.Cpu | CompactMonitorItems.Power | CompactMonitorItems.Charge, width, 6, 16 + 6 + 52) == (CompactMonitorItems.Cpu | CompactMonitorItems.Charge)
-            || CompactMonitor.Fit(CompactMonitorItems.Cpu | CompactMonitorItems.Power | CompactMonitorItems.Charge, width, 6, 16 + 6 + 52) == CompactMonitorItems.Cpu);
+        const CompactMonitorItems Three = CompactMonitorItems.Cpu | CompactMonitorItems.Power | CompactMonitorItems.Charge;
+        check("Readings: a short row drops Power first", CompactMonitor.Fit(Three, width, 6, 16 + 6 + 52) == (CompactMonitorItems.Cpu | CompactMonitorItems.Charge));
+        check("Readings: a shorter row then drops Charge", CompactMonitor.Fit(Three, width, 6, 16 + 6 + 52 - 1) == CompactMonitorItems.Cpu);
         check("Readings: no level of their own in the strip's rule", ReadingLevels.Of(CompactMonitorItems.Power, MonitorSnapshot.Empty(4, "t")) == MemoryLevel.Normal);
     }
 
