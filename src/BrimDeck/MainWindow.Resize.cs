@@ -358,6 +358,8 @@ public partial class MainWindow
         // Saved like any change from the settings window, which applies it to every panel and fits the window again. A press that
         // moved nothing only fits the window again.
         if (_resizeChanged) _app.UpdateSettings(Settings.Copy()); else ApplySettings();
+        // The collapsed row's windows ease from the room they followed to whole items (MainWindow.CompactFlow.cs).
+        if (compact) SettleCompactFlow();
         _resizeChanged = false;
         // The label leaves; the edge stays lit while the pointer is still on it.
         _hoverEdge = ResizeEdges.None;
