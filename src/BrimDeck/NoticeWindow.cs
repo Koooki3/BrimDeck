@@ -113,6 +113,18 @@ internal sealed partial class NoticeWindow : Window
     private NoticeCenter Center => _app.Notices;
     private bool Indicator => _deck.Collapsed.Style == CompactStyle.Line;
 
+    // The scale the panel, and with it the island, is drawn at (PanelScales). The notice is drawn at it too: its toast and its details
+    // are laid out at the size they are designed at and drawn at the scale (UI.Scale), as the open panel is, and every size around them
+    // (the frames, the margins of the shadow and of the droplets, the window) is the designed one times it.
+    private double Scale => _deck.Scale;
+
+    private void ApplyScale()
+    {
+        double scale = Scale;
+        if (UI.GetScale(_toast) == scale) return;
+        UI.Scale(_toast, scale); UI.Scale(_detail, scale);
+    }
+
     // ----- Showing, updating and ending -----
 
     public void Present(AttentionItem item)
@@ -301,10 +313,12 @@ internal sealed partial class NoticeWindow : Window
         else _detailFor = null;
     }
 
-    // The theme or the island changed while a notice shows: it is laid out and drawn again in place.
+    // The theme or the island changed while a notice shows: it is laid out and drawn again in place. One on its way back into the island
+    // aims at the island as it is now (Retarget).
     public void Refresh()
     {
-        if (_item is null || _leaving) return;
+        if (_leaving) { Retarget(); return; }
+        if (_item is null) return;
         FxStop();
         Layout();
         Dress();
@@ -313,18 +327,37 @@ internal sealed partial class NoticeWindow : Window
         else { _detailFor = null; SetFrame(_toastFrame, InPlace, NoticeMotion.Surface, Soft.Follow); }
     }
 
+    // The island's surface changed by itself (its row asked for another width): a notice that shows is laid out again for it, one that
+    // returns aims at it. Nothing changes while the island is where the notice was made for.
+    public void IslandChanged()
+    {
+        if (!IsVisible || NoticeGeometry.Collapsed(_deck.Collapsed) == _collapsed) return;
+        Refresh();
+    }
+
+    // The island's surface changed while the notice returns to it (its row asked for another width, the scale or the style changed): the
+    // return carries on to the surface as it is now, in the window made to hold it, so that the island takes over from the notice's last
+    // frame without a jump. Nothing changes when the island is where the return was already headed.
+    private void Retarget()
+    {
+        if (!IsVisible || _hiding || NoticeGeometry.Collapsed(_deck.Collapsed) == _collapsed) return;
+        Layout();
+        int generation = ++_generation;
+        SetFrame(_collapsed, Duration() * .6, NoticeMotion.ReturnSurface, Soft.Settle, () => { if (generation == _generation && _item is null) Finish(reveal: true); }, LineReturning());
+    }
+
     // ----- Geometry -----
 
-    private NoticeFrame Frame(NoticeForm form, Size wanted) => NoticeGeometry.Frame(_deck.Collapsed, _deck.MonitorBoundsDip, _deck.WorkDip, form, wanted.Width, wanted.Height);
+    private NoticeFrame Frame(NoticeForm form, Size wanted) => NoticeGeometry.Frame(_deck.Collapsed, _deck.MonitorBoundsDip, _deck.WorkDip, form, wanted.Width, wanted.Height, Scale);
 
     // Sizes the window once for this notice: it holds the island, the toast and the largest details card, with room for the glow.
     private void Layout()
     {
         _collapsed = NoticeGeometry.Collapsed(_deck.Collapsed);
         _toastFrame = Frame(NoticeForm.Toast, ToastSize());
-        _detailFrame = Frame(NoticeForm.Detail, new Size(NoticeGeometry.DetailMaxWidth, NoticeGeometry.DetailMaxHeight));
+        _detailFrame = Frame(NoticeForm.Detail, new Size(NoticeGeometry.DetailMaxWidth * Scale, NoticeGeometry.DetailMaxHeight * Scale));
         var union = Rect.Union(Rect.Union(ToRect(_collapsed.Rect), ToRect(_toastFrame.Rect)), ToRect(_detailFrame.Rect));
-        union.Inflate(GlowMargin + FxSideMargin, GlowMargin);
+        union.Inflate(GlowMargin * Scale + FxSideMargin, GlowMargin * Scale);
         var monitor = _deck.MonitorBoundsDip;
         union.Intersect(new Rect(0, 0, monitor.Width, monitor.Height));
         if (union.IsEmpty) union = new Rect(0, 0, 1, 1);
@@ -449,12 +482,13 @@ internal sealed partial class NoticeWindow : Window
     private NoticePrivacy Privacy(Notice notice) => Settings.NoticeRule(notice.AppKey)?.Privacy ?? Settings.NoticePrivacy;
     private string AccentHex => "#" + _accent.ToString()[3..];
 
+    // At the designed size (before the scale): height is the toast's height divided by the scale.
     private (double Padding, double Plate) ToastMetrics(double height)
     {
         double plate = Math.Clamp(Math.Round(height - 18), 24, 32);
         // The badges overhang the plate's lower corners a little; on a round-ended toast the plate keeps far enough from the end
         // that they stay inside its curve.
-        double padding = _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(16, _deck.Collapsed.Shoulder + 14) : Math.Max(16, (height - plate) / 2 + 6);
+        double padding = _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(16, _deck.Collapsed.Shoulder / Scale + 14) : Math.Max(16, (height - plate) / 2 + 6);
         return (padding, plate);
     }
 
@@ -467,7 +501,7 @@ internal sealed partial class NoticeWindow : Window
         double text = Math.Max(Measure(title, 12.5, FontWeights.SemiBold), summary.Length > 0 ? Measure(summary, 11.5, FontWeights.Normal) : 0);
         // In 16 DIP steps, so that titles of nearly the same length give the same width. The text column has 10 DIP before it
         // and 6 after it (BuildToast).
-        return new Size(Math.Ceiling((padding * 2 + plate + 16 + text + TrailingWidth()) / 16) * 16, height);
+        return new Size(Math.Ceiling((padding * 2 + plate + 16 + text + TrailingWidth()) / 16) * 16 * Scale, height * Scale);
     }
 
     // The count chip is as wide as its number with its padding (at least 22); the progress ring and the dot take fixed room.
@@ -492,7 +526,7 @@ internal sealed partial class NoticeWindow : Window
     private double Measure(string text, double size, FontWeight weight)
     {
         if (text.Length == 0) return 0;
-        var formatted = new FormattedText(text, Loc.Culture, FlowDirection.LeftToRight, new Typeface(UI.PanelFont, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        var formatted = new FormattedText(text, Loc.Culture, FlowDirection.LeftToRight, new Typeface(UI.PanelFont, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip * Scale);
         return Math.Ceiling(formatted.WidthIncludingTrailingWhitespace);
     }
 
@@ -504,7 +538,7 @@ internal sealed partial class NoticeWindow : Window
 
     // Everything the toast's build depends on besides its words, the count it shows and how far a task has come.
     private object ToastShape(Notice? notice, bool summary) => (_item?.Kind, notice?.IconRef, notice?.AppKey, notice?.AppName, notice?.Origin, notice?.Category,
-        notice?.TimeKind, _accent, TrailingKind(notice), summary, (_toastFrame.Rect.Width, _toastFrame.Rect.Height, _look));
+        notice?.TimeKind, _accent, TrailingKind(notice), summary, (_toastFrame.Rect.Width, _toastFrame.Rect.Height, _look, Scale));
 
     private int TrailingKind(Notice? notice) => _item is { Count: > 1 } ? 1 : HasCountdownRing(notice) ? 2 : notice?.Progress is not null ? 3 : notice is not null ? 4 : 0;
 
@@ -554,9 +588,12 @@ internal sealed partial class NoticeWindow : Window
     {
         _toast.Children.Clear(); _toast.ColumnDefinitions.Clear();
         _countText = null; _progressRing = null;
-        var size = new Size(_toastFrame.Rect.Width, _toastFrame.Rect.Height);
+        ApplyScale();
+        // Laid out at the designed size and drawn at the scale; the margin is the one place outside what is scaled.
+        double scale = Scale;
+        var size = new Size(_toastFrame.Rect.Width / scale, _toastFrame.Rect.Height / scale);
         var (padding, plate) = ToastMetrics(size.Height);
-        _toast.Margin = new Thickness(padding, 0, padding, 0);
+        _toast.Margin = new Thickness(padding * scale, 0, padding * scale, 0);
         _toast.Width = Math.Max(0, size.Width - padding * 2); _toast.Height = size.Height;
         _toast.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _toast.ColumnDefinitions.Add(new ColumnDefinition());
@@ -657,16 +694,18 @@ internal sealed partial class NoticeWindow : Window
 
     private Size DetailSize()
     {
-        if (_detail.Children.Count == 0) return new Size(400, NoticeGeometry.DetailMinHeight);
+        double scale = Scale;
+        if (_detail.Children.Count == 0) return new Size(400 * scale, NoticeGeometry.DetailMinHeight * scale);
         // Measured at the width the card will have (a narrow monitor can make it narrower than it asks for); the desired height
         // includes the margins that pad the card.
-        double width = Frame(NoticeForm.Detail, new Size(400, NoticeGeometry.DetailMinHeight)).Rect.Width, padding = DetailPadding();
-        _detail.Width = width - padding * 2; _detail.Height = double.NaN;
+        double width = Frame(NoticeForm.Detail, new Size(400 * scale, NoticeGeometry.DetailMinHeight * scale)).Rect.Width, padding = DetailPadding();
+        _detail.Width = width / scale - padding * 2; _detail.Height = double.NaN;
         _detail.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         return new Size(width, _detail.DesiredSize.Height);
     }
 
-    private double DetailPadding() => _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(18, _deck.Collapsed.Shoulder + 14) : 18;
+    // At the designed size, like the toast's.
+    private double DetailPadding() => _deck.Collapsed.Style == CompactStyle.Notch ? Math.Max(18, _deck.Collapsed.Shoulder / Scale + 14) : 18;
     private const double DetailTop = 14, DetailBottom = 16;
 
     // Everything the details show except a task's progress and the live time words (which follow their own tick).
@@ -709,8 +748,9 @@ internal sealed partial class NoticeWindow : Window
         _detail.Children.Clear();
         _progressDone = _progressLeft = null; _progressTrack = null;
         _detailKey = DetailKey();
-        double padding = DetailPadding();
-        _detail.Margin = new Thickness(padding, DetailTop, padding, DetailBottom);
+        ApplyScale();
+        double padding = DetailPadding(), scale = Scale;
+        _detail.Margin = new Thickness(padding * scale, DetailTop * scale, padding * scale, DetailBottom * scale);
         var notice = Notice;
         var stack = new StackPanel();
         _detail.Children.Add(stack);
@@ -794,9 +834,9 @@ internal sealed partial class NoticeWindow : Window
         if (_detail.Visibility == Visibility.Collapsed) _detail.Visibility = Visibility.Hidden;
         BuildDetail();
         _detailFrame = Frame(NoticeForm.Detail, DetailSize());
-        double padding = DetailPadding();
-        _detail.Width = Math.Max(0, _detailFrame.Rect.Width - padding * 2);
-        _detail.Height = Math.Max(0, _detailFrame.Rect.Height - DetailTop - DetailBottom);
+        double padding = DetailPadding(), scale = Scale;
+        _detail.Width = Math.Max(0, _detailFrame.Rect.Width / scale - padding * 2);
+        _detail.Height = Math.Max(0, _detailFrame.Rect.Height / scale - DetailTop - DetailBottom);
         _detailFor = _item;
         return true;
     }

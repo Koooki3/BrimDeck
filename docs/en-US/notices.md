@@ -19,6 +19,8 @@ Once a notice has grown to size, its surface moves like a viscous liquid for a m
 
 The capsule's and the notch's motion follows the weight of the notice: an ordinary notice plays as designed; a high priority one longer and with more droplets; an alarm, a call or an error stronger, in the warning or danger color; what only informs (a summary, an application set to low priority) lights briefly and throws a few droplets. The glow's and the droplets' colors and edges follow the [panel theme](themes.md); the pixel theme uses blocks. With animations off (BrimDeck's setting or Windows' own "animation effects") or in high contrast it does not play, and the notice is as it was; the capsule's and the notch's motion takes the display's frames only while it plays, about two seconds, and the indicator's is the panel's own animation; nothing otherwise. Quota alerts and track-change prompts are drawn by the island itself and do not play it.
 
+Notices follow the "Scale" setting (100% / 150%): their size, corners, droplets, glow and the indicator's draw-back and carry grow with it, as the collapsed form and the open panel do.
+
 The capsule's and the notch's liquid motion is the design "胶囊通知动效" provided for BrimDeck by the maintainer MoFeng2223 (<https://claude.ai/artifact/JU9bvJp5PPNY85vpGgUX6C>); the indicator bar's motion (the draw-back and the carry) and the adaptation to every kind of notice and every theme are BrimDeck's own implementation.
 
 ## Sources

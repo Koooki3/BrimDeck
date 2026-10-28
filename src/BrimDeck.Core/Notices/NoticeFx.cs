@@ -28,14 +28,23 @@ public static class NoticeFx
     public static double LineScale(NoticeFxPlan plan) => Math.Clamp(plan.Intensity / 5, .5, 1.5);
 
     // How far the line draws back before it grows into a card of cardWidth (at most 5 DIPs, and under a tenth of its length), as a
-    // fraction of the whole move; none where the card is hardly wider than the line.
-    public static double LineWindUp(double lineWidth, double cardWidth, NoticeFxPlan plan)
-        => cardWidth - lineWidth < 24 ? 0 : Math.Min(5, .09 * lineWidth) * LineScale(plan) / (cardWidth - lineWidth);
+    // fraction of the whole move; none where the card is hardly wider than the line. The distances in DIPs are those before the panel's
+    // scale (PanelScales), which the widths are drawn at, so they are multiplied by it.
+    public static double LineWindUp(double lineWidth, double cardWidth, NoticeFxPlan plan, double scale = 1)
+    {
+        double s = Valid(scale);
+        return cardWidth - lineWidth < 24 * s ? 0 : Math.Min(5 * s, .09 * lineWidth) * LineScale(plan) / (cardWidth - lineWidth);
+    }
 
     // How far the surface carries on past the line's length (shorter, and thinner) as it returns from fromWidth (at most 7 DIPs, and
     // about an eighth of its length), as a fraction of the whole move.
-    public static double LineCarry(double lineWidth, double fromWidth, NoticeFxPlan plan)
-        => fromWidth - lineWidth < 24 ? 0 : Math.Min(7, .12 * lineWidth) * LineScale(plan) / (fromWidth - lineWidth);
+    public static double LineCarry(double lineWidth, double fromWidth, NoticeFxPlan plan, double scale = 1)
+    {
+        double s = Valid(scale);
+        return fromWidth - lineWidth < 24 * s ? 0 : Math.Min(7 * s, .12 * lineWidth) * LineScale(plan) / (fromWidth - lineWidth);
+    }
+
+    private static double Valid(double scale) => scale > 0 && double.IsFinite(scale) ? scale : 1;
 
     // category: the notice's own category (null for a summary); call: an incoming call.
     public static NoticeFxPlan For(AttentionKind kind, NoticePriority priority, bool urgent, bool call, NoticeCategory? category)
