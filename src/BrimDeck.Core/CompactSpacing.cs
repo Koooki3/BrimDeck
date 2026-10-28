@@ -165,6 +165,72 @@ public static class CompactSpacing
         return (ia < 0 ? (0, 0, 0, 0) : Window(first, firstGap, a[ia]), ib < 0 ? (0, 0, 0, 0) : Window(second, secondGap, b[ib]));
     }
 
+    // Share while the surface is being dragged wider or narrower. Share steps by whole items, so as the room changes a window
+    // jumps by an item, and the gaps and the centring (Arrange) take the difference back: the row jumps with every item, which
+    // read as a jerk against the continuous drag of 1.2.1. Here the windows take the room as it comes: each region first takes its
+    // narrowest window, the second after the first, and then the regions widen by turns in the same order Share steps them, but
+    // the one whose turn it is takes whatever room is left, up to its next step, instead of waiting for all of it. The windows
+    // grow one for one with the room, never jump, and are Share's own at every room Share steps at (the sum of the windows
+    // Share would take); in between they are wider than Share's, by less than one step, with an item cut at the right edge
+    // (CutFade). Count is the whole items in the window; there is no Travel, nothing glides while the surface moves.
+    public static ((int Count, double Window, int Gaps, double Travel) First, (int Count, double Window, int Gaps, double Travel) Second)
+        ShareFlowing(IReadOnlyList<double> first, double firstGap, IReadOnlyList<double> second, double secondGap, double room)
+    {
+        room = double.IsFinite(room) ? Math.Max(0, room) : 0;
+        var a = Steps(first, firstGap); var b = Steps(second, secondGap);
+        double left = room, wa = 0, wb = 0;
+        int ia = -1, ib = -1;
+        bool partial = false;
+        double Take(ref double window, List<double> steps, int index, ref int at)
+        {
+            double wanted = steps[index] - (index == 0 ? 0 : steps[index - 1]);
+            double take = Math.Min(left, wanted);
+            window += take; left -= take;
+            if (take >= wanted - 1e-9) at = index; else partial = true;
+            return take;
+        }
+        if (a.Count > 0) { Take(ref wa, a, 0, ref ia); }
+        if (!partial && b.Count > 0) { Take(ref wb, b, 0, ref ib); }
+        bool together = !partial && (ia >= 0 || a.Count == 0) && (ib >= 0 || b.Count == 0);
+        while (together && !partial)
+        {
+            bool canA = ia >= 0 && ia + 1 < a.Count, canB = ib >= 0 && ib + 1 < b.Count;
+            if (!canA && !canB) break;
+            bool takeA = canA && (!canB || Window(first, firstGap, a[ia]).Count <= Window(second, secondGap, b[ib]).Count);
+            if (takeA) Take(ref wa, a, ia + 1, ref ia); else Take(ref wb, b, ib + 1, ref ib);
+        }
+        return ((Whole(first, firstGap, wa), wa, 0, 0), (Whole(second, secondGap, wb), wb, 0, 0));
+    }
+
+    // How many items stand whole in a window this wide, from the first.
+    public static int Whole(IReadOnlyList<double> widths, double gap, double window)
+    {
+        int count = 0; double used = 0;
+        for (int i = 0; i < (widths?.Count ?? 0); i++)
+        {
+            double next = used + (i > 0 ? Safe(gap) : 0) + Safe(widths![i]);
+            if (next > window + 1e-6) break;
+            used = next; count++;
+        }
+        return count;
+    }
+
+    // The width of the fade that softens the item a window cuts at its right edge, inside the window (up to edge): the cut item shows
+    // its first part and the rest is hidden; the fade is as wide as the smaller of the part shown, the part hidden and edge, so it
+    // is nothing when the window ends in a gap or at an item's edge, where it is not cutting anything, and grows from there, and
+    // the window changing continuously never shows a fade that appears or goes in one step.
+    public static double CutFade(IReadOnlyList<double> widths, double gap, double window, double edge)
+    {
+        double x = 0;
+        for (int i = 0; i < (widths?.Count ?? 0); i++)
+        {
+            double start = x, end = x + Safe(widths![i]);
+            if (window > start + 1e-6 && window < end - 1e-6) return Math.Max(0, Math.Min(edge, Math.Min(window - start, end - window)));
+            x = end + Safe(gap);
+        }
+        return 0;
+    }
+
     // The windows a carousel can take, narrowest first, each one more step of whole items than the one before; the last holds
     // every item and rests.
     private static List<double> Steps(IReadOnlyList<double> widths, double gap)
