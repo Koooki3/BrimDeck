@@ -44,7 +44,7 @@ public partial class MainWindow
     {
         // The readings that join the collapsed row with their first figure (the drives, the machine's power and battery) are admitted.
         AdmitStrip(snapshot);
-        _compactStrip?.Update(snapshot);
+        _compactStrip?.Update(snapshot, motion: false, (int)Settings.CompactSmoothing);
         _monitorView?.Update(snapshot, motion: false);
     }
 

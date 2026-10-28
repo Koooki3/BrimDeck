@@ -144,7 +144,7 @@ internal static class DevicesSheet
         foreach (var reading in readings) reading.Visible = reading.Item is CompactMonitorItems.Cpu or CompactMonitorItems.Battery;
         var strip = new MonitorStrip(readings, new StripColors(MonitorColorsFor(palette)), 1, true, new StripPresence(), 1) { Width = 150 };
         strip.SetBattery(charging ? new BatteryReading(64, true, MemoryLevel.Normal, "MX Master 3S") : new BatteryReading(12, false, MemoryLevel.Critical, "F99 MAX"));
-        strip.Update(MonitorSnapshot.Empty(8, "sheet"));
+        strip.Update(MonitorSnapshot.Empty(8, "sheet"), motion: false, (int)CompactSmoothing.Ten);
         return ThemeSheet.Island(palette, 220, 32, new CornerRadius(0, 0, 12, 12), 16, new Grid { Children = { strip }, VerticalAlignment = VerticalAlignment.Center });
     }
 

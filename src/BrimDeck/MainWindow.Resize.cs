@@ -52,7 +52,7 @@ public partial class MainWindow
     private DeckPage _resizePage;
     private long _resizeRendered;
     // The widest a page can be on this monitor, and the limits of the page being resized.
-    private double PageMaxWidth => Math.Max(DeckPages.MinWidth, Math.Min(DeckPages.MaxWidth, (WorkDip.Width - 24) / Zoom));
+    private double PageMaxWidth => DeckPages.MaxWidthOn(WorkDip.Width, _scale * Zoom);
     private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimits => PageLimitsOf(_resizePage);
     private (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) PageLimitsOf(DeckPage page)
     {
@@ -99,7 +99,7 @@ public partial class MainWindow
         if (_grips is null) return;
         var form = PanelResizable ? ResizeGripLayer.Form.Panel : CompactResizable || Resizing && _resizeCompact ? ResizeGripLayer.Form.Compact : ResizeGripLayer.Form.None;
         if (Resizing && !_resizeCompact) form = ResizeGripLayer.Form.Panel;
-        _grips.Show(form, IslandBox(), _header.Row, PanelHeader.PanelRadius, EffectiveStyle == CompactStyle.Line);
+        _grips.Show(form, IslandBox(), _header.Row * _scale * Zoom, PanelRadius, EffectiveStyle == CompactStyle.Line);
         if (form == ResizeGripLayer.Form.None && _hoverEdge != ResizeEdges.None && !Dragging) SetHoverEdge(ResizeEdges.None);
     }
 
@@ -115,7 +115,7 @@ public partial class MainWindow
         var r = _grips.Rect;
         // The distance to the nearest grip: zero on one, growing inside the panel; nothing above the header.
         double near = 0;
-        if (point.Y >= r.Y + _header.Row && point.X >= r.X - ResizeGrips.PanelOuter && point.X <= r.Right + ResizeGrips.PanelOuter && point.Y <= r.Bottom + ResizeGrips.PanelOuter)
+        if (point.Y >= r.Y + _header.Row * _scale * Zoom && point.X >= r.X - ResizeGrips.PanelOuter && point.X <= r.Right + ResizeGrips.PanelOuter && point.Y <= r.Bottom + ResizeGrips.PanelOuter)
         {
             double distance = Math.Max(0, Math.Min(Math.Min(point.X - r.X, r.Right - point.X), r.Bottom - point.Y) - ResizeGrips.PanelInner);
             near = 1 - Math.Clamp(distance / HintReach, 0, 1);
@@ -131,7 +131,7 @@ public partial class MainWindow
         if (!PanelResizable || PresentationSource.FromVisual(Stage) is null) return false;
         var area = ResizeGrips.PanelArea(IslandBox());
         var point = Stage.PointFromScreen(screen);
-        return point.X >= area.X - GripSlack && point.X <= area.Right + GripSlack && point.Y >= area.Y + _header.Row && point.Y <= area.Bottom + GripSlack;
+        return point.X >= area.X - GripSlack && point.X <= area.Right + GripSlack && point.Y >= area.Y + _header.Row * _scale * Zoom && point.Y <= area.Bottom + GripSlack;
     }
 
     private void SetHoverEdge(ResizeEdges edge)
@@ -154,8 +154,8 @@ public partial class MainWindow
         var cursor = WindowsHost.Cursor();
         double scale = _pixelsPerDip > 0 ? _pixelsPerDip : 1;
         double dx = (cursor.X - _resizeStart.X) / scale, dy = (cursor.Y - _resizeStart.Y) / scale;
-        // A page's size is its own, without the text size the open panel is drawn larger by (Zoom).
-        if (!_resizeCompact) { dx /= Zoom; dy /= Zoom; }
+        // A page's size is its own, without the panel's scale and the text size the open panel is drawn larger by (Zoom).
+        if (!_resizeCompact) { dx /= _scale * Zoom; dy /= _scale * Zoom; }
         // Both sides move, so the width changes by twice the pointer's move.
         double width = _resizeFrom.Width + (_resizeEdge.HasFlag(ResizeEdges.Right) ? 2 * dx : _resizeEdge.HasFlag(ResizeEdges.Left) ? -2 * dx : 0);
         if (_resizeCompact)
@@ -271,7 +271,7 @@ public partial class MainWindow
     // must show (CompactMusicLayout.RequiredWidth), which the surface keeps whatever width is saved.
     private (double Min, double Max) CompactWidthRange(CompactStyle style)
     {
-        var (min, max) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip);
+        var (min, max) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip, _scale);
         return (Math.Min(max, Math.Max(min, CollapsedGeometry.SurfaceWidth(style, Collapsed.Surface.Height, _compactRequired))), max);
     }
 
@@ -284,7 +284,8 @@ public partial class MainWindow
             width = Math.Clamp(width, min, max);
             if (width == Collapsed.Surface.Width && !Settings.CompactAutoWidth(style)) return;
             _resizeChanged = true;
-            Settings.SetCompactWidth(style, width); Settings.SetCompactAutoWidth(style, false);
+            // The surface is drawn at the scale; its width is saved before it.
+            Settings.SetCompactWidth(style, width / _scale); Settings.SetCompactAutoWidth(style, false);
             UpdateCollapsedGeometry();
             SetExpanded(false, instant: true);
             _grips.Light(LitEdges, true, SizeLabel(Collapsed.Surface.Width, 0));
@@ -330,7 +331,7 @@ public partial class MainWindow
         bool settling = SettlingHere(compact);
         var limits = PageLimitsOf(CurrentPage);
         var (min, max) = !horizontal ? (limits.MinHeight, limits.MaxHeight)
-            : compact ? CollapsedGeometry.WidthRange(EffectiveStyle, MonitorBoundsDip, WorkDip) : (limits.MinWidth, limits.MaxWidth);
+            : compact ? CollapsedGeometry.WidthRange(EffectiveStyle, MonitorBoundsDip, WorkDip, _scale) : (limits.MinWidth, limits.MaxWidth);
         double current = settling ? horizontal ? _springWidth.Target : _springHeight.Target
             : Math.Clamp(compact ? Collapsed.Surface.Width : horizontal ? DeckPages.Size(Settings, CurrentPage).Width : DeckPages.Size(Settings, CurrentPage).Height, min, max);
         double next = KeyboardResize.Next(current, direction, min, max);

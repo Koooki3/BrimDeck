@@ -54,7 +54,7 @@ public partial class MainWindow
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
-        if (strip && !_stripShowing) _compactStrip?.Update(_app.Monitor?.Latest);
+        if (strip && !_stripShowing) _compactStrip?.Update(_app.Monitor?.Latest, motion: false, (int)Settings.CompactSmoothing);
         _monitorShowing = page; _stripShowing = strip;
         // The devices page and the collapsed battery reading ask on the same occasions.
         UpdateDevicesDemand();
@@ -92,7 +92,7 @@ public partial class MainWindow
             // The drives, a temperature, a drive letter or the battery got its first figure: the row is built again with it, and it comes
             // in with the row's own entrance while the others slide aside. Until then the row did not show it, so nothing else changes.
             if (admitted) return;
-            _compactStrip?.Update(snapshot);
+            _compactStrip?.Update(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off, (int)Settings.CompactSmoothing);
             // The last reading has faded out of a row that stays as it is: the sampler may rest.
             if (_stripShowing && _compactStrip?.Showing(Eased.Now) != true) UpdateMonitorDemand();
             return;

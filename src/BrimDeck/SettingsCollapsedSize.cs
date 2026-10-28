@@ -144,7 +144,8 @@ public sealed partial class SettingsWindow
     private double ShownWidth(CompactStyle style)
     {
         var shape = _app.Deck.Collapsed;
-        return S.CompactAutoWidth(style) && shape.Style == style ? shape.Surface.Width : style == CompactStyle.Capsule ? S.CapsuleWidth : S.NotchWidth;
+        // The surface is drawn at the scale (PanelScales); the setting is the width before it.
+        return S.CompactAutoWidth(style) && shape.Style == style ? shape.Surface.Width / _app.Deck.Scale : style == CompactStyle.Capsule ? S.CapsuleWidth : S.NotchWidth;
     }
 
     // The panel changed the collapsed size or switch from outside this window (a drag, a double click, or content that

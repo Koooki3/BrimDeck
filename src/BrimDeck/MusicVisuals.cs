@@ -191,9 +191,6 @@ internal sealed class MusicMarquee : FrameworkElement
         set { if (_fontSize == value) return; _fontSize = value; ResetText(); }
     }
     public bool CenterWhenFits { get; init; } = true;
-    // The width a text takes in this type at this size, as the marquee draws it.
-    public static double NaturalWidth(string text, double fontSize, double pixelsPerDip) => new FormattedText(text, CultureInfo.CurrentUICulture,
-        FlowDirection.LeftToRight, Typeface, fontSize, Brushes.Black, pixelsPerDip > 0 ? pixelsPerDip : 1).Width;
     // The edge fade's width; the collapsed row scales it with its height. The scroll speed does not change.
     public double EdgeWidth { get; init; } = Edge;
     // False when the region is too narrow for a meaningful stretch of text: the text then rests at its start, cut at the edge.
@@ -577,7 +574,7 @@ internal sealed class ReadingsCarousel : GlideCarousel
     public ReadingsCarousel(MonitorStrip strip, double window, double travel, double edge, TimeSpan elapsed, bool animate)
     {
         Height = strip.Height;
-        strip.Width = strip.PreferredWidth; strip.Paired = true; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        strip.Width = strip.PreferredWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
         Glide(strip, window, travel, edge, elapsed, animate);
     }
 }

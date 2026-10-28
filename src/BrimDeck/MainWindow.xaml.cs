@@ -147,6 +147,7 @@ public partial class MainWindow : Window
         InitializeMonitor();
         InitializeDevices();
         InitializeResize();
+        InitializeScale();
         Island.Background = _surface;
         InitializeShadow();
         InitializeMotion();
@@ -265,9 +266,12 @@ public partial class MainWindow : Window
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
+        ApplyScale();
         var (bounds, work, scale) = Screen();
         UpdateCollapsedGeometry(bounds, work, scale);
-        double Fit(double width) => Math.Max(240, Math.Min(width, work.Width / scale - 24));
+        // Page widths are the page as laid out with the text size (Zoom) but before the panel's scale; drawn at the scale they fit
+        // the work area less 12 DIP each side.
+        double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
         _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width * Zoom); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width * Zoom);
         // The widest shown page as it fits this monitor, measured as _pageWidth is (SetExpanded centres on it). A drag resizes
         // only the page that shows, which SetExpanded takes from _pageWidth; this is set again when the size is saved (ApplySettings).
@@ -280,13 +284,13 @@ public partial class MainWindow : Window
         // as wide as the monitor, so the window is as wide as the monitor too. Only Island animates.
         var largest = DeckPages.Largest(Settings);
         largest = (Math.Max(largest.Width, PageMaxWidth) * Zoom, Math.Max(largest.Height, DeckPages.MaxHeight) * Zoom);
-        double widestSurface = Enum.GetValues<CompactStyle>().Max(style => CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip).Max);
-        Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Math.Max(Fit(largest.Width), widestSurface), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
-        double hostHeight = largest.Height;
+        double widestSurface = Enum.GetValues<CompactStyle>().Max(style => CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip, _scale).Max);
+        Width = Math.Min(MonitorBoundsDip.Width, Math.Max(Math.Max(Fit(largest.Width) * _scale, widestSurface), Collapsed.Surface.Width) + 2 * ResizeGrips.Room);
+        double hostHeight = largest.Height * _scale;
         // The window starts at the monitor top. A capsule's panel can start lower (at the top of a top taskbar's work area, or
         // just above a lowered capsule; see CollapsedGeometry.Panel), so the window reaches the panel's bottom; it always holds the collapsed surface and its shadow, and never passes the
         // bottom of the monitor. Its transparent parts let clicks through.
-        var hostPanel = PanelFor(hostHeight);
+        var hostPanel = PanelFor(largest.Height);
         double panelTop = hostPanel.Top;
         double panelSpace = panelTop > 0 ? panelTop + hostPanel.HeaderExtra + hostHeight + 12 : Math.Min(hostHeight + 16, WorkDip.Bottom - 16);
         Height = Math.Max(1, Math.Min(MonitorBoundsDip.Height, Math.Max(Math.Max(140, panelSpace), Collapsed.Surface.Bottom + 24)));
@@ -388,7 +392,7 @@ public partial class MainWindow : Window
         Collapsed = ShapeFor(EffectiveStyle);
     }
     private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
-        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null, _compactRequired);
+        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null, _compactRequired, _scale);
     // The width the collapsed content asks for (see CollapsedGeometry); NaN until the row is first built, which keeps the saved width.
     private double _compactWanted = double.NaN;
     // The width of what the collapsed content must show (CompactMusicLayout.RequiredWidth); the surface is never narrower.
@@ -415,31 +419,34 @@ public partial class MainWindow : Window
     // are distances from the top of the work area for a capsule of the given height or a line of the given thickness; 0 and 0
     // for the notch, which always touches the screen edge. WidthMin and WidthMax are the style's width (line length) range,
     // narrowed by what the monitor or its work area can hold; WidthMin is never below what the content must show.
+    // Widths and heights are as saved, before the scale (PanelScales); the offsets and tops are places on the screen, for the
+    // surface as drawn at the scale.
     public (double OffsetMin, double OffsetMax, double TopMin, double TopMax, double WidthMin, double WidthMax) CurrentCollapsedRanges(CompactStyle style, double width, double height)
     {
-        var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip);
+        var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip, _scale);
         // Never below what the content must show, at the height the surface takes, which a short screen or work area can lower
         // below the saved one (as Resolve does).
-        double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, MonitorBoundsDip, WorkDip);
+        double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, MonitorBoundsDip, WorkDip, _scale);
         widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, surfaceHeight, _compactRequired)));
-        var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width, MonitorBoundsDip, WorkDip);
+        var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width * _scale, MonitorBoundsDip, WorkDip);
         var (topMin, topMax) = style switch
         {
-            CompactStyle.Capsule => CollapsedGeometry.CapsuleTopRange(height, WorkDip),
-            CompactStyle.Line => CollapsedGeometry.LineTopRange(CollapsedGeometry.SnapToDevicePixels(CollapsedGeometry.RoundLineThickness(height), _pixelsPerDip), WorkDip),
+            CompactStyle.Capsule => CollapsedGeometry.CapsuleTopRange(surfaceHeight, WorkDip),
+            CompactStyle.Line => CollapsedGeometry.LineTopRange(CollapsedGeometry.SnapToDevicePixels(CollapsedGeometry.RoundLineThickness(height) * _scale, _pixelsPerDip), WorkDip),
             _ => (0d, 0d)
         };
-        return (-offsetMax, offsetMax, topMin, topMax, widthMin, widthMax);
+        return (-offsetMax, offsetMax, topMin, topMax, widthMin / _scale, widthMax / _scale);
     }
     // Where an open panel for a page of the given height starts, in DIPs from the top of the monitor, and the space a floating
     // panel adds above its header; see CollapsedGeometry.Panel.
     // The height a page that wants this height gets in the window. A panel hanging from the screen edge keeps 12 DIPs of the
     // window below it. One that starts lower has no shadow to keep room for, so it may reach the bottom of the window, which
     // can be the bottom of the monitor.
+    // Heights are unscaled; the window's room is divided by the panel's scale.
     private double PageHeight(double wanted, PanelPlacement panel)
     {
-        double height = Math.Max(0, Math.Min(wanted, Height - (panel.Top > 0 ? 0 : 12) - panel.Top - panel.HeaderExtra));
-        return panel.Top > 0 ? Math.Max(0, Math.Min(height, PanelBottom - panel.Top - panel.HeaderExtra)) : height;
+        double height = Math.Max(0, Math.Min(wanted, (Height - (panel.Top > 0 ? 0 : 12) - panel.Top - panel.HeaderExtra) / _scale));
+        return panel.Top > 0 ? Math.Max(0, Math.Min(height, (PanelBottom - panel.Top - panel.HeaderExtra) / _scale)) : height;
     }
     // The usage page's height in the current window, while the music page is shown too.
     private double UsagePageHeight => PageHeight(Settings.Height * Zoom, PanelFor(Settings.Height * Zoom)) / Zoom;
@@ -447,18 +454,22 @@ public partial class MainWindow : Window
     private double UsageLayoutWidth => _usageWidth / Zoom;
     // Windows' text size (TextScale): the open panel and everything on it are drawn larger by this factor, and its pages lay
     // out at the size they have at 100 %, so their layouts, which step between sizes by the room they have, stay as they are.
-    // _pageWidth, _usageWidth and the heights SetExpanded works with are the panel's size on screen; the sizes saved in the
-    // settings, and the drag's, are the pages' own.
+    // _pageWidth, _usageWidth and the heights SetExpanded works with are the panel's size on screen before the panel's scale
+    // (_scale, MainWindow.Scale.cs), which comes on top of this one; the sizes saved in the settings, and the drag's, are the
+    // pages' own.
     private double Zoom => TextScale.Current;
-    private void ApplyZoom()
+    internal void ApplyZoom()
     {
         double zoom = Zoom;
+        // What the page is drawn at in all (UI.PixelsPerDip): the panel's scale times the text size.
+        UI.SetScale(ContentCanvas, _scale * zoom);
         if (zoom == 1) { if (ContentCanvas.LayoutTransform != Transform.Identity) ContentCanvas.LayoutTransform = Transform.Identity; return; }
         if (ContentCanvas.LayoutTransform is ScaleTransform known && known.ScaleX == zoom) return;
         var scale = new ScaleTransform(zoom, zoom); scale.Freeze();
         ContentCanvas.LayoutTransform = scale;
     }
-    private PanelPlacement PanelFor(double pageHeight) => CollapsedGeometry.Panel(Collapsed, WorkDip, pageHeight, PanelBottom);
+    // pageHeight is before the panel's scale; the panel's place depends on its height as drawn.
+    private PanelPlacement PanelFor(double pageHeight) => CollapsedGeometry.Panel(Collapsed, WorkDip, pageHeight * _scale, PanelBottom);
     // The lowest bottom edge of a panel below a lowered capsule: the work area's bottom, even when that is the monitor's bottom
     // (no taskbar there), so a capsule pulled all the way down is still covered by its panel. The window may then end at the
     // monitor's bottom with no room below the panel; SetExpanded does not reserve any for a panel that starts below the top.
@@ -695,12 +706,14 @@ public partial class MainWindow : Window
         else if (_popupFloor > panel.HeaderExtra + wantedHeight) { wantedHeight = _popupFloor - panel.HeaderExtra; panel = PanelFor(wantedHeight); }
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);
-        double width = expanded ? _pageWidth : shape.Surface.Width;
+        // The page as drawn, at the panel's scale; the content is laid out at its unscaled size (ContentCanvas below).
+        double pageWidth = _pageWidth * _scale, widestPage = _widestPage * _scale;
+        double width = expanded ? pageWidth : shape.Surface.Width;
         // A floating panel is taller than its page by headerExtra, the space above its header.
-        double height = expanded ? pageHeight + headerExtra : shape.Surface.Height;
+        double height = expanded ? pageHeight * _scale + headerExtra : shape.Surface.Height;
         if (expanded) _glassOpenHeight = height;
         // Every compact style opens into the same panel, hanging from the screen edge or, below a lowered capsule, rounded all round.
-        double panelRadius = PanelHeader.PanelRadius;
+        double panelRadius = PanelRadius;
         var radius = expanded ? panelTop > 0 ? new CornerRadius(panelRadius) : new CornerRadius(0, 0, panelRadius, panelRadius)
             : new CornerRadius(shape.TopRadius, shape.TopRadius, shape.BottomRadius, shape.BottomRadius);
         double gap = expanded ? panelTop : shape.Surface.Y;
@@ -711,9 +724,9 @@ public partial class MainWindow : Window
         // wide ones put some pages at the pointer and others at the middle, so switching pages moved the panel sideways.
         if (!expanded) _openCentre = null;
         double panelCentre = shape.Surface.X + shape.Surface.Width / 2;
-        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > Math.Max(_pageWidth, _widestPage))
-            panelCentre = Math.Clamp(pointer, shape.Surface.X + _pageWidth / 2, shape.Surface.Right - _pageWidth / 2);
-        double panelLeft = Math.Clamp(panelCentre - _pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - _pageWidth));
+        if (_openCentre is { } pointer && double.IsFinite(pointer) && shape.Surface.Width > Math.Max(pageWidth, widestPage))
+            panelCentre = Math.Clamp(pointer, shape.Surface.X + pageWidth / 2, shape.Surface.Right - pageWidth / 2);
+        double panelLeft = Math.Clamp(panelCentre - pageWidth / 2, 0, Math.Max(0, MonitorBoundsDip.Width - pageWidth));
         double left = (expanded ? panelLeft : shape.Surface.X) - _windowOffset;
         ApplyCollapsedLayout();
         // The boot circle is still jumping: do not grow the island to the collapsed size under its lift.

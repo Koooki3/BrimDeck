@@ -29,8 +29,9 @@ public partial class MainWindow
         double density = Math.Min(widthStep, heightStep), font = 10.5 + density, gap = 3 + 1.5 * density;
         double maxWidth = Math.Min(172 + 28 * Math.Min(1, widthStep) + 32 * Math.Max(0, widthStep - 1), Math.Max(120, ContentCanvas.Width - 40));
         menu.Padding = new Thickness(2 + Math.Min(1, density));
+        // ContentCanvas's own space (the page's size, before the panel's scale and the text size); the menu's offset is on screen.
         double anchorBottom = MediaSourceButton.TranslatePoint(new Point(0, MediaSourceButton.ActualHeight), ContentCanvas).Y;
-        menu.MaxHeight = Math.Clamp(ContentCanvas.Height - anchorBottom - menu.VerticalOffset - 8, 18 + 2 * density + 2 * menu.Padding.Top + 2, 400);
+        menu.MaxHeight = Math.Clamp(ContentCanvas.Height - anchorBottom - menu.VerticalOffset / (_scale * Zoom) - 8, 18 + 2 * density + 2 * menu.Padding.Top + 2, 400);
         foreach (var separator in menu.Items.OfType<Separator>())
             separator.Margin = new Thickness(4 + density, 2 + density, 6 + density, 2 + density);
         foreach (var item in menu.Items.OfType<MenuItem>())

@@ -11,6 +11,20 @@ namespace BrimDeck;
 
 internal static class UI
 {
+    // The scale the expanded panel is drawn at (DeckSettings.PanelScale), inherited by everything in it and set on its menus.
+    // Device pixels per DIP of their own layout are the monitor's times this, so what is drawn on whole device pixels still meets
+    // them; a new scale draws them again.
+    public static readonly DependencyProperty ScaleProperty = DependencyProperty.RegisterAttached("Scale", typeof(double), typeof(UI),
+        new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.Inherits | FrameworkPropertyMetadataOptions.AffectsRender));
+    public static double GetScale(DependencyObject element) => (double)element.GetValue(ScaleProperty);
+    public static void SetScale(DependencyObject element, double scale) => element.SetValue(ScaleProperty, scale);
+    public static double PixelsPerDip(Visual visual) => VisualTreeHelper.GetDpi(visual).PixelsPerDip * GetScale(visual);
+    // Draws element at scale (none at 1), as the expanded panel and its menus are.
+    public static void Scale(FrameworkElement element, double scale)
+    {
+        element.LayoutTransform = scale == 1 ? Transform.Identity : new ScaleTransform(scale, scale);
+        SetScale(element, scale);
+    }
     public static readonly FontFamily TextFont = new("Microsoft YaHei");
     // The panel sets Latin text and digits in Segoe UI Variable and falls back to YaHei for Chinese.
     public static readonly FontFamily PanelFont = new("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");

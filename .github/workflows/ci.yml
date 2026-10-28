@@ -1,9 +1,11 @@
 name: Checks
-# Every pull request into dev or main must build and pass the tests that need no installed players or accounts.
+# Every pull request into dev, main or a release/<version> branch must build and pass the tests that need no installed
+# players or accounts, leave releases/ to the maintainer, and label a new settings migration step with the version its
+# target branch builds.
 # The install, in-app update and uninstall test stays in the release workflow: it installs software and takes minutes.
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, 'release/**']
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,6 +21,19 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # The checks below compare with the target branch and look for release branches and tags.
+          fetch-depth: 0
+      # Release notes files set the version every build takes, so only the repository owner adds or changes them.
+      - name: Release notes files
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
+        run: |
+          $changed = @(git diff --name-only "origin/$env:GITHUB_BASE_REF...HEAD" -- releases/)
+          if ($LASTEXITCODE -ne 0) { throw 'The changes could not be compared with the target branch.' }
+          if ($changed.Count -gt 0) { throw "Files under releases/ are changed by the maintainer only. Remove these changes: $($changed -join ', ')" }
+      - name: Settings migration labels
+        if: github.event_name == 'pull_request'
+        run: ./scripts/Test-MigrationVersions.ps1 -TargetBranch $env:GITHUB_BASE_REF
       - uses: actions/setup-dotnet@v6.0.0
         with:
           dotnet-version: '10.0.x'
