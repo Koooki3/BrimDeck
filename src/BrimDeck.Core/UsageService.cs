@@ -374,7 +374,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             {
                 // While the quota API is asking for time, it is not asked again (a manual refresh included); the failure below is
                 // the same one a 429 gives, so the reading kept from before is shown with the time the next request goes out.
-                if (limit.RetryAt(now) is { } wait) throw RateLimitedException.Held(wait);
+                if (limit.RetryAt(_clock()) is { } wait) throw RateLimitedException.Held(wait);
                 using var request = Bearer(HttpMethod.Get, "https://api.anthropic.com/api/oauth/usage", credential.Token);
                 request.Headers.TryAddWithoutValidation("anthropic-beta", "oauth-2025-04-20");
                 using var doc = await SendAsync(_http, request, ct);
@@ -404,7 +404,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 HttpRequestException or OperationCanceledException or IOException or InvalidDataException or JsonException or FormatException)
             {
                 lastFailure = ex;
-                if (ex is RateLimitedException { Sent: true } limited) limited.RetryAt = limit.Fail(now, limited.RetryAfter(now), (jitter ?? Random.Shared.NextDouble)());
+                // The pause counts from the moment the answer arrived, not from the start of the round: another token may have been
+                // tried first, and the request itself takes time, which a Retry-After of a minute must not be shortened by.
+                if (ex is RateLimitedException { Sent: true } limited) { var received = _clock(); limited.RetryAt = limit.Fail(received, limited.RetryAfter(received), (jitter ?? Random.Shared.NextDouble)()); }
                 // Keep an operational error instead of masking it with a later stale login.
                 if (failure is null || ex is HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } ||
                     failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) failure = ex;
