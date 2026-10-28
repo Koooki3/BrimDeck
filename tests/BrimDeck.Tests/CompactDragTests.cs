@@ -15,6 +15,93 @@ internal static class CompactDragTests
         Flowing(check);
         Cut(check);
         Drag(check);
+        Entries(check);
+    }
+
+    // The ways the collapsed width changes, as sequences of frames. What the user sees is where the readings' window starts and ends
+    // and where the clock begins. A frame's jump is how far the window grew or shrank beyond what the surface itself moved that frame,
+    // or how far the readings' start or the clock moved: the row jumping or centring again.
+    // The row at a width, the flow (eased) and the window the rest had before the flow rose (rising: the flow is held or rising, else it falls).
+    private static (double Left, double Window, double Clock, double Whole) Row(double width, double flow, double rest, bool rising)
+    {
+        double clock = 36, unit = 8, pool = Math.Max(0, width - clock - unit);
+        double whole = CompactSpacing.Share([], RingGap, Readings, ReadingGap, pool).Second.Window;
+        double flowing = CompactSpacing.ShareFlowing([], RingGap, Readings, ReadingGap, pool).Second.Window;
+        double window = flow <= 0 ? whole : RowFlow.Window(rising && rest >= 0 ? rest : whole, flowing, flow);
+        var place = CompactSpacing.Arrange([new(window), new(clock)], -1, 0, 0, width, unit, 1, 1);
+        return (place.Left[0], window, place.Left[1], whole);
+    }
+
+    // seconds of frames at fps. surface(t): the width then (called once per frame, in order); dragging(t): the surface is dragged;
+    // changes: when the settings changed the width. flowing: with the flow, or the rest's whole items only.
+    private static (double Worst, int Jerks, double FlowAtEnd) Run(double seconds, double fps, Func<double, double> surface, Func<double, bool> dragging, double[] changes, bool flowing)
+    {
+        var flow = new RowFlow();
+        double frame = 1 / fps, worst = 0, previousWidth = Math.Round(surface(0));
+        int jerks = 0, next = 0;
+        var previous = Row(previousWidth, 0, -1, false);
+        double rest = previous.Whole;
+        for (double t = frame; t <= seconds; t += frame)
+        {
+            double width = Math.Round(surface(t));
+            while (next < changes.Length && changes[next] <= t) { if (flowing) flow.NoteChange(changes[next]); next++; }
+            bool drag = dragging(t);
+            flow.Advance(t, drag, true);
+            var row = Row(width, flowing ? flow.Eased : 0, rest, flow.Target(drag) > 0);
+            if (!flowing || flow.Eased <= 0) rest = row.Whole;
+            double moved = Math.Abs(width - previousWidth);
+            double jump = Math.Max(Math.Max(Math.Abs(row.Window - previous.Window) - moved, Math.Abs(row.Left - previous.Left)), Math.Abs(row.Clock - previous.Clock) - moved);
+            worst = Math.Max(worst, jump); if (jump > 3) jerks++;
+            previous = row; previousWidth = width;
+        }
+        return (worst, jerks, flow.Value);
+    }
+
+    private static void Entries(Action<string, bool> check)
+    {
+        foreach (double fps in new[] { 144.0, 60.0 })
+        {
+            double limit = fps > 100 ? 3 : 6.5;
+            // The pointer or the resize shortcut: the surface follows a ramp on the drag's spring and is dragged until it rests.
+            foreach (bool flowing in new[] { true, false })
+            {
+                var spring = new Spring(220);
+                var drag = Run(3.5, fps, t => { spring.Target = 220 + 360 * Math.Clamp((t - .1) / 1.2, 0, 1); spring.Step(1 / fps); return spring.Value; },
+                    t => t >= .1 && (t < 1.4 || spring.Value != spring.Target), [], flowing);
+                if (flowing) check($"Entries ({fps:0} fps): dragging the surface moves no frame's row by more than {limit} DIPs beyond the surface's own move", drag.Worst <= limit);
+                else check($"Entries ({fps:0} fps): dragging the surface without the flow jumps the row by more than 10 DIPs", drag.Worst > 10);
+            }
+
+            // The settings slider: a value every 16 ms, 6 DIPs at a time, then 1 DIP every 45 ms; then left alone.
+            foreach (var (name, step, every) in new[] { ("quick slider", 6.0, .016), ("slow slider", 1.0, .045) })
+            {
+                int count = (int)(420 / step);
+                double[] changes = Enumerable.Range(0, count + 1).Select(k => k * every).ToArray();
+                double Width(double t) => 150 + Math.Min(Math.Floor(t / every + 1e-9) * step, 420);
+                double seconds = count * every + 1.5;
+                var flowing = Run(seconds, fps, Width, _ => false, changes, true);
+                var whole = Run(seconds, fps, Width, _ => false, changes, false);
+                // A value every 16 ms moves the surface 6 DIPs in some frames and none in the next: the row follows in the same lumps.
+                double sliderLimit = limit + 2;
+                check($"Entries ({fps:0} fps): the {name} moves no frame's row by more than {sliderLimit} DIPs beyond the surface's own move, and the flow is back to 0 after", flowing.Worst <= sliderLimit && flowing.FlowAtEnd == 0);
+                check($"Entries ({fps:0} fps): the {name} without the flow jumps the row by more than 10 DIPs (what the flow spares)", whole.Worst > 10);
+            }
+
+            // One change (a number typed, a reset): a new layout, not a motion; the flow stays 0.
+            var once = Run(2, fps, t => t < .5 ? 396 : 480, _ => false, [.5], true);
+            check($"Entries ({fps:0} fps): a width changed once does not flow", once.FlowAtEnd == 0);
+        }
+        var held = new RowFlow(); held.NoteChange(1);
+        check("Entries: the first change of a series holds nothing", !held.Holding);
+        check("Entries: the second within a quarter second holds the flow", held.NoteChange(1.1) && held.Holding);
+        held.Advance(1.1 + RowFlow.Hold + .01, false, true);
+        check("Entries: quiet for a quarter second, the hold ends", !held.Holding);
+        var animations = new RowFlow(); animations.NoteChange(0); animations.NoteChange(.1); animations.Advance(.1, false, false);
+        check("Entries: without animations the flow is at its target at once", animations.Value == 1);
+        animations.Advance(.1 + RowFlow.Hold + .01, false, false);
+        check("Entries: without animations it is back at 0 at once when the changes stop", animations.Value == 0 && !animations.Holding);
+        var rise = new RowFlow(); rise.Restart(0); rise.Advance(.05, true, true);
+        check("Entries: the flow rises over about a third of a second, not at once", rise.Value > 0 && rise.Value < .5);
     }
 
     private static void Flowing(Action<string, bool> check)

@@ -261,6 +261,7 @@ public partial class MainWindow : Window
         // panel hides or returns in this pass.
         _context = _host.DetectNow();
         bool wasVisible = IsVisible;
+        var shapeBefore = Collapsed; double dipBefore = _pixelsPerDip;
         ApplyLanguage();
         ApplyTheme();
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
@@ -269,6 +270,7 @@ public partial class MainWindow : Window
         ApplyScale();
         var (bounds, work, scale) = Screen();
         UpdateCollapsedGeometry(bounds, work, scale);
+        NoteCollapsedWidth(shapeBefore, dipBefore);
         // Page widths are the page as laid out with the text size (Zoom) but before the panel's scale; drawn at the scale they fit
         // the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
@@ -573,6 +575,7 @@ public partial class MainWindow : Window
     // The compact island shows one ring per enabled application: the highest used share among its quotas.
     private void BuildCompact()
     {
+        var fade = RowFadeStart();
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
@@ -590,6 +593,7 @@ public partial class MainWindow : Window
         CompactAlert.Visibility = Visibility.Collapsed; CompactRings.Visibility = Visibility.Visible;
         RenderCompactMusic();
         ApplyCollapsedLayout();
+        RowFadeRun(fade);
     }
 
     private void DetectThresholds()
