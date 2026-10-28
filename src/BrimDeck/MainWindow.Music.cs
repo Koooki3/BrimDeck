@@ -147,9 +147,11 @@ public partial class MainWindow
     private void PlacePageCapsule()
     {
         var button = CurrentPage switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, _ => AIUsageButton };
-        if (button.Visibility != Visibility.Visible || !button.IsMeasureValid || button.ActualWidth <= 0 || PresentationSource.FromVisual(button) is null)
+        if (!LayoutRetry.Laid(button))
         {
-            if (!_capsulePending) { _capsulePending = true; Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { _capsulePending = false; if (button.ActualWidth > 0) PlacePageCapsule(); }); }
+            // Retried after a layout pass, never by posting itself again: the switch is collapsed while the usage details show, its
+            // buttons then keep an invalid measure and their old width, and a retry that posted itself spun the UI thread at 90%.
+            if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => LayoutRetry.Laid(PageButton(CurrentPage)), () => { _capsulePending = false; PlacePageCapsule(); }); }
             return;
         }
         double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = button.ActualHeight;
