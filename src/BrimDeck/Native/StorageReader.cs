@@ -11,7 +11,8 @@ namespace BrimDeck.Native;
 // volume and drive is opened without read or write access, which a normal user may do; nothing here needs administrator rights.
 // Asking a drive for its temperature sends it a command (a few to over a hundred milliseconds, and it leaves its deepest power
 // state), and listing the volumes can wait on a slow drive, so everything is read on the thread pool: the volumes every 10
-// seconds, the temperatures every 30, never on a tick. Hard disks are not asked for a temperature, as asking could spin one up.
+// seconds, the temperatures every 30, never on a tick. Hard disks are not asked for a temperature, as asking could spin one up,
+// nor are drives behind a RAID controller (Storage.AsksTemperature).
 // The readings and states are kept while the sampler pauses, so a page opened again has its drives at once.
 internal sealed class StorageReader
 {
@@ -94,7 +95,7 @@ internal sealed class StorageReader
             {
                 _temperaturesAt = now;
                 var known = new Dictionary<int, DiskTemperature>();
-                foreach (int number in solid)
+                foreach (int number in solid.Where(number => Core.Storage.AsksTemperature(disks[number])))
                 {
                     var device = Open($@"\\.\PhysicalDrive{number}");
                     if (device == InvalidHandle) continue;

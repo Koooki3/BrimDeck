@@ -41,6 +41,8 @@ public static class Storage
 {
     // STORAGE_BUS_TYPE values that are not internal drives.
     public const int BusUsb = 7, BusSd = 12, BusMmc = 13, BusVirtual = 14, BusFileBackedVirtual = 15;
+    // A drive behind a RAID controller (Intel Rapid Storage Technology, a vendor's RAID mode).
+    public const int BusRaid = 8;
     public const ulong SmallestVolume = 1UL << 30;
     // The letter of the volume holding Windows, "C:".
     public static string? WindowsLetter { get; } = Path.GetPathRoot(Environment.SystemDirectory)?.TrimEnd('\\', '/') is { Length: > 0 } root ? root : null;
@@ -48,6 +50,11 @@ public static class Storage
     // A file-backed virtual disk that is not removable stays: a Dev Drive (Windows 11) is a VHDX the user keeps as a drive of its
     // own, as is a VHD mounted for good. Its space is also part of the drive that holds its file.
     public static bool Internal(StorageDisk disk) => !disk.Removable && disk.Bus is not (BusUsb or BusSd or BusMmc or BusVirtual);
+
+    // A drive behind a RAID controller is never asked for its temperature: the controller's driver answers for it, and Intel Rapid
+    // Storage Technology on one laptop never answered at all, which froze the whole machine. Windows' own settings show no
+    // temperature for such a drive either. Its space is listed as any other drive's.
+    public static bool AsksTemperature(StorageDisk disk) => disk.Bus != BusRaid;
 
     // The drives from the volumes and the physical drive each lies on (null when it spans drives or its drive is unknown), the
     // drives Windows describes, the temperatures by drive number and the solid-state drives' numbers. A volume on a drive that is
