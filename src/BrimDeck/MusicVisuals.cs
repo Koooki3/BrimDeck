@@ -685,7 +685,7 @@ internal sealed class ReadingsCarousel : GlideCarousel
         window = Math.Max(0, window); travel = Math.Max(0, travel); edge = Math.Max(0, edge);
         Rotates = travel > 0;
         Width = edge + window + edge; Height = strip.Height; ClipToBounds = true;
-        strip.Width = strip.PreferredWidth; strip.Paired = true; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        strip.Width = strip.PreferredWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
         strip.RenderTransform = new TranslateTransform();
         Canvas.SetLeft(strip, edge);
         // A Canvas measures the strip at its full width, as for the rings.

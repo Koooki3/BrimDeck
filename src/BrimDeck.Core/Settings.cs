@@ -350,6 +350,8 @@ public sealed class DeckSettings
     // theme's warning and critical colors. The expanded page does not change color by level.
     public string? CompactWarningColor { get; set; }
     public string? CompactCriticalColor { get; set; }
+    // The collapsed readings' dials and core columns ease to each reading at this many frames a second, or not at all.
+    public CompactSmoothing CompactSmoothing { get; set; } = CompactSmoothing.Ten;
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     public bool MonitorProcesses { get; set; } = true;
@@ -524,6 +526,7 @@ public sealed class DeckSettings
         MonitorGpu = string.IsNullOrWhiteSpace(MonitorGpu) ? null : MonitorGpu.Trim();
         MonitorGpuName = MonitorGpu is null || string.IsNullOrWhiteSpace(MonitorGpuName) ? null : MonitorGpuName.Trim();
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
+        if (!Enum.IsDefined(CompactSmoothing)) CompactSmoothing = CompactSmoothing.Ten;
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;

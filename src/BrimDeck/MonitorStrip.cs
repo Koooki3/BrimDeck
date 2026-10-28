@@ -47,7 +47,7 @@ internal sealed class MonitorStrip : FrameworkElement
     public MonitorStrip(IReadOnlyList<CompactReading> readings, StripColors colors, double scale, bool centered, StripPresence presence, double dpi,
         CompactMonitorItems unavailable = CompactMonitorItems.None, StripAdmission? admission = null)
     {
-        _easing = new PromptTimer(Dispatcher, EaseStep) { Interval = EaseFrame };
+        _easing = new PromptTimer(Dispatcher, EaseStep);
         _presence = presence; _dpi = dpi; _colors = colors; _centered = centered;
         _order = [.. readings.Select(reading => reading.Item)];
         _orderOnce = [.. _order.Distinct()];
@@ -141,10 +141,9 @@ internal sealed class MonitorStrip : FrameworkElement
         public readonly bool Moving(double now) => _has && _value.Moving(now);
     }
     private Smooth[] _cores = [];
-    // The values ease on a timer of their own at about 10 frames a second, not on Motion: Motion hooks the render loop, which then
-    // draws the whole window on every display frame, and the readings move after every reading, once a second. The timer stops
-    // once they rest, after drawing their final values.
-    private static readonly TimeSpan EaseFrame = TimeSpan.FromMilliseconds(1000 / 10.0);
+    // The values ease on a timer of their own at the frames a second chosen (CompactSmoothing), not on Motion: Motion hooks the
+    // render loop, which then draws the whole window on every display frame, and the readings move after every reading, once a
+    // second. The timer stops once they rest, after drawing their final values.
     private readonly PromptTimer _easing;
     private void EaseStep()
     {
@@ -155,13 +154,9 @@ internal sealed class MonitorStrip : FrameworkElement
 
     // The gap between two readings.
     public double Gap => _gap;
-    // While the readings scroll (ReadingsCarousel), the download and the upload after it are drawn as a pair, as close as the
-    // readings are, as the scrolling strip drew its figures at their own width before; standing still, each keeps the room of
-    // its widest figure.
-    public bool Paired { get; set; }
     // The width of each reading shown, left to right, for the window the row scrolls them through (CompactSpacing.Window). The
-    // upload right after the download is one item with it, with the gap between them: the carousel never stops between them,
-    // and draws them as a pair (Paired).
+    // upload right after the download is one item with it, with the gap between them: the carousel never stops between them.
+    // Each keeps the room of its widest figure while the readings scroll too, so a new download figure never moves the upload.
     public List<double> ItemWidths()
     {
         var widths = new List<double>();
@@ -177,9 +172,11 @@ internal sealed class MonitorStrip : FrameworkElement
         return widths;
     }
 
-    public void Update(MonitorSnapshot? snapshot, bool motion)
+    // frames: the frames a second the dials and the core columns are drawn at while they ease (CompactSmoothing).
+    public void Update(MonitorSnapshot? snapshot, bool motion, int frames)
     {
         _snapshot = snapshot;
+        _easing.Interval = TimeSpan.FromMilliseconds(1000.0 / Math.Max(1, frames));
         var s = snapshot;
         double now = Eased.Now;
         bool moving = false;
@@ -208,8 +205,6 @@ internal sealed class MonitorStrip : FrameworkElement
     // Every whole percent's figure, made once: the gauges show one on every reading.
     private static readonly string[] Percents = [.. Enumerable.Range(0, 101).Select(percent => MonitorFormat.Percent(percent / 100d) + "%")];
     private static string GaugeFigure(double? share) => share is { } v ? Percents[MonitorFormat.WholePercent(v)] : "—";
-    // A rate's arrow and figure as drawn (Rate), at this figure's own width.
-    private double RateWidth(double? rate) => Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth(RateFigure(rate));
     private static string RateFigure(double? rate)
     {
         var q = rate is { } r ? MonitorFormat.CompactRate(r) : new MonitorFormat.Quantity("—", "");
@@ -237,15 +232,9 @@ internal sealed class MonitorStrip : FrameworkElement
         if (total <= 0) return;
         double start = _centered ? (w - total) / 2 : w - total;
         var s = _snapshot;
-        // Paired, the upload right after the download follows the download's figure, not the room kept for its widest: the
-        // pair stays as close as the readings are, and the room its figures do not use lies after the upload.
-        double pull = 0;
         foreach (var (item, at, width, presence) in _arranged)
         {
             double x = start + at;
-            if (item == CompactMonitorItems.Upload && presence >= .999) x -= pull;
-            pull = Paired && item == CompactMonitorItems.Download && presence >= .999
-                ? Math.Max(0, width - RateWidth(s?.Network.OrDefault?.DownBytesPerSecond)) : 0;
             // A reading on its way in or out is drawn smaller and fainter, centred in the room it has.
             bool partial = presence < .999;
             double offset = (width * presence - width) / 2;
