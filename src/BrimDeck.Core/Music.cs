@@ -131,8 +131,13 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // The width a row with this content takes without cutting or rotating anything: the cover, every ring, the lyric's fixed
     // slot, the system readings, the equalizer and the clock, with their gaps. An auto-width surface takes it
-    // (CollapsedGeometry.Resolve).
-    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
+    // (CollapsedGeometry.Resolve). dpi (device pixels per DIP, 0 for none): the width is rounded up to whole device pixels. The row
+    // is laid out in whole device pixels, rounded down (DevicePixels.Down), so a width with a fraction left in it (a clock face
+    // that is not a whole number of DIPs) would leave the readings a fraction short of the room they asked for, and they would scroll.
+    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double dpi = 0)
+        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace);
+
+    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
     {
         double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace);
         rings = Math.Max(0, rings);

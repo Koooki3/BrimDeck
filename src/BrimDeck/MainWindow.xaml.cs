@@ -175,7 +175,14 @@ public partial class MainWindow : Window
         // DpiChanged is a bubbling event: every Image raises it when its own DPI changes. Once the window has moved to a
         // monitor with another scale, each image the panel rebuilds while it is laid out reports a change, and laying out
         // again on those would never stop. Only the window's own change counts.
-        DpiChanged += (_, e) => { if (ReferenceEquals(e.OriginalSource, this) && e.OldDpi.DpiScaleX != e.NewDpi.DpiScaleX) Dispatcher.BeginInvoke(ApplySettings); };
+        // The wanted width is rounded up to whole device pixels of the monitor it was measured on, so a new scale drops it and the
+        // next layout writes it again; the half-DIP threshold of the cache could keep a width rounded for the old scale.
+        DpiChanged += (_, e) =>
+        {
+            if (!ReferenceEquals(e.OriginalSource, this) || e.OldDpi.DpiScaleX == e.NewDpi.DpiScaleX) return;
+            _compactWanted = double.NaN;
+            Dispatcher.BeginInvoke(ApplySettings);
+        };
         // WM_DISPLAYCHANGE reaches the window after Windows has moved it into the new layout; SystemEvents reports the change
         // before that, when the window still has its old position. A taskbar change (auto-hide, size) alters the work area
         // without a display change.
@@ -228,6 +235,7 @@ public partial class MainWindow : Window
         // panel hides or returns in this pass.
         _context = _host.DetectNow();
         bool wasVisible = IsVisible;
+        var shapeBefore = Collapsed; double dipBefore = _pixelsPerDip;
         ApplyLanguage();
         ApplyTheme();
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
@@ -236,6 +244,7 @@ public partial class MainWindow : Window
         ApplyScale();
         var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
         UpdateCollapsedGeometry(bounds, work, scale);
+        NoteCollapsedWidth(shapeBefore, dipBefore);
         // Page widths are unscaled; drawn at the panel's scale they fit the work area less 12 DIP each side.
         double Fit(double width) => Math.Max(240, Math.Min(width, (work.Width / scale - 24) / _scale));
         _pageWidth = Fit(DeckPages.Size(Settings, CurrentPage).Width); _usageWidth = Fit(DeckPages.Size(Settings, DeckPage.Usage).Width);
@@ -485,6 +494,7 @@ public partial class MainWindow : Window
     // The compact island shows one ring per enabled application: the highest used share among its quotas.
     internal void RenderCompact()
     {
+        var fade = RowFadeStart();
         CompactRings.Children.Clear(); CompactAlert.Children.Clear();
         CompactRings.HorizontalAlignment = HorizontalAlignment.Center;
         if (_quotaCarousel is not null) { _quotaElapsed = _quotaCarousel.Elapsed; _quotaCarousel.SetRunning(false, false); }
@@ -502,6 +512,7 @@ public partial class MainWindow : Window
         CompactAlert.Visibility = Visibility.Collapsed; CompactRings.Visibility = Visibility.Visible;
         RenderCompactMusic();
         ApplyCollapsedLayout();
+        RowFadeRun(fade);
     }
 
     private void DetectThresholds()
