@@ -24,7 +24,7 @@ internal static class LayoutRetryTests
 
             int ran = 0, posted = 0;
             var hooks = Dispatcher.CurrentDispatcher.Hooks;
-            DispatcherHookEventHandler count = (_, _) => posted++;
+            DispatcherHookEventHandler count = (_, e) => { if (e.Operation.Priority == DispatcherPriority.Loaded) posted++; };
             hooks.OperationPosted += count;
             LayoutRetry.WhenReady(window, ready, () => ran++);
             // One frame ended by a timer, so the pump itself posts next to nothing while the retry is watched.
@@ -34,7 +34,8 @@ internal static class LayoutRetryTests
             timer.Start();
             Dispatcher.PushFrame(wait);
             hooks.OperationPosted -= count;
-            check("waiting for a collapsed parent posts nothing to the dispatcher", posted < 20);
+            Console.WriteLine($"  (Loaded-priority posts while waiting: {posted})");
+            check("waiting for a collapsed parent does not keep posting to the dispatcher", posted < 5);
             check("it has not run while the button cannot be laid out", ran == 0);
 
             parent.Visibility = Visibility.Visible;
