@@ -61,7 +61,7 @@ internal sealed partial class NoticeWindow
         // droplets, the bulges, the band they keep to and the glow all take the scale with it.
         double scale = Scale, width = frame.Rect.Width / scale, height = frame.Rect.Height / scale;
         var liquid = new NoticeLiquid(new LiquidSpec(form, width, height, NoticeLiquid.DesignSeed, Intensity: plan.Intensity, Separation: plan.Separation,
-            Shoulder: frame.Shoulder / scale, CornerRadius: frame.BottomRadius / scale, MaxInset: NoticeLiquid.MaxInset(height, ToastMetrics(height).Padding, height / 2 - 6)));
+            Shoulder: frame.Shoulder / scale, CornerRadius: frame.BottomRadius / scale, Cut: _look.Cut, MaxInset: NoticeLiquid.MaxInset(height, ToastMetrics(height).Padding, height / 2 - 6)));
         if (_fxLookCache is not { } cached || !ReferenceEquals(cached.Look, _look) || cached.Tone != plan.Tone || cached.Scale != scale)
             _fxLookCache = cached = (_look, plan.Tone, scale, NoticeFxLook.Create(_look, plan, scale));
         _fx = new NoticeFxState { Liquid = liquid, Look = cached.Fx, Plan = plan, Form = form, Scale = scale, Start = Eased.Now, Pace = NoticeFx.Pace(Settings.AnimationDuration) };
@@ -85,7 +85,7 @@ internal sealed partial class NoticeWindow
         bool shows = frame.Alive && (frame.Glow > .004 || frame.Discs.Count > 0 || frame.BumpRuns.Count > 0 || frame.InsetLeft > .02 || frame.InsetRight > .02);
         if (!shows && t > fx.Liquid.Separation) { FxStop(); return false; }
         SetInsets(frame.InsetLeft * fx.Scale, frame.InsetRight * fx.Scale);
-        SetAttachments(NoticeFxShape.Build(frame, fx.Form, fx.Width, fx.Height, fx.Look.Step, fx.Scale));
+        SetAttachments(NoticeFxShape.Build(frame, fx.Form, fx.Width, fx.Height, fx.Look.Step, fx.Scale, fx.Look.Angular));
         _fxBody.InvalidateVisual(); _fxGlow.InvalidateVisual();
         if (fx.Liquid.Finished(t)) { FxStop(); return false; }
         return true;

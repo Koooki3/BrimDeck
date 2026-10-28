@@ -45,7 +45,10 @@ public readonly record struct LiquidSpec(
     double Shoulder = 16, double CornerRadius = 12,
     // How far an end may draw in at most: what the surface's content leaves it (its padding, less what the end's own curve already
     // takes at the content's height; see NoticeLiquid.MaxInset), so that the content is not cut by the outline as it gives way.
-    double MaxInset = double.PositiveInfinity)
+    double MaxInset = double.PositiveInfinity,
+    // The surface's cut corners (the theme's effects.cut): above 0 the notch's shoulders are straight slants and its bottom corners
+    // 45-degree cuts of at most this many DIP (and its corner radius), so the bulges and the glow run along the outline it draws.
+    double Cut = 0)
 {
     // The design's own height, at which its sizes are given; a taller surface keeps the droplets' sizes.
     public const double DesignHeight = 32;
@@ -452,6 +455,7 @@ public sealed class NoticeLiquid
         double left = shoulder, right = w - shoulder;
         double limit = Math.Max(0, Math.Min(h - depth, (right - left) / 2));
         double corner = Math.Clamp(_spec.CornerRadius, 0, limit);
+        double cut = Math.Max(0, _spec.Cut), leg = cut > 0 ? Math.Min(cut, corner) : 0;
         var points = new List<LiquidPoint>(); var normals = new List<LiquidPoint>(); var along = new List<double>();
         double s = 0;
         void Push(double x, double y, double nx, double ny)
@@ -485,24 +489,48 @@ public sealed class NoticeLiquid
             }
         }
         LiquidPoint P(double x, double y) => new(x, y);
+        // The edge's reach into the corner: its leg when it is cut, its radius when it is round.
+        double reach = leg > 0 ? leg : corner;
+        const double Diagonal = .7071067811865476;
         if (shoulder > 0)
         {
-            Cubic(P(w, 0), P(w - shoulder * .28, 0), P(w - shoulder * .64, 0), P(w - shoulder * .82, depth * .18));
-            Cubic(P(w - shoulder * .82, depth * .18), P(right, depth * .36), P(right, depth * .72), P(right, depth));
+            if (cut > 0)
+            {
+                // A slant from the screen's edge to the wall, its outward normal the slant's own, turned a quarter.
+                double slant = Math.Sqrt(shoulder * shoulder + depth * depth);
+                Line(w, 0, right, depth, depth / slant, shoulder / slant);
+            }
+            else
+            {
+                Cubic(P(w, 0), P(w - shoulder * .28, 0), P(w - shoulder * .64, 0), P(w - shoulder * .82, depth * .18));
+                Cubic(P(w - shoulder * .82, depth * .18), P(right, depth * .36), P(right, depth * .72), P(right, depth));
+            }
             _shoulderEnd = s;
-            Line(right, depth, right, h - corner, 1, 0);
+            Line(right, depth, right, h - reach, 1, 0);
         }
-        else { _shoulderEnd = 0; Line(w, 0, w, h - corner, 1, 0); }
-        double cornerRight0 = s; Arc(right - corner, h - corner, 0, Math.PI / 2); double cornerRight = (cornerRight0 + s) / 2;
-        Line(right - corner, h, left + corner, h, 0, 1);
-        double cornerLeft0 = s; Arc(left + corner, h - corner, Math.PI / 2, Math.PI); double cornerLeft = (cornerLeft0 + s) / 2;
+        else { _shoulderEnd = 0; Line(w, 0, w, h - reach, 1, 0); }
+        double cornerRight0 = s;
+        if (leg > 0) Line(right, h - leg, right - leg, h, Diagonal, Diagonal); else Arc(right - corner, h - corner, 0, Math.PI / 2);
+        double cornerRight = (cornerRight0 + s) / 2;
+        Line(right - reach, h, left + reach, h, 0, 1);
+        double cornerLeft0 = s;
+        if (leg > 0) Line(left + leg, h, left, h - leg, -Diagonal, Diagonal); else Arc(left + corner, h - corner, Math.PI / 2, Math.PI);
+        double cornerLeft = (cornerLeft0 + s) / 2;
         if (shoulder > 0)
         {
-            Line(left, h - corner, left, depth, -1, 0);
-            Cubic(P(left, depth), P(left, depth * .72), P(left, depth * .36), P(shoulder * .82, depth * .18));
-            Cubic(P(shoulder * .82, depth * .18), P(shoulder * .64, 0), P(shoulder * .28, 0), P(0, 0));
+            Line(left, h - reach, left, depth, -1, 0);
+            if (cut > 0)
+            {
+                double slant = Math.Sqrt(shoulder * shoulder + depth * depth);
+                Line(left, depth, 0, 0, -depth / slant, shoulder / slant);
+            }
+            else
+            {
+                Cubic(P(left, depth), P(left, depth * .72), P(left, depth * .36), P(shoulder * .82, depth * .18));
+                Cubic(P(shoulder * .82, depth * .18), P(shoulder * .64, 0), P(shoulder * .28, 0), P(0, 0));
+            }
         }
-        else Line(left, h - corner, left, 0, -1, 0);
+        else Line(left, h - reach, left, 0, -1, 0);
         _points = [.. points]; _normals = [.. normals]; _along = [.. along]; _total = s; _cornerRight = cornerRight; _cornerLeft = cornerLeft;
     }
 

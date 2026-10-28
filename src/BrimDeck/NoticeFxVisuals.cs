@@ -38,7 +38,7 @@ internal sealed class NoticeFxLook
     private readonly Dictionary<(int Kind, int Alpha), Brush> _brushes = [];
     private readonly Pen?[] _rims;
     private readonly Brush[] _fills;
-    private NoticeFxLook(Brush[] fills, Pen?[] rims, Color glow, double step, bool glows, bool translucent) { _fills = fills; _rims = rims; Glow = glow; Step = step; Glows = glows; Translucent = translucent; }
+    private NoticeFxLook(Brush[] fills, Pen?[] rims, Color glow, double step, bool glows, bool translucent, bool angular) { _fills = fills; _rims = rims; Glow = glow; Step = step; Glows = glows; Translucent = translucent; Angular = angular; }
 
     // Whether the surface lets what is behind it show (a theme file may make it so; the glass themes do): its droplets are then
     // filled as one shape, so that where two overlap they are not drawn twice as dense, and nothing is drawn over the surface.
@@ -58,6 +58,8 @@ internal sealed class NoticeFxLook
     public double Step { get; }
     // False where the glow is not drawn (high contrast).
     public bool Glows { get; }
+    // A theme with cut corners (and no pixels): its droplets are octagons and its necks straight, so nothing of it is a curve the surface does not have.
+    public bool Angular { get; }
 
     private static Color Parse(string text) => (Color)ColorConverter.ConvertFromString(text);
 
@@ -106,7 +108,7 @@ internal sealed class NoticeFxLook
             }
             fills[i] = Frozen(new SolidColorBrush(color));
         }
-        return new(fills, rims, GlowColor(look, palette, plan.Tone), step, !look.HighContrast, look.Surface.A < 255);
+        return new(fills, rims, GlowColor(look, palette, plan.Tone), step, !look.HighContrast, look.Surface.A < 255, palette.Effects.Cut > 0 && palette.Effects.Pixel <= 0 && !look.HighContrast);
     }
 
     // The glow of the theme in the notice's tone. The design's own color for a dark theme; the accent where a theme glows or is
@@ -116,6 +118,8 @@ internal sealed class NoticeFxLook
     {
         if (tone == NoticeFxTone.Danger) return look.AppColor(Parse(look.Danger));
         if (tone == NoticeFxTone.Warning) return look.AppColor(Parse(PanelTheme.WarningDefault));
+        // A cut-corner theme lights its edge in the hazard yellow of its Indicator (the dark look), a flash of the signal rather than a bloom.
+        if (palette.Effects.Cut > 0 && palette.IsDark && !look.HighContrast) return look.AppColor(Parse(PanelTheme.Hex("indicator")));
         if (palette.Effects.Pixel > 0 || look.Glow || !palette.IsDark) return look.AppColor(Parse(look.Accent));
         return Color.FromRgb(0xD8, 0xDD, 0xE6);
     }
@@ -182,12 +186,12 @@ internal sealed class NoticeFxBody : FrameworkElement
             foreach (var disc in frame.Discs)
             {
                 if (disc.Attached) continue;
-                NoticeFxShape.AddDisc(path, at(disc.Side, new LiquidPoint(disc.X, disc.Y)), disc.R, step); any = true;
+                NoticeFxShape.AddDisc(path, at(disc.Side, new LiquidPoint(disc.X, disc.Y)), disc.R, step, look.Angular); any = true;
             }
             foreach (var neck in frame.Necks)
             {
                 if (neck.Attached) continue;
-                any |= NoticeFxShape.AddNeck(path, neck, at, step);
+                any |= NoticeFxShape.AddNeck(path, neck, at, step, look.Angular);
             }
         }
         if (!any) return;
@@ -226,6 +230,13 @@ internal sealed class NoticeFxBody : FrameworkElement
             var pen = look.Rim(Along(center.X));
             var fill = look.Fill(disc.Y / Math.Max(1, state.Height));
             if (step > 0) { var square = Block(center, disc.R, step); if (pen is not null) drawing.DrawRectangle(null, pen, square); drawing.DrawRectangle(fill, null, square); }
+            else if (look.Angular)
+            {
+                var octagon = new StreamGeometry();
+                using (var path = octagon.Open()) NoticeFxShape.AddDisc(path, center, disc.R, 0, true);
+                octagon.Freeze();
+                drawing.DrawGeometry(fill, pen, octagon);
+            }
             else { if (pen is not null) drawing.DrawEllipse(null, pen, center, disc.R, disc.R); drawing.DrawEllipse(fill, null, center, disc.R, disc.R); }
         }
     }
@@ -239,7 +250,7 @@ internal static class NoticeFxShape
 {
     // width and height are the surface's size before the scale; the shape is made at that size and drawn at the scale, in the surface's own
     // (scaled) coordinates.
-    public static Geometry? Build(LiquidFrame frame, LiquidForm form, double width, double height, double step, double scale = 1)
+    public static Geometry? Build(LiquidFrame frame, LiquidForm form, double width, double height, double step, double scale = 1, bool angular = false)
     {
         if (!frame.Alive) return null;
         var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
@@ -262,12 +273,12 @@ internal static class NoticeFxShape
                 foreach (var disc in frame.Discs)
                 {
                     if (!disc.Attached) continue;
-                    AddDisc(path, At(disc.Side, new LiquidPoint(disc.X, disc.Y)), disc.R, step); any = true;
+                    AddDisc(path, At(disc.Side, new LiquidPoint(disc.X, disc.Y)), disc.R, step, angular); any = true;
                 }
                 foreach (var neck in frame.Necks)
                 {
                     if (!neck.Attached) continue;
-                    any |= AddNeck(path, neck, At, step);
+                    any |= AddNeck(path, neck, At, step, angular);
                 }
             }
         }
@@ -279,8 +290,16 @@ internal static class NoticeFxShape
 
     // A droplet as a figure: a circle, or for a pixel theme the rows of a circle on the grid (a stepped disc). A droplet smaller than a block
     // is a block.
-    internal static void AddDisc(StreamGeometryContext path, Point c, double r, double step)
+    internal static void AddDisc(StreamGeometryContext path, Point c, double r, double step, bool angular = false)
     {
+        if (step <= 0 && angular)
+        {
+            // A regular octagon of the droplet's size, clockwise on the screen.
+            double rr = r / Math.Cos(Math.PI / 8);
+            path.BeginFigure(new Point(c.X + rr * Math.Cos(Math.PI / 8), c.Y + rr * Math.Sin(Math.PI / 8)), true, true);
+            for (int i = 1; i < 8; i++) path.LineTo(new Point(c.X + rr * Math.Cos(Math.PI / 8 + i * Math.PI / 4), c.Y + rr * Math.Sin(Math.PI / 8 + i * Math.PI / 4)), true, false);
+            return;
+        }
         if (step <= 0)
         {
             path.BeginFigure(new Point(c.X - r, c.Y), true, true);
@@ -301,7 +320,7 @@ internal static class NoticeFxShape
     }
 
     // A neck as a figure (clockwise): its two curves, or for a pixel theme its bar. False once there is nothing of it.
-    internal static bool AddNeck(StreamGeometryContext path, LiquidNeck neck, Func<int, LiquidPoint, Point> at, double step)
+    internal static bool AddNeck(StreamGeometryContext path, LiquidNeck neck, Func<int, LiquidPoint, Point> at, double step, bool angular = false)
     {
         if (step > 0)
         {
@@ -311,6 +330,13 @@ internal static class NoticeFxShape
         Point p1 = at(neck.Side, neck.P1), h1 = at(neck.Side, neck.H1), h3 = at(neck.Side, neck.H3), p3 = at(neck.Side, neck.P3);
         Point p4 = at(neck.Side, neck.P4), h4 = at(neck.Side, neck.H4), h2 = at(neck.Side, neck.H2), p2 = at(neck.Side, neck.P2);
         double area = (p1.X * p3.Y - p3.X * p1.Y) + (p3.X * p4.Y - p4.X * p3.Y) + (p4.X * p2.Y - p2.X * p4.Y) + (p2.X * p1.Y - p1.X * p2.Y);
+        if (angular)
+        {
+            // The same neck with its two curves as straight edges.
+            if (area >= 0) { path.BeginFigure(p1, true, true); path.LineTo(p3, true, false); path.LineTo(p4, true, false); path.LineTo(p2, true, false); }
+            else { path.BeginFigure(p2, true, true); path.LineTo(p4, true, false); path.LineTo(p3, true, false); path.LineTo(p1, true, false); }
+            return true;
+        }
         if (area >= 0) { path.BeginFigure(p1, true, true); path.BezierTo(h1, h3, p3, true, false); path.LineTo(p4, true, false); path.BezierTo(h4, h2, p2, true, false); }
         else { path.BeginFigure(p2, true, true); path.BezierTo(h2, h4, p4, true, false); path.LineTo(p3, true, false); path.BezierTo(h3, h1, p1, true, false); }
         return true;

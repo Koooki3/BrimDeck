@@ -34,7 +34,7 @@ internal static class NoticeFxCheck
         double shoulder = (form == LiquidForm.Notch ? 16 : 0) * panelScale, bottom = form == LiquidForm.Notch ? 20 * panelScale : h / 2, top = form == LiquidForm.Notch ? 0 : h / 2;
         var fx = NoticeFxLook.Create(look, plan, panelScale);
         var liquid = new NoticeLiquid(new LiquidSpec(form, dw, dh, NoticeLiquid.DesignSeed, Intensity: plan.Intensity, Separation: plan.Separation,
-            Shoulder: shoulder / panelScale, CornerRadius: bottom / panelScale, MaxInset: NoticeLiquid.MaxInset(dh, 16, dh / 2 - 6)));
+            Shoulder: shoulder / panelScale, CornerRadius: bottom / panelScale, Cut: look.Cut, MaxInset: NoticeLiquid.MaxInset(dh, 16, dh / 2 - 6)));
         var frame = new LiquidFrame();
         double side = (form == LiquidForm.Notch ? 24 : 60) * panelScale, vMargin = 28 * panelScale, cw = w + 2 * side, ch = h + 2 * vMargin;
         // The backdrop is one flat color, so that nothing but the surface itself can put a line in the picture.
@@ -49,7 +49,7 @@ internal static class NoticeFxCheck
         {
             liquid.Sample(t, frame, dw, dh);
             surface.InsetLeft = frame.InsetLeft * panelScale; surface.InsetRight = frame.InsetRight * panelScale;
-            surface.Attachments = NoticeFxShape.Build(frame, form, dw, dh, fx.Step, panelScale);
+            surface.Attachments = NoticeFxShape.Build(frame, form, dw, dh, fx.Step, panelScale, fx.Angular);
             canvas.Measure(new Size(cw, ch)); canvas.Arrange(new Rect(0, 0, cw, ch)); canvas.UpdateLayout();
             var bitmap = new RenderTargetBitmap((int)(cw * scale), (int)(ch * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
             bitmap.Render(canvas);

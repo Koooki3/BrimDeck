@@ -26,8 +26,8 @@ internal static class EndfieldTests
             && PanelThemes.LookAt(theme.File, new DateTime(2026, 10, 27, 12, 0, 0), appsLight: false) == DaylightLook.Night && PanelThemes.NextDaylightChange(theme.File, DateTime.Now) is null);
         check("Cut corners and the marks are in both looks: on paper a faint hatching, on graphite a hazard strip, the same yellow bar",
             day.Effects.Cut == 10 && night.Effects.Cut == 10 && day.Effects.Pixel == 0 && day.Effects.Glass is null && day.Effects.SurfaceGradient.Count == 0 && day.Effects.Scanlines == 0
-            && day.Effects.Decor is { Tab: { } dayTab, Hatch: { } dayHatch, Frame: not null, Diamond: not null, Cross: not null, Horizon: null, Hud: null } && night.Effects.Decor is { Tab: { } nightTab, Hatch: { } nightHatch, Diamond: { } nightDiamond, Cross: not null }
-            && dayTab == ThemeColor.Parse("#FFD400") && nightTab == dayTab && nightDiamond == ThemeColor.Parse("#FC6C00") && dayHatch.A < 80 && nightHatch.A > 150 && dayHatch != nightHatch);
+            && day.Effects.Decor is { Tab: { } dayTab, Hatch: { } dayHatch, Frame: not null, Diamond: null, Cross: null, Horizon: null, Hud: null } && night.Effects.Decor is { Tab: { } nightTab, Hatch: { } nightHatch, Diamond: null, Cross: null }
+            && dayTab == ThemeColor.Parse("#FFD400") && nightTab == dayTab && dayHatch.A < 80 && nightHatch.A > 150 && dayHatch != nightHatch);
         check("Signal yellow is a fill on paper (the selected segment, the indicator, ink on it); on graphite the signal is the HUD's yellow-green, a line and text",
             day["fillSelected"] == ThemeColor.Parse("#FFD400") && day["indicator"] == day["fillSelected"] && night["indicator"] == day["indicator"] && day["textPrimary"].MinimumContrast([day["fillSelected"]]) >= 7
             && day["accent"] == day["textPrimary"] && day["onAccent"] == ThemeColor.Parse("#FFD400") && night["accent"] == ThemeColor.Parse("#C6CA4C") && night["accent"].MinimumContrast(night.SurfaceStops) >= 7
@@ -73,7 +73,34 @@ internal static class EndfieldTests
         // The template and copies.
         check("The template lists cut, off", PanelThemes.Parse(PanelThemes.Template).Effects is { Cut: 0 } && PanelThemes.Build("t", PanelThemes.Parse(PanelThemes.Template)).Effects.Cut == 0);
         var copy = PanelThemes.Build("copy", PanelThemes.Parse(PanelThemes.FillTemplate("copy", day, PanelThemes.Endfield)));
-        check("A theme made from Endfield writes out its cut and its five marks",
-            copy.Effects is { Cut: 10, Decor: { Tab: not null, Hatch: not null, Frame: not null, Diamond: not null, Cross: not null } } && copy.Effects.Decor!.Tab == day.Effects.Decor!.Tab && copy.Effects.Decor.Hatch == day.Effects.Decor.Hatch && copy.Effects.Decor.Frame == day.Effects.Decor.Frame && copy.Effects.Decor.Diamond == day.Effects.Decor.Diamond && copy.Effects.Decor.Cross == day.Effects.Decor.Cross && copy.Adjustments.Count == 0);
+        check("A theme made from Endfield writes out its cut and its three marks",
+            copy.Effects is { Cut: 10, Decor: { Tab: not null, Hatch: not null, Frame: not null } } && copy.Effects.Decor!.Tab == day.Effects.Decor!.Tab && copy.Effects.Decor.Hatch == day.Effects.Decor.Hatch && copy.Effects.Decor.Frame == day.Effects.Decor.Frame && copy.Adjustments.Count == 0);
+
+        // The liquid motion's notch follows the cut outline: slanted shoulders and cut bottom corners, with unit normals, and the round
+        // outline is unchanged without a cut.
+        static (bool OnCut, bool Unit, bool RoundArc) Outline(double cut)
+        {
+            double w = 376, h = 52, shoulder = 16, radius = 20, right = w - shoulder, leg = 10;
+            var liquid = new BrimDeck.Core.Notices.NoticeLiquid(new BrimDeck.Core.Notices.LiquidSpec(BrimDeck.Core.Notices.LiquidForm.Notch, w, h, BrimDeck.Core.Notices.NoticeLiquid.DesignSeed, Shoulder: shoulder, CornerRadius: radius, Cut: cut));
+            var frame = new BrimDeck.Core.Notices.LiquidFrame();
+            liquid.Sample(0, frame, w, h);
+            bool onCut = true, unit = true, arc = false;
+            for (int i = 0; i < frame.Outline.Length; i++)
+            {
+                var p = frame.Outline[i]; var n = frame.Normals[i];
+                unit &= Math.Abs(Math.Sqrt(n.X * n.X + n.Y * n.Y) - 1) < 1e-6;
+                // The bottom right corner's points lie on the cut line x + y = right + h - leg, or, round, off it.
+                if (p.X > right - leg + 1e-6 && p.Y > h - leg + 1e-6 && p.X < right + 1e-6)
+                {
+                    double off = Math.Abs(p.X + p.Y - (right + h - leg));
+                    onCut &= off < 1e-6; arc |= off > .3;
+                }
+            }
+            return (onCut, unit, arc);
+        }
+        var cutOutline = Outline(10); var roundOutline = Outline(0);
+        check("The liquid motion's notch runs along the cut outline: its bottom corners on the 45-degree line, normals of unit length",
+            cutOutline.OnCut && cutOutline.Unit && !cutOutline.RoundArc);
+        check("Without a cut the notch keeps its round corners", roundOutline.Unit && roundOutline.RoundArc);
     }
 }

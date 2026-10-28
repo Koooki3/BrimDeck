@@ -355,7 +355,12 @@ public partial class MainWindow
         if (_app.Notices is null) return;
         int count = _app.Notices.Hub.UnviewedCount;
         NoticesBadge.Visibility = count > 0 && Settings.NoticesEnabled ? Visibility.Visible : Visibility.Collapsed;
-        NoticesBadge.Background = UI.Brush(PanelTheme.Hex("danger"));
+        // On a plate (PanelTheme.Plated) the unread marker is the game's orange diamond: the notice color, a square turned a quarter.
+        NoticesBadge.Background = UI.Brush(PanelTheme.Plated ? PanelTheme.WarningDefault : PanelTheme.Hex("danger"));
+        NoticesBadge.CornerRadius = new CornerRadius(PanelTheme.Plated ? 0 : 4);
+        NoticesBadge.MinWidth = NoticesBadge.Height = PanelTheme.Plated ? 6 : 8;
+        NoticesBadge.RenderTransformOrigin = new Point(.5, .5);
+        NoticesBadge.RenderTransform = PanelTheme.Plated ? new RotateTransform(45) : null;
         AutomationProperties.SetName(NoticesPageButton, Loc.T("通知历史", "Notice history") + (count > 0 ? " · " + NoticeText.Count(count) : ""));
     }
 

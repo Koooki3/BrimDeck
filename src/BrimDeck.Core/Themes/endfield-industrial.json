@@ -12,7 +12,7 @@
   //   The look follows Windows (light or dark), not the clock: it is the display mode of a device, not a time of day.
   //   Two yellows share the work: the game's hazard yellow (#FFD400) for the large strips (the Indicator, the bar and the warning stripes at
   //   the panel's foot, the selected page on paper), the yellow-green of its HUD readouts (#C6CA4C, dark look) for the small ones; orange is
-  //   a single diamond on the frame. Icons, bars and cards are drawn angular on this theme (IconStyle, UI.Bar, UI.Plate).
+  //   the unread marker, a diamond on the bell. Icons, bars and cards are drawn angular on this theme (IconStyle, UI.Bar, UI.Plate).
   "formatVersion": 1,
   "id": "endfield-industrial",
   "name": "明日方舟：终末地",
@@ -89,7 +89,7 @@
     // Cut corners (each at most its corner's radius; a collapsed capsule stays a pill, as a readout is a pill in the game) and, along
     // the open panel's bottom edge, the signal bar at the left and a strip of hatching at the right, in ink at a fifth of its strength.
     "cut": 10,
-    "decor": { "tab": { "color": "#FFD400" }, "hatch": { "color": "#38141414" }, "frame": { "color": "#26141414" }, "diamond": { "color": "#FC6C00" }, "cross": { "color": "#80141414" } }
+    "decor": { "tab": { "color": "#FFD400" }, "hatch": { "color": "#38141414" }, "frame": { "color": "#26141414" } }
   },
   // Mechanical, never springy: a hovered control gets the line highlight and a bar at its left (a record shifting into focus), a
   // press shades the plate as a graphite button does, keyboard focus is the four corner brackets of a selected item. The springs are
@@ -161,7 +161,7 @@
     },
     "effects": {
       "shadowOpacity": 0.6,
-      "decor": { "tab": { "color": "#FFD400" }, "hatch": { "color": "#D9FFD400" }, "frame": { "color": "#30FFFFFF" }, "diamond": { "color": "#FC6C00" }, "cross": { "color": "#80F5F5F5" } }
+      "decor": { "tab": { "color": "#FFD400" }, "hatch": { "color": "#D9FFD400" }, "frame": { "color": "#30FFFFFF" } }
     }
   }
 }
