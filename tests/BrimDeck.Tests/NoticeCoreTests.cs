@@ -385,6 +385,25 @@ internal static class NoticeCoreTests
         var nan = NoticeGeometry.Frame(notch, monitor, work, NoticeForm.Toast, double.NaN, double.PositiveInfinity);
         check("Unknown sizes fall back to the range", double.IsFinite(nan.Rect.Width) && double.IsFinite(nan.Rect.Height));
         check("The collapsed frame is the surface itself", NoticeGeometry.Collapsed(notch).Rect == notch.Surface);
+        // At the panel's scale (150%) the island is drawn larger and the notice with it: its range, the card's corners and the margin to the
+        // screen's edge are those of 100% times the scale, and it still grows and shrinks about the island's middle.
+        const double big = 1.5;
+        var notch15 = CollapsedGeometry.Resolve(new DeckSettings(), CompactStyle.Notch, monitor, work, panelScale: big);
+        var tiny15 = NoticeGeometry.Frame(notch15, monitor, work, NoticeForm.Toast, 10, 10, big);
+        var huge15 = NoticeGeometry.Frame(notch15, monitor, work, NoticeForm.Toast, 5000, 500, big);
+        check("At 150% a toast's range is the 100% range times 1.5", tiny15.Rect.Width == 280 * big && huge15.Rect.Width == 420 * big && huge15.Rect.Height == 64 * big);
+        check("At 150% a notch toast keeps the scaled island's shoulders and its middle", huge15.Shoulder == notch15.Shoulder && huge15.Rect.Y == 0
+            && Math.Abs(huge15.Rect.X + huge15.Rect.Width / 2 - (notch15.Surface.X + notch15.Surface.Width / 2)) < .001 && huge15.BottomRadius == 20 * big);
+        var detail15 = NoticeGeometry.Frame(notch15, monitor, work, NoticeForm.Detail, 100, 2000, big);
+        check("At 150% the details keep to their range times 1.5, with corners times 1.5", detail15.Rect.Width == NoticeGeometry.DetailMinWidth * big
+            && detail15.Rect.Height == NoticeGeometry.DetailMaxHeight * big && detail15.BottomRadius == NoticeGeometry.DetailRadius * big);
+        var narrow15 = NoticeGeometry.Frame(notch15, new DipRect(0, 0, 300, 600), new DipRect(0, 0, 300, 560), NoticeForm.Detail, 460 * big, 200 * big, big);
+        check("At 150% the margin to the screen's edge is scaled too", narrow15.Rect.Width == 300 - 2 * 8 * big && narrow15.Rect.X >= 8 * big - .001);
+        var low15 = CollapsedGeometry.Resolve(new DeckSettings { CapsuleTop = 4000 }, CompactStyle.Capsule, monitor, work, panelScale: big);
+        var lowDetail15 = NoticeGeometry.Frame(low15, monitor, work, NoticeForm.Detail, 400 * big, 300 * big, big);
+        check("At 150% a card near the bottom still grows upward within the scaled margin", lowDetail15.Rect.Y + lowDetail15.Rect.Height <= work.Height - NoticeGeometry.ScreenMargin * big + .001);
+        check("A scale that is not a number is taken as 100%", NoticeGeometry.Frame(notch, monitor, work, NoticeForm.Toast, 10, 10, double.NaN).Rect.Width == 280
+            && NoticeGeometry.ToastLimits(CompactStyle.Capsule, 0).MaxWidth == 400);
         // A notice ends exactly on the island it returns to, in every collapsed form, so the island takes over without a jump.
         foreach (var style in new[] { CompactStyle.Notch, CompactStyle.Capsule, CompactStyle.Line })
         {

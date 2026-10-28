@@ -24,7 +24,11 @@ internal sealed class NoticeFxState
     public double Pace { get; init; } = 1;
     // When it began (Eased.Now), and the surface as it stands now in the stage, as the player last read it.
     public double Start;
+    // Left and Top are where the surface is in the stage. The motion is worked out and drawn at the size the notice is designed at, before
+    // the panel's scale (PanelScales): Width and Height are the surface's size divided by Scale, and what is drawn is drawn at Scale from
+    // the surface's corner, so the droplets, the bulges, the glow and the rim all take the scale the notice does.
     public double Left, Top, Width, Height;
+    public double Scale = 1;
 }
 
 // How the motion looks on the theme in use: the surface's own color and rim for the droplets, the glow's color for the notice's
@@ -72,10 +76,13 @@ internal sealed class NoticeFxLook
         return stops[^1].Color;
     }
 
-    public static NoticeFxLook Create(NoticeLook look, NoticeFxPlan plan)
+    // scale: what the motion is drawn at (NoticeFxState.Scale). The rim and a pixel theme's block are as the surface's own, which are not
+    // drawn at the scale, so here they are divided by it.
+    public static NoticeFxLook Create(NoticeLook look, NoticeFxPlan plan, double scale = 1)
     {
         var palette = PanelTheme.Current;
-        double step = palette.Effects.Pixel > 0 ? Math.Max(1, palette.Effects.Pixel) : 0;
+        scale = scale > 0 && double.IsFinite(scale) ? scale : 1;
+        double step = palette.Effects.Pixel > 0 ? Math.Max(1, palette.Effects.Pixel) / scale : 0;
         var rims = new Pen?[9];
         for (int i = 0; i < rims.Length; i++)
         {
@@ -85,7 +92,7 @@ internal sealed class NoticeFxLook
                 GradientBrush { GradientStops.Count: > 0 } gradient => At(gradient, i / (double)(rims.Length - 1)),
                 _ => null
             };
-            rims[i] = color is { A: > 0 } c ? Frozen(new Pen(Frozen(new SolidColorBrush(c)), look.RimWidth * 2) { LineJoin = PenLineJoin.Round }) : null;
+            rims[i] = color is { A: > 0 } c ? Frozen(new Pen(Frozen(new SolidColorBrush(c)), look.RimWidth * 2 / scale) { LineJoin = PenLineJoin.Round }) : null;
         }
         var fills = new Brush[9];
         for (int i = 0; i < fills.Length; i++)
@@ -143,15 +150,18 @@ internal sealed class NoticeFxBody : FrameworkElement
         if (State is not { } state || !state.Frame.Alive) return;
         var frame = state.Frame; var look = state.Look;
         double step = look.Step;
+        // From the surface's corner, at the scale: the motion's own units are the notice's designed ones.
+        drawing.PushTransform(new MatrixTransform(state.Scale, 0, 0, state.Scale, state.Left, state.Top));
         if (state.Form == LiquidForm.Notch) DrawNotch(drawing, state, frame, look, step);
         else DrawPill(drawing, state, frame, look, step);
+        drawing.Pop();
     }
 
     private static double Snap(double value, double step) => step > 0 ? Math.Round(value / step) * step : value;
 
     private static void DrawPill(DrawingContext drawing, NoticeFxState state, LiquidFrame frame, NoticeFxLook look, double step)
     {
-        double left = state.Left, right = state.Left + state.Width, mid = state.Top + state.Height / 2;
+        double left = 0, right = state.Width, mid = state.Height / 2;
         Point At(int side, LiquidPoint p) => new(side > 0 ? right + p.X : left - p.X, mid + p.Y);
         // What has parted is drawn as one shape (a cluster of droplets still joined to each other has one boundary, too); what is
         // still joined to the surface is part of its outline (NoticeFxShape), not drawn here.
@@ -209,11 +219,10 @@ internal sealed class NoticeFxBody : FrameworkElement
     // The notch's beads: the bulges are part of the surface's own outline (NoticeFxShape), and a bead that has parted from them has its own.
     private static void DrawNotch(DrawingContext drawing, NoticeFxState state, LiquidFrame frame, NoticeFxLook look, double step)
     {
-        double ox = state.Left, oy = state.Top;
-        double Along(double x) => (x - ox) / Math.Max(1, state.Width);
+        double Along(double x) => x / Math.Max(1, state.Width);
         foreach (var disc in frame.Discs)
         {
-            var center = new Point(ox + disc.X, oy + disc.Y);
+            var center = new Point(disc.X, disc.Y);
             var pen = look.Rim(Along(center.X));
             var fill = look.Fill(disc.Y / Math.Max(1, state.Height));
             if (step > 0) { var square = Block(center, disc.R, step); if (pen is not null) drawing.DrawRectangle(null, pen, square); drawing.DrawRectangle(fill, null, square); }
@@ -228,7 +237,9 @@ internal sealed class NoticeFxBody : FrameworkElement
 // neck has thinned to nothing the droplet is no longer here, and is drawn on its own (NoticeFxBody).
 internal static class NoticeFxShape
 {
-    public static Geometry? Build(LiquidFrame frame, LiquidForm form, double width, double height, double step)
+    // width and height are the surface's size before the scale; the shape is made at that size and drawn at the scale, in the surface's own
+    // (scaled) coordinates.
+    public static Geometry? Build(LiquidFrame frame, LiquidForm form, double width, double height, double step, double scale = 1)
     {
         if (!frame.Alive) return null;
         var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
@@ -261,6 +272,7 @@ internal static class NoticeFxShape
             }
         }
         if (!any) return null;
+        if (scale != 1) geometry.Transform = new ScaleTransform(scale, scale);
         geometry.Freeze();
         return geometry;
     }
@@ -326,11 +338,13 @@ internal sealed class NoticeFxGlow : FrameworkElement
         var frame = state.Frame; var look = state.Look;
         if (!look.Glows) return;
         double strength = Math.Clamp(state.Plan.Glow, 0, 1.25);
+        drawing.PushTransform(new MatrixTransform(state.Scale, 0, 0, state.Scale, state.Left, state.Top));
         switch (state.Form)
         {
             case LiquidForm.Notch: DrawOutline(drawing, state, frame, look, strength); break;
             default: DrawEdges(drawing, state, look, Math.Min(1, frame.Glow * strength)); break;
         }
+        drawing.Pop();
     }
 
     // The layers: thickness and the share of the glow's alpha. A pixel theme's are whole blocks.
@@ -342,7 +356,7 @@ internal sealed class NoticeFxGlow : FrameworkElement
     {
         if (amount <= .01) return;
         double radius = state.Height / 2;
-        double x0 = state.Left + radius, x1 = state.Left + state.Width - radius, top = state.Top, bottom = state.Top + state.Height;
+        double x0 = radius, x1 = state.Width - radius, top = 0, bottom = state.Height;
         if (x1 - x0 < 8) return;
         foreach (var (thickness, alpha) in Layers(look))
         {
@@ -356,10 +370,8 @@ internal sealed class NoticeFxGlow : FrameworkElement
     {
         double amount = Math.Min(1, frame.Glow * strength);
         if (amount <= .01 || frame.Outline.Length < 2) return;
-        drawing.PushTransform(new TranslateTransform(state.Left, state.Top));
         foreach (var (thickness, alpha) in Layers(look))
             drawing.DrawGeometry(look.Plain(alpha * amount), null, Band(frame, thickness));
-        drawing.Pop();
     }
 
     // A band along the outline that is `thickness` wide where it is full and narrows to nothing over the last 46 DIPs of each

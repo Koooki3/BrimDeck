@@ -249,6 +249,11 @@ internal static class NoticeLiquidTests
             Math.Abs(Px(NoticeFx.LineWindUp(56, 240, normal), 184) - 5) < 1e-6 && Math.Abs(Px(NoticeFx.LineCarry(56, 240, normal), 184) - 6.72) < 1e-6
             && NoticeFx.LineWindUp(56, 240, urgent) > NoticeFx.LineWindUp(56, 240, normal) && NoticeFx.LineWindUp(56, 240, low) < NoticeFx.LineWindUp(56, 240, normal)
             && NoticeFx.LineWindUp(24, 240, normal) < NoticeFx.LineWindUp(56, 240, normal) && NoticeFx.LineWindUp(56, 70, normal) == 0 && NoticeFx.LineCarry(56, 70, normal) == 0);
+        // At the panel's scale (150%) the line is longer and the distances follow it: 7.5 DIPs of draw-back (5 times 1.5) and 10.08 of carry
+        // (an eighth of the line's length, 84, which is under the cap of 10.5), and a card hardly wider than the line still gets none.
+        check("Line amplitude at 150%: the draw-back and the carry are the 100% distances times 1.5 (or the line's own share)",
+            Math.Abs(Px(NoticeFx.LineWindUp(84, 360, normal, 1.5), 276) - 7.5) < 1e-6 && Math.Abs(Px(NoticeFx.LineCarry(84, 360, normal, 1.5), 276) - 10.08) < 1e-6
+            && NoticeFx.LineWindUp(84, 100, normal, 1.5) == 0 && NoticeFx.LineCarry(84, 100, normal, 1.5) == 0 && NoticeFx.LineWindUp(84, 360, normal, double.NaN) == NoticeFx.LineWindUp(84, 360, normal));
     }
 
     private static void Ending(Action<string, bool> check)
