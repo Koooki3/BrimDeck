@@ -55,6 +55,7 @@ try
     SettingsMigrationTests.Run(root, Check);
     OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
+    RowSwapTests.Run(Check);
     LanguageTests.Run(root, Check);
     await ConfiguredProviderTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);
