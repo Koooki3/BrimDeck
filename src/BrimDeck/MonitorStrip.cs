@@ -157,7 +157,7 @@ internal sealed class MonitorStrip : FrameworkElement
         InvalidateVisual();
         if (!ValuesMoving(Eased.Now)) _easing.Stop();
     }
-    private Smooth _cpu, _memory, _gpu;
+    private Smooth _cpu, _memory, _gpu, _charge;
 
     // The gap between two readings.
     public double Gap => _gap;
@@ -197,15 +197,10 @@ internal sealed class MonitorStrip : FrameworkElement
         if ((Shown & CompactMonitorItems.Cpu) != 0) moving |= _cpu.Set(cpu?.Usage, motion, now);
         if ((Shown & CompactMonitorItems.Memory) != 0) moving |= _memory.Set(s?.Memory.OrDefault?.UsedFraction, motion, now);
         if ((Shown & CompactMonitorItems.Gpu) != 0) moving |= _gpu.Set(s?.Gpu.OrDefault is { NoReadings: false } gpu ? gpu.Usage : null, motion, now);
+        if ((Shown & CompactMonitorItems.Charge) != 0) moving |= _charge.Set(s?.Battery.OrDefault is { } own ? own.Percent / 100 : null, motion, now);
         if (moving && !_easing.IsEnabled) _easing.Start();
         InvalidateVisual();
     }
-    private bool ValuesMoving(double now)
-    {
-        for (int i = 0; i < _cores.Length; i++) if (_cores[i].Moving(now)) return true;
-        return _cpu.Moving(now) || _memory.Moving(now) || _gpu.Moving(now);
-    }
-
     // Whether any reading is chosen and available: the row then shows the strip, and it needs readings
     // (MainWindow.UpdateMonitorDemand).
     public bool Showing(double now) => Shown != CompactMonitorItems.None;
@@ -251,6 +246,12 @@ internal sealed class MonitorStrip : FrameworkElement
         if (_battery == battery) return;
         _battery = battery; InvalidateVisual();
     }
+    private bool ValuesMoving(double now)
+    {
+        for (int i = 0; i < _cores.Length; i++) if (_cores[i].Moving(now)) return true;
+        return _cpu.Moving(now) || _memory.Moving(now) || _gpu.Moving(now) || _charge.Moving(now);
+    }
+
     private double FigureWidth(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace);
     private double SmallWidth(string figure) => Math.Ceiling(MonitorDraw.Text(figure, _small, UI.Primary, 1).WidthIncludingTrailingWhitespace);
 
@@ -316,7 +317,7 @@ internal sealed class MonitorStrip : FrameworkElement
                 case CompactMonitorItems.Storage: Drives(drawing, left, center, s, ppd); break;
                 case CompactMonitorItems.Battery: Battery(drawing, left, center, _battery, color, level, ppd); break;
                 case CompactMonitorItems.Power: Power(drawing, left, center, s?.Power.OrDefault, ppd); break;
-                case CompactMonitorItems.Charge: Charge(drawing, left, center, s?.Battery.OrDefault, level, ppd); break;
+                case CompactMonitorItems.Charge: Charge(drawing, left, center, s?.Battery.OrDefault, _charge.At(now), level, ppd); break;
             }
             if (partial) { drawing.Pop(); drawing.Pop(); drawing.Pop(); }
         }
@@ -337,15 +338,19 @@ internal sealed class MonitorStrip : FrameworkElement
         {
             var (first, end) = CompactSpacing.CoreRange(i, count, cores);
             var core = cpu.Cores[first];
-            for (int j = first + 1; j < end; j++) if (cpu.Cores[j].Usage > core.Usage) core = cpu.Cores[j];
-            // The column rises to the busiest of its cores as each of them eases.
-            double usage = 0;
-            for (int j = first; j < end; j++) usage = Math.Max(usage, j < _cores.Length ? _cores[j].At(now) ?? cpu.Cores[j].Usage : cpu.Cores[j].Usage);
+            double usage = EasedUsage(first, core, now);
+            for (int j = first + 1; j < end; j++)
+            {
+                if (cpu.Cores[j].Usage > core.Usage) core = cpu.Cores[j];
+                usage = Math.Max(usage, EasedUsage(j, cpu.Cores[j], now));
+            }
             double cx = x + i * (column + gap), fill = Math.Max(1.5, usage * height);
             drawing.DrawRectangle(UI.Brush(UI.Fill), null, new Rect(cx, top, column, height));
             drawing.DrawRectangle(UI.Brush(CoreColor(core.Group, groups, ReadingLevels.OfShare(core.Usage))), null, new Rect(cx, top + height - fill, column, fill));
         }
     }
+    // The load a core's column shows as it eases; the reading itself while the core has none yet.
+    private double EasedUsage(int index, CoreSample core, double now) => index < _cores.Length ? _cores[index].At(now) ?? core.Usage : core.Usage;
     // A core's color is mixed from the strip's colors, which it keeps: each is mixed once, not for every core on every reading.
     private readonly Dictionary<(int Group, int Groups, MemoryLevel Level), string> _coreColors = [];
     private string CoreColor(int group, int groups, MemoryLevel level)
@@ -473,12 +478,12 @@ internal sealed class MonitorStrip : FrameworkElement
     private double BatteryWidth => Math.Round(17 * _scale);
     // The machine's own battery in the shape of the theme's look (PowerGlyphs.Battery), filled to the charge, with the bolt in its tip
     // while it charges, the leaf while Battery saver is on and an exclamation mark when low; then the figure: "96%".
-    private void Charge(DrawingContext drawing, double x, double center, BatterySample? battery, MemoryLevel level, double ppd)
+    private void Charge(DrawingContext drawing, double x, double center, BatterySample? battery, double? fill, MemoryLevel level, double ppd)
     {
         double height = Math.Round(9 * _scale * ppd) / ppd;
         var visual = battery is null ? new BatteryVisual(0, BatteryState.Discharging, false, MemoryLevel.Normal) : BatteryVisual.Of(battery, _low);
         PowerGlyphs.Battery(drawing, new Rect(x, Math.Round((center - height / 2) * ppd) / ppd, BatteryWidth, height), visual, _powerStyle, ppd,
-            battery is null ? 0 : battery.Percent / 100, compact: true, unknown: battery is null);
+            battery is null ? 0 : fill ?? battery.Percent / 100, compact: true, unknown: battery is null);
         string color = battery is null ? UI.Tertiary : _powerStyle.Fill(level, battery.State);
         Figure(drawing, x + BatteryWidth + Math.Round(3 * _scale), center, battery is null ? null : battery.Percent / 100, "", FigureColor(level, color), ppd);
     }
