@@ -19,21 +19,24 @@ internal static class NoticeFxCheck
         public override string ToString() => Skipped ? "skipped (the theme has a pattern over its surface)" : $"frames={Frames} failed={Failed} worst={Worst} px at {WorstTime:0.00} s";
     }
 
+    // The stray pixels of a joint grow with the picture, which is panelScale times larger.
     private const int Tolerance = 24;
 
-    // The theme in use, one form of the motion (capsule or notch), every 40 ms of it.
-    internal static Result Sweep(LiquidForm form, double scale = 2)
+    // The theme in use, one form of the motion (capsule or notch), every 40 ms of it. scale: how finely the picture is rendered; panelScale:
+    // the scale the notice is drawn at (PanelScales), the motion being worked out at the designed size and drawn at it.
+    internal static Result Sweep(LiquidForm form, double scale = 2, double panelScale = 1)
     {
         var plan = NoticeFxPlan.Standard;
         var look = NoticeLook.Current(1);
         if (look.Pattern is not null) return new Result(0, 0, 0, 0, true);
-        double w = 376, h = form == LiquidForm.Notch ? 52 : 44;
-        double shoulder = form == LiquidForm.Notch ? 16 : 0, bottom = form == LiquidForm.Notch ? 20 : h / 2, top = form == LiquidForm.Notch ? 0 : h / 2;
-        var fx = NoticeFxLook.Create(look, plan);
-        var liquid = new NoticeLiquid(new LiquidSpec(form, w, h, NoticeLiquid.DesignSeed, Intensity: plan.Intensity, Separation: plan.Separation,
-            Shoulder: shoulder, CornerRadius: bottom, MaxInset: NoticeLiquid.MaxInset(h, 16, h / 2 - 6)));
+        double dw = 376, dh = form == LiquidForm.Notch ? 52 : 44;
+        double w = dw * panelScale, h = dh * panelScale;
+        double shoulder = (form == LiquidForm.Notch ? 16 : 0) * panelScale, bottom = form == LiquidForm.Notch ? 20 * panelScale : h / 2, top = form == LiquidForm.Notch ? 0 : h / 2;
+        var fx = NoticeFxLook.Create(look, plan, panelScale);
+        var liquid = new NoticeLiquid(new LiquidSpec(form, dw, dh, NoticeLiquid.DesignSeed, Intensity: plan.Intensity, Separation: plan.Separation,
+            Shoulder: shoulder / panelScale, CornerRadius: bottom / panelScale, MaxInset: NoticeLiquid.MaxInset(dh, 16, dh / 2 - 6)));
         var frame = new LiquidFrame();
-        double side = form == LiquidForm.Notch ? 24 : 60, vMargin = 28, cw = w + 2 * side, ch = h + 2 * vMargin;
+        double side = (form == LiquidForm.Notch ? 24 : 60) * panelScale, vMargin = 28 * panelScale, cw = w + 2 * side, ch = h + 2 * vMargin;
         // The backdrop is one flat color, so that nothing but the surface itself can put a line in the picture.
         var canvas = new Canvas { Width = cw, Height = ch, Background = new SolidColorBrush(Color.FromRgb(0x58, 0x62, 0x74)) };
         var surface = new NoticeSurface { Look = look, TopRadius = top, BottomRadius = bottom, Shoulder = shoulder, Width = w, Height = h, MarksHidden = true };
@@ -41,19 +44,19 @@ internal static class NoticeFxCheck
         canvas.Children.Add(surface);
         int failed = 0, worst = 0, frames = 0; double worstTime = 0;
         // What the surface's own rim and edge take at the outline is not inside: the rim, the step of a pixel theme and a little more.
-        int erode = (int)Math.Ceiling(scale * (Math.Max(look.RimWidth * 2, fx.Step) + 2.5)) + 2;
+        int erode = (int)Math.Ceiling(scale * (Math.Max(look.RimWidth * 2, fx.Step * panelScale) + 2.5)) + 2;
         for (double t = .04; t < liquid.Length; t += .04)
         {
-            liquid.Sample(t, frame, w, h);
-            surface.InsetLeft = frame.InsetLeft; surface.InsetRight = frame.InsetRight;
-            surface.Attachments = NoticeFxShape.Build(frame, form, w, h, fx.Step);
+            liquid.Sample(t, frame, dw, dh);
+            surface.InsetLeft = frame.InsetLeft * panelScale; surface.InsetRight = frame.InsetRight * panelScale;
+            surface.Attachments = NoticeFxShape.Build(frame, form, dw, dh, fx.Step, panelScale);
             canvas.Measure(new Size(cw, ch)); canvas.Arrange(new Rect(0, 0, cw, ch)); canvas.UpdateLayout();
             var bitmap = new RenderTargetBitmap((int)(cw * scale), (int)(ch * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
             bitmap.Render(canvas);
             int bad = Lines(bitmap, Color.FromRgb(0x58, 0x62, 0x74), erode);
             frames++;
             // A stray pixel or two where a tiny droplet joins is not a line; an outline through the inside is hundreds.
-            if (bad >= Tolerance) failed++;
+            if (bad >= Tolerance * panelScale) failed++;
             if (bad > worst) { worst = bad; worstTime = t; }
         }
         return new Result(frames, failed, worst, worstTime, false);
