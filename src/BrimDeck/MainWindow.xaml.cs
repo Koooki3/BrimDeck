@@ -143,6 +143,7 @@ public partial class MainWindow : Window
             if (_iconStyleGeneration == PanelTheme.Generation) return;
             _iconStyleGeneration = PanelTheme.Generation;
             IconStyle.Apply(Island, PanelTheme.Plated);
+            UpdateNoticeBadge();
         };
         InitializeMonitor();
         InitializeDevices();
