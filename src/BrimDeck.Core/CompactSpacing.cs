@@ -4,9 +4,9 @@ namespace BrimDeck.Core;
 // same; the quota rings and the system readings keep their own closer spacing inside their part (CompactMusicLayout.RingGap,
 // MonitorStrip), which never widens. The gap starts at one unit (CompactMusicLayout.Gap), and the width the parts leave over is
 // handed out in this order:
-//   1. the title, up to the width of its text but no more than TitleMax, so a short title is not left floating in a wide room;
+//   1. the title, up to the width it wants but no more than TitleMax;
 //   2. every gap between two parts alike, up to MaxGap units, so the row widens evenly instead of opening one hole;
-//   3. the title again, up to the width of its text, while its text is still wider than its room;
+//   3. the title again, up to the width it wants;
 //   4. what is still left stands equally at both ends: the content is centred.
 // Positions are worked out in device pixels: the unit, every part's width (rounded up, so nothing in it is cut), the gap and
 // the start are whole pixels, so every gap between two parts is exactly the same.
@@ -23,8 +23,9 @@ public static class CompactSpacing
     // Left and Room are in DIPs, one per part. Gap is every gap between two parts.
     public sealed record Placement(double[] Left, double[] Room, double Gap);
 
-    // parts: left to right. title: the index of the title, whose room this works out (-1 for none); titleText: the width its
-    // text would like, and titleShortest the least room it keeps while there is any. scale: the height scale.
+    // parts: left to right. title: the index of the title, whose room this works out (-1 for none); titleText: the width it
+    // wants (the collapsed row gives its share of the row, CompactMusicLayout.TextWidth, never its text's width, so the room does
+    // not change with the line), and titleShortest the least room it keeps while there is any. scale: the height scale.
     public static Placement Arrange(IReadOnlyList<Part> parts, int title, double titleText, double titleShortest, double width, double unit, double scale, double dpi)
     {
         dpi = double.IsFinite(dpi) && dpi > 0 ? dpi : 1;
@@ -114,8 +115,12 @@ public static class CompactSpacing
 
     // Two carousels in one row (the quota rings and the system readings) share the room left for them, which holds neither
     // their gap to each other nor to their neighbours. Each first takes its narrowest window (Minimum), so both always show;
-    // then they widen by turns, a step of whole items at a time, the one showing fewer items first, until neither's next step
-    // fits. A row too short for both shows the first alone if it fits, else the second. Each result is its Window.
+    // then they widen by turns, a step of whole items at a time, the one showing fewer items first, until the next step does
+    // not fit. The order of the steps does not depend on the room, and a step that does not fit is not passed over for a later
+    // one: a wider room only takes more of the same steps, so neither ever shows fewer items as the room grows. (Passing over a
+    // reading's wide step for a ring's narrow one gave four rings, then three once the reading's step fitted, then four
+    // again.) A row too short for both shows the first alone at its narrowest if it fits, else the second. Each result is its
+    // Window.
     public static ((int Count, double Window, int Gaps, double Travel) First, (int Count, double Window, int Gaps, double Travel) Second)
         Share(IReadOnlyList<double> first, double firstGap, IReadOnlyList<double> second, double secondGap, double room)
     {
@@ -127,13 +132,17 @@ public static class CompactSpacing
         else if (b.Count > 0 && b[0] <= room + 1e-6) ib = 0;
         double Width(List<double> steps, int i) => i < 0 ? 0 : steps[i];
         int Shown(IReadOnlyList<double> widths, double gap, List<double> steps, int i) => i < 0 ? 0 : Window(widths, gap, steps[i]).Count;
-        while (true)
+        // Only while both show, or one has nothing to show at all: one shown alone for want of room keeps its narrowest window,
+        // which it keeps when the other joins it.
+        bool together = (ia >= 0 || a.Count == 0) && (ib >= 0 || b.Count == 0);
+        while (together)
         {
+            bool canA = ia >= 0 && ia + 1 < a.Count, canB = ib >= 0 && ib + 1 < b.Count;
+            if (!canA && !canB) break;
+            bool takeA = canA && (!canB || Shown(first, firstGap, a, ia) <= Shown(second, secondGap, b, ib));
             double used = Width(a, ia) + Width(b, ib);
-            bool growA = ia >= 0 && ia + 1 < a.Count && used - a[ia] + a[ia + 1] <= room + 1e-6;
-            bool growB = ib >= 0 && ib + 1 < b.Count && used - b[ib] + b[ib + 1] <= room + 1e-6;
-            if (!growA && !growB) break;
-            if (growA && (!growB || Shown(first, firstGap, a, ia) <= Shown(second, secondGap, b, ib))) ia++; else ib++;
+            if ((takeA ? used - a[ia] + a[ia + 1] : used - b[ib] + b[ib + 1]) > room + 1e-6) break;
+            if (takeA) ia++; else ib++;
         }
         return (ia < 0 ? (0, 0, 0, 0) : Window(first, firstGap, a[ia]), ib < 0 ? (0, 0, 0, 0) : Window(second, secondGap, b[ib]));
     }

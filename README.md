@@ -153,7 +153,9 @@ No. Costs come from the amounts reported by each service or from public model pr
 
 You are welcome to report problems, suggest features or ask for more tools and players in [Issues](https://github.com/MoFeng2223/BrimDeck/issues), and to contribute through pull requests.
 
-- Open pull requests against the `dev` branch, not `main`.
+- Do not open pull requests against `main`:
+  - Open new features and general fixes against the `dev` branch.
+  - When a version enters testing, it gets a `release/<version>` branch (for example `release/1.3.0`). Open fixes for that version against that branch. It accepts fixes only, not new features.
 - Upcoming work is listed in the [BrimDeck roadmap](https://github.com/MoFeng2223/BrimDeck/discussions/57). Suggest features under that post, and reply there when you want to take on one of its items. Other topics are welcome in [Discussions](https://github.com/MoFeng2223/BrimDeck/discussions).
 
 ## License

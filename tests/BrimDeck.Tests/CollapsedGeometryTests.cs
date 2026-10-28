@@ -18,6 +18,15 @@ internal static class CollapsedGeometryTests
             capsule.Surface == new DipRect(862, 5, 196, 32) && Near(capsule.Inset, 16) && Near(capsule.ContentWidth, 164) && Near(capsule.BottomRadius, 16) && Near(capsule.Shoulder, 0));
         var line = CollapsedGeometry.Resolve(defaults, CompactStyle.Line, monitor, work);
         check("Default line is 56 x 4, four DIPs below the edge", line.Surface == new DipRect(932, 4, 56, 4) && Near(line.BottomRadius, 2));
+        var bigNotch = CollapsedGeometry.Resolve(defaults, CompactStyle.Notch, monitor, work, panelScale: 1.5);
+        var bigCapsule = CollapsedGeometry.Resolve(defaults, CompactStyle.Capsule, monitor, work, panelScale: 1.5);
+        var bigLine = CollapsedGeometry.Resolve(defaults, CompactStyle.Line, monitor, work, panelScale: 1.5);
+        check("At 150 % the sizes, the content and the notch's corners grow; the places stay",
+            bigNotch.Surface == new DipRect(781.5, 0, 357, 48) && Near(bigNotch.Scale, 1.5) && Near(bigNotch.BottomRadius, 18) && Near(bigNotch.Shoulder, 24)
+            && bigCapsule.Surface == new DipRect(813, 5, 294, 48) && Near(bigCapsule.Scale, 1.5)
+            && bigLine.Surface == new DipRect(918, 4, 84, 6)
+            && CollapsedGeometry.WidthRange(CompactStyle.Notch, monitor, work, 1.5) == (108, 1920)
+            && Near(CollapsedGeometry.SurfaceHeight(CompactStyle.Capsule, 32, monitor, work, 1.5), 48));
 
         var settings = new DeckSettings
         {

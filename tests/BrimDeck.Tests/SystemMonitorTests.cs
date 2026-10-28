@@ -276,6 +276,11 @@ static class SystemMonitorTests
         DeckPages.SetSize(sized, DeckPage.Music, 5000, 10); DeckPages.SetSize(sized, DeckPage.Usage, 10, 5000);
         check("Pages: a size set by a drag stays within the page's limits",
             DeckPages.Size(sized, DeckPage.Music) == (DeckPages.MaxWidth, DeckPages.MinHeight) && DeckPages.Size(sized, DeckPage.Usage) == (DeckPages.Limits(sized, DeckPage.Usage).MinWidth, DeckPages.MaxHeight));
+        check("Panel scale: 100 or 150 percent, any other value is 100; the widest page on a monitor shrinks by the scale",
+            PanelScales.Fit(150) == 150 && PanelScales.Fit(125) == 100 && PanelScales.Fit(0) == 100
+            && PanelScales.Factor(new DeckSettings()) == 1 && PanelScales.Factor(new DeckSettings { PanelScale = 150 }) == 1.5
+            && DeckPages.MaxWidthOn(3840) == DeckPages.MaxWidth && DeckPages.MaxWidthOn(1280) == 1200 && DeckPages.MaxWidthOn(1366) == 1200 && DeckPages.MaxWidthOn(1366, 1.5) == 894
+            && DeckPages.MaxWidthOn(800, 2) == DeckPages.MinWidth);
         check("Pages: the usage page is never narrower than its columns need",
             DeckPages.Limits(sized, DeckPage.Usage).MinWidth == Math.Max(DeckPages.MinWidth, sized.MinimumWidth) && DeckPages.Limits(sized, DeckPage.Music).MinWidth == DeckPages.MinWidth);
         check("Pages: a shown page resolves to itself", DeckPages.Resolve(settings, DeckPage.Monitor) == DeckPage.Monitor);
