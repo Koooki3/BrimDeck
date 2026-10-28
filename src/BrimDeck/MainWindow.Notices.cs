@@ -51,6 +51,21 @@ public partial class MainWindow
         _noticesSubscribed = true;
         _app.Notices.Changed += NoticesChanged;
         _app.Notices.Icons.Loaded += NoticeIconLoaded;
+        PrepareNoticeWindow();
+    }
+
+    // The first notice builds the notice window (its window, its theme's materials, its fonts), which took the UI thread tens of
+    // milliseconds in the middle of the notice's own arrival (live check 10-28: 70 ms in the first notice, 8 to 26 ms in later
+    // ones). It is built a few seconds after the panel has started, while nothing moves, with no window shown.
+    private void PrepareNoticeWindow()
+    {
+        var timer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.ApplicationIdle, Dispatcher) { Interval = TimeSpan.FromSeconds(6) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (_noticesSubscribed && _noticeWindow is null && !_expanded && !_booting && !_bootWaiting && CanShowNotices && Settings.NoticesEnabled) (_noticeWindow = new NoticeWindow(this, _app)).Prepare();
+        };
+        timer.Start();
     }
 
     private void CloseNotices()
