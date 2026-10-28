@@ -136,8 +136,9 @@ public partial class MainWindow
         // The processor's zones are reserved for only once one has shown (a fixed zone never does); a graphics adapter is
         // reserved for until it is known to have no sensor.
         bool small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor != SensorState.None : monitor?.CpuSensor == SensorState.Found;
-        // The power line (PowerBlock) is asked for unless the sampler has found no source on this machine.
-        int power = !Settings.MonitorPower || monitor?.PowerSensor == SensorState.None ? 0 : 1;
+        // The power line (PowerBlock) is asked for unless the sampler has found no source on this machine; a laptop on battery may have one
+        // that the mains did not give (StripSensors).
+        int power = !Settings.MonitorPower || StripSensors.Power == SensorState.None ? 0 : 1;
         return (lines, Settings.MonitorTemperatures && small, power);
     }
 
