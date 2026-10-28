@@ -29,10 +29,10 @@ internal sealed partial class NoticeWindow
     {
         if (!Indicator || _item is not { } item) return null;
         _linePlan = PlanOf(item);
-        return new LineArriveEase(NoticeFx.LineWindUp(_collapsed.Rect.Width, _toastFrame.Rect.Width, _linePlan));
+        return new LineArriveEase(NoticeFx.LineWindUp(_collapsed.Rect.Width, _toastFrame.Rect.Width, _linePlan, Scale));
     }
 
     // The curve as the surface returns to the line, from the size it has now, carrying on from the panel's closing curve (Soft.Settle).
     private IEasingFunction? LineReturning()
-        => Indicator ? new LineReturnEase(NoticeFx.LineCarry(_collapsed.Rect.Width, _surface.Width, _linePlan), .45, 0, .12, 1) : null;
+        => Indicator ? new LineReturnEase(NoticeFx.LineCarry(_collapsed.Rect.Width, _surface.Width, _linePlan, Scale), .45, 0, .12, 1) : null;
 }
