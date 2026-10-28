@@ -104,6 +104,15 @@ internal sealed partial class NoticeWindow : Window
         DpiChanged += (_, _) => { if (_item is not null && !_leaving) Dress(); };
     }
 
+    // Everything the first notice would build, built beforehand: the window's handle, the theme's materials and the fonts of its texts.
+    // Nothing is shown.
+    internal void Prepare()
+    {
+        new WindowInteropHelper(this).EnsureHandle();
+        Dress();
+        Measure("Ag 通知", 12.5, FontWeights.SemiBold); Measure("Ag 通知", 11.5, FontWeights.Normal);
+    }
+
     // True while a notice covers the island: the panel then leaves hovering to this window.
     public bool Covering => _item is not null || IsVisible && !_leaving;
     public AttentionItem? Item => _item;
