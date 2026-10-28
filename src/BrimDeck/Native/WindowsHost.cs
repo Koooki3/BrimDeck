@@ -175,13 +175,22 @@ public sealed class WindowsHost : IDisposable
     private ScreenContext Detect(IntPtr monitor)
     {
         var foreground = GetForegroundWindow();
-        if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
+        // Nothing but the desktop: a full-screen window elsewhere on this monitor still owns the screen, so the answer is
+        // BackgroundFullscreen rather than Desktop. Looked up once, and only where it can matter.
+        ScreenContext? background = null;
+        ScreenContext Desktop()
+        {
+            background ??= BackgroundFullscreen(monitor, foreground) != IntPtr.Zero
+                ? ScreenContext.BackgroundFullscreen : ScreenContext.Desktop;
+            return background.Value;
+        }
+        if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) { _appName = ""; _appPath = ""; return Desktop(); }
         GetWindowThreadProcessId(foreground, out var pid);
-        if (pid == Environment.ProcessId) { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
-        if (MonitorFromWindow(foreground, 2) != monitor) { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
+        if (pid == Environment.ProcessId) { _appName = ""; _appPath = ""; return Desktop(); }
+        if (MonitorFromWindow(foreground, 2) != monitor) { _appName = ""; _appPath = ""; return Desktop(); }
         var name = new System.Text.StringBuilder(256);
         GetClassName(foreground, name, name.Capacity);
-        if (name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") { _appName = ""; _appPath = ""; return ScreenContext.Desktop; }
+        if (name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") { _appName = ""; _appPath = ""; return Desktop(); }
         // The window's app travels with its context, so the app rules can answer for it; the read is cached per window.
         Describe(foreground, pid, out _appName, out _appPath);
         if (SHQueryUserNotificationState(out var state) == 0 && state == 3) return ScreenContext.Exclusive;
@@ -191,7 +200,48 @@ public sealed class WindowsHost : IDisposable
         var style = GetWindowLongPtr(foreground, -16).ToInt64();
         bool caption = (style & 0x00C00000) != 0;
         bool covers = rect.Left <= info.Monitor.Left + 2 && rect.Top <= info.Monitor.Top + 2 && rect.Right >= info.Monitor.Right - 2 && rect.Bottom >= info.Monitor.Bottom - 2;
-        return ScreenPolicy.Classify(false, covers, caption, IsZoomed(foreground));
+        var context = ScreenPolicy.Classify(false, covers, caption, IsZoomed(foreground));
+        return context == ScreenContext.Desktop ? Desktop() : context;
+    }
+    // A window on this monitor that fills the screen — maximised, or full screen without a frame (browser F11, a
+    // borderless game). It counts even while another app holds the foreground: the island is a topmost strip, so the
+    // filled window is partly hidden behind it, which is what the user opened it for. Excluded: the desktop shell, tool
+    // windows, our own windows, minimised windows and the ones the window manager keeps cloaked (the windows of other
+    // virtual desktops are still "visible" to the API).
+    private static IntPtr BackgroundFullscreen(IntPtr monitor, IntPtr foreground)
+    {
+        var info = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(monitor, ref info)) return IntPtr.Zero;
+        var found = IntPtr.Zero;
+        EnumWindows((window, _) =>
+        {
+            if (window == foreground) return true;
+            if (!IsWindowVisible(window) || IsIconic(window)) return true;
+            if ((GetWindowLongPtr(window, -20).ToInt64() & 0x00000080) != 0) return true;              // WS_EX_TOOLWINDOW
+            if (MonitorFromWindow(window, 2) != monitor) return true;
+            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            GetWindowThreadProcessId(window, out var pid);
+            if (pid == Environment.ProcessId) return true;
+            var cls = new System.Text.StringBuilder(256);
+            GetClassName(window, cls, cls.Capacity);
+            if (cls.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return true;
+            // A maximised window counts here too. The island is a topmost strip at the top of the screen, so a window that
+            // fills the screen is partly hidden behind it even when that window is not in front — the case reported for a
+            // browser left maximised behind another app. Only the window the user is actually working in is excluded, by
+            // being the foreground window itself.
+            //
+            // A maximised window fills the work area, not the monitor: with a taskbar on screen its rectangle stops above
+            // the taskbar, so testing it against the monitor rectangle would never match. IsZoomed answers it directly.
+            if (DwmGetWindowAttribute(window, 9, out RECT rect, Marshal.SizeOf<RECT>()) != 0) GetWindowRect(window, out rect);
+            var coversMonitor = rect.Left <= info.Monitor.Left + 2 && rect.Top <= info.Monitor.Top + 2
+                             && rect.Right >= info.Monitor.Right - 2 && rect.Bottom >= info.Monitor.Bottom - 2;
+            var caption = (GetWindowLongPtr(window, -16).ToInt64() & 0x00C00000) != 0;
+            // Maximised, or frameless across the whole monitor (browser F11, a borderless game, a full-screen video).
+            if (!IsZoomed(window) && !(coversMonitor && !caption)) return true;
+            found = window;
+            return false;
+        }, IntPtr.Zero);
+        return found;
     }
     // A window's process name and executable, read once per window. Both reads can fail when the process exited, runs as
     // administrator or has another bitness; the name alone still matches a saved exception.
@@ -222,6 +272,8 @@ public sealed class WindowsHost : IDisposable
     [StructLayout(LayoutKind.Sequential)] private struct RECT
     { public int Left, Top, Right, Bottom; public readonly Rect ToRect() => new(Left, Top, Right - Left, Bottom - Top); }
     [StructLayout(LayoutKind.Sequential)] private struct MONITORINFO { public int Size; public RECT Monitor, Work; public int Flags; }
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+    [DllImport("user32")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
     [DllImport("user32")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32")] private static extern bool IsZoomed(IntPtr window);
     [DllImport("user32")] private static extern bool IsIconic(IntPtr window);

@@ -80,5 +80,16 @@ internal static class FullscreenRuleTests
         var many = new DeckSettings { FullscreenRules = Enumerable.Range(0, 40).Select(i => new FullscreenRule("App" + i)).ToList() };
         many.Normalize();
         check("The rule list is capped", many.FullscreenRules.Count == AppPresets.MaximumFullscreenExceptions);
+        // A full-screen window behind the foreground one: the island folds to its line by default, and an app rule that
+        // names the foreground app does not change that (the rule speaks for the app, not for someone else's full screen).
+        var bg = new DeckSettings();
+        check("A background full screen folds the island to its line by default",
+            bg.Behavior(ScreenContext.BackgroundFullscreen) == WindowBehavior.Line
+            && bg.Behavior(ScreenContext.BackgroundFullscreen, "Player", @"C:\Apps\Player.exe") == WindowBehavior.Line);
+        bg.BackgroundFullscreen = WindowBehavior.Hide;
+        check("The background rule is the one the settings give",
+            bg.Behavior(ScreenContext.BackgroundFullscreen) == WindowBehavior.Hide);
+        check("The desktop itself is still no rule at all",
+            bg.Behavior(ScreenContext.Desktop) == WindowBehavior.Normal);
     }
 }
