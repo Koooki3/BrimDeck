@@ -36,6 +36,7 @@ try
     TemperatureTests.Run(Check);
     StorageTests.Run(Check);
     StripAdmissionTests.Run(Check);
+    PowerTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
     MotionReviewTests.Run(Check);

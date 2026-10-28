@@ -241,10 +241,17 @@ public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors,
     // The internal drives with their lettered volumes (Storage), each with its temperature while drive temperatures are read;
     // empty while storage is not read.
     public IReadOnlyList<StorageDrive> Storage { get; init; } = [];
+    // The whole machine's power draw, read only while something shows it (SystemSampler.SetExtras); PowerHistory is the last readings
+    // in watts, oldest first, and PowerSummary their peak and average since they began.
+    public Reading<PowerSample> Power { get; init; }
+    public IReadOnlyList<double> PowerHistory { get; init; } = [];
+    public PowerSummary? PowerSummary { get; init; }
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,
         Reading<CpuSample>.Unavailable(reason), Reading<MemorySample>.Unavailable(reason), Reading<NetworkSample>.Unavailable(reason),
         Reading<GpuSample>.Unavailable(reason), Reading<ProcessList>.Unavailable(reason));
 }
+
+public sealed record PowerSummary(double Peak, double Average, int Count);
 
 // Deltas between two cumulative counters. Each returns null when no time passed or a counter went backwards, as after
 // sleep or when an interface went away, so a reading is skipped rather than shown wrong.

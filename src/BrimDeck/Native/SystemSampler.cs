@@ -23,7 +23,7 @@ internal sealed class SystemSampler : IDisposable
     private readonly DispatcherTimer _linger;
     private readonly AutoResetEvent _wake = new(false);
     private Thread? _thread;
-    private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses;
+    private volatile bool _wanted, _disposed, _listProcesses, _primeProcesses, _primePower;
     private volatile int _intervalMilliseconds = 1000;
     // The providers belong to the sampling thread, which creates them: adding the performance counters can take tens of
     // milliseconds, which the panel must not wait for. Only HoldProcesses reaches them from the UI thread.
@@ -34,7 +34,13 @@ internal sealed class SystemSampler : IDisposable
     private readonly GpuTemperatures _gpuTemperatures = new();
     private readonly StorageReader _storage = new();
     // Whether the processor's and the graphics adapter's temperatures are read, the drives, and the drives' temperatures (SetExtras).
-    private volatile bool _temperatures, _storageWanted, _driveTemperatures;
+    // _powerWanted: the whole machine's power (the Energy Meter counters, NVIDIA's board power, the battery's discharge).
+    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted;
+    // The whole machine's power and the battery it may run on (PowerProvider, BatteryProvider), made on the sampling thread.
+    private PowerProvider? _power;
+    private BatteryProvider? _battery;
+    private readonly Queue<double> _powerHistory = new(HistoryLength);
+    private readonly PowerStats _powerStats = new();
     private readonly NetworkProvider _network = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
@@ -98,9 +104,13 @@ internal sealed class SystemSampler : IDisposable
     // with temperatures on, or the collapsed row's temperature); storage, the drives (the page with storage on, or the collapsed
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
     // page knows early how many lines it needs for them.
-    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures)
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false)
     {
-        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures;
+        bool newly = power && !_powerWanted;
+        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power;
+        // Power asked for while the sampler already runs (the collapsed row's readings kept it going): the counters are read at once and again
+        // after the short priming window, so the first figure comes with the next snapshot and not a second reading later.
+        if (newly && _wanted && _thread is not null) { _primePower = true; _wake.Set(); }
         if (storage && (_storage.Drives == SensorState.Unknown || _driveTemperatures && _storage.Temperatures == SensorState.Unknown)) _storage.Start(_driveTemperatures);
     }
     // Whether the processor's zones, the graphics adapters and the drives have given temperatures, and whether drives were found and
@@ -110,6 +120,8 @@ internal sealed class SystemSampler : IDisposable
     public SensorState DriveSensor => _storage.Temperatures;
     public SensorState StorageState => _storage.Drives;
     public int StorageCount => _storage.Count;
+    // Whether the machine gives a power reading; Unknown until read.
+    public SensorState PowerSensor => _power?.State ?? SensorState.Unknown;
 
     private void Run()
     {
@@ -120,18 +132,25 @@ internal sealed class SystemSampler : IDisposable
         _cpu = new CpuProvider(_pdh);
         _gpu = new GpuProvider(_pdh);
         _zones = new ThermalZones(_pdh);
+        _power = new PowerProvider(_pdh);
+        _battery = new BatteryProvider();
         bool primed = false, first = false;
         while (!_disposed)
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _storage.Rest(); _wake.WaitOne(); continue; }
-                if (!primed || _primeProcesses)
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _wake.WaitOne(); continue; }
+                bool primePower = _primePower;
+                _primePower = false;
+                if (!primed || _primeProcesses || primePower)
                 {
                     // The counters are read once to start the deltas; the processes again on the first reading, so their
-                    // figures cover the short window and not the whole pause.
+                    // figures cover the short window and not the whole pause. Power asked for while the sampler runs is primed the same way:
+                    // one collection now, and the next (the first snapshot) has the two samples a rate needs.
+                    bool primeProcesses = _primeProcesses;
                     _primeProcesses = false;
                     if (!primed) Collect(listProcesses: true);
+                    else if (primePower) Collect(listProcesses: primeProcesses && _listProcesses);
                     else if (_listProcesses) _processes.Sample(Now());
                     primed = true; first = true;
                     _wake.WaitOne(PrimeMilliseconds);
@@ -164,6 +183,7 @@ internal sealed class SystemSampler : IDisposable
     private MonitorSnapshot Collect(bool listProcesses)
     {
         double now = Now();
+        _power!.Prepare(_powerWanted);
         bool pdh = _pdh?.Collect() == true;
         if (!_listProcesses) { _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting); _processesAt = double.NegativeInfinity; }
         else if (listProcesses || !_lastProcesses.HasValue || now - _processesAt >= ProcessSeconds)
@@ -183,11 +203,42 @@ internal sealed class SystemSampler : IDisposable
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         var adapters = gpus.TryGet(out var read) ? Remember(read) : [];
+        // The machine's power: read only while something shows it; the history and the peak start over once none does.
+        Reading<PowerSample> power = default;
+        bool powerWanted = _powerWanted;
+        if (powerWanted)
+        {
+            // Apart from the rest: a battery or a driver that fails in an unexpected way costs this reading, never the page's.
+            try
+            {
+                var (batteryInputs, batterySample) = _battery!.Sample();
+                power = _power!.Sample(pdh, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
+                if (power.TryGet(out var drawn))
+                {
+                    if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
+                    _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts);
+                }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Debug.WriteLine(ex);
+                power = Reading<PowerSample>.Unavailable(ex.Message);
+            }
+        }
+        // Power no longer wanted (the page left, the row dropped the reading, the display went off): the counters leave the query, the
+        // NVIDIA helper ends and the history starts over, at this very reading and not after the sampler's pause.
+        if (!powerWanted)
+        {
+            if (_powerHistory.Count > 0) { _powerHistory.Clear(); _powerStats.Reset(); }
+            _power!.Sample(false, false, now, [], default, false);
+        }
         var snapshot = new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network,
             Reading<GpuSample>.Unavailable(gpus.Reason), _lastProcesses)
         {
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
-            CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage
+            CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage,
+            Power = power, PowerHistory = _powerHistory.ToArray(),
+            PowerSummary = _powerStats.Count > 0 ? new PowerSummary(_powerStats.Peak, _powerStats.Average, _powerStats.Count) : null
         };
         var shown = WithGpu(snapshot, _autoGpu, out bool automatic);
         if (automatic && shown.Gpu.TryGet(out var gpu)) Volatile.Write(ref _autoGpu, gpu.Luid);
@@ -255,7 +306,7 @@ internal sealed class SystemSampler : IDisposable
         _disposed = true; _wanted = false; _linger.Stop();
         _wake.Set();
         // The thread may be inside a reading; it ends on its own as a background thread if it does not stop in time.
-        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures.Dispose(); _wake.Dispose(); }
+        if (_thread?.Join(1000) != false) { _pdh?.Dispose(); _power?.Dispose(); _processes.Dispose(); _network.Dispose(); _gpuTemperatures.Dispose(); _wake.Dispose(); }
     }
 }
 

@@ -179,7 +179,8 @@ static class StorageTests
         CompactMonitor.Apply(readings, CompactMonitorMode.Brief);
         check("Compact drive: Brief hides it", !readings.Single(r => r.Item == Storage_).Visible);
         var width = CompactMonitor.Widths(CompactMonitor.Rings, 12, _ => 30, 14, 20, 50, 40);
-        var every = CompactMonitor.Every;
+        // The machine's power and battery are left out: they leave before both.
+        var every = CompactMonitor.Every & ~CompactMonitorItems.Power;
         double full = CompactMonitor.Width(every, width, 10);
         check("Compact drive: its own width; it leaves first when the row is short", width(Storage_) == 40 && CompactMonitor.Fit(every, width, 10, full) == every
             && CompactMonitor.Fit(every, width, 10, full - 1) == CompactMonitorItems.All && CompactMonitor.Fit(every, width, 10, full - 55) == (CompactMonitorItems.All & ~CompactMonitorItems.Upload));
