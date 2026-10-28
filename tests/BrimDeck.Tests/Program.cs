@@ -20,6 +20,7 @@ try
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
     CompactSpacingTests.Run(Check);
+    CompactDragTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
     PixelBlocksTests.Run(root, Check);
