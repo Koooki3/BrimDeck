@@ -1027,12 +1027,14 @@ public partial class MainWindow
         // when it settles (MainWindow.CompactFlow.cs): the row follows the pointer as 1.2.1's did, with no jump per item.
         double flow = CompactFlow();
         double ringCut = 0, readingCut = 0;
-        if (flow <= 0) { _restRings = rings.Window; _restReadings = readings.Window; }
+        if (flow <= 0) { _restRings = rings.Window; _restReadings = readings.Window; _restHeld = true; }
         else
         {
             var live = CompactSpacing.ShareFlowing(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool);
             // While the flow rises the windows start from those of the rest; while it falls, from the whole items of the width it stopped at.
             bool rising = FlowRising;
+            if (!rising) _restHeld = false;
+            else if (!_restHeld) { _restRings = rings.Window; _restReadings = readings.Window; _restHeld = true; }
             (int Count, double Window, int Gaps, double Travel) Blend((int Count, double Window, int Gaps, double Travel) whole, (int Count, double Window, int Gaps, double Travel) now, double rest)
                 => (now.Count, RowFlow.Window(rising && rest >= 0 ? rest : whole.Window, now.Window, flow), 0, 0);
             rings = Blend(rings, live.First, _restRings); readings = Blend(readings, live.Second, _restReadings);
