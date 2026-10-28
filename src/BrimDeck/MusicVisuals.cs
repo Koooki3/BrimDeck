@@ -499,7 +499,7 @@ internal abstract class GlideCarousel : Grid
         Retarget(travel);
     }
 
-    // A new travel for a strip whose width changed; the cycle carries on from the same time. No travel leaves it at rest.
+    // Sets the travel; a cycle already running carries on from the same time. No travel leaves it at rest.
     protected void Retarget(double travel)
     {
         if (_cycle is not null)
@@ -673,8 +673,8 @@ internal sealed class QuotaCarousel : GlideCarousel
     }
 }
 
-// System readings wider than their region scroll through it instead of dropping readings. The strip is drawn tight (each
-// figure at its own width, MonitorStrip.Tight), so it scrolls no blanks; its width and the travel follow the readings. The
+// System readings wider than their region scroll through it instead of dropping readings. The strip keeps its preferred width
+// (each figure at the widest it can show, as when it does not scroll), so a change of a reading never moves the others. The
 // left fade lies outside the region, over the gap before it, so the first reading is whole at rest, and the right fade lies
 // inside, so nothing is drawn past the region toward the equalizer or the clock.
 internal sealed class ReadingsCarousel : GlideCarousel
@@ -684,8 +684,7 @@ internal sealed class ReadingsCarousel : GlideCarousel
         span = Math.Max(0, span); edge = Math.Max(0, edge);
         Rotates = span > 0;
         Width = span + edge; Height = strip.Height; ClipToBounds = true;
-        strip.Tight = true;
-        strip.Width = strip.TightWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
+        strip.Width = strip.PreferredWidth; strip.HorizontalAlignment = HorizontalAlignment.Left; strip.VerticalAlignment = VerticalAlignment.Top; strip.Margin = new Thickness(0);
         strip.RenderTransform = new TranslateTransform();
         Canvas.SetLeft(strip, edge);
         // A Canvas measures the strip at its full width, as for the rings.
@@ -696,8 +695,6 @@ internal sealed class ReadingsCarousel : GlideCarousel
             new(Colors.White, (Width - fade) / Width), new(Colors.Transparent, 1) }, new Point(0, 0), new Point(Width, 0)) { MappingMode = BrushMappingMode.Absolute };
         Background = Brushes.Transparent;
         // At the end the last reading stands whole before the right fade.
-        double TravelFor(double full) => Math.Ceiling(full + fade - span);
-        Glide(strip, TravelFor(strip.Width), elapsed, animate);
-        strip.TightWidthChanged += () => { strip.Width = strip.TightWidth; Retarget(TravelFor(strip.Width)); };
+        Glide(strip, Math.Ceiling(strip.Width + fade - span), elapsed, animate);
     }
 }
