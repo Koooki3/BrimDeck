@@ -704,7 +704,8 @@ public partial class MainWindow : Window
         double wantedHeight = DeckPages.Size(Settings, CurrentPage).Height * Zoom;
         var panel = PanelFor(wantedHeight);
         if (!expanded) _popupFloor = 0;
-        else if (_popupFloor > panel.HeaderExtra + wantedHeight) { wantedHeight = _popupFloor - panel.HeaderExtra; panel = PanelFor(wantedHeight); }
+        // The floor is on screen, as drawn; the page's height is before the panel's scale.
+        else if (_popupFloor > panel.HeaderExtra + wantedHeight * _scale) { wantedHeight = (_popupFloor - panel.HeaderExtra) / _scale; panel = PanelFor(wantedHeight); }
         double panelTop = panel.Top, headerExtra = panel.HeaderExtra;
         double pageHeight = PageHeight(wantedHeight, panel);
         // The page as drawn, at the panel's scale; the content is laid out at its unscaled size (ContentCanvas below).
