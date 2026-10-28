@@ -1023,13 +1023,29 @@ public partial class MainWindow
         double needed = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
         if (pool < needed) pool += Math.Min(needed - pool, Math.Max(0, titleShare - titleFloor));
         var (rings, readings) = CompactSpacing.Share(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool);
+        // While the surface is dragged the windows take the room as it comes, an item cut at the edge, and ease back to whole items
+        // when it settles (MainWindow.CompactFlow.cs): the row follows the pointer as 1.2.1's did, with no jump per item.
+        double flow = CompactFlow();
+        double ringCut = 0, readingCut = 0;
+        if (flow <= 0) { _restRings = rings.Window; _restReadings = readings.Window; }
+        else
+        {
+            var live = CompactSpacing.ShareFlowing(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool);
+            // While the flow rises the windows start from those of the rest; while it falls, from the whole items of the width it stopped at.
+            bool rising = FlowRising;
+            (int Count, double Window, int Gaps, double Travel) Blend((int Count, double Window, int Gaps, double Travel) whole, (int Count, double Window, int Gaps, double Travel) now, double rest)
+                => (now.Count, RowFlow.Window(rising && rest >= 0 ? rest : whole.Window, now.Window, flow), 0, 0);
+            rings = Blend(rings, live.First, _restRings); readings = Blend(readings, live.Second, _restReadings);
+            ringCut = CompactSpacing.CutFade(ringWidths, layout.RingGap, rings.Window, Math.Min(layout.RingEdge, unit));
+            readingCut = CompactSpacing.CutFade(readingWidths, strip?.Gap ?? 0, readings.Window, Math.Min(Snap(layout.TextEdge, dpi), unit));
+        }
         var shown = new List<(object Part, CompactSpacing.Part Size)>();
         if (hasCover) shown.Add(("cover", new(layout.CoverSize)));
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
-            if (part == CompactPart.Rings && rings.Count > 0) shown.Add((part, new(rings.Window)));
+            if (part == CompactPart.Rings && rings.Window > 0) shown.Add((part, new(rings.Window)));
             else if (part == CompactPart.Music && hasText) shown.Add((part, new(0)));
-            else if (part == CompactPart.Monitor && readings.Count > 0) shown.Add((part, new(readings.Window)));
+            else if (part == CompactPart.Monitor && readings.Window > 0) shown.Add((part, new(readings.Window)));
         }
         if (hasEqualizer) shown.Add(("equalizer", new(layout.EqualizerSize)));
         if (hasClock) shown.Add(("clock", new(clock!.ReservedWidth)));
@@ -1054,7 +1070,8 @@ public partial class MainWindow
                 case "clock":
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
                 case CompactPart.Rings:
-                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), scale, _quotaElapsed, animate); break;
+                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), scale, _quotaElapsed, animate,
+                        flow > 0 ? rings.Window : null, ringCut); break;
                 case CompactPart.Music:
                     // The title's scroll position carries over from the row before (MarqueeScroll).
                     _compactMarquee = new MusicMarquee { Text = text, Scroll = _compactScroll, Width = room, Height = layout.TextHeight, FontSize = layout.TextFont, EdgeWidth = layout.TextEdge,
@@ -1065,7 +1082,9 @@ public partial class MainWindow
                     // The readings that fit stand still; more scroll through the window. Either way they need sampling.
                     strip!.Margin = new Thickness(0); _compactStrip = strip;
                     // The fades lie over the gaps beside the window, no wider than those.
-                    if (readings.Travel > 0) element = _stripCarousel = new ReadingsCarousel(strip, readings.Window, readings.Travel, Math.Min(Snap(layout.TextEdge, dpi), place.Gap), _stripElapsed, animate);
+                    // A window narrower than the readings clips them from their start; the strip alone, narrower than what it draws, would
+                    // show the middle of them (centred).
+                    if (readings.Travel > 0 || readingCut > 0 || flow > 0 && strip.PreferredWidth > readings.Window + .5) element = _stripCarousel = new ReadingsCarousel(strip, readings.Window, readings.Travel, Math.Min(Snap(layout.TextEdge, dpi), place.Gap), _stripElapsed, animate, readingCut);
                     else { strip.Width = room; element = strip; }
                     break;
             }

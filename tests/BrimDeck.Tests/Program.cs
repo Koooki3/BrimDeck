@@ -35,6 +35,7 @@ try
     MemoryFootprintTests.Run(Check);
     ColorMathTests.Run(Check);
     CompactSpacingTests.Run(Check);
+    CompactDragTests.Run(Check);
     AuditUiTests.Run(Check);
     RowSwapTests.Run(Check);
     AuditFollowupTests.Run(Check);

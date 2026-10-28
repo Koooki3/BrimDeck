@@ -368,6 +368,8 @@ public partial class MainWindow
         _noticeResizeSaved = !compact && _resizePage == DeckPage.Notices;
         try { if (_resizeChanged) _app.UpdateSettings(Settings.Copy()); else ApplySettings(); }
         finally { _noticeResizeSaved = false; }
+        // The collapsed row's windows ease from the room they followed to whole items (MainWindow.CompactFlow.cs).
+        if (compact) SettleCompactFlow();
         _resizeChanged = false;
         // The label leaves; the edge stays lit while the pointer is still on it.
         _hoverEdge = ResizeEdges.None;
