@@ -423,7 +423,8 @@ public partial class MainWindow
         }
         WatchSourceMenu(menu);
         MediaSourceButton.ContextMenu = menu; menu.PlacementTarget = MediaSourceButton; menu.Placement = PlacementMode.Bottom;
-        menu.VerticalOffset = 6; ResizeSourceMenu(menu); menu.IsOpen = true;
+        // A pop-up is not part of the panel's visual tree, so it takes the panel's scale itself.
+        UI.Scale(menu, _scale); menu.VerticalOffset = 6 * _scale; ResizeSourceMenu(menu); menu.IsOpen = true;
     }
     // Guidance shown in place of the transport when Netease runs without SMTC. Both sentences stay at every size:
     // what is required and where to switch it on. Only the type size and the entry's label adapt to the row.

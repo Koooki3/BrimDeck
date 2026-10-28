@@ -321,6 +321,9 @@ public sealed class DeckSettings
     public double Height { get; set; } = 200;
     // The quick size last chosen in settings; cleared when the width or height is edited by hand.
     public PanelSize? QuickSize { get; set; }
+    // BrimDeck drawn larger, in percent (PanelScales): the collapsed surface and the expanded panel, its pages, header and menus
+    // grow together, as Windows' display scaling would for BrimDeck alone. Sizes stay saved before the scale.
+    public int PanelScale { get; set; } = PanelScales.Default;
     public int OpenDelay { get; set; } = 0;
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
@@ -515,6 +518,7 @@ public sealed class DeckSettings
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
+        PanelScale = PanelScales.Fit(PanelScale);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();
