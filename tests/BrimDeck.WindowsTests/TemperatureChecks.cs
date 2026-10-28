@@ -90,7 +90,7 @@ internal static class TemperatureChecks
         foreach (var drive in drives)
             Console.WriteLine($"  Drive {drive.Number} {drive.Model}: {drive.Letters}, {drive.Used / 1073741824d:0.0} / {drive.Total / 1073741824d:0.0} GB"
                 + (drive.Temperature is { } heat ? $", {heat.Celsius:0} °C (warning {heat.Warning?.ToString() ?? "-"}, critical {heat.Critical?.ToString() ?? "-"})" : ", no temperature"));
-        check("drives: counted and known", reader.Count == drives.Count && reader.Drives == (drives.Count > 0 ? SensorState.Found : SensorState.None));
+        check("drives: counted and known", reader.Count == Storage.VolumeCount(drives) && reader.Drives == (drives.Count > 0 ? SensorState.Found : SensorState.None));
         check("drives: each volume on one drive only, the drive's volumes in letter order",
             drives.SelectMany(drive => drive.Volumes).Select(volume => volume.Letter).Distinct(StringComparer.OrdinalIgnoreCase).Count() == drives.Sum(drive => drive.Volumes.Count)
             && drives.All(drive => drive.Volumes.Select(volume => volume.Letter).SequenceEqual(drive.Volumes.Select(volume => volume.Letter).Order(StringComparer.OrdinalIgnoreCase))));
