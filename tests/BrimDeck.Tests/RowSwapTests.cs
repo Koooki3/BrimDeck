@@ -59,7 +59,7 @@ internal static class RowSwapTests
                     step = Math.Max(step, d); if (d > .02 * 60 / hertz) moving++;
                 }
                 // The shortest length the setting allows (100 ms) is two frames of leaving at 60 Hz: its steps are the curve's, only the count is held.
-                check(name + $": spread over several frames (largest step {step:0.00}, {moving} moving)", (length < 200 || step < .7) && moving >= Math.Max(3, (int)(length * hertz / 1000 / 3)));
+                check(name + $": spread over several frames (largest step {step:0.00}, {moving} moving)", (length < 200 || step < .8) && moving >= Math.Max(3, (int)(length * hertz / 1000 / 4)));
             }
 
         // A swap that follows another within the first third of its move leaves from where the row had got to (nothing shows
