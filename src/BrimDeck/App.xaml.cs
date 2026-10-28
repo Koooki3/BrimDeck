@@ -12,7 +12,8 @@ namespace BrimDeck;
 public partial class App : Application
 {
     private Mutex? _mutex;
-    private EventWaitHandle? _settingsEvent;
+    private EventWaitHandle? _settingsEvent, _exitEvent;
+    private RegisteredWaitHandle? _exitListener;
     private RegisteredWaitHandle? _listener;
     private TrayIcon? _tray;
     private SettingsWindow? _settingsWindow;
@@ -151,6 +152,8 @@ public partial class App : Application
         WatchSurface();
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(OpenSettings), null, Timeout.Infinite, false);
+        _exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, AppInstance.Exit);
+        _exitListener = ThreadPool.RegisterWaitForSingleObject(_exitEvent, (_, _) => Dispatcher.BeginInvoke(ExitApplication), null, Timeout.Infinite, true);
         if (e.Args.Contains("--settings")) OpenSettings();
         // A portable update that kept this version says why on the About page.
         else if (Updates.RestartFailed) OpenUpdateSettings();
@@ -598,7 +601,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         // A settings change still waiting for its timer (made during the exit animation) is written before the last wait (life-L13).
-        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; MotionEnvironment.Changed -= GlassEnvironmentChanged; GlassBackdrop.LiquidFailed -= GlassEnvironmentChanged; InteractionFx.Uninstall(); UnwatchSurface(); _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Exiting = true; Lifetime.Cancel(); Notices?.Dispose(); if (_save.IsEnabled) FlushSettings(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; MotionEnvironment.Changed -= GlassEnvironmentChanged; GlassBackdrop.LiquidFailed -= GlassEnvironmentChanged; InteractionFx.Uninstall(); UnwatchSurface(); _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose(); _exitListener?.Unregister(null); _exitEvent?.Dispose();
         Media?.Dispose(); Monitor?.Dispose(); Devices?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);

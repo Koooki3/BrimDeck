@@ -16,6 +16,13 @@ internal static class Program
             Environment.ExitCode = Native.NoticeBannerRegistry.RestoreAll(data) ? 0 : 1;
             return;
         }
+        // --exit [seconds]: asks the running BrimDeck to quit as the tray's Exit does and waits for it (0: gone, 2: still running after the
+        // wait, 3: none was running). Used by the local deploy so the settings are written and the panels power off before the files change.
+        if (Array.IndexOf(args, "--exit") is var exit && exit >= 0)
+        {
+            Environment.ExitCode = Core.AppInstance.RequestExit(exit + 1 < args.Length && int.TryParse(args[exit + 1], out var seconds) ? seconds : 20);
+            return;
+        }
         var app = new App();
         app.InitializeComponent();
         app.Run();
