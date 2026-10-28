@@ -325,14 +325,16 @@ public sealed partial class SettingsWindow
         // The reading's colors in the normal state as the scheme gives them, one per channel (the core columns: one per kind of
         // core). They are set under "配色", so they only show here.
         var dots = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent,
-            ToolTip = Loc.T("颜色在上方“各项颜色”中设置。", "Set under Reading colors above.") };
+            ToolTip = item == CompactMonitorItems.Power
+                ? Loc.T("颜色由当前主题的功耗样式决定。", "The color comes from the current theme's power style.")
+                : Loc.T("颜色在上方“各项颜色”中设置。", "Set under Reading colors above.") };
         var fills = Enumerable.Range(0, CompactMonitor.Channels(item)).Select(channel =>
             new Ellipse { Width = ReadingDot, Height = ReadingDot, Margin = new Thickness(channel == 0 ? 0 : 3, 0, 0, 0) }).ToArray();
         foreach (var fill in fills) dots.Children.Add(fill);
         refresh.Add(() =>
         {
             var colors = MonitorThemeColors.For(S);
-            for (int channel = 0; channel < fills.Length; channel++) fills[channel].Fill = UI.Brush(colors[CompactMonitor.Role(item, channel)]);
+            for (int channel = 0; channel < fills.Length; channel++) fills[channel].Fill = UI.Brush(item == CompactMonitorItems.Power ? PowerStyle.For(colors).Draw : colors[CompactMonitor.Role(item, channel)]);
         });
         Grid.SetColumn(dots, 1); row.Children.Add(dots);
 
