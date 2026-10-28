@@ -208,7 +208,14 @@ public partial class MainWindow : Window
         // DpiChanged is a bubbling event: every Image raises it when its own DPI changes. Once the window has moved to a
         // monitor with another scale, each image the panel rebuilds while it is laid out reports a change, and laying out
         // again on those would never stop. Only the window's own change counts.
-        DpiChanged += (_, e) => { if (ReferenceEquals(e.OriginalSource, this) && e.OldDpi.DpiScaleX != e.NewDpi.DpiScaleX) Dispatcher.BeginInvoke(ApplySettings); };
+        // The wanted width is rounded up to whole device pixels of the monitor it was measured on, so a new scale drops it and the
+        // next layout writes it again; the half-DIP threshold of the cache could keep a width rounded for the old scale.
+        DpiChanged += (_, e) =>
+        {
+            if (!ReferenceEquals(e.OriginalSource, this) || e.OldDpi.DpiScaleX == e.NewDpi.DpiScaleX) return;
+            _compactWanted = double.NaN;
+            Dispatcher.BeginInvoke(ApplySettings);
+        };
         // WM_DISPLAYCHANGE reaches the window after Windows has moved it into the new layout; SystemEvents reports the change
         // before that, when the window still has its old position. A taskbar change (auto-hide, size) alters the work area
         // without a display change.
