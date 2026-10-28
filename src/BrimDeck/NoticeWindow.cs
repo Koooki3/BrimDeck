@@ -94,6 +94,16 @@ internal sealed partial class NoticeWindow : Window
         new WindowInteropHelper(this).EnsureHandle();
         Dress();
         Measure("Ag 通知", 12.5, FontWeights.SemiBold); Measure("Ag 通知", 11.5, FontWeights.Normal);
+        // The window's first show (its layout, its render target, the layered window's set-up) is the larger part of what the first notice
+        // pays: done here, far off screen, transparent and for no longer than one dispatcher operation, so that nothing of it is drawn.
+        if (!IsVisible && _item is null)
+        {
+            double left = Left, top = Top, width = Width, height = Height, opacity = Opacity;
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = -32000; Top = -32000; Width = 16; Height = 16; Opacity = 0;
+            try { Show(); UpdateLayout(); Hide(); }
+            finally { Left = left; Top = top; Width = width; Height = height; Opacity = opacity; }
+        }
     }
 
     // True while a notice covers the island: the panel then leaves hovering to this window.
