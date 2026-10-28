@@ -204,7 +204,7 @@ internal sealed class SystemSampler : IDisposable
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         var adapters = gpus.TryGet(out var read) ? Remember(read) : [];
         // The machine's power: read only while something shows it; the history and the peak start over once none does.
-        Reading<PowerSample> power = default;
+        var power = Reading<PowerSample>.Unavailable(Why.Waiting);
         bool powerWanted = _powerWanted;
         if (powerWanted)
         {
