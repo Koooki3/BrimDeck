@@ -12,28 +12,41 @@ public enum MonitorProcessView { Auto, Compact, Detailed }
 // Since the table of readings (CompactReading) these are its presets: Full and Brief set which readings show and which rings
 // carry their figure, and Custom is any other setting.
 public enum CompactMonitorMode { Full, Brief, Custom }
+// CompactSmoothing: how many frames a second the collapsed readings' dials and core columns are drawn while they ease to a new
+// reading; Off shows each reading at once. The values are the frames a second.
+public enum CompactSmoothing { Off = 0, Ten = 10, Thirty = 30 }
 
 [Flags]
 public enum CompactMonitorItems
 {
     None = 0, Columns = 1, Cpu = 2, Memory = 4, Gpu = 8, Download = 16, Upload = 32,
-    All = Columns | Cpu | Memory | Gpu | Download | Upload
+    // The usage and rate readings, as the Full preset shows them. Storage came later and is not among them: it shows only when
+    // chosen in the table (CompactMonitor.Every is every reading). Temperature was a reading of its own before the temperatures
+    // joined CPU, GPU and the drives (CompactFigures); never released, it is dropped from saved tables and its number not reused.
+    All = Columns | Cpu | Memory | Gpu | Download | Upload,
+    Temperature = 64, Storage = 128
 }
 
 // One reading of the collapsed strip as set in the settings' table; its place there is its place in the strip, left to right.
 // ShowValue: a dial (CPU, memory, GPU) shows its percentage after it, or, off, the dial alone with its letter inside, which is
-// narrower; the core columns carry no figure and the rates are always text, so it means nothing for them.
+// narrower; the core columns carry no figure and the rates and the temperature are always text, so it means nothing for them.
 // The readings take their colors from the color scheme (CompactMonitor.Roles), as the expanded page does, and at the warning
 // and critical levels the collapsed readings' level colors (DeckSettings.CompactWarningColor). Color, ExtraColors,
 // WarningColor and CriticalColor are the reading's own colors from before the custom scheme: "#RRGGBB" in place of the
 // scheme's in the normal state, for the further channels in the normal state (the core columns' slowest kind of core), and at
 // the warning and critical levels. They are kept to read older files, which DeckSettings.Normalize moves into the custom
 // scheme and the level colors (CompactMonitor.MoveColors), and are not written.
+// Figures: what CPU, GPU and the drives show after their glyph, the share in use and the temperature (CompactFigures); Sources:
+// the drive letters the drives show (CompactSources). Both chosen in the table's menus, null for the default. FiguresInLine:
+// both figures side by side in the row's type rather than one above the other in two smaller lines.
 public sealed class CompactReading
 {
     public CompactMonitorItems Item { get; set; }
     public bool Visible { get; set; } = true;
     public bool ShowValue { get; set; } = true;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? Figures { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool FiguresInLine { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? Sources { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Color { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string?>? ExtraColors { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? WarningColor { get; set; }
@@ -44,6 +57,8 @@ public sealed class CompactReading
     {
         var copy = (CompactReading)MemberwiseClone();
         copy.ExtraColors = ExtraColors?.ToList();
+        copy.Figures = Figures?.ToList();
+        copy.Sources = Sources?.ToList();
         return copy;
     }
 }
@@ -54,10 +69,12 @@ public static class CompactMonitor
 {
     // Left to right by default; the settings' table can reorder them.
     public static readonly IReadOnlyList<CompactMonitorItems> Order =
-        [CompactMonitorItems.Columns, CompactMonitorItems.Cpu, CompactMonitorItems.Memory, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Upload];
+        [CompactMonitorItems.Columns, CompactMonitorItems.Cpu, CompactMonitorItems.Memory, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Upload,
+            CompactMonitorItems.Storage];
+    public const CompactMonitorItems Every = CompactMonitorItems.All | CompactMonitorItems.Storage;
     // When the row is too short, readings leave in this order.
     public static readonly IReadOnlyList<CompactMonitorItems> LeaveOrder =
-        [CompactMonitorItems.Upload, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Columns, CompactMonitorItems.Memory, CompactMonitorItems.Cpu];
+        [CompactMonitorItems.Storage, CompactMonitorItems.Upload, CompactMonitorItems.Gpu, CompactMonitorItems.Download, CompactMonitorItems.Columns, CompactMonitorItems.Memory, CompactMonitorItems.Cpu];
 
     // The readings with a figure that can be hidden.
     public const CompactMonitorItems Rings = CompactMonitorItems.Cpu | CompactMonitorItems.Memory | CompactMonitorItems.Gpu;
@@ -70,7 +87,9 @@ public static class CompactMonitor
     {
         [CompactMonitorItems.Columns] = [MonitorRole.Cpu, MonitorRole.Efficiency], [CompactMonitorItems.Cpu] = [MonitorRole.Cpu],
         [CompactMonitorItems.Memory] = [MonitorRole.Memory], [CompactMonitorItems.Gpu] = [MonitorRole.Gpu],
-        [CompactMonitorItems.Download] = [MonitorRole.Download], [CompactMonitorItems.Upload] = [MonitorRole.Upload]
+        [CompactMonitorItems.Download] = [MonitorRole.Download], [CompactMonitorItems.Upload] = [MonitorRole.Upload],
+        // The scheme has no color of its own for storage: it takes the memory color, as the page draws its bars.
+        [CompactMonitorItems.Storage] = [MonitorRole.Memory]
     };
     public static MonitorRole Role(CompactMonitorItems item, int channel = 0) =>
         Roles.TryGetValue(item, out var roles) ? roles[Math.Clamp(channel, 0, roles.Length - 1)] : MonitorRole.Cpu;
@@ -126,13 +145,14 @@ public static class CompactMonitor
         }
         var list = (readings ?? []).OfType<CompactReading>().Where(reading => Order.Contains(reading.Item)).DistinctBy(reading => reading.Item)
             .Select(reading => new CompactReading { Item = reading.Item, Visible = reading.Visible, ShowValue = reading.ShowValue, Color = Valid(reading.Color),
-                ExtraColors = Extra(reading), WarningColor = Valid(reading.WarningColor), CriticalColor = Valid(reading.CriticalColor) }).ToList();
+                ExtraColors = Extra(reading), WarningColor = Valid(reading.WarningColor), CriticalColor = Valid(reading.CriticalColor),
+                Figures = CompactFigures.Normalize(reading.Item, reading.Figures), FiguresInLine = CompactFigures.Has(reading.Item) && reading.FiguresInLine, Sources = CompactSources.Normalize(reading.Item, reading.Sources) }).ToList();
         list.AddRange(Order.Where(item => list.All(reading => reading.Item != item)).Select(item => new CompactReading { Item = item, Visible = false }));
         return list;
     }
 
     public static CompactMonitorItems Visible(IEnumerable<CompactReading> readings) =>
-        readings.Where(reading => reading.Visible).Aggregate(CompactMonitorItems.None, (items, reading) => items | reading.Item) & CompactMonitorItems.All;
+        readings.Where(reading => reading.Visible).Aggregate(CompactMonitorItems.None, (items, reading) => items | reading.Item) & Every;
     // The rings set to show their figure, shown or not.
     public static CompactMonitorItems Values(IEnumerable<CompactReading> readings) =>
         readings.Where(reading => reading.ShowValue).Aggregate(CompactMonitorItems.None, (items, reading) => items | reading.Item) & Rings;
@@ -145,7 +165,8 @@ public static class CompactMonitor
     {
         var all = readings.ToList();
         var (shown, values) = (Visible(all), Values(all));
-        return shown == CompactMonitorItems.All && values == Rings ? CompactMonitorMode.Full
+        // Storage is outside both presets: Full leaves it as it is, Brief hides it.
+        return (shown & CompactMonitorItems.All) == CompactMonitorItems.All && values == Rings ? CompactMonitorMode.Full
             : shown == Rings && values == CompactMonitorItems.None ? CompactMonitorMode.Brief : null;
     }
 
@@ -156,18 +177,21 @@ public static class CompactMonitor
         if (preset == CompactMonitorMode.Custom) return;
         foreach (var reading in readings)
         {
+            if (reading.Item == CompactMonitorItems.Storage) { if (preset == CompactMonitorMode.Brief) reading.Visible = false; continue; }
             bool ring = HasValueChoice(reading.Item);
             reading.Visible = preset == CompactMonitorMode.Full || ring;
             if (ring) reading.ShowValue = preset == CompactMonitorMode.Full;
         }
     }
 
-    // The width of each reading: a ring with its figure (the ring and the room after it) or alone, the core columns, a rate.
-    public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, double figure, double bareRing, double columns, double rate) => item => item switch
+    // The width of each reading: a ring with its figure (the ring and the room after it) or alone, the core columns, a rate, the
+    // drives. figure: the room after a ring, by ring (a ring showing its temperature too takes more).
+    public static Func<CompactMonitorItems, double> Widths(CompactMonitorItems values, double ring, Func<CompactMonitorItems, double> figure, double bareRing, double columns, double rate, double storage = 0) => item => item switch
     {
         CompactMonitorItems.Columns => columns,
-        CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu => (values & item) != 0 ? ring + figure : bareRing,
+        CompactMonitorItems.Cpu or CompactMonitorItems.Memory or CompactMonitorItems.Gpu => (values & item) != 0 ? ring + figure(item) : bareRing,
         CompactMonitorItems.Download or CompactMonitorItems.Upload => rate,
+        CompactMonitorItems.Storage => storage,
         _ => 0
     };
     // Rings alone, as Brief showed them, sit closer together.
@@ -220,7 +244,7 @@ public static class CompactMonitor
     public static CompactMonitorItems Fit(CompactMonitorItems items, Func<CompactMonitorItems, double> width, double gap, double available)
     {
         if (!double.IsFinite(available) || available <= 0) return CompactMonitorItems.None;
-        var shown = items & CompactMonitorItems.All;
+        var shown = items & Every;
         foreach (var item in LeaveOrder)
         {
             if (Width(shown, width, gap) <= available + 1e-9) return shown;
@@ -229,8 +253,8 @@ public static class CompactMonitor
         return Width(shown, width, gap) <= available + 1e-9 ? shown : CompactMonitorItems.None;
     }
 
-    // Whether a region of the collapsed row this wide shows any of the readings. Readings wider than their region scroll in it,
-    // so any room shows some; a region squeezed to nothing shows none, and the sampler is not run for them.
+    // Whether a region of the collapsed row this wide shows any of the readings; a region squeezed to nothing shows none, and the
+    // sampler is not run for them.
     public static bool HasRoom(double region) => double.IsFinite(region) && region > 0;
 }
 

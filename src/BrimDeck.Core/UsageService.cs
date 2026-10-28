@@ -17,8 +17,9 @@ public interface IDesktopSources
 }
 
 // quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
-// kimiQuotaCache does the same for Kimi Code (KimiQuotaCache).
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null, string? kimiQuotaCache = null) : IDisposable
+// kimiQuotaCache does the same for Kimi Code (KimiQuotaCache). jitter (0 to 1) is the share of a pause after a 429 that is added to it
+// (RateLimitBackoff); a test passes a fixed one.
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null, string? kimiQuotaCache = null, Func<double>? jitter = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -51,6 +52,10 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private string _kimiAccount = "", _kimiSaved = "";
     private bool _kimiCacheRead;
     private DateTimeOffset _kimiSavedTime;
+    // Cursor token details by local day, for the account they were read for (the sub claim of its token). A day is read again
+    // until a full read ends an hour after the day did, so records the service adds late still count; older days are kept.
+    private readonly Dictionary<DateTime, (List<TokenEntry> Entries, DateTimeOffset ReadAt)> _cursorDays = [];
+    private string _cursorAccount = "";
     private readonly SemaphoreSlim _gate = new(1);
     private ClaudeQuotaSnapshot? _grokBotRetained;
     // The last Claude quota read online; until this run reads its own, the previous run's (ClaudeQuotaCache), which is read on
@@ -101,6 +106,21 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         _claudeSaved = "";
         ClaudeQuotaCache.Delete(quotaCache);
     }
+    // The pause after a 429 from the Claude quota API, for each token (with its sign-in and account): a new sign-in starts without
+    // one, and the several tokens of one Desktop account, tried in turn, do not replace each other's. Only used while _gate is held.
+    // It is not kept on disk: a start asks once, and a 429 starts the pause again.
+    private readonly Dictionary<string, RateLimitBackoff> _claudeLimits = [];
+    private RateLimitBackoff ClaudeLimit(ClaudeCredential credential, DateTimeOffset now)
+    {
+        var token = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(credential.Token)));
+        var key = string.Join("|", credential.SignIn, ClaudeQuotaCache.AccountHash(credential.Account), token);
+        if (_claudeLimits.TryGetValue(key, out var limit)) return limit;
+        // Tokens are renewed now and then; the ones of the past have no pause left to keep.
+        if (_claudeLimits.Count >= 16)
+            foreach (var old in _claudeLimits.Where(pair => pair.Value.RetryAt(now) is null).Select(pair => pair.Key).ToList()) _claudeLimits.Remove(old);
+        return _claudeLimits[key] = new();
+    }
+    private static string Clock(DateTimeOffset time, DateTimeOffset now) => time.LocalDateTime.ToString(time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
     private readonly ConfiguredProviders _configured = new(secrets, http, clock);
     public Task<ProviderTestResult> TestProviderAsync(AppEntry entry, CancellationToken ct = default) => _configured.TestAsync(entry, ct);
 
@@ -223,6 +243,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         if (id == ProviderId.Antigravity) _antigravity.Read(snapshot, desktop, _locations.AntigravityConversations, start, now);
         if (id == ProviderId.Dsh) _dsh.Read(snapshot, _locations.DshHome, start, now);
         if (id == ProviderId.Kimi) _kimi.Read(snapshot, _locations.KimiHome, start, now);
+        if (id == ProviderId.OpenCode) OpenCodeUsage.Read(snapshot, desktop, _locations.OpenCodeDatabase, start, now);
         try
         {
             switch (id)
@@ -267,6 +288,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 case ProviderId.Kimi:
                     await ReadKimiAsync(snapshot, now, ct);
                     break;
+                case ProviderId.OpenCode:
+                    await ReadOpenCodeAsync(snapshot, now, ct);
+                    break;
             }
         }
         catch (HttpRequestException ex)
@@ -277,7 +301,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             {
                 HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => Loc.T("登录已失效或账户接口拒绝访问，请在原应用重新登录",
                     "The sign-in has expired or the account API refused access. Sign in again in the original app."),
-                HttpStatusCode.TooManyRequests => Loc.T("请求频繁，稍后自动重试", "Too many requests. Retrying automatically later."),
+                HttpStatusCode.TooManyRequests => ex is RateLimitedException { RetryAt: { } at }
+                    ? Loc.T($"请求频繁，{Clock(at, now)} 后自动重试", $"Too many requests. Retrying automatically after {Clock(at, now)}.")
+                    : Loc.T("请求频繁，稍后自动重试", "Too many requests. Retrying automatically later."),
                 _ => Loc.T("账户接口暂时不可用", "The account API is temporarily unavailable.")
             };
         }
@@ -343,11 +369,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             login = credential;
             // The plan is asked at the same time as the quota, so a slow or unreachable network costs one wait, not two.
             var planRequest = loginPlan = ReadClaudePlanAsync(credential.Token, ct);
+            var limit = ClaudeLimit(credential, now);
             try
             {
+                // While the quota API is asking for time, it is not asked again (a manual refresh included); the failure below is
+                // the same one a 429 gives, so the reading kept from before is shown with the time the next request goes out.
+                if (limit.RetryAt(_clock()) is { } wait) throw RateLimitedException.Held(wait);
                 using var request = Bearer(HttpMethod.Get, "https://api.anthropic.com/api/oauth/usage", credential.Token);
                 request.Headers.TryAddWithoutValidation("anthropic-beta", "oauth-2025-04-20");
                 using var doc = await SendAsync(_http, request, ct);
+                limit.Reset();
                 var quotas = QuotaParser.Claude(doc.RootElement);
                 if (quotas.Count == 0) throw new InvalidDataException();
                 // Publish only a complete successful result, all from the same login.
@@ -373,6 +404,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 HttpRequestException or OperationCanceledException or IOException or InvalidDataException or JsonException or FormatException)
             {
                 lastFailure = ex;
+                // The pause counts from the moment the answer arrived, not from the start of the round: another token may have been
+                // tried first, and the request itself takes time, which a Retry-After of a minute must not be shortened by.
+                if (ex is RateLimitedException { Sent: true } limited) { var received = _clock(); limited.RetryAt = limit.Fail(received, limited.RetryAfter(received), (jitter ?? Random.Shared.NextDouble)()); }
                 // Keep an operational error instead of masking it with a later stale login.
                 if (failure is null || ex is HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } ||
                     failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) failure = ex;
@@ -488,18 +522,19 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         snapshot.Quotas = kept.Quotas.ToList();
         if (kept.Plan.Length > 0) { snapshot.Plan = kept.Plan; snapshot.PlanSource = kept.PlanSource; }
         snapshot.LiveQuota = true; snapshot.QuotaTime = kept.Time; snapshot.Source = kept.Source;
-        var time = kept.Time.LocalDateTime.ToString(kept.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+        var time = Clock(kept.Time, now);
         var shown = kept.Local ? Loc.T($"显示 Claude 桌面版 {time} 记录的配额", $"showing the quota the Claude desktop app recorded at {time}")
             : Loc.T($"显示 {time} 读取的配额", $"showing the quota read at {time}");
         // Per-model quotas carried over from an earlier online reading say when they were read.
         if (kept.Local && kept.ScopedTime is { } scoped && kept.Time - scoped > TimeSpan.FromMinutes(1))
         {
-            var at = scoped.LocalDateTime.ToString(scoped.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+            var at = Clock(scoped, now);
             shown += Loc.T($"（按模型的额度为 {at} 读取）", $" (per-model quotas read at {at})");
         }
         snapshot.Status = failure switch
         {
             null => kept.Local ? Loc.T($"已连接，{shown}", $"Connected, {shown}") : Loc.T("已连接", "Connected"),
+            RateLimitedException { RetryAt: { } retry } => Loc.T($"请求频繁，{shown}，{Clock(retry, now)} 后自动重试", $"Too many requests; {shown}. Retrying automatically after {Clock(retry, now)}."),
             HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } => Loc.T($"请求频繁，{shown}，稍后自动重试", $"Too many requests; {shown}. Retrying automatically later."),
             OperationCanceledException => Loc.T($"读取超时，{shown}，稍后自动重试", $"Reading timed out; {shown}. Retrying automatically later."),
             _ => Loc.T($"账户接口暂时不可用，{shown}，稍后自动重试", $"The account API is temporarily unavailable; {shown}. Retrying automatically later.")
@@ -635,12 +670,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         {
             try
             {
-                var parts = token.Split('.');
-                if (parts.Length < 2) throw new InvalidDataException();
-                var payload = parts[1].Replace('-', '+').Replace('_', '/');
-                payload = payload.PadRight((payload.Length + 3) / 4 * 4, '=');
-                using var jwt = JsonDocument.Parse(Convert.FromBase64String(payload));
-                var subject = jwt.RootElement.Get("sub").Text();
+                var subject = CursorAccount(token);
                 if (subject.Length == 0) throw new InvalidDataException();
                 using var request = new HttpRequestMessage(HttpMethod.Get, "https://cursor.com/api/usage-summary");
                 request.Headers.TryAddWithoutValidation("Cookie", "WorkosCursorSessionToken=" + Uri.EscapeDataString(subject + "::" + token));
@@ -664,44 +694,83 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException && !ct.IsCancellationRequested) { }
         Connected(snapshot, Loc.T("Cursor 当前账期", "Cursor current billing period"), now);
-        try { await ReadCursorEvents(snapshot, token, now, start, ct); }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException or TaskCanceledException)
-        { snapshot.UsageAvailable = false; snapshot.Entries.Clear(); snapshot.UsageNote = Loc.T("配额已读取，账户 Token 明细暂时不可用或尚未读取完整。", "The quota was read, but the account's token details are unavailable or not fully read yet."); }
+        await ReadCursorEvents(snapshot, token, now, start, ct);
     }
 
+    // The account's records can run to thousands a day, more than one refresh can read, so they are read a day at a time,
+    // newest first, and every day read in full is kept. The days a refresh did not reach are read by the next ones.
     private async Task ReadCursorEvents(ProviderSnapshot snapshot, string token, DateTimeOffset now, DateTimeOffset start, CancellationToken ct)
     {
+        var account = CursorAccount(token);
+        // Details are shown only for the account signed in now; a token that names no account keeps nothing between refreshes.
+        if (account.Length == 0 || account != _cursorAccount) { _cursorDays.Clear(); _cursorAccount = account; }
+        DateTime first = start.LocalDateTime.Date, last = now.LocalDateTime.Date;
+        foreach (var day in _cursorDays.Keys.Where(day => day < first || day > last).ToList()) _cursorDays.Remove(day);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            for (var day = last; day >= first; day = day.AddDays(-1))
+            {
+                var end = new DateTimeOffset(day.AddDays(1));
+                if (_cursorDays.TryGetValue(day, out var kept) && kept.ReadAt >= end.AddHours(1)) continue;
+                _cursorDays[day] = (await ReadCursorDay(token, new DateTimeOffset(day), end, budget.Token), now);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidDataException ||
+            ex is OperationCanceledException && !ct.IsCancellationRequested) { }
+        int days = (int)(last - first).TotalDays + 1, missing = days - _cursorDays.Count;
+        if (missing == days)
+        { snapshot.UsageAvailable = false; snapshot.UsageNote = Loc.T("配额已读取，账户 Token 明细暂时不可用或尚未读取完整。", "The quota was read, but the account's token details are unavailable or not fully read yet."); return; }
+        snapshot.Entries = _cursorDays.Values.SelectMany(read => read.Entries).Where(entry => entry.Time >= start && entry.Time <= now).OrderBy(entry => entry.Time).ToList();
+        snapshot.UsageAvailable = true;
+        snapshot.UsageComplete = missing == 0;
+        if (missing > 0) snapshot.UsageNote += Loc.T($"其中 {missing} 天的明细尚未读取，将在之后的刷新中补全。", " " + Loc.Count(missing, "day", "days") + " not read yet; later refreshes fill them in.");
+    }
+
+    // One local day's records, [from, to). An empty day, or a page past the last, comes back without the list.
+    private async Task<List<TokenEntry>> ReadCursorDay(string token, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
         var entries = new Dictionary<string, TokenEntry>();
         long rowsRead = 0;
         for (int page = 1; page <= 100; page++)
         {
             using var request = Bearer(HttpMethod.Post, "https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents", token);
             request.Headers.TryAddWithoutValidation("Connect-Protocol-Version", "1");
-            request.Content = JsonBody(new { startDate = start.ToUnixTimeMilliseconds().ToString(), endDate = now.ToUnixTimeMilliseconds().ToString(), page, pageSize = 1000 });
-            using var response = await SendAsync(_http, request, budget.Token);
+            request.Content = JsonBody(new { startDate = from.ToUnixTimeMilliseconds().ToString(), endDate = (to.ToUnixTimeMilliseconds() - 1).ToString(), page, pageSize = 1000 });
+            using var response = await SendAsync(_http, request, ct);
             var events = response.RootElement.Get("usageEventsDisplay");
-            if (events.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
-            foreach (var item in events.EnumerateArray())
-            {
-                var entry = ParseCursorEvent(item);
-                if (entry is not null && entry.Time >= start && entry.Time <= now) entries.TryAdd(entry.Key, entry);
-            }
-            rowsRead += events.GetArrayLength();
+            if (events.ValueKind is not (JsonValueKind.Array or JsonValueKind.Undefined)) throw new InvalidDataException();
+            int rows = events.ValueKind == JsonValueKind.Array ? events.GetArrayLength() : 0;
+            if (rows > 0)
+                foreach (var item in events.EnumerateArray())
+                    if (ParseCursorEvent(item) is { } entry && entry.Time >= from && entry.Time < to) entries.TryAdd(entry.Key, entry);
+            rowsRead += rows;
             var total = response.RootElement.Get("totalUsageEventsCount").Number();
-            if ((total is { } expected && rowsRead >= expected) || (total is null && events.GetArrayLength() < 1000))
-            { snapshot.Entries = entries.Values.ToList(); snapshot.UsageAvailable = true; return; }
-            if (events.GetArrayLength() == 0) throw new InvalidDataException();
+            if (rows == 0 || (total is { } expected && rowsRead >= expected) || (total is null && rows < 1000)) return entries.Values.ToList();
         }
         throw new InvalidDataException();
     }
+
+    // The account a Cursor sign-in belongs to: the sub claim of its token, read without checking the signature, since it
+    // only tells accounts apart. "" when the token names none.
+    private static string CursorAccount(string token)
+    {
+        var parts = token.Split('.');
+        if (parts.Length < 2) return "";
+        var payload = parts[1].Replace('-', '+').Replace('_', '/');
+        payload = payload.PadRight((payload.Length + 3) / 4 * 4, '=');
+        try { using var jwt = JsonDocument.Parse(Convert.FromBase64String(payload)); return jwt.RootElement.Get("sub").Text(); }
+        catch (Exception ex) when (ex is FormatException or JsonException) { return ""; }
+    }
+
     public static TokenEntry? ParseCursorEvent(JsonElement item)
     {
         var usage = item.Get("tokenUsage");
         if (usage.ValueKind != JsonValueKind.Object || item.Get("timestamp").Date() is not { } time) return null;
         var model = item.Get("model").Text();
-        var identity = item.Get("id").Text();
+        var identity = item.Get("usageEventId").Text();
+        if (identity.Length == 0) identity = item.Get("id").Text();
         if (identity.Length == 0) identity = time.ToString("O") + ":" + model + ":" + item.Get("conversationId").Text() + ":" + usage.GetRawText();
         decimal? cost = usage.Get("totalCents").Number() is { } cents && cents >= 0 ? (decimal)cents / 100m : null;
         return new("cursor:" + identity, time, model, usage.Get("inputTokens").Count(), usage.Get("cacheReadTokens").Count(),
@@ -872,6 +941,45 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         Connected(snapshot, Loc.T("DeepSeek Harness · DeepSeek 账户", "DeepSeek Harness · DeepSeek account"), now);
     }
 
+    // OpenCode's own sign-in to OpenCode Console reads the Go allowance of its workspace (OpenCodeUsage). The token is used as
+    // it is and never renewed; an expired one is not sent. A workspace without Go is refused with HTTP 403.
+    private async Task ReadOpenCodeAsync(ProviderSnapshot snapshot, DateTimeOffset now, CancellationToken ct)
+    {
+        var credential = OpenCodeUsage.ReadCredential(desktop, _locations.OpenCodeDatabase, _locations.OpenCodeData);
+        if (credential is null)
+        {
+            snapshot.StatusLabel = Loc.T("未连接", "Not connected");
+            snapshot.Status = Loc.T("请先在 OpenCode 中登录 OpenCode Console", "Sign in to OpenCode Console in OpenCode first.");
+            return;
+        }
+        if (credential.Expired(now))
+        {
+            snapshot.StatusLabel = Loc.T("登录已过期", "Sign-in expired");
+            snapshot.Status = Loc.T("OpenCode 的登录已过期，在 OpenCode 中使用一次即可续期", "The OpenCode sign-in has expired. Using OpenCode once renews it.");
+            return;
+        }
+        if (OpenCodeUsage.UsageAddress(credential.Server) is not { } address) throw new InvalidDataException();
+        snapshot.Scope = "account";
+        using var request = Bearer(HttpMethod.Get, address.AbsoluteUri, credential.Token);
+        if (credential.Workspace.Length > 0) request.Headers.TryAddWithoutValidation("x-opencode-org-id", credential.Workspace);
+        using var response = await _http.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.Forbidden)
+        {
+            // Cloudflare in front of opencode.ai answers 403 as well when it blocks a request; only OpenCode's own 403 means no Go.
+            if ((await response.Content.ReadAsStringAsync(ct)).Contains("\"cloudflare_error\"", StringComparison.Ordinal)) throw new HttpRequestException(null, null, HttpStatusCode.ServiceUnavailable);
+            snapshot.StatusLabel = Loc.T("未订阅 Go", "No Go plan");
+            snapshot.Status = Loc.T("OpenCode 登录的工作区没有订阅 OpenCode Go", "The workspace OpenCode signed in to has no OpenCode Go plan.");
+            return;
+        }
+        response.EnsureSuccessStatusCode();
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var quotas = OpenCodeUsage.Allowance(doc.RootElement, out bool limited);
+        if (quotas.Count == 0) throw new InvalidDataException();
+        snapshot.Quotas = quotas;
+        Connected(snapshot, "OpenCode Go", now);
+        if (limited) snapshot.Status = Loc.T("已达到 OpenCode Go 的用量上限，重置前请求会被拒绝", "The OpenCode Go limit is reached; requests are refused until it resets.");
+    }
+
     // Kimi Code's own sign-in reads the plan quota. The token is used as it is: an expired one is not sent and never renewed,
     // since renewing would replace the sign-in Kimi Code holds. Kimi Code renews it only while in use, so most refreshes find
     // it expired; the last reading (KimiQuotaCache) then stands in, marked as old, until Kimi Code is used again. A rejected
@@ -1040,6 +1148,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private static async Task<JsonDocument> SendAsync(HttpClient client, HttpRequestMessage request, CancellationToken ct)
     {
         using var response = await client.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.TooManyRequests) throw RateLimitedException.From(response);
         response.EnsureSuccessStatusCode();
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct);

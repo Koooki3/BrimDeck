@@ -1,0 +1,82 @@
+{
+  // Pixel blocks: an unofficial pixel-art theme inspired by block-building sandbox games. It uses no artwork, fonts, textures
+  // or logos from any game: everything is drawn from colors and squares.
+  //   Material: a deep slate block with stepped corners (2 DIP steps) and a faint block grain, a bevel rim lit at the top left
+  //   and shaded at the bottom right, and a hard shadow with no blur. Text is drawn unsmoothed, as on a pixel screen.
+  //   Colors: the bright chat-style palette, white text, a yellow block clock, a green experience bar for the indicator;
+  //   menus and tooltips in a deep violet with a violet frame.
+  "formatVersion": 1,
+  "id": "pixel-blocks",
+  "name": "像素方块",
+  "nameEn": "Pixel Blocks",
+  "description": "非官方像素风，灵感来自方块沙盒游戏：阶梯圆角、方块纹理、斜面描边、硬阴影与像素时钟。",
+  "descriptionEn": "An unofficial pixel-art look inspired by block sandbox games: stepped corners, block grain, a bevel rim, a hard shadow and a block clock.",
+  "author": "BrimDeck",
+  "license": "Apache-2.0",
+  "base": "dark",
+  "colors": {
+    "surface": "#1C1C21",
+    "textPrimary": "#FFFFFF",
+    "textSecondary": "#D6D6D6",
+    "textTertiary": "#8F8F8F",
+    "accent": "#55FF55",
+    "onAccent": "#0A240A",
+    "danger": "#FF6B6B",
+    "liked": "#FF55FF",
+    "clock": "#FFFF55",
+    "equalizer": "#55FFFF",
+    "hairline": "#2EFFFFFF",
+    "track": "#33FFFFFF",
+    "ringTrack": "#3DFFFFFF",
+    "fill": "#14FFFFFF",
+    "fillSelected": "#2BFFFFFF",
+    "hover": "#26FFFFFF",
+    "pressed": "#40FFFFFF",
+    "outline": "#4DFFFFFF",
+    "popup": "#160A1E",
+    "popupBorder": "#6A3BC8",
+    "input": "#0E0E12",
+    "rangeFill": "#4D55FF55",
+    "coverPlaceholder": "#1AFFFFFF",
+    "coverOutline": "#40FFFFFF",
+    "scrollThumb": "#6E6E78",
+    "rim": "#5C5C66",
+    "shadow": "#000000",
+    "indicator": "#3B7A1E",
+    "indicatorProgress": "#8CFF3C",
+    "switchFill": "#1AFFFFFF",
+    "seekRail": "#40FFFFFF",
+    "rowDivider": "#26FFFFFF",
+    "rowHover": "#1AFFFFFF",
+    "menuDetail": "#D6D6D6",
+    "tooltip": "#160A1E",
+    "tooltipBorder": "#6A3BC8",
+    "bubble": "#160A1E",
+    "bubbleBorder": "#6A3BC8"
+  },
+  "apps": {
+    "claude": "#FFAA00", "codex": "#55FF55", "antigravity": "#55FFFF", "cursor": "#D6D6D6", "zcode": "#8888FF",
+    "dsh": "#66A3FF", "grokBot": "#D6D6D6", "kimi": "#22CCCC", "opencode": "#8F8F8F", "manual": "#FF77FF", "other": "#D6D6D6", "warning": "#FFFF55", "critical": "#FF5555"
+  },
+  "clock": {
+    "style": "pixel", "color": "default",
+    "palette": { "amber": "#FFAA00", "cyan": "#55FFFF", "pink": "#FF77FF", "lime": "#55FF55" },
+    "gradients": [
+      { "name": "日落", "nameEn": "Sunset", "stops": ["#FFFF55", "#FFAA00", "#FF5555"] },
+      { "name": "海洋", "nameEn": "Ocean", "stops": ["#55FFFF", "#66A3FF", "#B388FF"] },
+      { "name": "极光", "nameEn": "Aurora", "stops": ["#55FF55", "#55FFFF", "#66A3FF"] },
+      { "name": "火焰", "nameEn": "Ember", "stops": ["#FFAA00", "#FF7744", "#FF5555"] },
+      { "name": "霓虹", "nameEn": "Neon", "stops": ["#FF77FF", "#B388FF", "#55FFFF"] }
+    ]
+  },
+  "effects": {
+    // A bevel: the first color lights the top and left edges, the last shades the bottom and right ones.
+    "rimGradient": ["#6A6A75", "#08080A"],
+    "rimWidth": 2,
+    "shadowBlur": 0,
+    "shadowDepth": 3,
+    "shadowOpacity": 0.6,
+    "pixel": 2,
+    "texture": 0.05
+  }
+}

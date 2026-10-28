@@ -16,6 +16,7 @@ public sealed record MediaTrack
     public string? CurrentLyric { get; init; }
     public TimeSpan? CurrentLyricStart { get; init; }
     public bool IsQqMusic => Source == "QQ 音乐" || SongId.StartsWith("qq:", StringComparison.Ordinal) || SongId.StartsWith("qqid:", StringComparison.Ordinal);
+    public bool IsAppleMusic => Source == "Apple Music";
     public MediaState State { get; init; }
     public bool IsNeteaseLog { get; init; }
     public bool PreviousRestricted { get; init; }
@@ -30,6 +31,8 @@ public sealed record MediaTrack
     public bool CanRepeat { get; init; }
     public bool Shuffle { get; init; }
     public MediaRepeat Repeat { get; init; }
+    // Shuffle and repeat are independent switches with a button each (Apple Music), not one cycling playback mode.
+    public bool SeparateModes { get; init; }
     // Only a player connection that both reports and changes the liked state offers it; Liked is meaningful only with CanLike.
     public bool CanLike { get; init; }
     public bool Liked { get; init; }
@@ -60,13 +63,15 @@ public sealed record MediaTrack
 
 // The collapsed row, left to right: the cover region, the middle (quota rings, the lyric or track notice and the system
 // readings, in the order of CompactPart chosen for the style), the equalizer region and the clock region. The order only
-// places the regions; their widths are the same in any order. Each region has a width and clips what does not fit; nothing is hidden as a
-// whole. Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are
+// places the regions; their widths are the same in any order. The row shows what fits of each region whole: the rings and the
+// readings that do not fit scroll through it (CompactSpacing.Window), and the surface is never narrower than the cover, the
+// equalizer, the clock and the shortest lyric (RequiredWidth). CompactSpacing places the parts with one gap between all of them.
+// Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are
 // whole or half DIPs. The width only moves the middle: the side regions keep their size until the middle is empty.
 public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, double RingGap, int VisibleRings, double RingWidth, double TextWidth, bool ScrollRings)
 {
     // The narrowest scrolling lyric: about one and a half characters. Below it the lyric rests, clipped.
-    private const double MinimumText = 18;
+    public const double MinimumText = 18;
     public double Scale { get; init; } = 1;
     public double ContentWidth { get; init; }
     public double RowHeight { get; init; } = 24;
@@ -102,6 +107,23 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // Any scale is accepted; non-numbers and non-positive values mean the default size.
     public static double SafeScale(double scale) => double.IsFinite(scale) && scale > 0 ? Math.Clamp(scale, .25, 8) : 1;
     private static double Safe(double width) => double.IsFinite(width) && width > 0 ? width : 0;
+    // The gap between any two neighbours in the row, and between two rings or two readings (CompactSpacing).
+    public static double Gap(double scale) => Whole(8 * SafeScale(scale));
+
+    // The narrowest content for what the row shows, so the surface is never narrower (CollapsedGeometry.Resolve) and is no
+    // wider than that needs: the clock; while media plays the cover, the equalizer and the shortest lyric; one quota ring when
+    // the rings show (ring: its size, 0 without rings) and the narrowest window of the system readings when they show
+    // (reading: CompactSpacing.Minimum, 0 without readings), which their carousels then show in turn; all with the gaps between
+    // them. A clock alone, or rings alone, so make a short surface. In whole DIPs, rounded up, so rounding never takes a part away.
+    public static double RequiredWidth(double scale, bool media, bool text, double clockFace, double ring = 0, double reading = 0)
+    {
+        double s = SafeScale(scale), gap = Gap(s), width = 0;
+        int parts = 0;
+        void Add(double part) { if (part <= 0) return; width += part; parts++; }
+        if (media) { Add(Math.Max(1, Whole(20 * s))); Add(Math.Max(1, Whole(18 * s))); if (text) Add(Whole(MinimumText * s)); }
+        Add(Safe(ring)); Add(Safe(reading)); Add(Safe(clockFace));
+        return parts == 0 ? 0 : Math.Ceiling(width + (parts - 1) * gap - 1e-9);
+    }
 
     // The width an auto-width row keeps for the lyric or the title at scale 1. It does not follow the text, so the surface
     // keeps its width from line to line; a longer line scrolls in it.
@@ -109,8 +131,13 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // The width a row with this content takes without cutting or rotating anything: the cover, every ring, the lyric's fixed
     // slot, the system readings, the equalizer and the clock, with their gaps. An auto-width surface takes it
-    // (CollapsedGeometry.Resolve).
-    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
+    // (CollapsedGeometry.Resolve). dpi (device pixels per DIP, 0 for none): the width is rounded up to whole device pixels. The row
+    // is laid out in whole device pixels, rounded down (DevicePixels.Down), so a width with a fraction left in it (a clock face
+    // that is not a whole number of DIPs) would leave the readings a fraction short of the room they asked for, and they would scroll.
+    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double dpi = 0)
+        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace);
+
+    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
     {
         double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace);
         rings = Math.Max(0, rings);

@@ -56,5 +56,68 @@ internal static class MediaRoutingTests
             && MediaRouting.PreferSystem(logFull with { Title = "Song\u3000A" }, smtcFirst with { Title = "\uFF33\uFF4F\uFF4E\uFF47 A" }).HasTimeline);
         check("A different song keeps the log's timeline out", !MediaRouting.PreferSystem(logFull, smtcFirst with { Title = "\u6625\u96EA\u4E4B\u540E" }).HasTimeline
             && !MediaRouting.PreferSystem(logFull, smtcFirst with { Artist = "\u5176\u4ED6" }).HasTimeline);
+
+        // Measured: Apple Music reports "<artist> \u2014 <album>" as the artist with an empty album.
+        const string apple = "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App";
+        check("Apple Music's artist field is split into artist and album",
+            MediaRouting.SessionArtistAlbum(apple, "\u4F0D\u4F70 & China Blue \u2014 \u6CEA\u6865 (\"Rock Star 1\" Live) - Single", "")
+                == ("\u4F0D\u4F70 & China Blue", "\u6CEA\u6865 (\"Rock Star 1\" Live) - Single"));
+        check("Only the first dash ends Apple Music's artist",
+            MediaRouting.SessionArtistAlbum(apple, "Artist \u2014 Album \u2014 Deluxe", "") == ("Artist", "Album \u2014 Deluxe"));
+        check("Apple Music's artist without a dash or with an album is kept",
+            MediaRouting.SessionArtistAlbum(apple, "Artist", "") == ("Artist", "")
+            && MediaRouting.SessionArtistAlbum(apple, "Artist \u2014 Album", "Album") == ("Artist \u2014 Album", "Album"));
+        check("Other players' artists are not split",
+            MediaRouting.SessionArtistAlbum("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "Artist \u2014 Album", "") == ("Artist \u2014 Album", ""));
+
+        // Measured: Apple Music reported 2.000 at :57.677, again 2.000 at :58.219, then 3.000 at :58.433.
+        var t0 = new DateTimeOffset(2026, 10, 25, 23, 40, 57, 677, TimeSpan.Zero);
+        var known = new MediaTrack { Title = "Song", Artist = "Artist", State = MediaState.Playing, PositionKnown = true,
+            End = TimeSpan.FromSeconds(245), ReportedPosition = TimeSpan.FromSeconds(2), PositionAt = t0 };
+        MediaTrack Report(MediaTrack track, int seconds, DateTimeOffset at) => track with { ReportedPosition = TimeSpan.FromSeconds(seconds), PositionAt = at };
+        var (first, span) = MediaRouting.FromWholeSeconds(null, known);
+        check("A first whole-second report is taken from the middle of its second", first.Position(t0) == TimeSpan.FromSeconds(2.5));
+        (_, span) = MediaRouting.FromWholeSeconds(span, Report(known, 2, t0.AddMilliseconds(542)));
+        var (third, narrowed) = MediaRouting.FromWholeSeconds(span, Report(known, 3, t0.AddMilliseconds(756)));
+        // The three reports place the start between :55.219 and :55.433.
+        check("Whole-second reports narrow where the song started", narrowed!.Earliest == t0.AddMilliseconds(-2458) && narrowed.Latest == t0.AddMilliseconds(-2244)
+            && Math.Abs((third.Position(t0.AddSeconds(1)) - TimeSpan.FromSeconds(3.351)).TotalMilliseconds) < 1);
+
+        // Measured 2026-10-26: the reports of 122 to 130 seconds place the song at 124 between 11:53:32.352 and 11:53:32.629.
+        var day = new DateTimeOffset(2026, 10, 26, 11, 53, 0, TimeSpan.Zero);
+        (int Seconds, double At)[] reports = [(122, 31.301), (123, 31.844), (123, 32.125), (124, 32.665), (124, 33.212), (125, 33.737), (125, 34.272), (126, 34.811),
+            (126, 35.352), (127, 35.629), (127, 36.169), (128, 36.712), (128, 37.240), (129, 37.786), (129, 38.324), (130, 38.870)];
+        MediaRouting.WholeSecondStart? measured = null; MediaTrack estimate = known;
+        foreach (var (seconds, at) in reports) (estimate, measured) = MediaRouting.FromWholeSeconds(measured, Report(known, seconds, day.AddSeconds(at)));
+        var at124 = day.AddSeconds(32.352) + (day.AddSeconds(32.629) - day.AddSeconds(32.352)) / 2;
+        check("Measured whole-second reports place the song within a seventh of a second",
+            (measured!.Latest - measured.Earliest) <= TimeSpan.FromSeconds(0.28) && Math.Abs((estimate.Position(at124.AddSeconds(7)) - TimeSpan.FromSeconds(131)).TotalSeconds) < 0.15);
+        check("A report outside the span is a seek and starts a new one",
+            MediaRouting.FromWholeSeconds(measured, Report(known, 10, day.AddSeconds(39))).Start is { } seek && seek.Latest - seek.Earliest == TimeSpan.FromSeconds(1));
+        check("A paused, different, untimed or fractional report is taken as reported",
+            MediaRouting.FromWholeSeconds(measured, known with { State = MediaState.Paused }) is ({ } stopped, null) && stopped == known with { State = MediaState.Paused }
+            && MediaRouting.FromWholeSeconds(measured, Report(known with { Title = "Other" }, 130, day.AddSeconds(39))).Start!.Latest - day.AddSeconds(39 - 130) == TimeSpan.Zero
+            && MediaRouting.FromWholeSeconds(measured, known with { PositionKnown = false }).Start is null
+            && MediaRouting.FromWholeSeconds(measured, known with { ReportedPosition = TimeSpan.FromSeconds(2.4) }).Start is null);
+        // Measured on the Traditional Chinese interface: off and all share a glyph, one has its own.
+        string loop = AppleMusicRepeat.RepeatGlyph, one = AppleMusicRepeat.RepeatOneGlyph;
+        var traditional = new AppleMusicRepeat();
+        check("Apple Music's repeat states are read from the measured names and glyphs",
+            traditional.Observe(loop, "不要重複") == MediaRepeat.None && traditional.Observe(loop, "全部重複") == MediaRepeat.List
+            && traditional.Observe(one, "重複單首歌曲") == MediaRepeat.Track && traditional.Observe("?", "x") is null);
+        var english = new AppleMusicRepeat();
+        bool unknownFirst = english.Observe(loop, "Repeat Off") is null;
+        english.Observe(loop, "Repeat All"); english.Observe(one, "Repeat One");
+        check("Apple Music's repeat names in another language are learnt from the cycle",
+            unknownFirst && english.Observe(loop, "Repeat Off") == MediaRepeat.None && english.Observe(loop, "Repeat All") == MediaRepeat.List);
+        var paused = known with { State = MediaState.Paused, ReportedPosition = TimeSpan.FromSeconds(1), PositionAt = t0.AddMilliseconds(80) };
+        check("The pause Apple Music reports right after a seek is passed over",
+            MediaRouting.SettlingAfterSeek(known, paused, t0, t0.AddMilliseconds(100)));
+        check("A pause after the settling time, without a seek, or on another song is shown",
+            !MediaRouting.SettlingAfterSeek(known, paused, t0, t0 + MediaRouting.SeekSettle) && !MediaRouting.SettlingAfterSeek(known, paused, null, t0)
+            && !MediaRouting.SettlingAfterSeek(known, paused with { Title = "Other" }, t0, t0.AddMilliseconds(100))
+            && !MediaRouting.SettlingAfterSeek(known with { State = MediaState.Paused }, paused, t0, t0.AddMilliseconds(100)));
+        check("Apple Music is recognized by its application id",
+            MediaRouting.IsAppleMusic(apple) && !MediaRouting.IsAppleMusic("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"));
     }
 }

@@ -9,12 +9,14 @@ public sealed record LyricLine(double Seconds, string Text);
 public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string Source, bool Instrumental = false)
 {
     public static Lyrics Empty { get; } = new([], true, "");
+    // Apple Music's lines are shown this many seconds before they are sung, so that a line can be read as it starts.
+    public const double AppleLead = 0.2;
     public bool QqPreview { get; init; }
     public bool CanSynchronize(MediaTrack track) => Synced && track.HasTimeline;
     public (string Previous, string Current, string Next) At(MediaTrack track, DateTimeOffset now)
     {
         if (!CanSynchronize(track)) return ("", "", "");
-        if (!QqPreview || !track.IsQqMusic) return At(track.Position(now).TotalSeconds);
+        if (!QqPreview || !track.IsQqMusic) return At(track.Position(now).TotalSeconds + (track.IsAppleMusic ? AppleLead : 0));
         // A preview can start at zero or inside the song. QQ's actual current line and
         // full-song karaoke timestamp locate it without guessing from the clip metadata.
         string text = track.CurrentLyric ?? "";
@@ -82,8 +84,11 @@ public sealed partial class LyricsService : IDisposable
     // A lyric reply is a few kilobytes; a larger one is given up rather than read into memory.
     public const int MaxResponseBytes = 2 * 1024 * 1024;
     private const int MaxRedirects = 2;
-    public LyricsService(HttpClient? http = null)
+    // appleLyricsFile keeps which Apple Music lyrics each song was matched to; none keeps it only in memory.
+    public LyricsService(HttpClient? http = null, Func<IEnumerable<string>>? appleCacheRoots = null, string? appleLyricsFile = null)
     {
+        _appleCacheRoots = appleCacheRoots ?? AppleCacheRoots;
+        _appleLyricsFile = appleLyricsFile; _appleLyricsIds = LoadAppleLyricsIds(appleLyricsFile);
         _ownsHttp = http is null;
         // Redirects are followed by Get, only to HTTPS on the same host.
         _http = http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(8) };
@@ -97,11 +102,18 @@ public sealed partial class LyricsService : IDisposable
         try
         {
             string cacheKey = string.Join("\n", track.Source, track.SongId, track.SongKey);
-            if (_cache.TryGetValue(cacheKey, out var cached))
-            { _order.Remove(cacheKey); _order.AddLast(cacheKey); return cached; }
+            // A third-party result for Apple Music is kept only until Apple Music caches its own lyrics.
+            bool hit = _cache.TryGetValue(cacheKey, out var cached);
+            if (hit && (!track.IsAppleMusic || cached!.Source == AppleSource))
+            { _order.Remove(cacheKey); _order.AddLast(cacheKey); return cached!; }
             var lyrics = Lyrics.Empty;
             // QQ tracks must stay within QQ, including when lookup fails or metadata is incomplete.
             if (track.IsQqMusic) lyrics = await FindQq(track, token);
+            else if (track.IsAppleMusic)
+            {
+                lyrics = await FindApple(track, token);
+                if (!lyrics.Synced || lyrics.Lines.Count == 0) lyrics = hit ? cached! : await FindAppleFallback(track, lyrics, token);
+            }
             else
             {
                 if (track.SongId.StartsWith("netease:", StringComparison.Ordinal))
@@ -113,7 +125,7 @@ public sealed partial class LyricsService : IDisposable
             // An empty result can be a temporary provider failure. Do not keep it for the entire app session.
             if (lyrics.Lines.Count > 0 || lyrics.Instrumental)
             {
-                _cache[cacheKey] = lyrics; _order.AddLast(cacheKey);
+                _cache[cacheKey] = lyrics; _order.Remove(cacheKey); _order.AddLast(cacheKey);
                 while (_order.Count > 80) { _cache.Remove(_order.First!.Value); _order.RemoveFirst(); }
             }
             return lyrics;
@@ -182,8 +194,10 @@ public sealed partial class LyricsService : IDisposable
     private static string Str(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
     private static double Num(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) ? number : 0;
     private static string Normalize(string value) => Regex.Replace(value, @"[\s\p{P}\p{S}]", "").ToUpperInvariant();
+    // Apple Music shows names in the storefront's script (李耀陽); the other providers may use another (李耀阳).
+    private static string MatchText(MediaTrack track, string value) => Normalize(track.IsAppleMusic ? SimplifyAppleText(value) : value);
     private static bool Matches(MediaTrack track, string title, string artist, double seconds)
-        => Normalize(track.Title) == Normalize(title) && Regex.Split(track.Artist, @"\s*[/、,，&;；]\s*").Where(a => a.Length > 0).All(a => Normalize(artist).Contains(Normalize(a), StringComparison.Ordinal))
+        => MatchText(track, track.Title) == MatchText(track, title) && Regex.Split(track.Artist, @"\s*[/、,，&;；]\s*").Where(a => a.Length > 0).All(a => MatchText(track, artist).Contains(MatchText(track, a), StringComparison.Ordinal))
             && (track.Duration.TotalSeconds <= 0 || Math.Abs(seconds - track.Duration.TotalSeconds) <= 2);
     private async Task<Lyrics> FindNeteaseId(string id, double duration, CancellationToken token)
     {
@@ -222,5 +236,9 @@ public sealed partial class LyricsService : IDisposable
         }
         return Lyrics.Empty;
     }
-    public void Dispose() { if (_ownsHttp) _http.Dispose(); }
+    public void Dispose()
+    {
+        if (_ownsHttp) _http.Dispose();
+        foreach (var watcher in _appleWatchers.Values) watcher.Dispose();
+    }
 }

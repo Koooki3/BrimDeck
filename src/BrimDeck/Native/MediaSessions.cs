@@ -31,6 +31,10 @@ internal sealed class MediaSessions : IDisposable
         public readonly MediaSwapGuard Guard = new();
         public MediaTrack? Shown = heir?.Shown ?? heir?.Track;
         public BitmapSource? ShownCover = heir?.ShownCover ?? heir?.Cover;
+        // When BrimDeck last moved this session's position through the window controls (MediaRouting.SettlingAfterSeek).
+        public DateTimeOffset? SeekAt;
+        // Where Apple Music's whole-second reports place the playing song's start (MediaRouting.FromWholeSeconds).
+        public MediaRouting.WholeSecondStart? WholeSeconds;
     }
     private sealed class CoverCache
     {
@@ -50,6 +54,7 @@ internal sealed class MediaSessions : IDisposable
     private readonly MediaPlaybackStack _stack = new();
     private readonly AudioLevelMeter _meter = new();
     private readonly IMediaPlayerConnection[] _connections;
+    private readonly AppleMusicControls? _appleMusic;
     private readonly HttpClient _coverHttp = new() { Timeout = TimeSpan.FromSeconds(6) };
     private readonly Dictionary<Session, SystemSource> _sessions = new();
     private readonly Dictionary<string, CoverCache> _covers = new();
@@ -75,6 +80,7 @@ internal sealed class MediaSessions : IDisposable
     public bool NeteaseRunning => Netease?.ProcessId is not null;
     public bool NeteaseFullControl => Netease is { ProcessId: not null, IsLogMode: false };
     private NeteaseSource? Netease => _connections.OfType<NeteaseSource>().FirstOrDefault();
+    public bool NeteaseAutoFullControl { set { if (Netease is { } source) source.AutoFullControl = value; } }
     public async Task<bool> EnableFullControlAsync(bool quiet = false)
     {
         var source = Netease;
@@ -104,7 +110,24 @@ internal sealed class MediaSessions : IDisposable
         _recheck = new PromptTimer(dispatcher, () => { _recheck!.Stop(); Schedule(); }) { Interval = TimeSpan.FromSeconds(1) };
         _debounce.Stop(); _poll.Stop(); _recheck.Stop();
         foreach (var connection in _connections) connection.Changed += Schedule;
+        if (connectPlayers) { _appleMusic = new AppleMusicControls(); _appleMusic.Changed += AppleMusicChanged; }
     }
+    // Apple Music's shuffle, repeat and seeking through the controls of its window (AppleMusicControls), enabled from the
+    // music page's "Enable full control" entry after its explanation. It lasts while BrimDeck runs and is not saved, so the
+    // entry and its explanation come back after a restart, unless the setting AppleMusicFullControl enables it at start.
+    public bool AppleMusicFullControl { get; private set; }
+    public void EnableAppleMusicFullControl()
+    {
+        if (_appleMusic is null) return;
+        AppleMusicFullControl = true;
+        // The window's controls are read at once instead of at the next session event.
+        _appleMusic.Refresh(now: true); AppleMusicChanged();
+    }
+    private void AppleMusicChanged() => _dispatcher.BeginInvoke(() =>
+    {
+        foreach (var source in _sessions.Values.Where(s => MediaRouting.IsAppleMusic(s.App))) source.Dirty = true;
+        Schedule();
+    });
     public async Task StartAsync()
     {
         foreach (var connection in _connections) await connection.StartAsync();
@@ -442,7 +465,8 @@ internal sealed class MediaSessions : IDisposable
             if (metadata)
             {
                 var properties = await source.Session.TryGetMediaPropertiesAsync();
-                var updated = track with { Title = properties.Title ?? "", Artist = properties.Artist ?? "", Album = properties.AlbumTitle ?? "" };
+                var (artist, album) = MediaRouting.SessionArtistAlbum(source.App, properties.Artist ?? "", properties.AlbumTitle ?? "");
+                var updated = track with { Title = properties.Title ?? "", Artist = artist, Album = album };
                 if (!MediaRouting.SameSong(track, updated)) { cover = null; coverBytes = null; }
                 track = updated;
                 if (properties.Thumbnail is { } thumbnail)
@@ -476,7 +500,7 @@ internal sealed class MediaSessions : IDisposable
                 timeline.Position >= timeline.StartTime && timeline.Position <= timeline.EndTime;
             if (_disposed || revision != source.Revision) return;
             source.Cover = cover; source.CoverBytes = coverBytes;
-            source.Track = track with
+            var read = track with
             {
                 Id = source.Id, State = state, Source = SourceName(source.Session.SourceAppUserModelId),
                 PositionKnown = known, Start = timeline.StartTime, End = timeline.EndTime,
@@ -488,6 +512,20 @@ internal sealed class MediaSessions : IDisposable
                 CanShuffle = controls.IsShuffleEnabled, CanRepeat = controls.IsRepeatEnabled, Shuffle = playback.IsShuffleActive == true,
                 Repeat = playback.AutoRepeatMode switch { MediaPlaybackAutoRepeatMode.Track => MediaRepeat.Track, MediaPlaybackAutoRepeatMode.List => MediaRepeat.List, _ => MediaRepeat.None }
             };
+            if (MediaRouting.IsAppleMusic(source.App))
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (source.Track is { } settling && MediaRouting.SettlingAfterSeek(settling, read, source.SeekAt, now))
+                    read = read with { State = MediaState.Playing, Start = settling.Start, ReportedPosition = settling.ReportedPosition, PositionAt = settling.PositionAt };
+                else (read, source.WholeSeconds) = MediaRouting.FromWholeSeconds(source.WholeSeconds, read);
+                // The session offers no shuffle, repeat or seeking; with full control the window's controls stand in while
+                // they are found.
+                if (AppleMusicFullControl) _appleMusic?.Refresh();
+                if (AppleMusicFullControl && _appleMusic?.Latest is { } window)
+                    read = read with { CanShuffle = true, Shuffle = window.Shuffle, CanRepeat = true, Repeat = window.Repeat,
+                        CanSeek = read.HasTimeline && window.CanSeek, SeparateModes = true };
+            }
+            source.Track = read;
         }
         catch (Exception ex)
         {
@@ -540,6 +578,8 @@ internal sealed class MediaSessions : IDisposable
         var state = current.State;
         try
         {
+            if (command is MediaCommand.Shuffle or MediaCommand.Repeat && current.SeparateModes && _appleMusic is { } apple)
+                return await (command == MediaCommand.Shuffle ? apple.ToggleShuffleAsync() : apple.CycleRepeatAsync()).WaitAsync(TimeSpan.FromSeconds(3));
             return await MediaRouting.DispatchAsync(async () => route.Connection is { } connection
                 ? DispatchResult(await connection.CommandAsync(command, state))
                 : MediaDispatchResult.Unavailable,
@@ -596,13 +636,22 @@ internal sealed class MediaSessions : IDisposable
         if (current is null || !MediaRouting.SameSong(current, track) || !SameKnownId(track.SongId, current.SongId)) return false;
         if (route.Connection?.Snapshot is { } snapshot &&
             (!MediaRouting.SameSong(track, FromDesktop(snapshot)) || !SameKnownId(track.SongId, snapshot.SongId))) return false;
+        if (route.Connection is null && route.System is { } apple && MediaRouting.IsAppleMusic(apple.App))
+        {
+            // The pause Apple Music reports after the seek is not shown; once the time is over the session is read again.
+            apple.SeekAt = DateTimeOffset.UtcNow;
+            _ = Task.Delay(MediaRouting.SeekSettle + TimeSpan.FromMilliseconds(50)).ContinueWith(_ => _dispatcher.BeginInvoke(() =>
+            { if (!_disposed) { apple.Dirty = true; Schedule(); } }), TaskScheduler.Default);
+        }
         try
         {
             return await MediaRouting.DispatchAsync(async () => route.Connection is { } connection
                 ? DispatchResult(await connection.SeekAsync(TimeSpan.FromTicks(current.SeekTicks(fraction))))
                 : MediaDispatchResult.Unavailable,
                 async () => route.Connection is null && route.System?.Track is { CanSeek: true } system && MediaRouting.SameSong(track, system) &&
-                    await route.System.Session.TryChangePlaybackPositionAsync(system.SeekTicks(fraction)).AsTask().WaitAsync(TimeSpan.FromSeconds(2)));
+                    (MediaRouting.IsAppleMusic(route.System.App) && _appleMusic is { } apple
+                        ? await apple.SeekAsync(TimeSpan.FromTicks(system.SeekTicks(fraction)) - system.Start).WaitAsync(TimeSpan.FromSeconds(3))
+                        : await route.System.Session.TryChangePlaybackPositionAsync(system.SeekTicks(fraction)).AsTask().WaitAsync(TimeSpan.FromSeconds(2))));
         }
         catch { return false; }
         finally { Invalidate(route); }

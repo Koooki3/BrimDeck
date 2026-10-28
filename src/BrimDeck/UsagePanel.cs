@@ -239,9 +239,9 @@ public partial class MainWindow
             AutomationProperties.SetName(button, item.Name);
             strip.Children.Add(button);
         }
-        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        if (glide is null) return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
         var shift = new TranslateTransform();
-        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(5), HorizontalAlignment = HorizontalAlignment.Left,
+        var fill = new Border { Background = UI.Brush(UI.FillSelected), CornerRadius = new CornerRadius(PanelTheme.Corner(5)), HorizontalAlignment = HorizontalAlignment.Left,
             IsHitTestVisible = false, RenderTransform = shift, Visibility = Visibility.Hidden };
         var host = new Grid { Children = { fill, strip } };
         int chosen = items.ToList().FindIndex(item => item.Active);
@@ -258,7 +258,7 @@ public partial class MainWindow
             shift.BeginAnimation(TranslateTransform.XProperty, Soft.Fade(was.X, x, Soft.Choose, Soft.Follow));
             fill.BeginAnimation(FrameworkElement.WidthProperty, Soft.Fade(was.Width, width, Soft.Choose, Soft.Follow));
         };
-        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        return new Border { Child = host, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
     }
     // Where each gliding strip's fill was last, by its key.
     private static readonly Dictionary<string, (double X, double Width, long At)> SegmentFills = [];
@@ -448,7 +448,7 @@ public partial class MainWindow
         var text = UI.Centered(UI.DisplayPlan(snapshot.Plan), layout.Plan, UI.Tertiary);
         return new Border
         {
-            Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
+            Child = text, BorderBrush = UI.Brush(UI.Outline), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(PanelTheme.Corner(4)),
             Padding = new Thickness(layout.Tier >= Tier.Dense ? 4 : 5, 0, layout.Tier >= Tier.Dense ? 4 : 5, 0), Margin = new Thickness(6, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center
         };
@@ -460,7 +460,7 @@ public partial class MainWindow
     private static Grid QuotaBlock(AppEntry entry, UsageMetric quota, Layout layout, int slot)
     {
         double used = Math.Clamp(quota.UsedPercent ?? 100, 0, 100);
-        string color = quota.UsedPercent is null ? PanelTheme.AppTheme(entry) : PanelTheme.QuotaColor(entry, used);
+        string color = quota.UsedPercent is null ? PanelTheme.QuotaTheme(entry) : PanelTheme.QuotaColor(entry, used);
         int level = quota.UsedPercent is null ? 0 : AppPresets.Level(used);
         var block = new Grid();
         foreach (double height in new[] { layout.LabelRow, layout.RowGap, layout.NumberRow, layout.RowGap, layout.Track })
@@ -494,21 +494,28 @@ public partial class MainWindow
         bool expiryAbove = resetText.Length > 0 && expiryText.Length > 0;
         // A custom item places its own strings in the same two spots.
         bool text = quota.Kind == MetricKind.Text;
-        var upperText = text ? quota.Note : expiryAbove ? expiryText : sideText;
+        // An account balance in a row with off-peak time takes both spots: peak or off-peak now above, the time to the next
+        // switch below. The panel is drawn again each minute, so the countdown stays current.
+        var clock = DateTime.Now;
+        bool offPeak = quota.Kind == MetricKind.Balance && quota.Label == "账户余额" && entry.OffPeak.Count > 0, offPeakNow = offPeak && entry.IsOffPeak(clock);
+        var change = offPeak ? entry.NextOffPeakChange(clock) : null;
+        var upperText = text ? quota.Note : offPeak ? (offPeakNow ? Loc.T("低峰时段", "Off-peak") : Loc.T("高峰时段", "Peak")) : expiryAbove ? expiryText : sideText;
         if (upperText.Length > 0)
         {
             var reset = UI.Fixed(upperText, layout.Reset, layout.LabelRow, UI.Tertiary);
             reset.HorizontalAlignment = HorizontalAlignment.Right; reset.Margin = new Thickness(6, 0, 0, 0);
-            reset.ToolTip = text ? null : expiryAbove ? quota.ExpiresAt!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
+            reset.ToolTip = text ? null : offPeak ? OffPeakTooltip(entry) : expiryAbove ? quota.ExpiresAt!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
                 : countText.Length > 0 ? CountTooltip(quota) : MetricPercentTooltip(quota);
             Grid.SetColumn(reset, 1); labelRow.Children.Add(reset);
         }
-        var rightText = text ? quota.ResetText : resetText.Length > 0 ? resetText : expiryText;
+        var rightText = text ? quota.ResetText : offPeak ? (change is { } next ? Loc.T(UI.ShortReset(next) + "切换", "switches " + UI.ShortReset(next)) : "")
+            : resetText.Length > 0 ? resetText : expiryText;
         if (rightText.Length > 0)
         {
             var right = UI.Line(rightText, layout.Reset, UI.Tertiary);
             right.FontFamily = UI.PanelFont;
-            right.ToolTip = text ? null : (quota.ResetAt ?? quota.ExpiresAt)!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+            right.ToolTip = text ? null : offPeak ? Loc.T($"{change:yyyy-MM-dd HH:mm} 转为" + (offPeakNow ? "高峰时段" : "低峰时段"), (offPeakNow ? "Peak" : "Off-peak") + $" from {change:yyyy-MM-dd HH:mm}")
+                : (quota.ResetAt ?? quota.ExpiresAt)!.Value.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
             right.VerticalAlignment = VerticalAlignment.Bottom; right.HorizontalAlignment = HorizontalAlignment.Right;
             right.Margin = new Thickness(6, 0, 0, 1); Grid.SetColumn(right, 1); numbers.Children.Add(right);
         }
@@ -517,6 +524,10 @@ public partial class MainWindow
         block.Children.Add(track);
         return block;
     }
+
+    // The row's off-peak periods, written as the settings write them.
+    private static string OffPeakTooltip(AppEntry entry) => Loc.T("低峰时间：", "Off-peak time: ") + string.Join(Loc.T("、", ", "), entry.OffPeak.Select(period =>
+        OffPeakPeriod.Format(period.Start) + " – " + (period.End <= period.Start ? Loc.T("次日 ", "next day ") : "") + OffPeakPeriod.Format(period.End)));
 
     // A rounded share hides small usage of a large grant, so counts show the exact amounts.
     private static string? CountTooltip(UsageMetric metric)

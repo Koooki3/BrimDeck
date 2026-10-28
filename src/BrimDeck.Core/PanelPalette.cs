@@ -21,7 +21,18 @@ public sealed record PanelThemeAdjustment(string Key, string Before, string Afte
 }
 
 public sealed record PanelThemeEffectValues(IReadOnlyList<ThemeColor> SurfaceGradient, IReadOnlyList<ThemeColor> RimGradient, double RimWidth,
-    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines);
+    double ShadowBlur, double ShadowDepth, double ShadowOpacity, double Scanlines, double Pixel = 0, double Texture = 0, PanelDecor? Decor = null);
+
+// A theme's motifs (PanelThemeDecor, fitted); null parts are not drawn.
+public sealed record PanelDecor(PanelHorizon? Horizon, ThemeColor? Caustics, ThemeColor? Palm)
+{
+    public bool Any => Horizon is not null || Caustics is not null || Palm is not null;
+}
+public sealed record PanelHorizon(double At, ThemeColor Sea, ThemeColor? Line)
+{
+    // The sea deepens from Sea at the horizon to this at the bottom, as open water does away from the light.
+    public ThemeColor Deep => Sea with { R = (byte)(Sea.R * .9), G = (byte)(Sea.G * .92), B = (byte)(Sea.B * .95) };
+}
 
 // A theme ready to draw: every token has a color, every effect a value, and the contrast rules hold (see PanelThemes.Build).
 public sealed class PanelPalette
@@ -38,8 +49,10 @@ public sealed class PanelPalette
     {
         Id = id; _colors = colors; _apps = apps; Effects = effects; Adjustments = adjustments; Clock = clock; _swatches = swatches;
         WrittenColors = writtenColors; WrittenApps = writtenApps;
-        SurfaceStops = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface))];
-        IsDark = SurfaceStops.Average(stop => stop.Luminance) < .18;
+        List<ThemeColor> plain = [Surface, .. effects.SurfaceGradient.Select(stop => stop.Over(Surface)), .. PanelThemes.TextureStops(effects, colors, Surface)];
+        SurfaceStops = [.. plain, .. PanelThemes.DecoratedStops(effects, colors, Surface)];
+        // Dark or light by the surface itself, its gradient and its texture; the motifs drawn into it do not change which.
+        IsDark = plain.Average(stop => stop.Luminance) < .18;
     }
 
     public string Id { get; }
@@ -52,12 +65,19 @@ public sealed class PanelPalette
     public IReadOnlyDictionary<string, ThemeColor> WrittenApps { get; }
     public ThemeColor this[string key] => _colors[key];
     public ThemeColor Surface => _colors["surface"];
-    // The surface and every gradient stop: text must read on each of them.
+    // The surface, every gradient stop and a texture's lightest and darkest squares: text must read on each of them.
     public IReadOnlyList<ThemeColor> SurfaceStops { get; }
+    // The opacity the scroll bar's handle rests at while the pointer is elsewhere (App.xaml): faint, at ThumbRest, where the
+    // thumb still reaches its 2:1 on every surface stop there, else just as much more as it takes.
+    public double ThumbRestOpacity => _thumbRest ??= PanelThemes.ThumbRestOpacity(this["scrollThumb"], SurfaceStops);
+    private double? _thumbRest;
     public bool IsDark { get; }
 
     public PanelThemeEffectValues Effects { get; }
-    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0;
+    // A textured or decorated surface, like a gradient, has no single color to fade text into.
+    public bool HasOverlay => Effects.SurfaceGradient.Count > 0 || Effects.Scanlines > 0 || Effects.Texture > 0 || Effects.Decor is not null;
+    // Whether this is a theme's night look (PanelThemes.Resolve).
+    public bool IsNight { get; init; }
     public IReadOnlyList<PanelThemeAdjustment> Adjustments { get; }
 
     // The theme's default color for an application column. The dark theme names every source, and every theme builds on it.

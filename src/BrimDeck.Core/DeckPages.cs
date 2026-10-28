@@ -4,15 +4,17 @@ namespace BrimDeck.Core;
 // and which page the panel falls back to. The panel and the settings window ask here instead of comparing pages themselves.
 public static class DeckPages
 {
-    // The page switch, left to right.
+    // The page switch, left to right, until the order is changed in the settings (DeckSettings.PageOrder).
     public static readonly IReadOnlyList<DeckPage> Order = [DeckPage.Usage, DeckPage.Music, DeckPage.Monitor];
+    // Each known page once, in the saved order; a page missing from the file takes its default place after the others.
+    public static List<DeckPage> Normalize(IEnumerable<DeckPage>? order) => [.. (order ?? []).Where(page => Enum.IsDefined(page)).Concat(Order).Distinct()];
 
     public static bool Shown(DeckSettings settings, DeckPage page) => page switch
     {
         DeckPage.Usage => settings.UsagePage, DeckPage.Music => settings.MusicPage, DeckPage.Monitor => settings.MonitorPage, _ => false
     };
 
-    public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => Order.Where(page => Shown(settings, page)).ToList();
+    public static IReadOnlyList<DeckPage> Visible(DeckSettings settings) => settings.PageOrder.Where(page => Shown(settings, page)).ToList();
 
     // The page shown when wanted is asked for: wanted while it is shown, otherwise the first shown page in switch order.
     // With every page switched off it is the usage page, which then says that it is off.
@@ -26,7 +28,10 @@ public static class DeckPages
     };
 
     // Every page's size lies within these; the usage page is also at least as wide as its columns need (MinimumWidth).
+    // Sizes are before the scale (PanelScales): drawn at 150 %, a page of the largest size is 1800 x 600 DIP.
     public const double MinWidth = 440, MaxWidth = 1200, MinHeight = 140, MaxHeight = 400;
+    // The widest a page can be on a monitor with this work area: drawn at the scale, the work area's width less 12 DIP each side.
+    public static double MaxWidthOn(double workWidth, double scale = 1) => Math.Max(MinWidth, Math.Min(MaxWidth, Math.Floor((workWidth - 24) / scale)));
 
     public static (double MinWidth, double MaxWidth, double MinHeight, double MaxHeight) Limits(DeckSettings settings, DeckPage page)
         => (page == DeckPage.Usage ? Math.Max(MinWidth, settings.MinimumWidth) : MinWidth, MaxWidth, MinHeight, MaxHeight);
@@ -58,4 +63,13 @@ public static class DeckPages
         var pages = Visible(settings) is { Count: > 0 } visible ? visible : [DeckPage.Usage];
         return (pages.Max(page => Size(settings, page).Width), pages.Max(page => Size(settings, page).Height));
     }
+}
+
+// The scale BrimDeck is drawn at (DeckSettings.PanelScale), in percent: one of Choices; any other value is the default.
+public static class PanelScales
+{
+    public const int Default = 100;
+    public static readonly IReadOnlyList<int> Choices = [100, 150];
+    public static int Fit(int percent) => Choices.Contains(percent) ? percent : Default;
+    public static double Factor(DeckSettings settings) => Fit(settings.PanelScale) / 100d;
 }

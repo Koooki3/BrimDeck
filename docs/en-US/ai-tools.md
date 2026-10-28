@@ -18,13 +18,22 @@ The same tool can appear in several columns. It is read only once, and totals ar
 | ZCode | ✓ | ✓ | Sign in to ZCode on this PC |
 | DeepSeek Harness | ✓ | ✓ | Sign in to a DeepSeek account in the DeepSeek Harness desktop app or local web app, or save an API key there |
 | Kimi Code | ✓ | ✓ | Sign in to Kimi Code (CLI, desktop app or VS Code extension) on this PC |
+| OpenCode | ✓ | ✓ | Quota: sign in to OpenCode Console in OpenCode (CLI or desktop app) on this PC, with an OpenCode Go plan on the workspace. Usage only needs OpenCode to be used on this PC |
 | Zhipu GLM, Z.ai GLM | ✓ | | Enter an API key in settings |
 | DeepSeek | ✓ | | Enter an API key in settings |
 | Kimi Code API | ✓ | | Enter a Kimi Code API key in settings |
+| OpenCode Go | ✓ | | Enter an OpenCode Console API key in settings |
+| OpenRouter | ✓ | | Enter an OpenRouter API key in settings |
 | New API, Sub2API relay sites | ✓ | | Enter the site address and key in settings |
 | Custom | ✓ | | Write a short JavaScript script |
 
 Sources you enter by hand and Grok Bot have no local usage records; choose another tool as the usage app for Today and Week.
+
+## Cost estimates
+
+When a record carries its own amount (Cursor and OpenCode, for example), that amount is used. Other records are costed at the prices in the OpenRouter model list.
+
+A price in that list usually comes from the cheapest provider and can differ from the model maker's list price. For example, GLM-5.3 is listed at 0.07 and 1.4 USD per million input and output tokens, while Z.AI charges 1.4 and 4.4. So for each model your records use, BrimDeck looks up the model maker's own endpoint on OpenRouter and uses its prices instead; a model whose maker has no endpoint there keeps the list price. Each model's endpoint prices are looked up once a day and saved on this PC; when a lookup fails, the prices saved before are used. Prices added by hand take precedence.
 
 ## Usage in WSL
 
@@ -37,7 +46,7 @@ When "Include usage from WSL" is turned on in Settings › Quotas and usage, Bri
 
 Rows whose quota source is Claude or Grok Bot can be expanded, and each row has its own "Fetch quota online" switch (on by default):
 
-- **On**: the app's sign-in on this PC is used to read the account quota online. If a read fails, the last successful reading or the quota the desktop app recorded on this PC is shown, with its time.
+- **On**: the app's sign-in on this PC is used to read the account quota online. If a read fails, the last successful reading or the quota the desktop app recorded on this PC is shown, with its time. For Claude it is still shown after restarting BrimDeck, for the same account. When Claude's account API answers that there are too many requests (429), requests pause for the wait it names (a wait over 7 days is taken as invalid), or for 2, 4, 8 and 16 minutes in turn (30 at most) when it names none. No request goes out each minute during the pause, a manual refresh does not go round it, and the status gives the time of the next request.
 - **Off**: no sign-in is read and nothing is sent; only the latest quota the desktop app recorded on this PC is shown. This data is marked as old and does not trigger quota alerts.
 
 ## Grok Bot
@@ -65,9 +74,19 @@ Kimi Code CLI, the desktop app and the VS Code extension share one data folder a
 - **Service address**: follows Kimi Code's settings. When `KIMI_CODE_BASE_URL` is set, that address is used; it must use HTTPS. `KIMI_CODE_OAUTH_HOST` and `KIMI_CODE_REGION_MARKER` are honored as Kimi Code uses them.
 - **Tokens and cost**: read from the Kimi Code session records on this PC, covering the CLI, the desktop app and the VS Code extension, including their subagents. K3 (`kimi-k3`), K3.1 Pro (`kimi-k3.1-pro`) and K3.1 Pro Highspeed (`kimi-k3.1-pro-highspeed`) are costed at the prices of the official Moonshot AI endpoint on OpenRouter (including cache reads, and cache writes when the endpoint lists them), never another provider's price. These prices are updated daily with the price list and saved on this PC; when an update fails the last saved prices are used, and until they have been read once these models show tokens only. `k3-256k` is listed on its own and costed at K3's price. `kimi-for-coding` and `kimi-for-coding-highspeed` are aliases that Kimi Code points at different models over time, so they show tokens only, with no cost. Prices added by hand take precedence, including one added for `k3-256k` itself.
 
+## OpenCode
+
+The OpenCode CLI and desktop app share one data folder (`%USERPROFILE%\.local\share\opencode`), and keep the sign-in and session records in `opencode.db` there, so signing in to either is enough. OpenCode 1.x and 2.x use this folder too.
+
+- **Quota**: shows the OpenCode Go allowance of the workspace chosen when OpenCode signed in to OpenCode Console: the share used and reset time of the 5-hour, weekly and monthly limits. OpenCode returns only the shares, not the plan tier, so Go and Go Plus are not told apart. When the workspace has no OpenCode Go plan, the status reads "No Go plan"; when a limit is reached, the status says so.
+- **Sign-in**: uses OpenCode's own sign-in and never renews it. While the sign-in has expired, no request is sent; using OpenCode once renews it. When OpenCode has no Console sign-in but has an API key saved, that key is used.
+- **Data folder**: when `XDG_DATA_HOME` is set to an absolute path, the `opencode` folder in it is read; when `OPENCODE_DB` is set, that database is read, as OpenCode does.
+- **Tokens and cost**: read from every model request in the OpenCode database on this PC, covering the CLI and the desktop app, and records left by OpenCode 1.x. The cost is the amount OpenCode recorded, at OpenCode's list prices: free models cost 0, and OpenCode Go models are costed at list price too, showing what the request is worth rather than what was taken from the account balance. Failed requests have no tokens and are not counted. The request OpenCode makes to title a session has no record of its own and is not counted.
+- The pay-as-you-go balance of OpenCode Console is not shown yet.
+
 ## Sources entered by hand
 
-Choose Zhipu GLM, Z.ai GLM, DeepSeek, Kimi Code API, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
+Choose Zhipu GLM, Z.ai GLM, DeepSeek, Kimi Code API, OpenCode Go, OpenRouter, New API, Sub2API or Custom as the quota source, and the row expands so you can fill in what it needs.
 
 - **Key**: stored on this PC, encrypted by Windows, and never written to the settings file. It is deleted when you remove the column or change its quota source.
 - **Site address**: the home page address is enough. A trailing `/v1`, or the path of a console page you paste, is removed automatically. Requests carry the API key, so the address must use HTTPS; HTTP is only for this PC (`localhost`, `127.0.0.1`, `[::1]`).
@@ -86,6 +105,14 @@ Enter an API key created on the DeepSeek platform. Shows the account balance and
 ### Kimi Code API
 
 Enter an API key created in the Kimi Code console (starting with `sk-kimi-`); Kimi Code does not need to be signed in on this PC. Shows the same quota as the automatic Kimi Code source: the 5-hour and monthly limits, the weekly limit on legacy plans, and the extra-usage balance when purchased; the membership level appears beside the name. Keys for both mainland China (kimi.com) and international (kimi.ai) accounts work: api.kimi.com is asked first, and api.kimi.ai when it rejects the key. The source reads "Kimi Code API · kimi.com account" or "Kimi Code API · kimi.ai account", by the account's site. The key does not work on the Moonshot open platform, so no open-platform balance is shown, and no token usage is counted.
+
+### OpenCode Go
+
+Enter an API key created in OpenCode Console (starting with `oc_sk_`); OpenCode does not need to be installed or signed in on this PC. Shows the OpenCode Go allowance of the key's workspace, the same as the automatic OpenCode source: the 5-hour, weekly and monthly limits. When the workspace has no OpenCode Go plan, the status says so. No token usage is counted.
+
+### OpenRouter
+
+Enter an API key created on OpenRouter (starting with `sk-or-v1-`). Shows the account balance (credits purchased minus credits used) and what this key has been charged today and this month, in US dollars. Today and this month follow UTC, so they reset at midnight UTC. When the key has a credit limit, its remaining amount and reset time are shown too; when an account admin has set a budget, the budget that limits requests first is shown instead. No token usage is counted.
 
 ### New API
 

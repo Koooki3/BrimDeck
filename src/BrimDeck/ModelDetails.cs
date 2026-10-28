@@ -83,6 +83,8 @@ public partial class MainWindow
         label.ClearValue(TextBlock.ForegroundProperty); label.ClearValue(TextBlock.FontWeightProperty);
         var button = new Button { Content = content is null ? label : content(label), Height = height, Padding = new Thickness(icon ? 6 : 9, 0, icon ? 6 : 9, 0),
             Style = (Style)FindResource(style), Tag = active ? "Selected" : null, ToolTip = toolTip ? name : null };
+        // The toolbar look's 6 DIP corner comes from its style's own resources, which a theme does not replace: square in a pixel theme.
+        if (style == "ToolbarActionButton") button.Resources["SegmentCorner"] = new CornerRadius(PanelTheme.Corner(6));
         AutomationProperties.SetName(button, name); button.Click += (_, _) => click(); return button;
     }
 
@@ -111,7 +113,7 @@ public partial class MainWindow
             button.Padding = new Thickness(stage >= 2 ? 5 : 8, 0, stage >= 2 ? 5 : 8, 0);
             strip.Children.Add(button);
         }
-        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(6), Padding = new Thickness(1) };
+        return new Border { Child = strip, Background = UI.Brush(UI.Fill), CornerRadius = new CornerRadius(PanelTheme.Corner(6)), Padding = new Thickness(1) };
     }
 
     private Button ModelDateButton(bool iconOnly)
@@ -183,7 +185,7 @@ public partial class MainWindow
     {
         var stack = new StackPanel();
         var popup = new Window { Title = Loc.T("筛选应用", "Filter apps"), Width = 210, SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.None,
-            ResizeMode = ResizeMode.NoResize, AllowsTransparency = true, Background = Brushes.Transparent, ShowInTaskbar = false, Topmost = true };
+            ResizeMode = ResizeMode.NoResize, AllowsTransparency = true, Background = Brushes.Transparent, ShowInTaskbar = false, Topmost = true }; PanelTheme.Text(popup);
         foreach (var app in apps)
         {
             Button button = null!;
@@ -191,7 +193,7 @@ public partial class MainWindow
             { ToggleModelApp(app); button.Tag = _modelApps.Contains(app) ? "Selected" : null; }, _modelApps.Contains(app), toolTip: false);
             button.Margin = new Thickness(0, 3, 0, 3); stack.Children.Add(button);
         }
-        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(10), Padding = new Thickness(8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
+        popup.Content = new Border { Child = stack, Background = UI.Brush(PanelTheme.Hex("popup")), CornerRadius = new CornerRadius(PanelTheme.Corner(10)), Padding = new Thickness(8), BorderBrush = UI.Brush(PanelTheme.Hex("popupBorder")), BorderThickness = new Thickness(1) };
         ShowModelPopup(popup, ModelToolbar);
     }
 
@@ -199,6 +201,9 @@ public partial class MainWindow
     {
         if (_detailPopup is not null) { _detailPopup.Activate(); return; }
         _leave.Stop(); _popupReturnArea = null; _detailPopup = popup; popup.Owner = this;
+        // Drawn at the panel's scale, as the panel it opens from.
+        if (popup.Content is FrameworkElement scaled) UI.Scale(scaled, _scale);
+        if (double.IsFinite(popup.Width)) popup.Width *= _scale;
         // A layered window renders grayscale text unless told otherwise; its rounded background is opaque, so ClearType is safe.
         RenderOptions.SetClearTypeHint(popup, ClearTypeHint.Enabled);
         var point = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
@@ -209,7 +214,7 @@ public partial class MainWindow
         var (_, panelWork, _) = Native.WindowsHost.MonitorScreen(MonitorHandle) ?? Native.WindowsHost.PrimaryScreen();
         var work = new Rect(transform.Transform(panelWork.TopLeft), transform.Transform(panelWork.BottomRight));
         popup.Left = Math.Clamp(point.X - popup.Width, work.Left, Math.Max(work.Left, work.Right - popup.Width)); popup.Top = point.Y + 3;
-        popup.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { popup.Close(); SetExpanded(false); e.Handled = true; } };
+        popup.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) { popup.Close(); SetExpanded(false, keyboard: true); e.Handled = true; } };
         // Closing an active owned window also raises Deactivated. Do not close it
         // again from that nested native activation message.
         // A closing pop-up leaves as the monitor page's card does (Soft.Leave), and the panel takes it as closed from the start of
@@ -221,6 +226,11 @@ public partial class MainWindow
             if (left || _app.Exiting || popup.Content is not UIElement content || !Soft.Enabled) return;
             e.Cancel = true; left = true; popup.IsHitTestVisible = false;
             Soft.Leave(content, () => popup.Close());
+            // The leave is the only thing that closes it now, and an animation replaced on the same property never completes,
+            // so the pop-up closes on its own a little after the leave should have ended.
+            var fallback = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Soft.Quick + 250) };
+            fallback.Tick += (_, _) => { fallback.Stop(); if (popup.IsLoaded) popup.Close(); };
+            fallback.Start();
             RenderUsage();
         };
         popup.Deactivated += (_, _) => { if (!closing && popup.IsVisible) popup.Close(); };
@@ -231,7 +241,17 @@ public partial class MainWindow
             if (!left) RenderUsage();
             if (_expanded && !IsMouseOver) PointerChanged(false);
         };
-        Soft.Enter(popup.Content as UIElement);
+        // The pop-up enters once its first frame has been drawn: a layered window takes a frame or two to come up, and an
+        // entrance started before Show lost its beginning to them and popped in. Until then its content is held out of sight.
+        if (Soft.Enabled && popup.Content is UIElement entering)
+        {
+            entering.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 0, TimeSpan.Zero));
+            // Once only, and not when it was closed before its first frame: the entrance would replace the leave's fade, whose
+            // end is what closes it.
+            EventHandler? enter = null;
+            enter = (_, _) => { popup.ContentRendered -= enter; if (!left && popup.IsVisible) Soft.Enter(entering); };
+            popup.ContentRendered += enter;
+        }
         popup.Show(); popup.Activate();
     }
 

@@ -20,6 +20,7 @@ public sealed record PanelThemeInfo(string Id, PanelThemeKind Kind, PanelThemeFi
 }
 
 [JsonSerializable(typeof(PanelThemeFile))]
+[JsonSerializable(typeof(PanelThemeDecor))]
 [JsonSerializable(typeof(string))]
 internal sealed partial class PanelThemeJson : JsonSerializerContext;
 
@@ -31,17 +32,32 @@ internal sealed partial class PanelThemeJson : JsonSerializerContext;
 // hue, just far enough to reach it (PanelThemes.Build.cs).
 public static partial class PanelThemes
 {
-    public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners";
-    public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2;
+    public const string SystemId = "system", Dark = "dark", Light = "light", Demo = "cyberpunk-edgerunners", PixelBlocks = "pixel-blocks";
+    public const string IslandHoliday = "island-holiday", IslandHoliday2 = "island-holiday-2";
+    public const double TextContrast = 4.5, StrongTextContrast = 7, GraphicContrast = 3, IndicatorContrast = 2, ThumbContrast = 2;
+    // The warning and critical colors, the theme's and those chosen for an application or the collapsed readings: they color a
+    // quota's number and a reading's value as well as bars and rings, so they are held to the body-text minimum everywhere,
+    // and a number and its bar keep one color.
+    public const double LevelContrast = TextContrast;
+    // The scroll bar's handle at rest is drawn at this opacity or, where that would leave it under ThumbContrast, at the least
+    // opacity in steps of 0.05 that reaches it (PanelPalette.ThumbRestOpacity).
+    public const double ThumbRest = .55;
+    public static double ThumbRestOpacity(ThemeColor thumb, IReadOnlyList<ThemeColor> surfaces)
+    {
+        for (double opacity = ThumbRest; opacity < 1; opacity = Math.Round(opacity + .05, 2))
+            if (thumb.WithAlpha((byte)Math.Round(thumb.A * opacity)).MinimumContrast(surfaces) >= ThumbContrast) return opacity;
+        return 1;
+    }
 
     public static readonly IReadOnlyList<PanelThemeToken> Tokens =
     [
         new("surface", "面板底色", "Panel surface"),
         new("textPrimary", "主要文字", "Primary text", StrongTextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("textSecondary", "次要文字", "Secondary text", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
-        new("textTertiary", "辅助文字", "Tertiary text", GraphicContrast, PanelThemeBackdrop.SurfaceAndPopup),
+        // Tertiary text is small real text (the clock, "used", times, a notice's source), so it is held to the body-text minimum.
+        new("textTertiary", "辅助文字", "Tertiary text", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("accent", "强调色（键盘焦点、选中日期）", "Accent (keyboard focus, chosen dates)", GraphicContrast, PanelThemeBackdrop.SurfaceAndPopup),
-        new("onAccent", "强调色上的文字（选中的日期）", "Text on the accent (chosen dates)", GraphicContrast, PanelThemeBackdrop.Accent),
+        new("onAccent", "强调色上的文字（选中的日期、通知主按钮）", "Text on the accent (chosen dates, a notice's main button)", TextContrast, PanelThemeBackdrop.Accent),
         new("danger", "错误与暂停同步", "Errors and paused sync", TextContrast, PanelThemeBackdrop.SurfaceAndPopup),
         new("liked", "已喜欢", "Liked song", GraphicContrast, PanelThemeBackdrop.Surface),
         new("clock", "时间默认色", "Default clock color", TextContrast, PanelThemeBackdrop.Surface),
@@ -60,7 +76,7 @@ public static partial class PanelThemes
         new("rangeFill", "日期范围底色", "Date range fill"),
         new("coverPlaceholder", "无封面占位", "Missing cover"),
         new("coverOutline", "封面描边", "Cover outline"),
-        new("scrollThumb", "滚动条", "Scroll bar"),
+        new("scrollThumb", "滚动条", "Scroll bar", ThumbContrast, PanelThemeBackdrop.Surface),
         new("rim", "边缘描线", "Rim"),
         new("shadow", "阴影或辉光", "Shadow or glow"),
         new("indicator", "指示条", "Indicator"),
@@ -76,12 +92,12 @@ public static partial class PanelThemes
         new("bubbleBorder", "进度时间气泡描边", "Seek time bubble border"),
     ];
     // Applications keyed by the names the "apps" object uses. Sources entered by hand share "manual".
-    public static readonly IReadOnlyList<string> AppKeys = ["claude", "codex", "antigravity", "cursor", "zcode", "dsh", "grokBot", "kimi", "manual", "other", "warning", "critical"];
+    public static readonly IReadOnlyList<string> AppKeys = ["claude", "codex", "antigravity", "cursor", "zcode", "dsh", "grokBot", "kimi", "opencode", "manual", "other", "warning", "critical"];
     public static string AppKey(ProviderId id) => id switch
     {
         ProviderId.Claude => "claude", ProviderId.Codex => "codex", ProviderId.Antigravity => "antigravity", ProviderId.Cursor => "cursor",
-        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi",
-        ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => "manual",
+        ProviderId.ZCode => "zcode", ProviderId.Dsh => "dsh", ProviderId.GrokBot => "grokBot", ProviderId.Kimi => "kimi", ProviderId.OpenCode => "opencode",
+        ProviderId.GlmChina or ProviderId.GlmGlobal or ProviderId.DeepSeek or ProviderId.KimiApi or ProviderId.OpenCodeGo or ProviderId.OpenRouter or ProviderId.NewApi or ProviderId.Sub2Api or ProviderId.Custom => "manual",
         _ => "other"
     };
 
@@ -97,9 +113,11 @@ public static partial class PanelThemes
         var file = JsonSerializer.Deserialize<PanelThemeFile>(json, Json) ?? throw new JsonException("The theme file is empty.");
         // Properties are checked for null by the serializer; values inside the colors, apps and gradient collections are not.
         static bool HasNull(IEnumerable<string?>? values) => values?.Any(value => value is null) == true;
-        if (HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
+        // The night look is a layer of the same format and is checked the same way.
+        static bool AnyNull(PanelThemeFile file) => HasNull(file.Colors?.Values) || HasNull(file.Apps?.Values) || HasNull(file.Swatches)
             || HasNull(file.Effects?.SurfaceGradient) || HasNull(file.Effects?.RimGradient)
-            || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true)
+            || HasNull(file.Clock?.Gradient) || HasNull(file.Clock?.Palette?.Values) || file.Clock?.Gradients?.Any(gradient => gradient is null || HasNull(gradient.Stops)) == true;
+        if (AnyNull(file) || file.Night is { } night && AnyNull(night))
             throw new JsonException(Loc.T("颜色值不能为 null", "A color cannot be null"));
         return file;
     }
@@ -107,8 +125,8 @@ public static partial class PanelThemes
     // Built-in themes are read on demand: startup reads only the chosen theme and its base themes. The id of each is its resource
     // name, which a test keeps equal to the id inside the file.
     private const string ThemeResources = ".Themes.";
-    // Dark and light first, then the ported editor themes, then the custom demo.
-    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", Demo];
+    // Dark and light first, then the ported editor themes, then BrimDeck's own extensions with the custom demo last.
+    private static readonly string[] BuiltInOrder = [Dark, Light, "one-dark-pro", "github-dark", "github-light", "dracula", "night-owl", IslandHoliday, IslandHoliday2, PixelBlocks, Demo];
     private static (string Id, string Resource)[]? _builtInIndex;
     private static (string Id, string Resource)[] BuiltInIndex => _builtInIndex ??= [.. typeof(PanelThemes).Assembly.GetManifestResourceNames()
         .Where(name => name.Contains(ThemeResources, StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))

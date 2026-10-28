@@ -13,7 +13,7 @@
     "surface": "#011627",
     "textPrimary": "#D6DEEB",
     "textSecondary": "#A1B3C8",
-    "textTertiary": "#6C8BA6",
+    "textTertiary": "#6E8DA7",
     "accent": "#82AAFF",
     "onAccent": "#011627",
     "danger": "#F25A57",
@@ -51,7 +51,7 @@
   },
   "apps": {
     "claude": "#F78C6C", "codex": "#ADDB67", "antigravity": "#82AAFF", "cursor": "#A1B3C8", "zcode": "#7FDBCA",
-    "dsh": "#82AAFF", "grokBot": "#A1B3C8", "kimi": "#68CDEB", "manual": "#C792EA", "other": "#A1B3C8", "warning": "#ECC48D", "critical": "#EF5350"
+    "dsh": "#82AAFF", "grokBot": "#A1B3C8", "kimi": "#68CDEB", "opencode": "#737B86", "manual": "#C792EA", "other": "#A1B3C8", "warning": "#ECC48D", "critical": "#EF5350"
   },
   "clock": {
     "style": "minimal", "color": "default",

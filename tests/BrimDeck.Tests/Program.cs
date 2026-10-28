@@ -16,34 +16,56 @@ try
     ModelUsageTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
+    await AppleMusicLyricsTests.Run(root, Check);
     EqualizerSignalTests.Run(Check);
     ColorMathTests.Run(Check);
+    CompactSpacingTests.Run(Check);
+    CompactDragTests.Run(Check);
     PanelThemeTests.Run(root, Check);
     PanelThemeEditorTests.Run(root, Check);
+    PixelBlocksTests.Run(root, Check);
+    ThemeCoverageTests.Run(Check, Environment.GetEnvironmentVariable("BRIMDECK_THEME_REPORT") == "1");
     DisplayLayoutTests.Run(Check);
     MediaAppTargetTests.Run(Check);
     CollapsedHoverTests.Run(Check);
     HotkeyTests.Run(Check);
+    KeyboardResizeTests.Run(Check);
     CollapsedGeometryTests.Run(root, Check);
     PanelHeaderTests.Run(Check);
     SystemMonitorTests.Run(Check);
     CompactReadingTests.Run(Check);
+    TemperatureTests.Run(Check);
+    StorageTests.Run(Check);
+    StripAdmissionTests.Run(Check);
+    ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
+    MotionReviewTests.Run(Check);
     IdleCostTests.Run(Check);
+    MusicCostTests.Run(Check);
+    DisplayWatchTests.Run(Check);
     DotMotionTests.Run(Check);
+    DatePickerMotionTests.Run(Check);
     SystemMonitorTests.Store(root, Check);
+    GpuAdapterTests.Run(root, Check);
+    GpuIdentityTests.Run(Check);
     NeteaseLogTests.Run(Check);
     await DashboardUsageTests.Run(root, Check);
     await AppUpdateTests.Run(root, Check);
     await InstallerUpdateTests.Run(root, Check);
+    await PortableUpdateTests.Run(root, Check);
     SettingsMigrationTests.Run(root, Check);
+    OffPeakTests.Run(root, Check);
     FullscreenRuleTests.Run(Check);
     LanguageTests.Run(root, Check);
     await ConfiguredProviderTests.Run(Check);
     await ZCodeUsageTests.Run(root, Check);
     await DshUsageTests.Run(root, Check);
     await KimiUsageTests.Run(root, Check);
+    await ClaudeRateLimitTests.Run(root, Check);
+    await OpenCodeUsageTests.Run(root, Check);
+    await OfficialPriceTests.Run(root, Check);
     await GrokBotUsageTests.Run(root, Check);
+    await CursorUsageTests.Run(root, Check);
     var priceTime = DateTimeOffset.UtcNow;
     const string catalogJson = """
         {"data":[
@@ -148,6 +170,9 @@ try
     Check("Settings roundtrip keeps order and colors", loaded.Apps.Select(app => app.QuotaSource).SequenceEqual(moved.Apps.Select(app => app.QuotaSource)) && loaded.Apps[0].ThemeColor == "#FF8800");
     File.WriteAllText(store.FilePath, "broken json");
     Check("Corrupt settings recover visibly", store.Load().Style == CompactStyle.Notch && store.LoadWarning is not null);
+    var unreadableCopies = Directory.GetFiles(store.DirectoryPath, "settings.unreadable-*.json");
+    Check("Corrupt settings are copied aside before defaults replace them", unreadableCopies.Length == 1 && File.ReadAllText(unreadableCopies[0]) == "broken json" &&
+        store.LoadWarning!.Contains(Path.GetFileName(unreadableCopies[0])));
 
     var now = DateTimeOffset.Now;
     var locations = DataLocations.Resolve(Path.Combine(root, "home"), Path.Combine(root, "roaming"), Path.Combine(root, "local"), null, "");
@@ -283,6 +308,8 @@ try
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
         Check("Rate limiting does not cycle every Desktop scope", result.Quotas.Count == 2 && quotaHandler.Requests.Count == 2);
+        // The 429s above started a pause; a rejected login is only learned from a request that goes out.
+        usageClock = usageClock.AddHours(2);
         quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.Unauthorized);
         quotaHandler.Requests.Clear();
         result = (await Refresh(onlyClaude)).Single();
@@ -331,6 +358,7 @@ try
         Check("Rate limiting without any earlier reading falls back to the desktop application's local history", result.LiveQuota &&
             result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 37 && result.Quotas.Single(q => q.Minutes == 10080).UsedPercent == 7 && result.Plan == "Max 20x");
         quotaHandler.Override = null;
+        usageClock = usageClock.AddHours(2);
         result = (await Refresh(onlyClaude)).Single();
         Check("A successful account reading replaces the local history sample", result.LiveQuota && result.Quotas.Single(q => q.Minutes == 300).UsedPercent == 9);
         var readingTime = result.QuotaTime;
@@ -368,7 +396,8 @@ try
             Check("After a switch of account, rate limiting does not show the previous account's kept quotas", !limited.Quotas.Any(q => q.Label == "Fable 每周") && File.Exists(quotaFile));
         }
         desktopFixture.State = new(true, desktopCredentials);
-        using (var restarted = new UsageService(desktopFixture, locations, quotaClient, () => usageClock.AddMinutes(5), quotaCache: quotaFile))
+        var restartedAt = usageClock.AddMinutes(5);
+        using (var restarted = new UsageService(desktopFixture, locations, quotaClient, () => restartedAt, quotaCache: quotaFile))
         {
             var limited = (await restarted.RefreshAsync(onlyClaude)).Single();
             Check("After a restart, rate limiting still shows the per-model quota read before it", limited.LiveQuota && limited.Quotas.Any(q => q.Label == "Fable 每周" && q.UsedPercent == 44));
@@ -381,6 +410,7 @@ try
             var readable = (await restarted.RefreshAsync(onlyClaude)).Single();
             Check("After the sign-in was unreadable for a moment, rate limiting shows the kept per-model quotas again",
                 !unreadable.LiveQuota && File.Exists(quotaFile) && readable.Quotas.Any(q => q.Label == "Fable 每周" && q.UsedPercent == 44));
+            restartedAt = restartedAt.AddHours(2);
             quotaHandler.Override = (_, _) => new(System.Net.HttpStatusCode.Unauthorized);
             await restarted.RefreshAsync(onlyClaude);
             Check("A rejected sign-in removes the kept Claude reading", !File.Exists(quotaFile));
@@ -436,6 +466,7 @@ try
             new AppEntry().QuotaOnline && SettingsMigrations.Read(savedRow.ToJsonString()).Apps.Single().QuotaOnline);
         DeckSettings ClaudeRows(params bool[] online) => new() { Apps = online.Select(o => new AppEntry { Id = ProviderId.Claude, QuotaOnline = o }).ToList() };
         quotaHandler.Override = null;
+        usageClock = usageClock.AddHours(2);
         quotaHandler.Requests.Clear();
         await Refresh(ClaudeRows(true));
         int oneRowRequests = quotaHandler.Requests.Count;

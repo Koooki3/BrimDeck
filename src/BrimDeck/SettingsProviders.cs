@@ -64,7 +64,10 @@ public sealed partial class SettingsWindow
         arrow.HorizontalAlignment = HorizontalAlignment.Right; arrow.VerticalAlignment = VerticalAlignment.Center;
         AutomationProperties.SetAutomationId(arrow, "expand-source-" + entry.InstanceId.ToString("N"));
         row.Children.Add(arrow);
-        var detail = SourceDetails(entry); Grid.SetRow(detail, 1); Grid.SetColumnSpan(detail, 9);
+        var detail = new StackPanel { Margin = new Thickness(0, 0, 0, 12) }; Grid.SetIsSharedSizeScope(detail, true);
+        Grid.SetRow(detail, 1); Grid.SetColumnSpan(detail, 9);
+        if (SourceDetails(entry) is { } source) { source.Margin = new Thickness(0); detail.Children.Add(source); }
+        detail.Children.Add(OffPeakDetails(entry));
         bool open = _expandedSource == entry.InstanceId;
         detail.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         row.Children.Add(detail);
@@ -84,6 +87,17 @@ public sealed partial class SettingsWindow
         { _expandedSource = id; view.Detail.Visibility = Visibility.Visible; view.Row.Height = double.NaN; PointArrow(view.Arrow, true); }
     }
 
+    // The same help mark as the column headings of the application list, for a label inside an expanded row.
+    private FrameworkElement SmallHelp(string title, Func<string> help)
+    {
+        var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
+        var info = new Border { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(4, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
+            FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
+        AttachSettingHelp(info, title, help);
+        return info;
+    }
+
     // Claude and Grok Bot need no site or key; the expanded row holds this row's own switch for reading the quota online.
     private FrameworkElement OnlineQuotaDetails(AppEntry entry)
     {
@@ -96,19 +110,14 @@ public sealed partial class SettingsWindow
             : Loc.T("开启：使用 Claude Code 或桌面版的登录，联网获取额度。\n关闭：不联网，只显示 Claude 桌面版在本机记录的最新额度。",
                 "On: fetches the quota online with the Claude Code or desktop app sign-in.\nOff: no network access; shows the latest quota the Claude desktop app recorded on this PC.");
         var line = new Grid();
-        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        // The label column is shared with the off-peak lines below, so the switch starts where their controls start.
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
         line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line.ColumnDefinitions.Add(new ColumnDefinition());
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center };
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 16, 0), MinWidth = 52, VerticalAlignment = VerticalAlignment.Center };
         var caption = TextLine(title, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
         heading.Children.Add(caption);
-        // The same help mark as the column headings of the application list.
-        var mark = Stroke("M 6,1 A 5,5 0 1 1 6,11 A 5,5 0 1 1 6,1 Z M 6,5.4 V 8.4 M 6,3.6 V 3.7", 12, 12, TextTertiary); mark.StrokeThickness = 1.1;
-        var info = new Border { Width = 12, Height = 12, Background = Brushes.Transparent, Margin = new Thickness(4, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Help, Focusable = true, Child = mark, RenderTransform = new TranslateTransform(0, 0.5),
-            FocusVisualStyle = (Style)FindResource("SettingsSmallHelpFocus") };
-        AttachSettingHelp(info, title, () => help);
-        heading.Children.Add(info);
+        heading.Children.Add(SmallHelp(title, () => help));
         line.Children.Add(heading);
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = entry.QuotaOnline, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title); AutomationProperties.SetHelpText(toggle, help);
@@ -128,10 +137,12 @@ public sealed partial class SettingsWindow
 
     // The expanded configuration starts under the quota source: a short label column, then fields that end midway
     // between the warning and critical colors. Labels share one width so every field starts at the same place.
-    private FrameworkElement SourceDetails(AppEntry entry)
+    // Built-in sources other than Claude and Grok Bot have no configuration of their own; their rows open on the off-peak time alone.
+    private FrameworkElement? SourceDetails(AppEntry entry)
     {
         if (ProviderCatalog.HasOnlineSwitch(entry.QuotaSource)) return OnlineQuotaDetails(entry);
-        var grid = AppColumns(); grid.Margin = new Thickness(0, 0, 0, 12); Grid.SetIsSharedSizeScope(grid, true);
+        if (ProviderCatalog.IsBuiltIn(entry.QuotaSource)) return null;
+        var grid = AppColumns();
         var result = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(6, 4, 6, 4) };
         Func<bool> commitSite = () => true;
         Action commitScript = () => { };
@@ -251,6 +262,8 @@ public sealed partial class SettingsWindow
             ProviderId.GlmChina or ProviderId.GlmGlobal => Loc.T("GLM 套餐密钥，加密保存在本机", "GLM plan key, stored encrypted on this PC"),
             ProviderId.DeepSeek => Loc.T("DeepSeek API 密钥，加密保存在本机", "DeepSeek API key, stored encrypted on this PC"),
             ProviderId.KimiApi => Loc.T("Kimi Code API 密钥（sk-kimi-…），加密保存在本机", "Kimi Code API key (sk-kimi-…), stored encrypted on this PC"),
+            ProviderId.OpenCodeGo => Loc.T("OpenCode Console API 密钥（oc_sk_…），加密保存在本机", "OpenCode Console API key (oc_sk_…), stored encrypted on this PC"),
+            ProviderId.OpenRouter => Loc.T("OpenRouter API 密钥（sk-or-v1-…），加密保存在本机", "OpenRouter API key (sk-or-v1-…), stored encrypted on this PC"),
             ProviderId.Custom => Loc.T("可选，加密保存在本机", "Optional, stored encrypted on this PC"),
             _ => Loc.T("填写 API 密钥，加密保存在本机", "Enter the API key; it is stored encrypted on this PC")
         };
@@ -374,6 +387,107 @@ public sealed partial class SettingsWindow
         };
         Line("", test);
         Line("", result);
+        return grid;
+    }
+
+    // Every row's expanded area ends with its off-peak time: daily periods, each dragged out on a bar from noon to noon,
+    // and, once there is a period, the color the panel draws this row's quotas in during them. The labels share the
+    // source configuration's label width, so every control in the expanded area starts at the same place.
+    private FrameworkElement OffPeakDetails(AppEntry entry)
+    {
+        var grid = AppColumns();
+        string id = entry.InstanceId.ToString("N");
+        void Line(string label, FrameworkElement control)
+        {
+            var line = new Grid();
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "SourceLabel" });
+            line.ColumnDefinitions.Add(new ColumnDefinition());
+            // The heading stands level with the first control, which is 34 high under a margin of 5.
+            var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 5, 16, 0), Height = 34, MinWidth = 52, VerticalAlignment = VerticalAlignment.Top };
+            var caption = TextLine(label, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center; heading.Children.Add(caption);
+            line.Children.Add(heading);
+            Grid.SetColumn(control, 1); line.Children.Add(control);
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(line, grid.RowDefinitions.Count - 1); Grid.SetColumn(line, 1); Grid.SetColumnSpan(line, 5); grid.Children.Add(line);
+        }
+        string Span(int start, int end) => OffPeakPeriod.Format(start) + " – " + (end <= start ? Loc.T("次日 ", "next day ") : "") + OffPeakPeriod.Format(end);
+
+        var periods = new StackPanel();
+        for (int i = 0; i < entry.OffPeak.Count; i++)
+        {
+            int index = i;
+            var saved = entry.OffPeak[index];
+            var period = new Grid { Margin = new Thickness(0, 5, 0, 5), Height = 34 };
+            period.ColumnDefinitions.Add(new ColumnDefinition { MaxWidth = 380 });
+            period.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            period.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var bar = new OffPeakBar(saved.Start, saved.End)
+            {
+                Track = UI.Brush(_palette.Border), Range = UI.Brush(entry.OffPeakColor.Length > 0 ? PanelTheme.Readable(entry.OffPeakColor) : PanelTheme.AppTheme(entry)), Knobs = Brushes.White,
+                Outline = UI.Brush(_palette.Border), FocusRing = UI.Brush(_palette.Accent), Scale = UI.Brush(TextTertiary),
+                VerticalAlignment = VerticalAlignment.Bottom
+            };
+            AutomationProperties.SetAutomationId(bar, "offpeak-bar-" + index + "-" + id);
+            var times = TextLine(Span(saved.Start, saved.End), 12.5, TextPrimary); times.VerticalAlignment = VerticalAlignment.Center;
+            times.Margin = new Thickness(16, 0, 0, 0);
+            void Describe() => AutomationProperties.SetName(bar, Loc.T($"低峰时段 {index + 1}：", $"Off-peak period {index + 1}: ") + Span(bar.Start, bar.End));
+            Describe();
+            bar.Moved += () => { times.Text = Span(bar.Start, bar.End); Describe(); };
+            bar.Committed += () =>
+            {
+                if (S.Entry(entry.InstanceId)?.OffPeak.ElementAtOrDefault(index) is not { } current || current.Start == bar.Start && current.End == bar.End) return;
+                Change(s => { var changed = s.Entry(entry.InstanceId)!.OffPeak[index]; changed.Start = bar.Start; changed.End = bar.End; });
+            };
+            Grid.SetColumn(times, 1);
+            var cross = Stroke("M 0,0 L 8,8 M 8,0 L 0,8", 8, 8, TextSecondary);
+            cross.SetBinding(Shape.StrokeProperty, new Binding("Foreground") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1) });
+            var remove = new Button { Style = (Style)FindResource("SettingsGlyphButton"), Content = cross, Width = 24, Height = 26, Padding = new Thickness(0),
+                Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(remove, Loc.T($"删除低峰时段 {index + 1}", $"Remove off-peak period {index + 1}"));
+            AutomationProperties.SetAutomationId(remove, "offpeak-remove-" + index + "-" + id);
+            remove.Click += (_, _) => { Change(s => s.Entry(entry.InstanceId)!.OffPeak.RemoveAt(index)); RefreshAppRow(entry.InstanceId); };
+            Grid.SetColumn(remove, 2);
+            period.Children.Add(bar); period.Children.Add(times); period.Children.Add(remove);
+            periods.Children.Add(period);
+        }
+        // Drawn like "Add app" under the application list: the plus and label only, filled on hover. The negative margin
+        // puts the plus where the controls above start.
+        bool full = entry.OffPeak.Count >= AppPresets.MaximumOffPeakPeriods;
+        var add = ActionButton("", () =>
+        {
+            Change(s => s.Entry(entry.InstanceId)!.OffPeak.Add(new OffPeakPeriod()));
+            RefreshAppRow(entry.InstanceId);
+        });
+        add.HorizontalAlignment = HorizontalAlignment.Left; add.Height = 34; add.Margin = new Thickness(-10, 5, 0, 5); add.Padding = new Thickness(10, 0, 12, 0); add.IsEnabled = !full;
+        var addContent = new StackPanel { Orientation = Orientation.Horizontal };
+        addContent.Children.Add(Stroke("M 5,0 L 5,10 M 0,5 L 10,5", 10, 10, TextSecondary));
+        var addLabel = TextLine(Loc.T("添加时段", "Add period"), 12.5, TextSecondary); addLabel.Margin = new Thickness(8, 0, 0, 0); addLabel.VerticalAlignment = VerticalAlignment.Center;
+        addContent.Children.Add(addLabel); add.Content = addContent;
+        if (full) { add.ToolTip = Loc.T($"最多 {AppPresets.MaximumOffPeakPeriods} 个时段", $"Up to {AppPresets.MaximumOffPeakPeriods} periods"); ToolTipService.SetShowOnDisabled(add, true); }
+        AutomationProperties.SetName(add, Loc.T("添加低峰时段", "Add off-peak period")); AutomationProperties.SetAutomationId(add, "offpeak-add-" + id);
+        periods.Children.Add(add);
+        Line(Loc.T("低峰时间", "Off-peak time"), periods);
+
+        if (entry.OffPeak.Count > 0)
+        {
+            // Three swatches, as the row has them: an unchosen one shows the row's usual color for its level, which the panel
+            // keeps drawing during off-peak periods.
+            var swatchLine = new StackPanel { Orientation = Orientation.Horizontal, Height = 34, Margin = new Thickness(0, 5, 0, 5) };
+            void Swatch(string label, string key, string chosen, string shown, Action<AppEntry, string> apply)
+            {
+                var caption = TextLine(label, 12, TextSecondary); caption.VerticalAlignment = VerticalAlignment.Center;
+                caption.Margin = new Thickness(swatchLine.Children.Count == 0 ? 0 : 20, 0, 8, 0);
+                var swatch = ColorSwatch(entry.Name, Loc.T("低峰", "off-peak ") + label, chosen.Length > 0 ? chosen : shown, chosen.Length == 0,
+                    value => Change(s => apply(s.Entry(entry.InstanceId)!, value)), owner: entry.InstanceId);
+                swatch.VerticalAlignment = VerticalAlignment.Center;
+                AutomationProperties.SetAutomationId(swatch, "offpeak-" + key + "-" + id);
+                swatchLine.Children.Add(caption); swatchLine.Children.Add(swatch);
+            }
+            Swatch(Loc.T("主题", "Theme"), "theme", entry.OffPeakColor, entry.ThemeColor.Length > 0 ? entry.ThemeColor : PanelTheme.AppDefault(entry.QuotaSource), (e, v) => e.OffPeakColor = v);
+            Swatch(Loc.T("预警", "Warning"), "warning", entry.OffPeakWarningColor, entry.WarningColor.Length > 0 ? entry.WarningColor : PanelTheme.WarningDefault, (e, v) => e.OffPeakWarningColor = v);
+            Swatch(Loc.T("告警", "Critical"), "critical", entry.OffPeakCriticalColor, entry.CriticalColor.Length > 0 ? entry.CriticalColor : PanelTheme.CriticalDefault, (e, v) => e.OffPeakCriticalColor = v);
+            Line(Loc.T("低峰颜色", "Off-peak colors"), swatchLine);
+        }
         return grid;
     }
 }

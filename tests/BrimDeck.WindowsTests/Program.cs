@@ -1,6 +1,8 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Shell;
+using BrimDeck.Core;
 using BrimDeck.Native;
 
 internal static class Program
@@ -14,10 +16,14 @@ internal static class Program
         {
             Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
             CheckWindowChrome();
+            CheckSettledClip();
+            CheckPageToolTips();
             BrimDeck.MainWindow.CheckShadowLifetime();
+            CheckGpus();
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();
             Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
                 && work.Width > 0 && work.Height > 0 && scale > 0);
+            TemperatureChecks.Run(Check);
 
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))
             {
@@ -50,6 +56,85 @@ internal static class Program
                 Check("Windows 10 settings use a square outer frame", chrome.CornerRadius == new CornerRadius(0));
             else
                 Check("Windows 11 settings retain rounded corners", chrome.CornerRadius == new CornerRadius(12));
+        }
+        finally { window.Close(); }
+    }
+
+    // Reads every graphics adapter as the monitor does and lists them. A machine may have none with counters (a virtual machine
+    // with the software rasterizer only), which is not a failure.
+    private static void CheckGpus()
+    {
+        using var pdh = new PdhQuery();
+        var provider = new GpuProvider(pdh);
+        pdh.Collect();
+        Thread.Sleep(1000);
+        var reading = provider.Sample(pdh.Collect());
+        var gpus = reading.OrDefault ?? [];
+        if (!reading.HasValue) Console.WriteLine("SKIP: no GPU readings: " + reading.Reason);
+        foreach (var gpu in gpus)
+            Console.WriteLine($"GPU: {gpu.Name ?? "(unnamed)"} [{gpu.Kind}] usage {gpu.Usage:P0}, dedicated {Gigabytes(gpu.DedicatedBytes)} of {(gpu.DedicatedTotal is { } total ? $"{total / 1e9:0.0} GB" : "?")}, "
+                + $"shared {Gigabytes(gpu.SharedBytes)}, key {gpu.Key}, {GpuReadings.LuidText(gpu.Luid)}, engines {string.Join(" ", gpu.Engines.Select(e => $"{e.Kind} {e.Usage:P0}"))}");
+        var (adapters, described, _) = GpuAdapters.Read();
+        foreach (var adapter in adapters.Values)
+            Console.WriteLine($"DXGI: {adapter.Name} [{adapter.Kind}{(adapter.Software ? ", software" : "")}] {adapter.DedicatedTotal / 1e9:0.0} GB, at {adapter.Location ?? "?"}, key {adapter.Key}, {GpuReadings.LuidText(adapter.Luid)}");
+        Check("GPU readings keep only the hardware adapters DXGI describes", gpus.All(gpu => described ? adapters.TryGetValue(gpu.Luid, out var adapter) && !adapter.Software : gpu.Name is null));
+        Check("GPU readings give each adapter its own key", gpus.Select(gpu => gpu.Key).Distinct().Count() == gpus.Count);
+        if (gpus.Any(gpu => gpu.Kind == GpuKind.Discrete))
+            Check("GPU auto shows a discrete adapter", GpuChoice.Auto(gpus, 0)?.Kind == GpuKind.Discrete);
+    }
+    private static string Gigabytes(Reading<ulong> bytes) => bytes.TryGet(out var value) ? $"{value / 1e9:0.00} GB" : "?";
+
+    // The collapsed island at rest clips to a rectangle (IslandBorder.SettledClip): nothing of it, its rim included, may then reach
+    // past the rounded outline it shows with the rounded clip, at the notch's shoulders or the capsule's ends.
+    private static void CheckSettledClip()
+    {
+        foreach (var (name, corners, shoulder) in new[] { ("notch", new CornerRadius(0, 0, 12, 12), 16d), ("capsule", new CornerRadius(18), 0d) })
+            foreach (double scale in new[] { 1d, 1.5 })
+            {
+                byte[] Draw(bool settled)
+                {
+                    var island = new BrimDeck.IslandBorder { Width = 300, Height = 36, Background = System.Windows.Media.Brushes.Black, CornerRadius = corners,
+                        ShoulderRadius = shoulder, MaterialOpacity = 1, RimWidth = 1, RimBrush = System.Windows.Media.Brushes.White, ClipToBounds = true,
+                        SettledClip = settled };
+                    island.Measure(new Size(300, 36)); island.Arrange(new Rect(0, 0, 300, 36)); island.UpdateLayout();
+                    var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)(300 * scale), (int)(36 * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+                    bitmap.Render(island);
+                    var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+                    bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
+                    return pixels;
+                }
+                byte[] rounded = Draw(false), rest = Draw(true);
+                // Without the clip the outline's own antialiased edge may tint a few pixels faintly; the rim's outer half was
+                // whole pixels at full strength (99 of them on the notch before the fix).
+                int outside = 0, strongest = 0;
+                for (int i = 3; i < rounded.Length; i += 4) if (rounded[i] == 0 && rest[i] > 8) { outside++; strongest = Math.Max(strongest, rest[i]); }
+                Check($"the {name} at rest draws nothing past its rounded outline at {scale * 100:0}% ({outside} faint edge pixels, strongest alpha {strongest})",
+                    strongest <= 64 && outside <= 16);
+            }
+    }
+
+    // A page left without the pointer moving closes the tooltips opened over it, and only those (BrimDeck.PageToolTips).
+    private static void CheckPageToolTips()
+    {
+        var left = new Border { Width = 40, Height = 20 }; var kept = new Border { Width = 40, Height = 20 };
+        var page = new StackPanel(); page.Children.Add(left);
+        var other = new StackPanel(); other.Children.Add(kept);
+        var root = new StackPanel(); root.Children.Add(page); root.Children.Add(other);
+        // Off screen and never activated: nothing shows where the tests run.
+        var window = new Window { Content = root, Left = -20000, Top = -20000, Width = 120, Height = 80, ShowInTaskbar = false, ShowActivated = false, WindowStyle = WindowStyle.None };
+        try
+        {
+            window.Show();
+            var leftTip = new ToolTip { Content = "page", PlacementTarget = left, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+            var keptTip = new ToolTip { Content = "other", PlacementTarget = kept, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+            left.ToolTip = leftTip; kept.ToolTip = keptTip;
+            leftTip.IsOpen = true; keptTip.IsOpen = true;
+            Check("tooltips open for the page check", leftTip.IsOpen && keptTip.IsOpen);
+            int closed = BrimDeck.PageToolTips.CloseWithin(page);
+            Check("leaving a page closes the tooltip opened over it", closed == 1 && !leftTip.IsOpen);
+            Check("leaving a page keeps a tooltip opened elsewhere", keptTip.IsOpen);
+            keptTip.IsOpen = false;
+            Check("nothing open over the page closes nothing", BrimDeck.PageToolTips.CloseWithin(page) == 0);
         }
         finally { window.Close(); }
     }

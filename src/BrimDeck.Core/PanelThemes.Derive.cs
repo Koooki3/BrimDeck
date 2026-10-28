@@ -12,7 +12,7 @@ public static partial class PanelThemes
     // more opacity for the same contrast, so the secondary and tertiary text are a step stronger than there.
     private static readonly (string Key, byte Dark, byte Light)[] ForegroundShades =
     [
-        ("textSecondary", 0x9E, 0xB8), ("textTertiary", 0x61, 0x88), ("equalizer", 0x9E, 0x8C), ("menuDetail", 0x80, 0x8C),
+        ("textSecondary", 0x9E, 0xB8), ("textTertiary", 0x8C, 0xA0), ("equalizer", 0x9E, 0x8C), ("menuDetail", 0x80, 0x8C),
         ("hairline", 0x17, 0x14), ("track", 0x1F, 0x17), ("ringTrack", 0x29, 0x21), ("fill", 0x12, 0x0D), ("fillSelected", 0x24, 0x1A),
         ("hover", 0x18, 0x12), ("pressed", 0x24, 0x1F), ("outline", 0x24, 0x26), ("popupBorder", 0x24, 0x24), ("coverPlaceholder", 0x0F, 0x0D),
         ("coverOutline", 0x14, 0x1A), ("rim", 0x12, 0x1F), ("switchFill", 0x0F, 0x0A), ("seekRail", 0x2E, 0x24), ("rowDivider", 0x0D, 0x0F),

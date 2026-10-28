@@ -32,8 +32,12 @@ public sealed record CoreSample(int Id, int Group, CoreTier Tier, int Number, do
     public double? FrequencyFraction => FrequencyMhz.TryGet(out var mhz) && MaxFrequencyMhz is { } top && top > 0 ? Math.Clamp(mhz / top, 0, 1) : null;
 }
 
+// Temperature is the processor's from the ACPI thermal zones in degrees Celsius, TemperatureZone the zone it came from; null
+// where no zone gives one (Temperatures.Cpu).
 public sealed record CpuSample(IReadOnlyList<CoreSample> Cores, Reading<double> FrequencyMhz)
 {
+    public double? Temperature { get; init; }
+    public string? TemperatureZone { get; init; }
     // By index, as Average and Max add up: both are read on every redraw of the collapsed readings, which allocate nothing.
     public double Usage
     {
@@ -104,6 +108,7 @@ public static class ReadingLevels
         CompactMonitorItems.Gpu => snapshot?.Gpu.OrDefault is { } gpu ? OfShare(gpu.Usage) : MemoryLevel.Normal,
         CompactMonitorItems.Download => snapshot?.Network.OrDefault is { } down ? OfRate(down.DownBytesPerSecond) : MemoryLevel.Normal,
         CompactMonitorItems.Upload => snapshot?.Network.OrDefault is { } up ? OfRate(up.UpBytesPerSecond) : MemoryLevel.Normal,
+        CompactMonitorItems.Storage => snapshot is not null && Core.Storage.System(snapshot.Storage, Core.Storage.WindowsLetter) is { } drive ? OfShare(drive.UsedFraction) : MemoryLevel.Normal,
         _ => MemoryLevel.Normal
     };
 
@@ -120,15 +125,30 @@ public static class ReadingLevels
 // One kind of engine of a graphics adapter (3D, Copy, VideoDecode, ...) with the shares of all processes summed, 0..1.
 public sealed record GpuEngine(string Kind, double Usage);
 
-// The busiest graphics adapter, read as Task Manager reads it: its busiest engine type, the processes' shares summed. Engines are
-// its kinds of engine in a fixed order (GpuEngines.Order); Name and DedicatedTotal come from the adapter's description and are
-// null where the system does not give them.
+// A graphics adapter, read as Task Manager reads it: its busiest engine type, the processes' shares summed. Engines are its kinds
+// of engine in a fixed order (GpuEngines.Order); Name and DedicatedTotal come from the adapter's description and are null where the
+// system does not give them. Luid names the adapter until the next restart, Key for good (GpuReadings.Keyed); History is its last
+// usage readings, oldest first, 0 to 1.
 public sealed record GpuSample(double Usage, Reading<ulong> DedicatedBytes)
 {
+    // In degrees Celsius as Task Manager reads it; null without a sensor. TemperatureFrom names the adapter it was read from
+    // when that is not this one (this adapter has no sensor and another has), and TemperatureKind says its kind ("独显").
+    public double? Temperature { get; init; }
+    public string? TemperatureFrom { get; init; }
+    public string? TemperatureKind { get; init; }
     public IReadOnlyList<GpuEngine> Engines { get; init; } = [];
     public Reading<ulong> SharedBytes { get; init; } = Reading<ulong>.Unavailable("");
     public string? Name { get; init; }
     public ulong? DedicatedTotal { get; init; }
+    public ulong Luid { get; init; }
+    public string Key { get; init; } = "";
+    // The key saved before adapters had a location (GpuAdapter.LegacyKey), to find a choice saved then.
+    public string LegacyKey { get; init; } = "";
+    public GpuKind Kind { get; init; }
+    // A connected adapter without engine readings at the moment (a laptop's discrete GPU asleep, a driver between readings): it
+    // stays listed and choosable, and shows "暂无读数" in place of its figures.
+    public bool NoReadings { get; init; }
+    public IReadOnlyList<double> History { get; init; } = [];
     public double? DedicatedFraction => DedicatedBytes.TryGet(out var used) && DedicatedTotal is { } total && total > 0 ? Math.Clamp((double)used / total, 0, 1) : null;
 }
 
@@ -208,14 +228,19 @@ public sealed record ProcessList(IReadOnlyList<ProcessSample> Top, IReadOnlyList
 }
 
 // DownHistory and UpHistory are the last network readings, oldest first, bytes per second; empty until there are two.
-// CpuHistory and GpuHistory are the last processor and graphics usage readings in the same way, 0 to 1.
+// CpuHistory and GpuHistory are the last processor and graphics usage readings in the same way, 0 to 1. Gpus is every graphics
+// adapter read; Gpu is the one shown (GpuChoice), and GpuHistory its history.
 public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors, Reading<CpuSample> Cpu, Reading<MemorySample> Memory,
     Reading<NetworkSample> Network, Reading<GpuSample> Gpu, Reading<ProcessList> Processes)
 {
+    public IReadOnlyList<GpuSample> Gpus { get; init; } = [];
     public IReadOnlyList<double> DownHistory { get; init; } = [];
     public IReadOnlyList<double> UpHistory { get; init; } = [];
     public IReadOnlyList<double> CpuHistory { get; init; } = [];
     public IReadOnlyList<double> GpuHistory { get; init; } = [];
+    // The internal drives with their lettered volumes (Storage), each with its temperature while drive temperatures are read;
+    // empty while storage is not read.
+    public IReadOnlyList<StorageDrive> Storage { get; init; } = [];
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,
         Reading<CpuSample>.Unavailable(reason), Reading<MemorySample>.Unavailable(reason), Reading<NetworkSample>.Unavailable(reason),
         Reading<GpuSample>.Unavailable(reason), Reading<ProcessList>.Unavailable(reason));

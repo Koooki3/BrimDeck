@@ -30,7 +30,7 @@ public partial class MainWindow
         double maxWidth = Math.Min(172 + 28 * Math.Min(1, widthStep) + 32 * Math.Max(0, widthStep - 1), Math.Max(120, ContentCanvas.Width - 40));
         menu.Padding = new Thickness(2 + Math.Min(1, density));
         double anchorBottom = MediaSourceButton.TranslatePoint(new Point(0, MediaSourceButton.ActualHeight), ExpandedContent).Y;
-        menu.MaxHeight = Math.Clamp(ContentCanvas.Height - anchorBottom - menu.VerticalOffset - 8, 18 + 2 * density + 2 * menu.Padding.Top + 2, 400);
+        menu.MaxHeight = Math.Clamp(ContentCanvas.Height - anchorBottom - menu.VerticalOffset / _scale - 8, 18 + 2 * density + 2 * menu.Padding.Top + 2, 400);
         foreach (var separator in menu.Items.OfType<Separator>())
             separator.Margin = new Thickness(4 + density, 2 + density, 6 + density, 2 + density);
         foreach (var item in menu.Items.OfType<MenuItem>())
@@ -81,7 +81,7 @@ public partial class MainWindow
             CheckSourceMenuPointer(WindowsHost.Cursor(), pressed: true)), true);
         menu.PreviewKeyDown += (_, e) =>
         {
-            if (e.Key == Key.Escape) { CloseSourceMenu(); SetExpanded(false); e.Handled = true; }
+            if (e.Key == Key.Escape) { CloseSourceMenu(); SetExpanded(false, keyboard: true); e.Handled = true; }
         };
         menu.Closed += (_, _) =>
         {

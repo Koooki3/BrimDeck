@@ -14,16 +14,18 @@ namespace BrimDeck;
 // A dial with the reading's letter (MonitorDraw.Dial, as the collapsed strip has it), a figure with its unit, and a detail after
 // it, on one baseline: "(C) 47 % 3.41 GHz". Aligned right, the dial still leads and the whole line ends at the right edge. As a
 // button it lights its dial under the pointer and takes clicks.
-// The main gauge fills the room after its figure with the last minute's trend (Trend), a soft line in its own color.
+// The main gauge fills the room after its figure (and its detail) with the last minute's trend (Trend), a soft line in its own color.
 internal sealed class FigureGauge : FrameworkElement
 {
     private readonly string _letter, _color;
     private readonly double _figure, _small;
-    private readonly bool _right, _button;
+    private readonly bool _right;
+    private bool _button;
+    private string? _buttonName;
     private Eased _share, _hover = new(0, Eased.Hover);
     private bool _hasShare, _pressed;
-    private string _number = "—", _unit = "", _detail = "", _tip = "";
-    private readonly DrawingCache<(string, string, string, double, double, double)> _text = new();
+    private string _number = "—", _unit = "", _detail = "", _tip = "", _detailColor = UI.Tertiary;
+    private readonly DrawingCache<(string, string, string, string, double, double, double)> _text = new();
     private readonly DrawingCache<(IReadOnlyList<double>, double, double)> _trend = new();
     private IReadOnlyList<double> _history = [];
 
@@ -34,14 +36,30 @@ internal sealed class FigureGauge : FrameworkElement
     public FigureGauge(string letter, string color, double figure, double small, bool right = false, string? button = null)
     {
         _letter = letter; _color = color; _figure = figure; _small = small; _right = right; _button = button is not null;
-        Height = Math.Ceiling(figure * 1.4);
-        if (button is not null) { Cursor = Cursors.Hand; AutomationProperties.SetName(this, button); Focusable = false; }
+        Height = Math.Ceiling(figure * 1.4); Focusable = false;
+        Button = button;
     }
 
-    public void Set(double? share, string number, string unit, string detail, string tip, bool motion)
+    // What a click does, for screen readers, or null for a gauge that takes no clicks; the graphics gauge takes them only while
+    // there is another adapter to switch to.
+    public string? Button
     {
-        bool changed = number != _number || unit != _unit || detail != _detail || (share is not null) != _hasShare;
-        _number = number; _unit = unit; _detail = detail; _hasShare = share is not null;
+        set
+        {
+            if (value == _buttonName && _button == value is not null) return;
+            _buttonName = value;
+            if (!(_button = value is not null)) { _pressed = false; Hover(false); }
+            Cursor = _button ? Cursors.Hand : null;
+            AutomationProperties.SetName(this, value ?? "");
+        }
+    }
+
+    // detailColor: the detail's color, the tertiary text color by default (a temperature takes its level's).
+    public void Set(double? share, string number, string unit, string detail, string tip, bool motion, string? detailColor = null)
+    {
+        detailColor ??= UI.Tertiary;
+        bool changed = number != _number || unit != _unit || detail != _detail || detailColor != _detailColor || (share is not null) != _hasShare;
+        _number = number; _unit = unit; _detail = detail; _detailColor = detailColor; _hasShare = share is not null;
         if (tip != _tip) { _tip = tip; ToolTip = tip.Length > 0 ? tip : null; }
         if (share is { } value && _share.Set(value, motion)) Motion.Start(this, Step);
         else if (changed || share is not null) InvalidateVisual();
@@ -62,7 +80,7 @@ internal sealed class FigureGauge : FrameworkElement
         double badge = Math.Round(_figure + 3), gap = Math.Round(_figure * .4);
         var number = MonitorDraw.Text(_number, _figure, UI.Primary, ppd, display: true);
         var unit = MonitorDraw.Text(_unit, _small, UI.Secondary, ppd);
-        var detail = MonitorDraw.Text(_detail, _small, UI.Tertiary, ppd);
+        var detail = MonitorDraw.Text(_detail, _small, _detailColor, ppd);
         double width = badge + gap + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0)
             + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0);
         double x = _right ? Math.Max(0, w - width) : 0, baseline = Math.Round(h / 2 + number.Baseline - number.Height / 2 + _figure * .05);
@@ -80,22 +98,23 @@ internal sealed class FigureGauge : FrameworkElement
         if (_history.Count >= 3 && !_right)
         {
             // From after the figures (and any detail) to the right edge, half the line's height, centred on it.
-            double end = start + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0) + gap * 1.5;
+            double end = start + number.WidthIncludingTrailingWhitespace + (_unit.Length > 0 ? 2 + unit.WidthIncludingTrailingWhitespace : 0)
+                + (_detail.Length > 0 ? gap + detail.WidthIncludingTrailingWhitespace : 0) + gap * 1.5;
             var area = new Rect(end, Math.Round(h * .2), Math.Max(0, w - end - 6), Math.Round(h * .6));
-            if (area.Width >= 48 && _detail.Length == 0)
+            if (area.Width >= 48)
                 MonitorDraw.Place(drawing, area.TopLeft, _trend.Get((_history, area.Width, area.Height), context =>
                     MonitorDraw.Sparkline(context, new Rect(0, 0, area.Width, area.Height), _history, 1, _color, .14, 1.3)));
         }
-        drawing.DrawDrawing(_text.Get((_number, _unit, _detail, w, h, ppd), context =>
+        drawing.DrawDrawing(_text.Get((_number, _unit, _detail, _detailColor, w, h, ppd), context =>
         {
             double x = start;
             MonitorDraw.Baseline(context, number, x, baseline); x += number.WidthIncludingTrailingWhitespace;
             if (_unit.Length > 0) { MonitorDraw.Baseline(context, unit, x + 2, baseline); x += 2 + unit.WidthIncludingTrailingWhitespace; }
             if (_detail.Length > 0)
             {
-                // A long detail (an adapter's name) is cut to the room left, with an ellipsis.
+                // A long detail is cut to the room left, with an ellipsis.
                 double room = w - x - gap;
-                if (room > 12) MonitorDraw.Baseline(context, detail.WidthIncludingTrailingWhitespace <= room ? detail : MonitorDraw.Trimmed(_detail, _small, UI.Tertiary, room, ppd), x + gap, baseline);
+                if (room > 12) MonitorDraw.Baseline(context, detail.WidthIncludingTrailingWhitespace <= room ? detail : MonitorDraw.Trimmed(_detail, _small, _detailColor, room, ppd), x + gap, baseline);
             }
         }));
     }
@@ -335,21 +354,29 @@ internal sealed class MemoryBlock : FrameworkElement
         }
         if (_compact)
         {
-            // One line: the bar fills what the figures leave.
+            // One line: the bar fills what the figures leave, with the commit charge as a thin line just under it, so it shows at
+            // every size and not only where memory has a block of its own.
             double start = x + 10, end = w;
-            if (end - start > 16) Bar(drawing, new Rect(start, Math.Round(line / 2 - 2), end - start, 4), color, now);
+            if (end - start > 16)
+            {
+                double top = Math.Round(line / 2 - 4);
+                Bar(drawing, new Rect(start, top, end - start, 4), color, now);
+                Commit(drawing, new Rect(start, top + 4 + 3, end - start, 2), now);
+            }
             return;
         }
         double barTop = line + 6;
         Bar(drawing, new Rect(0, barTop, w, 5), color, now);
-        // The commit charge as a thin line under the bar, as ftop draws swap.
-        if (_memory is not null)
-        {
-            var r = new Rect(0, barTop + 5 + 5, w, 2);
-            drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, r, 1, 1);
-            double share = Math.Clamp(_commit.At(now), 0, 1);
-            if (share > 0) drawing.DrawRoundedRectangle(UI.Brush(UI.Secondary), null, new Rect(r.X, r.Y, Math.Max(2, r.Width * share), 2), 1, 1);
-        }
+        Commit(drawing, new Rect(0, barTop + 5 + 5, w, 2), now);
+    }
+
+    // The commit charge as a thin line under the bar, as ftop draws swap.
+    private void Commit(DrawingContext drawing, Rect r, double now)
+    {
+        if (_memory is null) return;
+        drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, r, 1, 1);
+        double share = Math.Clamp(_commit.At(now), 0, 1);
+        if (share > 0) drawing.DrawRoundedRectangle(UI.Brush(UI.Secondary), null, new Rect(r.X, r.Y, Math.Max(2, r.Width * share), 2), 1, 1);
     }
 
     // The memory in use, then the cache in the same color, lighter, then the free rest.
@@ -426,4 +453,121 @@ internal sealed class NetworkBlock : FrameworkElement
         => MonitorDraw.Sparkline(drawing, area, history, Math.Max(64_000, history.Max()), color, .16);
 
 
+}
+
+// The internal drives' volumes, an entry each (Storage.Rows) in lines tighter than the process list's rows (MonitorLayout.StorageRow),
+// filled left to right in one or two columns: a drive glyph, the volume's letter, its space in use
+// against its size, a bar of the space in use as memory's bar draws it, and, where its physical drive reports one, that drive's
+// temperature at the end in its level's color (volumes on one drive show the same). The parts line up from entry to entry; the
+// temperature takes room only while an entry has one, so no entry ends in a gap. With more volumes than places the last entry
+// holds the others ("+2"). The bars ease to each reading, and the entries fade in when the first reading arrives.
+internal sealed class StorageBlock : FrameworkElement
+{
+    // Between the columns.
+    private const double ColumnGap = 20;
+    private readonly MonitorColors _colors;
+    private readonly double _body, _caption, _row;
+    private readonly int _columns, _room;
+    private readonly bool _temperatures;
+    private IReadOnlyList<StorageRow> _rows = [];
+    private Eased[] _used = [];
+    private Eased _shown, _heat;
+
+    // lines and columns: the places the page keeps for the volumes; temperatures: whether entries carry temperatures.
+    public StorageBlock(MonitorColors colors, double body, double caption, double row, int lines, int columns, bool temperatures)
+    {
+        _colors = colors; _body = body; _caption = caption; _row = row; _columns = Math.Max(1, columns);
+        _room = Math.Max(1, lines) * _columns; _temperatures = temperatures;
+        Height = Math.Max(1, lines) * row;
+        SnapsToDevicePixels = true;
+    }
+
+    public void Set(IReadOnlyList<StorageDrive> drives, bool motion)
+    {
+        var rows = Storage.Rows(drives, _room, _temperatures);
+        // New entries start from an empty bar, so a first reading grows into place as the page's other values do.
+        if (rows.Count != _used.Length) _used = new Eased[rows.Count];
+        bool moving = false;
+        for (int i = 0; i < rows.Count; i++) moving |= _used[i].Set(rows[i].UsedFraction, motion);
+        if (rows.Count > 0) _rows = rows;
+        moving |= _shown.Set(rows.Count > 0 ? 1 : 0, motion);
+        moving |= _heat.Set(rows.Any(row => row.Celsius is not null) ? 1 : 0, motion);
+        ToolTip = rows.Count == 0 ? null : string.Join("\n", drives.Select(Describe));
+        if (moving) Motion.Start(this, Step); else InvalidateVisual();
+    }
+    private bool Step(double now)
+    {
+        InvalidateVisual();
+        if (_shown.Moving(now) || _heat.Moving(now)) return true;
+        foreach (var used in _used) if (used.Moving(now)) return true;
+        return false;
+    }
+
+    // "C: D: · YMTC YMSS2ED06D25MC · 212 / 477 GB · 44 °C", then each volume of a split drive on a line of its own.
+    private static string Describe(StorageDrive drive)
+    {
+        var (used, total, unit) = Storage.Sizes(drive.Used, drive.Total);
+        string text = drive.Letters + (drive.Model.Length > 0 ? " · " + drive.Model : "") + $" · {used} / {total} {unit}";
+        if (drive.Temperature is { } heat)
+            text += " · " + Temperatures.Detail(heat.Celsius) + (heat.Warning is { } warning ? Loc.T($"（警告 {Temperatures.Format(warning)} °C）", $" (warning at {Temperatures.Format(warning)} °C)") : "");
+        if (drive.Volumes.Count > 1)
+            foreach (var volume in drive.Volumes)
+            {
+                var (u, t, n) = Storage.Sizes(volume.Used, volume.Total);
+                text += $"\n    {volume.Letter}{(volume.Label.Length > 0 ? " " + volume.Label : "")} · {u} / {t} {n}";
+            }
+        return text;
+    }
+
+    protected override Size MeasureOverride(Size availableSize) => new(0, Height);
+
+    protected override void OnRender(DrawingContext drawing)
+    {
+        double now = Eased.Now, opacity = Math.Clamp(_shown.At(now), 0, 1);
+        if (_rows.Count == 0 || opacity <= .001) return;
+        double w = ActualWidth, ppd = MonitorDraw.PixelsPerDip(this), badge = Math.Round(_body + 5), space = Math.Round(_body * .7);
+        drawing.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, ActualHeight));
+        if (opacity < .999) drawing.PushOpacity(opacity);
+        // The columns: the letters, the figures (as wide as the widest size can be), and the temperature, as wide as its widest.
+        var texts = _rows.Select(row =>
+        {
+            var (used, total, unit) = Storage.Sizes(row.Used, row.Total);
+            return (Label: MonitorDraw.Text(row.Label, _body, UI.Secondary, ppd), Used: MonitorDraw.Text(used, _body + 1, UI.Primary, ppd, strong: true),
+                Size: MonitorDraw.Text($" / {total} {unit}", _caption, UI.Tertiary, ppd), Widest: MonitorDraw.Text(total, _body + 1, UI.Primary, ppd, strong: true));
+        }).ToList();
+        double labels = texts.Max(t => t.Label.WidthIncludingTrailingWhitespace), figures = texts.Max(t => t.Widest.WidthIncludingTrailingWhitespace + t.Size.WidthIncludingTrailingWhitespace);
+        var unitText = MonitorDraw.Text("°C", _caption, UI.Tertiary, ppd);
+        double heatWidth = (MonitorDraw.Text("100", _body, UI.Primary, ppd, strong: true).WidthIncludingTrailingWhitespace + 2 + unitText.WidthIncludingTrailingWhitespace + space)
+            * Math.Clamp(_heat.At(now), 0, 1);
+        double glyph = Math.Round(badge * 9 / 16), labelX = badge + Math.Round(_body * .5), figureX = labelX + labels + space, barX = figureX + figures + space;
+        double cell = Math.Floor((w - ColumnGap * (_columns - 1)) / _columns);
+        double barEnd = Math.Max(barX, cell - heatWidth);
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            var row = _rows[i]; var t = texts[i];
+            double left = i % _columns * (cell + ColumnGap), top = i / _columns * _row, baseline = Math.Round(top + _row / 2 + _body * .36), middle = top + _row / 2;
+            MonitorDraw.Arrow(drawing, new Point(left + (badge - glyph) / 2, middle - glyph / 2), glyph, Math.Max(1, glyph * .13), MonitorGlyph.Drive, UI.Secondary);
+            MonitorDraw.Baseline(drawing, t.Label, left + labelX, baseline);
+            MonitorDraw.Baseline(drawing, t.Used, left + figureX, baseline);
+            MonitorDraw.Baseline(drawing, t.Size, left + figureX + t.Used.WidthIncludingTrailingWhitespace, baseline);
+            if (barEnd - barX >= 16) Bar(drawing, new Rect(left + barX, Math.Round(middle - 2), barEnd - barX, 4), row, i, now);
+            if (row.Celsius is { } celsius && heatWidth > 1)
+            {
+                var number = MonitorDraw.Text(Temperatures.Format(celsius), _body, _colors.Level(row.Level, UI.Primary), ppd, strong: true);
+                double right = left + cell - unitText.WidthIncludingTrailingWhitespace;
+                MonitorDraw.Baseline(drawing, unitText, right, baseline);
+                MonitorDraw.Baseline(drawing, number, right - 2 - number.WidthIncludingTrailingWhitespace, baseline);
+            }
+        }
+        if (opacity < .999) drawing.Pop();
+    }
+
+    // The space in use, as memory's bar is drawn.
+    private void Bar(DrawingContext drawing, Rect r, StorageRow row, int index, double now)
+    {
+        double radius = r.Height / 2;
+        drawing.DrawRoundedRectangle(UI.Brush(UI.Track), null, r, radius, radius);
+        double used = Math.Clamp(index < _used.Length ? _used[index].At(now) : row.UsedFraction, 0, 1) * r.Width;
+        if (used > .5) drawing.DrawRoundedRectangle(UI.Brush(_colors.Storage), null, new Rect(r.X, r.Y, Math.Max(r.Height, used), r.Height), radius, radius);
+    }
 }

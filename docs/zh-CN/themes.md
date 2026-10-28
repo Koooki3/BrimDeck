@@ -5,12 +5,12 @@ BrimDeck 的刘海、胶囊、指示条、配额提示、展开面板及其弹�
 | 类别 | 主题 |
 | --- | --- |
 | 基础 | 跟随系统、深色（默认，即原有的纯黑外观）、浅色 |
-| 主题扩展 | One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl、赛博朋克：边缘行者（示例） |
+| 主题扩展 | One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl、海岛假日、海岛假日 2、像素方块、赛博朋克：边缘行者（示例） |
 | 自定义 | 主题文件夹中的主题文件，可在设置中新建、编辑与删除 |
 
 每个主题会分别记住你在它下面修改的应用列主题、预警、告警颜色和时间的样式与配色：切换到其他主题时保存，切换回来时恢复。第一次选择的主题使用它自己的配色和推荐的时间样式。在“配额与统计”“收起外观”中恢复默认，恢复的是当前主题的默认配色。
 
-主题扩展移植自开源的 VS Code 主题，配色按各自的 MIT 许可证使用：[One Dark Pro](https://github.com/Binaryify/OneDark-Pro)、[GitHub Theme](https://github.com/primer/github-vscode-theme)、[Dracula Official](https://github.com/dracula/visual-studio-code)、[Night Owl](https://github.com/sdras/night-owl-vscode-theme)。各项目的版权与许可声明随程序附在 `ThirdPartyNotices.txt` 中。
+One Dark Pro、GitHub Dark、GitHub Light、Dracula Official、Night Owl 移植自开源的 VS Code 主题，配色按各自的 MIT 许可证使用：[One Dark Pro](https://github.com/Binaryify/OneDark-Pro)、[GitHub Theme](https://github.com/primer/github-vscode-theme)、[Dracula Official](https://github.com/dracula/visual-studio-code)、[Night Owl](https://github.com/sdras/night-owl-vscode-theme)。各项目的版权与许可声明随程序附在 `ThirdPartyNotices.txt` 中。
 
 ## 在设置中修改颜色
 
@@ -57,15 +57,15 @@ BrimDeck 的刘海、胶囊、指示条、配额提示、展开面板及其弹�
 | `surface` | 刘海、胶囊和展开面板的底色，总是不透明 |
 | `textPrimary` | 标题、数字（7:1） |
 | `textSecondary` | 标签（4.5:1） |
-| `textTertiary` | 重置时间、备注等辅助文字（3:1） |
-| `accent` / `onAccent` | 键盘焦点、选中的日期 / 其上的文字（3:1） |
+| `textTertiary` | 重置时间、备注等辅助小字（4.5:1） |
+| `accent` / `onAccent` | 键盘焦点、选中的日期（3:1） / 其上的文字，如通知的主按钮（4.5:1） |
 | `danger` | 错误与暂停同步（4.5:1） |
 | `liked` | 已喜欢的歌曲（3:1） |
 | `clock` | 时间颜色选“主题默认色”时的颜色（4.5:1） |
 | `equalizer` | 律动条不跟随封面时的颜色（3:1） |
 | `hairline` `track` `ringTrack` `fill` `fillSelected` `hover` `pressed` `outline` | 分隔线、进度底轨、分段控件、悬停与按下、描边 |
 | `popup` `popupBorder` `input` `rangeFill` | 菜单与弹出层，日期输入框和日期范围 |
-| `coverPlaceholder` `coverOutline` `scrollThumb` | 无封面占位、封面描边、滚动条 |
+| `coverPlaceholder` `coverOutline` `scrollThumb` | 无封面占位、封面描边、滚动条（滑块在底色上 2:1） |
 | `rim` `shadow` | 表面内侧描线；收起时的阴影（亮色加零偏移即为辉光） |
 | `indicator` `indicatorProgress` | 指示条与其上的播放进度（2:1） |
 | `switchFill` `seekRail` `rowDivider` `rowHover` | 工具栏页面切换底色、播放进度底轨、模型明细的行分隔与悬停 |
@@ -74,7 +74,7 @@ BrimDeck 的刘海、胶囊、指示条、配额提示、展开面板及其弹�
 
 ### 应用颜色（apps）
 
-配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
+配额列、进度条和配额环的默认颜色，键为 `claude`、`codex`、`antigravity`、`cursor`、`zcode`、`dsh`、`grokBot`、`kimi`、`opencode`、`manual`（所有手动填写的来源）、`other`，以及 `warning`、`critical`（这两种同时也是文字，需 4.5:1）。在“配额与统计”中为某列选过颜色后，该列使用所选颜色。
 
 ### 时间（clock）
 
@@ -84,7 +84,7 @@ BrimDeck 的刘海、胶囊、指示条、配额提示、展开面板及其弹�
 "clock": { "style": "segment", "color": "default", "custom": "#B9A8FF", "gradient": ["#FF79C6", "#BD93F9", "#8BE9FD"] }
 ```
 
-`style` 取 `minimal`、`stacked`、`digits`、`dots`、`segment`、`neon`、`serif`、`wide`、`condensed`；`color` 取 `default`（即上面的 `clock` 颜色）、`amber`、`cyan`、`pink`、`lime`、`custom`、`gradient`、`cover`。`palette` 给出本主题下“琥珀、青色、粉色、柠檬绿”四个色块的颜色，`gradients` 给出本主题提供的预设渐变（一到八组，每组正好三个颜色），二者都需在底色上达到 4.5:1。切换主题时，正在使用的预设渐变会换成新主题同一位置的那一组。`custom` 在 `color` 为 `custom` 时使用；`gradient` 必须正好三个颜色，在 `color` 为 `gradient` 时使用。浅色主题下霓虹与数码管的辉光会自动减弱，避免数字发虚。
+`style` 取 `minimal`、`stacked`、`digits`、`dots`、`segment`、`neon`、`serif`、`wide`、`condensed`、`pixel`（方块点阵，像素方块主题推荐）、`rounded`（圆润的 Fredoka 字体，海岛假日 2 主题推荐）；`color` 取 `default`（即上面的 `clock` 颜色）、`amber`、`cyan`、`pink`、`lime`、`custom`、`gradient`、`cover`。`palette` 给出本主题下“琥珀、青色、粉色、柠檬绿”四个色块的颜色，`gradients` 给出本主题提供的预设渐变（一到八组，每组正好三个颜色），二者都需在底色上达到 4.5:1。切换主题时，正在使用的预设渐变会换成新主题同一位置的那一组。`custom` 在 `color` 为 `custom` 时使用；`gradient` 必须正好三个颜色，在 `color` 为 `gradient` 时使用。浅色主题下霓虹与数码管的辉光会自动减弱，避免数字发虚。
 
 ### 颜色选择器预设色（swatches）
 
@@ -99,12 +99,29 @@ BrimDeck 的刘海、胶囊、指示条、配额提示、展开面板及其弹�
 | `rimWidth` | 描线宽度 | 0–3 |
 | `shadowBlur` `shadowDepth` `shadowOpacity` | 阴影的模糊、下移距离与不透明度 | 0–40、0–12、0–1 |
 | `scanlines` | 横向扫描线，以主要文字色按此不透明度绘制 | 0–0.12 |
+| `pixel` | 像素风：轮廓的曲线变成这么多 DIP 的阶梯（按整设备像素取整），面板上的圆角变成直角，文字不做平滑；配合 `rimGradient` 时描线变成斜面，第一个颜色照亮朝上和朝左的边，最后一个颜色压暗朝下和朝右的边 | 0，或 1–4 |
+| `texture` | 配合 `pixel`：以像素大小为单位、略亮或略暗于底色的方块，像方块的颗粒。最亮和最暗的方块与渐变色标一样参与对比度检查；没有 `pixel` 时不生效 | 0–0.12 |
+| `decor` | 画在表面里、内容之下的安静图案，每个值分别继承（夜间外观只写 `sea` 时沿用白天的 `at` 与 `line`）：`horizon` 在高度 `at`（未设置时为 0.62）处以下铺一片海（`sea`），沿海平线有一道光（`line`，不透明度不限，同样检查对比度）；`caustics` 是海平线以下柔和的水波光纹（没有海平线时铺满整个表面）；`palm` 是展开面板右上角、海平线以上的棕榈叶影。完全透明的颜色会关掉该部分（例如在夜间外观里）；`sea` 透明时整条海平线都不画，水光随之铺满整个表面。收起的小岛上不画任何图案，海平线不会横穿时间；面板展开时图案渐显。文字对比度按海面（海平线处与最深处）、海平线光带和各图案在其所在区域叠加后的颜色检查 | `at` 0.3–0.9，水光不透明度 ≤ 0.2，叶影不透明度 ≤ 0.12 |
+
+### 日夜外观（night、daylight）
+
+主题可以带一个夜间外观：`night` 里写出夜间要改的 `colors`、`apps`、`effects` 和 `clock`，它按本地时间叠在白天外观上；没写的项沿用白天外观。`daylight` 的 `day` 和 `night` 是白天开始和夜晚开始的时间（`HH:mm`，默认 06:30 和 18:30，可以跨过午夜，如 20:00 到 08:00）；用户可以在设置的“当前主题 › 白天时段”中按半小时改动，改回主题自己的时段时不再保存设置。到点时岛上旧外观的材质在 1.6 秒内淡出，像黄昏一样过渡；关闭动画时直接切换。白天和夜间两种外观都要通过下面的可读性规则。
+
+```jsonc
+"daylight": { "day": "06:30", "night": "18:30" },
+"night": {
+  "colors": { "surface": "#0A1A2C", "textPrimary": "#EEF7F8" },
+  "effects": { "shadowDepth": 0 }
+}
+```
+
+夜间外观只属于写出它的文件，不随 `base` 继承：以海岛假日为基础的主题若也要日夜切换，需在自己的文件里写出 `night`；在设置中“以当前主题新建”或把编辑另存为新主题时，新文件从白天外观起步，并带上原主题的 `night` 与 `daylight`。
 
 ## 可读性保证
 
 主题只决定“好不好看”，不会让信息变得难以辨认：
 
-1. 每个带下限的颜色在应用前都会与底色、渐变的每个色标和弹出层比较对比度。
+1. 每个带下限的颜色在应用前都会与底色、渐变的每个色标、纹理最亮和最暗的方块以及弹出层比较对比度。
 2. 低于下限的颜色沿原有色相调亮或调暗（取需要改动更小的方向），只调到刚好达标；达标的颜色原样保留。半透明的颜色一旦需要调整，会按叠在底色上的效果改为不透明色。若背景有明有暗、任何亮度都无法全部达标，则采用最差情况最好的亮度（绝不比原色更差），并在设置页标明“无法全部达标”。
 3. 应用颜色、时间颜色、封面取色等用户在别处选择的颜色，也按当前主题的底色做同样的处理，所以浅色主题下浅色系的预警色、柠檬绿时间等仍然清晰。
 4. 设置页的“当前主题 › 可读性调整”会列出每一处调整；无法加载的主题文件会列出原因（JSON 错误、未知颜色项、ID 重复等），不会被选中。
@@ -118,8 +135,18 @@ BrimDeck 的刘海、胶囊、指示条、配额提示、展开面板及其弹�
 1. **收集参考**：截取作品或品牌的代表画面，记录场景的明暗、主色、点缀色与反复出现的图形元素。
 2. **提炼角色**：把颜色分到面板的角色上——底色（大面积、最暗或最亮）、文字三级、强调色、语义色（预警、告警、错误）、装饰（描线、阴影、渐变、纹理）。
 3. **先定底色与文字**：底色决定一切对比度；文字三级按 7 : 4.5 : 3 拉开。
-4. **再定点缀与应用色**：应用色彼此要能区分，并且在底色上不低于 3:1；预警与告警要符合直觉（黄、红）。
+4. **再定点缀与应用色**：应用色彼此要能区分，并且在底色上不低于 3:1（预警与告警同时也是文字，需 4.5:1）；预警与告警要符合直觉（黄、红）。
 5. **验证**：在设置页逐一查看收起、展开、提示与弹出层，确认“可读性调整”为空或可以接受；必要时回到第 3 步。
+
+## 新主题的设计说明
+
+**海岛假日**：白天是从暖沙（`#FFF6E8`）到海沫的渐变，深海色文字，泻湖青强调色，珊瑚色衬线时间，描线是“海岸线”（青、天蓝、沙色），阴影带一点海绿。夜里是月光海面：藏青到深青的渐变，灯笼金时间，月光下的海岸线描线，岛下没有阴影，而是一圈淡淡的青色海光。两种外观都无需任何可读性调整。
+
+**海岛假日 2**：同一座海岛的明信片版本，与第一版并存。白天是晴空（`#A8E1F8`）渐入地平线的暖雾，约三分之二处是海平线，下面是泻湖青的海面（`decor.horizon`），海平线上一道阳光，海面上是阳光投下的柔和水光（`decor.caustics`），展开面板右上角落着棕榈叶影（`decor.palm`）；深海色文字，泻湖青强调色，晒红的珊瑚色圆润时间（Fredoka 字体，`rounded` 样式），芒果色指示条，扶桑红“已喜欢”，描线是“海岸线”（泻湖、天空、沙滩、珊瑚），阴影带一点海绿。夜里是深海藏青（`#001E3C`），淡淡月金色的海平线下是深青海面，水面上有月光，灯笼金时间，岛下没有阴影，而是一圈淡淡的青色海光。收起的小岛只保留天空，海平线不会横穿时间。两种外观都无需任何可读性调整。
+
+## 像素方块
+
+非官方的像素风，灵感来自方块沙盒游戏，不使用任何游戏的画面、字体、贴图或标志，全部由颜色和方块画成。深板岩色底加 5% 的方块颗粒（`texture`），2 DIP 的阶梯圆角（`pixel`），左上亮、右下暗的斜面描边，无模糊的硬阴影；岛上和面板弹出层的文字不做平滑，面板里的圆角都变成直角。配色是“聊天”式的高饱和色：白字、黄色方块时钟（`pixel` 时间样式）、绿色强调，指示条像经验条一样是绿色；弹出层是深紫配紫框。设置窗口跟随 Windows 的浅色与深色，不随面板主题变化。
 
 ## 示例：赛博朋克：边缘行者
 

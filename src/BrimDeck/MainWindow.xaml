@@ -45,8 +45,9 @@
             <StackPanel x:Name="CompactRings" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             <StackPanel x:Name="CompactAlert" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
           </Grid>
-          <!-- Pinned to the top and scaled about the top center, so the content recedes toward the screen edge instead of sliding while the panel shrinks. -->
-          <Grid x:Name="ExpandedContent" Visibility="Hidden" Opacity="0" Width="{Binding ActualWidth, ElementName=Island}"
+          <!-- Pinned to the top and scaled about the top center, so the content recedes toward the screen edge instead of sliding while the panel shrinks.
+               Its width follows the island's, before the panel's scale (MainWindow.Scale.cs). -->
+          <Grid x:Name="ExpandedContent" Visibility="Hidden" Opacity="0"
                    HorizontalAlignment="Center" VerticalAlignment="Top" RenderTransformOrigin="0.5,0">
             <Grid.RenderTransform><ScaleTransform x:Name="ContentScale"/></Grid.RenderTransform>
             <Grid x:Name="ContentCanvas" Width="760" Height="240" Margin="0" HorizontalAlignment="Center">
@@ -62,7 +63,7 @@
               <Grid x:Name="Toolbar" Height="{Binding Height.Value, ElementName=ToolbarRow}" VerticalAlignment="Top">
                 <!-- The clock is centered on the whole panel; the switches and the settings button sit inside their own insets. -->
                 <TextBlock x:Name="ClockLabel" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="12" Foreground="{DynamicResource PanelTertiary}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
-                <Border x:Name="PageSwitch" Background="{DynamicResource PanelSwitchFill}" CornerRadius="8" Padding="2" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0">
+                <Border x:Name="PageSwitch" Background="{DynamicResource PanelSwitchFill}" CornerRadius="{DynamicResource PanelR8}" Padding="2" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="10,0,0,0">
                  <Grid>
                  <!-- The chosen page's fill glides between the buttons, as the monitor page's sort pill does (MainWindow.PlacePageCapsule). -->
                  <Border x:Name="PageCapsule" Background="{DynamicResource PanelFillSelected}" HorizontalAlignment="Left" VerticalAlignment="Center"

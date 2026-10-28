@@ -91,8 +91,10 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 <img src="docs/zh-CN/images/monitor.png" width="100%" alt="系统监控页：CPU 占用与各核心使用率、GPU、内存、网速，以及占用最高的应用">
 
-- 实时显示 CPU、GPU、内存的占用和网络速度，以及每个核心的使用率。
+- 实时显示 CPU、GPU、内存的占用和网络速度，以及每个核心的使用率。有多块显卡时默认显示独显；点击大号 GPU 读数可切换到下一块，也可在“设置 › 系统监控 › 显卡”中指定。
 - 按 CPU 或内存列出占用最高的应用，点击应用可查看详情。
+- 按物理硬盘逐行显示已用空间，一块硬盘分成多个盘符时按盘符分段；只列内置硬盘，不含 U 盘、SD 卡、移动硬盘和网络盘。
+- 显示 CPU、GPU 和固态硬盘的温度（可在设置中关闭；刘海或胶囊中的 CPU、GPU 和硬盘读数也可显示温度）。无需管理员权限，也不安装驱动；读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供。
 - 配色默认跟随面板主题，也提供多种预设配色，并支持自定义。
 
 本页参考并改编自 Nongfsq 的 macOS 系统监控 [ftop](https://github.com/Nongfsq/ftop)（MIT 许可证）。
@@ -108,8 +110,12 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 需要 Windows 11（x64）。对 Windows 10（2004 及以上版本）提供有限支持。
 
-1. 从 [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest) 下载并运行 `BrimDeck-<版本>-Setup.exe`。
+1. 从 [Releases](https://github.com/MoFeng2223/BrimDeck/releases/latest) 下载以下任一文件：
+   - 安装版：`BrimDeck-<版本>-Setup.exe`，运行后按提示安装。
+   - 免安装版：`BrimDeck-<版本>-Portable-x64.zip`，解压后运行 `BrimDeck` 文件夹中的 `BrimDeck.exe`。
 2. 如出现“Windows 已保护你的电脑”提示，点击“更多信息”→“仍要运行”。
+
+两种版本都可以在应用内更新，设置和数据都保存在 `%LOCALAPPDATA%\BrimDeck`。免安装版放在需要管理员权限才能修改的文件夹（例如 `C:\Program Files`）中时，更新会请求管理员确认。不再使用免安装版时，先在设置中关闭开机自启动（如已开启），再删除它的文件夹；如需同时删除设置和数据，再删除 `%LOCALAPPDATA%\BrimDeck`。
 
 ## 快速开始
 
@@ -119,7 +125,7 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 ## 卸载
 
-前往 Windows 设置中的“应用”卸载。
+安装版：前往 Windows 设置中的“应用”卸载。免安装版：先在设置中关闭开机自启动（如已开启），再删除它的文件夹。
 
 ## 隐私
 
@@ -141,7 +147,9 @@ BrimDeck 平时位于屏幕顶部中央，提供刘海（默认）、胶囊和�
 
 欢迎通过 [Issues](https://github.com/MoFeng2223/BrimDeck/issues) 反馈问题、提出功能建议，或申请适配更多工具与播放器，也欢迎提交 Pull Request 参与开发。
 
-- Pull Request 请以 `dev` 分支为目标，不要直接合入 `main`。
+- Pull Request 不要直接合入 `main`：
+  - 新功能和一般修复以 `dev` 分支为目标。
+  - 某个版本进入测试阶段后，会有对应的 `release/<版本>` 分支（例如 `release/1.3.0`）。针对这个版本的问题修复以该分支为目标；该分支只接受问题修复，不接受新功能。
 - 后续规划见 [BrimDeck 路线图](https://github.com/MoFeng2223/BrimDeck/discussions/57)。功能建议可以在帖子下讨论，想认领其中某项功能时，也可以直接在帖子下留言。其他话题可以在 [Discussions](https://github.com/MoFeng2223/BrimDeck/discussions) 中讨论。
 
 ## 许可证

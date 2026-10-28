@@ -85,6 +85,16 @@ public static partial class PanelThemes
         if (file.FormatVersion > 1) return Loc.T("需要更新版本的 BrimDeck", "This theme needs a newer BrimDeck");
         var baseId = NormalizeId(file.Base);
         if (baseId.Length > 0 && !IsBuiltIn(baseId)) return Loc.T($"基础主题“{file.Base}”不存在", $"The base theme \"{file.Base}\" does not exist");
+        if (LayerProblem(file) is { } problem) return problem;
+        if (file.Night is { } night && LayerProblem(night) is { } nightProblem) return Loc.T("夜间外观：", "Night look: ") + nightProblem;
+        foreach (var time in new[] { file.Daylight?.Day, file.Daylight?.Night })
+            if (time is { Length: > 0 } && ParseTimeOfDay(time) is null) return Loc.T($"时间“{time}”不是 HH:mm", $"The time \"{time}\" is not HH:mm");
+        return null;
+    }
+
+    // What makes the colors, effects or clock of a file, or of its night look, unusable.
+    private static string? LayerProblem(PanelThemeFile file)
+    {
         foreach (var (key, value) in file.Colors ?? [])
         {
             if (Tokens.All(token => !string.Equals(token.Key, key, StringComparison.OrdinalIgnoreCase))) return Loc.T($"未知的颜色项“{key}”", $"Unknown color \"{key}\"");
@@ -97,7 +107,9 @@ public static partial class PanelThemes
         }
         if (file.Swatches is { } swatches && (swatches.Count > 12 || swatches.Any(value => !ThemeColor.TryParse(value, out _))))
             return Loc.T("颜色选择器预设色最多十二个，且必须是有效颜色", "The picker swatches must be at most twelve valid colors");
-        foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []))
+        var decor = file.Effects?.Decor;
+        var decorColors = new[] { decor?.Horizon?.Sea, decor?.Horizon?.Line, decor?.Caustics?.Color, decor?.Palm?.Color }.OfType<string>();
+        foreach (var value in (file.Effects?.SurfaceGradient ?? []).Concat(file.Effects?.RimGradient ?? []).Concat(decorColors))
             if (!ThemeColor.TryParse(value, out _)) return Loc.T($"效果中的颜色“{value}”无效", $"The effect color \"{value}\" is invalid");
         return file.Clock is { } clock ? ClockProblem(clock) : null;
     }

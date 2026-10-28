@@ -1,0 +1,166 @@
+{
+  // Island holiday 2: a seaside postcard that is light by day and dark by night, changing by the local clock (06:30 and 18:30
+  // unless the settings move them).
+  //   Day: a clear sky fading into the warm haze of the horizon, and below it the lagoon: a turquoise sea with the soft net of
+  //   light a sunlit sea throws, and the shade of a palm frond falling into the open panel's corner. Deep-sea text, a lagoon
+  //   accent, a sunburnt coral clock in a round face, a mango indicator and hibiscus for liked songs. The rim is the shore:
+  //   lagoon, sky, sand, coral, and the shadow a soft sea-green.
+  //   Night: a moonlit sea, deep navy into a dark teal sea under a horizon lit faintly in moon gold, moonlight playing on the
+  //   water, a lantern-gold clock and a soft bioluminescent glow under the island instead of a shadow.
+  // The motifs are drawn, not pictures: no image ships with the theme.
+  "formatVersion": 1,
+  "id": "island-holiday-2",
+  "name": "海岛假日 2",
+  "nameEn": "Island Holiday 2",
+  "description": "海岛明信片：白天是晴空、泻湖海面上的粼粼水光与棕榈叶影，海岸线描边、圆润的珊瑚色时钟、芒果色指示条；夜晚是月光下的深青海面与岛下的海光，按本地时间自动渐变切换。",
+  "descriptionEn": "An island postcard: a clear sky over a lagoon with sunlit ripples and a palm's shade by day, with a shoreline rim, a round coral clock and a mango indicator; a moonlit dark teal sea with a soft glow under the island by night, fading over by the local clock.",
+  "author": "BrimDeck",
+  "license": "Apache-2.0",
+  "base": "light",
+  "daylight": { "day": "06:30", "night": "18:30" },
+  "colors": {
+    "surface": "#FFF7EA",
+    "textPrimary": "#0B2E3A",
+    "textSecondary": "#1D3B47",
+    "textTertiary": "#395661",
+    "accent": "#00676E",
+    "onAccent": "#FFFFFF",
+    "danger": "#922A1F",
+    "liked": "#C2185B",
+    "clock": "#902E14",
+    "equalizer": "#00747F",
+    "hairline": "#1A0B2E3A",
+    "track": "#1F0B2E3A",
+    "ringTrack": "#400B2E3A",
+    "fill": "#120B2E3A",
+    "fillSelected": "#240B2E3A",
+    "hover": "#170B2E3A",
+    "pressed": "#2B0B2E3A",
+    "outline": "#330B2E3A",
+    "popup": "#FFFBF4",
+    "popupBorder": "#2E0B2E3A",
+    "input": "#F7EFE2",
+    "rangeFill": "#3300676E",
+    "coverPlaceholder": "#140B2E3A",
+    "coverOutline": "#1F0B2E3A",
+    "scrollThumb": "#728F88",
+    "rim": "#1FC8C3",
+    "shadow": "#0B5560",
+    "indicator": "#FFA41B",
+    "indicatorProgress": "#0B2E3A",
+    "switchFill": "#0F0B2E3A",
+    "seekRail": "#290B2E3A",
+    "rowDivider": "#120B2E3A",
+    "rowHover": "#0D0B2E3A",
+    "menuDetail": "#3F5F6A",
+    "tooltip": "#FFFBF4",
+    "tooltipBorder": "#330B2E3A",
+    "bubble": "#FFFBF4",
+    "bubbleBorder": "#290B2E3A"
+  },
+  "apps": {
+    "claude": "#AB4E2B", "codex": "#1A7A4B", "antigravity": "#2D60C2", "cursor": "#5A646C", "zcode": "#334E88",
+    "dsh": "#385BB9", "grokBot": "#5A646C", "kimi": "#07728D", "opencode": "#34322F", "manual": "#8744B2", "other": "#5A646C", "warning": "#6F4B00", "critical": "#922A1F"
+  },
+  "clock": {
+    "style": "rounded", "color": "default",
+    "palette": { "amber": "#744500", "cyan": "#075960", "pink": "#8C2C54", "lime": "#3A5800" },
+    "gradients": [
+      { "name": "日落", "nameEn": "Sunset", "stops": ["#86390C", "#8C2C54", "#5838AD"] },
+      { "name": "海洋", "nameEn": "Ocean", "stops": ["#075960", "#184E9C", "#4A3BB5"] },
+      { "name": "极光", "nameEn": "Aurora", "stops": ["#225B25", "#075960", "#184E9C"] },
+      { "name": "火焰", "nameEn": "Ember", "stops": ["#744500", "#86390C", "#922A1F"] },
+      { "name": "霓虹", "nameEn": "Neon", "stops": ["#8A237C", "#5838AD", "#075960"] }
+    ]
+  },
+  "effects": {
+    // A clear sky at the top, the warm haze of the horizon, the sand's warmth at the bottom (under the sea).
+    "surfaceGradient": ["#A8E1F8", "#D6F2F8", "#FFF2DA"],
+    // The shore along the rim: lagoon, sky, sand, coral.
+    "rimGradient": ["#1FC8C3", "#7ED6F5", "#FFE3A3", "#FF8A65", "#1FC8C3"],
+    "rimWidth": 1.25,
+    "shadowBlur": 16,
+    "shadowDepth": 3,
+    "shadowOpacity": 0.22,
+    // The lagoon below a horizon about two thirds down (in the gap under the usage page's third row), a line of sunlight along
+    // it, the light the sea throws, and a palm frond's shade in the open panel's corner.
+    "decor": {
+      "horizon": { "at": 0.655, "sea": "#4038CFE0", "line": "#E6FFFFFF" },
+      "caustics": { "color": "#33FFFFFF" },
+      "palm": { "color": "#1F08402A" }
+    }
+  },
+  // Laid over everything above from 18:30 to 06:30 (or the hours chosen in the settings).
+  "night": {
+    "colors": {
+      "surface": "#001E3C",
+      "textPrimary": "#EEF7F8",
+      "textSecondary": "#DCE8EA",
+      "textTertiary": "#ADC0C7",
+      "accent": "#45D5C8",
+      "onAccent": "#05222A",
+      "danger": "#FFA69B",
+      "liked": "#FF7397",
+      "clock": "#FFD27A",
+      "equalizer": "#45D5C8",
+      "hairline": "#1FB1E0E6",
+      "track": "#26B1E0E6",
+      "ringTrack": "#33B1E0E6",
+      "fill": "#14B1E0E6",
+      "fillSelected": "#26B1E0E6",
+      "hover": "#1FB1E0E6",
+      "pressed": "#33B1E0E6",
+      "outline": "#3DB1E0E6",
+      "popup": "#0A2742",
+      "popupBorder": "#4045D5C8",
+      "input": "#001830",
+      "rangeFill": "#4045D5C8",
+      "coverPlaceholder": "#14B1E0E6",
+      "coverOutline": "#26B1E0E6",
+      "scrollThumb": "#57809E",
+      "rim": "#45D5C8",
+      "shadow": "#2FC9BE",
+      "indicator": "#5C7590",
+      "indicatorProgress": "#071320",
+      "switchFill": "#12B1E0E6",
+      "seekRail": "#38B1E0E6",
+      "rowDivider": "#14B1E0E6",
+      "rowHover": "#0FB1E0E6",
+      "menuDetail": "#DCE8EA",
+      "tooltip": "#0A2742",
+      "tooltipBorder": "#4D45D5C8",
+      "bubble": "#0E3050",
+      "bubbleBorder": "#2E45D5C8"
+    },
+    "apps": {
+      "claude": "#F0AC8C", "codex": "#8EE3B1", "antigravity": "#9EBBFF", "cursor": "#D3DCE2", "zcode": "#9AACEB",
+      "dsh": "#8FAEF2", "grokBot": "#D3DCE2", "kimi": "#6FD8F2", "opencode": "#9AA0A5", "manual": "#D2A6F2", "other": "#D3DCE2", "warning": "#FFD27A", "critical": "#FFA5A5"
+    },
+    "clock": {
+      "palette": { "amber": "#FFC06B", "cyan": "#6FE8E0", "pink": "#FF9EC4", "lime": "#D9FF86" },
+      "gradients": [
+        { "name": "日落", "nameEn": "Sunset", "stops": ["#FFD27A", "#FFA08F", "#FF99C6"] },
+        { "name": "海洋", "nameEn": "Ocean", "stops": ["#7CF2E8", "#6FC6FF", "#B3B2FF"] },
+        { "name": "极光", "nameEn": "Aurora", "stops": ["#93FFB8", "#6FE8E0", "#B3B2FF"] },
+        { "name": "火焰", "nameEn": "Ember", "stops": ["#FFE18A", "#FFC06B", "#FFA095"] },
+        { "name": "霓虹", "nameEn": "Neon", "stops": ["#FF93EE", "#C2ADFF", "#6FE8E0"] }
+      ]
+    },
+    "effects": {
+      // Deep ocean navy at the top, the sea deepening into teal below; a moonlit shoreline along the rim; a soft glow, no shadow.
+      "surfaceGradient": ["#001E3C", "#03294A", "#06344A"],
+      "rimGradient": ["#45D5C8", "#5D7FD8", "#FFD27A", "#FF8F70", "#45D5C8"],
+      "rimWidth": 1.25,
+      "shadowBlur": 16,
+      "shadowDepth": 0,
+      "shadowOpacity": 0.34,
+      // A dark teal sea under a horizon lit in moon gold, moonlight playing faintly on it.
+      "decor": {
+        "horizon": { "at": 0.655, "sea": "#990A4A5E", "line": "#14FFD27A" },
+        "caustics": { "color": "#0C9FE8FF" },
+        // No palm at night: its shade would only smudge the dark water.
+        "palm": { "color": "#00000000" }
+      }
+    }
+  }
+}

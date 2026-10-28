@@ -33,7 +33,9 @@ public partial class App : Application
     // Every panel shows the one set of players, and their lyrics are looked up once.
     internal MediaSessions? Media { get; private set; }
     internal event Action? MediaChanged;
-    internal LyricsService Lyrics { get; } = new();
+    internal LyricsService Lyrics { get; private set; } = null!;
+    // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
+    internal WindowDrags WindowDrags { get; private set; } = null!;
     private readonly HashSet<MainWindow> _presentingMedia = [];
     // The system monitor page's readings, shared by every panel; created when a panel first shows the page.
     internal SystemSampler? Monitor { get; private set; }
@@ -51,9 +53,22 @@ public partial class App : Application
         System.Windows.Controls.ToolTipService.ShowDurationProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(20000));
     }
 
+    // The element whose tooltip opens next (OnStartup).
+    private WeakReference<DependencyObject>? _toolTipOwner;
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Menus and tooltips take the text rendering of what they open from as they open (PanelTheme.Text). A tooltip opened by
+        // the service has no placement target, so its owner is noted as the service raises ToolTipOpening on it.
+        EventManager.RegisterClassHandler(typeof(FrameworkElement), FrameworkElement.ToolTipOpeningEvent,
+            new System.Windows.Controls.ToolTipEventHandler((_, args) => _toolTipOwner = new WeakReference<DependencyObject>((DependencyObject)args.OriginalSource)), true);
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ToolTip), System.Windows.Controls.ToolTip.OpenedEvent, new RoutedEventHandler((sender, _) =>
+        {
+            var tip = (System.Windows.Controls.ToolTip)sender;
+            PanelTheme.Text(tip, tip.PlacementTarget ?? (_toolTipOwner?.TryGetTarget(out var owner) == true ? owner : null));
+        }));
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ContextMenu), System.Windows.Controls.ContextMenu.OpenedEvent,
+            new RoutedEventHandler((sender, _) => PanelTheme.Text((System.Windows.Controls.ContextMenu)sender, ((System.Windows.Controls.ContextMenu)sender).PlacementTarget)));
         Resources[SystemParameters.VerticalScrollBarWidthKey] = 7.0;
         var suffix = Environment.UserName;
         var eventName = "Local\\BrimDeck.Settings." + suffix;
@@ -69,6 +84,7 @@ public partial class App : Application
         Store = new SettingsStore(folder); Settings = Store.Load();
         UseLanguage();
         PanelTheme.Use(Settings);
+        ScheduleDaylight();
         // "跟随系统" follows the Windows app theme while BrimDeck runs.
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         // The language a first start takes from Windows is kept, even if the display language changes later.
@@ -83,18 +99,23 @@ public partial class App : Application
         Prices = new Pricing(folder);
         Updates = new AppUpdates(BrimDeck.Updates.GitHubUpdates.Create(folder), folder);
         Secrets = new ProviderSecrets(folder);
+        Lyrics = new LyricsService(appleLyricsFile: Path.Combine(folder, "apple-music-lyrics.json"));
         Usage = new UsageService(new DesktopSources(), secrets: Secrets, quotaCache: Path.Combine(folder, ClaudeQuotaCache.FileName),
             kimiQuotaCache: Path.Combine(folder, KimiQuotaCache.FileName));
+        WindowDrags = new WindowDrags();
         Deck = new MainWindow(this); MainWindow = Deck;
         Displays = Native.Displays.Current(); AssignDisplays();
         Deck.Show();
         InitializeHotkeys();
         StartBackgroundUpdates();
+        DisplayPower.Install(Dispatcher);
         _save.Tick += (_, _) => FlushSettings();
         _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden);
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _listener = ThreadPool.RegisterWaitForSingleObject(_settingsEvent, (_, _) => Dispatcher.BeginInvoke(OpenSettings), null, Timeout.Infinite, false);
         if (e.Args.Contains("--settings")) OpenSettings();
+        // A portable update that kept this version says why on the About page.
+        else if (Updates.RestartFailed) OpenUpdateSettings();
     }
     // A resident app must not vanish without a trace. Unhandled errors are appended to crash.log in the data folder;
     // errors on the UI thread are logged and the app keeps running, and unobserved task errors are only logged.
@@ -165,10 +186,13 @@ public partial class App : Application
         bool styleChanged = settings.Style != Settings.Style;
         settings.Normalize(); Settings = settings;
         ApplyHotkeys();
+        // A panel whose collapsed row changes asks again as it is built (PresentMonitor).
+        UpdateMonitorExtras();
         // Statuses and notes are worded when the data is read, so a new language reads the data again.
         bool languageChanged = Loc.Normalize(settings.Language) != Loc.Language;
         if (languageChanged) UseLanguage();
         PanelTheme.Use(settings);
+        ScheduleDaylight();
         AssignDisplays();
         foreach (var deck in Decks.ToList()) { if (styleChanged) deck.MorphShape(); else deck.ApplySettings(); }
         QueueSave();
@@ -183,7 +207,9 @@ public partial class App : Application
         Dispatcher.BeginInvoke(() =>
         {
             if (Exiting) return;
-            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId) ApplyPanelTheme(systemChanged: true);
+            // High contrast turned on or off, or its scheme changed, shows the system's colors on the panel (PanelTheme.HighContrast).
+            if (PanelThemes.NormalizeId(Settings.PanelTheme) == PanelThemes.SystemId || SystemParameters.HighContrast || PanelTheme.HighContrast)
+                ApplyPanelTheme(systemChanged: true);
             // The theme page's "System" card shows the Windows mode whichever theme is chosen.
             else _settingsWindow?.PanelThemeChanged(onlyThemePage: true);
         });
@@ -193,10 +219,30 @@ public partial class App : Application
     internal void ApplyPanelTheme(bool reload = false, bool systemChanged = false)
     {
         var previous = PanelTheme.Current;
-        if (!PanelTheme.Use(Settings, reload, systemChanged)) return;
-        if (systemChanged && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
+        bool wasHigh = PanelTheme.HighContrast;
+        bool changed = PanelTheme.Use(Settings, reload, systemChanged);
+        ScheduleDaylight();
+        if (!changed) return;
+        // Into or out of high contrast the theme itself has not changed, so the clock's gradient stays as the user left it.
+        if (systemChanged && !wasHigh && !PanelTheme.HighContrast && PanelThemes.CarryGradient(previous, PanelTheme.Current, Settings)) QueueSave();
         foreach (var deck in Decks.ToList()) deck.ApplySettings();
         if (!reload) _settingsWindow?.PanelThemeChanged();
+    }
+    // A theme with a night look changes look at its hours (PanelThemes.IsNight): the timer is set for the next change, and at
+    // most ten minutes ahead, so a clock changed by hand or a machine that slept past the hour catches up soon after. The switch
+    // carries a preset clock gradient over, as Windows switching "system" between dark and light does.
+    private DispatcherTimer? _daylight;
+    internal void ScheduleDaylight()
+    {
+        if (PanelTheme.NextDaylightChange(Settings) is not { } next) { _daylight?.Stop(); return; }
+        if (_daylight is null)
+        {
+            _daylight = new DispatcherTimer(DispatcherPriority.Background);
+            _daylight.Tick += (_, _) => { _daylight.Stop(); if (!Exiting) ApplyPanelTheme(systemChanged: true); };
+        }
+        var wait = next - DateTime.Now;
+        _daylight.Interval = TimeSpan.FromMilliseconds(Math.Clamp(wait.TotalMilliseconds + 500, 1000, TimeSpan.FromMinutes(10).TotalMilliseconds));
+        _daylight.Stop(); _daylight.Start();
     }
     // A panel reports display changes (monitors added or removed, the primary changed, a work area or scale changed).
     // Each panel receives the same messages, so they are handled once, after Windows has moved the windows to the new layout.
@@ -236,6 +282,9 @@ public partial class App : Application
         bool wanted = Settings.MediaWanted;
         if (wanted && Media is null) { Media = new MediaSessions(Dispatcher); Media.Changed += RaiseMediaChanged; _ = Media.StartAsync(); }
         else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
+        // Switching the setting off leaves full control on until BrimDeck restarts.
+        if (Settings.AppleMusicFullControl && Media is { AppleMusicFullControl: false } media) media.EnableAppleMusicFullControl();
+        if (Media is not null) Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl;
     }
     private void RaiseMediaChanged() => MediaChanged?.Invoke();
     // Audio levels are read while any panel shows music.
@@ -252,8 +301,31 @@ public partial class App : Application
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
         bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
         if (Exiting || Monitor is null && !wanted) return;
-        if (Monitor is null) { Monitor = new SystemSampler(Dispatcher); Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot); }
+        // The sampler reads the choice of graphics adapter on its own thread, where each part is read whole.
+        if (Monitor is null)
+        {
+            Monitor = new SystemSampler(Dispatcher, () => (Settings.MonitorGpu, Settings.MonitorGpuName));
+            Monitor.Updated += snapshot => MonitorUpdated?.Invoke(snapshot);
+            // A choice saved under an older key is kept under the adapter's key from now on (GpuChoice.Resolve).
+            Monitor.GpuKeyUpgraded += (old, key) => { if (Settings.MonitorGpu == old) { Settings.MonitorGpu = key; QueueSave(); } };
+        }
         Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
+        UpdateMonitorExtras();
+    }
+    // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
+    // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
+    // it shows those.
+    private void UpdateMonitorExtras()
+    {
+        bool page = _presentingMonitor.Count > 0;
+        bool strip = _stripMonitor.Count > 0;
+        var shown = strip ? Core.CompactMonitor.Shown(Settings.CompactReadings) : CompactMonitorItems.None;
+        bool Heat(CompactMonitorItems item) => (shown & item) != 0 && Settings.CompactReadings.FirstOrDefault(reading => reading.Item == item) is { } reading
+            && (item == CompactMonitorItems.Storage || reading.ShowValue) && CompactFigures.Shows(reading, CompactFigures.Temperature);
+        bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
+        Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
+            page && Settings.MonitorStorage || stripDrives,
+            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage));
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
@@ -300,8 +372,8 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
-        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); _listener?.Unregister(null); _settingsEvent?.Dispose();
-        Media?.Dispose(); Monitor?.Dispose(); Lyrics.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
+        Exiting = true; Lifetime.Cancel(); _save.Stop(); FinishWriting(); StopBackgroundUpdates(); DisplayPower.Uninstall(); Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged; _tray?.Dispose(); DisposeHotkeys(); WindowDrags?.Dispose(); _listener?.Unregister(null); _settingsEvent?.Dispose();
+        Media?.Dispose(); Monitor?.Dispose(); Lyrics?.Dispose(); Prices?.Dispose(); _mutex?.Dispose(); base.OnExit(e);
     }
     [DllImport("shell32", CharSet = CharSet.Unicode)] private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
 }

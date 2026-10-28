@@ -17,8 +17,9 @@ internal static class MonitorThemeColors
     {
         Warning = Warning(settings), Critical = Critical(settings)
     };
-    public static string Warning(DeckSettings settings) => Drawn(settings.CompactWarningColor ?? PanelTheme.WarningDefault);
-    public static string Critical(DeckSettings settings) => Drawn(settings.CompactCriticalColor ?? PanelTheme.CriticalDefault);
+    // They color the readings' values too, so they are held to the text minimum (PanelThemes.LevelContrast).
+    public static string Warning(DeckSettings settings) => Drawn(settings.CompactWarningColor ?? PanelTheme.WarningDefault, PanelThemes.LevelContrast);
+    public static string Critical(DeckSettings settings) => Drawn(settings.CompactCriticalColor ?? PanelTheme.CriticalDefault, PanelThemes.LevelContrast);
 
     public static MonitorColors For(MonitorPalette palette, MonitorCustomColors custom)
     {
@@ -32,14 +33,16 @@ internal static class MonitorThemeColors
         return MonitorColors.For(palette, theme.IsDark).Map(Drawn);
     }
     // Opaque "#RRGGBB" as drawn on the theme, which ColorMath needs for the core groups' shades and for telling colors apart.
-    private static string Drawn(string color) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color)));
+    private static string Drawn(string color) => Drawn(color, PanelThemes.GraphicContrast);
+    private static string Drawn(string color, double minimum) => ThemeColor.Opaque(PanelTheme.Readable(ThemeColor.Opaque(color), minimum));
 
     public static StripColors Strip(DeckSettings settings) => new(For(settings));
 }
 
 // The system monitor page, after ftop's panel: the main gauge large with its columns (the processor's cores, or the graphics
 // adapter's engines), the other gauge small beside it (a click on either swaps them), memory and network below, and the
-// busiest apps beside or under the readings. Every part draws itself; Update hands each its new reading.
+// busiest apps beside or under the readings. Every part draws itself; Update hands each its new reading. With more than one
+// graphics adapter the large GPU gauge names the shown adapter's kind and a click on it shows the next adapter.
 internal sealed class MonitorView : Grid
 {
     private readonly MonitorLayout _layout;
@@ -51,28 +54,39 @@ internal sealed class MonitorView : Grid
     private readonly BlockGauge? _gpuBlock;
     private readonly MemoryBlock _memory;
     private readonly NetworkBlock _network;
+    private readonly StorageBlock? _storage;
+    private readonly bool _temperatures;
+    private readonly Grid _readings = new();
+    // How far the readings stop above the page's foot, so their last line ends level with the list's last row (AlignFoot).
+    private readonly FootAlignment _foot = new();
     private readonly ProcessListView? _list;
     private readonly Canvas _overlay = new() { IsHitTestVisible = false };
     private ProcessCard? _card;
     private ProcessList? _processes;
     private int _cores = Environment.ProcessorCount;
     private bool _motion;
+    // The adapter a click on the large GPU gauge shows next; null with one adapter.
+    private GpuSample? _nextGpu;
 
+    // temperatures: the gauges carry the processor's and the graphics adapter's temperatures after their figures, and the drives'
+    // entries theirs (the layout's StorageLines and StorageColumns are the places kept for the volumes under memory and network); smallTemperature: the gauge shown small may have a temperature, so its line is widened for one.
     public MonitorView(MonitorLayout layout, MonitorColors colors, MonitorMain main, ProcessSort sort, MonitorProcessView processView,
-        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold)
+        Action<MonitorMain> mainChanged, Action<ProcessSort> sortChanged, Action<bool> hold, Action<GpuSample> gpuChanged, bool temperatures = false, bool smallTemperature = false)
     {
-        _layout = layout; _colors = colors; _main = main;
+        _layout = layout; _colors = colors; _main = main; _temperatures = temperatures;
         bool cpuMain = main == MonitorMain.Cpu;
         string swapToGpu = Loc.T("切换为以 GPU 为主", "Show the GPU large"), swapToCpu = Loc.T("切换为以 CPU 为主", "Show the CPU large");
-        var readings = new Grid();
+        var readings = _readings;
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 16 });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        readings.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        // The gauge shown small takes a fixed width at the right: a wide block for the GPU, thin columns for the processor.
+        // The gauge shown small takes a fixed width at the right: a wide block for the GPU, thin columns for the processor. Its
+        // line is wider than the column under it, and wider still with a temperature after the figure.
         double mini = cpuMain ? Math.Round(Math.Clamp(layout.Figure * 3.4, 54, 84)) : Math.Round(Math.Clamp(layout.Figure * 5, 80, 120));
-        double headMini = Math.Max(mini, Math.Round(layout.Figure * 4.6));
+        double headMini = Math.Max(mini, temperatures && smallTemperature ? SmallLine(layout, gpu: cpuMain) : Math.Round(layout.Figure * 4.6));
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition());
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(headMini) });
@@ -82,6 +96,7 @@ internal sealed class MonitorView : Grid
         small.VerticalAlignment = VerticalAlignment.Center;
         SetColumn(small, 1); head.Children.Add(big); head.Children.Add(small);
         small.Clicked += () => mainChanged(cpuMain ? MonitorMain.Gpu : MonitorMain.Cpu);
+        if (!cpuMain) _gpuGauge.Clicked += () => { if (_nextGpu is { } next) gpuChanged(next); };
         readings.Children.Add(head);
 
         var graphs = new Grid { Margin = new Thickness(0, layout.CompactMetrics ? 4 : 6, 0, layout.CompactMetrics ? 6 : 10) };
@@ -98,7 +113,8 @@ internal sealed class MonitorView : Grid
         }
         else
         {
-            _gpuGraph = new ColumnGraph(44, layout.Caption, !layout.CompactMetrics, gap: 6);
+            // The engines spread over the room the graph has, so a wide page leaves no gap between them and the processor's columns.
+            _gpuGraph = new ColumnGraph(EngineColumn, layout.Caption, !layout.CompactMetrics, gap: 6);
             _cpuGraph = new ColumnGraph(6, layout.Caption, false, gap: 1.5, button: swapToCpu);
             _cpuGraph.Clicked += () => mainChanged(MonitorMain.Cpu);
             SetColumn(_cpuGraph, 2); graphs.Children.Add(_gpuGraph); graphs.Children.Add(_cpuGraph);
@@ -119,6 +135,13 @@ internal sealed class MonitorView : Grid
             _network.Margin = new Thickness(0, layout.Metrics == MetricsMode.Blocks ? 10 : 6, 0, 0);
             SetRow(_memory, 2); SetRow(_network, 3); readings.Children.Add(_memory); readings.Children.Add(_network);
         }
+        if (layout.StorageLines > 0)
+        {
+            // Under the line memory and network share, or under network; its lines are tighter than the list's rows.
+            _storage = new StorageBlock(colors, layout.Body, layout.Caption, layout.StorageRow, layout.StorageLines, layout.StorageColumns, temperatures)
+            { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
+            SetRow(_storage, layout.Metrics == MetricsMode.Line ? 3 : 4); readings.Children.Add(_storage);
+        }
 
         if (layout.List == ListPlacement.None) Children.Add(readings);
         else
@@ -132,6 +155,8 @@ internal sealed class MonitorView : Grid
                 ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(MonitorLayout.ListShare / (1 - MonitorLayout.ListShare), GridUnitType.Star),
                     MinWidth = MonitorLayout.ListMinimum, MaxWidth = MonitorLayout.ListMaximum });
                 SetColumn(_list, 2);
+                // The readings end where the list's last row ends, so both columns share their foot.
+                SizeChanged += (_, _) => AlignFoot();
             }
             else
             {
@@ -150,6 +175,37 @@ internal sealed class MonitorView : Grid
     }
 
     public bool CardOpen => _card is not null;
+    // The widest a graphics engine's column grows on the page with the GPU large: no narrower than the graph's room needs, so the
+    // few kinds of engine an adapter has always fill it.
+    public const double EngineColumn = 1000;
+
+    // The small gauge's widest line with a temperature, "(G) 100 % 独显 105 °C" (the kind only for the graphics adapter, when its
+    // temperature is another adapter's), as FigureGauge lays it out (its dial, the gaps, the figure in the display face, the unit
+    // and the detail), so no reading is ever cut.
+    private static double SmallLine(MonitorLayout layout, bool gpu)
+    {
+        double figure = layout.Body + 1, gap = Math.Round(figure * .4);
+        double Width(string text, double size, bool display = false) => MonitorDraw.Text(text, size, UI.Primary, 1, display: display).WidthIncludingTrailingWhitespace;
+        string hottest = Temperatures.Detail(Temperatures.Highest - 20);
+        double detail = gpu ? Math.Max(Width(Temperatures.AdapterKind(0) + " " + hottest, layout.Caption), Width(Temperatures.AdapterKind(ulong.MaxValue) + " " + hottest, layout.Caption))
+            : Width(hottest, layout.Caption);
+        return Math.Ceiling(Math.Round(figure + 3) + gap + Width("100", figure, display: true) + 2 + Width("%", layout.Caption) + gap + detail + 2);
+    }
+
+    // The list beside the readings fills whole rows from its top, so its last row usually ends above the page's foot; the readings
+    // stop there too, their graph giving up the difference. During a resize the foot holds and the readings stretch with it; once
+    // the size settles the foot eases to the list's, as the page's values ease.
+    private void AlignFoot()
+    {
+        if (_list is null || ActualHeight <= 0) return;
+        var (rows, _) = MonitorLayout.ListGrid(_list.ActualWidth, ActualHeight, _layout.RowHeight);
+        double now = Eased.Now;
+        // While the page is being resized the foot holds, and follows the list once the size settles (FootAlignment).
+        _foot.Resize(rows > 0 ? ActualHeight - MonitorLayout.ListHead - rows * _layout.RowHeight : 0, now);
+        PlaceFoot(now);
+        Motion.Start(this, frame => { bool moving = _foot.Step(frame, _motion); PlaceFoot(frame); return moving; });
+    }
+    private void PlaceFoot(double now) => _readings.Margin = new Thickness(0, 0, 0, Math.Round(_foot.At(now)));
 
     public void Update(MonitorSnapshot snapshot, bool motion)
     {
@@ -159,8 +215,13 @@ internal sealed class MonitorView : Grid
         if (snapshot.Cpu.TryGet(out var cpu))
         {
             string frequency = cpu.FrequencyMhz.TryGet(out var mhz) ? MonitorFormat.Gigahertz(mhz) + " GHz" : "";
-            _cpuGauge.Set(cpu.Usage, MonitorFormat.Percent(cpu.Usage), "%", "",
-                "CPU " + MonitorFormat.Percent(cpu.Usage) + "%" + (frequency.Length > 0 ? " · " + frequency : "") + Loc.T($" · {cpu.Cores.Count} 个逻辑处理器", $" · {cpu.Cores.Count} logical processors"), motion);
+            // The zone is the firmware's, which may be the board near the processor rather than the processor itself.
+            double? heat = _temperatures ? cpu.Temperature : null;
+            string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
+            _cpuGauge.Set(cpu.Usage, MonitorFormat.Percent(cpu.Usage), "%", temperature,
+                "CPU " + MonitorFormat.Percent(cpu.Usage) + "%" + (frequency.Length > 0 ? " · " + frequency : "") + Loc.T($" · {cpu.Cores.Count} 个逻辑处理器", $" · {cpu.Cores.Count} logical processors")
+                + (temperature.Length > 0 ? Loc.T($"\n温度 {temperature}（ACPI 热区 {cpu.TemperatureZone}，可能是主板而非 CPU 本身）", $"\nTemperature {temperature} (ACPI thermal zone {cpu.TemperatureZone}, possibly the board rather than the CPU itself)") : ""),
+                motion, heat is { } c ? Hot(Temperatures.OfCpu(c)) : null);
             int groups = Math.Max(1, cpu.GroupCount);
             _cpuGraph.Set(cpu.Cores.Select(core => new GraphColumn(core.Usage, cpuMain ? core.FrequencyFraction : null, _colors.Core(core.Group, groups), core.Group, Describe(core))).ToList(), motion);
         }
@@ -170,17 +231,35 @@ internal sealed class MonitorView : Grid
         {
             string memory = gpu.DedicatedBytes.TryGet(out var used)
                 ? Loc.T("显存 ", "VRAM ") + MonitorFormat.Gigabytes(used) + (gpu.DedicatedTotal is { } total ? " / " + MonitorFormat.GigabytesCompact(total) : "") + " GB" : "";
-            string tip = (gpu.Name ?? "GPU") + " · " + MonitorFormat.Percent(gpu.Usage) + "%" + (memory.Length > 0 ? " · " + memory : "")
-                + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "");
-            // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure.
-            _gpuGauge.Set(gpu.Usage, MonitorFormat.Percent(gpu.Usage), "%", "", tip, motion);
-            _gpuBlock?.Set(gpu.Usage, gpu.DedicatedFraction, tip, motion);
+            // With more than one adapter each is named with its kind, and the large gauge says which kind it shows.
+            bool several = snapshot.Gpus.Count > 1;
+            _nextGpu = several && !cpuMain ? GpuChoice.Next(snapshot.Gpus, gpu) : null;
+            double? heat = _temperatures ? gpu.Temperature : null;
+            string temperature = heat is { } celsius ? Temperatures.Format(celsius) + " °C" : "";
+            // An adapter without engine readings at the moment (NoReadings) shows a dash and says so; it can still be switched from.
+            bool idle = gpu.NoReadings;
+            string tip = (several ? GpuChoice.Describe(gpu.Name, gpu.Kind) : gpu.Name ?? "GPU") + " · " + (idle ? Loc.T("暂无读数", "No reading") : MonitorFormat.Percent(gpu.Usage) + "%") + (memory.Length > 0 ? " · " + memory : "")
+                + (gpu.SharedBytes.TryGet(out var shared) ? Loc.T(" · 共享 ", " · shared ") + MonitorFormat.Gigabytes(shared) + " GB" : "")
+                + (temperature.Length > 0 ? " · " + temperature + (gpu.TemperatureFrom is { } from ? Loc.T($"（{from} 的温度）", $" ({from}'s temperature)") : "") : "");
+            string switchTo = _nextGpu is { } next ? Loc.T("点击切换到 ", "Click to show ") + GpuChoice.Describe(next.Name, next.Kind) : "";
+            if (!cpuMain) _gpuGauge.Button = switchTo.Length > 0 ? Loc.T("切换显卡", "Switch GPU") : null;
+            // The adapter's name and its memory are in the tooltip and in the block's line, not spelled out beside the figure. After the
+            // figure: the adapter's kind where there is more than one ("独显"), and its temperature, "独显 · 48 °C"; a temperature read
+            // from another adapter (this one has no sensor) carries that adapter's kind instead.
+            string kind = several && !cpuMain ? GpuChoice.KindName(gpu.Kind) : "";
+            string heatText = temperature.Length > 0 && gpu.TemperatureKind is { } from2 ? from2 + " " + temperature : temperature;
+            string detail = kind.Length > 0 && heatText.Length > 0 ? kind + " · " + heatText : kind + heatText;
+            _gpuGauge.Set(idle ? null : gpu.Usage, idle ? "—" : MonitorFormat.Percent(gpu.Usage), idle ? "" : "%", detail, switchTo.Length > 0 ? tip + "\n" + switchTo : tip, motion,
+                heat is { } c ? Hot(Temperatures.OfGpu(c)) : null);
+            _gpuBlock?.Set(idle ? 0 : gpu.Usage, idle ? null : gpu.DedicatedFraction, tip, motion);
             _gpuGraph?.Set(gpu.Engines.Select(engine => new GraphColumn(engine.Usage, null, _colors.Gpu, 0,
                 GpuEngines.Label(engine.Kind) + " · " + MonitorFormat.Percent(engine.Usage) + "%", GpuEngines.Short(engine.Kind))).ToList(), motion);
         }
         else
         {
             string reason = Loc.T("暂无读数：", "No reading: ") + snapshot.Gpu.Reason;
+            _nextGpu = null;
+            if (!cpuMain) _gpuGauge.Button = null;
             _gpuGauge.Set(null, "—", "", "", reason, motion);
             _gpuBlock?.Set(0, null, reason, motion);
             _gpuGraph?.Set([], motion);
@@ -190,6 +269,7 @@ internal sealed class MonitorView : Grid
         (cpuMain ? _cpuGauge : _gpuGauge).Trend = cpuMain ? snapshot.CpuHistory : snapshot.GpuHistory;
         _memory.Set(snapshot.Memory, motion);
         _network.Set(snapshot.Network, snapshot.DownHistory, snapshot.UpHistory);
+        _storage?.Set(snapshot.Storage, motion);
         _list?.Set(snapshot.Processes, _cores, motion);
         _processes = snapshot.Processes.OrDefault;
         // An open card follows its app's readings; it closes when the app has left the list.
@@ -199,6 +279,9 @@ internal sealed class MonitorView : Grid
             if (sample is null) CloseCard(animate: true); else _card.Show(sample, _cores, _layout.Body, _layout.Caption);
         }
     }
+
+    // A temperature's color: the text's while normal, the collapsed readings' warning or critical color above.
+    private string? Hot(MemoryLevel level) => level == MemoryLevel.Normal ? null : _colors.Level(level, UI.Tertiary);
 
     private static string Describe(CoreSample core)
     {
@@ -240,4 +323,36 @@ internal sealed class MonitorView : Grid
     }
 
     public void SetSort(ProcessSort sort) => _list?.SetSort(sort, _motion);
+}
+
+// The monitor page giving way to a new build of itself (a resize across a layout step, a sensor found or missing, a new main
+// gauge): the new page fades in while every page it replaces fades out from where it is, so their opacities always add up to one
+// and the page never dims, even when a drag crosses several steps in quick succession. Nothing jumps to its new place in one
+// frame; the pages that leave take no input. Without animations the new page simply replaces them.
+internal static class MonitorCrossfade
+{
+    private const double Seconds = Eased.Seconds * .6;
+
+    public static void Swap(Panel host, FrameworkElement next, FrameworkElement old, bool motion)
+    {
+        if (!motion || !host.Children.Contains(old)) { host.Children.Clear(); host.Children.Add(next); return; }
+        var leaving = host.Children.OfType<UIElement>().Select(child => (Element: child, From: child.Opacity)).ToList();
+        foreach (var (element, _) in leaving) { element.IsHitTestVisible = false; element.BeginAnimation(UIElement.OpacityProperty, null); }
+        // The opacities the leaving pages had, after any animation of their own was taken off.
+        leaving = [.. leaving.Select(page => (page.Element, page.Element.Opacity))];
+        next.Opacity = 0;
+        host.Children.Add(next);
+        var fade = new Eased(0, Seconds);
+        fade.Set(1, true);
+        Motion.Start(host, now =>
+        {
+            double t = Math.Clamp(fade.At(now), 0, 1);
+            next.Opacity = t;
+            foreach (var (element, from) in leaving) element.Opacity = from * (1 - t);
+            if (fade.Moving(now)) return true;
+            next.Opacity = 1;
+            foreach (var (element, _) in leaving) host.Children.Remove(element);
+            return false;
+        });
+    }
 }

@@ -83,4 +83,45 @@ public static class MediaRouting
             CanNext = log.CanNext || system.CanNext
         };
     }
+
+    // Apple Music's session reports "<artist> — <album>" as the artist and leaves the album empty (measured with
+    // version 1.1540.23042.0: "伍佰 & China Blue — 泪桥 - Single"). The first dash ends the artist.
+    public static (string Artist, string Album) SessionArtistAlbum(string appId, string artist, string album)
+    {
+        const string separator = " — ";
+        if (album.Length > 0 || !IsAppleMusic(appId)) return (artist, album);
+        int dash = artist.IndexOf(separator, StringComparison.Ordinal);
+        return dash > 0 ? (artist[..dash], artist[(dash + separator.Length)..]) : (artist, album);
+    }
+    public static bool IsAppleMusic(string appId) => appId.Contains("applemusic", StringComparison.OrdinalIgnoreCase);
+
+    // Apple Music reports its position in whole seconds, stamped with the time of the report, two to four times a
+    // second (measured: 2.000 at :57.677, 2.000 at :58.219, 3.000 at :58.433). A report of n seconds at t places the song's
+    // start, when it was at zero, after t - n - 1 and no later than t - n. Each report of the same playing song narrows that
+    // span (to 0.28 seconds within seven seconds, measured), and the position is taken from its middle; taking each report
+    // as it came would leave the position up to a second behind and move the progress bar back and forth. A report outside
+    // the span is a seek or a new start, and begins a new span.
+    public sealed record WholeSecondStart(MediaTrack Song, DateTimeOffset Earliest, DateTimeOffset Latest);
+    public static (MediaTrack Track, WholeSecondStart? Start) FromWholeSeconds(WholeSecondStart? known, MediaTrack read)
+    {
+        var reported = read.ReportedPosition - read.Start;
+        if (read is not { State: MediaState.Playing, HasTimeline: true, Rate: 1 } || reported.Ticks % TimeSpan.TicksPerSecond != 0) return (read, null);
+        var latest = read.PositionAt - reported;
+        var earliest = latest - TimeSpan.FromSeconds(1);
+        if (known is not null && known.Song.Duration == read.Duration && SameSong(known.Song, read) && known.Earliest < latest && earliest < known.Latest)
+        {
+            if (known.Earliest > earliest) earliest = known.Earliest;
+            if (known.Latest < latest) latest = known.Latest;
+        }
+        var middle = earliest + (latest - earliest) / 2;
+        return (read with { ReportedPosition = read.Start + (read.PositionAt - middle) }, new(read, earliest, latest));
+    }
+
+    // Apple Music reports a pause right after its position is changed and plays on half a second later (measured: Paused
+    // 80 ms after the seek, Playing again 500 ms after that). Within SeekSettle of a seek BrimDeck made, a pause read while
+    // the same song was playing is that pause, and the playing track is kept; a real pause shows once the time is over.
+    public static readonly TimeSpan SeekSettle = TimeSpan.FromSeconds(1.5);
+    public static bool SettlingAfterSeek(MediaTrack known, MediaTrack read, DateTimeOffset? seekAt, DateTimeOffset now) =>
+        seekAt is { } at && now - at >= TimeSpan.Zero && now - at < SeekSettle &&
+        known.State == MediaState.Playing && read.State == MediaState.Paused && SameSong(known, read);
 }

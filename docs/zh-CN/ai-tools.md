@@ -18,13 +18,22 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 | ZCode | ✓ | ✓ | 在本机登录 ZCode |
 | DeepSeek Harness | ✓ | ✓ | 在 DeepSeek Harness 桌面版或本地 Web 版中登录 DeepSeek 账户，或在其中保存 API 密钥 |
 | Kimi Code | ✓ | ✓ | 在本机登录 Kimi Code（CLI、桌面版或 VS Code 扩展） |
+| OpenCode | ✓ | ✓ | 配额：在本机的 OpenCode（CLI 或桌面版）中登录 OpenCode Console，且工作区订阅了 OpenCode Go。用量统计只需在本机使用 OpenCode |
 | 智谱 GLM、Z.ai GLM | ✓ | | 在设置中填写 API 密钥 |
 | DeepSeek | ✓ | | 在设置中填写 API 密钥 |
 | Kimi Code API | ✓ | | 在设置中填写 Kimi Code API 密钥 |
+| OpenCode Go | ✓ | | 在设置中填写 OpenCode Console API 密钥 |
+| OpenRouter | ✓ | | 在设置中填写 OpenRouter API 密钥 |
 | New API、Sub2API 中转站 | ✓ | | 在设置中填写站点地址和密钥 |
 | 自定义 | ✓ | | 编写一段 JavaScript 脚本 |
 
 手动填写的来源与 Grok Bot 没有本地用量记录，"今日"和"七日"可以另选一个工具统计。
+
+## 费用估算
+
+记录本身带有金额时（例如 Cursor 与 OpenCode），直接使用该金额。其他记录按 OpenRouter 模型目录中的单价估算。
+
+目录中的单价通常取自最便宜的服务商，可能与模型厂商的官方价格不同。例如 GLM-5.3 在目录中的输入与输出单价为每百万 Token 0.07 与 1.4 美元，Z.AI 官方为 1.4 与 4.4 美元。因此，对记录中用到的每个模型，BrimDeck 会查询 OpenRouter 上该模型厂商自己的渠道，并改用该渠道的单价；厂商没有渠道的模型，沿用目录单价。厂商渠道的单价每个模型每天查询一次，并保存在本机；查询失败时沿用上次保存的单价。手动添加的单价优先。
 
 ## WSL 中的用量
 
@@ -37,7 +46,7 @@ AI 用量页的每一列可以在"设置 › 配额与统计"中分别配置：
 
 配额来源为 Claude 或 Grok Bot 的行可以展开，每一行可以单独开关"联网获取额度"（默认开启）：
 
-- **开启**：使用该应用在本机的登录，联网读取账户额度。读取失败时，显示最近一次成功读取的额度或桌面版在本机记录的额度，并标明时间。
+- **开启**：使用该应用在本机的登录，联网读取账户额度。读取失败时，显示最近一次成功读取的额度或桌面版在本机记录的额度，并标明时间。Claude 重启 BrimDeck 后仍会显示同一账户上次读取的额度。Claude 的账户接口提示请求频繁（429）时，按接口给出的等待时间暂停请求（超过 7 天的当作无效），没有给出时依次等待 2、4、8、16 分钟，最长 30 分钟；暂停期间不再每分钟请求，手动刷新也不会绕过，状态里会写明下次请求的时间。
 - **关闭**：不读取登录，也不联网，只显示桌面版在本机记录的最新额度。这些数据标为旧数据，不触发额度提醒。
 
 ## Grok Bot
@@ -65,9 +74,19 @@ Kimi Code CLI、桌面版与 VS Code 扩展共用同一个数据目录与登录�
 - **服务地址**：按 Kimi Code 的设置读取。设置了 `KIMI_CODE_BASE_URL` 时使用该地址，须为 HTTPS；同时支持 `KIMI_CODE_OAUTH_HOST` 与 `KIMI_CODE_REGION_MARKER`，与 Kimi Code 的用法一致。
 - **Token 用量与费用**：读取本机的 Kimi Code 会话记录，包含 CLI、桌面版与 VS Code 扩展，以及其中的子代理。K3（`kimi-k3`）、K3.1 Pro（`kimi-k3.1-pro`）与 K3.1 Pro Highspeed（`kimi-k3.1-pro-highspeed`）按 OpenRouter 上 Moonshot AI 官方渠道的单价估算费用（包括缓存读取，渠道提供时也包括缓存写入），不采用其他服务商的价格；该价格随单价表每天更新并保存在本机，更新失败时沿用上次保存的价格，从未获取到时只统计 Token。`k3-256k` 单独列出，按 K3 的单价计算。`kimi-for-coding` 与 `kimi-for-coding-highspeed` 是 Kimi Code 会随时间指向不同模型的别名，只统计 Token，不计算费用。手动添加的单价优先，包括为 `k3-256k` 单独添加的单价。
 
+## OpenCode
+
+OpenCode CLI 与桌面版共用同一个数据目录（`%USERPROFILE%\.local\share\opencode`），登录与会话记录都保存在其中的 `opencode.db`，任选其一登录即可。OpenCode 1.x 与 2.x 也使用这个目录。
+
+- **配额**：显示 OpenCode 登录 OpenCode Console 时所选工作区的 OpenCode Go 额度，包括 5 小时、每周与每月额度的已用比例和重置时间。OpenCode 只返回比例，不返回套餐档位，因此不区分 Go 与 Go Plus。工作区未订阅 OpenCode Go 时，状态显示"未订阅 Go"；达到用量上限时，状态中会提示。
+- **登录**：使用 OpenCode 自己的登录，不续期登录。登录过期时不发送请求，使用一次 OpenCode 即可续期。OpenCode 中没有 Console 登录、只保存了 API 密钥时，使用该密钥。
+- **数据目录**：设置了 `XDG_DATA_HOME`（须为绝对路径）时，读取其中的 `opencode` 目录；设置了 `OPENCODE_DB` 时，读取该数据库，与 OpenCode 的用法一致。
+- **Token 用量与费用**：读取本机 OpenCode 数据库中的每次模型请求，包含 CLI 与桌面版，以及 OpenCode 1.x 留下的记录。费用使用 OpenCode 记录的金额，即按 OpenCode 标价计算的金额：免费模型为 0；OpenCode Go 的模型同样按标价计算，表示这次请求相当于多少钱，不是从账户余额中扣除的金额。失败的请求没有 Token，不计入。OpenCode 为会话生成标题的请求没有单独的记录，不计入。
+- OpenCode Console 的按量付费余额目前不显示。
+
 ## 手动填写的来源
 
-在"配额来源"中选择智谱 GLM、Z.ai GLM、DeepSeek、Kimi Code API、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
+在"配额来源"中选择智谱 GLM、Z.ai GLM、DeepSeek、Kimi Code API、OpenCode Go、OpenRouter、New API、Sub2API 或自定义后，该行会展开，填写所需内容即可。
 
 - **密钥**：使用 Windows 的加密功能保存在本机，不写入设置文件。删除该列或更换配额来源时，密钥一并删除。
 - **站点地址**：填写站点首页地址即可。末尾的 `/v1`，以及直接粘贴的控制台页面路径，会自动去掉。请求会带上 API 密钥，所以站点地址须使用 HTTPS；HTTP 仅限本机地址（`localhost`、`127.0.0.1`、`[::1]`）。
@@ -86,6 +105,14 @@ Kimi Code CLI、桌面版与 VS Code 扩展共用同一个数据目录与登录�
 ### Kimi Code API
 
 填写在 Kimi Code 控制台创建的 API 密钥（`sk-kimi-` 开头），无需在本机登录 Kimi Code。显示的额度与自动读取的 Kimi Code 相同：5 小时与每月额度，旧版套餐另有每周额度，购买了加油包时显示加油包余额；名称旁显示会员等级。国内版（kimi.com）与海外版（kimi.ai）的密钥都可以使用：先向 api.kimi.com 查询，密钥被拒绝时改向 api.kimi.ai 查询，来源按账户所属站点显示为“Kimi Code API · kimi.com 账户”或“Kimi Code API · kimi.ai 账户”。此密钥不能用于 Moonshot 开放平台，因此不显示开放平台余额，也不统计 Token 用量。
+
+### OpenCode Go
+
+填写在 OpenCode Console 创建的 API 密钥（`oc_sk_` 开头），无需在本机安装或登录 OpenCode。显示该密钥所属工作区的 OpenCode Go 额度，与自动读取的 OpenCode 相同：5 小时、每周与每月额度。工作区未订阅 OpenCode Go 时，状态中会说明。不统计 Token 用量。
+
+### OpenRouter
+
+填写在 OpenRouter 创建的 API 密钥（`sk-or-v1-` 开头）。显示账户余额（已购买的额度减去已用额度），以及这个密钥今日与本月的扣费，金额以美元显示。今日与本月按 UTC 时间计算，在北京时间 08:00 重置。密钥设置了额度上限时，另外显示密钥余额与重置时间；账户管理员设置了预算时，显示最先限制请求的预算余额。不统计 Token 用量。
 
 ### New API
 

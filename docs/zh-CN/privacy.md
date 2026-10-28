@@ -14,9 +14,10 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | ZCode | 读取 ZCode 的登录，查询 Coding Plan、Start Plan 与 MCP 每日额度 | 读取本地请求记录（`%USERPROFILE%\.zcode\cli\db\db.sqlite`） |
 | DeepSeek Harness | 读取 DeepSeek Harness 的登录（`%USERPROFILE%\.dsh\.credentials.yaml`），向 DeepSeek 开放平台查询账户余额与累计消费金额；未登录账户时，使用其中保存的 API 密钥查询余额 | 读取本地会话记录（`%USERPROFILE%\.dsh\sessions`） |
 | Kimi Code | 读取 Kimi Code 的登录（`%USERPROFILE%\.kimi-code\credentials\` 下的 `kimi-code.json`，海外版为 `kimi-code-env-…json`）、服务地址与站点设置（`config.toml`，以及可选的 `region` 文件），向所选站点（api.kimi.com 或 api.kimi.ai）查询套餐额度与会员等级；不续期登录，不修改 Kimi Code 的任何文件 | 读取本地会话记录（`%USERPROFILE%\.kimi-code\sessions`） |
-| 智谱 GLM、Z.ai GLM、DeepSeek、Kimi Code API、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址；Kimi Code API 的密钥只发往 api.kimi.com 与 api.kimi.ai，读取的额度不写入 `kimi-quota.json`。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
+| OpenCode | 以只读方式读取 OpenCode 数据库（`%USERPROFILE%\.local\share\opencode\opencode.db`）中的 OpenCode Console 登录，没有时读取同一目录下 `auth.json` 中的 API 密钥，向 opencode.ai 查询 OpenCode Go 额度；不续期登录，不修改 OpenCode 的任何文件 | 以只读方式读取同一数据库中的模型请求记录 |
+| 智谱 GLM、Z.ai GLM、DeepSeek、Kimi Code API、OpenCode Go、OpenRouter、New API、Sub2API、自定义 | 使用在设置中填写的密钥与站点地址；Kimi Code API 的密钥只发往 api.kimi.com 与 api.kimi.ai，读取的额度不写入 `kimi-quota.json`；OpenCode Go 的密钥只发往 opencode.ai；OpenRouter 的密钥只发往 openrouter.ai。密钥只通过 HTTPS 或发往本机地址；New API、Sub2API、自定义来源打开“允许 HTTP”后，也会通过 HTTP 以明文发送 | 不提供 |
 
-- 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME`、`DSH_HOME` 或 `KIMI_CODE_HOME`（须为绝对路径）时，从该目录读取。
+- 设置了 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ZCODE_HOME`、`DSH_HOME` 或 `KIMI_CODE_HOME`（须为绝对路径）时，从该目录读取。OpenCode 按 `XDG_DATA_HOME` 与 `OPENCODE_DB` 确定数据库位置。
 - 这些账户接口与本地数据格式并非公开的稳定接口。无法读取时，面板显示实际状态，不会显示虚构的数值。
 
 ## 本机保存的文件
@@ -28,17 +29,18 @@ BrimDeck 仅读取应用已有的登录状态与用量记录，不会修改、�
 | `settings.json` | 设置，不含任何登录令牌或 API 密钥 |
 | `secrets.dat` | 手动填写的 API 密钥，使用 Windows 的加密功能按当前用户加密 |
 | `model-prices.json`、`manual-model-prices.json` | 同步的模型单价、手动添加的单价 |
-| `moonshot-prices.json` | 从 OpenRouter 同步的 Moonshot AI 官方渠道单价（Kimi K3、K3.1 Pro 与 K3.1 Pro Highspeed），用于计算 Kimi Code 的费用 |
+| `official-prices.json` | 从 OpenRouter 同步的模型厂商官方渠道单价，只包含记录中用到的模型，以及 Kimi Code 计费所需的 Kimi K3、K3.1 Pro 与 K3.1 Pro Highspeed。没有这个文件时，读取旧版本保存的 `moonshot-prices.json` |
 | `claude-quota.json` | 最近一次联网读取的 Claude 额度（各项百分比、重置时间与订阅名称），重启后接口被限流时用来继续显示 Fable 等额度；不含登录令牌；账户仅以其 ID 的单向哈希记录（不保存 ID 本身），只在同一账户登录时使用；超过 7 天不再使用，登录失效或退出登录时删除 |
 | `kimi-quota.json` | 最近一次联网读取的 Kimi Code 额度（各项百分比、重置时间、加油包与会员等级），登录过期或接口暂时不可用时继续显示，重启后同样适用；不含登录令牌与其他账户资料；账户仅以其 ID 连同服务地址的单向哈希记录（不保存 ID 本身），只在同一站点的同一账户登录时使用；超过 7 天不再使用，退出登录或账户未订阅 Kimi Code 套餐时删除 |
-| `update-prompt.txt`、`updates\` | 已提示过的版本号、下载的安装包 |
+| `update-prompt.txt`、`updates\` | 已提示过的版本号、下载的安装包或免安装压缩包（免安装版更新时还有解压出的新版本文件） |
 | `crash.log` | 错误记录，超过 1 MB 时清空 |
 
 ## 联网与安全
 
-- 仅连接以下地址：各工具的官方接口、你在设置中填写的站点、OpenRouter 模型目录及 Kimi 模型的渠道列表（同步模型单价）、歌词服务（LRCLIB、网易云音乐、QQ 音乐）、播放器提供的封面地址，以及 GitHub Releases（检查更新）。
+- 仅连接以下地址：各工具的官方接口、你在设置中填写的站点、OpenRouter 模型目录及记录中用到的模型的渠道列表（同步模型单价，只发送模型名称）、歌词服务（LRCLIB、网易云音乐、QQ 音乐）、播放器提供的封面地址，以及 GitHub Releases（检查更新）。
 - 读取的登录令牌仅在内存中使用，不写入磁盘；Claude 桌面版与 Grok Bot 桌面版的登录缓存使用当前用户的 Windows 加密功能在内存中解密。
 - 自定义脚本在沙盒中运行，无法访问文件、进程或 .NET 对象，限制详见[支持的工具](ai-tools.md#自定义脚本)。
+- 系统监控的读数（包括温度和硬盘空间）只在本机读取和显示，不保存、不上传。硬盘空间来自各盘符的文件系统，盘符所在的物理硬盘通过 Windows 的卷信息查询。温度通过 Windows 自带的接口读取：CPU 用性能计数器中的 ACPI 热区，GPU 用显卡驱动报告的数据，硬盘以不可读写的方式打开后查询其温度；不需要管理员权限，不安装驱动。
 - 律动条所用的声音仅在内存中分析，不会保存。
 
 ## 网易云音乐完整控制
