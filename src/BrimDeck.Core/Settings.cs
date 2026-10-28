@@ -119,6 +119,17 @@ public sealed class AppEntry
     public string OffPeakWarningColor { get; set; } = "";
     public string OffPeakCriticalColor { get; set; } = "";
     public bool IsOffPeak(DateTime local) => OffPeak?.Any(period => period.Contains(local)) == true;
+    // The next minute at which this row enters or leaves its off-peak time; null without periods, or when they cover the
+    // whole day. A boundary inside another period changes nothing, so the first boundary that flips the state is taken.
+    public DateTime? NextOffPeakChange(DateTime local)
+    {
+        if (OffPeak is not { Count: > 0 }) return null;
+        bool now = IsOffPeak(local);
+        var minute = local.Date.AddMinutes(local.Hour * 60 + local.Minute);
+        return OffPeak.SelectMany(period => new[] { period.Start, period.End }).Distinct()
+            .Select(boundary => local.Date.AddMinutes(boundary)).Select(at => at <= minute ? at.AddDays(1) : at)
+            .Order().Cast<DateTime?>().FirstOrDefault(at => IsOffPeak(at!.Value) != now);
+    }
     public AppEntry Copy()
     {
         var copy = (AppEntry)MemberwiseClone();
@@ -321,6 +332,9 @@ public sealed class DeckSettings
     public double Height { get; set; } = 200;
     // The quick size last chosen in settings; cleared when the width or height is edited by hand.
     public PanelSize? QuickSize { get; set; }
+    // BrimDeck drawn larger, in percent (PanelScales): the collapsed surface and the expanded panel, its pages, header and menus
+    // grow together, as Windows' display scaling would for BrimDeck alone. Sizes stay saved before the scale.
+    public int PanelScale { get; set; } = PanelScales.Default;
     public int OpenDelay { get; set; } = 0;
     public int CloseDelay { get; set; } = 0;
     public int AnimationDuration { get; set; } = 360;
@@ -350,6 +364,8 @@ public sealed class DeckSettings
     // theme's warning and critical colors. The expanded page does not change color by level.
     public string? CompactWarningColor { get; set; }
     public string? CompactCriticalColor { get; set; }
+    // The collapsed readings' dials and core columns ease to each reading at this many frames a second, or not at all.
+    public CompactSmoothing CompactSmoothing { get; set; } = CompactSmoothing.Ten;
     // Seconds between readings: 1 or 2.
     public int MonitorInterval { get; set; } = 1;
     public bool MonitorProcesses { get; set; } = true;
@@ -513,6 +529,7 @@ public sealed class DeckSettings
         MusicHeight = double.IsFinite(MusicHeight) ? Math.Clamp(MusicHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : 200;
         MonitorWidth = double.IsFinite(MonitorWidth) ? Math.Clamp(MonitorWidth, DeckPages.MinWidth, DeckPages.MaxWidth) : MonitorSizes.Default.Width;
         MonitorHeight = double.IsFinite(MonitorHeight) ? Math.Clamp(MonitorHeight, DeckPages.MinHeight, DeckPages.MaxHeight) : MonitorSizes.Default.Height;
+        PanelScale = PanelScales.Fit(PanelScale);
         if (!Enum.IsDefined(MonitorPalette)) MonitorPalette = MonitorPalette.Theme;
         MonitorCustomColors ??= new();
         MonitorCustomColors.Normalize();
@@ -524,6 +541,7 @@ public sealed class DeckSettings
         MonitorGpu = string.IsNullOrWhiteSpace(MonitorGpu) ? null : MonitorGpu.Trim();
         MonitorGpuName = MonitorGpu is null || string.IsNullOrWhiteSpace(MonitorGpuName) ? null : MonitorGpuName.Trim();
         if (!Enum.IsDefined(MonitorProcessView)) MonitorProcessView = MonitorProcessView.Auto;
+        if (!Enum.IsDefined(CompactSmoothing)) CompactSmoothing = CompactSmoothing.Ten;
         if (!Enum.IsDefined(CompactMonitor)) CompactMonitor = CompactMonitorMode.Full;
         CompactMonitorItems &= CompactMonitorItems.All;
         if (CompactMonitorItems == CompactMonitorItems.None) CompactMonitorItems = CompactMonitorItems.Cpu;
@@ -659,11 +677,29 @@ public sealed class SettingsStore(string directory, string? appVersion = null)
             }
             return SettingsMigrations.Read(root, running, out _);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
+        // Any exception, since a faulty migration step can throw anything. Defaults replace the file at the next save,
+        // so the file is copied aside first and can still be restored by hand.
+        catch (Exception)
         {
-            _loadWarning = () => Loc.T("无法读取已保存的设置，本次使用默认值。", "The saved settings could not be read. Default settings are used this time.");
+            var kept = KeepUnreadable();
+            _loadWarning = kept is null
+                ? () => Loc.T("无法读取已保存的设置，本次使用默认值。", "The saved settings could not be read. Default settings are used this time.")
+                : () => Loc.T($"无法读取已保存的设置，本次使用默认值。原文件已另存为 {kept}。", $"The saved settings could not be read. Default settings are used this time. The original file is kept as {kept}.");
             return FirstStart();
         }
+    }
+
+    // Copies an unreadable settings file next to it and returns the copy's name, or null when there is nothing to copy.
+    private string? KeepUnreadable()
+    {
+        try
+        {
+            if (!File.Exists(FilePath)) return null;
+            var name = $"settings.unreadable-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            File.Copy(FilePath, Path.Combine(DirectoryPath, name), true);
+            return name;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
     public void Save(DeckSettings settings) => Write(Serialize(settings));
 

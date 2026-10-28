@@ -201,6 +201,9 @@ public partial class MainWindow
     {
         if (_detailPopup is not null) { _detailPopup.Activate(); return; }
         _leave.Stop(); _popupReturnArea = null; _detailPopup = popup; popup.Owner = this;
+        // Drawn at the panel's scale, as the panel it opens from.
+        if (popup.Content is FrameworkElement scaled) UI.Scale(scaled, _scale);
+        if (double.IsFinite(popup.Width)) popup.Width *= _scale;
         // A layered window renders grayscale text unless told otherwise; its rounded background is opaque, so ClearType is safe.
         RenderOptions.SetClearTypeHint(popup, ClearTypeHint.Enabled);
         var point = anchor.PointToScreen(new Point(anchor.ActualWidth, anchor.ActualHeight));
