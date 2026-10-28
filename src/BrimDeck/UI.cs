@@ -83,13 +83,6 @@ internal static class UI
         block.InvalidateMeasure();
         return cut;
     }
-    public static Button Button(string text, Action click, bool active = false)
-    {
-        var button = new Button { Content = text, Background = Brush(active ? "#293A55" : "#222224"), BorderBrush = Brush(active ? "#4D83D1" : "#333336"),
-            Foreground = Brush(active ? "#DBE9FF" : "#B2B2B8"), Padding = new Thickness(10, 5, 10, 5), FontSize = 11, Margin = new Thickness(0, 0, 6, 0) };
-        button.Click += (_, _) => click();
-        return button;
-    }
     // A progress ring: a faint track with a colored arc that starts at the top and runs counterclockwise.
     public static Grid Ring(double percent, string color, double size, double thickness, string? track = null)
     {
@@ -109,7 +102,6 @@ internal static class UI
         }
         return ring;
     }
-    public static Border Divider(double margin = 12) => new() { Height = 1, Background = Brush("#2D2F38"), Margin = new Thickness(0, margin, 0, margin) };
     public static string Number(long number) => number switch
     { >= 1_000_000_000 => (number / 1_000_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "B", >= 1_000_000 => (number / 1_000_000d).ToString("0.##", CultureInfo.InvariantCulture) + "M", >= 1000 => (number / 1000d).ToString("0.#", CultureInfo.InvariantCulture) + "K", _ => number.ToString("N0") };
     public static string Cost(IEnumerable<TokenEntry> entries, Pricing pricing) => Cost(pricing.Summarize(entries));

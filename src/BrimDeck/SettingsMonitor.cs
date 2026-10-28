@@ -58,7 +58,8 @@ public sealed partial class SettingsWindow
         // The options stay available while the page is off, so they can be set before it is shown.
         SectionTitle(Loc.T("通用", "General"));
         Group(Row(Loc.T("各项颜色", "Reading colors"), roles),
-            QuickRow(Loc.T("快捷预设", "Presets"), presets));
+            QuickRow(Loc.T("快捷预设", "Presets"), presets),
+            GpuChoiceRow());
         CompactMonitorOptions();
         SectionTitle(Loc.T("展开时", "When expanded"));
         // The choices that show themselves on the monitor page keep its preview open, so switching between them does not collapse it first.
@@ -74,14 +75,49 @@ public sealed partial class SettingsWindow
                 keepPreview: true),
             Toggle(Loc.T("显示硬盘", "Show drives"), S.MonitorStorage, v => Resize(s => s.MonitorStorage = v, DeckPage.Monitor),
                 help:
-                Loc.T("在内存和网速下方按物理硬盘逐行显示已用空间：一块硬盘分成多个盘符时，一行内按盘符分段。只列出内置硬盘上 1 GB 以上的固定分区，不含 U 盘、SD 卡、移动硬盘、网络盘和光驱；Dev Drive 和长期挂载的 VHD 照常列出。面板放不下时，其余硬盘合并为最后一行。每 10 秒读取一次。",
-                    "Shows the space in use on each physical drive, one line per drive, under memory and network: a drive split into several letters has a segment per letter. Only fixed volumes of 1 GB or more on internal drives are listed, not USB sticks, SD cards, external, network or optical drives; a Dev Drive or a VHD mounted for good is listed. When the panel has no room for all, the rest share the last line. Read every 10 seconds."),
+                Loc.T("不含 U 盘、移动硬盘、网络盘和光驱。放不下的盘符合并为最后一项。",
+                    "USB, external, network and optical drives are not included. Letters that do not fit are combined into the last item."),
                 keepPreview: true),
             Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
-                Loc.T("在 CPU 和 GPU 读数后、各硬盘行的末尾显示温度。读不到的项不显示。GPU 温度与任务管理器相同；CPU 温度来自主板固件的 ACPI 热区，可能是主板而非 CPU 本身的温度，许多电脑不提供；热区读数变化过才显示，从不变化的固定值不显示，此后 10 分钟不变也会隐藏；硬盘温度每 30 秒读取一次。",
-                    "Shows temperatures after the CPU and GPU readings and at the end of each drive's line. Sensors that cannot be read are left out. The GPU temperature is the one Task Manager shows; the CPU temperature comes from the firmware's ACPI thermal zones, may be the board's rather than the CPU's own, and many PCs do not provide it; a zone shows only once its value has changed, so a fixed value never shows, and it is left out again after 10 minutes without change; drives are read every 30 seconds."),
+                Loc.T("读不到的温度不显示。CPU 温度由主板固件提供，许多电脑没有这项数据；有的电脑读到的是主板的温度，不是 CPU 本身的温度。",
+                    "Temperatures that cannot be read are not shown. The CPU temperature comes from the motherboard firmware. Many PCs do not provide it, and on some it is the motherboard's temperature rather than the CPU's."),
                 keepPreview: true));
+    }
+
+    // The graphics adapter the monitor shows, on the page and in the collapsed readings alike: 自动, or one of the adapters found,
+    // named with its kind. The adapters are the ones the monitor reads while it runs, else the ones DXGI lists. A chosen adapter
+    // that is not connected stays in the list, marked, so the choice can be seen and changed.
+    private Grid GpuChoiceRow()
+    {
+        var found = _app.Monitor?.Latest?.Gpus is { Count: > 0 } read ? read.Select(gpu => (gpu.Key, gpu.LegacyKey, gpu.Name, gpu.Luid, gpu.Kind, gpu.NoReadings)).ToList()
+            : Native.GpuAdapters.Read().Adapters.Values.Where(adapter => !adapter.Software).OrderBy(adapter => GpuReadings.Rank(adapter.Kind))
+                .ThenBy(adapter => adapter.Name, StringComparer.Ordinal).Select(adapter => (adapter.Key, adapter.LegacyKey, Name: (string?)adapter.Name, adapter.Luid, adapter.Kind, NoReadings: false)).ToList();
+        var options = new List<(string? Key, string? Name, string Label)> { (null, null, Loc.T("自动", "Auto")) };
+        // An adapter without readings at the moment stays in the list, marked.
+        options.AddRange(found.Select(gpu => ((string?)gpu.Key, gpu.Name, GpuChoice.Describe(gpu.Name, gpu.Kind) + (gpu.NoReadings ? Loc.T("（暂无读数）", " (no reading)") : ""))));
+        // The saved card is found as the monitor finds it (GpuChoice.Find): while it is not connected, another card of the same model
+        // is never shown as chosen; the saved one is listed as not connected instead, and the monitor shows 自动 meanwhile.
+        int selected = S.MonitorGpu is not { } saved ? 0 : GpuChoice.Find(found, gpu => (gpu.Key, gpu.LegacyKey, gpu.Name, gpu.Luid), saved, S.MonitorGpuName) is var at and >= 0 ? at + 1 : -1;
+        if (selected < 0)
+        {
+            options.Add((S.MonitorGpu, S.MonitorGpuName, Loc.T($"{S.MonitorGpuName ?? "GPU"}（未连接，暂按自动显示）", $"{S.MonitorGpuName ?? "GPU"} (not connected; showing Auto meanwhile)")));
+            selected = options.Count - 1;
+        }
+        var choice = new ComboBox { Width = 292, Style = (Style)FindResource("SettingsCombo"), ItemsSource = options.Select(option => option.Label).ToList(), SelectedIndex = selected };
+        AutomationProperties.SetName(choice, Loc.T("显卡", "GPU")); PopupMotion.Attach(choice);
+        choice.SelectionChanged += (_, _) =>
+        {
+            if (choice.SelectedIndex < 0) return;
+            var (key, name, _) = options[choice.SelectedIndex];
+            if (key == S.MonitorGpu) return;
+            Change(s => { s.MonitorGpu = key; s.MonitorGpuName = name; });
+            // The open page and the collapsed readings show the new adapter at once.
+            _app.Monitor?.ShowGpuChoice();
+        };
+        return Row(Loc.T("显卡", "GPU"), choice, help: () => Loc.T(
+            "自动：优先显示独显，有多块独显时显示显存最大的一块；没有独显时显示占用最高的一块。选定后不随占用切换。以 GPU 为主视图时，点击 GPU 读数可切换显卡。",
+            "Auto: prefers the discrete GPU, and with several, the one with the most memory; without one, the busiest GPU. It does not switch as the load changes. Click the GPU reading while the GPU is the large gauge to switch GPUs."));
     }
 
     // A color circle with its name beside it. refresh builds the circle again, so it shows the color the settings hold. The note
@@ -328,8 +364,8 @@ public sealed partial class SettingsWindow
         return new Border { Child = row, Height = ReadingRowHeight, BorderBrush = UI.Brush(Divider), BorderThickness = new Thickness(0), Tag = item, RenderTransform = new TranslateTransform() };
     }
 
-    // The menu of what CPU, GPU or the drives show after their glyph: the share in use, the temperature or both (one above the
-    // other), at least one; for the drives also which lettered volumes, at least one. A chosen letter not found now (a drive taken
+    // The menu of what CPU, GPU or the drives show after their glyph: the share in use, the temperature or both, at least one, and
+    // whether both show one above the other (the default) or side by side; for the drives also which lettered volumes, at least one. A chosen letter not found now (a drive taken
     // out) is listed as not connected. The drives come from the sampler's last reading, or, when it has none, are read once as the
     // menu opens. The menu is as wide as its button.
     private Button FiguresMenu(CompactMonitorItems item, List<Action> refresh, Action<Action<DeckSettings>> edit)
@@ -385,8 +421,8 @@ public sealed partial class SettingsWindow
             CornerRadius = new CornerRadius(8), Padding = new Thickness(4)
         };
         menu.Child = surface;
-        // One line: a check when chosen, then the label. The last one chosen of its group stays.
-        void Entry(string label, bool on, bool last, string? help, Action toggle)
+        // One line: a check when chosen, then the label. The last one chosen of its group stays; blocked: why it cannot be chosen now.
+        void Entry(string label, bool on, bool last, string? help, Action toggle, string? blocked = null)
         {
             var line = new DockPanel();
             line.Children.Add(new TextBlock
@@ -398,8 +434,8 @@ public sealed partial class SettingsWindow
             line.Children.Add(text);
             var entry = ActionButton("", () => { }); entry.Content = line;
             entry.HorizontalContentAlignment = HorizontalAlignment.Stretch; entry.Padding = new Thickness(7, 3, 7, 3);
-            entry.IsEnabled = !last;
-            entry.ToolTip = last ? Loc.T("至少保留一项。", "At least one stays.") : help;
+            entry.IsEnabled = !last && blocked is null;
+            entry.ToolTip = last ? Loc.T("至少保留一项。", "At least one stays.") : blocked ?? help;
             ToolTipService.SetShowOnDisabled(entry, true);
             AutomationProperties.SetName(entry, label); AutomationProperties.SetHelpText(entry, on ? Loc.T("已选", "Chosen") : Loc.T("未选", "Not chosen"));
             entry.Click += (_, _) => { toggle(); Fill(); };
@@ -415,7 +451,7 @@ public sealed partial class SettingsWindow
             items.Children.Clear();
             var reading = Reading(S, item);
             var figures = CompactFigures.Of(reading);
-            if (drives) Header(Loc.T("数值", "Figures"));
+            Header(Loc.T("数值", "Figures"));
             foreach (var figure in new[] { CompactFigures.Usage, CompactFigures.Temperature })
             {
                 bool on = figures.Contains(figure);
@@ -429,6 +465,14 @@ public sealed partial class SettingsWindow
                     if (!next.Remove(figure)) next.Add(figure);
                     edit(s => Reading(s, item).Figures = CompactFigures.Normalize(item, next));
                 });
+            }
+            Header(Loc.T("排列", "Layout"));
+            string? single = figures.Count < 2 ? Loc.T("同时选择占用和温度时可用。", "Available when both usage and temperature are chosen.") : null;
+            foreach (var inLine in new[] { false, true })
+            {
+                bool on = reading.FiguresInLine == inLine;
+                Entry(inLine ? Loc.T("同一行", "One line") : Loc.T("分两行", "Two lines"), on, false, null,
+                    () => edit(s => Reading(s, item).FiguresInLine = inLine), single);
             }
             if (!drives) return;
             Header(Loc.T("盘符", "Letters"));

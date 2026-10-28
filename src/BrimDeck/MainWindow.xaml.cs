@@ -124,9 +124,20 @@ public partial class MainWindow : Window
         InitializeThemeFade();
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
-        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); if (_lead is null) _app.CheckUpdatesIfDue(); };
+        _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
-        _host.ContextChanged += context => { _context = context; if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true) _expanded = false; ApplySettings(true); };
+        // A new foreground context closes the panel directly (ApplySettings lays it out collapsed), so SetExpanded never sees the
+        // panel turn from open to closed: the collapsed title is set to scroll its laps again here, as SetExpanded does.
+        _host.ContextChanged += context =>
+        {
+            _context = context;
+            if (!_preview && _detailPopup is null && _popupReturnArea is null && MediaSourceButton.ContextMenu?.IsOpen != true)
+            {
+                if (_expanded) ReplayCompactTitle();
+                _expanded = false;
+            }
+            ApplySettings(true);
+        };
         // The app under the same context changed. Only the app rules' answer can differ, so only a changed answer is
         // re-applied: collapsed, the shape crosses to it with the same animation a context change uses; expanded, it is
         // applied at once, so switching windows does not replay the expand animation. An unchanged answer re-applies
@@ -180,6 +191,16 @@ public partial class MainWindow : Window
     // Closes a panel whose monitor no longer shows one.
     internal void Retire() { _retiring = true; SetExpanded(false, true); Close(); }
     private void ScheduleClock() => _clock.Interval = ClockDelay(DateTime.Now);
+    // The rings take the off-peak color, so the collapsed island is drawn again when an application enters or leaves an off-peak period.
+    private string _offPeakState = "";
+    private bool OffPeakChanged()
+    {
+        var now = DateTime.Now;
+        string state = string.Concat(Settings.EnabledApps.Select(app => app.IsOffPeak(now) ? '1' : '0'));
+        if (state == _offPeakState) return false;
+        _offPeakState = state;
+        return true;
+    }
     internal static TimeSpan ClockDelay(DateTime now) => TimeSpan.FromMilliseconds(60_000 - now.Second * 1000 - now.Millisecond + 50);
     // Hidden or held open by a preview, the surface cannot be hovered, so the checks stop instead of returning early 25 times a
     // second. A collapsed preview keeps them running: hovering the island ends the preview (see TrackPointer).
@@ -250,17 +271,41 @@ public partial class MainWindow : Window
             // squash the whole surface once it shows again (without a boot).
             ++_boot; _bootWaiting = false; _bootEnds = 0; _bootDot = false;
             ResetDotPose();
-            SetExpanded(false, true); Hide();
+            SetExpanded(false, true); HideBlank();
         }
         else
         {
-            bool appearing = !IsVisible;
+            bool appearing = !IsVisible || _hiding;
+            _hiding = false;
             if (!IsVisible) Show();
             if (appearing) SetImmediate(HoverZone, OpacityProperty, 1d);
             SetExpanded(_expanded, !animatePage || !wasVisible);
         }
         UpdatePointerTracking();
         RenderUsage();
+    }
+    // Windows keeps a layered window's last picture while it is hidden and puts it on screen the moment the window is shown,
+    // before WPF draws again. Hidden straight away, the panel came back showing the frame it was hidden on: after the expand
+    // hotkey opened it while the panels were hidden, the next press flashed the whole open panel before it opened again from
+    // the collapsed surface. The surface is cleared first and the window hidden once that empty frame has been drawn.
+    private bool _hiding;
+    private void HideBlank()
+    {
+        if (!IsVisible || _hiding) return;
+        _hiding = true;
+        SetImmediate(HoverZone, OpacityProperty, 0d);
+        int frames = 0;
+        void Rendered(object? sender, EventArgs e)
+        {
+            // Shown again meanwhile (ApplySettings clears _hiding), or closed.
+            if (!_hiding || PresentationSource.FromVisual(this) is null) { CompositionTarget.Rendering -= Rendered; return; }
+            // Rendering comes before each frame: by the third, the empty frame has been drawn.
+            if (++frames < 3) return;
+            CompositionTarget.Rendering -= Rendered;
+            _hiding = false;
+            Hide();
+        }
+        CompositionTarget.Rendering += Rendered;
     }
     // Sizes are DIPs as they will be on the target monitor, and WPF turns Left and Top into pixels with the DPI the window
     // has now. A window on a monitor with another scale is therefore first moved onto the target in one step, which gives
@@ -295,9 +340,11 @@ public partial class MainWindow : Window
         Collapsed = ShapeFor(EffectiveStyle);
     }
     private CollapsedShape ShapeFor(CompactStyle style) => CollapsedGeometry.Resolve(Settings, style, MonitorBoundsDip, WorkDip, _pixelsPerDip,
-        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null);
+        Settings.CompactAutoWidth(style) && !double.IsNaN(_compactWanted) ? _compactWanted : null, _compactRequired);
     // The width the collapsed content asks for (see CollapsedGeometry); NaN until the row is first built, which keeps the saved width.
     private double _compactWanted = double.NaN;
+    // The width of what the collapsed content must show (CompactMusicLayout.RequiredWidth), which the surface always keeps.
+    private double _compactRequired;
     // Where the pointer was when hovering opened the panel, in DIPs from the monitor's left edge; null when the panel was opened
     // another way (the hotkey) or is closed.
     private double? _openCentre;
@@ -317,10 +364,13 @@ public partial class MainWindow : Window
     // OffsetMax is the largest offset either way (OffsetMin = -OffsetMax) for a surface of the given width. TopMin and TopMax
     // are distances from the top of the work area for a capsule of the given height or a line of the given thickness; 0 and 0
     // for the notch, which always touches the screen edge. WidthMin and WidthMax are the style's width (line length) range,
-    // narrowed by what the monitor or its work area can hold.
+    // narrowed by what the monitor or its work area can hold; WidthMin is never below what the content must show.
     public (double OffsetMin, double OffsetMax, double TopMin, double TopMax, double WidthMin, double WidthMax) CurrentCollapsedRanges(CompactStyle style, double width, double height)
     {
         var (widthMin, widthMax) = CollapsedGeometry.WidthRange(style, MonitorBoundsDip, WorkDip);
+        // At the height the surface takes, which a short screen or work area can lower below the saved one (as Resolve does).
+        double surfaceHeight = CollapsedGeometry.SurfaceHeight(style, height, MonitorBoundsDip, WorkDip);
+        widthMin = Math.Min(widthMax, Math.Max(widthMin, CollapsedGeometry.SurfaceWidth(style, surfaceHeight, _compactRequired)));
         var (_, offsetMax) = CollapsedGeometry.OffsetXRange(style, width, MonitorBoundsDip, WorkDip);
         var (topMin, topMax) = style switch
         {
@@ -512,7 +562,7 @@ public partial class MainWindow : Window
         _expanded = expanded;
         _escapeDismissal?.SetEnabled(expanded && !_preview);
         if (!expanded) { CloseSourceMenu(); _popupReturnArea = null; _leave.Stop(); _pageSwitchHold.Stop(); _detailPopup?.Close(); }
-        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); _app.RequestTrim(); }
+        if (wasExpanded && !expanded) { HotkeyPanelCollapsed(); ReplayCompactTitle(); _app.RequestTrim(); }
         Collapsed = ShapeFor(EffectiveStyle);
         var shape = Collapsed;
         var style = shape.Style;
@@ -760,7 +810,7 @@ public partial class MainWindow : Window
         // A pointer on the island means the display is on, whatever Windows last reported (DisplayPower).
         if (inside) DisplayPower.InputSeen();
         _pointerInside = inside; UpdateQuotaCarousel();
-        if (inside) { ReleaseHotkeyPin(); ReplayCompactTitle(); }
+        if (inside) ReleaseHotkeyPin();
         if (inside)
         {
             _popupReturnArea = null;
