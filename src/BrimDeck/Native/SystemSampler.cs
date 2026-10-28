@@ -296,6 +296,9 @@ internal sealed class SystemSampler : IDisposable
         if (GpuChoice.Resolve(snapshot.Gpus, key, name, previousAuto, out automatic, out var upgrade) is not { } gpu) return snapshot;
         // A choice found by an older mark (a key saved before adapters had a location) is saved again under the adapter's key.
         if (upgrade is not null) _dispatcher.BeginInvoke(DispatcherPriority.Background, () => GpuKeyUpgraded?.Invoke(key!, upgrade));
+        // Only the adapter shown carries a temperature (WithTemperature), not its entry in Gpus: resolved again to the same
+        // adapter, the shown one is kept, or the temperature read for it would be lost on the way to the page.
+        if (snapshot.Gpu.TryGet(out var shown) && shown.Luid == gpu.Luid) gpu = shown;
         return snapshot with { Gpu = gpu, GpuHistory = gpu.History };
     }
     // Shows the newest readings again for a new choice of graphics adapter, at once instead of with the next reading.
