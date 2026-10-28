@@ -37,7 +37,11 @@ static class ClaudeRateLimitTests
         check("A Retry-After inside the limits is followed as sent", Delay(1, TimeSpan.FromMinutes(10)) == TimeSpan.FromMinutes(10));
         check("A Retry-After that is zero, negative or very short is raised to the shortest pause",
             Delay(1, TimeSpan.Zero) == RateLimitBackoff.MinDelay && Delay(1, TimeSpan.FromSeconds(-5)) == RateLimitBackoff.MinDelay && Delay(1, TimeSpan.FromSeconds(3)) == RateLimitBackoff.MinDelay);
-        check("A very long Retry-After is cut to the longest one followed", Delay(1, TimeSpan.FromDays(2)) == RateLimitBackoff.MaxRetryAfter);
+        check("A Retry-After longer than an hour is kept as the server sent it", Delay(1, TimeSpan.FromHours(2)) == TimeSpan.FromHours(2) &&
+            Delay(1, TimeSpan.FromDays(3)) == TimeSpan.FromDays(3) && Delay(4, TimeSpan.FromHours(2)) == TimeSpan.FromHours(2) && Delay(1, RateLimitBackoff.MaxPlausibleRetryAfter) == RateLimitBackoff.MaxPlausibleRetryAfter);
+        check("A Retry-After beyond a week is taken for a mistake and the growth decides", Delay(1, RateLimitBackoff.MaxPlausibleRetryAfter + TimeSpan.FromSeconds(1)) == Delay(1) &&
+            Delay(3, TimeSpan.FromDays(400)) == Delay(3) && Delay(5, TimeSpan.MaxValue) == RateLimitBackoff.MaxGrowth);
+        check("The growth is the only pause with a limit: it stays at 30 minutes however many 429s", Enumerable.Range(1, 40).Select(failures => Delay(failures)).Max() == RateLimitBackoff.MaxGrowth);
         check("A repeated short Retry-After does not hold the pause below the growth", Delay(1, TimeSpan.FromSeconds(30)) == RateLimitBackoff.MinDelay &&
             Delay(3, TimeSpan.FromSeconds(30)) == TimeSpan.FromMinutes(8) && Delay(3, TimeSpan.FromMinutes(20)) == TimeSpan.FromMinutes(20));
         var spread = Enumerable.Range(0, 11).Select(step => Delay(2, null, step / 10d)).ToList();
@@ -54,12 +58,17 @@ static class ClaudeRateLimitTests
         check("A further 429 pauses longer, and the count survives the pause that ended", limit.Failures == 2 && second == first + TimeSpan.FromMinutes(4));
         limit.Reset();
         check("An answer that is not a 429 clears the pause and the count", limit.Failures == 0 && limit.RetryAt(at) is null && limit.Fail(at, null, 0) == first);
-        // The clock was set back after the pause began (a time sync, a manual change): the wait is cut to the longest pause.
-        var told = limit.Fail(at, TimeSpan.FromHours(1), 0);
+        // The clock was set back after the pause began (a time sync, a manual change): the wait left is cut to the pause that was
+        // decided, counted from the new time, however far the clock went back.
+        var told = limit.Fail(at, TimeSpan.FromHours(2), 0);
+        check("A Retry-After of two hours holds for two hours", told == at.AddHours(2) && limit.RetryAt(at.AddMinutes(119)) == told && limit.RetryAt(at.AddMinutes(121)) is null);
         var back = at.AddDays(-2);
-        var cut = limit.RetryAt(back);
-        check("A clock set back far cannot hold requests for longer than the longest pause", told > back.AddHours(1) && cut is { } resume && resume - back <= RateLimitBackoff.MaxRetryAfter * (1 + RateLimitBackoff.JitterShare) &&
-            limit.RetryAt(back.AddHours(2)) is null);
+        check("A clock set back far cannot hold requests for longer than the pause itself", limit.RetryAt(back) == back.AddHours(2) && limit.RetryAt(back.AddMinutes(119)) == back.AddHours(2) &&
+            limit.RetryAt(back.AddMinutes(121)) is null);
+        limit.Fail(at, TimeSpan.FromHours(2), 0);
+        check("A clock set back by an hour leaves the two hours counted from the new time", limit.RetryAt(at.AddHours(-1)) == at.AddHours(1));
+        limit.Reset();
+        check("A reset pause keeps no wait", limit.RetryAt(at.AddDays(-9)) is null);
     }
 
     // Answers the usage endpoint from a script and counts the requests; the account endpoint is not counted.
@@ -208,6 +217,38 @@ static class ClaudeRateLimitTests
             check("Another account does not show the reading kept for the first", !shown.LiveQuota && shown.Quotas.Count == 0 && handler.Usage.Count == requests + 1);
         }
         SignIn("token-a", "account-a");
+
+        // The pause counts from the moment the answer arrived. The request is slow here (the clock moves 10 seconds while it is
+        // answered), so a Retry-After of a minute ends a minute after the answer, not a minute after the round began.
+        File.Delete(cache);
+        using (var service = new UsageService(desktop, locations, http, () => clock, quotaCache: cache, jitter: () => added))
+        {
+            Task<ProviderSnapshot> Read() => service.RefreshAsync(settings).ContinueWith(task => task.Result.Single());
+            async Task<int> Asked(DateTimeOffset at) { clock = at; var before = handler.Usage.Count; await Read(); return handler.Usage.Count - before; }
+            var round = start.AddDays(10);
+            handler.Answer = _ => { clock = clock.AddSeconds(10); return Limited("60"); };
+            var sent = await Asked(round);
+            var arrival = round.AddSeconds(10);
+            var heldUntilEnd = await Asked(arrival.AddSeconds(59));
+            handler.Answer = _ => { clock = clock.AddSeconds(10); return Limited("7200"); };
+            var after = await Asked(arrival.AddSeconds(60));
+            var twoHours = clock;
+            var heldTwoHours = await Asked(twoHours.AddMinutes(119));
+            var resumedAfter = await Asked(twoHours.AddMinutes(121));
+            check("A Retry-After counts from the answer's arrival: 60 seconds received 10 seconds into the round ends 70 seconds in", sent == 1 && heldUntilEnd == 0 && after == 1);
+            check("A Retry-After of two hours is kept for two hours, not cut to an hour", heldTwoHours == 0 && resumedAfter == 1);
+        }
+        using (var service = new UsageService(desktop, locations, http, () => clock, quotaCache: cache, jitter: () => added))
+        {
+            Task<ProviderSnapshot> Read() => service.RefreshAsync(settings).ContinueWith(task => task.Result.Single());
+            async Task<int> Asked(DateTimeOffset at) { clock = at; var before = handler.Usage.Count; await Read(); return handler.Usage.Count - before; }
+            handler.Answer = _ => Limited(DateTimeOffset.UtcNow.AddYears(5).ToString("R"));
+            var late = start.AddDays(20);
+            var mistaken = await Asked(late);
+            var heldOneMinute = await Asked(late.AddMinutes(1));
+            var afterGrowth = await Asked(late.AddMinutes(3));
+            check("A Retry-After years away is taken for a mistake: the pause is the growth, not years", mistaken == 1 && heldOneMinute == 0 && afterGrowth == 1);
+        }
 
         // Accounts and sign-ins are paused separately within one run.
         using (var service = new UsageService(desktop, locations, http, () => clock, quotaCache: cache, jitter: () => added))
