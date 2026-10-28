@@ -95,19 +95,22 @@ internal static class CompactSpacingTests
             some.First.Count == 3 && some.First.Travel > 0 && some.Second.Count == 3 && some.Second.Travel > 0 && some.First.Window + some.Second.Window <= 200);
         var all = CompactSpacing.Share(rings, 8, readings, 6, 72 + 324);
         check("Compact share: with room for everything nothing scrolls", all.First == (4, 72, 3, 0) && all.Second == (6, 324, 5, 0));
-        check("Compact share: too short for both, the first alone, else the second, else none",
-            CompactSpacing.Share(rings, 8, readings, 6, 50).First.Count == 2 && CompactSpacing.Share(rings, 8, readings, 6, 50).Second.Count == 0
+        check("Compact share: too short for both, the first alone at its narrowest, else the second, else none",
+            CompactSpacing.Share(rings, 8, readings, 6, 50).First.Count == 1 && CompactSpacing.Share(rings, 8, readings, 6, 50).Second.Count == 0
             && CompactSpacing.Share([], 8, readings, 6, 100).Second == (2, 98, 1, 254) && CompactSpacing.Share(rings, 8, readings, 6, 0) == ((0, 0, 0, 0), (0, 0, 0, 0)));
         // Every width from nothing to everything: the two windows fit the room, both show once it holds their narrowest
-        // windows, and each that shows any scrolls through the rest.
-        bool steady = true;
+        // windows, and each that shows any scrolls through the rest. Once both show, a wider room never shows fewer of either.
+        bool steady = true, growing = true;
+        int lastA = 0, lastB = 0;
         for (double room = 0; room <= 420; room++)
         {
             var (a, b) = CompactSpacing.Share(rings, 8, readings, 6, room);
             steady &= a.Window + b.Window <= room + 1e-6 && (room < 110 || a.Count > 0 && b.Count > 0)
                 && (a.Count is 0 or 4 || a.Travel > 0) && (b.Count is 0 or 6 || b.Travel > 0);
+            if (room >= 110) { growing &= a.Count >= lastA && b.Count >= lastB; lastA = a.Count; lastB = b.Count; }
         }
         check("Compact share: both show once they can, fit the room, and scroll what they do not hold", steady);
+        check("Compact share: a wider room never shows fewer rings or fewer readings", growing);
     }
 
     private static void Required(Action<string, bool> check)

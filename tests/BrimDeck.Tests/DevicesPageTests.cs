@@ -43,11 +43,18 @@ static class DevicesPageTests
         check("Devices settings: normalized", saved.DevicesWidth == 1200 && saved.DevicesHeight == 200 && saved.DeviceLowPercent == Devices.DefaultLowPercent && saved.HiddenDevices.Count == 1);
         var back = JsonSerializer.Deserialize<DeckSettings>(JsonSerializer.Serialize(new DeckSettings { HiddenDevices = [new("bt:AA", "Mouse")], LastPage = DeckPage.Devices, DefaultPage = DefaultDeckPage.Devices }))!;
         check("Devices settings: survive saving", back.Hides("bt:AA") && back.HiddenDevices[0].Name == "Mouse" && back.LastPage == DeckPage.Devices && back.DefaultPage == DefaultDeckPage.Devices);
-        check("Devices settings: the page is saved as number 4, its opening choice as 5 (3 and 4 are kept for the recent notices page)",
+        check("Devices settings: the page is saved as number 4, its opening choice as 5 (3 and 4 are kept free for a page in review)",
             (int)DeckPage.Devices == 4 && (int)DefaultDeckPage.Devices == 5 && DeckPages.Opening(DefaultDeckPage.Devices) == DeckPage.Devices);
         var sized = new DeckSettings();
         DeckPages.SetSize(sized, DeckPage.Devices, 600, 250);
         check("Devices settings: a drag sizes the devices page alone", DeckPages.Size(sized, DeckPage.Devices) == (600, 250) && sized.Width == new DeckSettings().Width);
+        // A file saved before the devices page has none of its members and needs no migration step: the page takes its defaults, joins
+        // the page order at the end and the scale and the other settings read as they were.
+        var older = SettingsMigrations.Read("""{"AppVersion":"1.2.2","MonitorPage":true,"PanelScale":150,"PageOrder":[2,0,1]}""");
+        check("Devices settings: a file from before the page reads with the page's defaults, last in the order",
+            older.DevicesPage && older.DevicesWidth == 460 && older.DevicesHeight == 200 && older.HiddenDevices.Count == 0 && older.DeviceLowPercent == Devices.DefaultLowPercent
+            && older.PageOrder.SequenceEqual([DeckPage.Monitor, DeckPage.Usage, DeckPage.Music, DeckPage.Devices]) && older.PanelScale == 150);
+        check("Devices settings: the collapsed battery reading joins an older table hidden", older.CompactReadings.Single(r => r.Item == CompactMonitorItems.Battery) is { Visible: false });
     }
 
     private static void Strip(Action<string, bool> check)

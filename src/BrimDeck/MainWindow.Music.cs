@@ -424,7 +424,8 @@ public partial class MainWindow
         }
         WatchSourceMenu(menu);
         MediaSourceButton.ContextMenu = menu; menu.PlacementTarget = MediaSourceButton; menu.Placement = PlacementMode.Bottom;
-        menu.VerticalOffset = 6; ResizeSourceMenu(menu); menu.IsOpen = true;
+        // A pop-up is not part of the panel's visual tree, so it takes the panel's scale itself.
+        UI.Scale(menu, _scale); menu.VerticalOffset = 6 * _scale; ResizeSourceMenu(menu); menu.IsOpen = true;
     }
     // Guidance shown in place of the transport when Netease runs without SMTC. Both sentences stay at every size:
     // what is required and where to switch it on. Only the type size and the entry's label adapt to the row.
@@ -956,16 +957,18 @@ public partial class MainWindow
         { _compactWanted = wanted; _compactRequired = required; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         double row = layout.RowHeight, unit = CompactMusicLayout.Gap(scale);
         var grid = new Grid { Width = SnapDown(contentWidth, dpi), Height = row };
-        // Each part shows whole or not at all. The title keeps the share the layout gives it (no more than its text needs); the
-        // rings and the readings share what the other parts and the gaps between all of them leave (CompactSpacing.Share): each
-        // shows at least its narrowest window and scrolls through the rest, and they widen by turns. Room neither can use goes
-        // back to the title, then to the gaps between the parts, before the row is centred (CompactSpacing.Arrange).
+        // Each part shows whole or not at all. The title wants the share the layout gives it, which follows the row's width and
+        // never the text: the row is not built again for a new lyric line, so a width taken from one line would stay with the
+        // lines after it, and the parts would move whenever it was. The rings and the readings share what the other parts and
+        // the gaps between all of them leave (CompactSpacing.Share): each shows at least its narrowest window and scrolls through
+        // the rest, and they widen by turns. Room neither can use goes back to the title, then to the gaps between the parts,
+        // before the row is centred (CompactSpacing.Arrange).
         bool hasCover = media && layout.CoverWidth >= layout.CoverSize - .001, hasEqualizer = media && layout.EqualizerWidth >= layout.EqualizerSize - .001;
         bool hasClock = clock is not null && layout.ClockWidth >= clock.ReservedWidth - .001, hasText = layout.TextWidth > 0 && text.Length > 0;
-        double titleText = hasText ? MusicMarquee.NaturalWidth(text, layout.TextFont, VisualTreeHelper.GetDpi(this).PixelsPerDip) : 0;
+        double titleWanted = hasText ? layout.TextWidth : 0;
         double shortest = CompactMusicLayout.Whole(CompactMusicLayout.MinimumText * scale);
-        double titleShare = hasText ? Math.Min(layout.TextWidth, Math.Max(shortest, Math.Min(titleText, CompactMusicLayout.Whole(CompactSpacing.TitleMax * scale)))) : 0;
-        double titleFloor = hasText ? Math.Min(shortest, Math.Ceiling(titleText)) : 0;
+        double titleShare = hasText ? Math.Min(titleWanted, Math.Max(shortest, CompactMusicLayout.Whole(CompactSpacing.TitleMax * scale))) : 0;
+        double titleFloor = hasText ? Math.Min(shortest, titleWanted) : 0;
         var ringWidths = apps.Select(_ => layout.RingSize).ToList();
         bool hasRings = ringWidths.Count > 0, hasReadings = readingWidths.Count > 0;
         int parts = (hasCover ? 1 : 0) + (hasEqualizer ? 1 : 0) + (hasClock ? 1 : 0) + (hasText ? 1 : 0) + (hasRings ? 1 : 0) + (hasReadings ? 1 : 0);
@@ -987,7 +990,7 @@ public partial class MainWindow
         if (hasClock) shown.Add(("clock", new(clock!.ReservedWidth)));
         int title = shown.FindIndex(entry => entry.Part is CompactPart.Music);
         // One gap between every two parts; what is left widens them evenly and then centres the row.
-        var place = CompactSpacing.Arrange([.. shown.Select(entry => entry.Size)], title, titleText, shortest, grid.Width, unit, scale, dpi);
+        var place = CompactSpacing.Arrange([.. shown.Select(entry => entry.Size)], title, titleWanted, shortest, grid.Width, unit, scale, dpi);
         bool animate = Settings.Animations && SystemParameters.ClientAreaAnimation;
         for (int i = 0; i < shown.Count; i++)
         {

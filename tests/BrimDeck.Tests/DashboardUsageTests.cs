@@ -91,19 +91,27 @@ internal static class DashboardUsageTests
             check("WSL statistics are left out while the option is off", withoutWsl.Entries.Sum(entry => entry.Total) == 100);
         }
         // The WSL read runs beside the network requests of the same refresh, so the round takes the longer of the two, not both.
-        // Checked by when each was under way rather than by the round's length: a slow build machine stretches both, and a time
-        // limit failed there although the two did overlap.
+        // Checked by when each was under way rather than by the round's length, and by a handshake rather than by sleeps: a request
+        // waits until the WSL read has begun and the read until a request has begun (each for at most 5 s), so the two overlap
+        // exactly when they run at the same time, however slow or busy the machine is. Run one after the other, one of them waits in
+        // vain and the spans do not meet.
         var timeline = System.Diagnostics.Stopwatch.StartNew();
         TimeSpan wslStart = default, wslEnd = default;
-        handler.DelayMs = 800; handler.Timeline = timeline;
+        using var wslBegun = new ManualResetEventSlim();
+        handler.Timeline = timeline; handler.HoldUntil = wslBegun;
         using (var overlapping = new UsageService(new SourceDesktop(), locations, client, null, null,
-            () => { wslStart = timeline.Elapsed; Thread.Sleep(800); wslEnd = timeline.Elapsed; return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromSeconds(5)))
+            () =>
+            {
+                handler.Begun.Wait(TimeSpan.FromSeconds(5));
+                wslStart = timeline.Elapsed; wslBegun.Set(); Thread.Sleep(50); wslEnd = timeline.Elapsed;
+                return [new WslHome("Test", wslClaude, "")];
+            }, TimeSpan.FromSeconds(15)))
         {
             var round = await overlapping.RefreshAsync(wslSettings);
             check("The WSL read overlaps the network requests", handler.Busy is { } busy && wslStart < busy.End && busy.Start < wslEnd &&
                 round.Single(s => s.Id == ProviderId.Claude).Entries.Sum(entry => entry.Total) == 120);
         }
-        handler.Timeline = null;
+        handler.Timeline = null; handler.HoldUntil = null;
         handler.DelayMs = 0;
         using var release = new ManualResetEventSlim();
         using (var stuck = new UsageService(new SourceDesktop(), locations, client, null, null, () => { release.Wait(TimeSpan.FromSeconds(20)); return [new WslHome("Test", wslClaude, "")]; }, TimeSpan.FromMilliseconds(1000)))
@@ -134,11 +142,16 @@ internal static class DashboardUsageTests
         // While set, the span from the first request's start to the last one's end on this clock (Busy).
         public System.Diagnostics.Stopwatch? Timeline { get; set; }
         public (TimeSpan Start, TimeSpan End)? Busy { get; private set; }
+        // Set as a request begins while Timeline is set; a request then waits for HoldUntil, if given, for at most 5 s.
+        public ManualResetEventSlim Begun { get; } = new();
+        public ManualResetEventSlim? HoldUntil { get; set; }
         private readonly object _gate = new();
+        protected override void Dispose(bool disposing) { if (disposing) Begun.Dispose(); base.Dispose(disposing); }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var timeline = Timeline;
             var start = timeline?.Elapsed;
+            if (timeline is not null) { Begun.Set(); if (HoldUntil is { } hold) await Task.Run(() => hold.Wait(TimeSpan.FromSeconds(5)), cancellationToken); }
             if (DelayMs > 0) await Task.Delay(DelayMs, cancellationToken);
             if (timeline is not null && start is { } began)
                 lock (_gate) Busy = Busy is { } busy ? (busy.Start < began ? busy.Start : began, timeline.Elapsed) : (began, timeline.Elapsed);

@@ -23,6 +23,13 @@ internal static class OffPeakTests
 
         var entry = new AppEntry { QuotaSource = ProviderId.Codex, OffPeak = [morning, night] };
         check("an application is off-peak inside any of its periods", entry.IsOffPeak(day.AddHours(3)) && entry.IsOffPeak(day.AddHours(23)) && !entry.IsOffPeak(day.AddHours(12)));
+        check("the next change is the end of the current period or the start of the next one",
+            entry.NextOffPeakChange(day.AddHours(3)) == day.AddMinutes(8 * 60 + 30) && entry.NextOffPeakChange(day.AddHours(12)) == day.AddHours(22)
+            && entry.NextOffPeakChange(day.AddHours(23)) == day.AddDays(1).AddMinutes(8 * 60 + 30) && entry.NextOffPeakChange(day.AddHours(22)) == day.AddDays(1).AddMinutes(8 * 60 + 30));
+        var joined = new AppEntry { QuotaSource = ProviderId.Codex, OffPeak = [new OffPeakPeriod { Start = 0, End = 120 }, new OffPeakPeriod { Start = 60, End = 180 }] };
+        check("a boundary inside another period is not a change", joined.NextOffPeakChange(day.AddMinutes(30)) == day.AddHours(3));
+        check("without periods, or with one covering the whole day, nothing changes",
+            new AppEntry().NextOffPeakChange(day) is null && new AppEntry { OffPeak = [new OffPeakPeriod { Start = 720, End = 720 }] }.NextOffPeakChange(day) is null);
         var copy = entry.Copy(); copy.OffPeak[0].Start = 0; copy.OffPeak.Add(new OffPeakPeriod());
         check("a copied application keeps its own off-peak periods", entry.OffPeak.Count == 2 && entry.OffPeak[0].Start == 30);
         var levels = new AppEntry { QuotaSource = ProviderId.Codex, OffPeakWarningColor = "123abc", OffPeakCriticalColor = "nope" };
