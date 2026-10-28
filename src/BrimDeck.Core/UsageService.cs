@@ -17,8 +17,9 @@ public interface IDesktopSources
 }
 
 // quotaCache is the file that keeps the last Claude quota read online across restarts (ClaudeQuotaCache); null keeps none.
-// kimiQuotaCache does the same for Kimi Code (KimiQuotaCache).
-public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null, string? kimiQuotaCache = null) : IDisposable
+// kimiQuotaCache does the same for Kimi Code (KimiQuotaCache). jitter (0 to 1) is the share of a pause after a 429 that is added to it
+// (RateLimitBackoff); a test passes a fixed one.
+public sealed class UsageService(IDesktopSources desktop, DataLocations? locations = null, HttpClient? http = null, Func<DateTimeOffset>? clock = null, IProviderSecrets? secrets = null, Func<IReadOnlyList<WslHome>>? wsl = null, TimeSpan? wslTimeout = null, string? quotaCache = null, string? kimiQuotaCache = null, Func<double>? jitter = null) : IDisposable
 {
     // Every provider uses the panel's shared refresh cycle. Claude may display local history
     // after an unsuccessful request, but it does not delay the next scheduled refresh.
@@ -105,6 +106,21 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         _claudeSaved = "";
         ClaudeQuotaCache.Delete(quotaCache);
     }
+    // The pause after a 429 from the Claude quota API, for each token (with its sign-in and account): a new sign-in starts without
+    // one, and the several tokens of one Desktop account, tried in turn, do not replace each other's. Only used while _gate is held.
+    // It is not kept on disk: a start asks once, and a 429 starts the pause again.
+    private readonly Dictionary<string, RateLimitBackoff> _claudeLimits = [];
+    private RateLimitBackoff ClaudeLimit(ClaudeCredential credential, DateTimeOffset now)
+    {
+        var token = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(credential.Token)));
+        var key = string.Join("|", credential.SignIn, ClaudeQuotaCache.AccountHash(credential.Account), token);
+        if (_claudeLimits.TryGetValue(key, out var limit)) return limit;
+        // Tokens are renewed now and then; the ones of the past have no pause left to keep.
+        if (_claudeLimits.Count >= 16)
+            foreach (var old in _claudeLimits.Where(pair => pair.Value.RetryAt(now) is null).Select(pair => pair.Key).ToList()) _claudeLimits.Remove(old);
+        return _claudeLimits[key] = new();
+    }
+    private static string Clock(DateTimeOffset time, DateTimeOffset now) => time.LocalDateTime.ToString(time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
     private readonly ConfiguredProviders _configured = new(secrets, http, clock);
     public Task<ProviderTestResult> TestProviderAsync(AppEntry entry, CancellationToken ct = default) => _configured.TestAsync(entry, ct);
 
@@ -285,7 +301,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             {
                 HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => Loc.T("登录已失效或账户接口拒绝访问，请在原应用重新登录",
                     "The sign-in has expired or the account API refused access. Sign in again in the original app."),
-                HttpStatusCode.TooManyRequests => Loc.T("请求频繁，稍后自动重试", "Too many requests. Retrying automatically later."),
+                HttpStatusCode.TooManyRequests => ex is RateLimitedException { RetryAt: { } at }
+                    ? Loc.T($"请求频繁，{Clock(at, now)} 后自动重试", $"Too many requests. Retrying automatically after {Clock(at, now)}.")
+                    : Loc.T("请求频繁，稍后自动重试", "Too many requests. Retrying automatically later."),
                 _ => Loc.T("账户接口暂时不可用", "The account API is temporarily unavailable.")
             };
         }
@@ -351,11 +369,16 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
             login = credential;
             // The plan is asked at the same time as the quota, so a slow or unreachable network costs one wait, not two.
             var planRequest = loginPlan = ReadClaudePlanAsync(credential.Token, ct);
+            var limit = ClaudeLimit(credential, now);
             try
             {
+                // While the quota API is asking for time, it is not asked again (a manual refresh included); the failure below is
+                // the same one a 429 gives, so the reading kept from before is shown with the time the next request goes out.
+                if (limit.RetryAt(_clock()) is { } wait) throw RateLimitedException.Held(wait);
                 using var request = Bearer(HttpMethod.Get, "https://api.anthropic.com/api/oauth/usage", credential.Token);
                 request.Headers.TryAddWithoutValidation("anthropic-beta", "oauth-2025-04-20");
                 using var doc = await SendAsync(_http, request, ct);
+                limit.Reset();
                 var quotas = QuotaParser.Claude(doc.RootElement);
                 if (quotas.Count == 0) throw new InvalidDataException();
                 // Publish only a complete successful result, all from the same login.
@@ -381,6 +404,9 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
                 HttpRequestException or OperationCanceledException or IOException or InvalidDataException or JsonException or FormatException)
             {
                 lastFailure = ex;
+                // The pause counts from the moment the answer arrived, not from the start of the round: another token may have been
+                // tried first, and the request itself takes time, which a Retry-After of a minute must not be shortened by.
+                if (ex is RateLimitedException { Sent: true } limited) { var received = _clock(); limited.RetryAt = limit.Fail(received, limited.RetryAfter(received), (jitter ?? Random.Shared.NextDouble)()); }
                 // Keep an operational error instead of masking it with a later stale login.
                 if (failure is null || ex is HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } ||
                     failure is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }) failure = ex;
@@ -496,18 +522,19 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
         snapshot.Quotas = kept.Quotas.ToList();
         if (kept.Plan.Length > 0) { snapshot.Plan = kept.Plan; snapshot.PlanSource = kept.PlanSource; }
         snapshot.LiveQuota = true; snapshot.QuotaTime = kept.Time; snapshot.Source = kept.Source;
-        var time = kept.Time.LocalDateTime.ToString(kept.Time.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+        var time = Clock(kept.Time, now);
         var shown = kept.Local ? Loc.T($"显示 Claude 桌面版 {time} 记录的配额", $"showing the quota the Claude desktop app recorded at {time}")
             : Loc.T($"显示 {time} 读取的配额", $"showing the quota read at {time}");
         // Per-model quotas carried over from an earlier online reading say when they were read.
         if (kept.Local && kept.ScopedTime is { } scoped && kept.Time - scoped > TimeSpan.FromMinutes(1))
         {
-            var at = scoped.LocalDateTime.ToString(scoped.LocalDateTime.Date == now.LocalDateTime.Date ? "HH:mm" : "MM-dd HH:mm");
+            var at = Clock(scoped, now);
             shown += Loc.T($"（按模型的额度为 {at} 读取）", $" (per-model quotas read at {at})");
         }
         snapshot.Status = failure switch
         {
             null => kept.Local ? Loc.T($"已连接，{shown}", $"Connected, {shown}") : Loc.T("已连接", "Connected"),
+            RateLimitedException { RetryAt: { } retry } => Loc.T($"请求频繁，{shown}，{Clock(retry, now)} 后自动重试", $"Too many requests; {shown}. Retrying automatically after {Clock(retry, now)}."),
             HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } => Loc.T($"请求频繁，{shown}，稍后自动重试", $"Too many requests; {shown}. Retrying automatically later."),
             OperationCanceledException => Loc.T($"读取超时，{shown}，稍后自动重试", $"Reading timed out; {shown}. Retrying automatically later."),
             _ => Loc.T($"账户接口暂时不可用，{shown}，稍后自动重试", $"The account API is temporarily unavailable; {shown}. Retrying automatically later.")
@@ -1121,6 +1148,7 @@ public sealed class UsageService(IDesktopSources desktop, DataLocations? locatio
     private static async Task<JsonDocument> SendAsync(HttpClient client, HttpRequestMessage request, CancellationToken ct)
     {
         using var response = await client.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.TooManyRequests) throw RateLimitedException.From(response);
         response.EnsureSuccessStatusCode();
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct);
