@@ -58,6 +58,13 @@ internal static class Program
             return LiquidPages.RunPower(args[1], powerScale, named > 0 && named + 1 < args.Length ? args[named + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet() : null,
                 args.Contains("--sizes"), args.Contains("--en"));
         }
+        // The collapsed row's readings in the real capsule at one display scale (StripFit): --strip-fit [<folder>] [--scale 150] [--fixed <width>]
+        if (args.Length > 0 && args[0] == "--strip-fit")
+        {
+            int fixedAt = Array.IndexOf(args, "--fixed");
+            return LiquidPages.RunStripFit(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, LiquidPages.ScaleFrom(args) ?? 1.5,
+                fixedAt > 0 && fixedAt + 1 < args.Length ? double.Parse(args[fixedAt + 1], CultureInfo.InvariantCulture) : null);
+        }
         if (args.Length > 1 && args[0] == "--theme-pages")
         {
             if (LiquidPages.ScaleFrom(args) is not { } themeScale) { Console.WriteLine("FAIL: --scale wants a display scale such as 100, 125, 150"); return 1; }

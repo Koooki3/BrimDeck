@@ -11,6 +11,7 @@ using BrimDeck;
 using BrimDeck.Core;
 using BrimDeck.Core.Notices;
 using BrimDeck.LiquidGlass;
+using LiquidFrame = BrimDeck.LiquidGlass.LiquidFrame;
 using Path = System.IO.Path;
 
 // The real panel over liquid glass, drawn offscreen: BrimDeck's own App (constructed, never run: OnStartup does not run) and

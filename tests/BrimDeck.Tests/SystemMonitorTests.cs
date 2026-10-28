@@ -257,6 +257,24 @@ static class SystemMonitorTests
             && CompactMusicLayout.NaturalWidth(1, true, 2, true, 0, 0) > CompactMusicLayout.NaturalWidth(1, true, 1, true, 0, 0)
             && CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 0) > CompactMusicLayout.NaturalWidth(1, true, 2, true, 0, 0)
             && CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 150) > CompactMusicLayout.NaturalWidth(1, true, 2, true, 40, 0));
+        // An auto-width row asks for a fraction of a DIP (a clock face that is not a whole number of DIPs) and is laid out in whole
+        // device pixels, rounded down: unrounded, the readings were a fraction short of their room and scrolled, cutting the last
+        // one. The row's own arithmetic (MainWindow): the room the readings share is the row less the cover, the equalizer, the
+        // clock, the gaps between the parts and the lyric's slot.
+        double[] stripItems = [56, 47, 47, 47, 94, 41, 49];
+        const double readingsGap = 6, clockFace = 63.83, partGap = 8;
+        bool Roomy(double dpi, bool rounded)
+        {
+            double asks = stripItems.Sum() + (stripItems.Length - 1) * readingsGap;
+            double row = DevicePixels.Down(rounded ? CompactMusicLayout.NaturalWidth(1, true, 0, true, clockFace, DevicePixels.Up(asks, dpi), dpi)
+                : CompactMusicLayout.NaturalWidth(1, true, 0, true, clockFace, DevicePixels.Up(asks, dpi)), dpi);
+            double pool = row - (20 + 18 + clockFace + 4 * partGap) - CompactMusicLayout.TextSlot;
+            var (_, readings) = CompactSpacing.Share([], 0, stripItems, readingsGap, pool);
+            return readings.Count == stripItems.Length && readings.Travel == 0;
+        }
+        check("Compact fit: an auto-width row rounded up to whole device pixels gives the readings all their room at every display scale",
+            new[] { 1, 1.25, 1.5, 1.75, 2 }.All(dpi => Roomy(dpi, rounded: true)));
+        check("Compact fit: the width unrounded left the readings short at 100 % (the cut-off last reading)", !Roomy(1, rounded: false));
         var engines = GpuEngines.Order([new("Copy", .1), new("3D", .4), new("Compute_0", .2), new("Compute_1", .5), new("Foo", .3)]);
         check("GPU engines: kinds folded and ordered as Task Manager", engines.Select(e => e.Kind).SequenceEqual(["3D", "Compute", "Copy", "Foo"]) && engines[1].Usage == .5);
         check("GPU engine kinds", GpuEngines.Kind("Compute_1") == "Compute" && GpuEngines.Kind("VideoDecode") == "VideoDecode" && GpuEngines.Kind("Engine_x") == "Engine_x"
