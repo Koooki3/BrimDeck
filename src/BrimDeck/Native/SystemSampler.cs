@@ -206,8 +206,8 @@ internal sealed class SystemSampler : IDisposable
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         var adapters = gpus.TryGet(out var read) ? Remember(read) : [];
         // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
-        Reading<PowerSample> power = default;
-        Reading<BatterySample> battery = default;
+        var power = Reading<PowerSample>.Unavailable(Why.Waiting);
+        var battery = Reading<BatterySample>.Unavailable(Why.Waiting);
         bool powerWanted = _powerWanted, batteryWanted = _batteryWanted;
         if (batteryWanted)
         {

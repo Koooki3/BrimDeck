@@ -140,8 +140,9 @@ public partial class MainWindow
         // reserved for until it is known to have no sensor.
         bool small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor != SensorState.None : monitor?.CpuSensor == SensorState.Found;
         // The power and the battery lines (PowerBlock) are asked for as many as the machine can show: both on a machine with a battery
-        // (known at once from the system), power alone on one without, none once the sampler finds no source.
-        int power = !Settings.MonitorPower ? 0 : Native.BatteryProvider.SystemHasBattery ? 2 : monitor?.PowerSensor == SensorState.None ? 0 : 1;
+        // (known at once from the system), power alone on one without, none once the sampler finds no source (a laptop on battery may have one
+        // that the mains did not give: StripSensors).
+        int power = !Settings.MonitorPower ? 0 : Native.BatteryProvider.SystemHasBattery ? 2 : StripSensors.Power == SensorState.None ? 0 : 1;
         return (lines, Settings.MonitorTemperatures && small, power);
     }
 
