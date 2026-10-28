@@ -159,51 +159,6 @@ public partial class MainWindow
         _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = ""; if (!animatePage) _handover.Drop();
         ApplySettings(animatePage);
     }
-    // Places the chosen page's fill under its button. While the open panel shows it, it glides there as the monitor page's sort pill
-    // does; otherwise it is set in place. A switch whose buttons are not laid out yet places it once they are.
-    private void PlacePageCapsule()
-    {
-        var button = PageButton(CurrentPage);
-        if (!LayoutRetry.Laid(button))
-        {
-            // Retried after a layout pass, never by posting itself again: the switch is collapsed while the usage details show, its
-            // buttons then keep an invalid measure and their old width, and the old retry (a Loaded callback that called this again)
-            // spun the UI thread at 90% until the details closed (2026-10-28).
-            if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => LayoutRetry.Laid(PageButton(CurrentPage)), () => { _capsulePending = false; PlacePageCapsule(); }); }
-            return;
-        }
-        double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = HitArea.Look(button);
-        bool glide = _expanded && !_preview && PageSwitch.IsVisible && Soft.Enabled && PageCapsule.Width > 0 && Math.Abs(PageCapsuleShift.X - x) > .5;
-        PageCapsule.Height = height;
-        // motion-review F8: the width is set at once and the change is drawn by stretching the capsule from its left edge, so
-        // the glide lays nothing out again.
-        // A stretch still under way goes on from the width it draws now, not from its laid-out width.
-        double was = PageCapsule.Width * PageCapsuleStretch.ScaleX;
-        PageCapsule.Width = width;
-        PageCapsuleStretch.BeginAnimation(ScaleTransform.ScaleXProperty, null); PageCapsuleStretch.ScaleX = 1;
-        if (glide && double.IsFinite(was) && was > 0 && width > 0 && Math.Abs(was - width) > .5)
-            PageCapsuleStretch.BeginAnimation(ScaleTransform.ScaleXProperty, new System.Windows.Media.Animation.DoubleAnimation(was / width, 1, TimeSpan.FromMilliseconds(Soft.Choose))
-            { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
-        double from = PageCapsuleShift.X;
-        PageCapsuleShift.BeginAnimation(TranslateTransform.XProperty, null);
-        PageCapsuleShift.X = x;
-        if (glide) PageCapsuleShift.BeginAnimation(TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(from, x, TimeSpan.FromMilliseconds(Soft.Choose))
-        { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
-    }
-    private bool _capsulePending;
-    // The buttons stand in the order chosen in the settings; the first has no gap before it.
-    private void OrderPageButtons()
-    {
-        if (AIUsageButton.Parent is not Panel buttons) return;
-        var order = Settings.PageOrder.Select(PageButton).ToList();
-        if (!buttons.Children.Cast<UIElement>().SequenceEqual(order))
-        {
-            buttons.Children.Clear();
-            foreach (var button in order) buttons.Children.Add(button);
-        }
-        for (int i = 0; i < order.Count; i++) order[i].Margin = new Thickness(i == 0 ? 0 : 1, 0, 0, 0);
-    }
-    private Button PageButton(DeckPage page) => page switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Devices => DevicesPageButton, DeckPage.Notices => NoticesPageButton, _ => AIUsageButton };
     // The wheel walks the shown pages (down moves along the switch, up moves back) or steps the system volume. A wheel that
     // a scrolling part of a page uses (the lyrics, the model details) never arrives, as those mark it handled on the way up;
     // an open menu or the detail popup keeps the wheel to itself as well.

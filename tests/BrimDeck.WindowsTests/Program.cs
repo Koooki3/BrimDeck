@@ -34,6 +34,7 @@ internal static class Program
             finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
             NoticeRowStretchTests.Run(Check);
             LayoutRetryTests.Run(Check);
+            BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
             CheckGpus();
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();
