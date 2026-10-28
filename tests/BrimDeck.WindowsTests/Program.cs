@@ -16,6 +16,7 @@ internal static class Program
         {
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.
             if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
+            if (args is ["--only", "layout"]) { LayoutRetryTests.Run(Check); return 0; }
             Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
             CheckWindowChrome();
             CheckSettledClip();
@@ -32,6 +33,7 @@ internal static class Program
             try { NoticeBannerRegistryTests.Run(bannerRoot, Check); NoticeBannerKeeperTests.Run(System.IO.Path.Combine(bannerRoot, "keeper"), Check); }
             finally { if (System.IO.Directory.Exists(bannerRoot)) System.IO.Directory.Delete(bannerRoot, true); }
             NoticeRowStretchTests.Run(Check);
+            LayoutRetryTests.Run(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
             CheckGpus();
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();

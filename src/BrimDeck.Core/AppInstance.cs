@@ -13,6 +13,7 @@ public static class AppInstance
     public static string Settings => @"Local\BrimDeck.Settings." + _scope + Environment.UserName;
     // A second start with --exit sets Exit; the running BrimDeck then quits the way the tray's Exit does (panels power off, the settings
     // are written) and the second start waits for Mutex to be released. A forced kill would lose the settings change still waiting for its timer.
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public static int RequestExit(int seconds)
     {
         try { using var running = new System.Threading.Mutex(false, Mutex); if (running.WaitOne(0)) { running.ReleaseMutex(); return 3; } }

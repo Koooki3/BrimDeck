@@ -163,10 +163,13 @@ public partial class MainWindow
     // does; otherwise it is set in place. A switch whose buttons are not laid out yet places it once they are.
     private void PlacePageCapsule()
     {
-        var button = CurrentPage switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Devices => DevicesPageButton, DeckPage.Notices => NoticesPageButton, _ => AIUsageButton };
-        if (button.Visibility != Visibility.Visible || !button.IsMeasureValid || button.ActualWidth <= 0 || PresentationSource.FromVisual(button) is null)
+        var button = PageButton(CurrentPage);
+        if (!LayoutRetry.Laid(button))
         {
-            if (!_capsulePending) { _capsulePending = true; Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { _capsulePending = false; if (button.ActualWidth > 0) PlacePageCapsule(); }); }
+            // Retried after a layout pass, never by posting itself again: the switch is collapsed while the usage details show, its
+            // buttons then keep an invalid measure and their old width, and the old retry (a Loaded callback that called this again)
+            // spun the UI thread at 90% until the details closed (2026-10-28).
+            if (!_capsulePending) { _capsulePending = true; LayoutRetry.WhenReady(this, () => LayoutRetry.Laid(PageButton(CurrentPage)), () => { _capsulePending = false; PlacePageCapsule(); }); }
             return;
         }
         double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = HitArea.Look(button);
