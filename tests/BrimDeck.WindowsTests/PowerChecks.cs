@@ -21,7 +21,7 @@ internal static class PowerChecks
         var (inputs, sample) = provider.Sample();
         bool system = BatteryProvider.SystemHasBattery;
         Console.WriteLine(sample.TryGet(out var b)
-            ? $"  battery {b.Percent:0.0}% {b.State}, rate {b.Watts:0.0} W{(b.HasRate ? "" : " (none)")}, left {b.TimeLeft}, to full {b.TimeToFull}, health {(b.Health is { } h ? h.ToString("0.00") : "?")}, {b.Count} battery(ies), mains {b.AcOnline}"
+            ? $"  battery {b.Percent:0.0}% {b.State}, rate {b.Watts:0.0} W{(b.HasRate ? "" : " (none)")}, left {b.TimeLeft}, to full {b.TimeToFull}, health {(b.Health is { } h ? h.ToString("0.00") : "?")}, {b.Count} battery(ies), mode {b.Mode}, saver {b.BatterySaver}, mains {b.AcOnline}"
             : $"  battery: none ({sample.Reason}); system says battery: {system}");
         check("battery: the system and the batteries agree on whether there is one", sample.HasValue == system || !system && provider.State == SensorState.None);
         check("battery: the state is known after a read", provider.State is SensorState.Found or SensorState.None);

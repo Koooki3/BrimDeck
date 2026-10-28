@@ -147,8 +147,8 @@ internal sealed class MonitorView : Grid
         }
         if (layout.PowerLines > 0 && power is not null)
         {
-            // Under the drives (or under network), at the same distance; its line is as tall as a drive's.
-            _power = new PowerBlock(colors, power, layout.Body, layout.Caption, layout.StorageRow)
+            // Under the drives (or under network), at the same distance; the lines are list rows' height.
+            _power = new PowerBlock(colors, power, layout.Body, layout.Caption, layout.RowHeight, layout.PowerLines)
             { Margin = new Thickness(0, layout.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }, 0, 0) };
             SetRow(_power, 5); readings.Children.Add(_power);
         }

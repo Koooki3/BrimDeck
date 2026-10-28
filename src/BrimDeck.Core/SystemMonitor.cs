@@ -241,9 +241,10 @@ public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors,
     // The internal drives with their lettered volumes (Storage), each with its temperature while drive temperatures are read;
     // empty while storage is not read.
     public IReadOnlyList<StorageDrive> Storage { get; init; } = [];
-    // The whole machine's power draw, read only while something shows it (SystemSampler.SetExtras); PowerHistory is the last readings
-    // in watts, oldest first, and PowerSummary their peak and average since they began.
+    // The whole machine's power draw and its own battery, read only while something shows them (SystemSampler.SetExtras); PowerHistory
+    // is the last readings in watts, oldest first, and PowerSummary their peak and average since they began.
     public Reading<PowerSample> Power { get; init; }
+    public Reading<BatterySample> Battery { get; init; }
     public IReadOnlyList<double> PowerHistory { get; init; } = [];
     public PowerSummary? PowerSummary { get; init; }
     public static MonitorSnapshot Empty(int logicalProcessors, string reason) => new(DateTimeOffset.Now, logicalProcessors,

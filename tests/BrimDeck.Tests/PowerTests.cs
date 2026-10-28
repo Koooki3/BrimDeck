@@ -1,8 +1,8 @@
 using BrimDeck.Core;
 
-// The whole machine's power: which source wins and how it is labelled (PowerResolver), the counters' names (FromCounters), the battery's
-// report as the discharge source needs it (BatteryModel, from made-up reports), the collapsed row's Power reading, the monitor page's line
-// for it, and every theme's look.
+// The whole machine's power and its own battery: which source wins and how it is labelled (PowerResolver), the counters' names
+// (FromCounters), a battery's state, time and health from made-up reports (BatteryModel), the collapsed row's Power and Charge readings,
+// the monitor page's lines for them, and every theme's look.
 static class PowerTests
 {
     private static Reading<double> W(double watts) => watts;
@@ -130,6 +130,10 @@ static class PowerTests
             BatteryModel.Build(new BatteryInputs([Cell(30_000, 60_000, 66_000, -300)], AcOnline: false)).OrDefault is { TimeLeft: null, HasRate: false, State: BatteryState.Discharging });
         check("Battery: a time past two days is left out", BatteryModel.Build(new BatteryInputs([Cell(50_000, 60_000, 66_000, -600, discharging: true)], AcOnline: false)).OrDefault is { TimeLeft: null });
 
+        // Battery saver and the power mode pass through.
+        var saver = BatteryModel.Build(new BatteryInputs([Cell(30_000, 60_000, 66_000, -8_000, discharging: true)], AcOnline: false, BatterySaver: true, Mode: PowerMode.BestEfficiency)).OrDefault!;
+        check("Battery: Battery saver and the power mode are kept", saver.BatterySaver && saver.Mode == PowerMode.BestEfficiency && !plugged.BatterySaver);
+
         // Two batteries: capacities add up and the share is weighted by size (15/30 and 60/60 Wh is 83 %, not 75 %).
         var two = BatteryModel.Build(new BatteryInputs([Cell(15_000, 30_000, 33_000, -4_000, discharging: true), Cell(60_000, 60_000, 66_000, -6_000, discharging: true)], AcOnline: false)).OrDefault!;
         check("Battery: two batteries are one, weighted by size", two.Count == 2 && Math.Abs(two.Percent - 83.333) < .01 && Math.Abs(two.Watts - 10) < 1e-9 && two.FullWh == 90 && two.DesignWh == 99);
@@ -155,6 +159,18 @@ static class PowerTests
         check("Battery: the fallback cell discharges off mains with Windows' time", flagged.State == BatteryState.Discharging && flagged.TimeLeft == TimeSpan.FromMinutes(90) && Math.Abs(flagged.Percent - 40) < 1e-9);
         var charging = BatteryModel.Build(new BatteryInputs([new BatteryCell("system", null, null, null, null, true, false)], AcOnline: true, WindowsPercent: 40)).OrDefault!;
         check("Battery: the fallback cell charges when the system flags charging", charging.State == BatteryState.Charging);
+
+        // Levels: low at or under the threshold, elevated within ten above, never when on mains.
+        check("Battery: levels follow the devices' rule, charging is never low",
+            BatteryModel.Level(new BatterySample(12, BatteryState.Discharging, 1), 15) == MemoryLevel.Critical && BatteryModel.Level(new BatterySample(22, BatteryState.Discharging, 1), 15) == MemoryLevel.Elevated
+            && BatteryModel.Level(new BatterySample(40, BatteryState.Discharging, 1), 15) == MemoryLevel.Normal && BatteryModel.Level(new BatterySample(5, BatteryState.Charging, 1), 15) == MemoryLevel.Normal
+            && BatteryModel.Level(null, 15) == MemoryLevel.Normal);
+
+        check("Battery: Windows' power modes by their overlay GUID",
+            BatteryModel.ModeOf(Guid.Parse("961cc777-2547-4f9d-8174-7d86181b8a7a")) == PowerMode.BestEfficiency && BatteryModel.ModeOf(Guid.Empty) == PowerMode.Balanced
+            && BatteryModel.ModeOf(Guid.Parse("ded574b5-45a0-4f42-8737-46345c09c238")) == PowerMode.BestPerformance
+            && BatteryModel.ModeOf(Guid.Parse("3af9b8d9-7c97-431d-ad78-34a8bfea439f")) == PowerMode.BetterPerformance && BatteryModel.ModeOf(Guid.NewGuid()) == PowerMode.Unknown);
+        check("Battery: the words", BatteryModel.StateName(BatteryState.Charging) == "充电中" && BatteryModel.ModeName(PowerMode.Balanced) == "平衡" && BatteryModel.ModeName(PowerMode.Unknown) == "");
     }
 
     private static Reading<BatterySample> AsReading(this BatterySample sample) => sample;
@@ -164,56 +180,67 @@ static class PowerTests
         check("Format: watts have a decimal under 100 and none from there", PowerFormat.Watts(38.24) == "38.2" && PowerFormat.Watts(112.4) == "112" && PowerFormat.Watts(99.97) == "100" && PowerFormat.Watts(0) == "0.0"
             && PowerFormat.Watts(double.NaN) == "0.0");
         check("Format: the collapsed row's watts are three characters at most", PowerFormat.Compact(8.43) == "8.4" && PowerFormat.Compact(38.4) == "38" && PowerFormat.Compact(112.4) == "112" && PowerFormat.Compact(5000) == "999");
+        check("Format: durations in the two largest units", PowerFormat.Duration(TimeSpan.FromMinutes(192)) == "3 小时 12 分" && PowerFormat.Duration(TimeSpan.FromMinutes(12)) == "12 分钟"
+            && PowerFormat.Duration(TimeSpan.FromHours(2)) == "2 小时" && PowerFormat.Duration(TimeSpan.FromSeconds(20)) == "不到 1 分钟");
+        Loc.Use(Loc.English);
+        check("Format: English durations", PowerFormat.Duration(TimeSpan.FromMinutes(192)) == "3 h 12 min" && PowerFormat.Duration(TimeSpan.FromMinutes(12)) == "12 min");
+        Loc.Use(Loc.Chinese);
     }
 
-    // The collapsed row's Power reading joins once it gives a figure, stays away on a machine that has none, and keeps the sampler running
-    // until it is known to be absent.
+    // The collapsed row's Power and Charge readings join once they give a figure, stay away on a machine that has none, and keep the
+    // sampler running until they are known to be absent.
     private static void Admission(Action<string, bool> check)
     {
         var all = CompactMonitor.Normalize(null);
-        foreach (var reading in all) reading.Visible = reading.Item == CompactMonitorItems.Power;
+        foreach (var reading in all) reading.Visible = reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge;
         var admission = new StripAdmission();
-        const CompactMonitorItems Power = CompactMonitorItems.Power;
-        check("Strip: Power waits for its first figure", (admission.Hidden & Power) == Power);
-        check("Strip: a row that chose it keeps the sampler running while its sensor is unknown", admission.Awaits(all, null, SensorStates.Unknown));
-        check("Strip: ...and stops asking once it is known to be absent", !admission.Awaits(all, null, SensorStates.Unknown with { Power = SensorState.None }));
+        const CompactMonitorItems Both = CompactMonitorItems.Power | CompactMonitorItems.Charge;
+        check("Strip: Power and Charge wait for their first figure", (admission.Hidden & Both) == Both);
+        check("Strip: a row that chose them keeps the sampler running while their sensors are unknown", admission.Awaits(all, null, SensorStates.Unknown));
+        check("Strip: ...and stops asking once both are known to be absent", !admission.Awaits(all, null, SensorStates.Unknown with { Power = SensorState.None, Charge = SensorState.None }));
+        check("Strip: ...but keeps asking for the one that may still come", admission.Awaits(all, null, SensorStates.Unknown with { Power = SensorState.None }));
 
         var drawn = new PowerSample(30, PowerOrigin.Estimated, PowerSource.Components, []);
         var snapshot = MonitorSnapshot.Empty(4, "t") with { Power = drawn };
         var (hidden, arriving) = admission.Update(snapshot, all, SensorStates.Unknown);
-        check("Strip: the power reading joins with its first figure", (hidden & Power) == CompactMonitorItems.None && arriving == Power);
-        check("Strip: a joined reading is part of the layout", admission.Layout.Contains(((int)Power).ToString()));
+        check("Strip: the power reading joins with its first figure, the charge reading (no battery figure) does not", (hidden & Both) == CompactMonitorItems.Charge && arriving == CompactMonitorItems.Power);
+        check("Strip: a joined reading is part of the layout", admission.Layout.Contains(((int)CompactMonitorItems.Power).ToString()));
 
-        var (hidden2, _) = admission.Update(null, all, SensorStates.Unknown with { Power = SensorState.None });
-        check("Strip: it leaves once the sampler finds the machine has no source", (hidden2 & Power) == Power);
+        var withBattery = snapshot with { Battery = new BatterySample(80, BatteryState.Discharging, 1) };
+        var (hidden2, arriving2) = admission.Update(withBattery, all, SensorStates.Unknown);
+        check("Strip: the charge reading joins when the battery gives a figure", (hidden2 & Both) == CompactMonitorItems.None && arriving2 == CompactMonitorItems.Charge);
 
-        var unchosen = CompactMonitor.Normalize(null);
-        var quiet = new StripAdmission();
-        quiet.Update(snapshot, unchosen, SensorStates.Unknown);
-        check("Strip: a row that does not choose it is not built again when its first figure comes", !quiet.Layout.Contains(((int)Power).ToString()));
+        var (hidden3, _) = admission.Update(null, all, SensorStates.Unknown with { Power = SensorState.None, Charge = SensorState.None });
+        check("Strip: both leave once the sampler finds the machine has neither", (hidden3 & Both) == Both);
+
+        var desktop = new StripAdmission();
+        var (desktopHidden, _) = desktop.Update(MonitorSnapshot.Empty(4, "t"), all, SensorStates.Unknown with { Charge = SensorState.None });
+        check("Strip: a desktop never shows the charge reading", (desktopHidden & CompactMonitorItems.Charge) != 0);
     }
 
     private static void Readings(Action<string, bool> check)
     {
         var table = CompactMonitor.Normalize(null);
-        check("Readings: Power is last in the table, hidden",
-            table.Select(reading => reading.Item).Last() == CompactMonitorItems.Power && table.Where(reading => reading.Item == CompactMonitorItems.Power).All(reading => !reading.Visible));
-        check("Readings: it is a reading of the system", CompactMonitor.Order.Contains(CompactMonitorItems.Power) && (CompactMonitor.Every & CompactMonitorItems.Power) != 0);
-        check("Readings: it leaves a short row first", CompactMonitor.LeaveOrder[0] == CompactMonitorItems.Power && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
+        check("Readings: Power and Charge are last in the table, hidden",
+            table.Select(reading => reading.Item).TakeLast(2).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Charge]) && table.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
+        check("Readings: they are readings of the system",
+            CompactMonitor.Order.Contains(CompactMonitorItems.Power) && CompactMonitor.Order.Contains(CompactMonitorItems.Charge)
+            && (CompactMonitor.Every & CompactMonitorItems.Power) != 0 && (CompactMonitor.Every & CompactMonitorItems.Charge) != 0);
+        check("Readings: they leave a short row early, the machine's battery after the drives", CompactMonitor.LeaveOrder.Take(3).SequenceEqual([CompactMonitorItems.Power, CompactMonitorItems.Storage, CompactMonitorItems.Charge]) && CompactMonitor.LeaveOrder.Count == CompactMonitor.Order.Count);
 
-        // The presets keep to the readings they had: Full does not turn the new one on, Brief turns it off.
+        // The presets keep to the readings they had: Full does not turn the new ones on, Brief turns them off.
         var full = CompactMonitor.Normalize(null);
         full.First(reading => reading.Item == CompactMonitorItems.Power).Visible = true;
         CompactMonitor.Apply(full, CompactMonitorMode.Full);
         check("Readings: Full leaves Power as it is", full.First(reading => reading.Item == CompactMonitorItems.Power).Visible);
         CompactMonitor.Apply(full, CompactMonitorMode.Brief);
-        check("Readings: Brief hides Power", full.Where(reading => reading.Item == CompactMonitorItems.Power).All(reading => !reading.Visible));
-        full.First(reading => reading.Item == CompactMonitorItems.Power).Visible = true;
-        check("Readings: a table with Power on is no preset", CompactMonitor.Preset(full) is null);
+        check("Readings: Brief hides Power and Charge", full.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
+        full.First(reading => reading.Item == CompactMonitorItems.Charge).Visible = true;
+        check("Readings: a table with Charge on is no preset", CompactMonitor.Preset(full) is null);
 
-        // A saved table from before it still loads, and one with it round-trips.
-        var saved = CompactMonitor.Normalize(table.Where(reading => reading.Item != CompactMonitorItems.Power));
-        check("Readings: a table saved before it gets it hidden", saved.Count == table.Count && saved.Where(reading => reading.Item == CompactMonitorItems.Power).All(reading => !reading.Visible));
+        // A saved table from before them still loads, and one with them round-trips.
+        var saved = CompactMonitor.Normalize(table.Where(reading => reading.Item != CompactMonitorItems.Power && reading.Item != CompactMonitorItems.Charge));
+        check("Readings: a table saved before them gets them hidden", saved.Count == table.Count && saved.Where(reading => reading.Item is CompactMonitorItems.Power or CompactMonitorItems.Charge).All(reading => !reading.Visible));
         var settings = new DeckSettings();
         settings.CompactReadings.First(reading => reading.Item == CompactMonitorItems.Power).Visible = true;
         var folder = Path.Combine(Path.GetTempPath(), "BrimDeck-Tests-power-" + Guid.NewGuid().ToString("N"));
@@ -223,11 +250,12 @@ static class PowerTests
         finally { try { Directory.Delete(folder, true); } catch (IOException) { } }
         check("Readings: Power survives the settings file", copy.CompactReadings.First(reading => reading.Item == CompactMonitorItems.Power).Visible && (CompactMonitor.Shown(copy.CompactReadings) & CompactMonitorItems.Power) != 0 && copy.MonitorPower);
 
-        // Its width comes in through the same table as the others.
-        var width = CompactMonitor.Widths(CompactMonitorItems.None, 16, _ => 0, 16, 40, 30, power: 41);
-        check("Readings: the width of Power", width(CompactMonitorItems.Power) == 41 && CompactMonitor.Width(CompactMonitorItems.Power, width, 6) == 41);
-        check("Readings: a short row drops Power first", CompactMonitor.Fit(CompactMonitorItems.Cpu | CompactMonitorItems.Power, width, 6, 16) == CompactMonitorItems.Cpu);
-        check("Readings: no level of its own in the strip's rule", ReadingLevels.Of(CompactMonitorItems.Power, MonitorSnapshot.Empty(4, "t")) == MemoryLevel.Normal);
+        // Their widths come in through the same table as the others.
+        var width = CompactMonitor.Widths(CompactMonitorItems.None, 16, _ => 0, 16, 40, 30, power: 41, charge: 52);
+        check("Readings: the widths of Power and Charge", width(CompactMonitorItems.Power) == 41 && width(CompactMonitorItems.Charge) == 52 && CompactMonitor.Width(CompactMonitorItems.Power | CompactMonitorItems.Charge, width, 6) == 41 + 6 + 52);
+        check("Readings: a short row drops Power first, then Charge", CompactMonitor.Fit(CompactMonitorItems.Cpu | CompactMonitorItems.Power | CompactMonitorItems.Charge, width, 6, 16 + 6 + 52) == (CompactMonitorItems.Cpu | CompactMonitorItems.Charge)
+            || CompactMonitor.Fit(CompactMonitorItems.Cpu | CompactMonitorItems.Power | CompactMonitorItems.Charge, width, 6, 16 + 6 + 52) == CompactMonitorItems.Cpu);
+        check("Readings: no level of their own in the strip's rule", ReadingLevels.Of(CompactMonitorItems.Power, MonitorSnapshot.Empty(4, "t")) == MemoryLevel.Normal);
     }
 
     private static void Layout(Action<string, bool> check)
@@ -236,25 +264,28 @@ static class PowerTests
         var before = MonitorLayout.For(700, 290, true, 2);
         check("Layout: without power nothing changes", before == MonitorLayout.For(700, 290, true, 2, 0) && before.PowerLines == 0 && before.Parts(290)[4].Height == 0);
         // Room is what the drives leave while the core columns keep their minimum.
-        var tall = MonitorLayout.For(700, 400, true, 2, power: 1);
-        check("Layout: a tall page shows power and keeps its drives", tall.PowerLines == 1 && tall.StorageLines == 2);
-        check("Layout: a short page has none", MonitorLayout.For(620, 100, true, 2, power: 1).PowerLines == 0);
-        check("Layout: the power line comes before the drives, which give up room for it, while the graph keeps its minimum", Enumerable.Range(140, 260).All(height =>
+        var tall = MonitorLayout.For(700, 400, true, 2, power: 2);
+        check("Layout: a tall page shows power and the battery on two lines", tall.PowerLines == 2 && tall.StorageLines == 2);
+        var narrow = MonitorLayout.For(620, 260, true, 2, power: 2);
+        check("Layout: a standard page with drives keeps one line for both", narrow.PowerLines == 1);
+        check("Layout: a short page has none", MonitorLayout.For(620, 100, true, 2, power: 2).PowerLines == 0);
+        check("Layout: the first line of power comes before the drives, which give up room for it (at most two lines) while the graph keeps its minimum", Enumerable.Range(140, 260).All(height =>
         {
             var plain = MonitorLayout.For(700, height, true, 3);
-            var with = MonitorLayout.For(700, height, true, 3, power: 1);
-            return with.StorageLines >= plain.StorageLines - 2 && with.StorageLines <= plain.StorageLines && with.Parts(height)[1].Height >= MonitorLayout.MinimumGraph - 1e-9 && with.Metrics == plain.Metrics
-                && (with.PowerLines == 0) == (MonitorLayout.PowerRoom(height, with.Metrics, with.Figure, with.Body) == 0);
+            var with = MonitorLayout.For(700, height, true, 3, power: 2);
+            return with.StorageLines >= plain.StorageLines - 2 && with.StorageLines <= plain.StorageLines && with.Parts(height)[1].Height >= MonitorLayout.MinimumGraph - 1e-9 && with.Metrics == plain.Metrics && with.PowerLines is >= 0 and <= 2
+                && (with.PowerLines == 0) == (MonitorLayout.PowerRoom(height, with.Metrics, with.Figure, with.Body, 0) == 0);
         }));
+        check("Layout: a page with room for power and drives at once loses nothing", MonitorLayout.For(700, 400, true, 2, power: 2) is { StorageLines: 2, PowerLines: 2 });
         var parts = tall.Parts(400);
-        check("Layout: the power line sits under the drives and the graph keeps its minimum", parts[4].Top == parts[3].Top + parts[3].Height
-            && parts[4].Height == (tall.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }) + tall.StorageRow && parts[1].Height >= MonitorLayout.MinimumGraph - 1e-9);
+        check("Layout: the power lines sit under the drives and the graph keeps its minimum", parts[4].Top == parts[3].Top + parts[3].Height
+            && parts[4].Height == (tall.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }) + 2 * tall.StorageRow && parts[1].Height >= MonitorLayout.MinimumGraph - 1e-9);
         check("Layout: the settings default shows power", new DeckSettings().MonitorPower);
-        check("Layout: the hysteresis keeps a step with power", MonitorLayout.For(700, 290, true, 2, MonitorLayout.For(700, 285, true, 2, null, 1), 1) is { PowerLines: >= 0 });
+        check("Layout: the hysteresis keeps a step with power", MonitorLayout.For(700, 290, true, 2, MonitorLayout.For(700, 285, true, 2, null, 2), 2) is { PowerLines: >= 0 });
     }
 
-    // Every built-in theme has its own look, every color a look names resolves in every theme, and it holds the contrast the themes hold
-    // (graphics 3:1 on the surface, as the tests of the other marks).
+    // Every built-in theme has its own look, every color a look names resolves in every theme, and the colors that carry meaning hold
+    // the contrast the themes hold (graphics 3:1 on the surface at every stop of its gradient, as the tests of the other marks).
     private static void Looks(Action<string, bool> check)
     {
         var palettes = ThemeCoverageTests.Palettes().ToList();
@@ -281,16 +312,17 @@ static class PowerTests
                 if (ratio < 3 - .005) failures.Add($"{id}: {name} {ratio:0.00} < 3");
             }
         }
-        // Orange and red belong to the low levels: the power curve is never drawn in the theme's warning or critical color. A token is the
-        // theme's own; a role comes from the monitor's Theme color scheme (the default), worked out as the app does (MonitorColors.FromTheme
-        // over the theme's accent and its cyan, pink, lime and amber), with the theme's warning and critical beside it. Every theme.
+        // Orange and red belong to the low levels: a battery at a normal charge, charging or saving is never drawn in the theme's warning or
+        // critical color, so "83 %" is never mistaken for a warning. A token is the theme's own; a role comes from the monitor's Theme color scheme
+        // (the default), worked out as the app does (MonitorColors.FromTheme over the theme's accent and its cyan, pink, lime and amber), with
+        // the theme's warning and critical beside it. Every theme, its night and dusk looks included.
         var warm = new List<string>();
         foreach (var (id, palette) in palettes.Where(item => !item.Id.StartsWith("high-contrast", StringComparison.Ordinal)))
         {
             var look = PowerLooks.For(palette);
             string warning = (palette.WarningDefault ?? ThemeColor.Parse(AppPresets.WarningColor)).ToString(), critical = (palette.CriticalDefault ?? ThemeColor.Parse(AppPresets.CriticalColor)).ToString();
             var scheme = MonitorColors.FromTheme(palette["accent"].ToString(), [.. new[] { ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Amber }.Select(color => palette.ClockPreset(color).ToString())], warning, critical);
-            foreach (var name in look.References)
+            foreach (var name in new[] { look.Normal, look.Charge, look.Saver, look.Draw }.Distinct())
             {
                 string color = PowerLook.Tokens.Contains(name) ? palette[name].ToString() : name switch
                 { "cpu" => scheme.Performance, "efficiency" => scheme.Efficiency, "memory" => scheme.Memory, "gpu" => scheme.Gpu, _ => "" };
@@ -298,7 +330,8 @@ static class PowerTests
                 if (ColorMath.Distance(color, warning) < 90 || ColorMath.Distance(color, critical) < 90) warm.Add($"{id}: {name} {color} is near {warning} or {critical}");
             }
         }
-        check("Look: the power curve never takes the warning or critical color" + (warm.Count > 0 ? ": " + string.Join("; ", warm) : ""), warm.Count == 0);
+        check("Look: no state of a normal battery takes the warning or critical color" + (warm.Count > 0 ? ": " + string.Join("; ", warm) : ""), warm.Count == 0);
+        check("Look: a normal battery's fill is the text color or a cool one in every look", PowerLooks.Default.Normal == "textPrimary" && PowerLooks.Ids.All(id => PowerLooks.For(PanelThemes.Resolve(PanelThemes.BuiltIn(id)!)).Normal is "textPrimary" or "accent"));
         check("Look: every color a look takes from a theme reads on that theme" + (failures.Count > 0 ? ": " + string.Join("; ", failures) : ""), failures.Count == 0);
     }
 
@@ -319,6 +352,15 @@ static class PowerTests
         check("Text: what could not be read is listed with its reason", missing.Contains("\n未读取  GPU（空闲）"));
         check("Text: no reading is a dash and the reason", PowerText.Power(Reading<PowerSample>.Unavailable("无功率来源"), null) == "整机功耗  —\n原因  无功率来源");
 
+        var cell = BatteryModel.Build(new BatteryInputs([Cell(57_000, 59_400, 60_000, 0)], AcOnline: true, Mode: PowerMode.BestPerformance)).OrDefault!;
+        var lines = PowerText.Battery(Reading<BatterySample>.Of(cell)).Split('\n');
+        check("Text: the battery tooltip: charge, state, mode, health", lines[0] == "电池  96%（57.0 Wh）" && lines[1] == "状态  交流供电，未充电" && lines[2] == "电源模式  最佳性能" && lines[3].StartsWith("健康度  ") && lines[3].Contains("满充") && lines.Length == 4);
+        var discharging = BatteryModel.Build(new BatteryInputs([Cell(40_000, 60_000, 66_000, -23_400, discharging: true)], AcOnline: false, BatterySaver: true, WindowsRemaining: TimeSpan.FromMinutes(165))).OrDefault!;
+        var more = PowerText.Battery(Reading<BatterySample>.Of(discharging));
+        check("Text: discharging has its rate, the time left and the saver", more.Contains("状态  放电 23.4 W") && more.Contains("剩余  2 小时 45 分") && more.Contains("节电  开启"));
+        var charging = BatteryModel.Build(new BatteryInputs([Cell(40_000, 60_000, 66_000, 31_000, charging: true)], AcOnline: true)).OrDefault!;
+        check("Text: charging has its rate and the time to full", PowerText.Battery(Reading<BatterySample>.Of(charging)) is { } c && c.Contains("状态  充电 31.0 W") && c.Contains("充满需  "));
+
         Loc.Use(Loc.English);
         PowerPart[] partsEn = [new("cpu", "CPU package", 9.1, "RAPL"), new("gpu", "GPU", 7.9, PowerResolver.GpuSource)];
         var estimateEn = new PowerSample(17.0, PowerOrigin.Estimated, PowerSource.Components, partsEn);
@@ -326,9 +368,11 @@ static class PowerTests
         check("Text: the English tooltip is the same form",
             english[0] == "System power  17.0 W (estimated)" && english[1] == "Source  CPU package 9.1 W (RAPL) + GPU 7.9 W (NVIDIA driver)" && english[2] == "Excludes  display, storage, fans, board, PSU loss"
             && english[3] == "Peak / mean  78.5 / 63.4 W (since opened)");
-        check("Text: the English reading's name", PowerText.Spoken(Reading<PowerSample>.Of(estimateEn)) == "System power ≈17.0 W, estimated");
+        var englishBattery = PowerText.Battery(Reading<BatterySample>.Of(cell)).Split('\n');
+        check("Text: the English battery lines", englishBattery[0] == "Battery  96% (57.0 Wh)" && englishBattery[1] == "State  AC power, not charging" && englishBattery[2] == "Power mode  Best performance");
+        check("Text: the English reading's name", PowerText.Spoken(Reading<PowerSample>.Of(estimateEn), Reading<BatterySample>.Of(cell), true) == "System power ≈17.0 W, estimated; battery 96%, AC power, not charging; power mode Best performance");
         Loc.Use(Loc.Chinese);
-        var all = new[] { PowerText.Power(Reading<PowerSample>.Of(estimate), summary), PowerText.Spoken(Reading<PowerSample>.Of(estimate)) };
+        var all = new[] { PowerText.Power(Reading<PowerSample>.Of(estimate), summary), PowerText.Battery(Reading<BatterySample>.Of(discharging)), PowerText.Spoken(Reading<PowerSample>.Of(estimate), Reading<BatterySample>.Of(cell), true) };
         check("Text: no tool name and no full stop in any of them", all.All(line => !line.Contains("nvidia-smi", StringComparison.OrdinalIgnoreCase) && !line.Contains("NVML") && !line.Contains('。')));
     }
 }

@@ -333,9 +333,14 @@ public partial class App : Application
         Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
             page && Settings.MonitorStorage || stripDrives,
             page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage),
-            // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading.
-            _presentingPower.Count > 0 && Settings.MonitorPower || (shown & CompactMonitorItems.Power) != 0);
+            // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
+            // alone also for the row's charge reading.
+            _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
+            (shown & CompactMonitorItems.Charge) != 0);
     }
+    // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
+    // source nor a battery (a desktop with nothing), so such a page does not keep asking.
+    private bool PowerKnownToExist => Monitor is null || Monitor.PowerSensor != SensorState.None || Monitor.BatterySensor != SensorState.None || Native.BatteryProvider.SystemHasBattery;
     // The first save of a session took about 115 ms on the UI thread (the serializer's first use), which landed 400 ms after the first opening
     // of a page (the last page is saved then) as a stall in its animation. Once the app is idle a pool thread serializes a copy of the
     // settings once, so the first real save finds the serializer ready.

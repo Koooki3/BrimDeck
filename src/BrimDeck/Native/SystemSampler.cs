@@ -34,9 +34,10 @@ internal sealed class SystemSampler : IDisposable
     private readonly GpuTemperatures _gpuTemperatures = new();
     private readonly StorageReader _storage = new();
     // Whether the processor's and the graphics adapter's temperatures are read, the drives, and the drives' temperatures (SetExtras).
-    // _powerWanted: the whole machine's power (the Energy Meter counters, NVIDIA's board power, the battery's discharge).
-    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted;
-    // The whole machine's power and the battery it may run on (PowerProvider, BatteryProvider), made on the sampling thread.
+    // _powerWanted: the whole machine's power (the Energy Meter counters, NVIDIA's board power); _batteryWanted: the battery alone, which
+    // the machine's charge reading needs without any of the rest.
+    private volatile bool _temperatures, _storageWanted, _driveTemperatures, _powerWanted, _batteryWanted;
+    // The whole machine's power and the machine's battery (PowerProvider, BatteryProvider), made on the sampling thread.
     private PowerProvider? _power;
     private BatteryProvider? _battery;
     private readonly Queue<double> _powerHistory = new(HistoryLength);
@@ -104,10 +105,10 @@ internal sealed class SystemSampler : IDisposable
     // with temperatures on, or the collapsed row's temperature); storage, the drives (the page with storage on, or the collapsed
     // row's drive); driveTemperatures, the drives' temperatures (the page with both on). The drives are first read at once, so the
     // page knows early how many lines it needs for them.
-    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false)
+    public void SetExtras(bool temperatures, bool storage, bool driveTemperatures, bool power = false, bool battery = false)
     {
         bool newly = power && !_powerWanted;
-        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power;
+        _temperatures = temperatures; _storageWanted = storage; _driveTemperatures = storage && driveTemperatures; _powerWanted = power; _batteryWanted = power || battery;
         // Power asked for while the sampler already runs (the collapsed row's readings kept it going): the counters are read at once and again
         // after the short priming window, so the first figure comes with the next snapshot and not a second reading later.
         if (newly && _wanted && _thread is not null) { _primePower = true; _wake.Set(); }
@@ -120,8 +121,9 @@ internal sealed class SystemSampler : IDisposable
     public SensorState DriveSensor => _storage.Temperatures;
     public SensorState StorageState => _storage.Drives;
     public int StorageCount => _storage.Count;
-    // Whether the machine gives a power reading; Unknown until read.
+    // Whether the machine gives a power reading and has a battery of its own; Unknown until read.
     public SensorState PowerSensor => _power?.State ?? SensorState.Unknown;
+    public SensorState BatterySensor => _battery?.State ?? SensorState.Unknown;
 
     private void Run()
     {
@@ -203,26 +205,31 @@ internal sealed class SystemSampler : IDisposable
         IReadOnlyList<StorageDrive> storage = _storageWanted ? _storage.Sample(now, _driveTemperatures) : [];
         Remember(_cpuHistory, cpu.OrDefault?.Usage);
         var adapters = gpus.TryGet(out var read) ? Remember(read) : [];
-        // The machine's power: read only while something shows it; the history and the peak start over once none does.
+        // The machine's power and battery: read only while something shows them; the history and the peak start over once none does.
         Reading<PowerSample> power = default;
-        bool powerWanted = _powerWanted;
-        if (powerWanted)
+        Reading<BatterySample> battery = default;
+        bool powerWanted = _powerWanted, batteryWanted = _batteryWanted;
+        if (batteryWanted)
         {
-            // Apart from the rest: a battery or a driver that fails in an unexpected way costs this reading, never the page's.
+            // Apart from the rest: a battery or a driver that fails in an unexpected way costs these two readings, never the page's.
             try
             {
                 var (batteryInputs, batterySample) = _battery!.Sample();
-                power = _power!.Sample(pdh, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
-                if (power.TryGet(out var drawn))
+                battery = batterySample;
+                if (powerWanted)
                 {
-                    if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
-                    _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts);
+                    power = _power!.Sample(pdh, true, now, adapters, BatteryModel.Discharge(batteryInputs, batterySample), _battery.Present);
+                    if (power.TryGet(out var drawn))
+                    {
+                        if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
+                        _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts);
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 Debug.WriteLine(ex);
-                power = Reading<PowerSample>.Unavailable(ex.Message);
+                power = Reading<PowerSample>.Unavailable(ex.Message); battery = Reading<BatterySample>.Unavailable(ex.Message);
             }
         }
         // Power no longer wanted (the page left, the row dropped the reading, the display went off): the counters leave the query, the
@@ -237,7 +244,7 @@ internal sealed class SystemSampler : IDisposable
         {
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
             CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage,
-            Power = power, PowerHistory = _powerHistory.ToArray(),
+            Power = power, Battery = battery, PowerHistory = _powerHistory.ToArray(),
             PowerSummary = _powerStats.Count > 0 ? new PowerSummary(_powerStats.Peak, _powerStats.Average, _powerStats.Count) : null
         };
         var shown = WithGpu(snapshot, _autoGpu, out bool automatic);

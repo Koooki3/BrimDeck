@@ -168,4 +168,21 @@ public static class PowerFormat
         double value = double.IsFinite(watts) ? Math.Max(0, watts) : 0;
         return value < 9.95 ? value.ToString("0.0", CultureInfo.InvariantCulture) : ((int)Math.Round(Math.Min(value, 999))).ToString(CultureInfo.InvariantCulture);
     }
+
+    // A time as hours and minutes, "2:45", for a row that has a clock mark beside it; under a minute "0:01".
+    public static string Clock(TimeSpan time)
+    {
+        int minutes = Math.Max(1, (int)Math.Round(time.TotalMinutes));
+        return (minutes / 60).ToString(CultureInfo.InvariantCulture) + ":" + (minutes % 60).ToString("00", CultureInfo.InvariantCulture);
+    }
+
+    // A time in the two largest units that apply: "3 小时 12 分", "12 分钟", "不到 1 分钟".
+    public static string Duration(TimeSpan time)
+    {
+        int minutes = (int)Math.Round(time.TotalMinutes);
+        if (minutes < 1) return Loc.T("不到 1 分钟", "under a minute");
+        if (minutes < 60) return Loc.T($"{minutes} 分钟", $"{minutes} min");
+        int hours = minutes / 60, rest = minutes % 60;
+        return rest == 0 ? Loc.T($"{hours} 小时", $"{hours} h") : Loc.T($"{hours} 小时 {rest} 分", $"{hours} h {rest} min");
+    }
 }

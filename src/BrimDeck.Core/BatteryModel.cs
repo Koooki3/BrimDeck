@@ -8,13 +8,17 @@ namespace BrimDeck.Core;
 // at a threshold, as some laptops do to spare the cell).
 public enum BatteryState { Discharging, Charging, Full, PluggedIn }
 
+// Windows' power mode (the overlay scheme the Settings app calls Power mode).
+public enum PowerMode { Unknown, BestEfficiency, Balanced, BestPerformance, BetterPerformance }
+
 // One battery's report. Milliwatt-hours and milliwatts as Windows gives them; null where the battery does not say. RateMilliwatts
 // is positive while charging and negative while discharging. Charging, Discharging: the battery's own status (both false: idle).
 public sealed record BatteryCell(string Id, double? RemainingMwh, double? FullMwh, double? DesignMwh, double? RateMilliwatts, bool Charging = false, bool Discharging = false);
 
-// What the system says besides the batteries. AcOnline null: unknown. WindowsPercent and WindowsRemaining are the system's own figures
-// (GetSystemPowerStatus), used where the reports lack capacities or a rate.
-public sealed record BatteryInputs(IReadOnlyList<BatteryCell> Cells, bool? AcOnline = null, double? WindowsPercent = null, TimeSpan? WindowsRemaining = null);
+// What the system says besides the batteries. AcOnline null: unknown. BatterySaver: Windows' Battery saver is on. WindowsPercent and
+// WindowsRemaining are the system's own figures (GetSystemPowerStatus, PowerManager), used where the reports lack capacities or a rate.
+public sealed record BatteryInputs(IReadOnlyList<BatteryCell> Cells, bool? AcOnline = null, bool BatterySaver = false, PowerMode Mode = PowerMode.Unknown,
+    double? WindowsPercent = null, TimeSpan? WindowsRemaining = null);
 
 // The batteries as the page shows them. Percent is 0 to 100; Watts the size of the charge or discharge rate (0 when idle or unknown, see
 // HasRate). TimeLeft is set while discharging and TimeToFull while charging, each only when it can be told.
@@ -29,7 +33,9 @@ public sealed record BatterySample(double Percent, BatteryState State, int Count
     public double? DesignWh { get; init; }
     // The full-charge capacity against the design capacity, 0 to 1; null without both.
     public double? Health { get; init; }
+    public bool BatterySaver { get; init; }
     public bool AcOnline { get; init; }
+    public PowerMode Mode { get; init; }
     public bool Charging => State == BatteryState.Charging;
 }
 
@@ -93,7 +99,8 @@ public static class BatteryModel
         {
             Watts = watts, HasRate = hasRate && moving, TimeLeft = left, TimeToFull = toFull,
             RemainingWh = hasRemaining ? remaining / 1000 : null, FullWh = hasFull ? full / 1000 : null, DesignWh = hasDesign ? design / 1000 : null,
-            Health = health, AcOnline = inputs.AcOnline == true || state is BatteryState.Charging or BatteryState.Full or BatteryState.PluggedIn
+            Health = health, BatterySaver = inputs.BatterySaver, AcOnline = inputs.AcOnline == true || state is BatteryState.Charging or BatteryState.Full or BatteryState.PluggedIn,
+            Mode = inputs.Mode
         };
     }
 
@@ -107,4 +114,42 @@ public static class BatteryModel
         // On mains (a charger weaker than the load) the battery covers only the shortfall, which is not what the machine draws.
         => battery.TryGet(out var sample) && sample.State == BatteryState.Discharging && sample.HasRate && inputs.AcOnline != true ? sample.Watts : Reading<double>.Unavailable(
             Loc.T("未使用电池供电", "not on battery"));
+
+    // The charge at or under which the battery is low (critical), and elevated within ten points above it.
+    public const int LowPercent = 15;
+    // Low is at or under the threshold, elevated within ten points above it; a battery on mains is never low. Battery saver is a
+    // state of its own (Saver) and does not change the level.
+    public static MemoryLevel Level(BatterySample? battery, int low)
+    {
+        if (battery is null || battery.State != BatteryState.Discharging) return MemoryLevel.Normal;
+        int percent = (int)Math.Round(battery.Percent);
+        return percent <= low ? MemoryLevel.Critical : percent <= low + 10 ? MemoryLevel.Elevated : MemoryLevel.Normal;
+    }
+
+    public static string StateName(BatteryState state) => state switch
+    {
+        BatteryState.Charging => Loc.T("充电中", "Charging"),
+        BatteryState.Full => Loc.T("已充满", "Fully charged"),
+        BatteryState.PluggedIn => Loc.T("已接通电源，未在充电", "Plugged in, not charging"),
+        _ => Loc.T("使用电池", "On battery")
+    };
+
+    public static string ModeName(PowerMode mode) => mode switch
+    {
+        PowerMode.BestEfficiency => Loc.T("最佳能效", "Best power efficiency"),
+        PowerMode.Balanced => Loc.T("平衡", "Balanced"),
+        PowerMode.BestPerformance => Loc.T("最佳性能", "Best performance"),
+        PowerMode.BetterPerformance => Loc.T("更佳性能", "Better performance"),
+        _ => ""
+    };
+
+    // Windows' overlay scheme GUIDs (powrprof.h). Anything else (a vendor's own scheme) is unknown.
+    public static PowerMode ModeOf(Guid overlay) => overlay.ToString().ToLowerInvariant() switch
+    {
+        "961cc777-2547-4f9d-8174-7d86181b8a7a" => PowerMode.BestEfficiency,
+        "00000000-0000-0000-0000-000000000000" => PowerMode.Balanced,
+        "ded574b5-45a0-4f42-8737-46345c09c238" => PowerMode.BestPerformance,
+        "3af9b8d9-7c97-431d-ad78-34a8bfea439f" => PowerMode.BetterPerformance,
+        _ => PowerMode.Unknown
+    };
 }

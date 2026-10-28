@@ -63,7 +63,8 @@ public partial class MainWindow
     // A laptop on mains that gave no power reading may give one on battery (the discharge rate): its power is asked again then.
     private SensorStates StripSensors => _app.Monitor is { } monitor ? new(monitor.CpuSensor, monitor.GpuSensor, monitor.StorageState, monitor.DriveSensor)
     {
-        Power = monitor.PowerSensor == SensorState.None && Native.BatteryProvider.SystemHasBattery && !Native.BatteryProvider.OnMains ? SensorState.Unknown : monitor.PowerSensor
+        Power = monitor.PowerSensor == SensorState.None && Native.BatteryProvider.SystemHasBattery && !Native.BatteryProvider.OnMains ? SensorState.Unknown : monitor.PowerSensor,
+        Charge = monitor.BatterySensor
     } : SensorStates.Unknown;
     // Whether this surface shows the system readings and waits for the first figures of one it does not show yet.
     private bool StripAwaits()
@@ -71,8 +72,10 @@ public partial class MainWindow
         if (!Settings.ShowsMonitor(EffectiveStyle)) return false;
         return _stripAdmission.Awaits(Settings.CompactReadings, _app.Monitor?.Latest, StripSensors);
     }
-    // animate: the page is built for the first time, not for a new size, so its power line comes in (PowerOptions.Animate).
-    private PowerOptions PowerBlockFor(bool animate) => new(PowerStyle.For(MonitorThemeColors.For(Settings)), animate);
+    // animate: the page is built for the first time, not for a new size, so its power rows come in (PowerOptions.Animate).
+    private PowerOptions PowerBlockFor(bool animate) => Native.BatteryProvider.SystemHasBattery
+        ? new(PowerStyle.For(MonitorThemeColors.For(Settings)), BatteryModel.LowPercent, true, Native.BatteryProvider.Quick(), animate)
+        : new(PowerStyle.For(MonitorThemeColors.For(Settings)), BatteryModel.LowPercent, false, default, animate);
     private static MonitorSnapshot WaitingSnapshot => MonitorSnapshot.Empty(Environment.ProcessorCount, Loc.T("正在读取", "Reading"));
 
     private bool MonitorMotion => Settings.Animations && SystemParameters.ClientAreaAnimation;
@@ -119,8 +122,8 @@ public partial class MainWindow
     // that room change: when the volumes are first counted, a sensor turns out to have none or first shows, or a volume comes or
     // goes past the room.
     private string MonitorKey() => string.Join("|", CurrentMonitorLayout(), Settings.MonitorPalette, Settings.MonitorPalette == MonitorPalette.Custom ? Settings.MonitorCustomColors.Key : "", Settings.MonitorProcesses,
-        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors().Small, Settings.MonitorPower);
-    // What the shown page was built for: its volumes' places, the small gauge's room and the line for power.
+        Settings.MonitorMain, Settings.MonitorProcessView, Loc.Language, PanelTheme.Generation, Settings.MonitorTemperatures, MonitorSensors().Small, Settings.MonitorPower, Native.BatteryProvider.SystemHasBattery);
+    // What the shown page was built for: its volumes' places, the small gauge's room and the lines for power and the battery.
     private (int Lines, int Columns, bool Small, int Power) _monitorSensors;
     private (int Lines, int Columns, bool Small, int Power) BuiltSensors()
     {
@@ -136,8 +139,9 @@ public partial class MainWindow
         // The processor's zones are reserved for only once one has shown (a fixed zone never does); a graphics adapter is
         // reserved for until it is known to have no sensor.
         bool small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor != SensorState.None : monitor?.CpuSensor == SensorState.Found;
-        // The power line (PowerBlock) is asked for unless the sampler has found no source on this machine.
-        int power = !Settings.MonitorPower || monitor?.PowerSensor == SensorState.None ? 0 : 1;
+        // The power and the battery lines (PowerBlock) are asked for as many as the machine can show: both on a machine with a battery
+        // (known at once from the system), power alone on one without, none once the sampler finds no source.
+        int power = !Settings.MonitorPower ? 0 : Native.BatteryProvider.SystemHasBattery ? 2 : monitor?.PowerSensor == SensorState.None ? 0 : 1;
         return (lines, Settings.MonitorTemperatures && small, power);
     }
 

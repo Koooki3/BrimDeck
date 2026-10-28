@@ -7,10 +7,11 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The marks of the power row, in place of words: what the figure comes from, whether it is an estimate, the peak and the mean. One
-// drawing of each on a 16 unit grid, set in the theme's graphic language (PowerLook): plain line art, rounder and heavier for the island,
-// straight edges for the HUD look, and 8 by 8 squares for pixel art. A mark that stands for an estimate is dashed.
-internal enum PowerIcon { Chip, Meter, BatteryOut, Peak, Mean, Bolt }
+// The marks of the power and battery rows, in place of words: what a figure comes from, whether it is an estimate, the mains, the time,
+// the power mode, the battery's health, the peak and the mean. One drawing of each on a 16 unit grid, set in the theme's graphic language
+// (PowerLook): plain line art, rounder and heavier for the island, a hairline for glass, straight edges for the HUD look and the industrial
+// plate (IconStyle), and 8 by 8 squares for pixel art. A mark that stands for an estimate is dashed.
+internal enum PowerIcon { Chip, Meter, BatteryOut, Plug, Clock, Heart, Leaf, GaugeLow, GaugeMid, GaugeHigh, Peak, Mean, Bolt }
 
 internal static class PowerIcons
 {
@@ -23,6 +24,14 @@ internal static class PowerIcons
         [PowerIcon.Meter] = Frozen("M2.5,3 H13.5 V13 H2.5 Z M4.5,9.5 L6.5,6 L8.5,10.5 L10,7.5 L11.5,8.5"),
         // A battery giving power out (the discharge): the body with a minus in it.
         [PowerIcon.BatteryOut] = Frozen("M2.5,4.5 H12 A1,1 0 0 1 13,5.5 V10.5 A1,1 0 0 1 12,11.5 H2.5 A1,1 0 0 1 1.5,10.5 V5.5 A1,1 0 0 1 2.5,4.5 Z M14.5,7 V9 M4.5,8 H9.5"),
+        [PowerIcon.Plug] = Frozen("M5.5,1.8 V5 M10.5,1.8 V5 M4,5 H12 V7.8 A4,4 0 0 1 4,7.8 Z M8,11.8 V14.5"),
+        [PowerIcon.Clock] = Frozen("M8,2 A6,6 0 1 1 8,14 A6,6 0 1 1 8,2 Z M8,4.8 V8 L10.3,9.7"),
+        [PowerIcon.Heart] = Frozen("M8,13.6 L2.9,8.3 A3.2,3.2 0 0 1 8,4.1 A3.2,3.2 0 0 1 13.1,8.3 Z"),
+        [PowerIcon.Leaf] = Frozen("M3,13 C3,6.5 7.5,3 13,3 C13,9 9.5,13 3,13 Z M3,13 L9,7"),
+        // The power mode: a dial with its needle low (efficiency), in the middle (balanced) or high (performance).
+        [PowerIcon.GaugeLow] = Frozen("M2.2,11.8 A5.8,5.8 0 0 1 13.8,11.8 M2.2,11.8 H13.8 M8,11.8 L4.8,8.4"),
+        [PowerIcon.GaugeMid] = Frozen("M2.2,11.8 A5.8,5.8 0 0 1 13.8,11.8 M2.2,11.8 H13.8 M8,11.8 V6.4"),
+        [PowerIcon.GaugeHigh] = Frozen("M2.2,11.8 A5.8,5.8 0 0 1 13.8,11.8 M2.2,11.8 H13.8 M8,11.8 L11.2,8.4"),
         // The peak: a head over a base. The mean: a bar over an x.
         [PowerIcon.Peak] = Frozen("M8,3.2 L13,11.2 H3 Z"),
         [PowerIcon.Mean] = Frozen("M3.8,3.6 H12.2 M4.8,6.8 L11.2,13 M11.2,6.8 L4.8,13"),
@@ -37,6 +46,13 @@ internal static class PowerIcons
         [PowerIcon.Chip] = ["..#..#..", ".######.", "##....##", ".#....#.", "##....##", ".#....#.", ".######.", "..#..#.."],
         [PowerIcon.Meter] = ["########", "#......#", "#...#..#", "#.#.#.##", "#.#.#.##", "#..#...#", "#......#", "########"],
         [PowerIcon.BatteryOut] = ["........", "#######.", "#.....##", "#.###.##", "#.....##", "#######.", "........", "........"],
+        [PowerIcon.Plug] = ["..#..#..", "..#..#..", ".######.", ".#....#.", ".#....#.", "..####..", "...##...", "...##..."],
+        [PowerIcon.Clock] = ["..####..", ".#....#.", "#..#...#", "#..#...#", "#..##..#", ".#....#.", "..####..", "........"],
+        [PowerIcon.Heart] = [".##..##.", "########", "########", "########", ".######.", "..####..", "...##...", "........"],
+        [PowerIcon.Leaf] = ["......##", "....####", "..######", ".#####.#", "#####.#.", "####.#..", "##.#....", "#......."],
+        [PowerIcon.GaugeLow] = ["..####..", ".#....#.", "#.#....#", "#..#...#", "#...#..#", "#......#", "########", "........"],
+        [PowerIcon.GaugeMid] = ["..####..", ".#.##.#.", "#..##..#", "#..##..#", "#..##..#", "#......#", "########", "........"],
+        [PowerIcon.GaugeHigh] = ["..####..", ".#....#.", "#....#.#", "#...#..#", "#..#...#", "#......#", "########", "........"],
         [PowerIcon.Peak] = ["...##...", "..####..", "..####..", ".######.", ".######.", "########", "........", "........"],
         [PowerIcon.Mean] = ["########", "........", "#......#", ".#....#.", "..#..#..", "..#..#..", ".#....#.", "#......#"],
         [PowerIcon.Bolt] = ["...###..", "..###...", ".###....", "..#####.", "....###.", "...###..", "..##....", "..#....."],
@@ -108,9 +124,9 @@ internal static class PowerIcons
     }
 }
 
-// The first time the power row is shown, the UI thread built the icons' geometry and compiled the row's code on the spot (about 25 ms, with
+// The first time the power rows are shown, the UI thread built the icons' geometry and compiled the rows' code on the spot (about 25 ms, with
 // the page's own first layout). Once the app has started and has nothing else to do, a pool thread does both: the geometry (frozen, so any
-// thread may use it) and the code of the row, the tooltip's words and the figures. One pass, a few milliseconds of one pool thread, and
+// thread may use it) and the code of the rows, the tooltip's words and the figures. One pass, a few milliseconds of one pool thread, and
 // nothing runs again while the panel is idle.
 internal static class PowerWarm
 {
@@ -127,13 +143,15 @@ internal static class PowerWarm
         {
             RuntimeHelpers.RunClassConstructor(typeof(PowerIcons).TypeHandle);
             const BindingFlags All = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-            foreach (var type in new[] { typeof(PowerBlock), typeof(PowerGlyphs), typeof(PowerIcons), typeof(PowerStyle), typeof(PowerText), typeof(PowerResolver), typeof(PowerFormat) })
+            foreach (var type in new[] { typeof(PowerBlock), typeof(PowerGlyphs), typeof(PowerIcons), typeof(PowerStyle), typeof(PowerText), typeof(PowerResolver), typeof(BatteryModel), typeof(PowerFormat) })
                 foreach (var method in type.GetMethods(All)) Prepare(method);
             // The words and the figures once, with made-up readings.
             var sample = new PowerSample(20, PowerOrigin.Estimated, PowerSource.Components, [new PowerPart("cpu", "CPU", 12, "RAPL")]);
+            var battery = BatteryModel.Build(new BatteryInputs([new BatteryCell("warm", 30_000, 60_000, 66_000, -10_000, false, true)], false, false, PowerMode.Balanced));
             PowerText.Power(Reading<PowerSample>.Of(sample), new PowerSummary(30, 20, 3));
-            PowerText.Spoken(Reading<PowerSample>.Of(sample));
-            PowerFormat.Watts(12.3);
+            PowerText.Battery(battery);
+            PowerText.Spoken(Reading<PowerSample>.Of(sample), battery, true);
+            PowerFormat.Clock(TimeSpan.FromMinutes(90)); PowerFormat.Duration(TimeSpan.FromMinutes(90)); PowerFormat.Watts(12.3);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine(ex); }
     }
