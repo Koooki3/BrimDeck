@@ -149,7 +149,7 @@ internal static class MonitorDraw
         return parsed.WithAlpha((byte)Math.Round(Math.Clamp(alpha, 0, 1) * 255)).ToString();
     }
 
-    public static double PixelsPerDip(Visual visual) => VisualTreeHelper.GetDpi(visual).PixelsPerDip;
+    public static double PixelsPerDip(Visual visual) => UI.PixelsPerDip(visual);
 
     // A cached drawing, drawn at its origin, placed at a point.
     public static void Place(DrawingContext drawing, Point at, Drawing cached)

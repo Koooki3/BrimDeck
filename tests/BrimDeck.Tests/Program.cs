@@ -180,6 +180,9 @@ try
     Check("Settings roundtrip keeps order and colors", loaded.Apps.Select(app => app.QuotaSource).SequenceEqual(moved.Apps.Select(app => app.QuotaSource)) && loaded.Apps[0].ThemeColor == "#FF8800");
     File.WriteAllText(store.FilePath, "broken json");
     Check("Corrupt settings recover visibly", store.Load().Style == CompactStyle.Notch && store.LoadWarning is not null);
+    var unreadableCopies = Directory.GetFiles(store.DirectoryPath, "settings.unreadable-*.json");
+    Check("Corrupt settings are copied aside before defaults replace them", unreadableCopies.Length == 1 && File.ReadAllText(unreadableCopies[0]) == "broken json" &&
+        store.LoadWarning!.Contains(Path.GetFileName(unreadableCopies[0])));
 
     var now = DateTimeOffset.Now;
     var locations = DataLocations.Resolve(Path.Combine(root, "home"), Path.Combine(root, "roaming"), Path.Combine(root, "local"), null, "");
