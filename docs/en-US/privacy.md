@@ -38,6 +38,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 ## Network and security
 
 - Connects only to: each tool's official APIs, sites you enter in settings, the OpenRouter model list and the endpoint lists of the models your records use (model prices; only the model name is sent), lyrics services (LRCLIB, NetEase Cloud Music, QQ Music), the cover addresses players provide, and GitHub Releases (updates).
+- Claude desktop data folders include `%APPDATA%\Claude`, the Store paths `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` and `%LOCALAPPDATA%\Packages\AnthropicPBC.Claude_*\LocalCache\Roaming\Claude`, and `%LOCALAPPDATA%\Claude-Data\<install>`.
 - Sign-in tokens are used only in memory and never written to disk; the sign-in caches of the Claude and Grok Bot desktop apps are decrypted in memory with Windows encryption for the current user.
 - Custom scripts run in a sandbox with no access to files, processes or .NET objects; see the limits in [Supported tools](ai-tools.md#custom-script).
 - The system monitor's readings, temperatures and drive space included, are read and shown only on this PC, never saved or sent. Drive space comes from each lettered volume's file system, and the physical drive a volume lies on from Windows' volume information. Temperatures come from interfaces built into Windows: the ACPI thermal zones in the performance counters for the CPU, the data the graphics driver reports for the GPU, and each drive's own report, asked for with the drive opened without read or write access. No administrator rights or drivers are needed.

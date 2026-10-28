@@ -200,6 +200,12 @@ try
     Check("A marked folder that another install still keeps its config in remains a profile",
         locations.ClaudeDesktopProfiles() is { Count: 3 } shared && shared.Contains(storeProfile) && shared[0] == movedProfile);
     File.Delete(Path.Combine(storeProfile, "config.json"));
+    var publisherStoreProfile = Path.Combine(locations.Local, "Packages", "AnthropicPBC.Claude_fnn82j28hfe8t", "LocalCache", "Roaming", "Claude");
+    Directory.CreateDirectory(publisherStoreProfile);
+    File.WriteAllText(Path.Combine(publisherStoreProfile, "config.json"), "{}");
+    File.WriteAllText(Path.Combine(Path.GetDirectoryName(publisherStoreProfile)!, ".user-data-leaving.anthropicpbc.claude_fnn82j28hfe8t"), "");
+    Check("Publisher-prefixed Claude Store profile is discovered while its config remains during migration",
+        locations.ClaudeDesktopProfiles() is { Count: 3 } withPublisher && withPublisher.Contains(publisherStoreProfile) && withPublisher.Contains(movedProfile));
     var oldSettings = SettingsMigrations.Read("""{"Width":890,"Claude":false,"CodexHome":"obsolete","ClaudeHome":"obsolete","CursorDatabase":"obsolete","OnlineQuota":false}""");
     oldSettings.Normalize();
     var migrated = JsonSerializer.Serialize(oldSettings);
