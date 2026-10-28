@@ -22,6 +22,9 @@ public partial class MainWindow
     private bool FlowDragging => Resizing && _resizeCompact;
     // The windows of the rest, taken whenever the row is built without the flow, for the flow to start from (RowFlow.Window).
     private double _restRings = -1, _restReadings = -1;
+    // Whether those windows are the ones the flow rose from: not after it began to fall and rose again (a slider dragged again before
+    // the flow of the last one was gone), when it rises from the whole items of the width it is at then.
+    private bool _restHeld;
     private bool FlowRising => _flow.Target(FlowDragging) > 0;
 
     // The flow for the row being built now.
