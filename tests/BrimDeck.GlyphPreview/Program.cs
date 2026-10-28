@@ -46,7 +46,7 @@ internal static class Program
     }
 
     // The liquid motion's boundary: the surface with the parts joined to it in one outline has no line inside it, on every built-in
-    // theme (a theme with a pattern over its surface is skipped), and the detector does find a line where one is drawn.
+    // theme (a theme with a pattern over its surface is skipped), at both panel scales, and the detector does find a line where one is drawn.
     private static int BoundaryChecks()
     {
         if (Application.Current is null) _ = new Application();
@@ -54,12 +54,14 @@ internal static class Program
         foreach (var theme in PanelThemes.BuiltIns)
         {
             PanelTheme.Use(new DeckSettings { PanelTheme = theme.Id });
+            // At the panel's two scales (PanelScales): the motion is drawn at the scale the notice is.
             foreach (var form in new[] { LiquidForm.Capsule, LiquidForm.Notch })
-            {
-                var result = NoticeFxCheck.Sweep(form);
-                checks++;
-                if (!result.Skipped && result.Failed > 0) { failures++; Console.WriteLine($"FAIL: {theme.Id} {form}: lines inside the outline: {result}"); }
-            }
+                foreach (double panelScale in new[] { 1d, 1.5 })
+                {
+                    var result = NoticeFxCheck.Sweep(form, panelScale: panelScale);
+                    checks++;
+                    if (!result.Skipped && result.Failed > 0) { failures++; Console.WriteLine($"FAIL: {theme.Id} {form} at {panelScale:0.##}: lines inside the outline: {result}"); }
+                }
         }
         var backdrop = Color.FromRgb(0x58, 0x62, 0x74);
         BitmapSource Picture(bool line)
