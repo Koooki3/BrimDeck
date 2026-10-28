@@ -119,6 +119,17 @@ public sealed class AppEntry
     public string OffPeakWarningColor { get; set; } = "";
     public string OffPeakCriticalColor { get; set; } = "";
     public bool IsOffPeak(DateTime local) => OffPeak?.Any(period => period.Contains(local)) == true;
+    // The next minute at which this row enters or leaves its off-peak time; null without periods, or when they cover the
+    // whole day. A boundary inside another period changes nothing, so the first boundary that flips the state is taken.
+    public DateTime? NextOffPeakChange(DateTime local)
+    {
+        if (OffPeak is not { Count: > 0 }) return null;
+        bool now = IsOffPeak(local);
+        var minute = local.Date.AddMinutes(local.Hour * 60 + local.Minute);
+        return OffPeak.SelectMany(period => new[] { period.Start, period.End }).Distinct()
+            .Select(boundary => local.Date.AddMinutes(boundary)).Select(at => at <= minute ? at.AddDays(1) : at)
+            .Order().Cast<DateTime?>().FirstOrDefault(at => IsOffPeak(at!.Value) != now);
+    }
     public AppEntry Copy()
     {
         var copy = (AppEntry)MemberwiseClone();
