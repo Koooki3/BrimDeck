@@ -82,6 +82,8 @@ static class PowerTests
 
         var stats = new PowerStats();
         foreach (double watts in new[] { 20.0, 60, 40, double.NaN, -3 }) stats.Add(watts);
+        check("Power: an ended helper is started again after the interval, not before, and a running one never", !PowerResolver.RestartDue(true, 10, 0) && PowerResolver.RestartDue(true, PowerResolver.RestartSeconds, 0)
+            && !PowerResolver.RestartDue(true, 80, 60) && PowerResolver.RestartDue(true, 100, 60) && !PowerResolver.RestartDue(false, 1000, 0));
         check("Power: the peak and the average count plausible readings only", stats.Count == 3 && stats.Peak == 60 && Math.Abs(stats.Average - 40) < 1e-9);
         stats.Reset();
         check("Power: stats start over", stats.Count == 0 && stats.Peak == 0 && stats.Average == 0);

@@ -44,6 +44,7 @@ internal static class PowerChecks
     {
         int Running() => Process.GetProcessesByName("nvidia-smi").Length;
         int before = Running();
+        var known = Process.GetProcessesByName("nvidia-smi").Select(process => process.Id).ToHashSet();
         using var provider = new PowerProvider(pdh);
         var idle = adapters.Select(adapter => adapter with { Usage = 0 }).ToList();
         double clock = 200;
@@ -51,6 +52,16 @@ internal static class PowerChecks
         check("power: no helper while the NVIDIA adapter is idle", Running() == before);
         for (int i = 0; i < 3; i++) { provider.Sample(pdh.Collect(), true, clock++, adapters, discharge, battery); Thread.Sleep(700); }
         check("power: the helper runs while the NVIDIA adapter works", Running() == before + 1);
+        // Ended from outside while the adapter still works: it is started again once the interval has passed, and not before.
+        foreach (var process in Process.GetProcessesByName("nvidia-smi").Where(process => !known.Contains(process.Id))) { process.Kill(); process.WaitForExit(2000); }
+        Thread.Sleep(300);
+        check("power: the helper is gone when it is ended from outside", Running() == before);
+        provider.Sample(pdh.Collect(), true, clock + 5, adapters, discharge, battery);
+        Thread.Sleep(300);
+        check("power: an ended helper is not started again at once", Running() == before);
+        clock += PowerResolver.RestartSeconds + 5;
+        for (int i = 0; i < 2; i++) { provider.Sample(pdh.Collect(), true, clock++, adapters, discharge, battery); Thread.Sleep(700); }
+        check("power: ...but again after the interval, while the adapter works", Running() == before + 1);
         provider.Sample(pdh.Collect(), false, clock++, adapters, discharge, battery);
         Thread.Sleep(500);
         check("power: the helper ends when power is no longer wanted", Running() == before);

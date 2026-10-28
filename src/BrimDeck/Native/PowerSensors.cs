@@ -28,6 +28,7 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
     private volatile SensorState _state = SensorState.Unknown;
     private readonly Dictionary<string, double> _busyAt = new(StringComparer.OrdinalIgnoreCase);
     private NvidiaSmi? _smi;
+    private double _smiStartedAt;
     public SensorState State => _state;
 
     // Called before each collection of the query: while power is wanted the Energy Meter counters are in it, so the first collection after the
@@ -86,7 +87,8 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
                 read.Add(new GpuPowerInput(name, Reading<double>.Unavailable(Loc.T("空闲", "idle"))));
                 continue;
             }
-            _smi ??= new NvidiaSmi();
+            if (_smi is not null && PowerResolver.RestartDue(_smi.Ended, now, _smiStartedAt)) { _smi.Dispose(); _smi = null; }
+            if (_smi is null) { _smi = new NvidiaSmi(); _smiStartedAt = now; }
             read.Add(new GpuPowerInput(name, _smi.Read(name, ordinal)));
         }
         // Every adapter idle for good: the helper ends, and its memory goes with it.
@@ -162,6 +164,9 @@ internal sealed class NvidiaSmi : IDisposable
             if (_ready.Count == 0 || _readyAt == 0) { _ready = [.. _batch]; _readyAt = now; }
         }
     }
+
+    // Whether the helper is not running: it did not start, or it has ended.
+    public bool Ended => _failure is not null || _process is { HasExited: true };
 
     // The nth adapter of this name in the driver's order (identical cards are told apart by it); the adapter's name is DXGI's, the
     // driver's alike.
