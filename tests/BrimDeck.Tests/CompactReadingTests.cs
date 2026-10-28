@@ -193,6 +193,11 @@ internal static class CompactReadingTests
         var levels = Read("""{"AppVersion":"0.1.0","CompactWarningColor":"abcdef","CompactCriticalColor":"nope"}""");
         check("Level colors: normalized, an invalid one follows the panel theme", levels is { CompactWarningColor: "#ABCDEF", CompactCriticalColor: null }
             && SettingsMigrations.Read(JsonSerializer.Serialize(levels)).CompactWarningColor == "#ABCDEF");
+        check("Smoothing: older files ease at 10 frames a second, an unknown value too, and a choice is kept",
+            levels.CompactSmoothing == CompactSmoothing.Ten
+            && Read("""{"AppVersion":"0.1.0","CompactSmoothing":7}""").CompactSmoothing == CompactSmoothing.Ten
+            && Read("""{"AppVersion":"0.1.0","CompactSmoothing":30}""").CompactSmoothing == CompactSmoothing.Thirty
+            && Read("""{"AppVersion":"0.1.0","CompactSmoothing":0}""").CompactSmoothing == CompactSmoothing.Off);
         check("Older colors: they leave the readings, which keep the rest", read.CompactReadings.All(r => !r.HasOwnColors)
             && !read.CompactReadings.First(r => r.Item == Columns).Visible && Same(read.CompactReadings, Memory, Cpu, Columns, Download, Gpu, Upload, CompactMonitorItems.Storage, CompactMonitorItems.Power, CompactMonitorItems.Charge, CompactMonitorItems.Battery));
         var plain = Read("""{"AppVersion":"0.1.0","MonitorPalette":1,"CompactReadings":[{"Item":4}]}""");

@@ -12,6 +12,9 @@ public enum MonitorProcessView { Auto, Compact, Detailed }
 // Since the table of readings (CompactReading) these are its presets: Full and Brief set which readings show and which rings
 // carry their figure, and Custom is any other setting.
 public enum CompactMonitorMode { Full, Brief, Custom }
+// CompactSmoothing: how many frames a second the collapsed readings' dials and core columns are drawn while they ease to a new
+// reading; Off shows each reading at once. The values are the frames a second.
+public enum CompactSmoothing { Off = 0, Ten = 10, Thirty = 30 }
 
 [Flags]
 public enum CompactMonitorItems
