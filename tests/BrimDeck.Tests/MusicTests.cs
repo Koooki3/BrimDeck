@@ -198,6 +198,22 @@ internal static class MusicTests
         check("Rings alone in less than one ring show the first ring cut", ringsOnly.VisibleRings == 0 && ringsOnly.RingWidth == 6 && !ringsOnly.ScrollRings && ringsOnly.TextWidth == 0);
         var alone = CompactMusicLayout.Calculate(20, 1, false, 0, false, 33);
         check("A lone clock has no gap and is cut to the row", alone.ClockAlone && alone.ClockWidth == 20);
+        // The equalizer shown apart from the media.
+        check("The equalizer without media keeps its region, with the gap toward the middle only when something is there",
+            CompactMusicLayout.Calculate(200, 1, false, 0, false, 33, 0, true) is { EqualizerWidth: 18, ClockAlone: false, ClockWidth: 41, CoverWidth: 0 }
+            && CompactMusicLayout.Calculate(200, 1, false, 2, false, 33, 0, true) is { EqualizerWidth: 26 }
+            && CompactMusicLayout.Calculate(200, 1, false, 0, false, 0, 0, true) is { EqualizerWidth: 18 }
+            && CompactMusicLayout.Calculate(200, 1, false, 0, false, 0, 120, true) is { MonitorAlone: false });
+        check("The equalizer's length follows its bars, four by default, and the count stays in its range",
+            CompactMusicLayout.BarsWidth(4, 1) == 18 && CompactMusicLayout.BarsWidth(20, 1) == 98 && CompactMusicLayout.BarsWidth(3, 2) == 26
+            && CompactMusicLayout.BarsWidth(1, 1) == 13 && CompactMusicLayout.BarsWidth(99, 1) == 98 && new DeckSettings { EqualizerBars = 0 }.EqualizerBars == 3
+            && new DeckSettings().EqualizerBars == 4 && new DeckSettings().MusicEqualizerBars == 5 && new DeckSettings { MusicEqualizerBars = 30 }.MusicEqualizerBars == 20 && CompactMusicLayout.Calculate(300, 1, true, 0, true, 0, 0, true, 8) is { EqualizerWidth: 8 + 38, EqualizerSize: 38 }
+            && CompactMusicLayout.NaturalWidth(1, false, 0, false, 0, 0, 0, true, 6) == 28);
+        check("Media without the equalizer has no equalizer region", CompactMusicLayout.Calculate(200, 1, true, 0, true, 33, 0, false) is { EqualizerWidth: 0, CoverWidth: 28 });
+        check("The width the row asks for counts the equalizer apart from the media",
+            CompactMusicLayout.NaturalWidth(1, false, 0, false, 0, 0, 0, true) == 18 && CompactMusicLayout.NaturalWidth(1, false, 0, false, 33, 0, 0, true) == 18 + 8 + 33
+            && CompactMusicLayout.NaturalWidth(1, true, 0, false, 0, 0, 0, false) == 20 + 8
+            && CompactMusicLayout.RequiredWidth(1, false, false, 33, 0, 0, true) == 18 + 8 + 33 && CompactMusicLayout.RequiredWidth(1, true, true, 0, 0, 0, false) == 20 + 8 + 18);
 
         // Any width, scale and clock width gives finite regions that are never negative and never add up to more than the row.
         double[] widths = [0, .4, 1, 7, 17.9, 18, 36, 54, 84, 91.3, 115, 164, 178, 400, 1e6, double.NaN, -5, double.PositiveInfinity];

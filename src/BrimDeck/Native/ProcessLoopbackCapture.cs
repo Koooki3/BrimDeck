@@ -7,8 +7,8 @@ using NAudio.Wave;
 
 namespace BrimDeck.Native;
 
-// Captures what one player process renders (Windows 10 build 20348 and later) and feeds
-// it to the level-bar analysis. Samples stay in memory and are discarded after analysis.
+// Captures what one player process renders (Windows 10 build 20348 and later), or with exclude
+// what every other process renders, and feeds it to the level-bar analysis. Samples stay in memory and are discarded after analysis.
 // Create, read and dispose on the same MTA thread.
 internal sealed class ProcessLoopbackCapture : IDisposable
 {
@@ -35,7 +35,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
         _client.Start();
     }
 
-    public static ProcessLoopbackCapture? TryStart(uint processId)
+    public static ProcessLoopbackCapture? TryStart(uint processId, bool exclude = false)
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348)) return null;
         IntPtr parameters = IntPtr.Zero, variant = IntPtr.Zero;
@@ -46,7 +46,7 @@ internal sealed class ProcessLoopbackCapture : IDisposable
             parameters = Marshal.AllocHGlobal(12);
             Marshal.WriteInt32(parameters, 0, 1);                 // AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK
             Marshal.WriteInt32(parameters, 4, (int)processId);    // TargetProcessId
-            Marshal.WriteInt32(parameters, 8, 0);                 // PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
+            Marshal.WriteInt32(parameters, 8, exclude ? 1 : 0);   // PROCESS_LOOPBACK_MODE_EXCLUDE_ or _INCLUDE_TARGET_PROCESS_TREE
             // PROPVARIANT holding a VT_BLOB that points at the parameters.
             variant = Marshal.AllocHGlobal(Marshal.SizeOf<BlobVariant>());
             Marshal.StructureToPtr(new BlobVariant { Type = 65, Size = 12, Data = parameters }, variant, false);

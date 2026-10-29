@@ -11,7 +11,9 @@ namespace BrimDeck.Native;
 // volume and drive is opened without read or write access, which a normal user may do; nothing here needs administrator rights.
 // Asking a drive for its temperature sends it a command (a few to over a hundred milliseconds, and it leaves its deepest power
 // state), and listing the volumes can wait on a slow drive, so everything is read on the thread pool: the volumes every 10
-// seconds, the temperatures every 30, never on a tick. Hard disks are not asked for a temperature, as asking could spin one up.
+// seconds, the temperatures every 30, never on a tick. Hard disks are not asked for a temperature, as asking could spin one up,
+// nor are drives behind a RAID controller (Storage.AsksTemperature). Each temperature query is guarded (SensorGuard): a drive whose
+// query never answered is not asked again, and a reading stuck on one is given up so the next can start.
 // The readings and states are kept while the sampler pauses, so a page opened again has its drives at once.
 internal sealed class StorageReader
 {
@@ -28,6 +30,8 @@ internal sealed class StorageReader
     // interval they are no longer shown.
     private long _heatedAt = BitConverter.DoubleToInt64Bits(double.NegativeInfinity);
     private int _running;
+    // Raised when a reading stuck on a drive is given up (SensorGuard): only the reading of this generation may say it has ended.
+    private int _generation;
     private volatile Task _reading = Task.CompletedTask;
 
     // Whether any internal drive with a lettered volume was found, and how many such volumes; whether any drive gave a temperature.
@@ -43,11 +47,12 @@ internal sealed class StorageReader
     public void Start(bool temperatures)
     {
         if (Interlocked.Exchange(ref _running, 1) == 1) return;
+        int generation = Volatile.Read(ref _generation);
         _reading = Task.Run(() =>
         {
-            try { Read(temperatures, Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency); }
+            try { Read(temperatures, Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency, generation); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { Debug.WriteLine(ex); }
-            finally { Volatile.Write(ref _running, 0); }
+            finally { if (Volatile.Read(ref _generation) == generation) Volatile.Write(ref _running, 0); }
         });
     }
 
@@ -63,10 +68,16 @@ internal sealed class StorageReader
         return temperatures && now - BitConverter.Int64BitsToDouble(Interlocked.Read(ref _heatedAt)) <= 2 * TemperatureEvery ? _heated : _plain;
     }
 
+    // A reading stuck on a drive's temperature: the next may start.
+    private void GiveUp(int generation)
+    {
+        if (Interlocked.CompareExchange(ref _generation, generation + 1, generation) == generation) Volatile.Write(ref _running, 0);
+    }
+
     // The sampler paused: the next sample reads again at once. The last readings stay until then.
     public void Rest() => _readAt = double.NegativeInfinity;
 
-    private void Read(bool temperatures, double now)
+    private void Read(bool temperatures, double now, int generation)
     {
         var volumes = Volumes();
         var numbers = volumes.Select(item => item.Disk).OfType<int>().Distinct().ToList();
@@ -94,11 +105,19 @@ internal sealed class StorageReader
             {
                 _temperaturesAt = now;
                 var known = new Dictionary<int, DiskTemperature>();
-                foreach (int number in solid)
+                foreach (int number in solid.Where(number => Core.Storage.AsksTemperature(disks[number])))
                 {
+                    var disk = disks[number];
+                    var guarded = new GuardedDevice(GuardedReading.DriveTemperature, disk.Model + " | " + disk.Bus, disk.Model.Length > 0 ? disk.Model : "SSD");
+                    if (SensorGuard.Stopped(guarded.Reading, guarded.Device)) continue;
                     var device = Open($@"\\.\PhysicalDrive{number}");
                     if (device == InvalidHandle) continue;
-                    try { if (Temperature(device, query, output, disks[number].Model) is { } heat) known[number] = heat with { Number = number }; }
+                    try
+                    {
+                        // Given up on, the next reading starts without waiting for this one, and skips the drive.
+                        var heat = SensorGuard.Ask(guarded, () => Temperature(device, query, output, disk.Model), () => GiveUp(generation));
+                        if (heat is not null) known[number] = heat with { Number = number };
+                    }
                     finally { CloseHandle(device); }
                 }
                 _known = known;

@@ -15,6 +15,9 @@ public static class ApplicationVersion
         return Version.TryParse(core, out var version) && version.Build >= 0 ? new Version(version.Major, version.Minor, version.Build) : new Version(0, 0, 0);
     }
 
+    // True for a version with a prerelease label ("0.3.0-beta.1").
+    public static bool IsPrerelease(string? text) => Prerelease(text).Length > 0;
+
     // Release order for updates. A prerelease comes before its release ("0.3.0-beta.2" < "0.3.0"); prerelease labels
     // compare part by part as in SemVer: numbers by value, text by ordinal, numbers before text, a longer label after its prefix.
     public static int Compare(string? left, string? right)
