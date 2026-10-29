@@ -114,6 +114,18 @@ internal static class AppUpdateTests
         var migrated = new AppUpdates(backend, legacy, () => now); await migrated.CheckAsync(true);
         check("update-prompt.txt is migrated once into update-state.json", migrated.HasUpdate && !migrated.ShouldPrompt(true, true) &&
             !File.Exists(Path.Combine(legacy, "update-prompt.txt")) && File.Exists(Path.Combine(legacy, "update-state.json")));
+
+        var betaBackend = new UpdateFixture { Release = new("0.2.0-beta.1", "Beta notes", 100) };
+        var betaFolder = Path.Combine(folder, "beta");
+        var betas = new AppUpdates(betaBackend, betaFolder); await betas.CheckAsync(true);
+        check("checks ask for releases only until betas are turned on", betaBackend.LastBeta == false && !betas.Beta);
+        betas.Beta = true; await betas.CheckAsync(true);
+        check("turning betas on asks for them and is remembered", betaBackend.LastBeta == true && betas.HasUpdate && new AppUpdates(betaBackend, betaFolder).Beta);
+        betas.Beta = false;
+        check("turning betas off withdraws a beta that was not downloaded", !betas.HasUpdate && betas.Stage == AppUpdateStage.Idle &&
+            betas.NoticeVersion is null && new AppUpdates(betaBackend, betaFolder).NoticeVersion is null);
+        betas.Beta = true; await betas.CheckAsync(true); await betas.DownloadAsync(); betas.Beta = false;
+        check("a downloaded beta stays ready when betas are turned off", betas.Stage == AppUpdateStage.Ready && betas.Release?.Version == "0.2.0-beta.1");
     }
 }
 
@@ -129,6 +141,7 @@ internal sealed class UpdateFixture : IAppUpdateBackend
     public Exception? Failure { get; set; }
     public bool FailDownload { get; set; }
     public int Checks { get; private set; }
+    public bool? LastBeta { get; private set; }
     public int Downloads { get; private set; }
     public int Installs { get; private set; }
     public Action<int>? Report { get; private set; }
@@ -140,6 +153,7 @@ internal sealed class UpdateFixture : IAppUpdateBackend
         if (Failure is not null) throw Failure;
         return CheckResult ?? Task.FromResult(Release);
     }
+    public Task<AppRelease?> CheckAsync(bool beta, CancellationToken cancellation) { LastBeta = beta; return CheckAsync(cancellation); }
     public async Task DownloadAsync(AppRelease release, Action<int> progress, CancellationToken cancellation)
     {
         Downloads++; Report = progress;

@@ -67,17 +67,19 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
     private const string PortableFolder = "portable";
     private readonly HttpClient _http;
     private readonly Uri _manifest;
+    private readonly Uri? _betaManifest;
     private readonly Func<UpdateManifest, UpdatePackage, Uri> _package;
     private readonly string _directory;
     private readonly string _appPath;
     private readonly Func<ProcessStartInfo, bool> _launch;
     private UpdateManifest? _available;
 
-    // appPath is the running executable; a portable copy replaces the folder it is in.
+    // appPath is the running executable; a portable copy replaces the folder it is in. betaManifest is the newest beta's
+    // update.json, read only when betas are asked for.
     public InstallerUpdateBackend(HttpClient http, Uri manifest, Func<UpdateManifest, UpdatePackage, Uri> package, string currentVersion,
-        string directory, UpdateMode mode, Func<ProcessStartInfo, bool>? launch = null, string? appPath = null)
+        string directory, UpdateMode mode, Func<ProcessStartInfo, bool>? launch = null, string? appPath = null, Uri? betaManifest = null)
     {
-        _http = http; _manifest = manifest; _package = package; _directory = directory; Mode = mode;
+        _http = http; _manifest = manifest; _betaManifest = betaManifest; _package = package; _directory = directory; Mode = mode;
         CurrentVersion = currentVersion;
         _appPath = appPath ?? Environment.ProcessPath ?? "";
         _launch = launch ?? (start => { using var process = Process.Start(start); return process is not null; });
@@ -114,15 +116,34 @@ public sealed class InstallerUpdateBackend : IAppUpdateBackend
         }
     }
 
-    public async Task<AppRelease?> CheckAsync(CancellationToken cancellation)
+    public Task<AppRelease?> CheckAsync(CancellationToken cancellation) => CheckAsync(false, cancellation);
+
+    // With beta, the newer of the release and the newest beta is offered. The beta channel exists only once a beta has been
+    // published, so a beta manifest that cannot be read leaves the result of the release check.
+    public async Task<AppRelease?> CheckAsync(bool beta, CancellationToken cancellation)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
-        using var response = await _http.GetAsync(_manifest, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) throw new UpdateCheckException(response.StatusCode, RetryAfter(response.Headers.RetryAfter));
-        var manifest = UpdateManifest.Parse(await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
+        var manifest = await ReadManifestAsync(_manifest, timeout.Token).ConfigureAwait(false);
+        if (beta && _betaManifest is not null)
+        {
+            try
+            {
+                var newest = await ReadManifestAsync(_betaManifest, timeout.Token).ConfigureAwait(false);
+                if (ApplicationVersion.Compare(newest.Version, manifest.Version) > 0) manifest = newest;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or JsonException ||
+                ex is OperationCanceledException && !cancellation.IsCancellationRequested) { }
+        }
         _available = IsNewer(manifest) ? manifest : null;
         return _available is null ? null : Describe(_available);
+    }
+
+    private async Task<UpdateManifest> ReadManifestAsync(Uri uri, CancellationToken cancellation)
+    {
+        using var response = await _http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) throw new UpdateCheckException(response.StatusCode, RetryAfter(response.Headers.RetryAfter));
+        return UpdateManifest.Parse(await response.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false));
     }
 
     // Retry-After is either a number of seconds or a date.
