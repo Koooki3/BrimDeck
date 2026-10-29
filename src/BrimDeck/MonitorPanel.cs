@@ -22,6 +22,8 @@ public partial class MainWindow
     private void InitializeMonitor()
     {
         IsVisibleChanged += (_, _) => UpdateMonitorDemand();
+        // Pressed anywhere in the window, not only on the page: the page's blank room takes no clicks of its own.
+        PreviewMouseLeftButtonDown += (_, _) => _monitorView?.WindowPressed();
         _app.MonitorUpdated += MonitorUpdated;
         // Plugging in or unplugging changes what the power reading can come from (battery discharge on battery only): asked again then.
         Microsoft.Win32.PowerModeChangedEventHandler powerChanged = (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.StatusChange) Dispatcher.BeginInvoke(UpdateMonitorDemand); };
@@ -161,10 +163,10 @@ public partial class MainWindow
         // The processor's zones are reserved for only once one has shown (a fixed zone never does); a graphics adapter is
         // reserved for until it is known to have no sensor.
         bool small = Settings.MonitorMain == MonitorMain.Cpu ? monitor?.GpuSensor != SensorState.None : monitor?.CpuSensor == SensorState.Found;
-        // The power and the battery lines (PowerBlock) are asked for as many as the machine can show: both on a machine with a battery
-        // (known at once from the system), power alone on one without, none once the sampler finds no source (a laptop on battery may have one
-        // that the mains did not give: StripSensors).
-        int power = !Settings.MonitorPower ? 0 : Native.BatteryProvider.SystemHasBattery ? 2 : StripSensors.Power == SensorState.None ? 0 : 1;
+        // The power line (PowerBlock), with the battery beside it on a machine that has one (known at once from the system): one line,
+        // never two; none once the sampler finds no source and there is no battery (a laptop on battery may have one that the mains did
+        // not give: StripSensors).
+        int power = !Settings.MonitorPower ? 0 : Native.BatteryProvider.SystemHasBattery || StripSensors.Power != SensorState.None ? 1 : 0;
         return (lines, Settings.MonitorTemperatures && small, power);
     }
 

@@ -104,7 +104,7 @@ internal sealed class MusicEqualizer : FrameworkElement
     // Bar width in DIPs; the collapsed row scales it with its height.
     public double BarWidth { get; init; } = 3;
     private readonly (double Time, double Peak)[] _history = new (double, double)[64];
-    private readonly double[] _levels = new double[5];
+    private readonly double[] _levels = new double[CompactMusicLayout.MaximumBars];
     private readonly DrawingGroup _drawing = new();
     private Size _drawnSize;
     private int _next, _count;

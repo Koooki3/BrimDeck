@@ -53,6 +53,8 @@ static class StorageTests
         check("Storage: internal buses", Storage.Internal(new("", 17, false)) && Storage.Internal(new("", 11, false)) && Storage.Internal(new("", 16, false))
             && !Storage.Internal(new("", 17, true)) && !Storage.Internal(new("", Storage.BusUsb, false)) && !Storage.Internal(new("", Storage.BusVirtual, false))
             && Storage.Internal(new("", Storage.BusFileBackedVirtual, false)) && !Storage.Internal(new("", Storage.BusFileBackedVirtual, true)) && !Storage.Internal(new("", Storage.BusSd, false)) && !Storage.Internal(new("", Storage.BusMmc, false)));
+        check("Storage: a drive behind a RAID controller is listed but not asked for its temperature", Storage.Internal(new("", Storage.BusRaid, false))
+            && !Storage.AsksTemperature(new("", Storage.BusRaid, false)) && Storage.AsksTemperature(new("", 17, false)) && Storage.AsksTemperature(new("", 11, false)));
         check("Storage: exactly 1 GB is listed", Storage.Group([(new StorageVolume("C:", "", G, 0), 0)], Disks).Count == 1 && Storage.Group([(new StorageVolume("C:", "", G - 1, 0), 0)], Disks).Count == 0);
     }
 

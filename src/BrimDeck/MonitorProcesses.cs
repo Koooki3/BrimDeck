@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using BrimDeck.Core;
+using BrimDeck.Native;
 
 namespace BrimDeck;
 
@@ -249,6 +250,9 @@ internal sealed class ProcessListView : FrameworkElement
         MonitorDraw.Baseline(drawing, MonitorDraw.Trimmed(sample.Name, _layout.Body, UI.Primary, Math.Max(10, right - nameLeft - 6), ppd), nameLeft, baseline);
     }
 
+    // Whether the pointer is on an app's row: a click there opens or closes its card (Open), so the page leaves the card to it.
+    public bool PointerOnRow => IsMouseOver && At(Mouse.GetPosition(this), out _) is not null;
+
     private ProcessSample? At(Point point, out Rect box)
     {
         box = Rect.Empty;
@@ -308,13 +312,18 @@ internal sealed class ProcessListView : FrameworkElement
 }
 
 // An app's card, opened from its row: its icon and name, where it runs from, its CPU and memory, how many processes it has and
-// the busiest of them. It grows in from just smaller than itself, follows the readings while open, and closes on a click.
+// the busiest of them; for an app with a window, a button that brings it to the front. It grows in from just smaller than
+// itself, follows the readings while open, and closes on a click.
 internal sealed class ProcessCard : Border
 {
     private readonly TextBlock _name, _where, _cpu, _memory, _count;
     private readonly StackPanel _members;
     private readonly Image _icon;
+    private readonly Button _switch;
+    private string? _executable;
     public string Id { get; private set; } = "";
+    // The app's window was brought to the front from the card.
+    public event Action? Switched;
 
     public ProcessCard(double body, double caption)
     {
@@ -323,7 +332,16 @@ internal sealed class ProcessCard : Border
         Cursor = Cursors.Hand; AutomationProperties.SetName(this, Loc.T("进程详情", "Process details"));
         var stack = new StackPanel();
         var head = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
-        _icon = new Image { Width = 26, Height = 26, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+        // At the top right, beside the name, which gives up the room it takes.
+        _switch = new Button { Content = Loc.T("打开", "Open"), FontFamily = UI.PanelFont, FontSize = caption, Height = 22, Padding = new Thickness(8, 0, 8, 0),
+            Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed };
+        _switch.SetResourceReference(StyleProperty, "PanelOutlineButton");
+        AutomationProperties.SetName(_switch, Loc.T("打开应用窗口", "Open the app's window"));
+        // Looked up again on the click, since the window may have changed since the card last looked; synchronous on purpose:
+        // the foreground can only be handed over while this click is being handled.
+        _switch.Click += (_, _) => { if (ProcessWindows.Activate(ProcessWindows.Find(_executable))) Switched?.Invoke(); };
+        DockPanel.SetDock(_switch, Dock.Right); head.Children.Add(_switch);
+        _icon =new Image { Width = 26, Height = 26, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
         RenderOptions.SetBitmapScalingMode(_icon, BitmapScalingMode.HighQuality);
         head.Children.Add(_icon);
         var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
@@ -353,6 +371,9 @@ internal sealed class ProcessCard : Border
     public void Show(ProcessSample sample, int cores, double body, double caption)
     {
         Id = sample.Id;
+        // The button only for an app that has a window to show: not for background processes or an app left in the tray.
+        _executable = sample.AppKey ?? System.IO.Path.GetFileName(sample.Path);
+        _switch.Visibility = ProcessWindows.Find(_executable) != 0 ? Visibility.Visible : Visibility.Collapsed;
         _icon.Source = ProcessIcons.For(sample.Path); _icon.Visibility = _icon.Source is null ? Visibility.Collapsed : Visibility.Visible;
         _name.Text = sample.Name;
         _where.Text = sample.Path ?? (sample.AppKey ?? "") + " · PID " + sample.Pid;

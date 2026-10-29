@@ -120,6 +120,12 @@ public sealed partial class SettingsWindow
             var panel = new StackPanel(); panel.Children.Add(header); panel.Children.Add(progress); panel.Children.Add(error); panel.Children.Add(noteScroll);
             panel.Children.Add(new Border { Height = 1, Background = UI.Brush(_palette.RowDivider) });
             panel.Children.Add(Toggle(Loc.T("自动检查更新", "Check for updates automatically"), updates.AutoCheck, value => updates.AutoCheck = value));
+            panel.Children.Add(Toggle(Loc.T("接收测试版更新", "Receive beta updates"), updates.Beta, value =>
+            {
+                updates.Beta = value;
+                if (value) _ = updates.CheckAsync(true, _app.Lifetime.Token);
+            }, help: Loc.T("接收正式版更新的同时，也接收测试版更新。测试版可能不够稳定。",
+                "Receives beta updates as well as releases. Betas may be less stable.")));
             root = panel;
         }
         else

@@ -8,10 +8,11 @@ public sealed class EqualizerSignal
 {
     public const int WindowSize = 2048;
     public const double BarDelay = .075;
-    private const double RangeSeconds = 3, RiseSmoothing = .08, Attack = .03, Release = .2, HistorySeconds = 1;
+    private const double RangeSeconds = 3, RiseSmoothing = .08, Attack = .03, Release = .2, HistorySeconds = 2;
     // A full-scale sine concentrates about 54 dB in its band with this window; anything 60 dB
     // below that is treated as silence, so a paused player's dither never gets scaled up.
     private const double SilenceDb = -6;
+    // The history reaches back past the last of 20 bars (19 BarDelay), so every bar has a value.
     private static readonly double[] Edges = [50, 150, 500, 1500, 4500, 14000];
     private static readonly double[] Hann = Enumerable.Range(0, WindowSize).Select(i => .5 - .5 * Math.Cos(2 * Math.PI * i / (WindowSize - 1))).ToArray();
     // The FFT's twiddle factors, e^(-2πik/N) for k below N/2, taken once instead of carried by a recurrence in every butterfly.

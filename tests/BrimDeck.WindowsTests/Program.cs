@@ -30,6 +30,7 @@ internal static class Program
             TemperatureChecks.Run(Check);
             DeviceChecks.Run(Check);
             PowerChecks.Run(Check);
+            SensorGuardChecks.Run(Check);
 
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))
             {

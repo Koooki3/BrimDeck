@@ -40,42 +40,43 @@ internal static class PowerChecks
     }
 
     // The NVIDIA helper (nvidia-smi) runs only while an adapter works and power is wanted, and ends otherwise.
-    private static void Helper(PdhQuery pdh, List<GpuSample> adapters, Reading<double> discharge, bool battery, Action<string, bool> check)
+    private static void Helper(List<GpuSample> adapters, Reading<double> discharge, bool battery, Action<string, bool> check)
     {
         int Running() => Process.GetProcessesByName("nvidia-smi").Length;
         int before = Running();
         var known = Process.GetProcessesByName("nvidia-smi").Select(process => process.Id).ToHashSet();
-        using var provider = new PowerProvider(pdh);
+        using var pdh = new PdhQuery();
+        using var provider = new PowerProvider(pdh, () => { });
         var idle = adapters.Select(adapter => adapter with { Usage = 0 }).ToList();
         double clock = 200;
-        for (int i = 0; i < 3; i++) { provider.Sample(pdh.Collect(), true, clock++, idle, discharge, battery); Thread.Sleep(300); }
+        for (int i = 0; i < 3; i++) { provider.Sample(provider.Prepare(true), true, clock++, idle, discharge, battery); Thread.Sleep(300); }
         check("power: no helper while the NVIDIA adapter is idle", Running() == before);
-        for (int i = 0; i < 3; i++) { provider.Sample(pdh.Collect(), true, clock++, adapters, discharge, battery); Thread.Sleep(700); }
+        for (int i = 0; i < 3; i++) { provider.Sample(provider.Prepare(true), true, clock++, adapters, discharge, battery); Thread.Sleep(700); }
         check("power: the helper runs while the NVIDIA adapter works", Running() == before + 1);
         // Ended from outside while the adapter still works: it is started again once the interval has passed, and not before.
         foreach (var process in Process.GetProcessesByName("nvidia-smi").Where(process => !known.Contains(process.Id))) { process.Kill(); process.WaitForExit(2000); }
         Thread.Sleep(300);
         check("power: the helper is gone when it is ended from outside", Running() == before);
-        provider.Sample(pdh.Collect(), true, clock + 5, adapters, discharge, battery);
+        provider.Sample(provider.Prepare(true), true, clock + 5, adapters, discharge, battery);
         Thread.Sleep(300);
         check("power: an ended helper is not started again at once", Running() == before);
         clock += PowerResolver.RestartSeconds + 5;
-        for (int i = 0; i < 2; i++) { provider.Sample(pdh.Collect(), true, clock++, adapters, discharge, battery); Thread.Sleep(700); }
+        for (int i = 0; i < 2; i++) { provider.Sample(provider.Prepare(true), true, clock++, adapters, discharge, battery); Thread.Sleep(700); }
         check("power: ...but again after the interval, while the adapter works", Running() == before + 1);
-        provider.Sample(pdh.Collect(), false, clock++, adapters, discharge, battery);
+        provider.Sample(provider.Prepare(false), false, clock++, adapters, discharge, battery);
         Thread.Sleep(500);
         check("power: the helper ends when power is no longer wanted", Running() == before);
-        for (int i = 0; i < 2; i++) { provider.Sample(pdh.Collect(), true, clock++, adapters, discharge, battery); Thread.Sleep(300); }
-        provider.Sample(pdh.Collect(), true, clock += 20, idle, discharge, battery);
+        for (int i = 0; i < 2; i++) { provider.Sample(provider.Prepare(true), true, clock++, adapters, discharge, battery); Thread.Sleep(300); }
+        provider.Sample(provider.Prepare(true), true, clock += 20, idle, discharge, battery);
         Thread.Sleep(500);
         check("power: the helper ends once the adapter has been idle for a while", Running() == before);
     }
 
     private static void Power(Action<string, bool> check)
     {
+        // The meter in a query of its own, as the sampler keeps it.
         using var pdh = new PdhQuery();
-        pdh.Add(@"\Processor Information(_Total)\% Processor Utility");
-        using var provider = new PowerProvider(pdh);
+        using var provider = new PowerProvider(pdh, () => { });
         check("power: unknown until asked", provider.State == SensorState.Unknown);
         var battery = new BatteryProvider();
         var (inputs, sample) = battery.Sample();
@@ -83,13 +84,13 @@ internal static class PowerChecks
         // The adapters the monitor would hand over: the first NVIDIA adapter, busy, so it is read.
         var adapters = GpuAdapters.Read().Adapters.Values.Where(adapter => !adapter.Software && adapter.Name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase))
             .Select(adapter => new GpuSample(.5, Reading<ulong>.Unavailable("")) { Name = adapter.Name }).ToList();
-        check("power: nothing is read while it is not wanted", !provider.Sample(pdh.Collect(), false, 0, adapters, discharge, sample.HasValue).HasValue);
-        // The counters join the query on the first ask and give readings from the third collection (a rate needs two).
-        provider.Sample(pdh.Collect(), true, 1, adapters, discharge, sample.HasValue);
+        check("power: nothing is read while it is not wanted", !provider.Sample(provider.Prepare(false), false, 0, adapters, discharge, sample.HasValue).HasValue);
+        // The counters join the query on the first ask and give readings from the second collection (a rate needs two).
+        provider.Sample(provider.Prepare(true), true, 1, adapters, discharge, sample.HasValue);
         Thread.Sleep(1100);
-        provider.Sample(pdh.Collect(), true, 2, adapters, discharge, sample.HasValue);
+        provider.Sample(provider.Prepare(true), true, 2, adapters, discharge, sample.HasValue);
         Thread.Sleep(1100);
-        var read = provider.Sample(pdh.Collect(), true, 3, adapters, discharge, sample.HasValue);
+        var read = provider.Sample(provider.Prepare(true), true, 3, adapters, discharge, sample.HasValue);
         Console.WriteLine(read.TryGet(out var power)
             ? $"  power {power.Watts:0.0} W {power.Origin} from {power.Source}: {string.Join(", ", power.Parts.Select(part => $"{part.Name} {part.Watts:0.0} W ({part.Source})"))}{(power.Missing.Count > 0 ? "; missing: " + string.Join("; ", power.Missing) : "")}"
             : $"  power: none ({read.Reason})");
@@ -99,14 +100,15 @@ internal static class PowerChecks
         check("power: its state follows the reading", read.HasValue ? provider.State == SensorState.Found : provider.State != SensorState.Found);
         if (adapters.Count > 0)
             check("power: an NVIDIA adapter in use gives its board power, or says why not", p is null || p.Parts.Any(part => part.Source == PowerResolver.GpuSource) || p.Missing.Count > 0 || !read.HasValue);
-        if (adapters.Count > 0) Helper(pdh, adapters, discharge, sample.HasValue, check);
-        check("power: nothing stays read once it is not wanted", !provider.Sample(pdh.Collect(), false, 4, [], discharge, false).HasValue);
+        if (adapters.Count > 0) Helper(adapters, discharge, sample.HasValue, check);
+        check("power: nothing stays read once it is not wanted", !provider.Sample(provider.Prepare(false), false, 4, [], discharge, false).HasValue);
         // Idle adapters are not asked: a sleeping discrete adapter would wake up.
         var idle = adapters.Select(adapter => adapter with { Usage = 0 }).ToList();
-        using var cold = new PowerProvider(pdh);
-        cold.Sample(pdh.Collect(), true, 100, idle, discharge, false);
+        using var coldPdh = new PdhQuery();
+        using var cold = new PowerProvider(coldPdh, () => { });
+        cold.Sample(cold.Prepare(true), true, 100, idle, discharge, false);
         Thread.Sleep(1100);
-        var quiet = cold.Sample(pdh.Collect(), true, 101, idle, discharge, false);
+        var quiet = cold.Sample(cold.Prepare(true), true, 101, idle, discharge, false);
         check("power: an idle adapter is not read", !quiet.TryGet(out var q) || q.Parts.All(part => part.Source != PowerResolver.GpuSource));
     }
 }
