@@ -81,12 +81,45 @@ public sealed partial class SettingsWindow
                 Loc.T("在硬盘下方显示整机功耗和本机电池。只在面板展开到系统监控页时读取。",
                     "Shows system power and this PC's battery under the drives. Read only while the panel is open on the system monitor page."),
                 keepPreview: true),
-            Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
+            WithSensorStops(Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
                 Loc.T("读不到的温度不显示。CPU 温度由主板固件提供，许多电脑没有这项数据；有的电脑读到的是主板的温度，不是 CPU 本身的温度。",
                     "Temperatures that cannot be read are not shown. The CPU temperature comes from the motherboard firmware. Many PCs do not provide it, and on some it is the motherboard's temperature rather than the CPU's."),
-                keepPreview: true));
+                keepPreview: true)));
     }
+
+    // Under the last row of "展开时": a line in amber for every reading stopped because its driver did not answer (SensorGuard),
+    // with a button that turns it on again. Shown whatever the switches say, until the reading is turned on again; nothing without
+    // a stop. Filled again when a reading stops or is turned on (SensorStopsChanged).
+    private Action? _refreshStops;
+    private FrameworkElement WithSensorStops(FrameworkElement row)
+    {
+        var lines = new StackPanel();
+        void Fill()
+        {
+            lines.Children.Clear();
+            foreach (var stop in Native.SensorGuard.Stops)
+            {
+                var line = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+                line.ColumnDefinitions.Add(new ColumnDefinition()); line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var notice = TextLine(SensorStops.Notice(stop), 12.5, CautionColor);
+                notice.TextWrapping = TextWrapping.Wrap; notice.VerticalAlignment = VerticalAlignment.Center; notice.Margin = new Thickness(0, 0, 12, 0);
+                var resume = ActionButton(Loc.T("重新开启", "Turn on again"), () => Native.SensorGuard.Resume(stop));
+                resume.ToolTip = Loc.T("重新开启后如果电脑再次卡住，BrimDeck 会再次自动停止读取。", "Should the PC freeze again, BrimDeck stops the reading again by itself.");
+                AutomationProperties.SetName(resume, Loc.T("重新开启：", "Turn on again: ") + SensorStops.Notice(stop));
+                resume.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(resume, 1);
+                line.Children.Add(notice); line.Children.Add(resume);
+                lines.Children.Add(line);
+            }
+        }
+        Fill();
+        _refreshStops = Fill;
+        var panel = new StackPanel();
+        panel.Children.Add(row); panel.Children.Add(lines);
+        return panel;
+    }
+    private void SensorStopsChanged()
+    { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(() => { if (IsLoaded) _refreshStops?.Invoke(); }); }
 
     // The graphics adapter the monitor shows, on the page and in the collapsed readings alike: 自动, or one of the adapters found,
     // named with its kind. The adapters are the ones the monitor reads while it runs, else the ones DXGI lists. A chosen adapter
