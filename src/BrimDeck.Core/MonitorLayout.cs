@@ -176,10 +176,11 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
     // drives' lines, the second after them, with the core columns keeping MinimumGraph; a page without room for a line has none, and a
     // page that asks for no power is laid out exactly as before.
     public int PowerLines { get; init; }
-    public static int PowerRoom(double readings, MetricsMode metrics, double figure, double body, double row, int storageLines)
+    public static int PowerRoom(double readings, MetricsMode metrics, double figure, double body, int storageLines)
     {
         var (head, margins, rest, storageMargin) = Fixed(metrics, figure, body);
-        double drives = storageLines > 0 ? storageMargin + storageLines * StorageRowFor(body) : 0;
+        double row = StorageRowFor(body);
+        double drives = storageLines > 0 ? storageMargin + storageLines * row : 0;
         return Math.Clamp((int)Math.Floor((readings - head - margins - rest - drives - storageMargin - MinimumGraph) / row), 0, 2);
     }
 
@@ -202,7 +203,7 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
     {
         var (head, margins, metrics, storageMargin) = Fixed(Metrics, Figure, Body);
         double storage = StorageLines > 0 ? storageMargin + StorageLines * StorageRow : 0;
-        double power = PowerLines > 0 ? storageMargin + PowerLines * RowHeight : 0;
+        double power = PowerLines > 0 ? storageMargin + PowerLines * StorageRow : 0;
         double graph = Math.Max(16, readings - foot - head - margins - metrics - storage - power);
         double graphTop = head + (Metrics == MetricsMode.Line ? 4 : 6);
         double metricsTop = head + margins + graph;
@@ -224,7 +225,7 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
         return next;
     }
 
-    // storage: the volumes the page would show an entry each; power: the lines the page asks for under them (0 to 2).
+    // storage: the volumes the page would show an entry each. power: the lines the page would show for power (0 to 2).
     public static MonitorLayout For(double width, double height, bool processes, int storage = 0, int power = 0)
     {
         width = double.IsFinite(width) ? Math.Max(0, width) : 0;
@@ -242,13 +243,13 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
         var metrics = readings < LinesFrom(figure, body) ? MetricsMode.Line : readings < 250 ? MetricsMode.Lines : MetricsMode.Blocks;
         // The readings beside a side list are the page less the list and the 22 DIP between them.
         double readingsWidth = list == ListPlacement.Side ? width - 22 - SideListWidth(width) : width;
-        int columns = storage <= 0 ? 0 : readingsWidth >= StorageTwoColumns ? Math.Min(storage, MaximumStorageColumns) : 1;
         // The first line of power (with the battery, sharing it) comes before the drives' lines, which give up room for it: a page the
         // user set to show power must show it at the size it has, however many drives there are. The battery's own line comes after the drives.
-        bool firstLine = power > 0 && PowerRoom(readings, metrics, figure, body, row, 0) >= 1;
-        double reserve = firstLine ? Fixed(metrics, figure, body).StorageMargin + row : 0;
+        bool firstLine = power > 0 && PowerRoom(readings, metrics, figure, body, 0) >= 1;
+        double reserve = firstLine ? Fixed(metrics, figure, body).StorageMargin + StorageRowFor(body) : 0;
+        int columns = storage <= 0 ? 0 : readingsWidth >= StorageTwoColumns ? Math.Min(storage, MaximumStorageColumns) : 1;
         int lines = storage <= 0 ? 0 : Math.Min((storage + columns - 1) / columns, StorageRoom(readings - reserve, metrics, figure, body));
-        int powerLines = power <= 0 ? 0 : Math.Min(Math.Min(power, 2), Math.Max(PowerRoom(readings, metrics, figure, body, row, lines), firstLine ? 1 : 0));
+        int powerLines = power <= 0 ? 0 : Math.Min(Math.Min(power, 2), Math.Max(PowerRoom(readings, metrics, figure, body, lines), firstLine ? 1 : 0));
         return new(figure, body, caption, metrics, list, row) { StorageLines = lines, StorageColumns = lines > 0 ? columns : 0, PowerLines = powerLines };
     }
 

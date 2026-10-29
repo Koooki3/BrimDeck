@@ -82,6 +82,8 @@ static class PowerTests
 
         var stats = new PowerStats();
         foreach (double watts in new[] { 20.0, 60, 40, double.NaN, -3 }) stats.Add(watts);
+        check("Power: an ended helper is started again after the interval, not before, and a running one never", !PowerResolver.RestartDue(true, 10, 0) && PowerResolver.RestartDue(true, PowerResolver.RestartSeconds, 0)
+            && !PowerResolver.RestartDue(true, 80, 60) && PowerResolver.RestartDue(true, 100, 60) && !PowerResolver.RestartDue(false, 1000, 0));
         check("Power: the peak and the average count plausible readings only", stats.Count == 3 && stats.Peak == 60 && Math.Abs(stats.Average - 40) < 1e-9);
         stats.Reset();
         check("Power: stats start over", stats.Count == 0 && stats.Peak == 0 && stats.Average == 0);
@@ -253,8 +255,9 @@ static class PowerTests
         // Their widths come in through the same table as the others.
         var width = CompactMonitor.Widths(CompactMonitorItems.None, 16, _ => 0, 16, 40, 30, power: 41, charge: 52);
         check("Readings: the widths of Power and Charge", width(CompactMonitorItems.Power) == 41 && width(CompactMonitorItems.Charge) == 52 && CompactMonitor.Width(CompactMonitorItems.Power | CompactMonitorItems.Charge, width, 6) == 41 + 6 + 52);
-        check("Readings: a short row drops Power first, then Charge", CompactMonitor.Fit(CompactMonitorItems.Cpu | CompactMonitorItems.Power | CompactMonitorItems.Charge, width, 6, 16 + 6 + 52) == (CompactMonitorItems.Cpu | CompactMonitorItems.Charge)
-            || CompactMonitor.Fit(CompactMonitorItems.Cpu | CompactMonitorItems.Power | CompactMonitorItems.Charge, width, 6, 16 + 6 + 52) == CompactMonitorItems.Cpu);
+        const CompactMonitorItems Three = CompactMonitorItems.Cpu | CompactMonitorItems.Power | CompactMonitorItems.Charge;
+        check("Readings: a short row drops Power first", CompactMonitor.Fit(Three, width, 6, 16 + 6 + 52) == (CompactMonitorItems.Cpu | CompactMonitorItems.Charge));
+        check("Readings: a shorter row then drops Charge", CompactMonitor.Fit(Three, width, 6, 16 + 6 + 52 - 1) == CompactMonitorItems.Cpu);
         check("Readings: no level of their own in the strip's rule", ReadingLevels.Of(CompactMonitorItems.Power, MonitorSnapshot.Empty(4, "t")) == MemoryLevel.Normal);
     }
 
@@ -266,7 +269,7 @@ static class PowerTests
         // Room is what the drives leave while the core columns keep their minimum.
         var tall = MonitorLayout.For(700, 400, true, 2, power: 2);
         check("Layout: a tall page shows power and the battery on two lines", tall.PowerLines == 2 && tall.StorageLines == 2);
-        var narrow = MonitorLayout.For(620, 220, true, 2, power: 2);
+        var narrow = MonitorLayout.For(620, 260, true, 2, power: 2);
         check("Layout: a standard page with drives keeps one line for both", narrow.PowerLines == 1);
         check("Layout: a short page has none", MonitorLayout.For(620, 100, true, 2, power: 2).PowerLines == 0);
         check("Layout: the first line of power comes before the drives, which give up room for it (at most two lines) while the graph keeps its minimum", Enumerable.Range(140, 260).All(height =>
@@ -274,12 +277,12 @@ static class PowerTests
             var plain = MonitorLayout.For(700, height, true, 3);
             var with = MonitorLayout.For(700, height, true, 3, power: 2);
             return with.StorageLines >= plain.StorageLines - 2 && with.StorageLines <= plain.StorageLines && with.Parts(height)[1].Height >= MonitorLayout.MinimumGraph - 1e-9 && with.Metrics == plain.Metrics && with.PowerLines is >= 0 and <= 2
-                && (with.PowerLines == 0) == (MonitorLayout.PowerRoom(height, with.Metrics, with.Figure, with.Body, with.RowHeight, 0) == 0);
+                && (with.PowerLines == 0) == (MonitorLayout.PowerRoom(height, with.Metrics, with.Figure, with.Body, 0) == 0);
         }));
         check("Layout: a page with room for power and drives at once loses nothing", MonitorLayout.For(700, 400, true, 2, power: 2) is { StorageLines: 2, PowerLines: 2 });
         var parts = tall.Parts(400);
         check("Layout: the power lines sit under the drives and the graph keeps its minimum", parts[4].Top == parts[3].Top + parts[3].Height
-            && parts[4].Height == (tall.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }) + 2 * tall.RowHeight && parts[1].Height >= MonitorLayout.MinimumGraph - 1e-9);
+            && parts[4].Height == (tall.Metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 }) + 2 * tall.StorageRow && parts[1].Height >= MonitorLayout.MinimumGraph - 1e-9);
         check("Layout: the settings default shows power", new DeckSettings().MonitorPower);
         check("Layout: the hysteresis keeps a step with power", MonitorLayout.For(700, 290, true, 2, MonitorLayout.For(700, 285, true, 2, null, 2), 2) is { PowerLines: >= 0 });
     }

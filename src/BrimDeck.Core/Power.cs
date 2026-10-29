@@ -53,6 +53,11 @@ public static class PowerResolver
     // Where a graphics adapter's power is read: the graphics driver's own tool.
     public static string GpuSource => Loc.T("NVIDIA 驱动", "NVIDIA driver");
 
+    // A helper process that has ended (a driver update, a reset, ended from outside) is started again while its adapter still works, but
+    // not before this many seconds after it was started, so one that dies at once is not started every second.
+    public const double RestartSeconds = 30;
+    public static bool RestartDue(bool ended, double now, double startedAt) => ended && now - startedAt >= RestartSeconds;
+
     public static bool Plausible(double watts) => double.IsFinite(watts) && watts >= 0 && watts <= Ceiling;
     private static double? Value(Reading<double> reading) => reading.TryGet(out var watts) && Plausible(watts) ? watts : null;
 

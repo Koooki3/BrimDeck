@@ -143,7 +143,8 @@ public partial class App : Application
         Notices.ApplySettings();
         InitializeHotkeys();
         StartBackgroundUpdates();
-        PowerWarm.Start(Dispatcher);
+        // Only for a user who has the monitor page with its power line: the rest never open it.
+        if (Settings.MonitorPage && Settings.MonitorPower) PowerWarm.Start(Dispatcher);
         WarmSettingsWriter();
         DisplayPower.Install(Dispatcher);
         DisplayPower.Changed += UpdateDeviceDemand;

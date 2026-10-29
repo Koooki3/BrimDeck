@@ -13,6 +13,11 @@ public sealed class App : Application
     public DeckSettings Settings { get; } = new();
 }
 
+// PageHandover's snapshot path reads the inherited draw scale; capsule tests use only its real Glide path.
+internal static class UI
+{
+    public static double GetScale(DependencyObject owner) => 1;
+}
 public partial class MainWindow
 {
     private DeckSettings Settings { get; } = new();
