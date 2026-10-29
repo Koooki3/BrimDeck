@@ -383,6 +383,9 @@ public sealed class DeckSettings
     public bool MonitorTemperatures { get; set; } = true;
     // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
     public bool MonitorStorage { get; set; } = true;
+    // The expanded page shows the whole machine's power draw with its curve, and the machine's own battery when it has one (PowerResolver,
+    // BatteryModel); off, neither is read for it. The collapsed row's Power and Charge readings are chosen in its table.
+    public bool MonitorPower { get; set; } = true;
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }

@@ -160,6 +160,45 @@ internal static class NoticeWindowsAppTests
         var merged = hub.Receive(WinInput("new", "windows:QQ", "Alice", "2 条新消息") with { Replaces = "old" }, WinT0.AddSeconds(3));
         check("The hub updates the notice a replacement takes the place of", merged.Receipt == NoticeReceipt.Updated && merged.Notice == first.Notice
             && hub.Notices.Count == 1 && first.Notice!.InstanceKey == "new" && first.Notice.Body == "2 条新消息" && merged.Present);
+
+        var delayed = new NoticeHub();
+        var delayedOld = delayed.Receive(WinInput("old-direct", "windows:QQ", "Alice", "earlier"), WinT0);
+        var deliveredNew = delayed.Receive(WinInput("new-direct", "windows:QQ", "Alice", "latest"), WinT0.AddSeconds(1));
+        var mergedDelayed = delayed.Receive(WinInput("new-direct", "windows:QQ", "Alice", "latest") with { Replaces = "old-direct" }, WinT0.AddSeconds(5));
+        check("A later replacement pair merges the already-delivered row without keeping a duplicate",
+            mergedDelayed.Receipt == NoticeReceipt.Updated && mergedDelayed.Notice == deliveredNew.Notice
+            && delayed.Notices.Count == 1 && delayed.Notices[0].InstanceKey == "new-direct"
+            && delayed.Find(delayedOld.Notice!.Id) is null && delayed.Find(deliveredNew.Notice!.Id) == deliveredNew.Notice);
+
+        var otherSource = new NoticeHub();
+        var wslOld = WinInput("old-wsl", "wsl:distro:app", "same") with { Origin = NoticeOrigin.Wsl, Distro = "distro" };
+        var wslNew = WinInput("new-wsl", "wsl:distro:app", "same") with { Origin = NoticeOrigin.Wsl, Distro = "distro" };
+        var wslOldResult = otherSource.Receive(wslOld, WinT0);
+        var wslNewResult = otherSource.Receive(wslNew, WinT0.AddSeconds(1));
+        otherSource.Receive(wslNew with { Replaces = "old-wsl" }, WinT0.AddSeconds(2));
+        check("The delayed Windows merge leaves other-source history untouched",
+            otherSource.Notices.Count == 2 && otherSource.Find(wslOldResult.Notice!.Id) == wslOldResult.Notice
+            && otherSource.Find(wslNewResult.Notice!.Id) == wslNewResult.Notice);
+
+        // The user deletes the directly delivered row before the full reading pairs it: the later merge must not bring its
+        // content back onto the older row as a new, unviewed notice.
+        var deleted = new NoticeHub();
+        var deletedOld = deleted.Receive(WinInput("old-gone", "windows:QQ", "Alice", "earlier"), WinT0);
+        deleted.MarkAllViewed();
+        var deletedNew = deleted.Receive(WinInput("new-gone", "windows:QQ", "Alice", "latest"), WinT0.AddSeconds(1));
+        deleted.Delete(deletedNew.Notice!.Id);
+        var resend = deleted.Receive(WinInput("new-gone", "windows:QQ", "Alice", "latest") with { Replaces = "old-gone", Redelivery = true }, WinT0.AddSeconds(5));
+        check("A merge resend for a row the user deleted does not resurface it",
+            resend.Receipt == NoticeReceipt.Duplicate && !resend.Present && resend.Notice is null
+            && deleted.Notices.Count == 1 && deleted.Notices[0] == deletedOld.Notice && deletedOld.Notice!.Body == "earlier"
+            && deletedOld.Notice.Viewed && !deletedOld.Notice.SourcePresent && deleted.UnviewedCount == 0);
+
+        var cleared = new NoticeHub();
+        cleared.Receive(WinInput("old-cleared", "windows:QQ", "Alice", "earlier"), WinT0);
+        cleared.Receive(WinInput("new-cleared", "windows:QQ", "Alice", "latest"), WinT0.AddSeconds(1));
+        cleared.Clear(WinT0.AddSeconds(2));
+        var afterClear = cleared.Receive(WinInput("new-cleared", "windows:QQ", "Alice", "latest") with { Replaces = "old-cleared", Redelivery = true }, WinT0.AddSeconds(5));
+        check("A merge resend after the list was cleared adds nothing", afterClear.Receipt == NoticeReceipt.Duplicate && cleared.Notices.Count == 0);
         var foreign = hub.Receive(WinInput("x", "windows:Other", "Alice") with { Replaces = "new" }, WinT0.AddSeconds(4));
         check("A replacement never takes over another application's notice", foreign.Receipt == NoticeReceipt.Accepted && hub.Notices.Count == 2);
         var orphan = hub.Receive(WinInput("y", "windows:QQ", "Zed") with { Replaces = "deleted" }, WinT0.AddSeconds(5));

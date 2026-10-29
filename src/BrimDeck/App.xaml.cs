@@ -43,6 +43,8 @@ public partial class App : Application
     internal SystemSampler? Monitor { get; private set; }
     internal event Action<MonitorSnapshot>? MonitorUpdated;
     private readonly HashSet<MainWindow> _presentingMonitor = [], _stripMonitor = [];
+    // The panels whose open monitor page shows the power line (PresentMonitor): the power is read for those, and for a row that chose it.
+    private readonly HashSet<MainWindow> _presentingPower = [];
     public CancellationTokenSource Lifetime { get; } = new();
     public bool Exiting { get; private set; }
 
@@ -112,6 +114,9 @@ public partial class App : Application
         Notices.ApplySettings();
         InitializeHotkeys();
         StartBackgroundUpdates();
+        // Only for a user who has the monitor page with its power line: the rest never open it.
+        if (Settings.MonitorPage && Settings.MonitorPower) PowerWarm.Start(Dispatcher);
+        WarmSettingsWriter();
         DisplayPower.Install(Dispatcher);
         _save.Tick += (_, _) => FlushSettings();
         _tray = new TrayIcon(Deck, OpenSettings, ExitApplication, ToggleHidden, () => UserHidden)
@@ -305,9 +310,10 @@ public partial class App : Application
     }
     // The system is read while any panel shows the monitor page open (and briefly after; see SystemSampler) or shows readings in
     // its collapsed row. Processes are listed only for an open page.
-    internal void PresentMonitor(MainWindow deck, bool page, bool strip)
+    internal void PresentMonitor(MainWindow deck, bool page, bool strip, bool power = false)
     {
         if (page) _presentingMonitor.Add(deck); else _presentingMonitor.Remove(deck);
+        if (power) _presentingPower.Add(deck); else _presentingPower.Remove(deck);
         if (strip) _stripMonitor.Add(deck); else _stripMonitor.Remove(deck);
         bool wanted = _presentingMonitor.Count + _stripMonitor.Count > 0;
         if (Exiting || Monitor is null && !wanted) return;
@@ -319,8 +325,9 @@ public partial class App : Application
             // A choice saved under an older key is kept under the adapter's key from now on (GpuChoice.Resolve).
             Monitor.GpuKeyUpgraded += (old, key) => { if (Settings.MonitorGpu == old) { Settings.MonitorGpu = key; QueueSave(); } };
         }
-        Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
+        // What is read besides the usage is set before the sampler starts, so its first collection already holds it.
         UpdateMonitorExtras();
+        Monitor.SetDemand(wanted, Settings.MonitorInterval, _presentingMonitor.Count > 0);
     }
     // Temperatures and drives are read for an open page with them on; also for a collapsed row showing them: the processor's and
     // the graphics adapter's temperatures for a ring showing its own, the drives for the drive reading, and their temperatures when
@@ -335,7 +342,26 @@ public partial class App : Application
         bool stripDrives = (shown & CompactMonitorItems.Storage) != 0;
         Monitor?.SetExtras(page && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Cpu) || Heat(CompactMonitorItems.Gpu),
             page && Settings.MonitorStorage || stripDrives,
-            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage));
+            page && Settings.MonitorStorage && Settings.MonitorTemperatures || Heat(CompactMonitorItems.Storage),
+            // The watts (the counters, NVIDIA's helper) only for a page that shows the power line or a row that chose the reading; the battery
+            // alone also for the row's charge reading.
+            _presentingPower.Count > 0 && Settings.MonitorPower && PowerKnownToExist || (shown & CompactMonitorItems.Power) != 0,
+            (shown & CompactMonitorItems.Charge) != 0);
+    }
+    // The page reads the machine's power only where there may be something to read: not once the sampler knows there is neither a power
+    // source nor a battery (a desktop with nothing), so such a page does not keep asking.
+    private bool PowerKnownToExist => Monitor is null || Monitor.PowerSensor != SensorState.None || Monitor.BatterySensor != SensorState.None || Native.BatteryProvider.SystemHasBattery;
+    // The first save of a session took about 115 ms on the UI thread (the serializer's first use), which landed 400 ms after the first opening
+    // of a page (the last page is saved then) as a stall in its animation. Once the app is idle a pool thread serializes a copy of the
+    // settings once, so the first real save finds the serializer ready.
+    private void WarmSettingsWriter()
+    {
+        var copy = Settings.Copy();
+        Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try { copy.Normalize(); System.Text.Json.JsonSerializer.SerializeToNode(copy); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine(ex); }
+        }));
     }
     // Settings changed outside UpdateSettings are written after the same short pause instead of immediately.
     public void QueueSave() { _save.Stop(); _save.Start(); }
