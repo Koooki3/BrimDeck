@@ -65,6 +65,10 @@ public sealed record NoticeInput
     public bool StopTiming { get; init; }
     // Arrived while BrimDeck could not read its source (the PC slept): recorded, unviewed, but not shown as it arrives (core-M5).
     public bool Missed { get; init; }
+    // Handed over already as it arrived (WindowsNoticeList.Observe) and sent again only so the hub merges the notice it took the
+    // place of (Replaces): it never adds a notice, and one the user deleted or cleared meanwhile stays gone. Set by
+    // WindowsNoticeList; never taken from a sender.
+    public bool Redelivery { get; init; }
     // An incoming call, as BrimDeck reads a Windows notification (WindowsNoticeApps.ReadsAsCall); never taken from a sender.
     public bool Call { get; init; }
     // A desktop notification its application marked "transient" (NoticeMessage.Transient): shown and listed, never saved.

@@ -214,9 +214,16 @@ public static class NoticeReplacements
     {
         var left = removed.ToList();
         var result = new List<NoticeInput>(added.Count);
-        foreach (var input in added)
+        // A directly delivered notice can already be gone by the full reading. It may replace an older notice, but never
+        // itself or a later arrival from the same batch. Keeping the arrival order also makes A -> B -> C collapse to C.
+        var addedAt = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < added.Count; i++)
+            if (added[i].InstanceKey is { Length: > 0 } key) addedAt.TryAdd(key, i);
+        for (int i = 0; i < added.Count; i++)
         {
-            int match = input.Title.Length == 0 ? -1 : left.FindIndex(gone => gone.AppKey == input.AppKey && gone.Title == input.Title);
+            var input = added[i];
+            int match = input.Title.Length == 0 ? -1 : left.FindIndex(gone => gone.AppKey == input.AppKey && gone.Title == input.Title
+                && (!addedAt.TryGetValue(gone.InstanceKey, out int position) || position < i));
             if (match < 0) { result.Add(input); continue; }
             result.Add(input with { Replaces = left[match].InstanceKey });
             left.RemoveAt(match);
