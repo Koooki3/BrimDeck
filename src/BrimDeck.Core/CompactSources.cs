@@ -5,6 +5,9 @@ namespace BrimDeck.Core;
 // charge, None once the devices are listed and none does), which the devices give, not the sampler.
 public readonly record struct SensorStates(SensorState Cpu, SensorState Gpu, SensorState Storage, SensorState DiskTemperatures, SensorState Battery = SensorState.Unknown)
 {
+    // Whether the machine gives a power reading (PowerResolver), and whether it has a battery of its own (BatteryModel).
+    public SensorState Power { get; init; }
+    public SensorState Charge { get; init; }
     public static SensorStates Unknown => default;
 }
 

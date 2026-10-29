@@ -10,14 +10,18 @@ internal static class Program
     // Exercises the native adapters without starting the app, reading account
     // credentials, changing playback, or creating application settings.
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
         try
         {
+            // "--only power": just the power and battery checks, for a quick look at what this machine reports.
+            if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
             Console.WriteLine($"Windows native smoke tests: {Environment.OSVersion.Version}");
             CheckWindowChrome();
             CheckSettledClip();
             CheckPageToolTips();
+            LayoutRetryTests.Run(Check);
+            BrimDeck.MainWindow.CheckPageCapsule(Check);
             BrimDeck.MainWindow.CheckShadowLifetime();
             CheckGpus();
             var (bounds, work, scale) = WindowsHost.PrimaryScreen();
@@ -25,6 +29,7 @@ internal static class Program
                 && work.Width > 0 && work.Height > 0 && scale > 0);
             TemperatureChecks.Run(Check);
             DeviceChecks.Run(Check);
+            PowerChecks.Run(Check);
 
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348))
             {

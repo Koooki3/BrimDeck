@@ -142,40 +142,6 @@ public partial class MainWindow
         _detailPopup?.Close(); _details = false; _page = page; _musicRenderKey = ""; _handover.Drop();
         ApplySettings(animatePage);
     }
-    // Places the chosen page's fill under its button. While the open panel shows it, it glides there as the monitor page's sort pill
-    // does; otherwise it is set in place. A switch whose buttons are not laid out yet places it once they are.
-    private void PlacePageCapsule()
-    {
-        var button = CurrentPage switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Devices => DevicesPageButton, _ => AIUsageButton };
-        if (button.Visibility != Visibility.Visible || !button.IsMeasureValid || button.ActualWidth <= 0 || PresentationSource.FromVisual(button) is null)
-        {
-            if (!_capsulePending) { _capsulePending = true; Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { _capsulePending = false; if (button.ActualWidth > 0) PlacePageCapsule(); }); }
-            return;
-        }
-        double x = button.TranslatePoint(new Point(), (UIElement)PageCapsule.Parent).X, width = button.ActualWidth, height = button.ActualHeight;
-        bool glide = _expanded && !_preview && PageSwitch.IsVisible && Soft.Enabled && PageCapsule.Width > 0 && Math.Abs(PageCapsuleShift.X - x) > .5;
-        PageCapsule.Height = height;
-        PageHandover.Glide(PageCapsule, WidthProperty, width, glide, Soft.Choose);
-        double from = PageCapsuleShift.X;
-        PageCapsuleShift.BeginAnimation(TranslateTransform.XProperty, null);
-        PageCapsuleShift.X = x;
-        if (glide) PageCapsuleShift.BeginAnimation(TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(from, x, TimeSpan.FromMilliseconds(Soft.Choose))
-        { EasingFunction = Soft.Follow, FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop });
-    }
-    private bool _capsulePending;
-    // The buttons stand in the order chosen in the settings; the first has no gap before it.
-    private void OrderPageButtons()
-    {
-        if (AIUsageButton.Parent is not Panel buttons) return;
-        var order = Settings.PageOrder.Select(PageButton).ToList();
-        if (!buttons.Children.Cast<UIElement>().SequenceEqual(order))
-        {
-            buttons.Children.Clear();
-            foreach (var button in order) buttons.Children.Add(button);
-        }
-        for (int i = 0; i < order.Count; i++) order[i].Margin = new Thickness(i == 0 ? 0 : 1, 0, 0, 0);
-    }
-    private Button PageButton(DeckPage page) => page switch { DeckPage.Music => MusicPageButton, DeckPage.Monitor => MonitorPageButton, DeckPage.Devices => DevicesPageButton, _ => AIUsageButton };
     // The wheel walks the shown pages (down moves along the switch, up moves back) or steps the system volume. A wheel that
     // a scrolling part of a page uses (the lyrics, the model details) never arrives, as those mark it handled on the way up;
     // an open menu or the detail popup keeps the wheel to itself as well.
@@ -947,7 +913,7 @@ public partial class MainWindow
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
         int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
-        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0);
+        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip?.PreferredWidth ?? 0, dpi);
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
         // for, this leaves out the track notice, so the surface does not move for it.
         var readingWidths = strip?.ItemWidths() ?? [];
@@ -978,13 +944,31 @@ public partial class MainWindow
         double needed = CompactSpacing.Minimum(ringWidths, layout.RingGap) + CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0);
         if (pool < needed) pool += Math.Min(needed - pool, Math.Max(0, titleShare - titleFloor));
         var (rings, readings) = CompactSpacing.Share(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool);
+        // While the surface is dragged the windows take the room as it comes, an item cut at the edge, and ease back to whole items
+        // when it settles (MainWindow.CompactFlow.cs): the row follows the pointer as 1.2.1's did, with no jump per item.
+        double flow = CompactFlow();
+        double ringCut = 0, readingCut = 0;
+        if (flow <= 0) { _restRings = rings.Window; _restReadings = readings.Window; _restHeld = true; }
+        else
+        {
+            var live = CompactSpacing.ShareFlowing(ringWidths, layout.RingGap, readingWidths, strip?.Gap ?? 0, pool);
+            // While the flow rises the windows start from those of the rest; while it falls, from the whole items of the width it stopped at.
+            bool rising = FlowRising;
+            if (!rising) _restHeld = false;
+            else if (!_restHeld) { _restRings = rings.Window; _restReadings = readings.Window; _restHeld = true; }
+            (int Count, double Window, int Gaps, double Travel) Blend((int Count, double Window, int Gaps, double Travel) whole, (int Count, double Window, int Gaps, double Travel) now, double rest)
+                => (now.Count, RowFlow.Window(rising && rest >= 0 ? rest : whole.Window, now.Window, flow), 0, 0);
+            rings = Blend(rings, live.First, _restRings); readings = Blend(readings, live.Second, _restReadings);
+            ringCut = CompactSpacing.CutFade(ringWidths, layout.RingGap, rings.Window, Math.Min(layout.RingEdge, unit));
+            readingCut = CompactSpacing.CutFade(readingWidths, strip?.Gap ?? 0, readings.Window, Math.Min(Snap(layout.TextEdge, dpi), unit));
+        }
         var shown = new List<(object Part, CompactSpacing.Part Size)>();
         if (hasCover) shown.Add(("cover", new(layout.CoverSize)));
         foreach (var part in Settings.CompactOrder(EffectiveStyle))
         {
-            if (part == CompactPart.Rings && rings.Count > 0) shown.Add((part, new(rings.Window)));
+            if (part == CompactPart.Rings && rings.Window > 0) shown.Add((part, new(rings.Window)));
             else if (part == CompactPart.Music && hasText) shown.Add((part, new(0)));
-            else if (part == CompactPart.Monitor && readings.Count > 0) shown.Add((part, new(readings.Window)));
+            else if (part == CompactPart.Monitor && readings.Window > 0) shown.Add((part, new(readings.Window)));
         }
         if (hasEqualizer) shown.Add(("equalizer", new(layout.EqualizerSize)));
         if (hasClock) shown.Add(("clock", new(clock!.ReservedWidth)));
@@ -1007,14 +991,17 @@ public partial class MainWindow
                 case "clock":
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
                 case CompactPart.Rings:
-                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate); break;
+                    element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), _quotaElapsed, animate,
+                        flow > 0 ? rings.Window : null, ringCut); break;
                 case CompactPart.Music:
                     element = _compactMarquee = CompactTitle(text, room, layout); break;
                 default:
                     // The readings that fit stand still; more scroll through the window. Either way they need sampling.
                     strip!.Margin = new Thickness(0); _compactStrip = strip;
                     // The fades lie over the gaps beside the window, no wider than those.
-                    if (readings.Travel > 0) element = _stripCarousel = new ReadingsCarousel(strip, readings.Window, readings.Travel, Math.Min(Snap(layout.TextEdge, dpi), place.Gap), _stripElapsed, animate);
+                    // A window narrower than the readings clips them from their start; the strip alone, narrower than what it draws, would
+                    // show the middle of them (centred).
+                    if (readings.Travel > 0 || readingCut > 0 || flow > 0 && strip.PreferredWidth > readings.Window + .5) element = _stripCarousel = new ReadingsCarousel(strip, readings.Window, readings.Travel, Math.Min(Snap(layout.TextEdge, dpi), place.Gap), _stripElapsed, animate, readingCut);
                     else { strip.Width = room; element = strip; }
                     break;
             }
