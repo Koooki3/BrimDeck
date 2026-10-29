@@ -65,7 +65,7 @@ public static class PowerResolver
     {
         var parts = new List<PowerPart>();
         var missing = new List<string>();
-        if (Value(inputs.Cpu) is { } cpu) parts.Add(new PowerPart("cpu", Loc.T("CPU 封装", "CPU package"), cpu, "RAPL"));
+        if (Value(inputs.Cpu) is { } cpu) parts.Add(new PowerPart("cpu", "CPU", cpu, "RAPL"));
         if (Value(inputs.Memory) is { } memory && memory > 0) parts.Add(new PowerPart("memory", Loc.T("内存", "Memory"), memory, "RAPL"));
         foreach (var gpu in inputs.Gpus)
         {
@@ -92,10 +92,20 @@ public static class PowerResolver
             || line.Name.Contains(adapter, StringComparison.OrdinalIgnoreCase)).ToList();
         if (found.Count == 0 && lines.Count == 1) found = [.. lines];
         if (found.Count == 0) return Reading<double>.Unavailable(Loc.T("未列出", "not listed"));
-        // An adapter beyond the lines (one the driver does not list twice) has none of its own.
-        if (ordinal >= found.Count && found.Count > 1) return Reading<double>.Unavailable(Loc.T("驱动没有列出这块显卡", "the driver does not list this adapter"));
-        var line = found[Math.Min(ordinal, found.Count - 1)];
+        // An adapter beyond the lines (one the driver does not list twice, or not yet) has none of its own: a single line is the first
+        // adapter's, never the second's as well.
+        if (ordinal < 0 || ordinal >= found.Count) return Reading<double>.Unavailable(Loc.T("驱动没有列出这块显卡", "the driver does not list this adapter"));
+        var line = found[ordinal];
         return line.Watts is { } watts && Plausible(watts) ? watts : Reading<double>.Unavailable(Loc.T("无功率数据", "no power data"));
+    }
+
+    // One kind of part's own power in a reading ("cpu", "gpu"; several adapters together), or none where the reading has no such part.
+    public static double? PartWatts(PowerSample sample, string key)
+    {
+        double? sum = null;
+        foreach (var part in sample.Parts)
+            if (part.Key == key) sum = (sum ?? 0) + part.Watts;
+        return sum;
     }
 
     // Where a figure comes from, in the words the page shows beside it.
@@ -151,12 +161,40 @@ public sealed class PowerStats
     public int Count { get; private set; }
     public double Peak { get; private set; }
     public double Average => Count == 0 ? 0 : _sum / Count;
-    public void Add(double watts)
+    // When the first reading was counted, on the caller's clock (seconds), so the tooltip can say over how long.
+    public double Started { get; private set; }
+    public void Add(double watts, double now = 0)
     {
         if (!PowerResolver.Plausible(watts)) return;
+        if (Count == 0) Started = now;
         _sum += watts; Count++; Peak = Math.Max(Peak, watts);
     }
-    public void Reset() { _sum = 0; Count = 0; Peak = 0; }
+    public void Reset() { _sum = 0; Count = 0; Peak = 0; Started = 0; }
+}
+
+// What the monitor page's power line can show: the whole machine, or the processor's or the graphics' own power.
+public enum PowerView { Whole, Cpu, Gpu }
+
+// A series of power readings: the last ones in watts, oldest first, and their peak and mean since they began.
+public sealed record PowerTrack(IReadOnlyList<double> History, PowerSummary? Summary)
+{
+    public static readonly PowerTrack None = new([], null);
+}
+
+// The sampler's record of one series: the last `length` readings and the peak and mean since it was last cleared.
+public sealed class PowerTrail(int length)
+{
+    private readonly Queue<double> _history = new(length);
+    private readonly PowerStats _stats = new();
+    public void Add(double watts, double now)
+    {
+        if (!PowerResolver.Plausible(watts)) return;
+        if (_history.Count == length) _history.Dequeue();
+        _history.Enqueue(watts); _stats.Add(watts, now);
+    }
+    public void Clear() { _history.Clear(); _stats.Reset(); }
+    public PowerTrack Track(double now) => _stats.Count == 0 ? PowerTrack.None
+        : new([.. _history], new PowerSummary(_stats.Peak, _stats.Average, _stats.Count, now - _stats.Started));
 }
 
 public static class PowerFormat
@@ -167,11 +205,12 @@ public static class PowerFormat
         double value = double.IsFinite(watts) ? Math.Max(0, watts) : 0;
         return value < 99.95 ? value.ToString("0.0", CultureInfo.InvariantCulture) : ((int)Math.Round(value)).ToString(CultureInfo.InvariantCulture);
     }
-    // For the collapsed row, at most three characters and the unit: "8.4", "38", "112".
-    public static string Compact(double watts)
+    // Whole watts from 10 on and one decimal under: "8.4", "38", "112". most: the largest shown, 999 for the collapsed row's three
+    // characters, 9999 for the monitor page's four.
+    public static string Compact(double watts, int most = 999)
     {
         double value = double.IsFinite(watts) ? Math.Max(0, watts) : 0;
-        return value < 9.95 ? value.ToString("0.0", CultureInfo.InvariantCulture) : ((int)Math.Round(Math.Min(value, 999))).ToString(CultureInfo.InvariantCulture);
+        return value < 9.95 ? value.ToString("0.0", CultureInfo.InvariantCulture) : ((int)Math.Round(Math.Min(value, most))).ToString(CultureInfo.InvariantCulture);
     }
 
     // A time as hours and minutes, "2:45", for a row that has a clock mark beside it; under a minute "0:01".
@@ -179,6 +218,13 @@ public static class PowerFormat
     {
         int minutes = Math.Max(1, (int)Math.Round(time.TotalMinutes));
         return (minutes / 60).ToString(CultureInfo.InvariantCulture) + ":" + (minutes % 60).ToString("00", CultureInfo.InvariantCulture);
+    }
+
+    // How long the peak and the mean cover, in seconds under two minutes and then as a duration: "45 秒", "312 秒" is "5 分钟".
+    public static string Span(double seconds)
+    {
+        int whole = Math.Max(1, (int)Math.Round(double.IsFinite(seconds) ? seconds : 0));
+        return whole < 120 ? Loc.T($"{whole} 秒", $"{whole} s") : Duration(TimeSpan.FromSeconds(whole));
     }
 
     // A time in the two largest units that apply: "3 小时 12 分", "12 分钟", "不到 1 分钟".

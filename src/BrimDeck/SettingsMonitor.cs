@@ -80,8 +80,8 @@ public sealed partial class SettingsWindow
                 keepPreview: true),
             Toggle(Loc.T("显示功耗与电池", "Show power and battery"), S.MonitorPower, v => Resize(s => s.MonitorPower = v, DeckPage.Monitor),
                 help:
-                Loc.T("在硬盘下方显示整机功耗（曲线、峰值、均值）和本机电池。功耗来源按优先级：功率计、电池放电、CPU + GPU 估算（≈）。仅在此页打开时读取。",
-                    "Shows system power (curve, peak, mean) and this PC's battery under the drives. Power source, in order: system meter, battery discharge, CPU + GPU estimate (≈). Read only while this page is open."),
+                Loc.T("在硬盘下方显示整机功耗（曲线、峰值）和本机电池。功耗来源按优先级：功率计、电池放电、CPU + GPU 估算。仅在此页打开时读取。",
+                    "Shows system power (curve, peak) and this PC's battery under the drives. Power source, in order: system meter, battery discharge, CPU + GPU estimate. Read only while this page is open."),
                 keepPreview: true),
             Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
@@ -351,7 +351,7 @@ public sealed partial class SettingsWindow
             {
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
                 CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值，在左侧的菜单中选择显示什么。", "The drives always show figures; choose which in the menu at the left."),
-                CompactMonitorItems.Power => Loc.T("整机功耗，单位 W；≈ 表示估算。无读数的电脑不显示。", "System power in W; ≈ marks an estimate. Hidden on PCs with no reading."),
+                CompactMonitorItems.Power => Loc.T("整机功耗，单位 W；是否为估算见悬停提示。无读数的电脑不显示。", "System power in W; the tooltip says whether it is an estimate. Hidden on PCs with no reading."),
                 CompactMonitorItems.Charge => Loc.T("本机电池电量，以电池图形显示。无电池的电脑不显示。", "This PC's battery charge, shown as a battery icon. Hidden on PCs without a battery."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };

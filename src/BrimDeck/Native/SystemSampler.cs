@@ -42,6 +42,8 @@ internal sealed class SystemSampler : IDisposable
     private BatteryProvider? _battery;
     private readonly Queue<double> _powerHistory = new(HistoryLength);
     private readonly PowerStats _powerStats = new();
+    // The processor's and the graphics' own power, read with the whole machine's, for the page's power line when it shows one of them.
+    private readonly PowerTrail _cpuPower = new(HistoryLength), _gpuPower = new(HistoryLength);
     private readonly NetworkProvider _network = new();
     private readonly ProcessProvider _processes = new();
     private Reading<ProcessList> _lastProcesses = Reading<ProcessList>.Unavailable(Why.Waiting);
@@ -141,7 +143,7 @@ internal sealed class SystemSampler : IDisposable
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _wake.WaitOne(); continue; }
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _cpuPower.Clear(); _gpuPower.Clear(); _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _wake.WaitOne(); continue; }
                 bool primePower = _primePower;
                 _primePower = false;
                 if (!primed || _primeProcesses || primePower)
@@ -222,7 +224,9 @@ internal sealed class SystemSampler : IDisposable
                     if (power.TryGet(out var drawn))
                     {
                         if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
-                        _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts);
+                        _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts, now);
+                        if (PowerResolver.PartWatts(drawn, "cpu") is { } cpuWatts) _cpuPower.Add(cpuWatts, now);
+                        if (PowerResolver.PartWatts(drawn, "gpu") is { } gpuWatts) _gpuPower.Add(gpuWatts, now);
                     }
                 }
             }
@@ -237,6 +241,7 @@ internal sealed class SystemSampler : IDisposable
         if (!powerWanted)
         {
             if (_powerHistory.Count > 0) { _powerHistory.Clear(); _powerStats.Reset(); }
+            _cpuPower.Clear(); _gpuPower.Clear();
             _power!.Sample(false, false, now, [], default, false);
         }
         var snapshot = new MonitorSnapshot(DateTimeOffset.Now, Environment.ProcessorCount, cpu, MemoryProvider.Sample(), network,
@@ -245,7 +250,8 @@ internal sealed class SystemSampler : IDisposable
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
             CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage,
             Power = power, Battery = battery, PowerHistory = _powerHistory.ToArray(),
-            PowerSummary = _powerStats.Count > 0 ? new PowerSummary(_powerStats.Peak, _powerStats.Average, _powerStats.Count) : null
+            PowerSummary = _powerStats.Count > 0 ? new PowerSummary(_powerStats.Peak, _powerStats.Average, _powerStats.Count, now - _powerStats.Started) : null,
+            CpuPower = _cpuPower.Track(now), GpuPower = _gpuPower.Track(now)
         };
         var shown = WithGpu(snapshot, _autoGpu, out bool automatic);
         if (automatic && shown.Gpu.TryGet(out var gpu)) Volatile.Write(ref _autoGpu, gpu.Luid);
