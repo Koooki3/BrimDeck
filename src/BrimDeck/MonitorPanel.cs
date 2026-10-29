@@ -22,6 +22,8 @@ public partial class MainWindow
     private void InitializeMonitor()
     {
         IsVisibleChanged += (_, _) => UpdateMonitorDemand();
+        // Pressed anywhere in the window, not only on the page: the page's blank room takes no clicks of its own.
+        PreviewMouseLeftButtonDown += (_, _) => _monitorView?.WindowPressed();
         _app.MonitorUpdated += MonitorUpdated;
         // Plugging in or unplugging changes what the power reading can come from (battery discharge on battery only): asked again then.
         Microsoft.Win32.PowerModeChangedEventHandler powerChanged = (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.StatusChange) Dispatcher.BeginInvoke(UpdateMonitorDemand); };

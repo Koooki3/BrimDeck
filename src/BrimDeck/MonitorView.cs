@@ -179,12 +179,16 @@ internal sealed class MonitorView : Grid
         }
         SetColumnSpan(_overlay, 3); SetRowSpan(_overlay, 3);
         Children.Add(_overlay);
-        // A click anywhere outside the card and the list closes it; the click still reaches what it was meant for. On the list the
-        // row decides (Open): its own row closes the card, another row opens its own.
-        PreviewMouseLeftButtonDown += (_, e) => { if (_card is not null && !_card.IsMouseOver && _list?.IsMouseOver != true) CloseCard(animate: true); };
     }
 
     public bool CardOpen => _card is not null;
+    // A press anywhere in the window outside the card and the list's rows closes the card: the page's blank room, the list's own
+    // blank room and its sort buttons, the window's top bar. The click still reaches what it was meant for. On a row the row
+    // decides (Open): its own row closes the card, another row opens its own.
+    public void WindowPressed()
+    {
+        if (_card is not null && !_card.IsMouseOver && _list?.PointerOnRow != true) CloseCard(animate: true);
+    }
     // Whether the page has the power line (the layout had room for it): the power is read only then.
     public bool ShowsPower => _power is not null;
     // The widest a graphics engine's column grows on the page with the GPU large: no narrower than the graph's room needs, so the
@@ -315,6 +319,7 @@ internal sealed class MonitorView : Grid
         var card = new ProcessCard(_layout.Body, _layout.Caption);
         card.Show(sample, _cores, _layout.Body, _layout.Caption);
         card.MouseLeftButtonUp += (_, e) => { e.Handled = true; CloseCard(animate: true); };
+        card.Switched += () => CloseCard(animate: true);
         card.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var origin = _list.TranslatePoint(new Point(row.X, row.Y), this);
         double width = card.DesiredSize.Width, height = card.DesiredSize.Height;
