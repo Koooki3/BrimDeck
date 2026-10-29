@@ -88,11 +88,11 @@ internal sealed class MonitorStrip : FrameworkElement
         // A reading fading out of a narrow row stays within it, off the lyric or the rings beside it.
         ClipToBounds = true;
         // Fixed per item, from the widest figure each can show, so the row's layout never moves with the readings. A rate has
-        // at most five characters (MonitorFormat.CompactRate): "99.9M" or "99.9G" at the widest.
+        // at most four characters (MonitorFormat.CompactRate): "999M" or "999G" at the widest.
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("112W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent));
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("999M"), text("999G"))), DrivesWidth(),
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("999W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent));
     }
 
     private const string WidestDegrees = "125°", WidestPercent = "100%";
@@ -387,7 +387,7 @@ internal sealed class MonitorStrip : FrameworkElement
         => MonitorDraw.Baseline(drawing, MonitorDraw.Text(GaugeFigure(share), _font, color, ppd), x, Math.Round(center + _font * .36));
 
     // The whole machine's power: a bolt in the theme's curve color, then the draw in watts, "38W"; a dash
-    // while there is no reading. The room is kept for the widest figure ("112W").
+    // while there is no reading. The room is kept for the widest figure ("999W"; the font's 1 is narrower than its other digits).
     private void Power(DrawingContext drawing, double x, double center, PowerSample? power, double ppd)
     {
         // The bolt is drawn in a square (PowerIcons draws in the shorter side) over the room kept for it; it is narrower than tall.
