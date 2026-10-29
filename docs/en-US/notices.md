@@ -31,7 +31,7 @@ The capsule's and the notch's liquid motion is the design "胶囊通知动效" p
 
 ### Windows: event log mode and polling
 
-As an ordinary desktop program BrimDeck gets no change events from Windows. Windows' push notification platform writes an entry to its log (Applications and Services Logs › Microsoft › Windows › PushNotification-Platform › Operational) for every notification delivered to the current user, and any user may subscribe to that log, so BrimDeck uses **event log mode** by default: about 0.1 s after each entry it reads the notification list; otherwise it reads it only every 60 seconds, with practically no idle cost. A new notice usually appears within 0.03–1 second (the log service hands entries over in batches about once a second).
+As an ordinary desktop program BrimDeck gets no change events from Windows. Windows' push notification platform writes an entry to its log (Applications and Services Logs › Microsoft › Windows › PushNotification-Platform › Operational) for every notification delivered to the current user, and any user may subscribe to that log, so BrimDeck uses **event log mode** by default: about 0.1 s after an entry (a batch of entries is taken together) BrimDeck reads the one notification it names by its id, checks that the id and the application match, and shows it at once. This does not wait for a reading of the whole list, not even the first one after starting or waking (after waking, an entry logged before that reading begins counts as arrived during sleep). An entry without a usable id or application, or a notification that cannot be read or belongs to another application, is left to a full reading instead. The whole list is read in the background: after starting, being granted access or waking (notices already there are not shown again; those that arrived during sleep are recorded as missed), every 60 seconds as a safety check, and to learn which notices were cleared. A clear entry does not say which notice went, so that reading comes at most every 30 seconds; after an entry or a lookup that could not be trusted it comes within about a second. A lookup Windows does not answer within 5 seconds (seen after waking) counts as a failure: BrimDeck takes the notification listener again and reads the whole list.
 
 When that log is turned off (by group policy, say), cannot be subscribed to or keeps failing, BrimDeck **polls** instead: every 2.5 seconds it checks for a new notification (about 2.5 ms of CPU) and reads the whole list every 15 seconds; a new notice usually appears within 0.2–2.6 seconds, at an idle cost of about 0.36% of one core. The status line in the settings shows which mode is in use.
 
@@ -107,7 +107,7 @@ Alarms, timers, countdowns, mail and event reminders are recognized and shown by
 
 | Case | Result |
 |---|---|
-| Windows 11 (26300) | Snapshot readable; change events unavailable, so event log mode, end to end 0.03–1 s; polling while the log is off, end to end 0.2–2.3 s |
+| Windows 11 (26300) | Snapshot readable; change events unavailable; event log mode reads by TrackingId and reconciles the full list periodically and after dismissals; polling remains the fallback |
 | Icons of Windows notifications | Packaged apps give their icon; otherwise the application's initial |
 | Opening the source application | Packaged apps through the app list; desktop apps by the id registered with their Start menu shortcut; otherwise the details say so |
 | Several monitors (negative coordinates, 125% secondary) | Shows on the foreground window's monitor, placed and scaled correctly |
