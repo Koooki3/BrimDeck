@@ -122,7 +122,8 @@ public sealed class MonitorCustomColors
 }
 
 public enum ListPlacement { None, Side, Below }
-// How memory and network are shown: both on one line, one line each, or as blocks with their second lines and sparklines.
+// How memory and network are shown: both on one line, one line each, or memory as a block with its bar and commit line under the
+// figure while network keeps its one line.
 public enum MetricsMode { Line, Lines, Blocks }
 
 // How the system monitor page fills the space it has, after ftop's layout ladder: a small page keeps the essentials, a
@@ -193,7 +194,8 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
         {
             MetricsMode.Line => line,
             MetricsMode.Lines => 2 * line + 6,
-            _ => Math.Ceiling(body * 1.7 + 19) + Math.Ceiling(body * 1.7 + 4 + body * 2) + 10
+            // Memory's block (the figure, the bar and the commit line), then network on one line (NetworkBlock).
+            _ => Math.Ceiling(body * 1.7 + 19) + Math.Ceiling(body * 1.7) + 10
         }, metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 });
     }
 

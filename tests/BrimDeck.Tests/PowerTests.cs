@@ -297,8 +297,8 @@ static class PowerTests
         // Room is what the drives leave while the core columns keep their minimum.
         var tall = MonitorLayout.For(700, 400, true, 2, power: 2);
         check("Layout: a tall page shows power and the battery on two lines", tall.PowerLines == 2 && tall.StorageLines == 2);
-        var narrow = MonitorLayout.For(620, 260, true, 2, power: 2);
-        check("Layout: a standard page with drives keeps one line for both", narrow.PowerLines == 1);
+        var narrow = MonitorLayout.For(620, 260, true, 2, power: 1);
+        check("Layout: a standard page with drives keeps the power line", narrow.PowerLines == 1 && narrow.StorageLines == 2);
         check("Layout: a short page has none", MonitorLayout.For(620, 100, true, 2, power: 2).PowerLines == 0);
         check("Layout: the first line of power comes before the drives, which give up room for it (at most two lines) while the graph keeps its minimum", Enumerable.Range(140, 260).All(height =>
         {
