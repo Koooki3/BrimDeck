@@ -84,7 +84,7 @@ static class PowerTests
             && !PowerResolver.PickGpu(mixed, "NVIDIA RTX A2000", 0).HasValue && PowerResolver.PickGpu([("NVIDIA GPU", 9.0)], "NVIDIA RTX 3050 Laptop", 0).OrDefault == 9.0);
         check("Power: an absurd driver figure is none", !PowerResolver.PickGpu([("NVIDIA X", 99999.0)], "NVIDIA X", 0).HasValue);
 
-        var stats = new PowerStats();
+        var stats = new PowerStats(10);
         foreach (double watts in new[] { 20.0, 60, 40, double.NaN, -3 }) stats.Add(watts);
         check("Power: an ended helper is started again after the interval, not before, and a running one never", !PowerResolver.RestartDue(true, 10, 0) && PowerResolver.RestartDue(true, PowerResolver.RestartSeconds, 0)
             && !PowerResolver.RestartDue(true, 80, 60) && PowerResolver.RestartDue(true, 100, 60) && !PowerResolver.RestartDue(false, 1000, 0));
@@ -93,6 +93,19 @@ static class PowerTests
         check("Power: stats start over", stats.Count == 0 && stats.Peak == 0 && stats.Average == 0);
         stats.Add(double.NaN, 99); stats.Add(30, 100); stats.Add(40, 101);
         check("Power: the stats begin at their first counted reading", stats.Started == 100);
+        // As many readings as the curve: a minute at the one-second interval, two at the two-second one.
+        var everySecond = new PowerStats(60);
+        for (int at = 0; at <= 100; at++) everySecond.Add(at == 20 ? 99 : 10 + at % 3, at);
+        check("Power: the stats keep the curve's readings only", everySecond.Count == 60 && everySecond.Peak == 12 && everySecond.Summary(100) is { Count: 60, Seconds: 60 });
+        var everyTwo = new PowerStats(60);
+        for (int at = 0; at <= 200; at += 2) everyTwo.Add(10, at);
+        check("Power: at two seconds they cover two minutes", everyTwo.Summary(200) is { Count: 60, Seconds: 120 }
+            && PowerText.Table(Reading<PowerSample>.Of(new PowerSample(10, PowerOrigin.Estimated, PowerSource.Components, [])), everyTwo.Summary(200), PowerTrack.None, PowerTrack.None)!.Rows[1].Label == "2 分钟内峰值");
+        var filling = new PowerStats(60);
+        filling.Add(10, 5); filling.Add(20, 6); filling.Add(30, 7);
+        check("Power: before they are full they cover from their first reading", filling.Summary(7) is { Count: 3, Seconds: 2, Peak: 30, Average: 20 });
+        filling.Reset();
+        check("Power: reset stats have nothing", filling.Summary(8) is null);
 
         // The CPU's and the GPU's own power, for the page's power line: a part's watts, two adapters together, and none where it is not read.
         var twoCards = new PowerSample(80, PowerOrigin.Estimated, PowerSource.Components, [new("cpu", "CPU", 20, "RAPL"), new("gpu", "A", 25, "x"), new("gpu", "B", 35, "x")]);
@@ -102,8 +115,8 @@ static class PowerTests
         check("Power: an empty series has nothing to show", trail.Track(5) == PowerTrack.None);
         foreach (var (watts, at) in new[] { (10.0, 1.0), (30, 2), (double.NaN, 3), (20, 4), (15, 5) }) trail.Add(watts, at);
         var track = trail.Track(9);
-        check("Power: a series keeps its last readings, and its peak, mean and time over all it counted", track.History.SequenceEqual([30.0, 20, 15]) && track.Summary is { Peak: 30, Count: 4, Seconds: 8 }
-            && Math.Abs(track.Summary.Average - 18.75) < 1e-9);
+        check("Power: a series keeps its last readings, and its peak, mean and time over the same readings", track.History.SequenceEqual([30.0, 20, 15]) && track.Summary is { Peak: 30, Count: 3, Seconds: 8 }
+            && Math.Abs(track.Summary.Average - 65.0 / 3) < 1e-9);
         trail.Clear();
         check("Power: a cleared series starts over", trail.Track(10) == PowerTrack.None);
     }
@@ -377,14 +390,18 @@ static class PowerTests
         check("Text: the power table has a column for the whole machine, the CPU and the GPU", table.Columns.SequenceEqual(["整机", "CPU", "GPU"]));
         check("Text: its rows are now, the peak and the mean over the time they cover", table.Rows.Select(row => row.Label).SequenceEqual(["当前", "5 分钟内峰值", "5 分钟内均值"])
             && table.Rows[0].Cells.SequenceEqual(["17.0 W", "9.1 W", "7.9 W"]) && table.Rows[1].Cells.SequenceEqual(["78.5 W", "52.0 W", "23.1 W"]) && table.Rows[2].Cells.SequenceEqual(["63.4 W", "38.0 W", "8.2 W"]));
-        check("Text: an estimate made of these parts is their sum, with no notes", table.Sum && table.Notes.Count == 0);
+        check("Text: an estimate made of these parts is their sum, and says what it adds and leaves out", table.Sum && table.Notes.SequenceEqual(["来源  CPU + GPU 估算，不含屏幕、硬盘、风扇等"]));
         check("Text: a short time is in seconds", PowerText.Table(Reading<PowerSample>.Of(estimate), summary with { Seconds = 45.2 }, cpuTrack, gpuTrack)!.Rows[1].Label == "45 秒内峰值");
+        check("Text: from a minute on the time is in whole minutes", PowerFormat.Span(59.4) == "59 秒" && PowerFormat.Span(64) == "1 分钟" && PowerFormat.Span(89) == "1 分钟"
+            && PowerFormat.Span(90) == "2 分钟" && PowerFormat.Span(124) == "2 分钟" && PowerFormat.Span(150) == "3 分钟");
         var measured = new PowerSample(23.4, PowerOrigin.Measured, PowerSource.Battery, [parts[0]]);
         var measuredTable = PowerText.Table(Reading<PowerSample>.Of(measured), null, cpuTrack, PowerTrack.None)!;
-        check("Text: a measurement is no sum, says where it is read, and has no GPU column without a GPU", !measuredTable.Sum && measuredTable.Notes.SequenceEqual(["整机为实测（电池放电）"])
+        check("Text: a measurement is no sum, says where it is read, and has no GPU column without a GPU", !measuredTable.Sum && measuredTable.Notes.SequenceEqual(["来源  电池放电（实测）"])
             && measuredTable.Columns.SequenceEqual(["整机", "CPU"]) && measuredTable.Rows.Count == 1 && measuredTable.Rows[0].Cells.SequenceEqual(["23.4 W", "9.1 W"]));
         var idle = PowerText.Table(Reading<PowerSample>.Of(new PowerSample(9.1, PowerOrigin.Estimated, PowerSource.Components, [parts[0]]) { Missing = ["GPU（空闲）"] }), null, cpuTrack, PowerTrack.None)!;
-        check("Text: a GPU not read has its column with a dash, and says why", idle.Columns.SequenceEqual(["整机", "CPU", "GPU"]) && idle.Rows[0].Cells[2] == "—" && idle.Notes.SequenceEqual(["未读取  GPU（空闲）"]));
+        check("Text: a GPU not read has its column with a dash, and says why", idle.Columns.SequenceEqual(["整机", "CPU", "GPU"]) && idle.Rows[0].Cells[2] == "—" && idle.Notes.SequenceEqual(["未读取  GPU（空闲）", "来源  CPU 估算，不含屏幕、硬盘、风扇等"]));
+        var meter = PowerText.Table(Reading<PowerSample>.Of(new PowerSample(40, PowerOrigin.Measured, PowerSource.SystemMeter, parts)), null, cpuTrack, gpuTrack)!;
+        check("Text: a system meter says so", !meter.Sum && meter.Notes.SequenceEqual(["来源  整机功率计（实测）"]));
         check("Text: the power line's mean, up to four digits", PowerText.Mean(65.9) == "均值 66 W" && PowerText.Mean(8.43) == "均值 8.4 W" && PowerText.Mean(1234.4) == "均值 1234 W"
             && PowerFormat.Compact(1234.4) == "999");
         check("Text: the power line's views", PowerText.ViewName(PowerView.Whole) == "整机" && PowerText.ViewName(PowerView.Cpu) == "CPU" && PowerText.ViewName(PowerView.Gpu) == "GPU");
@@ -410,7 +427,10 @@ static class PowerTests
         Loc.Use(Loc.English);
         var estimateEn = new PowerSample(17.0, PowerOrigin.Estimated, PowerSource.Components, parts);
         var english = PowerText.Table(Reading<PowerSample>.Of(estimateEn), summary with { Seconds = 45 }, cpuTrack, gpuTrack)!;
-        check("Text: the English table is the same form", english.Columns.SequenceEqual(["System", "CPU", "GPU"]) && english.Rows.Select(row => row.Label).SequenceEqual(["Now", "Peak, 45 s", "Mean, 45 s"]));
+        check("Text: the English table is the same form", english.Columns.SequenceEqual(["System", "CPU", "GPU"]) && english.Rows.Select(row => row.Label).SequenceEqual(["Now", "Peak, 45 s", "Mean, 45 s"])
+            && english.Notes.SequenceEqual(["Source  CPU + GPU estimate; display, drives, fans and others not included"]));
+        check("Text: the English measured source", PowerText.Table(Reading<PowerSample>.Of(new PowerSample(23.4, PowerOrigin.Measured, PowerSource.Battery, [parts[0]])), null, cpuTrack, PowerTrack.None)!
+            .Notes.SequenceEqual(["Source  battery discharge (measured)"]));
         var englishBattery = PowerText.Battery(Reading<BatterySample>.Of(cell)).Split('\n');
         check("Text: the English battery lines", englishBattery[0] == "Battery  96% (57.0 Wh stored)" && englishBattery[1] == "State  Plugged in, not charging" && englishBattery[2] == "Power mode  Best performance");
         check("Text: the English battery's time on the page", PowerText.Brief(discharging) == "2:45 left" && PowerText.Brief(full) == "" && PowerText.Brief(cell) == "");

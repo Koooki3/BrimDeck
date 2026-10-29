@@ -70,18 +70,16 @@ public sealed partial class SettingsWindow
                 v => Resize(s => s.MonitorProcessView = v, DeckPage.Monitor), keepPreview: true),
             Toggle(Loc.T("显示进程列表", "Show the process list"), S.MonitorProcesses, v => Resize(s => s.MonitorProcesses = v, DeckPage.Monitor),
                 help:
-                Loc.T("按 CPU 或内存列出占用最高的应用，同一程序的多个进程合并为一行。面板足够大时显示。",
-                    "Lists the apps using the most CPU or memory, with the processes of one program folded into one row. Shown when the panel is large enough."),
+                Loc.T("按 CPU 或内存列出占用最高的应用。", "Lists the apps using the most CPU or memory."),
                 keepPreview: true),
             Toggle(Loc.T("显示硬盘", "Show drives"), S.MonitorStorage, v => Resize(s => s.MonitorStorage = v, DeckPage.Monitor),
                 help:
-                Loc.T("不含 U 盘、移动硬盘、网络盘和光驱。放不下的盘符合并为最后一项。",
-                    "USB, external, network and optical drives are not included. Letters that do not fit are combined into the last item."),
+                Loc.T("不含 U 盘、移动硬盘、网络盘和光驱。", "USB, external, network and optical drives are not included."),
                 keepPreview: true),
             Toggle(Loc.T("显示功耗与电池", "Show power and battery"), S.MonitorPower, v => Resize(s => s.MonitorPower = v, DeckPage.Monitor),
                 help:
-                Loc.T("在硬盘下方显示整机功耗（曲线、峰值）和本机电池。功耗来源按优先级：功率计、电池放电、CPU + GPU 估算。仅在此页打开时读取。",
-                    "Shows system power (curve, peak) and this PC's battery under the drives. Power source, in order: system meter, battery discharge, CPU + GPU estimate. Read only while this page is open."),
+                Loc.T("在硬盘下方显示整机功耗和本机电池。只在面板展开到系统监控页时读取。",
+                    "Shows system power and this PC's battery under the drives. Read only while the panel is open on the system monitor page."),
                 keepPreview: true),
             Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
@@ -158,7 +156,7 @@ public sealed partial class SettingsWindow
     private Button RoleSwatch(MonitorRole role, Action refreshed)
     {
         string? own = S.MonitorPalette == MonitorPalette.Custom ? S.MonitorCustomColors.Get(role) : null;
-        string color = MonitorThemeColors.For(S)[role], name = RoleName(role);
+        string color = RoleColor(MonitorThemeColors.For(S), role), name = RoleName(role);
         var button = new Button { Style = (Style)FindResource("SettingsColorButton"), Foreground = UI.Brush(color) };
         AutomationProperties.SetName(button, Loc.T($"{name}颜色", $"{name} color"));
         AutomationProperties.SetHelpText(button, color + (own is null ? Loc.T("（默认）", " (default)") : ""));
@@ -194,10 +192,17 @@ public sealed partial class SettingsWindow
         return button;
     }
 
+    // A role's color as drawn: power and the battery by the theme's power style, which the custom scheme's own colors replace.
+    private static string RoleColor(MonitorColors colors, MonitorRole role) => role switch
+    {
+        MonitorRole.Power => PowerStyle.For(colors).Draw, MonitorRole.Battery => PowerStyle.For(colors).Normal, _ => colors[role]
+    };
+
     private static string RoleName(MonitorRole role) => role switch
     {
         MonitorRole.Efficiency => Loc.T("能效核", "Efficiency cores"), MonitorRole.Memory => Loc.T("内存", "Memory"), MonitorRole.Gpu => "GPU",
-        MonitorRole.Download => Loc.T("下载", "Download"), MonitorRole.Upload => Loc.T("上传", "Upload"), _ => "CPU"
+        MonitorRole.Download => Loc.T("下载", "Download"), MonitorRole.Upload => Loc.T("上传", "Upload"), MonitorRole.Storage => Loc.T("硬盘", "Drives"),
+        MonitorRole.Power => Loc.T("整机功耗", "System power"), MonitorRole.Battery => Loc.T("本机电池", "Battery"), _ => "CPU"
     };
     private static string LevelName(MemoryLevel level) => level == MemoryLevel.Critical ? Loc.T("告警", "Critical") : Loc.T("预警", "Warning");
 
@@ -206,7 +211,6 @@ public sealed partial class SettingsWindow
     {
         MonitorRole.Cpu => Loc.T("CPU 读数与核心柱中性能核的颜色。", "The color of the CPU readings and of the performance cores in the core columns."),
         MonitorRole.Efficiency => Loc.T("核心柱中能效核的颜色。", "The color of the efficiency cores in the core columns."),
-        MonitorRole.Memory => Loc.T("内存与硬盘已用空间的颜色。", "The color of the memory and of the drives' space in use."),
         _ => null
     };
 
@@ -324,19 +328,16 @@ public sealed partial class SettingsWindow
             Grid.SetColumn(menu, 2); row.Children.Add(menu);
         }
         // The reading's colors in the normal state as the scheme gives them, one per channel (the core columns: one per kind of
-        // core). They are set under "配色", so they only show here.
+        // core). They are set under "各项颜色", so they only show here.
         var dots = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent,
-            ToolTip = item is CompactMonitorItems.Power or CompactMonitorItems.Charge
-                ? Loc.T("颜色由当前主题的功耗样式决定。", "The color comes from the current theme's power style.")
-                : Loc.T("颜色在上方“各项颜色”中设置。", "Set under Reading colors above.") };
+            ToolTip = Loc.T("颜色在上方“各项颜色”中设置。", "Set under Reading colors above.") };
         var fills = Enumerable.Range(0, CompactMonitor.Channels(item)).Select(channel =>
             new Ellipse { Width = ReadingDot, Height = ReadingDot, Margin = new Thickness(channel == 0 ? 0 : 3, 0, 0, 0) }).ToArray();
         foreach (var fill in fills) dots.Children.Add(fill);
         refresh.Add(() =>
         {
             var colors = MonitorThemeColors.For(S);
-            for (int channel = 0; channel < fills.Length; channel++) fills[channel].Fill = UI.Brush(item == CompactMonitorItems.Power ? PowerStyle.For(colors).Draw
-                    : item == CompactMonitorItems.Charge ? PowerStyle.For(colors).Fill(MemoryLevel.Normal, BatteryState.Discharging) : colors[CompactMonitor.Role(item, channel)]);
+            for (int channel = 0; channel < fills.Length; channel++) fills[channel].Fill = UI.Brush(RoleColor(colors, CompactMonitor.Role(item, channel)));
         });
         Grid.SetColumn(dots, 1); row.Children.Add(dots);
 

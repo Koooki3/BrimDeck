@@ -153,39 +153,43 @@ public static class PowerResolver
     }
 }
 
-// The peak and the average of the readings since the page was opened (the sampler pauses a few seconds after it closes and starts
-// again from nothing), over every reading whatever its source.
-public sealed class PowerStats
+// The peak and the average of the last `length` readings, as many as the curve shows (a minute at the one-second interval, two at
+// the two-second one); the oldest is dropped as each new one comes. Times are on the caller's clock (seconds).
+public sealed class PowerStats(int length)
 {
-    private double _sum;
-    public int Count { get; private set; }
-    public double Peak { get; private set; }
-    public double Average => Count == 0 ? 0 : _sum / Count;
-    // When the first reading was counted, on the caller's clock (seconds), so the tooltip can say over how long.
-    public double Started { get; private set; }
+    private readonly Queue<(double At, double Watts)> _readings = new(length);
+    // When the last dropped reading was taken: once full, the readings kept cover from then to now, as long as the curve does.
+    private double? _dropped;
+    public int Count => _readings.Count;
+    public double Peak => _readings.Count == 0 ? 0 : _readings.Max(reading => reading.Watts);
+    public double Average => _readings.Count == 0 ? 0 : _readings.Average(reading => reading.Watts);
+    // Where the time the readings cover begins, so the tooltip can say over how long.
+    public double Started => _dropped ?? (_readings.Count == 0 ? 0 : _readings.Peek().At);
     public void Add(double watts, double now = 0)
     {
         if (!PowerResolver.Plausible(watts)) return;
-        if (Count == 0) Started = now;
-        _sum += watts; Count++; Peak = Math.Max(Peak, watts);
+        if (_readings.Count == length) _dropped = _readings.Dequeue().At;
+        _readings.Enqueue((now, watts));
     }
-    public void Reset() { _sum = 0; Count = 0; Peak = 0; Started = 0; }
+    public void Reset() { _readings.Clear(); _dropped = null; }
+    // The peak, the mean and the time they cover, none without a reading.
+    public PowerSummary? Summary(double now) => Count == 0 ? null : new PowerSummary(Peak, Average, Count, now - Started);
 }
 
 // What the monitor page's power line can show: the whole machine, or the processor's or the graphics' own power.
 public enum PowerView { Whole, Cpu, Gpu }
 
-// A series of power readings: the last ones in watts, oldest first, and their peak and mean since they began.
+// A series of power readings: the last ones in watts, oldest first, and their peak and mean over the same readings (PowerStats).
 public sealed record PowerTrack(IReadOnlyList<double> History, PowerSummary? Summary)
 {
     public static readonly PowerTrack None = new([], null);
 }
 
-// The sampler's record of one series: the last `length` readings and the peak and mean since it was last cleared.
+// The sampler's record of one series: the last `length` readings and their peak and mean.
 public sealed class PowerTrail(int length)
 {
     private readonly Queue<double> _history = new(length);
-    private readonly PowerStats _stats = new();
+    private readonly PowerStats _stats = new(length);
     public void Add(double watts, double now)
     {
         if (!PowerResolver.Plausible(watts)) return;
@@ -193,8 +197,7 @@ public sealed class PowerTrail(int length)
         _history.Enqueue(watts); _stats.Add(watts, now);
     }
     public void Clear() { _history.Clear(); _stats.Reset(); }
-    public PowerTrack Track(double now) => _stats.Count == 0 ? PowerTrack.None
-        : new([.. _history], new PowerSummary(_stats.Peak, _stats.Average, _stats.Count, now - _stats.Started));
+    public PowerTrack Track(double now) => _history.Count == 0 ? PowerTrack.None : new([.. _history], _stats.Summary(now));
 }
 
 public static class PowerFormat
@@ -220,11 +223,12 @@ public static class PowerFormat
         return (minutes / 60).ToString(CultureInfo.InvariantCulture) + ":" + (minutes % 60).ToString("00", CultureInfo.InvariantCulture);
     }
 
-    // How long the peak and the mean cover, in seconds under two minutes and then as a duration: "45 秒", "312 秒" is "5 分钟".
+    // How long the peak and the mean cover, in seconds under a minute and then in whole minutes, half a minute rounding up: "45 秒",
+    // "64 秒" is "1 分钟", "124 秒" is "2 分钟". A sample takes the interval and the reading itself, so a full curve is a little longer.
     public static string Span(double seconds)
     {
         int whole = Math.Max(1, (int)Math.Round(double.IsFinite(seconds) ? seconds : 0));
-        return whole < 120 ? Loc.T($"{whole} 秒", $"{whole} s") : Duration(TimeSpan.FromSeconds(whole));
+        return whole < 60 ? Loc.T($"{whole} 秒", $"{whole} s") : Duration(TimeSpan.FromMinutes(Math.Round(whole / 60.0, MidpointRounding.AwayFromZero)));
     }
 
     // A time in the two largest units that apply: "3 小时 12 分", "12 分钟", "不到 1 分钟".

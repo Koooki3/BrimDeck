@@ -148,8 +148,20 @@ internal static class CompactReadingTests
         }));
         check("Level colors: the fixed schemes give memory and upload the efficiency color, download the performance color",
             schemes.All(scheme => scheme.Memory == scheme.Efficiency && scheme.Upload == scheme.Efficiency && scheme.Download == scheme.Performance));
+        // The drives follow memory, power and the battery the CPU color, while they have none of their own.
+        static MonitorRole? Follows(MonitorRole role) => role switch
+        {
+            MonitorRole.Storage => MonitorRole.Memory, MonitorRole.Power or MonitorRole.Battery => MonitorRole.Cpu, _ => null
+        };
         check("Level colors: each color of a scheme by its role", Enum.GetValues<MonitorRole>().All(role =>
-            palette.With(role, "#010203")[role] == "#010203" && Enum.GetValues<MonitorRole>().Where(other => other != role).All(other => palette.With(role, "#010203")[other] == palette[other])));
+            palette.With(role, "#010203")[role] == "#010203" && Enum.GetValues<MonitorRole>().Where(other => other != role)
+                .All(other => palette.With(role, "#010203")[other] == (Follows(other) == role ? "#010203" : palette[other]))));
+        check("Level colors: the drives, power and the battery keep their own color over the one they follow",
+            palette.With(MonitorRole.Storage, "#0A0B0C").With(MonitorRole.Memory, "#010203") is { Storage: "#0A0B0C", Memory: "#010203" }
+            && palette.With(MonitorRole.Power, "#0A0B0C").With(MonitorRole.Cpu, "#010203")[MonitorRole.Power] == "#0A0B0C"
+            && palette.With(MonitorRole.Battery, "#0A0B0C").With(MonitorRole.Cpu, "#010203")[MonitorRole.Battery] == "#0A0B0C");
+        check("Custom colors: the drives, power and the battery survive drawing", new MonitorCustomColors { Base = MonitorPalette.Sea, Storage = "#123456", Power = "#234567", Battery = "#345678" }
+            .Over(palette, _ => "#000000") is { Drives: "#000000", Power: "#000000", Battery: "#000000" } && palette.Map(color => color) is { Drives: null, Power: null, Battery: null });
         var none = new StripColors(palette);
         check("Level colors: the core columns run from the CPU color to the efficiency color", none.Core(0, 3) == palette.Performance && none.Core(2, 3) == palette.Efficiency
             && none.Core(1, 3) == palette.Core(1, 3));

@@ -25,7 +25,9 @@ internal sealed class PowerStyle
             "cpu" => colors.Performance, "efficiency" => colors.Efficiency, "memory" => colors.Memory, "gpu" => colors.Gpu,
             "warning" => colors.Warning, "critical" => colors.Critical, _ => PanelTheme.Hex(name)
         };
-        Normal = Resolve(look.Normal); Charge = Resolve(look.Charge); Saver = Resolve(look.Saver); Draw = Resolve(look.Draw);
+        // The custom scheme's own colors replace the look's: the battery's while discharging and while charging (the plug tells the
+        // two apart), and power's for the curve and the bolt.
+        Normal = colors.Battery ?? Resolve(look.Normal); Charge = colors.Battery ?? Resolve(look.Charge); Saver = Resolve(look.Saver); Draw = colors.Power ?? Resolve(look.Draw);
         Warning = colors.Warning; Critical = colors.Critical;
     }
 

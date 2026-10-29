@@ -20,12 +20,14 @@ public static class PowerText
     private static string Quality(PowerSample power) => power.Estimated ? Loc.T("估算", "estimated") : Loc.T("实测", "measured");
     private static string Bracket(string text) => Loc.T("（" + text + "）", " (" + text + ")");
 
-    // Where a measured figure is read, after its quality: "实测，电池放电".
-    private static string Measured(PowerSample power) => power.Source switch
+    // Where the whole machine's figure comes from, the tooltip's last line: "电池放电（实测）", or the parts the estimate adds up and what
+    // it leaves out: "CPU + GPU 估算，不含屏幕、硬盘、风扇等".
+    private static string Source(PowerSample power) => power.Source switch
     {
-        PowerSource.SystemMeter => Loc.T("整机功率计", "system meter"),
-        PowerSource.Battery => Loc.T("电池放电", "battery discharge"),
-        _ => ""
+        PowerSource.SystemMeter => Loc.T("整机功率计", "system meter") + Bracket(Loc.T("实测", "measured")),
+        PowerSource.Battery => Loc.T("电池放电", "battery discharge") + Bracket(Loc.T("实测", "measured")),
+        _ => string.Join(" + ", power.Parts.Select(part => part.Key switch { "cpu" => "CPU", "gpu" => "GPU", _ => Loc.T("内存", "memory") }).Distinct())
+            + Loc.T(" 估算，不含屏幕、硬盘、风扇等", " estimate; display, drives, fans and others not included")
     };
     // The power tooltip with no reading: a dash and the reason.
     public static string NoPower(string reason) => Line(Loc.T("整机功耗", "System power"), "—") + "\n" + Line(Loc.T("原因", "Reason"), reason);
@@ -35,8 +37,8 @@ public static class PowerText
     //   当前       42.2 W  ≈  34.3 W  +  7.9 W
     //   5 分钟内峰值  75.2 W     52.0 W     23.1 W
     //   5 分钟内均值  46.2 W     38.0 W     8.2 W
-    // "≈" and "+" join the current row only where the whole machine is the estimate made of these parts. Notes under it: where a measured
-    // whole machine is read, and what could not be read. Null without a reading (NoPower then).
+    // "≈" and "+" join the current row only where the whole machine is the estimate made of these parts. Notes under it: what could not
+    // be read, then where the whole machine's figure comes from. Null without a reading (NoPower then).
     public static PowerTable? Table(Reading<PowerSample> power, PowerSummary? whole, PowerTrack cpu, PowerTrack gpu)
     {
         if (!power.TryGet(out var sample)) return null;
@@ -63,8 +65,8 @@ public static class PowerText
         // The whole machine is these parts added up only when it is the estimate and every part it adds is a column.
         bool sum = sample.Source == PowerSource.Components && columns.Count > 1 && sample.Parts.All(part => part.Key is "cpu" or "gpu");
         var notes = new List<string>();
-        if (!sample.Estimated) notes.Add(Loc.T("整机为实测", "System is measured") + Bracket(Measured(sample)));
         if (sample.Missing.Count > 0) notes.Add(Line(Loc.T("未读取", "Not read"), string.Join(Loc.T("、", ", "), sample.Missing)));
+        notes.Add(Line(Loc.T("来源", "Source"), Source(sample)));
         return new PowerTable(columns, rows, sum, notes);
     }
 

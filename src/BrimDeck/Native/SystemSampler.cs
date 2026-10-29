@@ -41,7 +41,10 @@ internal sealed class SystemSampler : IDisposable
     private PowerProvider? _power;
     private BatteryProvider? _battery;
     private readonly Queue<double> _powerHistory = new(HistoryLength);
-    private readonly PowerStats _powerStats = new();
+    private readonly PowerStats _powerStats = new(HistoryLength);
+    // Where the last whole-machine figure came from: the peak and mean (of the curve's readings) start over when it changes (plugged in
+    // or out), so a measurement and an estimate are never counted together. The curve keeps its readings.
+    private PowerSource? _powerSource;
     // The processor's and the graphics' own power, read with the whole machine's, for the page's power line when it shows one of them.
     private readonly PowerTrail _cpuPower = new(HistoryLength), _gpuPower = new(HistoryLength);
     private readonly NetworkProvider _network = new();
@@ -143,7 +146,7 @@ internal sealed class SystemSampler : IDisposable
         {
             try
             {
-                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _cpuPower.Clear(); _gpuPower.Clear(); _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _wake.WaitOne(); continue; }
+                if (!_wanted) { primed = false; _history.Clear(); _cpuHistory.Clear(); _gpuHistories.Clear(); _powerHistory.Clear(); _powerStats.Reset(); _powerSource = null; _cpuPower.Clear(); _gpuPower.Clear(); _power!.Sample(false, false, 0, [], default, false); _storage.Rest(); _wake.WaitOne(); continue; }
                 bool primePower = _primePower;
                 _primePower = false;
                 if (!primed || _primeProcesses || primePower)
@@ -224,6 +227,8 @@ internal sealed class SystemSampler : IDisposable
                     if (power.TryGet(out var drawn))
                     {
                         if (_powerHistory.Count == HistoryLength) _powerHistory.Dequeue();
+                        if (_powerSource is { } last && last != drawn.Source) _powerStats.Reset();
+                        _powerSource = drawn.Source;
                         _powerHistory.Enqueue(drawn.Watts); _powerStats.Add(drawn.Watts, now);
                         if (PowerResolver.PartWatts(drawn, "cpu") is { } cpuWatts) _cpuPower.Add(cpuWatts, now);
                         if (PowerResolver.PartWatts(drawn, "gpu") is { } gpuWatts) _gpuPower.Add(gpuWatts, now);
@@ -241,6 +246,7 @@ internal sealed class SystemSampler : IDisposable
         if (!powerWanted)
         {
             if (_powerHistory.Count > 0) { _powerHistory.Clear(); _powerStats.Reset(); }
+            _powerSource = null;
             _cpuPower.Clear(); _gpuPower.Clear();
             _power!.Sample(false, false, now, [], default, false);
         }
@@ -250,7 +256,7 @@ internal sealed class SystemSampler : IDisposable
             DownHistory = _history.Select(reading => reading.Down).ToArray(), UpHistory = _history.Select(reading => reading.Up).ToArray(),
             CpuHistory = _cpuHistory.ToArray(), Gpus = adapters, Storage = storage,
             Power = power, Battery = battery, PowerHistory = _powerHistory.ToArray(),
-            PowerSummary = _powerStats.Count > 0 ? new PowerSummary(_powerStats.Peak, _powerStats.Average, _powerStats.Count, now - _powerStats.Started) : null,
+            PowerSummary = _powerStats.Summary(now),
             CpuPower = _cpuPower.Track(now), GpuPower = _gpuPower.Track(now)
         };
         var shown = WithGpu(snapshot, _autoGpu, out bool automatic);

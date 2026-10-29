@@ -242,7 +242,7 @@ public sealed record MonitorSnapshot(DateTimeOffset Time, int LogicalProcessors,
     // empty while storage is not read.
     public IReadOnlyList<StorageDrive> Storage { get; init; } = [];
     // The whole machine's power draw and its own battery, read only while something shows them (SystemSampler.SetExtras); PowerHistory
-    // is the last readings in watts, oldest first, and PowerSummary their peak and average since they began.
+    // is the last readings in watts, oldest first, and PowerSummary their peak and average (PowerStats).
     public Reading<PowerSample> Power { get; init; } = Reading<PowerSample>.Unavailable(Loc.T("正在读取", "Reading"));
     public Reading<BatterySample> Battery { get; init; } = Reading<BatterySample>.Unavailable(Loc.T("正在读取", "Reading"));
     public IReadOnlyList<double> PowerHistory { get; init; } = [];
