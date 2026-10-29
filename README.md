@@ -117,7 +117,7 @@ Requires Windows 11 (x64). Windows 10 (version 2004 or later) has limited suppor
    - Portable: `BrimDeck-<version>-Portable-x64.zip`. Extract it and run `BrimDeck.exe` in the `BrimDeck` folder.
 2. If Windows shows "Windows protected your PC", select "More info", then "Run anyway".
 
-Both versions update from within the app, and both keep settings and data in `%LOCALAPPDATA%\BrimDeck`. When the portable version is in a folder that needs administrator rights to change, such as `C:\Program Files`, the update asks for administrator approval. To stop using the portable version, turn off starting with Windows in settings if it is on, then delete its folder; to remove settings and data as well, also delete `%LOCALAPPDATA%\BrimDeck`.
+Both versions update from within the app, and both keep settings and data in `%LOCALAPPDATA%\BrimDeck`. The app offers releases only; turn on "Receive beta updates" on the About page of settings to be offered betas too. When the portable version is in a folder that needs administrator rights to change, such as `C:\Program Files`, the update asks for administrator approval. To stop using the portable version, turn off starting with Windows in settings if it is on, then delete its folder; to remove settings and data as well, also delete `%LOCALAPPDATA%\BrimDeck`.
 
 ## Quick start
 

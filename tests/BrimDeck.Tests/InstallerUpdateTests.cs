@@ -6,6 +6,7 @@ using BrimDeck.Core;
 internal static class InstallerUpdateTests
 {
     private static readonly Uri ManifestUri = new("https://updates.test/latest/update.json");
+    private static readonly Uri BetaManifestUri = new("https://updates.test/beta-channel/update.json");
 
     public static async Task Run(string root, Action<string, bool> check)
     {
@@ -90,17 +91,34 @@ internal static class InstallerUpdateTests
         service = new AppUpdates(Backend(), Path.Combine(root, "installer-updates-data"));
         await service.CheckAsync(true); await service.DownloadAsync(); launches.Clear();
         check("the update service prepares and starts the installer", service.Stage == AppUpdateStage.Ready && service.PrepareRestart(() => { }) && launches.Count == 1);
+
+        var betaBackend = new InstallerUpdateBackend(http, ManifestUri, (m, p) => new Uri($"https://updates.test/v{m.Version}/{p.File}"), "0.1.0",
+            Path.Combine(root, "installer-updates-beta"), UpdateMode.Installer, betaManifest: BetaManifestUri);
+        server.BetaManifest = (manifest with { Version = "0.3.0-beta.1" }).ToJson();
+        check("without betas the beta channel is not read", (await betaBackend.CheckAsync(false, CancellationToken.None))?.Version == "0.2.0" && server.BetaRequests == 0);
+        check("a beta newer than the release is offered", (await betaBackend.CheckAsync(true, CancellationToken.None))?.Version == "0.3.0-beta.1");
+        server.BetaManifest = (manifest with { Version = "0.2.0-beta.2" }).ToJson();
+        check("a release newer than the beta is offered", (await betaBackend.CheckAsync(true, CancellationToken.None))?.Version == "0.2.0");
+        server.BetaManifest = null;
+        check("a missing beta channel leaves the release", (await betaBackend.CheckAsync(true, CancellationToken.None))?.Version == "0.2.0" && server.BetaRequests == 3);
+        server.BetaManifest = "broken";
+        check("an unreadable beta manifest leaves the release", (await betaBackend.CheckAsync(true, CancellationToken.None))?.Version == "0.2.0");
     }
 
     private sealed class ReleaseServer : HttpMessageHandler
     {
         public string Manifest { get; set; } = "";
         public byte[] Installer { get; set; } = [];
+        // Null answers the beta manifest with 404, as before the first beta.
+        public string? BetaManifest { get; set; }
         public int Requests { get; private set; }
+        public int BetaRequests { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests++;
+            if (request.RequestUri == BetaManifestUri) BetaRequests++;
             HttpContent? content = request.RequestUri == ManifestUri ? new StringContent(Manifest)
+                : request.RequestUri == BetaManifestUri && BetaManifest is not null ? new StringContent(BetaManifest)
                 : request.RequestUri?.AbsolutePath == "/v0.2.0/BrimDeck-0.2.0-Setup.exe" ? new ByteArrayContent(Installer) : null;
             return Task.FromResult(new HttpResponseMessage(content is null ? HttpStatusCode.NotFound : HttpStatusCode.OK) { Content = content ?? new StringContent("") });
         }
