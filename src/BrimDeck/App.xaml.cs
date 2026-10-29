@@ -36,7 +36,7 @@ public partial class App : Application
     internal LyricsService Lyrics { get; private set; } = null!;
     // A window being dragged by its title bar or edge; the panels do not open on it (see MainWindow.TrackPointer).
     internal WindowDrags WindowDrags { get; private set; } = null!;
-    private readonly HashSet<MainWindow> _presentingMedia = [];
+    private readonly HashSet<MainWindow> _presentingMedia = [], _presentingSystemAudio = [];
     // The system monitor page's readings, shared by every panel; created when a panel first shows the page.
     internal SystemSampler? Monitor { get; private set; }
     internal event Action<MonitorSnapshot>? MonitorUpdated;
@@ -285,18 +285,20 @@ public partial class App : Application
     internal void StartMedia()
     {
         bool wanted = Settings.MediaWanted;
-        if (wanted && Media is null) { Media = new MediaSessions(Dispatcher); Media.Changed += RaiseMediaChanged; _ = Media.StartAsync(); }
+        if (wanted && Media is null) { Media = new MediaSessions(Dispatcher); Media.Changed += RaiseMediaChanged; Media.SetPresentationActive(_presentingMedia.Count > 0, _presentingSystemAudio.Count > 0); _ = Media.StartAsync(); }
         else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
         // Switching the setting off leaves full control on until BrimDeck restarts.
         if (Settings.AppleMusicFullControl && Media is { AppleMusicFullControl: false } media) media.EnableAppleMusicFullControl();
         if (Media is not null) Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl;
     }
     private void RaiseMediaChanged() => MediaChanged?.Invoke();
-    // Audio levels are read while any panel shows music.
-    internal void PresentMedia(MainWindow deck, bool active)
+    // Audio levels are read while any panel shows music: the player's while it shows a song's bars, the whole system's while
+    // it shows collapsed bars at all times and no song plays.
+    internal void PresentMedia(MainWindow deck, bool active, bool system)
     {
         if (active) _presentingMedia.Add(deck); else _presentingMedia.Remove(deck);
-        Media?.SetPresentationActive(_presentingMedia.Count > 0);
+        if (system) _presentingSystemAudio.Add(deck); else _presentingSystemAudio.Remove(deck);
+        Media?.SetPresentationActive(_presentingMedia.Count > 0, _presentingSystemAudio.Count > 0);
     }
     // The system is read while any panel shows the monitor page open (and briefly after; see SystemSampler) or shows readings in
     // its collapsed row. Processes are listed only for an open page.

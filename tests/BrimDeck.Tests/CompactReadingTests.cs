@@ -21,6 +21,8 @@ internal static class CompactReadingTests
     }
 
     private static DeckSettings Read(string json) => SettingsMigrations.Read(json);
+    // Read by the version that gave the equalizer its own switch, whatever version the tests carry.
+    private static DeckSettings Upgraded(string json) => SettingsMigrations.Read(json, new Version(1, 2, 3), out _);
     private static bool Same(IEnumerable<CompactReading> readings, params CompactMonitorItems[] order) => readings.Select(r => r.Item).SequenceEqual(order);
 
     private static void Migration(Action<string, bool> check)
@@ -261,18 +263,40 @@ internal static class CompactReadingTests
     // The order of the collapsed parts: one per style, each part once, kept by copies and by saving.
     private static void PartOrder(Action<string, bool> check)
     {
-        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor];
+        CompactPart[] standard = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock];
         var defaults = new DeckSettings();
-        check("Compact order: defaults are rings, music, readings", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual(standard));
+        check("Compact order: defaults are rings, music, readings, equalizer, clock", defaults.NotchOrder.SequenceEqual(standard) && defaults.CapsuleOrder.SequenceEqual(standard));
         var odd = Read("""{"AppVersion":"0.1.0","NotchOrder":[2,9,2,0]}""");
-        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music])
+        check("Compact order: unknown and repeated parts are dropped and missing ones added", odd.NotchOrder.SequenceEqual([CompactPart.Monitor, CompactPart.Rings, CompactPart.Music, CompactPart.Equalizer, CompactPart.Clock])
             && odd.CapsuleOrder.SequenceEqual(standard));
+        var older = Read("""{"AppVersion":"1.2.2","NotchOrder":[1,2,0]}""");
+        check("Compact order: an order saved before the equalizer and the clock had a place puts the equalizer before the clock, at the end",
+            older.NotchOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock]));
+        var moved = Read("""{"AppVersion":"1.2.3","NotchOrder":[4,0,3,1,2]}""");
+        check("Compact order: the equalizer and the clock keep a place chosen for them",
+            moved.NotchOrder.SequenceEqual([CompactPart.Clock, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Music, CompactPart.Monitor]));
+        var musicOff = Upgraded("""{"AppVersion":"1.2.2","NotchMusic":false}""");
+        check("Compact equalizer: a file from before its own switch shows it as the music was shown",
+            !musicOff.NotchEqualizer && musicOff.CapsuleEqualizer && !musicOff.EqualizerAlways && Upgraded("""{"AppVersion":"1.2.2"}""").NotchEqualizer);
+        var split = Upgraded("""{"AppVersion":"0.0.9","CompactMusic":false}""");
+        check("Compact equalizer: a file with one music switch for both styles turns both equalizers as it", !split.NotchEqualizer && !split.CapsuleEqualizer);
+        check("Compact equalizer: its color was the cover's or the theme's, and is now a swatch",
+            Upgraded("""{"AppVersion":"1.2.2","MusicCoverColor":false}""").EqualizerColor == ClockColor.White
+            && Upgraded("""{"AppVersion":"1.2.2","MusicCoverColor":true}""").EqualizerColor == ClockColor.Cover
+            && Upgraded("""{"AppVersion":"1.2.2"}""").EqualizerColor == ClockColor.Cover && new DeckSettings().EqualizerColor == ClockColor.Cover
+            && Upgraded("""{"AppVersion":"1.2.3","EqualizerColor":2}""").EqualizerColor == ClockColor.Cyan);
+        var chosen = Upgraded("""{"AppVersion":"1.2.2","NotchMusic":false,"NotchEqualizer":true}""");
+        check("Compact equalizer: a switch already saved is kept", chosen.NotchEqualizer);
+        check("Compact equalizer: media is read for the equalizer alone, and the indicator shows none",
+            new DeckSettings { MusicPage = false, NotchMusic = false, MusicIndicatorProgress = false }.MediaWanted
+            && !new DeckSettings { MusicPage = false, NotchMusic = false, NotchEqualizer = false, MusicIndicatorProgress = false }.MediaWanted
+            && !new DeckSettings().ShowsEqualizer(CompactStyle.Line));
         var settings = new DeckSettings();
         settings.SetCompactOrder(CompactStyle.Capsule, [CompactPart.Music, CompactPart.Monitor, CompactPart.Rings]);
         var copy = settings.Copy(); copy.SetCompactOrder(CompactStyle.Capsule, standard);
         check("Compact order: each style keeps its own and Copy is deep", settings.CompactOrder(CompactStyle.Capsule)[0] == CompactPart.Music
             && settings.CompactOrder(CompactStyle.Notch).SequenceEqual(standard));
         var read = SettingsMigrations.Read(JsonSerializer.Serialize(settings));
-        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings]));
+        check("Compact order: survives saving and reading", read.CapsuleOrder.SequenceEqual([CompactPart.Music, CompactPart.Monitor, CompactPart.Rings, CompactPart.Equalizer, CompactPart.Clock]));
     }
 }

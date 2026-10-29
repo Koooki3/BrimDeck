@@ -67,7 +67,7 @@ internal sealed class MediaSessions : IDisposable
     // Sessions on screen that disappeared within the handover hold, by route id.
     private readonly Dictionary<string, SystemSource> _departed = new();
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
-    private bool _reading, _again, _disposed, _sessionListDirty = true, _visible, _requestingManager, _announcedRestarting;
+    private bool _reading, _again, _disposed, _sessionListDirty = true, _visible, _systemVisible, _requestingManager, _announcedRestarting;
     private DateTimeOffset _recoveryAt;
     private string? _selected, _pinned, _pinnedSource, _announcedPin;
     public IReadOnlyList<MediaTrack> Tracks { get; private set; } = [];
@@ -203,11 +203,13 @@ internal sealed class MediaSessions : IDisposable
         _recheck.Interval = TimeSpan.FromMilliseconds(Math.Max(50, (due - DateTimeOffset.UtcNow).TotalMilliseconds + 50));
         _recheck.Start();
     }
-    public void SetPresentationActive(bool active)
+    // system: bars are shown that read the whole system's sound while no song plays.
+    public void SetPresentationActive(bool active, bool system = false)
     {
-        if (_visible == active) return;
-        _visible = active; UpdateMeter();
-        if (active) Schedule();
+        if (_visible == active && _systemVisible == system) return;
+        bool appeared = active && !_visible;
+        _visible = active; _systemVisible = system; UpdateMeter();
+        if (appeared) Schedule();
     }
     private void Subscribe(Session session)
     { session.MediaPropertiesChanged += MetadataChanged; session.PlaybackInfoChanged += PlaybackChanged; session.TimelinePropertiesChanged += TimelineChanged; }
@@ -668,8 +670,12 @@ internal sealed class MediaSessions : IDisposable
     public float Peak() => _meter.Peak;
     // Flowing bar values from the player's captured audio; false when only the peak meter is available.
     public bool FlowLevels(Span<double> levels) => _meter.TryFill(levels);
-    private void UpdateMeter() => _meter.SetSource(Current is not null && _routes.TryGetValue(Current.Id, out var route) ? route.ProcessName : null,
-        _visible && Current?.State == MediaState.Playing);
+    // The playing player's sound while its bars are seen; otherwise the whole system's, while bars shown at all times ask for it.
+    private void UpdateMeter()
+    {
+        bool player = _visible && Current?.State == MediaState.Playing;
+        _meter.SetSource(Current is not null && _routes.TryGetValue(Current.Id, out var route) ? route.ProcessName : null, player, !player && _systemVisible);
+    }
 
     // The application playing the current song, for bringing its window forward.
     public MediaAppOwner? CurrentOwner => Current is not null && _routes.TryGetValue(Current.Id, out var route)
