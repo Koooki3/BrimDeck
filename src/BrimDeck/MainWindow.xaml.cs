@@ -685,8 +685,13 @@ public partial class MainWindow : Window
         Track content = expanded ? new(.12, .8) : new(0, .30);
         Track surface = reshaping || morphing || booting || expanded ? new(0, 1) : new(PanelMotion.CloseSurfaceStart(redirect || carried > 0), line ? .92 : 1);
         // Between forms the corners turn early: a notch becoming a capsule rounds its flat top long before it has its new size,
-        // rather than showing a square top over round bottom corners for most of the move.
-        Track cornerTrack = morphing ? new(0, .4) : surface;
+        // rather than showing a square top over round bottom corners for most of the move. The outline draws no top corners
+        // while it has shoulders (IslandBorder), so the two take turns: leaving the notch, the shoulders draw in first and the
+        // top rounds after them; becoming the notch, the top squares first and the shoulders flare after it. On one track the
+        // top stayed square until the shoulders were gone and then rounded in a single frame.
+        bool intoShoulders = morphing && shape.Shoulder > 0, outOfShoulders = morphing && !intoShoulders && Island.ShoulderRadius > 0;
+        Track cornerTrack = outOfShoulders ? new(.3, .7) : morphing ? new(0, .4) : surface;
+        Track shoulderTrack = intoShoulders ? new(.4, 1) : outOfShoulders ? new(0, .3) : surface;
         Track compact = booting ? new(.5, 1) : expanded ? new(0, .15) : line ? new(0, morphing ? .25 : .35) : morphing ? new(.55, 1) : new(.62, 1);
         Track shadow = booting ? new(.35, 1) : expanded ? new(0, .3) : morphing ? new(.2, .9) : new(.5, 1);
         Track rim = expanded ? new(.2, .5) : morphing ? new(.2, .7) : new(.5, .8);
@@ -712,7 +717,7 @@ public partial class MainWindow : Window
         Animate(ContentScale, ScaleTransform.ScaleYProperty, expanded ? 1 : .96, duration, content, easeOut);
         Animate(Island, WidthProperty, width, duration, surface, settle);
         Animate(Island, HeightProperty, height, duration, surface, settle);
-        Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, surface, corners);
+        Animate(Island, IslandBorder.ShoulderRadiusProperty, expanded ? 0 : shape.Shoulder, duration, shoulderTrack, corners);
         // Compact notch and capsule hover over their full bounding box from the screen edge; the open panel uses its own outline.
         Animate(HoverExtension, HeightProperty, double.IsFinite(box.Height) ? Math.Max(0, box.Height) : 0, duration, surface, settle);
         if (duration == 0)
