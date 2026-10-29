@@ -78,6 +78,11 @@ public sealed partial class SettingsWindow
                 Loc.T("不含 U 盘、移动硬盘、网络盘和光驱。放不下的盘符合并为最后一项。",
                     "USB, external, network and optical drives are not included. Letters that do not fit are combined into the last item."),
                 keepPreview: true),
+            Toggle(Loc.T("显示功耗与电池", "Show power and battery"), S.MonitorPower, v => Resize(s => s.MonitorPower = v, DeckPage.Monitor),
+                help:
+                Loc.T("在硬盘下方显示整机功耗（曲线、峰值、均值）和本机电池。功耗来源按优先级：功率计、电池放电、CPU + GPU 估算（≈）。仅在此页打开时读取。",
+                    "Shows system power (curve, peak, mean) and this PC's battery under the drives. Power source, in order: system meter, battery discharge, CPU + GPU estimate (≈). Read only while this page is open."),
+                keepPreview: true),
             Toggle(Loc.T("显示温度", "Show temperatures"), S.MonitorTemperatures, v => Resize(s => s.MonitorTemperatures = v, DeckPage.Monitor),
                 help:
                 Loc.T("读不到的温度不显示。CPU 温度由主板固件提供，许多电脑没有这项数据；有的电脑读到的是主板的温度，不是 CPU 本身的温度。",
@@ -298,7 +303,8 @@ public sealed partial class SettingsWindow
     {
         CompactMonitorItems.Columns => Loc.T("核心柱", "Core columns"), CompactMonitorItems.Memory => Loc.T("内存", "Memory"), CompactMonitorItems.Gpu => "GPU",
         CompactMonitorItems.Download => Loc.T("下载", "Download"), CompactMonitorItems.Upload => Loc.T("上传", "Upload"),
-        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), _ => "CPU"
+        CompactMonitorItems.Storage => Loc.T("硬盘", "Drives"), CompactMonitorItems.Power => Loc.T("整机功耗", "System power"),
+        CompactMonitorItems.Charge => Loc.T("本机电池", "This PC's battery"), _ => "CPU"
     };
     private static CompactReading Reading(DeckSettings settings, CompactMonitorItems item) => settings.CompactReadings.First(reading => reading.Item == item);
 
@@ -320,21 +326,24 @@ public sealed partial class SettingsWindow
         // The reading's colors in the normal state as the scheme gives them, one per channel (the core columns: one per kind of
         // core). They are set under "配色", so they only show here.
         var dots = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Background = Brushes.Transparent,
-            ToolTip = Loc.T("颜色在上方“各项颜色”中设置。", "Set under Reading colors above.") };
+            ToolTip = item is CompactMonitorItems.Power or CompactMonitorItems.Charge
+                ? Loc.T("颜色由当前主题的功耗样式决定。", "The color comes from the current theme's power style.")
+                : Loc.T("颜色在上方“各项颜色”中设置。", "Set under Reading colors above.") };
         var fills = Enumerable.Range(0, CompactMonitor.Channels(item)).Select(channel =>
             new Ellipse { Width = ReadingDot, Height = ReadingDot, Margin = new Thickness(channel == 0 ? 0 : 3, 0, 0, 0) }).ToArray();
         foreach (var fill in fills) dots.Children.Add(fill);
         refresh.Add(() =>
         {
             var colors = MonitorThemeColors.For(S);
-            for (int channel = 0; channel < fills.Length; channel++) fills[channel].Fill = UI.Brush(colors[CompactMonitor.Role(item, channel)]);
+            for (int channel = 0; channel < fills.Length; channel++) fills[channel].Fill = UI.Brush(item == CompactMonitorItems.Power ? PowerStyle.For(colors).Draw
+                    : item == CompactMonitorItems.Charge ? PowerStyle.For(colors).Fill(MemoryLevel.Normal, BatteryState.Discharging) : colors[CompactMonitor.Role(item, channel)]);
         });
         Grid.SetColumn(dots, 1); row.Children.Add(dots);
 
         // The figure switch is for the rings only; the core columns (no figure) and the rates (always text) show it off and dimmed.
         bool choice = CompactMonitor.HasValueChoice(item);
         var value = new CheckBox { Style = (Style)FindResource("SettingsToggle"), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage };
+            VerticalAlignment = VerticalAlignment.Center, IsEnabled = choice, IsChecked = item is CompactMonitorItems.Download or CompactMonitorItems.Upload or CompactMonitorItems.Storage or CompactMonitorItems.Power or CompactMonitorItems.Charge };
         AutomationProperties.SetName(value, Loc.T("显示数值 ", "Show figure ") + name);
         if (!choice)
         {
@@ -342,6 +351,8 @@ public sealed partial class SettingsWindow
             {
                 CompactMonitorItems.Columns => Loc.T("核心柱没有数值。", "The core columns have no figure."),
                 CompactMonitorItems.Storage => Loc.T("硬盘始终显示数值，在左侧的菜单中选择显示什么。", "The drives always show figures; choose which in the menu at the left."),
+                CompactMonitorItems.Power => Loc.T("整机功耗，单位 W；≈ 表示估算。无读数的电脑不显示。", "System power in W; ≈ marks an estimate. Hidden on PCs with no reading."),
+                CompactMonitorItems.Charge => Loc.T("本机电池电量，以电池图形显示。无电池的电脑不显示。", "This PC's battery charge, shown as a battery icon. Hidden on PCs without a battery."),
                 _ => Loc.T("下载和上传始终显示速率。", "Download and upload always show their rate.")
             };
             ToolTipService.SetShowOnDisabled(value, true);
