@@ -171,6 +171,19 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
         return Math.Max(150, head + margins + rest + storageMargin + MinimumGraph + StorageRowFor(body));
     }
 
+    // The lines under the drives for the whole machine's power draw and its own battery (PowerBlock): 2 lines when both have one, 1 when
+    // only power has, or when the page has room for one line only (power and battery then share it). The first line comes before the
+    // drives' lines, the second after them, with the core columns keeping MinimumGraph; a page without room for a line has none, and a
+    // page that asks for no power is laid out exactly as before.
+    public int PowerLines { get; init; }
+    public static int PowerRoom(double readings, MetricsMode metrics, double figure, double body, int storageLines)
+    {
+        var (head, margins, rest, storageMargin) = Fixed(metrics, figure, body);
+        double row = StorageRowFor(body);
+        double drives = storageLines > 0 ? storageMargin + storageLines * row : 0;
+        return Math.Clamp((int)Math.Floor((readings - head - margins - rest - drives - storageMargin - MinimumGraph) / row), 0, 2);
+    }
+
     // The heights MonitorView gives the readings' parts: the main gauge's line, the graph's margins, memory and network, and the
     // drives' top margin. The graph takes what is left.
     private static (double Head, double Margins, double Metrics, double StorageMargin) Fixed(MetricsMode metrics, double figure, double body)
@@ -190,10 +203,11 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
     {
         var (head, margins, metrics, storageMargin) = Fixed(Metrics, Figure, Body);
         double storage = StorageLines > 0 ? storageMargin + StorageLines * StorageRow : 0;
-        double graph = Math.Max(16, readings - foot - head - margins - metrics - storage);
+        double power = PowerLines > 0 ? storageMargin + PowerLines * StorageRow : 0;
+        double graph = Math.Max(16, readings - foot - head - margins - metrics - storage - power);
         double graphTop = head + (Metrics == MetricsMode.Line ? 4 : 6);
         double metricsTop = head + margins + graph;
-        return [(0, head), (graphTop, graph), (metricsTop, metrics), (metricsTop + metrics, storage)];
+        return [(0, head), (graphTop, graph), (metricsTop, metrics), (metricsTop + metrics, storage), (metricsTop + metrics + storage, power)];
     }
 
     // How far past a step a resize must go before the page takes the next step, so a size held at a step does not flip back and
@@ -201,18 +215,18 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
     public const double Hysteresis = 12;
 
     // The layout for this size, keeping previous (the step the page shows) while the size is within Hysteresis of it.
-    public static MonitorLayout For(double width, double height, bool processes, int storage, MonitorLayout? previous)
+    public static MonitorLayout For(double width, double height, bool processes, int storage, MonitorLayout? previous, int power = 0)
     {
-        var next = For(width, height, processes, storage);
+        var next = For(width, height, processes, storage, power);
         if (previous is null || next == previous) return next;
         foreach (double dw in new[] { 0, -Hysteresis, Hysteresis })
             foreach (double dh in new[] { 0, -Hysteresis, Hysteresis })
-                if (For(width + dw, height + dh, processes, storage) == previous) return previous;
+                if (For(width + dw, height + dh, processes, storage, power) == previous) return previous;
         return next;
     }
 
-    // storage: the volumes the page would show an entry each.
-    public static MonitorLayout For(double width, double height, bool processes, int storage = 0)
+    // storage: the volumes the page would show an entry each. power: the lines the page would show for power (0 to 2).
+    public static MonitorLayout For(double width, double height, bool processes, int storage = 0, int power = 0)
     {
         width = double.IsFinite(width) ? Math.Max(0, width) : 0;
         height = double.IsFinite(height) ? Math.Max(0, height) : 0;
@@ -229,9 +243,14 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
         var metrics = readings < LinesFrom(figure, body) ? MetricsMode.Line : readings < 250 ? MetricsMode.Lines : MetricsMode.Blocks;
         // The readings beside a side list are the page less the list and the 22 DIP between them.
         double readingsWidth = list == ListPlacement.Side ? width - 22 - SideListWidth(width) : width;
+        // The first line of power (with the battery, sharing it) comes before the drives' lines, which give up room for it: a page the
+        // user set to show power must show it at the size it has, however many drives there are. The battery's own line comes after the drives.
+        bool firstLine = power > 0 && PowerRoom(readings, metrics, figure, body, 0) >= 1;
+        double reserve = firstLine ? Fixed(metrics, figure, body).StorageMargin + StorageRowFor(body) : 0;
         int columns = storage <= 0 ? 0 : readingsWidth >= StorageTwoColumns ? Math.Min(storage, MaximumStorageColumns) : 1;
-        int lines = storage <= 0 ? 0 : Math.Min((storage + columns - 1) / columns, StorageRoom(readings, metrics, figure, body));
-        return new(figure, body, caption, metrics, list, row) { StorageLines = lines, StorageColumns = lines > 0 ? columns : 0 };
+        int lines = storage <= 0 ? 0 : Math.Min((storage + columns - 1) / columns, StorageRoom(readings - reserve, metrics, figure, body));
+        int powerLines = power <= 0 ? 0 : Math.Min(Math.Min(power, 2), Math.Max(PowerRoom(readings, metrics, figure, body, lines), firstLine ? 1 : 0));
+        return new(figure, body, caption, metrics, list, row) { StorageLines = lines, StorageColumns = lines > 0 ? columns : 0, PowerLines = powerLines };
     }
 
     // The rows and columns a list of this size shows.
