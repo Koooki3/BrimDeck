@@ -312,7 +312,7 @@ public sealed class DeckSettings
     // song's, Custom EqualizerCustomColor. Gradient is not offered and reads as White.
     public ClockColor EqualizerColor { get; set; } = ClockColor.Cover;
     public string EqualizerCustomColor { get; set; } = ClockColors.DefaultCustom;
-    // The notch and the capsule each switch the clock on; its style, color and hour format are shared.
+    // The notch and the capsule each switch the clock on; its style, color, hour format and seconds are shared.
     public bool NotchClock { get; set; }
     public bool CapsuleClock { get; set; }
     public ClockStyle ClockStyle { get; set; }
@@ -320,6 +320,7 @@ public sealed class DeckSettings
     public string ClockCustomColor { get; set; } = ClockColors.DefaultCustom;
     public List<string> ClockGradient { get; set; } = [.. ClockColors.Sunset];
     public bool Clock24Hour { get; set; } = true;
+    public bool ClockSeconds { get; set; }
     public CompactMusicText MusicText { get; set; }
     public bool MusicTrackNotice { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;

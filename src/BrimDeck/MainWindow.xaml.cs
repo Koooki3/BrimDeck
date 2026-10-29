@@ -20,6 +20,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _refresh = new() { Interval = TimeSpan.FromSeconds(60) };
     // Fires just after each minute boundary, when the clock text and the reset countdowns change.
     private readonly DispatcherTimer _clock = new();
+    // Fires just after each second boundary while the collapsed clock shows seconds; it redraws only the clock.
+    private readonly DispatcherTimer _seconds = new();
     private readonly DispatcherTimer _alertTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     // Compact hover follows the cursor position rather than window mouse messages, which reach
     // this per-pixel transparent window unreliably over the nearly invisible strip around the surface.
@@ -126,6 +128,7 @@ public partial class MainWindow : Window
         Island.Background = _surface;
         _refresh.Tick += async (_, _) => await RefreshAutomaticallyAsync();
         _clock.Tick += (_, _) => { UpdateClock(); ScheduleClock(); if (_expanded) RenderUsage(); else if (OffPeakChanged()) RenderCompact(); if (_lead is null) _app.CheckUpdatesIfDue(); };
+        _seconds.Tick += (_, _) => { if (_compactClock is not null) _compactClock.Time = DateTime.Now; _seconds.Interval = SecondDelay(DateTime.Now); };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _alert = null; RenderCompact(); if (!_expanded) SetExpanded(false); };
         // A new foreground context closes the panel directly (ApplySettings lays it out collapsed), so SetExpanded never sees the
         // panel turn from open to closed: the collapsed title is set to scroll its laps again here, as SetExpanded does.
@@ -166,7 +169,7 @@ public partial class MainWindow : Window
             if (_lead is null) { _app.AssignDisplays(); await RefreshAutomaticallyAsync(); }
         };
         Closing += (_, e) => { if (!_app.Exiting && !_retiring) { e.Cancel = true; SetExpanded(false); } };
-        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
+        Closed += (_, _) => { _escapeDismissal?.Dispose(); _virtualDesktops?.Dispose(); _host.Dispose(); _hover.Stop(); _leave.Stop(); _pointerTrack.Stop(); _pageSwitchHold.Stop(); _clock.Stop(); _seconds.Stop(); _refresh.Stop(); _alertTimer.Stop(); _clipSettle?.Stop(); };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) { WindowState = WindowState.Normal; SetExpanded(false); } };
         // The collapsed island opens on hover, so a right click there does nothing.
         MouseWheel += PanelWheel;
@@ -210,6 +213,13 @@ public partial class MainWindow : Window
         return true;
     }
     internal static TimeSpan ClockDelay(DateTime now) => TimeSpan.FromMilliseconds(60_000 - now.Second * 1000 - now.Millisecond + 50);
+    private static TimeSpan SecondDelay(DateTime now) => TimeSpan.FromMilliseconds(1000 - now.Millisecond + 20);
+    private void ApplySecondClock()
+    {
+        bool run = Settings.ClockSeconds && Settings.ShowsClock(EffectiveStyle);
+        if (run && !_seconds.IsEnabled) { _seconds.Interval = SecondDelay(DateTime.Now); _seconds.Start(); }
+        else if (!run && _seconds.IsEnabled) _seconds.Stop();
+    }
     // Hidden or held open by a preview, the surface cannot be hovered, so the checks stop instead of returning early 25 times a
     // second. A collapsed preview keeps them running: hovering the island ends the preview (see TrackPointer).
     private void UpdatePointerTracking()
@@ -241,6 +251,7 @@ public partial class MainWindow : Window
         if (!Settings.QuotaAlerts && _alert is not null) ClearAlert();
         ApplySyncSchedule();
         ApplyMusicSettings();
+        ApplySecondClock();
         ApplyScale();
         var (bounds, work, scale) = WindowsHost.MonitorScreen(MonitorHandle) ?? WindowsHost.PrimaryScreen();
         UpdateCollapsedGeometry(bounds, work, scale);
