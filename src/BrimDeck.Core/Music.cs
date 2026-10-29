@@ -61,9 +61,10 @@ public sealed record MediaTrack
     }
 }
 
-// The collapsed row, left to right: the cover region, the middle (quota rings, the lyric or track notice and the system
-// readings, in the order of CompactPart chosen for the style), the equalizer region and the clock region. The order only
-// places the regions; their widths are the same in any order. The row shows what fits of each region whole: the rings and the
+// The collapsed row, left to right: the cover region, then the quota rings, the lyric or track notice, the system readings, the
+// equalizer and the clock in the order of CompactPart chosen for the style. The rings, the lyric and the readings share the
+// middle; the equalizer and the clock keep regions of their own. The order only places the parts; their widths are the same in
+// any order. The equalizer shows with the media (the cover and the lyric) unless it is chosen apart (equalizer). The row shows what fits of each region whole: the rings and the
 // readings that do not fit scroll through it (CompactSpacing.Window), and the surface is never narrower than the cover, the
 // equalizer, the clock and the shortest lyric (RequiredWidth). CompactSpacing places the parts with one gap between all of them.
 // Sizes follow the height through Scale (1 at the default 32 DIP height) and are whole DIPs; font sizes are
@@ -79,7 +80,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public double CoverWidth { get; init; }
     public double CoverSize { get; init; } = 20;
     public double CoverRadius { get; init; } = 4;
-    // Equalizer region: the gap from the middle, then the bars; the gap goes first, then the bars' left side.
+    // Equalizer region: the gap from the middle, then the bars; the gap goes first, then the bars' left side. Alone it has no gap.
     public double EqualizerWidth { get; init; }
     public double EqualizerSize { get; init; } = 18;
     public double EqualizerHeight { get; init; } = 14;
@@ -103,6 +104,11 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     public bool TextScrolls { get; init; }
 
     public static double Whole(double value) => Math.Round(value, MidpointRounding.AwayFromZero);
+    // The collapsed equalizer's bars (DeckSettings.EqualizerBars): 3 DIP wide, 5 DIP from one bar's left to the next at scale 1,
+    // so the default four take 18 DIP.
+    public const int DefaultBars = 4, MinimumBars = 3, MaximumBars = 20;
+    public static int SafeBars(int bars) => Math.Clamp(bars, MinimumBars, MaximumBars);
+    public static double BarsWidth(int bars, double scale) => Math.Max(1, Whole((3 + (SafeBars(bars) - 1) * 5) * SafeScale(scale)));
     public static double Half(double value) => Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2;
     // Any scale is accepted; non-numbers and non-positive values mean the default size.
     public static double SafeScale(double scale) => double.IsFinite(scale) && scale > 0 ? Math.Clamp(scale, .25, 8) : 1;
@@ -115,12 +121,14 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // the rings show (ring: its size, 0 without rings) and the narrowest window of the system readings when they show
     // (reading: CompactSpacing.Minimum, 0 without readings), which their carousels then show in turn; all with the gaps between
     // them. A clock alone, or rings alone, so make a short surface. In whole DIPs, rounded up, so rounding never takes a part away.
-    public static double RequiredWidth(double scale, bool media, bool text, double clockFace, double ring = 0, double reading = 0)
+    public static double RequiredWidth(double scale, bool media, bool text, double clockFace, double ring = 0, double reading = 0, bool? equalizer = null, int bars = DefaultBars)
     {
         double s = SafeScale(scale), gap = Gap(s), width = 0;
         int parts = 0;
         void Add(double part) { if (part <= 0) return; width += part; parts++; }
-        if (media) { Add(Math.Max(1, Whole(20 * s))); Add(Math.Max(1, Whole(18 * s))); if (text) Add(Whole(MinimumText * s)); }
+        if (media) Add(Math.Max(1, Whole(20 * s)));
+        if (equalizer ?? media) Add(BarsWidth(bars, s));
+        if (media && text) Add(Whole(MinimumText * s));
         Add(Safe(ring)); Add(Safe(reading)); Add(Safe(clockFace));
         return parts == 0 ? 0 : Math.Ceiling(width + (parts - 1) * gap - 1e-9);
     }
@@ -134,18 +142,20 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
     // (CollapsedGeometry.Resolve). dpi (device pixels per DIP, 0 for none): the width is rounded up to whole device pixels. The row
     // is laid out in whole device pixels, rounded down (DevicePixels.Down), so a width with a fraction left in it (a clock face
     // that is not a whole number of DIPs) would leave the readings a fraction short of the room they asked for, and they would scroll.
-    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double dpi = 0)
-        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace);
+    public static double NaturalWidth(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, double dpi = 0, bool? equalizer = null, int bars = DefaultBars)
+        => dpi > 0 ? DevicePixels.Up(Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars), dpi) : Natural(scale, media, rings, text, clockFace, monitorFace, equalizer ?? media, bars);
 
-    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace)
+    private static double Natural(double scale, bool media, int rings, bool text, double clockFace, double monitorFace, bool equalizer, int count)
     {
-        double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace);
+        double s = SafeScale(scale), face = Safe(clockFace), monitor = Safe(monitorFace), bars = BarsWidth(count, s);
         rings = Math.Max(0, rings);
-        double width = media ? Whole(20 * s) + Whole(8 * s) + Whole(8 * s) + Math.Max(1, Whole(18 * s)) : 0;
+        double width = media ? Whole(20 * s) + Whole(8 * s) : 0;
         width += RingsAndText(s, rings, text);
-        bool alone = monitor > 0 && !media && rings == 0 && !text && face == 0;
+        bool alone = monitor > 0 && !media && !equalizer && rings == 0 && !text && face == 0;
         width += monitor == 0 ? 0 : alone ? monitor : monitor + Whole(8 * s);
-        width += face == 0 ? 0 : !media && rings == 0 && !text && monitor == 0 ? face : face + Whole(8 * s);
+        // The bars hold the gap toward the middle, the clock the gap toward whatever is before it.
+        width += !equalizer ? 0 : media || rings > 0 || text || monitor > 0 ? bars + Whole(8 * s) : bars;
+        width += face == 0 ? 0 : !media && !equalizer && rings == 0 && !text && monitor == 0 ? face : face + Whole(8 * s);
         return width;
     }
 
@@ -164,15 +174,18 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
 
     // contentWidth is the whole row in DIPs; clockFace is the clock's reserved width at this scale, or 0 without a clock;
     // monitorFace is the width all chosen system readings want, or 0 without them; readings wider than their region scroll in it.
-    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0)
+    public static CompactMusicLayout Calculate(double contentWidth, double scale, bool media, int rings, bool text, double clockFace, double monitorFace = 0, bool? equalizer = null, int barCount = DefaultBars)
     {
         double s = SafeScale(scale), width = Safe(contentWidth), face = Safe(clockFace), monitorWanted = Safe(monitorFace);
         rings = Math.Max(0, rings);
+        bool bars = equalizer ?? media;
         double cover = Math.Max(1, Whole(20 * s)), coverGap = Whole(8 * s);
-        double eqW = Math.Max(1, Whole(18 * s)), eqH = Math.Max(1, Whole(14 * s)), eqGap = Whole(8 * s), bar = Math.Max(1, Whole(3 * s));
-        // Beside system readings the clock is not alone: it keeps its place at the right after them.
-        bool clockAlone = face > 0 && !media && rings == 0 && monitorWanted == 0;
-        double coverRegion = media ? cover + coverGap : 0, eqRegion = media ? eqGap + eqW : 0;
+        double eqW = BarsWidth(barCount, s), eqH = Math.Max(1, Whole(14 * s)), eqGap = Whole(8 * s), bar = Math.Max(1, Whole(3 * s));
+        // Beside system readings or the equalizer the clock is not alone.
+        bool clockAlone = face > 0 && !media && !bars && rings == 0 && monitorWanted == 0;
+        // The bars hold the gap toward the middle, so without anything there they have none; the clock holds its own.
+        bool barsGap = media || rings > 0 || text || monitorWanted > 0;
+        double coverRegion = media ? cover + coverGap : 0, eqRegion = !bars ? 0 : barsGap ? eqGap + eqW : eqW;
         double clockRegion = face == 0 ? 0 : clockAlone ? face : face + Whole(8 * s);
         // The middle gives way first. When it is empty, the equalizer, then the cover, then the clock shrink in turn,
         // each to nothing before the next starts, so a 1 DIP change in width changes one region by at most 1 DIP.
@@ -184,7 +197,7 @@ public sealed record CompactMusicLayout(double MiddleWidth, double RingSize, dou
         // the two halves are even they narrow together. The readings scroll in what they keep, as the rings and the lyric do.
         // One ring and the shortest lyric always stay. Alone, the readings have the row. All are min and max of linear
         // functions of the width, with slopes from 0 to 1, as above.
-        bool monitorAlone = monitorWanted > 0 && !media && rings == 0 && !text && face == 0;
+        bool monitorAlone = monitorWanted > 0 && !media && !bars && rings == 0 && !text && face == 0;
         double monitorNeed = monitorWanted + Whole(8 * s);
         double monitorRegion = monitorWanted == 0 ? 0 : monitorAlone ? Math.Min(monitorWanted, middle)
             : Math.Min(Math.Min(monitorNeed, Math.Max(middle - RingsAndText(s, rings, text), middle / 2)),

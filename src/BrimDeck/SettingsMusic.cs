@@ -13,7 +13,7 @@ public sealed partial class SettingsWindow
 {
     private DeckPage _previewPage;
     // keepPreview marks the segments alone as preview controls, so a press on the rest of the row still ends the preview.
-    private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true, bool keepPreview = false) where T : notnull
+    private FrameworkElement MusicChoice<T>(string title, T selected, (T Value, string Label)[] options, Action<T> change, bool enabled = true, bool keepPreview = false, string? help = null) where T : notnull
     {
         var strip = new UniformGrid { Columns = options.Length, Width = 292, IsEnabled = enabled };
         if (keepPreview) KeepPreview(strip);
@@ -22,7 +22,7 @@ public sealed partial class SettingsWindow
             var choice = new RadioButton { Style = (Style)FindResource("SettingsSegment"), Content = option.Label, GroupName = title, IsChecked = EqualityComparer<T>.Default.Equals(option.Value, selected) };
             AutomationProperties.SetName(choice, title + " " + option.Label); choice.Checked += (_, _) => change(option.Value); strip.Children.Add(choice);
         }
-        var row = Row(title, SegmentBorder(strip)); row.IsEnabled = enabled; return row;
+        var row = Row(title, SegmentBorder(strip), help: help is null ? null : () => help); row.IsEnabled = enabled; return row;
     }
     // The options under the style cards belong to the chosen style. Choosing another card slides the current options
     // out and the chosen style's options in, moving the way the chosen card lies from the previous one.
@@ -54,14 +54,19 @@ public sealed partial class SettingsWindow
             Group(Toggle(Loc.T("显示播放进度", "Show playback progress"), S.MusicIndicatorProgress, v => Change(s => s.MusicIndicatorProgress = v)));
             return;
         }
-        // The rows that can be dragged are in the order the row shows them; the clock always stays at the right, so it comes last.
+        // The rows are in the order the collapsed row shows the parts, left to right; only the cover keeps its place at the left.
         var rows = new StackPanel();
-        foreach (var part in S.CompactOrder(style)) rows.Children.Add(PartRow(style, part, rows));
+        _partOptions.Clear();
+        foreach (var part in S.CompactOrder(style))
+            rows.Children.Add(part switch { CompactPart.Equalizer => EqualizerRow(style, rows), CompactPart.Clock => ClockRow(style, rows), _ => PartRow(style, part, rows) });
         UpdateDividers(rows);
-        Group(rows, ClockRow(style, PartHandleWidth));
+        Group(rows);
     }
 
     private const double PartRowHeight = 44, PartHandleWidth = 40;
+    // The parts whose options are open (the equalizer, the clock), kept while the page is rebuilt or the collapsed style changes.
+    private readonly HashSet<CompactPart> _openParts = [];
+    private readonly List<(Border Row, Border Options, Button Arrow)> _partOptions = [];
     // One draggable row of the collapsed content: the handle, the name and the switch.
     private Border PartRow(CompactStyle style, CompactPart part, StackPanel rows)
     {
@@ -70,7 +75,7 @@ public sealed partial class SettingsWindow
         {
             CompactPart.Rings => (Loc.T("配额环", "Quota rings"), S.ShowsSummary(style), null),
             CompactPart.Music => (Loc.T("正在播放的音乐", "Music now playing"), S.ShowsMusic(style),
-                Loc.T("拖动只改变歌名或歌词的位置。封面始终在最左侧，律动条在右侧。", "Dragging moves only the title or lyric. The cover stays at the left and the equalizer at the right.")),
+                Loc.T("拖动只改变歌名或歌词的位置。封面始终在最左侧。", "Dragging moves only the title or lyric. The cover stays at the left.")),
             _ => (Loc.T("系统监控", "System monitor"), S.ShowsMonitor(style), null)
         };
         void Show(bool on) => Change(s =>
@@ -90,23 +95,128 @@ public sealed partial class SettingsWindow
         var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = shown, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetName(toggle, title); toggle.Checked += (_, _) => Show(true); toggle.Unchecked += (_, _) => Show(false);
         Grid.SetColumn(toggle, 2); row.Children.Add(toggle);
-        // Dropped in a new place, the collapsed row takes the new order at once.
-        AttachDrag(handle, () => rows, PartRowHeight, list =>
-        {
-            var order = list.Children.OfType<Border>().Where(b => b.Tag is CompactPart).Select(b => (CompactPart)b.Tag).ToArray();
-            Change(s => s.SetCompactOrder(style, order));
-        });
+        AttachPartDrag(handle, style, rows);
         return new Border { Child = row, Height = PartRowHeight, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = part, RenderTransform = new TranslateTransform() };
+    }
+    // Dropped in a new place, the collapsed row takes the new order at once. The open options close when a drag begins, so every
+    // row is one line high while they move.
+    private void AttachPartDrag(Border handle, CompactStyle style, StackPanel rows) => AttachDrag(handle, () => rows, PartRowHeight, list =>
+    {
+        var order = list.Children.OfType<Border>().Where(b => b.Tag is CompactPart).Select(b => (CompactPart)b.Tag).ToArray();
+        Change(s => s.SetCompactOrder(style, order));
+    }, ClosePartOptions);
+    private void ClosePartOptions()
+    {
+        _openParts.Clear();
+        foreach (var (row, options, arrow) in _partOptions) { options.Visibility = Visibility.Collapsed; PointArrow(arrow, false); row.Height = PartRowHeight; }
+    }
+    // A part with options under it: the handle, the title with its arrow, and the switch, which only turns the part on or off.
+    // The title and its arrow open and close the options; the options are dimmed while the part is off. Without padding they lie
+    // under the title, a little indented, as the page rows' sizes do; with it, on a card across the row.
+    private Border OptionsPartRow(CompactStyle style, CompactPart part, StackPanel rows, string title, string arrowName, bool shown, Action<bool> turn, FrameworkElement content, Thickness? padding = null)
+    {
+        var options = padding is { } card ? new Border { Background = UI.Brush(Inset), CornerRadius = new CornerRadius(10), Padding = card, Margin = new Thickness(0, 0, 0, 12), Child = content }
+            : new Border { Margin = new Thickness(20, 0, 0, 8), Child = content };
+        void Enable(bool on) { options.IsEnabled = on; options.Opacity = on ? 1 : .45; }
+        Enable(shown);
+        Button arrow = null!;
+        Border item = null!;
+        void Show(bool open)
+        {
+            if (open) _openParts.Add(part); else _openParts.Remove(part);
+            options.Visibility = open ? Visibility.Visible : Visibility.Collapsed; PointArrow(arrow, open);
+            item.Height = open ? double.NaN : PartRowHeight;
+        }
+        arrow = ChevronButton(arrowName, () => Show(!_openParts.Contains(part)));
+        arrow.Margin = new Thickness(2, 0, 0, 0);
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        heading.Children.Add(SettingLabel(title)); heading.Children.Add(arrow);
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = shown, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(toggle, title);
+        toggle.Checked += (_, _) => { turn(true); Enable(true); }; toggle.Unchecked += (_, _) => { turn(false); Enable(false); };
+        var row = new Grid { Background = Brushes.Transparent };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(PartHandleWidth) }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = new GridLength(PartRowHeight) }); row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var handle = new Border { Width = 22, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, HorizontalAlignment = HorizontalAlignment.Left, Child = Grip(TextTertiary) };
+        row.Children.Add(handle);
+        Grid.SetColumn(heading, 1); row.Children.Add(heading);
+        Grid.SetColumn(toggle, 2); row.Children.Add(toggle);
+        Grid.SetRow(options, 1); if (padding is null) Grid.SetColumn(options, 1); Grid.SetColumnSpan(options, padding is null ? 2 : 3); row.Children.Add(options);
+        // The handle, the switch and the arrow take their own clicks; a click anywhere else on the title line opens or closes the
+        // options, as the size rows do.
+        row.MouseLeftButtonDown += (_, e) => { if (e.GetPosition(row).Y >= PartRowHeight) return; Show(!_openParts.Contains(part)); e.Handled = true; };
+        AttachPartDrag(handle, style, rows);
+        item = new Border { Child = row, BorderBrush = UI.Brush(_palette.RowDivider), BorderThickness = new Thickness(0), Tag = part, RenderTransform = new TranslateTransform() };
+        _partOptions.Add((item, options, arrow));
+        Show(_openParts.Contains(part));
+        return item;
+    }
+    private Border EqualizerRow(CompactStyle style, StackPanel rows)
+    {
+        bool notch = style == CompactStyle.Notch;
+        string when = Loc.T("显示时机", "Shown"), length = Loc.T("长度", "Length"), color = Loc.T("颜色", "Color");
+        var options = new StackPanel();
+        options.Children.Add(Lighter(MusicChoice(when, S.EqualizerAlways, [(false, Loc.T("播放音乐时", "While music plays")), (true, Loc.T("始终显示", "Always"))],
+            v => Change(s => s.EqualizerAlways = v), help: Loc.T("始终显示时，没有音乐播放也会显示，读取系统的全部声音。", "When always shown, it also shows while no music plays, reading all system sound.")), when));
+        options.Children.Add(Lighter(SliderRow(length, S.EqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
+            v => Change(s => s.EqualizerBars = (int)v)), length));
+        options.Children.Add(Lighter(Row(color, EqualizerSwatches(style)), color));
+        return OptionsPartRow(style, CompactPart.Equalizer, rows, Loc.T("律动条", "Equalizer"), Loc.T("律动条设置", "Equalizer settings"), S.ShowsEqualizer(style),
+            on => Change(s => { if (notch) s.NotchEqualizer = on; else s.CapsuleEqualizer = on; }), options);
+    }
+    // The clock's swatches but the gradient: the theme's equalizer color, the presets, a custom color and the cover's.
+    private StackPanel EqualizerSwatches(CompactStyle compact)
+    {
+        var swatches = new StackPanel { Orientation = Orientation.Horizontal };
+        ClockColor[] order = [ClockColor.White, ClockColor.Amber, ClockColor.Cyan, ClockColor.Pink, ClockColor.Lime, ClockColor.Custom, ClockColor.Cover];
+        foreach (var color in order)
+        {
+            string name = ColorName(color);
+            var swatch = new RadioButton { Style = (Style)FindResource("SettingsClockSwatch"), GroupName = "EqualizerColor" + compact, IsChecked = S.EqualizerColor == color,
+                Background = EqualizerSwatchFill(color), ToolTip = name, Margin = new Thickness(swatches.Children.Count == 0 ? 0 : 6, 0, 0, 0) };
+            AutomationProperties.SetName(swatch, Loc.T("律动条颜色 ", "Equalizer color ") + name);
+            swatch.Checked += (_, _) => Change(s => s.EqualizerColor = color);
+            if (color == ClockColor.Cover) swatch.Content = MusicVisuals.Icon("music", 13, UI.Brush(SwatchInk(SampleCover)));
+            if (color == ClockColor.Custom)
+            {
+                // Choosing this swatch also opens the picker; each later click opens it again.
+                swatch.Content = Pencil(ClockFace.Parse(S.EqualizerCustomColor));
+                AttachClockPicker(swatch, () => S.EqualizerCustomColor, ClockColors.DefaultCustom, value =>
+                {
+                    Change(s => { s.EqualizerCustomColor = value; s.EqualizerColor = ClockColor.Custom; });
+                    swatch.Background = EqualizerSwatchFill(ClockColor.Custom); swatch.Content = Pencil(ClockFace.Parse(value));
+                });
+            }
+            swatches.Children.Add(swatch);
+        }
+        return swatches;
+    }
+    private Brush EqualizerSwatchFill(ClockColor color) => color switch
+    {
+        ClockColor.Custom => ClockFace.Fill([ClockFace.Parse(S.EqualizerCustomColor)]),
+        ClockColor.Cover => ClockFace.Fill([SampleCover]),
+        ClockColor.White => UI.Brush(PanelTheme.Hex("equalizer")),
+        _ => ClockFace.Fill([PanelTheme.Readable(ClockFace.Preset(color))])
+    };
+    // Labels inside an open row are set lighter than the row's own title, as "快捷尺寸" is (QuickRow).
+    private static FrameworkElement Lighter(FrameworkElement row, string title)
+    {
+        static IEnumerable<TextBlock> Texts(DependencyObject parent) => LogicalTreeHelper.GetChildren(parent).OfType<DependencyObject>()
+            .SelectMany(child => child is TextBlock text ? new[] { text } : Texts(child));
+        if (Texts(row).FirstOrDefault(text => text.Text == title) is { } label) label.FontWeight = FontWeights.Normal;
+        return row;
     }
     // Settings every player shares: colors, cover and text.
     private void MusicStyle()
     {
         SectionTitle(Loc.T("收起时", "When collapsed"));
         Group(MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) }, v => Change(s => s.MusicText = v)),
-            MusicChoice(Loc.T("律动条颜色", "Equalizer color"), S.MusicCoverColor, new[] { (true, Loc.T("封面主色", "Cover color")), (false, Loc.T("主题默认色", "Theme default")) }, v => Change(s => s.MusicCoverColor = v)),
             Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)));
         SectionTitle(Loc.T("展开时", "When expanded"));
-        Group(Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage));
+        var bars = SliderRow(Loc.T("律动条长度", "Equalizer length"), S.MusicEqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
+            v => Change(s => s.MusicEqualizerBars = (int)v));
+        bars.IsEnabled = S.MusicPage;
+        Group(Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars);
     }
     // Operations only one player supports, grouped under that player's name.
     private void Players()

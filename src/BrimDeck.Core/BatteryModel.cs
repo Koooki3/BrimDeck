@@ -53,17 +53,19 @@ public static class BatteryModel
         var cells = inputs.Cells;
         if (cells.Count == 0) return Reading<BatterySample>.Unavailable(NoBattery);
 
-        // Capacities add up over the batteries that give them; the share is the sum of what remains over the sum of what fits, so a
+        // Capacities add up over the batteries; the share is the sum of what remains over the sum of what fits, so a
         // large battery weighs more than a small one (two batteries at 50 % and 100 % of 30 and 60 Wh are 83 %, not 75 %).
+        // A total stands for the machine only when every battery gives its part: a sum missing one battery's capacity or rate would
+        // be shown as the whole (a health of 100 %, a time twice too long, half the discharge called measured), so it is left out.
         double remaining = 0, full = 0, design = 0, rate = 0;
-        bool hasRemaining = false, hasFull = false, hasDesign = false, hasRate = false, charging = false, discharging = false, sharable = true;
+        bool hasRemaining = true, hasFull = true, hasDesign = true, hasRate = true, charging = false, discharging = false, sharable = true;
         double shareRemaining = 0, shareFull = 0;
         foreach (var cell in cells)
         {
-            if (cell.RemainingMwh is { } r && Plausible(r)) { remaining += r; hasRemaining = true; }
-            if (cell.FullMwh is { } f && Plausible(f) && f > 0) { full += f; hasFull = true; }
-            if (cell.DesignMwh is { } d && Plausible(d) && d > 0) { design += d; hasDesign = true; }
-            if (cell.RateMilliwatts is { } w && double.IsFinite(w)) { rate += w; hasRate = true; }
+            if (cell.RemainingMwh is { } r && Plausible(r)) remaining += r; else hasRemaining = false;
+            if (cell.FullMwh is { } f && Plausible(f) && f > 0) full += f; else hasFull = false;
+            if (cell.DesignMwh is { } d && Plausible(d) && d > 0) design += d; else hasDesign = false;
+            if (cell.RateMilliwatts is { } w && double.IsFinite(w)) rate += w; else hasRate = false;
             charging |= cell.Charging; discharging |= cell.Discharging;
             if (cell.RemainingMwh is { } cr && Plausible(cr) && cell.FullMwh is { } cf && Plausible(cf) && cf > 0) { shareRemaining += cr; shareFull += cf; } else sharable = false;
         }

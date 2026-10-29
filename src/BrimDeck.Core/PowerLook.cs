@@ -27,7 +27,7 @@ public sealed record PowerLook(PowerGauge Gauge, PowerCurve Curve, string Normal
 
 public static class PowerLooks
 {
-    public static readonly PowerLook Default = new(PowerGauge.Pill, PowerCurve.Smooth, "textPrimary", "accent", "accent", "accent");
+    public static readonly PowerLook Default = new(PowerGauge.Pill, PowerCurve.Smooth, "textPrimary", "accent", "accent", "cpu");
 
     // High contrast: outlines and text colors only, so the system's colors carry everything; the states are told by the mark and the
     // words (bolt, exclamation, leaf), never by color alone.
@@ -37,16 +37,17 @@ public static class PowerLooks
     //   Cyberpunk: HUD-cut battery with neon cyan, charging in the pale text color (the theme's yellow and pink sit on its warning and critical colors), a sharp scope-like curve with a bright head.
     //   Island Holiday (both): a capsule like a lagoon bubble, charging in the sea's own color, a wave curve over a deeper fill.
     //   Pixel Blocks: ten stepped squares in the bright chat palette, charging cyan, a stair curve.
-    // Charging, Battery saver and the curve take the theme's accent or its own cool color: the monitor scheme's efficiency color can land
-    // on a theme's warning or critical color, and orange and red belong to the low levels alone.
+    // Charging and Battery saver take the theme's accent or its own cool color: the monitor scheme's efficiency color can land on a
+    // theme's warning or critical color, and orange and red belong to the low levels alone. The curve takes the scheme's CPU color, as
+    // the CPU reading does, so it changes with the color preset.
     private static readonly Dictionary<string, PowerLook> Table = new(StringComparer.OrdinalIgnoreCase)
     {
         [PanelThemes.Dark] = Default,
         [PanelThemes.Light] = Default,
-        ["cyberpunk-edgerunners"] = new(PowerGauge.Chamfer, PowerCurve.Sharp, "accent", "textPrimary", "accent", "accent"),
-        [PanelThemes.IslandHoliday] = new(PowerGauge.Round, PowerCurve.Wave, "textPrimary", "equalizer", "equalizer", "equalizer"),
-        [PanelThemes.IslandHoliday2] = new(PowerGauge.Round, PowerCurve.Wave, "textPrimary", "equalizer", "equalizer", "equalizer"),
-        [PanelThemes.PixelBlocks] = new(PowerGauge.Blocks, PowerCurve.Steps, "textPrimary", "equalizer", "equalizer", "equalizer"),
+        ["cyberpunk-edgerunners"] = new(PowerGauge.Chamfer, PowerCurve.Sharp, "accent", "textPrimary", "accent", "cpu"),
+        [PanelThemes.IslandHoliday] = new(PowerGauge.Round, PowerCurve.Wave, "textPrimary", "equalizer", "equalizer", "cpu"),
+        [PanelThemes.IslandHoliday2] = new(PowerGauge.Round, PowerCurve.Wave, "textPrimary", "equalizer", "equalizer", "cpu"),
+        [PanelThemes.PixelBlocks] = new(PowerGauge.Blocks, PowerCurve.Steps, "textPrimary", "equalizer", "equalizer", "cpu"),
     };
 
     // The built-in themes with a look of their own.

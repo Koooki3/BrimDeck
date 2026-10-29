@@ -2,7 +2,7 @@
   <Style x:Key="PanelIconButton" TargetType="Button">
     <Setter Property="Width" Value="32"/><Setter Property="Height" Value="28"/>
     <Setter Property="Foreground" Value="{DynamicResource PanelSecondary}"/><Setter Property="Background" Value="Transparent"/>
-    <Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/>
+    <Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/><Setter Property="BorderBrush" Value="Transparent"/>
     <Setter Property="Cursor" Value="Hand"/>
     <Setter Property="FocusVisualStyle" Value="{StaticResource PanelKeyboardFocus}"/>
     <!-- Hover and press fade (Feedback): the layers lie under the chrome, whose own background is the selected fill. -->
@@ -12,7 +12,7 @@
         <Grid>
           <Border x:Name="HoverLayer" Background="{DynamicResource PanelHover}" CornerRadius="{Binding CornerRadius, ElementName=Chrome}" Opacity="0"/>
           <Border x:Name="PressLayer" Background="{DynamicResource PanelPressed}" CornerRadius="{Binding CornerRadius, ElementName=Chrome}" Opacity="0"/>
-          <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
+          <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource PanelR5}" Padding="{TemplateBinding Padding}">
             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
         </Grid>
@@ -154,5 +154,9 @@
     <Style.Triggers>
       <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value=".28"/></Trigger>
     </Style.Triggers>
+  </Style>
+  <!-- A text action with an outline, for a pop-up whose other content does not read as clickable (the process card). -->
+  <Style x:Key="PanelOutlineButton" TargetType="Button" BasedOn="{StaticResource PanelTextButton}">
+    <Setter Property="BorderBrush" Value="{DynamicResource PanelPopupBorder}"/>
   </Style>
 </ResourceDictionary>

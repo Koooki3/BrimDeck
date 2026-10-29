@@ -16,13 +16,16 @@ namespace BrimDeck.Native;
 // The whole machine's power (PowerResolver chooses between the sources, PowerInputs hands them over). The counters are in the query
 // only while power is wanted. A graphics adapter is asked only while it is doing work (Awake seconds after its last use): asking
 // an idle hybrid-graphics laptop's discrete adapter would wake it from sleep and cost the battery more than the figure is worth.
-internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
+// The meter counters are in a query of their own, guarded (SensorGuard): firmware whose meter never answers stops the meter, and
+// the power then comes from the other sources. stuck: the sampler gives up its thread for another.
+internal sealed class PowerProvider(PdhQuery? pdh, Action stuck) : IDisposable
 {
     private const string EnergyPath = @"\Energy Meter(*)\Power", MeterPath = @"\Power Meter(*)\Power";
     private const double Awake = 8, Busy = .03;
     // Ticks without any source before the machine is taken for one without (a battery machine keeps trying: unplugged it has one).
     private const int GiveUpAfter = 5;
-    private bool _added, _available;
+    private readonly GuardedDevice _device = new(GuardedReading.PowerMeter, SensorGuard.Board, Loc.T("功率计", "Power meter"));
+    private bool _added, _available, _stopped;
     private int _empty;
     private bool _everFound;
     private volatile SensorState _state = SensorState.Unknown;
@@ -31,18 +34,28 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
     private double _smiStartedAt;
     public SensorState State => _state;
 
-    // Called before each collection of the query: while power is wanted the Energy Meter counters are in it, so the first collection after the
-    // page opens already holds a sample of them and the next (the first snapshot, 300 ms later) a second: a rate needs two. Taken out again
-    // once it is not wanted.
-    public void Prepare(bool wanted)
+    // Called where the sampler collects its own query: while power is wanted the Energy Meter counters are added and collected, so the
+    // first collection after the page opens already holds a sample of them and the next (the first snapshot, 300 ms later) a second: a
+    // rate needs two. Taken out again once it is not wanted, or once the meter is stopped. Whether they were collected.
+    public bool Prepare(bool wanted)
     {
-        if (pdh is null) return;
-        if (wanted && !_added) { _added = true; _available = pdh.Add(EnergyPath) | pdh.Add(MeterPath); }
-        else if (!wanted && _added) { pdh.Remove(EnergyPath); pdh.Remove(MeterPath); _added = false; }
+        if (pdh is null) return false;
+        _stopped = SensorGuard.Stopped(_device.Reading, _device.Device);
+        if (!wanted || _stopped)
+        {
+            if (_added) { pdh.Remove(EnergyPath); pdh.Remove(MeterPath); _added = false; }
+            return false;
+        }
+        return SensorGuard.Ask(_device, () =>
+        {
+            if (!_added) { _added = true; _available = pdh.Add(EnergyPath) | pdh.Add(MeterPath); }
+            return _available && pdh.Collect();
+        }, stuck);
     }
 
     // gpus: the adapters read this tick (usage tells whether one is awake); discharge: the battery's supply (BatteryModel.Discharge);
     // hasBattery: the machine runs on a battery, so a missing source may only be for the moment.
+    // collected: what Prepare returned this tick.
     public Reading<PowerSample> Sample(bool collected, bool wanted, double now, IReadOnlyList<GpuSample> gpus, Reading<double> discharge, bool hasBattery)
     {
         if (!wanted)
@@ -51,8 +64,6 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
             _smi?.Dispose(); _smi = null; _busyAt.Clear();
             return Reading<PowerSample>.Unavailable(Why.Waiting);
         }
-        // Normally the counters are in the query already (Prepare, before the collection); a caller that did not prepare gets them from here on.
-        Prepare(true);
         Reading<double> system = Reading<double>.Unavailable(""), cpu = system, memory = system;
         if (_available && collected && pdh is not null)
             (system, cpu, memory) = PowerResolver.FromCounters(pdh.Read(EnergyPath), pdh.Read(MeterPath));
@@ -62,7 +73,7 @@ internal sealed class PowerProvider(PdhQuery? pdh) : IDisposable
         // None only for a machine that has never given a reading and has no NVIDIA adapter that may yet be busy; a laptop that gives
         // none on mains may give one on battery, which the panel asks again for (MainWindow.StripSensors). Once found it stays found:
         // a figure missing for a moment (an idle adapter) is a dash, not a sensor that has gone.
-        else if (!_everFound && (collected || pdh is null) && ++_empty >= GiveUpAfter && !gpus.Any(gpu => gpu.Name?.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) == true))
+        else if (!_everFound && (collected || pdh is null || _stopped) && ++_empty >= GiveUpAfter && !gpus.Any(gpu => gpu.Name?.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) == true))
             _state = SensorState.None;
         return power;
     }

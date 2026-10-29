@@ -17,6 +17,7 @@ public static class SettingsMigrations
     private static readonly (Version Version, Action<JsonObject> Apply)[] Steps =
     [
         (new Version(0, 1, 0), To0_1_0),
+        (new Version(1, 2, 3), To1_2_3),
     ];
 
     // Upgrades the settings object in place and reads it. A file saved by a newer version runs no step.
@@ -63,6 +64,16 @@ public static class SettingsMigrations
             if (app["UsageSource"] is NodeValue usage && usage.TryGetValue(out int source) && source is 8 or 9)
                 app["UsageSource"] = (int)ProviderId.Claude;
         }
+    }
+
+    // 1.2.3: the equalizer has its own switch. It showed with the music, so it starts as the music's switch was. Its color was
+    // the cover's or the theme's (MusicCoverColor); it is now chosen as the clock's is.
+    private static void To1_2_3(JsonObject root)
+    {
+        foreach (var style in new[] { "Notch", "Capsule" })
+            if (!root.ContainsKey(style + "Equalizer")) root[style + "Equalizer"] = Flag(root, style + "Music");
+        if (!root.ContainsKey("EqualizerColor")) root["EqualizerColor"] = (int)(Flag(root, "MusicCoverColor") ? ClockColor.Cover : ClockColor.White);
+        root.Remove("MusicCoverColor");
     }
 
     private static bool Flag(JsonObject root, string name) => root[name] is not NodeValue value || !value.TryGetValue(out bool flag) || flag;
