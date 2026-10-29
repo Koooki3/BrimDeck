@@ -35,6 +35,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Could not edit the notes of $tag." }
     gh release upload $tag $manifestPath $sumsPath --clobber
     if ($LASTEXITCODE -ne 0) { throw "Could not upload the updated assets of $tag." }
+    # The beta channel holds a copy of the newest beta's update.json; it gets the new notes while it still names this version.
+    if ($Version -match '-beta\.') {
+        $channel = Join-Path $work 'beta-channel'
+        gh release download beta-channel --pattern update.json --dir $channel
+        if ($LASTEXITCODE -eq 0 -and (Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $channel 'update.json') | ConvertFrom-Json).version -eq $Version) {
+            gh release upload beta-channel $manifestPath --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Could not update the beta channel.' }
+        }
+    }
     Write-Output "Updated the notes of $tag."
 }
 finally {

@@ -390,8 +390,9 @@ public sealed class DeckSettings
     public string? MonitorGpu { get; set; }
     public string? MonitorGpuName { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
-    // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it.
-    public bool MonitorTemperatures { get; set; } = true;
+    // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it. Off by default: asking
+    // a driver for a temperature froze one laptop (SensorStops), so a new user turns them on knowingly.
+    public bool MonitorTemperatures { get; set; }
     // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
     public bool MonitorStorage { get; set; } = true;
     // The expanded page shows the whole machine's power draw with its curve, and the machine's own battery when it has one (PowerResolver,
