@@ -13,18 +13,33 @@ public sealed class WindowsHost : IDisposable
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly Func<IntPtr> _monitor;
-    // The app the context was last detected for: the empty pair on the desktop. The app rules resolve by it.
+    // The foreground window's app, as the detection reads it: the empty pair on the desktop.
     private string _appName = "", _appPath = "";
-    public (string Name, string Path) App => (_appName, _appPath);
+    // The app the answer resolves for: the window whose context was detected. On a background full screen that is the
+    // window behind the foreground one, which is the window the user is looking at, so its own rule has to answer.
+    private string _resolvedName = "", _resolvedPath = "";
+    public (string Name, string Path) App => (_resolvedName, _resolvedPath);
+    // How that background window fills the screen — Maximized or Borderless — so that the app's own rule can answer for
+    // the context it is in; Desktop when the context is not a background full screen.
+    private ScreenContext _backgroundKind = ScreenContext.Desktop;
+    public ScreenContext BackgroundKind => _backgroundKind;
+    // The background window's app, kept apart from the foreground one: another app taking the screen behind the
+    // foreground window changes which rule speaks, but it is not the foreground app changing.
+    private string _backgroundName = "", _backgroundPath = "";
     // The foreground window changes rarely but is polled several times a second, so its process is read once per window.
     private IntPtr _identityWindow;
     private uint _identityPid;
     private string _identityName = "", _identityPath = "";
+    // The background window gets a reading of its own, so that reading one window does not throw the other away.
+    private IntPtr _backgroundWindow;
+    private uint _backgroundPid;
+    private string _backgroundIdentityName = "", _backgroundIdentityPath = "";
     public event Action<ScreenContext>? ContextChanged;
-    // The foreground app changed while the context stayed, carrying the app the last answer was resolved for. The app
-    // rules may now answer differently for the same context, but nothing about the panel's own state needs to change —
-    // the panel does not fold away for an app switch, only for a context switch.
-    public event Action<(string Name, string Path)>? AppChanged;
+    // The app the answer was resolved for changed while the context stayed, carrying that app and the way its window
+    // fills the screen, as they were for the last answer. The app rules may now answer differently for the same context,
+    // but nothing about the panel's own state needs to change — the panel does not fold away for an app switch, only for
+    // a context switch.
+    public event Action<(string Name, string Path, ScreenContext Kind)>? AppChanged;
     public ScreenContext Current { get; private set; }
     // monitor gives the monitor whose foreground window decides the context. The context is reported with the app it was
     // detected for, and a change of either is a change: two apps can read as the same context with different app rules.
@@ -38,13 +53,14 @@ public sealed class WindowsHost : IDisposable
     // The strip the island actually draws in, in screen physical pixels, as of the last layout; null before the first.
     private readonly Func<Rect?> _island;
     private string _raisedName = "", _raisedPath = "";
+    private ScreenContext _raisedKind = ScreenContext.Desktop;
     private void Poll()
     {
         var context = DetectNow();
-        var change = ScreenPolicy.WhatChanged(context, _appName, _appPath, Current, _raisedName, _raisedPath);
+        var change = ScreenPolicy.WhatChanged(context, _resolvedName, _resolvedPath, Current, _raisedName, _raisedPath);
         if (change == ScreenPolicy.ForegroundChange.None) { WatchOrder(_window()); return; }
-        var previous = (_raisedName, _raisedPath);
-        Current = context; _raisedName = _appName; _raisedPath = _appPath;
+        var previous = (_raisedName, _raisedPath, _raisedKind);
+        Current = context; _raisedName = _resolvedName; _raisedPath = _resolvedPath; _raisedKind = _backgroundKind;
         if (change == ScreenPolicy.ForegroundChange.Context) ContextChanged?.Invoke(context);
         else AppChanged?.Invoke(previous);
         WatchOrder(_window());
@@ -135,7 +151,15 @@ public sealed class WindowsHost : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
     // The context right now, without raising ContextChanged; a caller applies it itself, for instance at startup.
-    public ScreenContext DetectNow() => Detect(_monitor());
+    public ScreenContext DetectNow()
+    {
+        var context = Detect(_monitor());
+        // A background full screen is answered for by the window behind the foreground one; every other context by the
+        // foreground app the detection has just read.
+        (_resolvedName, _resolvedPath) = context == ScreenContext.BackgroundFullscreen
+            ? (_backgroundName, _backgroundPath) : (_appName, _appPath);
+        return context;
+    }
     public static IntPtr PrimaryMonitor() => MonitorFromPoint(new POINT(), 1);
     public static (Rect Bounds, Rect Work, double Scale) PrimaryScreen() => Screen(PrimaryMonitor());
     // Null when the handle no longer names a connected monitor.
@@ -175,13 +199,25 @@ public sealed class WindowsHost : IDisposable
     private ScreenContext Detect(IntPtr monitor)
     {
         var foreground = GetForegroundWindow();
+        _backgroundName = ""; _backgroundPath = ""; _backgroundKind = ScreenContext.Desktop;
         // Nothing but the desktop: a full-screen window elsewhere on this monitor still owns the screen, so the answer is
         // BackgroundFullscreen rather than Desktop. Looked up once, and only where it can matter.
         ScreenContext? background = null;
         ScreenContext Desktop()
         {
-            background ??= BackgroundFullscreen(monitor, foreground) != IntPtr.Zero
-                ? ScreenContext.BackgroundFullscreen : ScreenContext.Desktop;
+            if (background is null)
+            {
+                var filled = BackgroundFilled(monitor, foreground);
+                background = filled == IntPtr.Zero ? ScreenContext.Desktop : ScreenContext.BackgroundFullscreen;
+                if (filled != IntPtr.Zero)
+                {
+                    // The rules answer for the app that fills the screen, so its identity and the way it fills the screen
+                    // travel with the answer: an app that asked to keep the panel's style is then left alone here too.
+                    GetWindowThreadProcessId(filled, out var filledPid);
+                    DescribeBackground(filled, filledPid, out _backgroundName, out _backgroundPath);
+                    _backgroundKind = KindOf(filled, monitor);
+                }
+            }
             return background.Value;
         }
         if (foreground == IntPtr.Zero || !IsWindowVisible(foreground) || IsIconic(foreground)) { _appName = ""; _appPath = ""; return Desktop(); }
@@ -208,7 +244,7 @@ public sealed class WindowsHost : IDisposable
     // filled window is partly hidden behind it, which is what the user opened it for. Excluded: the desktop shell, tool
     // windows, our own windows, minimised windows and the ones the window manager keeps cloaked (the windows of other
     // virtual desktops are still "visible" to the API).
-    private static IntPtr BackgroundFullscreen(IntPtr monitor, IntPtr foreground)
+    private static IntPtr BackgroundFilled(IntPtr monitor, IntPtr foreground)
     {
         var info = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(monitor, ref info)) return IntPtr.Zero;
@@ -243,23 +279,43 @@ public sealed class WindowsHost : IDisposable
         }, IntPtr.Zero);
         return found;
     }
-    // A window's process name and executable, read once per window. Both reads can fail when the process exited, runs as
-    // administrator or has another bitness; the name alone still matches a saved exception.
-    private void Describe(IntPtr window, uint pid, out string processName, out string imagePath)
+    // The way a background window fills the screen, in the same terms the foreground context is read in, so that the
+    // app's own rule can answer for it: a frameless window across the whole monitor is Borderless, a maximised one is
+    // Maximized. The two tests that accept the window above are the ones deciding here, so an accepted window never
+    // reads as Desktop.
+    private static ScreenContext KindOf(IntPtr window, IntPtr monitor)
     {
-        if (window != _identityWindow || pid != _identityPid)
+        var info = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(monitor, ref info)) return ScreenContext.Desktop;
+        if (DwmGetWindowAttribute(window, 9, out RECT rect, Marshal.SizeOf<RECT>()) != 0) GetWindowRect(window, out rect);
+        var coversMonitor = rect.Left <= info.Monitor.Left + 2 && rect.Top <= info.Monitor.Top + 2
+                         && rect.Right >= info.Monitor.Right - 2 && rect.Bottom >= info.Monitor.Bottom - 2;
+        var caption = (GetWindowLongPtr(window, -16).ToInt64() & 0x00C00000) != 0;
+        return ScreenPolicy.Classify(false, coversMonitor, caption, IsZoomed(window));
+    }
+    // A window's process name and executable, read once per window. Both reads can fail when the process exited, runs as
+    // administrator or has another bitness; the name alone still matches a saved exception. The foreground window and the
+    // one that fills the screen are both read every poll, so each keeps a reading of its own.
+    private void Describe(IntPtr window, uint pid, out string processName, out string imagePath)
+        => Describe(ref _identityWindow, ref _identityPid, ref _identityName, ref _identityPath, window, pid, out processName, out imagePath);
+    private void DescribeBackground(IntPtr window, uint pid, out string processName, out string imagePath)
+        => Describe(ref _backgroundWindow, ref _backgroundPid, ref _backgroundIdentityName, ref _backgroundIdentityPath, window, pid, out processName, out imagePath);
+    private static void Describe(ref IntPtr cachedWindow, ref uint cachedPid, ref string cachedName, ref string cachedPath,
+        IntPtr window, uint pid, out string processName, out string imagePath)
+    {
+        if (window != cachedWindow || pid != cachedPid)
         {
-            _identityWindow = window; _identityPid = pid; _identityName = ""; _identityPath = "";
+            cachedWindow = window; cachedPid = pid; cachedName = ""; cachedPath = "";
             try
             {
                 using var process = Process.GetProcessById((int)pid);
-                _identityName = process.ProcessName;
-                try { _identityPath = process.MainModule?.FileName ?? ""; }
+                cachedName = process.ProcessName;
+                try { cachedPath = process.MainModule?.FileName ?? ""; }
                 catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or NotSupportedException) { }
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { }
         }
-        processName = _identityName; imagePath = _identityPath;
+        processName = cachedName; imagePath = cachedPath;
     }
     public static void ConfigureOverlay(Window window)
     {

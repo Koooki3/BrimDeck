@@ -80,8 +80,9 @@ internal static class FullscreenRuleTests
         var many = new DeckSettings { FullscreenRules = Enumerable.Range(0, 40).Select(i => new FullscreenRule("App" + i)).ToList() };
         many.Normalize();
         check("The rule list is capped", many.FullscreenRules.Count == AppPresets.MaximumFullscreenExceptions);
-        // A full-screen window behind the foreground one: the island folds to its line by default, and an app rule that
-        // names the foreground app does not change that (the rule speaks for the app, not for someone else's full screen).
+        // A full-screen window behind the foreground one: the island folds to its line by default. The app the rules
+        // answer for is the one that fills the screen, and the way it fills the screen picks which of its own choices
+        // speaks, so an app that asked to keep the panel's style is not overruled by the background rule.
         var bg = new DeckSettings();
         check("A background full screen folds the island to its line by default",
             bg.Behavior(ScreenContext.BackgroundFullscreen) == WindowBehavior.Line
@@ -91,5 +92,26 @@ internal static class FullscreenRuleTests
             bg.Behavior(ScreenContext.BackgroundFullscreen) == WindowBehavior.Hide);
         check("The desktop itself is still no rule at all",
             bg.Behavior(ScreenContext.Desktop) == WindowBehavior.Normal);
+        var browser = new DeckSettings
+        {
+            BackgroundFullscreen = WindowBehavior.Line,
+            FullscreenRules = [new FullscreenRule("chrome") { Maximized = WindowBehavior.Normal }]
+        };
+        check("An app that keeps the style while maximised keeps it behind the foreground window too",
+            browser.Behavior(ScreenContext.BackgroundFullscreen, "chrome", "", ScreenContext.Maximized) == WindowBehavior.Normal
+            && browser.Behavior(ScreenContext.Maximized, "chrome", "") == WindowBehavior.Normal);
+        check("A background window the rule says nothing about takes the background rule",
+            browser.Behavior(ScreenContext.BackgroundFullscreen, "firefox", "", ScreenContext.Maximized) == WindowBehavior.Line
+            && browser.Behavior(ScreenContext.BackgroundFullscreen, "chrome", "", ScreenContext.Borderless) == WindowBehavior.Line
+            && browser.Behavior(ScreenContext.BackgroundFullscreen, "chrome", @"C:\Apps\chrome.exe") == WindowBehavior.Line);
+        var borderless = new DeckSettings
+        {
+            BackgroundFullscreen = WindowBehavior.Hide,
+            FullscreenRules = [new FullscreenRule("chrome") { Borderless = WindowBehavior.Normal }]
+        };
+        check("The way the background window fills the screen picks which of the app's choices speaks",
+            borderless.Behavior(ScreenContext.BackgroundFullscreen, "chrome", "", ScreenContext.Borderless) == WindowBehavior.Normal
+            && borderless.Behavior(ScreenContext.BackgroundFullscreen, "chrome", "", ScreenContext.Maximized) == WindowBehavior.Hide
+            && borderless.Behavior(ScreenContext.Borderless, "chrome", "") == WindowBehavior.Normal);
     }
 }

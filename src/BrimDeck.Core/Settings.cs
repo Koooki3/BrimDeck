@@ -473,13 +473,17 @@ public sealed class DeckSettings
     }
     // The behavior a context calls for: the app's own rule first, where it chooses one for that context, and the global
     // rules everywhere else. The app is the one the context was detected for; a null app, as on the desktop, has no rule.
-    public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null)
+    // A background full screen is the one context the app is not in itself, so backgroundKind — the way that window fills
+    // the screen — picks which of the app's own choices speaks for it. Without one there is nothing of the app's to ask,
+    // and the global background rule answers.
+    public WindowBehavior Behavior(ScreenContext context, string? processName = null, string? imagePath = null,
+        ScreenContext? backgroundKind = null)
     {
         if (processName is not null || imagePath is not null)
             foreach (var rule in FullscreenRules)
                 if (ScreenPolicy.Matches(rule, processName, imagePath))
                 {
-                    var own = context switch
+                    var own = (context == ScreenContext.BackgroundFullscreen ? backgroundKind ?? ScreenContext.Desktop : context) switch
                     {
                         ScreenContext.Maximized => rule.Maximized, ScreenContext.Borderless => rule.Borderless,
                         ScreenContext.Exclusive => rule.Exclusive, _ => null

@@ -73,7 +73,7 @@ public partial class MainWindow : Window
     private CompactAlertInfo? _alert;
     private DeckSettings Settings => _app.Settings;
     public bool IsExpanded => _expanded;
-    public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Hide || HiddenByUser);
+    public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Hide || HiddenByUser);
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
     public string? LastRefreshError { get; private set; }
 
@@ -147,8 +147,8 @@ public partial class MainWindow : Window
         {
             var context = _host.Current;
             if (context == ScreenContext.Desktop) return;
-            var before = Settings.Behavior(context, previous.Name, previous.Path);
-            var after = Settings.Behavior(context, _host.App.Name, _host.App.Path);
+            var before = Settings.Behavior(context, previous.Name, previous.Path, previous.Kind);
+            var after = Settings.Behavior(context, _host.App.Name, _host.App.Path, _host.BackgroundKind);
             if (before == after) return;
             _context = context;
             ApplySettings(!_expanded);
@@ -544,7 +544,7 @@ public partial class MainWindow : Window
         if (!_expanded && !IsSuppressed) SetExpanded(false);
     }
 
-    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
+    private CompactStyle EffectiveStyle => !_preview && Settings.Behavior(_context, _host.App.Name, _host.App.Path, _host.BackgroundKind) == WindowBehavior.Line ? CompactStyle.Line : Settings.Style;
     // One animated track: where it starts and ends, as fractions of the configured duration.
     private readonly record struct Track(double Start, double End);
     // The collapsed island at rest clips its content to a rectangle (IslandBorder.SettledClip): the content keeps clear of its
