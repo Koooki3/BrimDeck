@@ -392,7 +392,8 @@ internal sealed class MemoryBlock : FrameworkElement
 }
 
 // Download and upload: a badge with the arrow, the rate, and the last minute as a soft line, each scaled to its own highest
-// reading: under the rate in a block, after it on a line (Lines), or not at all where both share a line with memory (Line).
+// reading: after the rate on a line (Lines, and Blocks too: a block of its own under the rate took twice the height for a line that
+// says little more, and the core columns use it better), or not at all where both share a line with memory (Line).
 internal sealed class NetworkBlock : FrameworkElement
 {
     private readonly MonitorColors _colors;
@@ -404,8 +405,8 @@ internal sealed class NetworkBlock : FrameworkElement
 
     public NetworkBlock(MonitorColors colors, MetricsMode mode, double body, double caption)
     {
-        _colors = colors; _mode = mode; _body = body; _caption = caption;
-        Height = mode == MetricsMode.Blocks ? Math.Ceiling(body * 1.7 + 4 + body * 2) : Math.Ceiling(body * 1.7);
+        _colors = colors; _mode = mode == MetricsMode.Blocks ? MetricsMode.Lines : mode; _body = body; _caption = caption;
+        Height = Math.Ceiling(body * 1.7);
     }
 
     public void Set(Reading<NetworkSample> reading, IReadOnlyList<double> down, IReadOnlyList<double> up)
@@ -439,11 +440,11 @@ internal sealed class NetworkBlock : FrameworkElement
         x += number.WidthIncludingTrailingWhitespace;
         if (q.Unit.Length > 0) { var unit = MonitorDraw.Text(q.Unit, _caption, UI.Tertiary, ppd); MonitorDraw.Baseline(drawing, unit, x + 3, baseline); x += 3 + unit.WidthIncludingTrailingWhitespace; }
         if (_mode == MetricsMode.Line || history.Count < 3) return;
-        // On a line the sparkline takes the rest of the half after the rate, at the line's height; in a block, the row under it.
-        // Measured before a Rect is made: a Rect does not take a negative size, and a narrow half leaves none.
-        double start = _mode == MetricsMode.Lines ? Math.Max(x + 10, left + width * .45) : left;
-        double areaWidth = left + width - start, areaTop = _mode == MetricsMode.Lines ? 2 : line + 4;
-        double areaHeight = _mode == MetricsMode.Lines ? line - 4 : ActualHeight - line - 4;
+        // The sparkline takes the rest of the half after the rate, centred on the line and as tall as the power line's curve (a drive
+        // line less 4), so the page's small curves are one size. Measured before a Rect is made: a Rect does not take a negative size,
+        // and a narrow half leaves none.
+        double start = Math.Max(x + 10, left + width * .45);
+        double areaWidth = left + width - start, areaHeight = Math.Min(line - 4, Math.Ceiling(_body * 1.5) - 4), areaTop = Math.Round((line - areaHeight) / 2);
         if (areaWidth >= 24 && areaHeight >= 6) Sparkline(drawing, new Rect(start, areaTop, areaWidth, areaHeight), history, color);
     }
 

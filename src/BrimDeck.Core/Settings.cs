@@ -42,12 +42,13 @@ public enum MouseWheelAction { None, Pages, Volume }
 public enum CompactMusicText { None, Title, Lyrics }
 // The monitor an arriving notice is shown on: the one with the foreground window, or always the main panel's.
 public enum NoticeScreen { Foreground, Main }
-// The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left and the
-// equalizer and the clock at the right; Music places only the title or lyric. Saved as numbers, so new members go at the end.
-public enum CompactPart { Rings, Music, Monitor }
+// The parts of the collapsed notch and capsule that are put in order, left to right. The cover stays at the left; Music places
+// only the title or lyric. Saved as numbers, so new members go at the end.
+public enum CompactPart { Rings, Music, Monitor, Equalizer, Clock }
 public static class CompactParts
 {
-    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor];
+    // A file saved before the equalizer and the clock were put in order adds them after its parts, the clock last, where they stood.
+    public static IReadOnlyList<CompactPart> Default { get; } = [CompactPart.Rings, CompactPart.Music, CompactPart.Monitor, CompactPart.Equalizer, CompactPart.Clock];
     // Each known part once, in the saved order; a part missing from the file takes its default place after the others.
     public static List<CompactPart> Normalize(IEnumerable<CompactPart>? order) => [.. (order ?? []).Where(part => Enum.IsDefined(part)).Concat(Default).Distinct()];
 }
@@ -259,6 +260,7 @@ public sealed class DeckSettings
     private List<CompactReading>? _readings;
     private List<CompactPart> _notchOrder = [.. CompactParts.Default], _capsuleOrder = [.. CompactParts.Default];
     private List<DeckPage> _pageOrder = [.. DeckPages.Order];
+    private int _equalizerBars = CompactMusicLayout.DefaultBars, _musicEqualizerBars = 5;
     // Version of the BrimDeck that last saved settings.json; see SettingsMigrations. Empty in files saved before 0.1.0.
     public string AppVersion { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
@@ -302,6 +304,17 @@ public sealed class DeckSettings
     public bool NotchMusic { get; set; } = true;
     public bool CapsuleSummary { get; set; } = true;
     public bool CapsuleMusic { get; set; } = true;
+    // The notch and the capsule each switch the equalizer on. It shows while a song plays (or is paused), or, with EqualizerAlways,
+    // at all times: then it reads the whole system's sound while no song plays.
+    public bool NotchEqualizer { get; set; } = true;
+    public bool CapsuleEqualizer { get; set; } = true;
+    public bool EqualizerAlways { get; set; }
+    // How many bars the collapsed equalizer has, which sets its length (CompactMusicLayout.BarsWidth).
+    public int EqualizerBars { get => _equalizerBars; set => _equalizerBars = CompactMusicLayout.SafeBars(value); }
+    // The collapsed equalizer's color, chosen among the clock's swatches: White is the theme's equalizer color, Cover the playing
+    // song's, Custom EqualizerCustomColor. Gradient is not offered and reads as White.
+    public ClockColor EqualizerColor { get; set; } = ClockColor.Cover;
+    public string EqualizerCustomColor { get; set; } = ClockColors.DefaultCustom;
     // The notch and the capsule each switch the clock on; its style, color and hour format are shared.
     public bool NotchClock { get; set; }
     public bool CapsuleClock { get; set; }
@@ -311,10 +324,11 @@ public sealed class DeckSettings
     public List<string> ClockGradient { get; set; } = [.. ClockColors.Sunset];
     public bool Clock24Hour { get; set; } = true;
     public CompactMusicText MusicText { get; set; }
-    public bool MusicCoverColor { get; set; } = true;
     public bool MusicTrackNotice { get; set; } = true;
     public bool MusicIndicatorProgress { get; set; } = true;
     public bool LyricsEnabled { get; set; } = true;
+    // How many bars the music page's equalizer has, beside the title; its bars keep their spacing, so more bars make it longer.
+    public int MusicEqualizerBars { get => _musicEqualizerBars; set => _musicEqualizerBars = CompactMusicLayout.SafeBars(value); }
     // Offers "网易云音乐 · 完整控制" in the source menu, or alone in its place when nothing plays.
     public bool NeteaseFullControlEntry { get; set; }
     // Restarts a player started the normal way with full control, without asking again; switching it on asks once.
@@ -379,8 +393,9 @@ public sealed class DeckSettings
     public string? MonitorGpu { get; set; }
     public string? MonitorGpuName { get; set; }
     public MonitorProcessView MonitorProcessView { get; set; }
-    // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it.
-    public bool MonitorTemperatures { get; set; } = true;
+    // The expanded page shows the temperatures the system reports (Temperatures); off, none are read for it. Off by default: asking
+    // a driver for a temperature froze one laptop (SensorStops), so a new user turns them on knowingly.
+    public bool MonitorTemperatures { get; set; }
     // The expanded page shows the internal drives' space, one line per physical drive (Storage); off, the drives are not read for it.
     public bool MonitorStorage { get; set; } = true;
     // The expanded page shows the whole machine's power draw with its curve, and the machine's own battery when it has one (PowerResolver,
@@ -389,7 +404,7 @@ public sealed class DeckSettings
     // The notch and the capsule each switch the system readings on; what they show is shared.
     public bool NotchMonitor { get; set; }
     public bool CapsuleMonitor { get; set; }
-    // The order of the quota rings, the title or lyric and the system readings, for the notch and the capsule each.
+    // The order of the quota rings, the title or lyric, the system readings, the equalizer and the clock, for the notch and the capsule each.
     public List<CompactPart> NotchOrder { get => _notchOrder; set => _notchOrder = CompactParts.Normalize(value); }
     public List<CompactPart> CapsuleOrder { get => _capsuleOrder; set => _capsuleOrder = CompactParts.Normalize(value); }
     // The order of the pages in the open panel's page switch, left to right.
@@ -459,6 +474,8 @@ public sealed class DeckSettings
 
     public bool ShowsSummary(CompactStyle style) => style switch { CompactStyle.Notch => NotchSummary, CompactStyle.Capsule => CapsuleSummary, _ => false };
     public bool ShowsMusic(CompactStyle style) => style switch { CompactStyle.Notch => NotchMusic, CompactStyle.Capsule => CapsuleMusic, _ => false };
+    // The indicator shows neither the equalizer nor the clock.
+    public bool ShowsEqualizer(CompactStyle style) => style switch { CompactStyle.Notch => NotchEqualizer, CompactStyle.Capsule => CapsuleEqualizer, _ => false };
     // The indicator is too thin for text, so it never shows the clock.
     public bool ShowsClock(CompactStyle style) => style switch { CompactStyle.Notch => NotchClock, CompactStyle.Capsule => CapsuleClock, _ => false };
     // The indicator is too thin for readings, as for the clock.
@@ -472,9 +489,9 @@ public sealed class DeckSettings
     {
         if (style == CompactStyle.Notch) NotchWidth = width; else if (style == CompactStyle.Capsule) CapsuleWidth = width; else LineLength = width;
     }
-    // Media is detected for the expanded music page, the chosen style's music, or an indicator that shows playback
+    // Media is detected for the expanded music page, the chosen style's music or equalizer, or an indicator that shows playback
     // progress; a window rule can turn any style into the indicator.
-    [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || MusicIndicatorProgress
+    [JsonIgnore] public bool MediaWanted => MusicPage || ShowsMusic(Style) || ShowsEqualizer(Style) || MusicIndicatorProgress
         && (Style == CompactStyle.Line || Maximized == WindowBehavior.Line || Borderless == WindowBehavior.Line || Exclusive == WindowBehavior.Line);
     // The switched-on applications. Their quotas are read for the AI usage page or for the rings of the chosen compact
     // style; the two are shown independently, so either one keeps the data current.
