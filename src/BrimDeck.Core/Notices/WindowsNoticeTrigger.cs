@@ -1,12 +1,11 @@
 namespace BrimDeck.Core.Notices;
 
 // What tells WindowsNoticeSource to read Windows' list. Windows raises its change event only for a process with package
-// identity, which BrimDeck, a plain desktop program, does not have. Windows' push notification platform still writes an entry
-// to its Operational event log for every toast it delivers to the current user (3052, with the toast's id as TrackingId; 3053
-// on older builds) and when toasts are cleared (3055). Any user may subscribe to that log, so BrimDeck reads the list after
-// each entry (EventLog), and only reads it on a timer (Polling) when the log is disabled, cannot be read, or the subscription
-// fails. The log service hands entries over in
-// batches about once a second, so a toast is seen 30 ms to 1 s after it was shown (measured on Windows 11 26300).
+// identity, which BrimDeck, a plain desktop program, does not have. The push notification log gives a toast's TrackingId
+// and AppUserModelId (3052; 3053 on older builds), which are checked against the notification returned by the listener.
+// A valid entry reads one notification. A clear (3055) carries only the session id, so which notices went is learnt from a
+// full-list reading, which also gives baselines and the safety reading (WindowsNoticeLoop). The log service hands entries
+// over in batches about once a second.
 public enum WindowsNoticeTrigger
 {
     Polling,
@@ -17,7 +16,7 @@ public static class WindowsNoticeTriggers
 {
     public const string Channel = "Microsoft-Windows-PushNotification-Platform/Operational";
     public const int Delivered = 3052, Submitted = 3053, Cleared = 3055;
-    // Entries come in batches (ten toasts shown at once give ten entries within a few ms): one reading covers them all.
+    // Entries come in batches (ten toasts shown at once give ten entries within a few ms): one batch covers them all.
     public static readonly TimeSpan Coalesce = TimeSpan.FromMilliseconds(100);
     // A subscription that keeps failing gives way to polling; it is tried again later (WindowsNoticeLogRetry).
     public const int MostFailures = 3;
@@ -33,6 +32,29 @@ public static class WindowsNoticeTriggers
     // The same filter applied to an entry as it arrives, in case the log service passes on more than was asked for.
     public static bool Relevant(int eventId, string? notificationType)
         => eventId is Delivered or Cleared || eventId == Submitted && string.Equals(notificationType, "toast", StringComparison.OrdinalIgnoreCase);
+
+    // A delivered/submitted entry can be read directly only when both its id and app identity are present. Otherwise the
+    // source falls back to a full reading rather than risking showing another application's notification.
+    public static WindowsNoticeLogEvent Parse(int eventId, string? notificationType, string? appUserModelId, object? trackingId)
+    {
+        if (eventId == Cleared) return WindowsNoticeLogEvent.Reconcile;
+        if (eventId != Delivered && !(eventId == Submitted && string.Equals(notificationType, "toast", StringComparison.OrdinalIgnoreCase)))
+            return WindowsNoticeLogEvent.Ignored;
+
+        if (!TryTrackingId(trackingId, out uint id) || string.IsNullOrWhiteSpace(appUserModelId))
+            return WindowsNoticeLogEvent.Fallback;
+        return new(WindowsNoticeLogEventKind.Notification, id, appUserModelId.Trim(), false);
+    }
+
+    // The log's template declares TrackingId as win:Int32 (Windows 11 26300), so it arrives as a boxed int; the listener's
+    // ids are unsigned, so an id past int.MaxValue would arrive negative and is taken back bit for bit.
+    private static bool TryTrackingId(object? value, out uint id)
+    {
+        if (value is uint number) { id = number; return id > 0; }
+        if (value is int signed) { id = unchecked((uint)signed); return id > 0; }
+        var text = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+        return uint.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out id) && id > 0;
+    }
 
     // The log while it is turned on and may be tried now (WindowsNoticeLogRetry.MayTry); polling otherwise.
     public static WindowsNoticeTrigger Choose(bool logEnabled, bool mayTry)
@@ -74,9 +96,9 @@ public sealed class WindowsNoticeLogRetry
             : TimeSpan.FromMinutes(Math.Min(MostWait.TotalMinutes, Math.Pow(2, Math.Min(failures - WindowsNoticeTriggers.MostFailures, 10))));
 }
 
-// Turns a run of log entries into one reading: the first entry asks for a wake after WindowsNoticeTriggers.Coalesce, later
-// ones before it fires ask for nothing. An entry after it fired asks again, so a toast arriving while the list is being read
-// is read once more. Thread-safe: entries arrive on thread-pool threads.
+// Turns a run of log entries into one wake: the first entry asks for a wake after WindowsNoticeTriggers.Coalesce, later
+// ones before it fires ask for nothing. An entry after it fired asks again, so an id queued while the loop is busy is read
+// at its next turn. Thread-safe: entries arrive on thread-pool threads.
 public sealed class WindowsNoticeCoalescer
 {
     private int _pending;
@@ -84,6 +106,6 @@ public sealed class WindowsNoticeCoalescer
     // True when the caller should schedule the wake.
     public bool Arrive() => Interlocked.Exchange(ref _pending, 1) == 0;
 
-    // Called when the scheduled wake fires, before the reading starts.
+    // Called when the scheduled wake fires, before the loop takes the queued ids.
     public void Fired() => Volatile.Write(ref _pending, 0);
 }

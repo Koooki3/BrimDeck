@@ -112,8 +112,25 @@ public sealed class NoticeHub
         var priority = NoticeClock.Alerting(input.Timing, now) || input.Call ? AlertPriority(rule, input.PriorityHint) : EffectivePriority(rule, input.PriorityHint);
         bool quiet = rule?.Muted == true || priority == NoticePriority.Low;
         bool late = Late(input, priority, now);
-        var existing = SameInstance(input.InstanceKey, input)
-            ?? (input.Replaces is { Length: > 0 } replaced ? SameInstance(replaced, input) : null)
+        var sameInstance = SameInstance(input.InstanceKey, input);
+        var replaced = input.Replaces is { Length: > 0 } replacedKey ? SameInstance(replacedKey, input) : null;
+        if (input.Redelivery && sameInstance is null)
+        {
+            // The notice was handed over as it arrived and the user deleted it (or cleared the list) before a full reading
+            // found the one it took the place of. Neither comes back as unviewed; the replaced one is gone from its source.
+            if (replaced is not null) SourceRemoved(replaced.InstanceKey);
+            return new(NoticeReceipt.Duplicate, null, false, "removed");
+        }
+        Notice? existing;
+        if (input.Origin == NoticeOrigin.Windows && sameInstance is { Origin: NoticeOrigin.Windows } && replaced is { Origin: NoticeOrigin.Windows } && sameInstance.AppKey == input.AppKey && replaced.AppKey == input.AppKey && !ReferenceEquals(sameInstance, replaced))
+        {
+            // A fast source may deliver the new instance before its full-list read can confirm the replacement. Keep the
+            // already-delivered row, and remove the superseded row so the later Replaces update does not leave two entries.
+            _notices.Remove(replaced); _byId.Remove(replaced.Id);
+            if (_trackRemovals) _deleted.Add(replaced.Id);
+            existing = sameInstance;
+        }
+        else existing = sameInstance ?? replaced
             ?? (input.ReplaceKey is { Length: > 0 } replace ? Replacing(input, replace) : null);
         if (existing is not null)
         {

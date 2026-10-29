@@ -57,6 +57,7 @@ public sealed record DataLocations(string ClaudeHome, string CodexHome, string C
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
         Add(Path.Combine(Local, "Packages"), "Claude_*", packages => packages.Select(package => Path.Combine(package, "LocalCache", "Roaming", "Claude")));
+        Add(Path.Combine(Local, "Packages"), "AnthropicPBC.Claude_*", packages => packages.Select(package => Path.Combine(package, "LocalCache", "Roaming", "Claude")));
         // Newer desktop versions move their data to %LOCALAPPDATA%\Claude-Data\<install>, which also holds a README; a folder
         // there is a profile once the app has written its config.json.
         Add(Path.Combine(Local, "Claude-Data"), "*", folders => folders.Where(HasConfig));
