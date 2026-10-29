@@ -7,34 +7,16 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The marks of the power and battery rows, in place of words: what a figure comes from, whether it is an estimate, the mains, the time,
-// the power mode, the battery's health, the peak and the mean. One drawing of each on a 16 unit grid, set in the theme's graphic language
-// (PowerLook): plain line art, rounder and heavier for the island, a hairline for glass, straight edges for the HUD look and the industrial
-// plate (IconStyle), and 8 by 8 squares for pixel art. A mark that stands for an estimate is dashed.
-internal enum PowerIcon { Chip, Meter, BatteryOut, Plug, Clock, Heart, Leaf, GaugeLow, GaugeMid, GaugeHigh, Peak, Mean, Bolt }
+// The bolt before the power figures (the monitor page and the collapsed row), on a 16 unit grid, set in the theme's graphic language
+// (PowerLook): plain, rounder for the island, straight edges for the HUD look and the industrial plate (IconStyle), and 8 by 8 squares
+// for pixel art. A mark drawn dashed (for an estimate) or stroked keeps the treatments for marks added later.
+internal enum PowerIcon { Bolt }
 
 internal static class PowerIcons
 {
     // Stroked line art on a 16 unit grid.
     private static readonly Dictionary<PowerIcon, Geometry> Lines = new()
     {
-        // A chip with its pins: the sum of the processor's and the graphics' power.
-        [PowerIcon.Chip] = Frozen("M4.5,4.5 H11.5 V11.5 H4.5 Z M6.5,2 V4.5 M9.5,2 V4.5 M6.5,11.5 V14 M9.5,11.5 V14 M2,6.5 H4.5 M2,9.5 H4.5 M11.5,6.5 H14 M11.5,9.5 H14"),
-        // An instrument: a frame with a trace in it (a meter of the whole machine).
-        [PowerIcon.Meter] = Frozen("M2.5,3 H13.5 V13 H2.5 Z M4.5,9.5 L6.5,6 L8.5,10.5 L10,7.5 L11.5,8.5"),
-        // A battery giving power out (the discharge): the body with a minus in it.
-        [PowerIcon.BatteryOut] = Frozen("M2.5,4.5 H12 A1,1 0 0 1 13,5.5 V10.5 A1,1 0 0 1 12,11.5 H2.5 A1,1 0 0 1 1.5,10.5 V5.5 A1,1 0 0 1 2.5,4.5 Z M14.5,7 V9 M4.5,8 H9.5"),
-        [PowerIcon.Plug] = Frozen("M5.5,1.8 V5 M10.5,1.8 V5 M4,5 H12 V7.8 A4,4 0 0 1 4,7.8 Z M8,11.8 V14.5"),
-        [PowerIcon.Clock] = Frozen("M8,2 A6,6 0 1 1 8,14 A6,6 0 1 1 8,2 Z M8,4.8 V8 L10.3,9.7"),
-        [PowerIcon.Heart] = Frozen("M8,13.6 L2.9,8.3 A3.2,3.2 0 0 1 8,4.1 A3.2,3.2 0 0 1 13.1,8.3 Z"),
-        [PowerIcon.Leaf] = Frozen("M3,13 C3,6.5 7.5,3 13,3 C13,9 9.5,13 3,13 Z M3,13 L9,7"),
-        // The power mode: a dial with its needle low (efficiency), in the middle (balanced) or high (performance).
-        [PowerIcon.GaugeLow] = Frozen("M2.2,11.8 A5.8,5.8 0 0 1 13.8,11.8 M2.2,11.8 H13.8 M8,11.8 L4.8,8.4"),
-        [PowerIcon.GaugeMid] = Frozen("M2.2,11.8 A5.8,5.8 0 0 1 13.8,11.8 M2.2,11.8 H13.8 M8,11.8 V6.4"),
-        [PowerIcon.GaugeHigh] = Frozen("M2.2,11.8 A5.8,5.8 0 0 1 13.8,11.8 M2.2,11.8 H13.8 M8,11.8 L11.2,8.4"),
-        // The peak: a head over a base. The mean: a bar over an x.
-        [PowerIcon.Peak] = Frozen("M8,3.2 L13,11.2 H3 Z"),
-        [PowerIcon.Mean] = Frozen("M3.8,3.6 H12.2 M4.8,6.8 L11.2,13 M11.2,6.8 L4.8,13"),
         [PowerIcon.Bolt] = Frozen("M9.2,1.5 L3.8,9 H7.6 L7,14.5 L12.2,7 H8.4 Z"),
     };
     // Marks drawn filled rather than stroked.
@@ -43,18 +25,6 @@ internal static class PowerIcons
     // The 8 by 8 squares of pixel art, one string a row.
     private static readonly Dictionary<PowerIcon, string[]> Pixels = new()
     {
-        [PowerIcon.Chip] = ["..#..#..", ".######.", "##....##", ".#....#.", "##....##", ".#....#.", ".######.", "..#..#.."],
-        [PowerIcon.Meter] = ["########", "#......#", "#...#..#", "#.#.#.##", "#.#.#.##", "#..#...#", "#......#", "########"],
-        [PowerIcon.BatteryOut] = ["........", "#######.", "#.....##", "#.###.##", "#.....##", "#######.", "........", "........"],
-        [PowerIcon.Plug] = ["..#..#..", "..#..#..", ".######.", ".#....#.", ".#....#.", "..####..", "...##...", "...##..."],
-        [PowerIcon.Clock] = ["..####..", ".#....#.", "#..#...#", "#..#...#", "#..##..#", ".#....#.", "..####..", "........"],
-        [PowerIcon.Heart] = [".##..##.", "########", "########", "########", ".######.", "..####..", "...##...", "........"],
-        [PowerIcon.Leaf] = ["......##", "....####", "..######", ".#####.#", "#####.#.", "####.#..", "##.#....", "#......."],
-        [PowerIcon.GaugeLow] = ["..####..", ".#....#.", "#.#....#", "#..#...#", "#...#..#", "#......#", "########", "........"],
-        [PowerIcon.GaugeMid] = ["..####..", ".#.##.#.", "#..##..#", "#..##..#", "#..##..#", "#......#", "########", "........"],
-        [PowerIcon.GaugeHigh] = ["..####..", ".#....#.", "#....#.#", "#...#..#", "#..#...#", "#......#", "########", "........"],
-        [PowerIcon.Peak] = ["...##...", "..####..", "..####..", ".######.", ".######.", "########", "........", "........"],
-        [PowerIcon.Mean] = ["########", "........", "#......#", ".#....#.", "..#..#..", "..#..#..", ".#....#.", "#......#"],
         [PowerIcon.Bolt] = ["...###..", "..###...", ".###....", "..#####.", "....###.", "...###..", "..##....", "..#....."],
     };
 
@@ -148,7 +118,7 @@ internal static class PowerWarm
             // The words and the figures once, with made-up readings.
             var sample = new PowerSample(20, PowerOrigin.Estimated, PowerSource.Components, [new PowerPart("cpu", "CPU", 12, "RAPL")]);
             var battery = BatteryModel.Build(new BatteryInputs([new BatteryCell("warm", 30_000, 60_000, 66_000, -10_000, false, true)], false, false, PowerMode.Balanced));
-            PowerText.Power(Reading<PowerSample>.Of(sample), new PowerSummary(30, 20, 3));
+            PowerText.Table(Reading<PowerSample>.Of(sample), new PowerSummary(30, 20, 3), PowerTrack.None, PowerTrack.None);
             PowerText.Battery(battery);
             PowerText.Spoken(Reading<PowerSample>.Of(sample), battery, true);
             PowerFormat.Clock(TimeSpan.FromMinutes(90)); PowerFormat.Duration(TimeSpan.FromMinutes(90)); PowerFormat.Watts(12.3);
