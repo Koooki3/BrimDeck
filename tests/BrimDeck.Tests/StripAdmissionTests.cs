@@ -5,7 +5,10 @@ using BrimDeck.Core;
 // come in; a machine without the sensor never shows them, and nothing is built again for it.
 static class StripAdmissionTests
 {
-    private const CompactMonitorItems Cpu = CompactMonitorItems.Cpu, Gpu = CompactMonitorItems.Gpu, Storage_ = CompactMonitorItems.Storage, Later = StripAdmission.Later;
+    private const CompactMonitorItems Cpu = CompactMonitorItems.Cpu, Gpu = CompactMonitorItems.Gpu, Storage_ = CompactMonitorItems.Storage,
+        // The machine's power and battery join by their own sensors (PowerTests); these runs leave them aside.
+        Later = StripAdmission.Later & ~CompactMonitorItems.Power & ~CompactMonitorItems.Charge;
+    private const CompactMonitorItems EveryReading = CompactMonitor.Every & ~CompactMonitorItems.Power & ~CompactMonitorItems.Charge;
     private const SensorState Unknown = SensorState.Unknown, Found = SensorState.Found, None = SensorState.None;
     private const string Heat = StripAdmission.Heat;
 
@@ -44,11 +47,12 @@ static class StripAdmissionTests
         IEnumerable<(MonitorSnapshot? Snapshot, SensorStates States)> ticks)
     {
         var admission = new StripAdmission();
-        var (built, layout) = (admission.Hidden, admission.Layout);
+        var (built, layout) = (admission.Hidden & Later, admission.Layout);
         int rebuilds = 0; var arrivals = new List<CompactMonitorItems>();
         foreach (var (snapshot, states) in ticks)
         {
-            var (hidden, arriving) = admission.Update(snapshot, readings, states);
+            var (all, arriving) = admission.Update(snapshot, readings, states);
+            var hidden = all & Later;
             if (hidden == built && admission.Layout == layout) continue;
             rebuilds++; arrivals.Add(arriving); (built, layout) = (hidden, admission.Layout);
         }
@@ -57,22 +61,22 @@ static class StripAdmissionTests
 
     private static void FirstLoad(Action<string, bool> check)
     {
-        check("Strip admission: the drives are left out before any figure", new StripAdmission().Hidden == Later);
-        var readings = Readings(CompactMonitor.Every);
+        check("Strip admission: the drives are left out before any figure", (new StripAdmission().Hidden & Later) == Later);
+        var readings = Readings(EveryReading);
         var (rebuilds, arrivals, hidden) = Run(readings, [(null, States(Unknown, Unknown, Unknown)), (Snapshot(null, false), States(Unknown, Unknown, Unknown)),
             (Snapshot(null, false), States(None, Found, Unknown)), (Snapshot(null, true), States(None, Found, Found)), (Snapshot(null, true), States(None, Found, Found))]);
         check("Strip admission: the row stays as it is until the drives' first figure, then they join once", rebuilds == 1 && arrivals.Single() == Storage_ && hidden == CompactMonitorItems.None);
         var flicker = Run(readings, [(Snapshot(null, true), States(None, Found, Found)), (Snapshot(null, false), States(None, Found, Found)), (Snapshot(null, true), States(None, Found, Found))]);
-        check("Strip admission: a figure missing for a moment does not take the drives out again", flicker.Rebuilds == 1 && flicker.Hidden == CompactMonitorItems.None);
+        check("Strip admission: a figure missing for a moment does not take the drives out again", flicker.Rebuilds == 1 && (flicker.Hidden & Later) == CompactMonitorItems.None);
     }
 
     private static void Missing(Action<string, bool> check)
     {
-        var readings = Readings(CompactMonitor.Every, heat: true);
+        var readings = Readings(EveryReading, heat: true);
         var none = Run(readings, [(null, States(Unknown, Unknown, Unknown)), (Snapshot(null, false), States(None, Unknown, None)), (Snapshot(null, false), States(None, None, None, None))]);
-        check("Strip admission: without sensors nothing joins, and the row is never built again for them", none.Rebuilds == 0 && none.Hidden == Later);
+        check("Strip admission: without sensors nothing joins, and the row is never built again for them", none.Rebuilds == 0 && (none.Hidden & Later) == Later);
         var lost = Run(readings, [(Snapshot(48, true), States(None, Found, Found)), (Snapshot(null, true), States(None, None, Found))]);
-        check("Strip admission: a temperature leaves only once its sensor is known to be missing", lost.Rebuilds == 2 && lost.Hidden == CompactMonitorItems.None);
+        check("Strip admission: a temperature leaves only once its sensor is known to be missing", lost.Rebuilds == 2 && (lost.Hidden & Later) == CompactMonitorItems.None);
     }
 
     // After a restart with only the drives chosen for the row: before their first figures the row shows nothing and has no width,
@@ -85,7 +89,7 @@ static class StripAdmissionTests
         check("Strip admission (drives only, after a restart): the row shows nothing yet", (Storage_ & ~admission.Hidden) == CompactMonitorItems.None);
         check("Strip admission (drives only): the system is still read for them", admission.Awaits(readings, null, States(Unknown, Unknown, Unknown)));
         var (hidden, arriving) = admission.Update(Snapshot(null, true), readings, States(None, None, Found));
-        check("Strip admission (drives only): the first figure arrives and they join", hidden == CompactMonitorItems.None && arriving == Storage_
+        check("Strip admission (drives only): the first figure arrives and they join", (hidden & Later) == CompactMonitorItems.None && arriving == Storage_
             && !admission.Awaits(readings, Snapshot(null, true), States(None, None, Found)));
         var bare = new StripAdmission();
         bare.Update(Snapshot(null, false), readings, States(None, None, None));
