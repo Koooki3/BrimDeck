@@ -89,6 +89,6 @@ internal static class CompactMotionTests
         carried.Tick(.02f, false);
         check("Equalizer bars rest when playback stops", carried.Levels.ToArray().All(level => level == 0));
         var flowing = new EqualizerBars(); flowing.Show([.2, 1.4, -1, .5], true);
-        check("Equalizer bars show captured levels, clamped", flowing.Levels.ToArray().SequenceEqual(new double[] { .2, 1, 0, .5, 0 }));
+        check("Equalizer bars show captured levels, clamped", flowing.Levels.ToArray().SequenceEqual(new double[] { .2, 1, 0, .5 }.Concat(new double[EqualizerBars.Count - 4])));
     }
 }

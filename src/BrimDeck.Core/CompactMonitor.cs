@@ -93,12 +93,13 @@ public static class CompactMonitor
         [CompactMonitorItems.Columns] = [MonitorRole.Cpu, MonitorRole.Efficiency], [CompactMonitorItems.Cpu] = [MonitorRole.Cpu],
         [CompactMonitorItems.Memory] = [MonitorRole.Memory], [CompactMonitorItems.Gpu] = [MonitorRole.Gpu],
         [CompactMonitorItems.Download] = [MonitorRole.Download], [CompactMonitorItems.Upload] = [MonitorRole.Upload],
-        // The scheme has no color of its own for storage: it takes the memory color, as the page draws its bars.
-        [CompactMonitorItems.Storage] = [MonitorRole.Memory],
-        // The battery takes the CPU color, as the devices page fills a battery.
+        // The drives take the memory color unless the custom scheme gives them their own, as the page draws its bars. Power and the
+        // machine's battery are drawn in the theme's power style (PowerLook, whose curve takes the CPU color) unless the custom scheme
+        // gives them their own.
+        [CompactMonitorItems.Storage] = [MonitorRole.Storage],
+        // The devices' lowest battery takes the CPU color, as the devices page fills a battery.
         [CompactMonitorItems.Battery] = [MonitorRole.Cpu],
-        // Power takes the efficiency color (energy), the machine's battery the CPU color like the devices' (PowerLook gives each theme its own).
-        [CompactMonitorItems.Power] = [MonitorRole.Efficiency], [CompactMonitorItems.Charge] = [MonitorRole.Cpu]
+        [CompactMonitorItems.Power] = [MonitorRole.Power], [CompactMonitorItems.Charge] = [MonitorRole.Battery]
     };
     public static MonitorRole Role(CompactMonitorItems item, int channel = 0) =>
         Roles.TryGetValue(item, out var roles) ? roles[Math.Clamp(channel, 0, roles.Length - 1)] : MonitorRole.Cpu;

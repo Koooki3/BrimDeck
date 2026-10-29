@@ -96,7 +96,7 @@ internal sealed class MonitorStrip : FrameworkElement
         double text(string sample) => MonitorDraw.Text(sample, _font, UI.Primary, 1).WidthIncludingTrailingWhitespace;
         _width = CompactMonitor.Widths(_values, _dial, _ringFigure, _dial, ColumnsWidth(Environment.ProcessorCount),
             Math.Round(9 * _scale) + Math.Round(3 * _scale) + Math.Ceiling(Math.Max(text("99.9M"), text("99.9G"))), DrivesWidth(), DeviceWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent),
-            Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("≈112W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent));
+            Math.Round(9 * _scale) + Math.Round(3 * _scale) + FigureWidth("112W"), BatteryWidth + Math.Round(3 * _scale) + FigureWidth(WidestPercent));
     }
 
     private const string WidestDegrees = "125°", WidestPercent = "100%";
@@ -227,7 +227,7 @@ internal sealed class MonitorStrip : FrameworkElement
                     parts.Add(Loc.T("设备最低电量（外设）", "Lowest device battery (peripherals)") + " " + device.Name + " " + device.Percent + "%"
                         + (device.Charging ? Loc.T("，充电", ", charging") : "") + LevelWords(device.Level)); break;
                 case CompactMonitorItems.Power when s?.Power.OrDefault is { } power:
-                    parts.Add(Loc.T("整机功耗 ", "System power ") + (power.Estimated ? "≈" : "") + PowerText.Watts(power.Watts) + Loc.T("，", ", ") + (power.Estimated ? Loc.T("估算", "estimated") : Loc.T("实测", "measured"))); break;
+                    parts.Add(Loc.T("整机功耗 ", "System power ") + PowerText.Watts(power.Watts) + Loc.T("，", ", ") + (power.Estimated ? Loc.T("估算", "estimated") : Loc.T("实测", "measured"))); break;
                 case CompactMonitorItems.Charge when s?.Battery.OrDefault is { } own:
                     parts.Add(Loc.T("本机电池 ", "This PC's battery ") + PowerText.Percent(own.Percent) + Loc.T("，", ", ") + PowerText.State(own) + LevelWords(BatteryModel.Level(own, _low))); break;
             }
@@ -465,19 +465,20 @@ internal sealed class MonitorStrip : FrameworkElement
     private void Figure(DrawingContext drawing, double x, double center, double? share, string unused, string color, double ppd)
         => MonitorDraw.Baseline(drawing, MonitorDraw.Text(GaugeFigure(share), _font, color, ppd), x, Math.Round(center + _font * .36));
 
-    // The whole machine's power: a bolt in the theme's curve color, then the draw in watts, "38W", with "≈" before an estimate; a dash
-    // while there is no reading. The room is kept for the widest figure ("≈112W").
+    // The whole machine's power: a bolt in the theme's curve color, then the draw in watts, "38W"; a dash
+    // while there is no reading. The room is kept for the widest figure ("112W").
     private void Power(DrawingContext drawing, double x, double center, PowerSample? power, double ppd)
     {
-        double size = Math.Round(11 * _scale), slot = Math.Round(9 * _scale);
-        PowerIcons.Draw(drawing, PowerIcon.Bolt, new Rect(x, Math.Round(center - size / 2), slot, size), power is null ? UI.Tertiary : _powerStyle.Draw, _powerStyle, ppd);
-        string figure = power is { } p ? (p.Estimated ? "≈" : "") + PowerFormat.Compact(p.Watts) + "W" : "—";
+        // The bolt is drawn in a square (PowerIcons draws in the shorter side) over the room kept for it; it is narrower than tall.
+        double size = Math.Round(14 * _scale), slot = Math.Round(9 * _scale);
+        PowerIcons.Draw(drawing, PowerIcon.Bolt, new Rect(x + Math.Round((slot - size) / 2), Math.Round(center - size / 2), size, size), power is null ? UI.Tertiary : _powerStyle.Draw, _powerStyle, ppd);
+        string figure = power is { } p ? PowerFormat.Compact(p.Watts) + "W" : "—";
         MonitorDraw.Baseline(drawing, MonitorDraw.Text(figure, _font, UI.Primary, ppd), x + slot + Math.Round(3 * _scale), Math.Round(center + _font * .36));
     }
 
     private double BatteryWidth => Math.Round(17 * _scale);
-    // The machine's own battery in the shape of the theme's look (PowerGlyphs.Battery), filled to the charge, with the bolt in its tip
-    // while it charges, the leaf while Battery saver is on and an exclamation mark when low; then the figure: "96%".
+    // The machine's own battery in the shape of the theme's look (PowerGlyphs.Battery), filled to the charge, with the plug in its tip
+    // while it is on mains, the leaf while Battery saver is on and an exclamation mark when low; then the figure: "96%".
     private void Charge(DrawingContext drawing, double x, double center, BatterySample? battery, double? fill, MemoryLevel level, double ppd)
     {
         double height = Math.Round(9 * _scale * ppd) / ppd;

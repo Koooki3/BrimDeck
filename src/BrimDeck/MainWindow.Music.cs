@@ -68,7 +68,7 @@ public partial class MainWindow
     private (MediaCommand Id, long At)? _musicPointerClick;
     private const int MusicClickAnswer = 2000;
     private MusicEqualizer? _musicEqualizer, _compactEqualizer;
-    private readonly double[] _flowLevels = new double[5];
+    private readonly double[] _flowLevels = new double[CompactMusicLayout.MaximumBars];
     private MusicMarquee? _compactMarquee;
     // The collapsed row's bar heights and the place of its scrolling line. The row is built again on every change of its width
     // (a resize drag does that every frame), so like the readings' StripPresence they belong to the panel and outlive each row.
@@ -537,7 +537,8 @@ public partial class MainWindow
         int lyricLines = playerLyrics ? Math.Min(1, layout.LyricLines) : layout.LyricLines;
         right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(layout.HeaderHeight) });
         right.RowDefinitions.Add(new RowDefinition());
-        double equalizerWidth = Math.Max(27, Math.Round(c.Equalizer * 1.7));
+        // Five bars span 1.7 times their height; other counts keep the five bars' spacing.
+        double fiveBars = Math.Max(27, Math.Round(c.Equalizer * 1.7)), equalizerWidth = Math.Round(3 + (Settings.MusicEqualizerBars - 1) * (fiveBars - 3) / 4);
         var header = new Grid();
         header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(equalizerWidth + 16) });
         var titles = new StackPanel { VerticalAlignment = VerticalAlignment.Top };
@@ -556,7 +557,7 @@ public partial class MainWindow
         }
         header.Children.Add(titles);
         if (shown && songChanging) RiseIn(titles);
-        _musicEqualizer = new MusicEqualizer { Width = equalizerWidth, Height = c.Equalizer, Color = _musicAccent, HorizontalAlignment = HorizontalAlignment.Right,
+        _musicEqualizer = new MusicEqualizer { Bars = Settings.MusicEqualizerBars, Width = equalizerWidth, Height = c.Equalizer, Color = _musicAccent, HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, (c.TitleLine - c.Equalizer) / 2, 0, 0) };
         Grid.SetColumn(_musicEqualizer, 1); header.Children.Add(_musicEqualizer); right.Children.Add(header);
 
@@ -914,6 +915,7 @@ public partial class MainWindow
         double scale = CompactMusicLayout.SafeScale(shape.Scale);
         double contentWidth = CompactContentWidth(shape);
         bool media = Settings.ShowsMusic(EffectiveStyle) && _mediaTrack is { State: not MediaState.Stopped };
+        bool equalizer = CompactEqualizerShown;
         bool notice = media && _trackNoticeUntil > DateTimeOffset.UtcNow;
         string text = "";
         if (media)
@@ -929,7 +931,7 @@ public partial class MainWindow
         // A quota ring with nothing read yet would be an empty grey circle that says nothing: it is left out until its quota has
         // a reading (QuotaRings).
         var apps = Settings.ShowsSummary(EffectiveStyle) && !notice ? [.. Settings.EnabledApps.Where(HasQuotaReading)] : new List<AppEntry>();
-        // The clock keeps its own width at the right; shown alone, it is centred.
+        // The clock keeps its own width; shown alone, it is centred.
         var clock = Settings.ShowsClock(EffectiveStyle) ? new ClockFace(Settings.ClockStyle, Settings.Clock24Hour, ClockFace.Palette(Settings, CoverColor), DateTime.Now, scale) : null;
         // The system readings offer each chosen reading, in the order of the settings' table and in the scheme's colors; the row
         // admits those that fit whole (CompactMusicLayout).
@@ -938,24 +940,25 @@ public partial class MainWindow
         // say so: its admission is taken again as the row is built.
         if (StripChoosesBattery) _stripPresence.Arrive(UpdateStripAdmission(_app.Monitor?.Latest).Arriving);
         var strip = Settings.ShowsMonitor(EffectiveStyle) ? new MonitorStrip(Settings.CompactReadings, MonitorThemeColors.Strip(Settings), scale,
-            !media && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission, Settings.DeviceLowPercent) : null;
+            !media && !equalizer && apps.Count == 0 && text.Length == 0 && clock is null, _stripPresence, dpi, _stripUnavailable = _stripAdmission.Hidden, _stripAdmission, Settings.DeviceLowPercent) : null;
         _stripLayout = _stripAdmission.Layout;
         if (StripChoosesBattery) strip?.SetBattery(StripBattery());
         double rowWidth = SnapDown(contentWidth, dpi);
         // Readings that do not fit scroll through a window of whole readings, as the rings do (CompactSpacing.Window).
         var layout = CompactMusicLayout.Calculate(rowWidth, scale, media, apps.Count, text.Length > 0, clock?.ReservedWidth ?? 0,
-            strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi));
+            strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi), equalizer, Settings.EqualizerBars);
         CurrentCompactLayout = layout;
         // An auto-width surface takes the width of what the row shows; the new shape builds the row again. The track notice
         // and the lyric's changing length are left out, so the width changes only when the content itself does.
         int steadyRings = Settings.ShowsSummary(EffectiveStyle) ? Settings.EnabledApps.Count(HasQuotaReading) : 0;
         bool steadyText = media && Settings.MusicText != CompactMusicText.None;
-        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi), dpi);
+        double wanted = CompactMusicLayout.NaturalWidth(scale, media, steadyRings, steadyText, clock?.ReservedWidth ?? 0, strip is null ? 0 : DevicePixels.Up(strip.PreferredWidth, dpi), dpi,
+            equalizer, Settings.EqualizerBars);
         // The surface is never narrower than what the row must show (CompactMusicLayout.RequiredWidth); like the width it asks
         // for, this leaves out the track notice, so the surface does not move for it.
         var readingWidths = strip?.ItemWidths() ?? [];
         double required = CompactMusicLayout.RequiredWidth(scale, media, steadyText, clock?.ReservedWidth ?? 0,
-            steadyRings > 0 ? Math.Max(1, CompactMusicLayout.Whole(12 * scale)) : 0, CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0));
+            steadyRings > 0 ? Math.Max(1, CompactMusicLayout.Whole(12 * scale)) : 0, CompactSpacing.Minimum(readingWidths, strip?.Gap ?? 0), equalizer, Settings.EqualizerBars);
         if (double.IsNaN(_compactWanted) || Math.Abs(wanted - _compactWanted) > .5 || Math.Abs(required - _compactRequired) > .5)
         { _compactWanted = wanted; _compactRequired = required; Dispatcher.BeginInvoke(DispatcherPriority.Background, FitCompactToContent); }
         double row = layout.RowHeight, unit = CompactMusicLayout.Gap(scale);
@@ -966,7 +969,7 @@ public partial class MainWindow
         // the gaps between all of them leave (CompactSpacing.Share): each shows at least its narrowest window and scrolls through
         // the rest, and they widen by turns. Room neither can use goes back to the title, then to the gaps between the parts,
         // before the row is centred (CompactSpacing.Arrange).
-        bool hasCover = media && layout.CoverWidth >= layout.CoverSize - .001, hasEqualizer = media && layout.EqualizerWidth >= layout.EqualizerSize - .001;
+        bool hasCover = media && layout.CoverWidth >= layout.CoverSize - .001, hasEqualizer = equalizer && layout.EqualizerWidth >= layout.EqualizerSize - .001;
         bool hasClock = clock is not null && layout.ClockWidth >= clock.ReservedWidth - .001, hasText = layout.TextWidth > 0 && text.Length > 0;
         double titleWanted = hasText ? layout.TextWidth : 0;
         double shortest = CompactMusicLayout.Whole(CompactMusicLayout.MinimumText * scale);
@@ -1006,9 +1009,9 @@ public partial class MainWindow
             if (part == CompactPart.Rings && rings.Window > 0) shown.Add((part, new(rings.Window)));
             else if (part == CompactPart.Music && hasText) shown.Add((part, new(0)));
             else if (part == CompactPart.Monitor && readings.Window > 0) shown.Add((part, new(readings.Window)));
+            else if (part == CompactPart.Equalizer && hasEqualizer) shown.Add((part, new(layout.EqualizerSize)));
+            else if (part == CompactPart.Clock && hasClock) shown.Add((part, new(clock!.ReservedWidth)));
         }
-        if (hasEqualizer) shown.Add(("equalizer", new(layout.EqualizerSize)));
-        if (hasClock) shown.Add(("clock", new(clock!.ReservedWidth)));
         int title = shown.FindIndex(entry => entry.Part is CompactPart.Music);
         // One gap between every two parts; what is left widens them evenly and then centres the row.
         var place = CompactSpacing.Arrange([.. shown.Select(entry => entry.Size)], title, titleWanted, shortest, grid.Width, unit, scale, dpi);
@@ -1022,12 +1025,12 @@ public partial class MainWindow
                 case "cover":
                     var cover = MusicVisuals.Cover(_mediaCover, layout.CoverSize, layout.CoverRadius); AutomationProperties.SetName(cover, _mediaTrack!.Caption);
                     element = CompactRegion(cover, room, layout.CoverSize, layout.CoverSize, row, RegionAnchor.Left, dpi); break;
-                case "equalizer":
+                case CompactPart.Equalizer:
                     // The bars' levels carry over from the row before (EqualizerBars), so rebuilding the row while resizing never resets them.
-                    _compactEqualizer = new MusicEqualizer { Bars = 4, Levels = _compactBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar,
-                        Color = Settings.MusicCoverColor ? _musicAccent : UI.Brush(PanelTheme.Hex("equalizer")) };
+                    _compactEqualizer = new MusicEqualizer { Bars = Settings.EqualizerBars, Levels = _compactBars, Width = layout.EqualizerSize, Height = layout.EqualizerHeight, BarWidth = layout.EqualizerBar,
+                        Color = CompactEqualizerColor };
                     element = CompactRegion(_compactEqualizer, room, layout.EqualizerSize, layout.EqualizerHeight, row, RegionAnchor.Left, dpi); break;
-                case "clock":
+                case CompactPart.Clock:
                     element = CompactRegion(clock!, room, clock!.ReservedWidth, clock.Height, row, RegionAnchor.Left, dpi); _compactClock = clock; break;
                 case CompactPart.Rings:
                     element = _quotaCarousel = new QuotaCarousel(QuotaRings(apps), layout.RingSize, layout.RingThickness, layout.RingGap, rings.Count, Math.Min(layout.RingEdge, place.Gap), scale, _quotaElapsed, animate,
@@ -1070,10 +1073,20 @@ public partial class MainWindow
             : snapshot.Metrics.Count > 0 ? string.Join(Loc.T("；", "; "), snapshot.Metrics.Select(m => m.ValueText.Length > 0 ? m.ValueText + " " + m.ValueSuffix : Loc.Label(m.Label))) : snapshot.StatusLabel);
         return (used, PanelTheme.QuotaTheme(entry), tip, QuotaCarousel.Letter(entry.Name));
     }).ToArray();
+    // The collapsed bars' color, drawn as the theme can show it on its surface; under high contrast always the theme's.
+    private Brush CompactEqualizerColor => ClockColors.Shown(Settings.EqualizerColor, PanelTheme.HighContrast) switch
+    {
+        ClockColor.Cover => _musicAccent,
+        ClockColor.Custom => new SolidColorBrush(PanelTheme.Readable(ClockFace.Parse(Settings.EqualizerCustomColor))),
+        var preset when ClockColors.Swatches.Contains(preset) => new SolidColorBrush(PanelTheme.Readable(ClockFace.Preset(preset))),
+        _ => UI.Brush(PanelTheme.Hex("equalizer"))
+    };
+    // The collapsed bars: while a song plays or is paused, or at all times when chosen (EqualizerAlways).
+    private bool CompactEqualizerShown => Settings.ShowsEqualizer(EffectiveStyle) && (Settings.EqualizerAlways || _mediaTrack is { State: not MediaState.Stopped });
     private void UpdateMusicTimer()
     {
-        bool musicVisible = MusicPresentationVisible;
-        _app.PresentMedia(this, musicVisible && !CompactMusicRests);
+        bool musicVisible = MusicPresentationVisible, systemVisible = SystemLevelsVisible;
+        _app.PresentMedia(this, PlayerLevelsVisible && !CompactMusicRests, systemVisible);
         bool progressVisible = !_expanded && EffectiveStyle == CompactStyle.Line && Settings.MusicIndicatorProgress && _mediaTrack is { HasTimeline: true, State: not MediaState.Stopped };
         bool animations = MusicMotion;
         // A paused song rests at the start of its line; an endless scroll would keep the window composing for hours. So does a
@@ -1081,9 +1094,9 @@ public partial class MainWindow
         _compactMarquee?.SetScrolling(animations && MusicAudioActive && IsVisible && !IsSuppressed && !_expanded && _alert is null && EffectiveStyle != CompactStyle.Line && !CompactMusicRests);
         UpdateLyricScrolling();
         UpdateQuotaCarousel();
-        bool needed = IsVisible && !IsSuppressed && !ScreenOff && (MusicAudioActive && (musicVisible || progressVisible) || _trackNoticeUntil > DateTimeOffset.UtcNow);
+        bool needed = IsVisible && !IsSuppressed && !ScreenOff && (MusicAudioActive && (musicVisible || progressVisible) || animations && systemVisible || _trackNoticeUntil > DateTimeOffset.UtcNow);
         // Frame-rate ticks only drive visible equalizer bars; the line indicator's progress moves a pixel every few seconds.
-        bool bars = animations && MusicAudioActive && musicVisible && !CompactMusicRests;
+        bool bars = animations && (MusicAudioActive && PlayerLevelsVisible && !CompactMusicRests || systemVisible);
         // Without bars the tick only moves the open page's position and ends a track notice; collapsed, nothing else it drives
         // shows more often than once a second (the indicator's progress moves a pixel every few seconds).
         _musicTick.Interval = TimeSpan.FromMilliseconds(bars ? BarsMs : _expanded || _trackNoticeUntil > DateTimeOffset.UtcNow ? 250 : 1000);
@@ -1148,7 +1161,13 @@ public partial class MainWindow
     // The display is off by either watch: the motion environment's (ambient light, notices) or DisplayPower's (readings, music).
     private static bool ScreenOff => MotionEnvironment.DisplayOff || DisplayPower.Off;
     private bool MusicPresentationVisible => IsVisible && !IsSuppressed && !ScreenOff && _mediaTrack is { State: not MediaState.Stopped }
-        && (_expanded ? IsMusicPage : Settings.ShowsMusic(EffectiveStyle) && _alert is null);
+        && (_expanded ? IsMusicPage : (Settings.ShowsMusic(EffectiveStyle) || _compactEqualizer is not null) && _alert is null);
+    // The bars seen with a song: the music page's, or the collapsed row's.
+    private bool PlayerLevelsVisible => MusicPresentationVisible && (_expanded || _compactEqualizer is not null);
+    // The collapsed bars shown at all times read the whole system's sound while no song plays; over a full-screen window they
+    // rest as the collapsed row's music does (CompactMusicRests).
+    private bool SystemLevelsVisible => IsVisible && !IsSuppressed && !ScreenOff && !_expanded && _alert is null
+        && Settings.EqualizerAlways && _compactEqualizer is not null && !MusicAudioActive && !CompactMusicRests;
     // The display went off or came back on (DisplayPower): what runs only to be seen stops or starts again.
     // A track notice that ran out while the display was off (the music tick that ends it was stopped) is cleared first, so the
     // display comes back to the row as it is now.
@@ -1162,16 +1181,17 @@ public partial class MainWindow
     {
         var now = DateTimeOffset.UtcNow; double seconds = Math.Min(.5, (now - _lastMusicTick).TotalSeconds); _lastMusicTick = now;
         // motion-review F18: the bars rest whenever the music's motion does (animations off, the display off).
-        bool playing = MusicMotion && MusicAudioActive && !CompactMusicRests;
-        bool musicVisible = MusicPresentationVisible;
-        _app.PresentMedia(this, musicVisible && !CompactMusicRests);
-        float peak = musicVisible ? _media?.Peak() ?? 0 : 0;
+        bool playerVisible = PlayerLevelsVisible && !CompactMusicRests, systemVisible = SystemLevelsVisible;
+        bool playing = MusicMotion && MusicAudioActive && !CompactMusicRests, compactPlaying = playing || MusicMotion && systemVisible;
+        _app.PresentMedia(this, playerVisible, systemVisible);
+        bool levels = playerVisible || systemVisible;
+        float peak = levels ? _media?.Peak() ?? 0 : 0;
         // Captured audio drives the flowing bars; the session peak is the fallback.
-        bool flowing = musicVisible && _media?.FlowLevels(_flowLevels) == true;
+        bool flowing = levels && _media?.FlowLevels(_flowLevels) == true;
         if (_expanded && IsMusicPage) { if (flowing) _musicEqualizer?.Show(_flowLevels, playing); else _musicEqualizer?.Tick(peak, playing, seconds); }
-        if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(_flowLevels, playing); else _compactEqualizer?.Tick(peak, playing, seconds); }
+        if (!_expanded && _alert is null) { if (flowing) _compactEqualizer?.Show(_flowLevels, compactPlaying); else _compactEqualizer?.Tick(peak, compactPlaying, seconds); }
         if (_trackNoticeUntil != default && now >= _trackNoticeUntil) { _trackNoticeUntil = default; RenderCompact(); }
         if ((now - _positionTick).TotalMilliseconds >= 250) { _positionTick = now; UpdateMusicPosition(); }
     }
-    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _barsOnFrames = false; _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= AppleLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false); }
+    private void DisposeMusic() { CloseSourceMenu(); _musicTick.Stop(); _barsOnFrames = false; _lyricsRequest?.Cancel(); _app.MediaChanged -= MediaChanged; _app.Lyrics.AppleLyricsWritten -= AppleLyricsWritten; DisplayPower.Changed -= DisplayPowerChanged; _app.PresentMedia(this, false, false); }
 }

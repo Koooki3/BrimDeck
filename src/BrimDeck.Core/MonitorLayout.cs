@@ -8,9 +8,9 @@ namespace BrimDeck.Core;
 public enum MonitorPalette { Sea, Graphite, Warm, Theme, Custom }
 
 // The colors of a scheme, in the order the settings list them: Cpu the CPU readings and the fastest cores, Efficiency the
-// slowest cores (the kinds between take the colors between), then memory, GPU, download and upload. The collapsed readings
-// and the expanded page take the same ones.
-public enum MonitorRole { Cpu, Efficiency, Memory, Gpu, Download, Upload }
+// slowest cores (the kinds between take the colors between), then memory, GPU, download and upload, then the drives, the whole
+// machine's power and its own battery. The collapsed readings and the expanded page take the same ones.
+public enum MonitorRole { Cpu, Efficiency, Memory, Gpu, Download, Upload, Storage, Power, Battery }
 
 // The colors of one of ftop's palettes on a dark or a light panel theme. Theme and Custom have no fixed colors and give Sea's
 // here. ftop's palettes have three main colors; memory and upload take the efficiency color, download the performance color.
@@ -45,22 +45,34 @@ public sealed record MonitorColors(string Performance, string Efficiency, string
         return new(accent, efficiency, efficiency, gpu, accent, efficiency, warning, critical);
     }
 
-    // The drives' bars take the memory color: both are space in use, and the scheme keeps one color for each role it lists.
-    public string Storage => Memory;
+    // The drives', the power curve's and the machine battery's own colors, which only a custom scheme gives; null otherwise. Without
+    // one the drives' bars take the memory color (both are space in use), and power and the battery the panel theme's power style
+    // (the app resolves it, as only it knows the theme).
+    public string? Drives { get; init; }
+    public string? Power { get; init; }
+    public string? Battery { get; init; }
+    public string Storage => Drives ?? Memory;
 
+    // Power and the battery fall back on the CPU color here; the app draws them by the theme's power style, whose curve takes the
+    // CPU color too.
     public string this[MonitorRole role] => role switch
     {
         MonitorRole.Efficiency => Efficiency, MonitorRole.Memory => Memory, MonitorRole.Gpu => Gpu, MonitorRole.Download => Download,
-        MonitorRole.Upload => Upload, _ => Performance
+        MonitorRole.Upload => Upload, MonitorRole.Storage => Storage, MonitorRole.Power => Power ?? Performance, MonitorRole.Battery => Battery ?? Performance,
+        _ => Performance
     };
     public MonitorColors With(MonitorRole role, string color) => role switch
     {
         MonitorRole.Efficiency => this with { Efficiency = color }, MonitorRole.Memory => this with { Memory = color }, MonitorRole.Gpu => this with { Gpu = color },
-        MonitorRole.Download => this with { Download = color }, MonitorRole.Upload => this with { Upload = color }, _ => this with { Performance = color }
+        MonitorRole.Download => this with { Download = color }, MonitorRole.Upload => this with { Upload = color }, MonitorRole.Storage => this with { Drives = color },
+        MonitorRole.Power => this with { Power = color }, MonitorRole.Battery => this with { Battery = color }, _ => this with { Performance = color }
     };
     // Every color as drawn (the app moves them to read on the panel theme).
     public MonitorColors Map(Func<string, string> drawn) =>
-        new(drawn(Performance), drawn(Efficiency), drawn(Memory), drawn(Gpu), drawn(Download), drawn(Upload), drawn(Warning), drawn(Critical));
+        new(drawn(Performance), drawn(Efficiency), drawn(Memory), drawn(Gpu), drawn(Download), drawn(Upload), drawn(Warning), drawn(Critical))
+        {
+            Drives = Drives is null ? null : drawn(Drives), Power = Power is null ? null : drawn(Power), Battery = Battery is null ? null : drawn(Battery)
+        };
 
     // Core groups run from the performance color to the efficiency color in even steps, so a processor with any number of
     // kinds of core has a color for each.
@@ -86,11 +98,14 @@ public sealed class MonitorCustomColors
     public string? Gpu { get; set; }
     public string? Download { get; set; }
     public string? Upload { get; set; }
+    public string? Storage { get; set; }
+    public string? Power { get; set; }
+    public string? Battery { get; set; }
 
     public string? Get(MonitorRole role) => role switch
     {
         MonitorRole.Efficiency => Efficiency, MonitorRole.Memory => Memory, MonitorRole.Gpu => Gpu, MonitorRole.Download => Download,
-        MonitorRole.Upload => Upload, _ => Cpu
+        MonitorRole.Upload => Upload, MonitorRole.Storage => Storage, MonitorRole.Power => Power, MonitorRole.Battery => Battery, _ => Cpu
     };
     public void Set(MonitorRole role, string? color)
     {
@@ -101,6 +116,9 @@ public sealed class MonitorCustomColors
             case MonitorRole.Gpu: Gpu = color; break;
             case MonitorRole.Download: Download = color; break;
             case MonitorRole.Upload: Upload = color; break;
+            case MonitorRole.Storage: Storage = color; break;
+            case MonitorRole.Power: Power = color; break;
+            case MonitorRole.Battery: Battery = color; break;
             default: Cpu = color; break;
         }
     }
@@ -122,7 +140,8 @@ public sealed class MonitorCustomColors
 }
 
 public enum ListPlacement { None, Side, Below }
-// How memory and network are shown: both on one line, one line each, or as blocks with their second lines and sparklines.
+// How memory and network are shown: both on one line, one line each, or memory as a block with its bar and commit line under the
+// figure while network keeps its one line.
 public enum MetricsMode { Line, Lines, Blocks }
 
 // How the system monitor page fills the space it has, after ftop's layout ladder: a small page keeps the essentials, a
@@ -193,7 +212,8 @@ public sealed record MonitorLayout(double Figure, double Body, double Caption, M
         {
             MetricsMode.Line => line,
             MetricsMode.Lines => 2 * line + 6,
-            _ => Math.Ceiling(body * 1.7 + 19) + Math.Ceiling(body * 1.7 + 4 + body * 2) + 10
+            // Memory's block (the figure, the bar and the commit line), then network on one line (NetworkBlock).
+            _ => Math.Ceiling(body * 1.7 + 19) + Math.Ceiling(body * 1.7) + 10
         }, metrics switch { MetricsMode.Line => 2, MetricsMode.Lines => 4, _ => 8 });
     }
 

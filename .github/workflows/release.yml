@@ -87,3 +87,18 @@ jobs:
           $latest = @(if (!$prerelease) { '--latest' })
           gh release edit $env:RELEASE_TAG --draft=false @latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed.' }
+      # Copies that receive beta updates also read update.json from the beta-channel release. Each beta replaces it there;
+      # the first beta creates that release, as a prerelease that is never marked latest.
+      - name: Update beta channel
+        if: contains(needs.check.outputs.version, '-beta.')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          gh release view beta-channel *> $null
+          if ($LASTEXITCODE -ne 0) {
+              gh release create beta-channel --target $env:RELEASE_COMMIT --prerelease --latest=false --title 'Beta channel' --notes 'Points BrimDeck copies that receive beta updates to the newest beta. Download betas from their own releases.'
+              if ($LASTEXITCODE -ne 0) { throw 'The beta channel could not be created.' }
+          }
+          gh release upload beta-channel artifacts/releases/update.json --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'The beta channel could not be updated.' }

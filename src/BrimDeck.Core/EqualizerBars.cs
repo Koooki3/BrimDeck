@@ -5,7 +5,8 @@ namespace BrimDeck.Core;
 // built again on every change of its width: the new row shows the bars where they were instead of starting again from rest.
 public sealed class EqualizerBars
 {
-    public const int Count = 5;
+    // As many as any equalizer may show (CompactMusicLayout.MaximumBars); each draws the first of them it has room for.
+    public const int Count = CompactMusicLayout.MaximumBars;
     private readonly (double Time, double Peak)[] _history = new (double, double)[64];
     private readonly double[] _levels = new double[Count];
     private int _next, _count;

@@ -9,7 +9,7 @@ namespace BrimDeck;
 internal sealed class PowerStyle
 {
     public PowerLook Look { get; }
-    // Normal fills a battery as it is; Charge while charging; Saver outlines Battery saver; Draw is the power curve and the bolt badge.
+    // Normal fills a battery as it is; Charge while charging; Saver outlines Battery saver; Draw is the power curve and the bolt.
     public string Normal { get; }
     public string Charge { get; }
     public string Saver { get; }
@@ -25,7 +25,9 @@ internal sealed class PowerStyle
             "cpu" => colors.Performance, "efficiency" => colors.Efficiency, "memory" => colors.Memory, "gpu" => colors.Gpu,
             "warning" => colors.Warning, "critical" => colors.Critical, _ => PanelTheme.Hex(name)
         };
-        Normal = Resolve(look.Normal); Charge = Resolve(look.Charge); Saver = Resolve(look.Saver); Draw = Resolve(look.Draw);
+        // The custom scheme's own colors replace the look's: the battery's while discharging and while charging (the plug tells the
+        // two apart), and power's for the curve and the bolt.
+        Normal = colors.Battery ?? Resolve(look.Normal); Charge = colors.Battery ?? Resolve(look.Charge); Saver = Resolve(look.Saver); Draw = colors.Power ?? Resolve(look.Draw);
         Warning = colors.Warning; Critical = colors.Critical;
     }
 
@@ -49,16 +51,17 @@ internal sealed class PowerStyle
 internal readonly record struct BatteryVisual(double Percent, BatteryState State, bool Saver, MemoryLevel Level)
 {
     public bool Charging => State == BatteryState.Charging;
+    // Plugged in: charging, full or held at a charge limit. The plug is drawn in the battery for all three.
+    public bool OnMains => State is BatteryState.Charging or BatteryState.Full or BatteryState.PluggedIn;
     public static BatteryVisual Of(BatterySample sample, int low) => new(sample.Percent, sample.State, sample.BatterySaver, BatteryModel.Level(sample, low));
 }
 
-// The drawings shared by the monitor page, the collapsed row and the settings preview: a battery in the theme's shape, the bolt, the
+// The drawings shared by the monitor page, the collapsed row and the settings preview: a battery in the theme's shape, the plug, the
 // leaf of Battery saver, and the power curve. Each shape follows the look of the theme (PowerLook); the marks that tell a state
-// (a bolt, an exclamation mark, a leaf) are drawn in every look, so color is never the only sign.
+// (a plug, an exclamation mark, a leaf) are drawn in every look, so color is never the only sign.
 internal static class PowerGlyphs
 {
     private static readonly Geometry LeafShape = Frozen("M3,13 C3,6.5 7.5,3 13,3 C13,9 9.5,13 3,13 Z M3,13 L9,7");
-    private static readonly Geometry BoltBadge = Frozen("M9,1.5 L3.8,9 H7.6 L7,14.5 L12.2,7 H8.4 Z");
     private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
 
     // Pens by color, thickness, join and dash, made once and frozen: the strip draws the battery on every reading.
@@ -82,48 +85,20 @@ internal static class PowerGlyphs
         drawing.Pop();
     }
 
-    // The badge before the power figure: a bolt in a ring (a hexagon for the HUD look, a square for blocks), on the quota rings' track.
-    public static void Badge(DrawingContext drawing, Point center, double size, string color, bool known, PowerStyle style)
-    {
-        double ring = Math.Max(1.2, size / 10), r = size / 2 - ring / 2;
-        var track = DeviceGlyphs.Stroke(PanelTheme.Hex("ringTrack"), ring);
-        switch (style.Look.Gauge)
-        {
-            case PowerGauge.Blocks:
-                drawing.DrawRectangle(null, Outline(PanelTheme.Hex("ringTrack"), ring, PenLineJoin.Miter), new Rect(center.X - r, center.Y - r, 2 * r, 2 * r));
-                break;
-            case PowerGauge.Chamfer:
-                {
-                    double c = r * .5;
-                    var figure = new PathFigure(new Point(center.X - r + c, center.Y - r), [], true);
-                    foreach (var p in new[] { new Point(center.X + r, center.Y - r), new Point(center.X + r, center.Y + r - c), new Point(center.X + r - c, center.Y + r),
-                        new Point(center.X - r, center.Y + r), new Point(center.X - r, center.Y - r + c) }) figure.Segments.Add(new LineSegment(p, true));
-                    var hex = new PathGeometry([figure]); hex.Freeze();
-                    drawing.DrawGeometry(null, Outline(PanelTheme.Hex("ringTrack"), ring, PenLineJoin.Miter), hex);
-                    break;
-                }
-            default:
-                drawing.DrawEllipse(null, track, center, r, r);
-                break;
-        }
-        double scale = size * .72 / 16;
-        drawing.PushTransform(new MatrixTransform(scale, 0, 0, scale, center.X - 8 * scale, center.Y - 8 * scale));
-        drawing.DrawGeometry(UI.Brush(known ? color : UI.Tertiary), null, BoltBadge);
-        drawing.Pop();
-    }
-
     // A battery lying on its side in the area (the tip included): the body in the look's shape, filled to the share (fill, 0 to 1,
-    // easing to the reading). compact: too small to carry a mark inside; the bolt then replaces the tip while charging, the leaf
-    // while Battery saver is on, and an exclamation mark shows in the empty part when low. unknown: no reading; outlined and empty.
+    // easing to the reading). On mains a plug sits on the body's lower right corner, set apart from it by a thin gap that follows
+    // the plug's outline (the body is cut there, so the gap shows whatever is behind). compact: too small to carry a mark inside; the
+    // leaf then replaces the tip while Battery saver is on, and an exclamation mark shows in the empty part when low.
+    // unknown: no reading; outlined and empty.
     public static void Battery(DrawingContext drawing, Rect area, BatteryVisual battery, PowerStyle style, double ppd, double fill, bool compact, bool unknown = false)
     {
         double Snap(double value) => Math.Round(value * ppd, MidpointRounding.AwayFromZero) / ppd;
         var gauge = style.Look.Gauge;
         double h = Snap(area.Height), stroke = Math.Max(1, Math.Round(Math.Max(1, h * .11) * ppd)) / ppd;
-        bool charging = battery.Charging && !unknown, saver = battery.Saver && battery.State == BatteryState.Discharging && battery.Level == MemoryLevel.Normal && !unknown;
-        // The tip is a mark's place in the compact drawing: the bolt (charging) or the leaf (saver) takes it.
-        bool tipMark = compact && (charging || saver);
-        double tipWidth = tipMark ? Snap(h * (charging ? 15 / 23.0 : .9)) : gauge == PowerGauge.Blocks ? Snap(Math.Max(2, h * .2)) : Snap(Math.Max(1, h * .16));
+        bool plugged = battery.OnMains && !unknown, saver = battery.Saver && battery.State == BatteryState.Discharging && battery.Level == MemoryLevel.Normal && !unknown;
+        // The tip is a mark's place in the compact drawing: the leaf (saver) takes it.
+        bool tipMark = compact && saver;
+        double tipWidth = tipMark ? Snap(h * .9) : gauge == PowerGauge.Blocks ? Snap(Math.Max(2, h * .2)) : Snap(Math.Max(1, h * .16));
         string fillColor = style.Fill(battery.Level, battery.State);
         string ink = unknown ? UI.Tertiary : saver ? style.Saver : fillColor;
         var body = new Rect(Snap(area.X) + stroke / 2, Snap(area.Y) + stroke / 2, Math.Max(2, Snap(area.Width - tipWidth - 1) - stroke), Math.Max(2, h - stroke));
@@ -133,6 +108,17 @@ internal static class PowerGlyphs
         var pen = Outline(ink, stroke, gauge is PowerGauge.Chamfer or PowerGauge.Blocks ? PenLineJoin.Miter : PenLineJoin.Round);
         double tipX = Snap(body.Right + stroke / 2 + 1 / ppd);
         double lit = inner.Width * share;
+
+        // The corner plug: over the body's lower right corner, its right edge on the body's (the tip stays whole), reaching below it;
+        // the body is drawn without the plug's outline widened by the gap. A compact battery is small, so its plug is larger against it.
+        Geometry? cornerPlug = null;
+        if (plugged)
+        {
+            double plugHeight = Snap(h * (compact ? .8 : .54)), plugWidth = plugHeight * PowerMarks.PlugAspect, gap = Math.Max(1, Math.Round(1.2 * ppd)) / ppd;
+            cornerPlug = PowerMarks.PlugIn(new Rect(Snap(body.Right - plugWidth), Snap(body.Bottom - plugHeight * .72), plugWidth, plugHeight));
+            var room = Geometry.Combine(cornerPlug, cornerPlug.GetWidenedPathGeometry(new Pen(Brushes.Black, gap * 2) { LineJoin = PenLineJoin.Round }), GeometryCombineMode.Union, null);
+            drawing.PushClip(new CombinedGeometry(GeometryCombineMode.Exclude, new RectangleGeometry(Rect.Inflate(area, h, h)), room));
+        }
 
         switch (gauge)
         {
@@ -181,27 +167,26 @@ internal static class PowerGlyphs
                 }
         }
 
-        // The tip: a bump, or a mark's place (the bolt, the leaf).
+        // The tip: a bump, or a mark's place (the leaf).
         var tip = new Rect(tipX, Snap(area.Y + (h - h * .4) / 2), tipWidth, Snap(h * .4));
-        if (tipMark && charging) DeviceGlyphs.Bolt(drawing, new Rect(tipX, Snap(area.Y), tipWidth, h), ink);
-        else if (tipMark) Leaf(drawing, new Point(tipX - h * .05, Snap(area.Y)), h, ink);
+        if (tipMark) Leaf(drawing, new Point(tipX - h * .05, Snap(area.Y)), h, ink);
         else drawing.DrawRectangle(UI.Brush(ink), null, tip);
+        if (cornerPlug is not null) { drawing.Pop(); drawing.DrawGeometry(UI.Brush(ink), null, cornerPlug); }
 
         if (unknown) return;
-        // Marks inside a body big enough for them, in the ink that reads on the fill.
-        if (!compact && inner.Height >= 8 && inner.Width >= 14)
+        // Marks inside a body big enough for them, in the ink that reads on the fill (on mains the plug at the corner says it all).
+        if (!compact && !plugged && inner.Height >= 8 && inner.Width >= 14)
         {
             string onFill = Ink(fillColor);
             double markSize = Math.Floor(inner.Height * .9);
-            if (charging) DeviceGlyphs.Bolt(drawing, new Rect(inner.X + (inner.Width - markSize * .7) / 2, inner.Y + (inner.Height - markSize) / 2, markSize * .7, markSize), lit > inner.Width * .5 ? onFill : fillColor);
-            else if (battery.Level != MemoryLevel.Normal)
+            if (battery.Level != MemoryLevel.Normal)
             {
                 var empty = new Rect(inner.X + lit, inner.Y, Math.Max(0, inner.Width - lit), inner.Height);
                 DeviceGlyphs.Exclamation(drawing, empty.Width >= markSize * .6 ? empty : inner, empty.Width >= markSize * .6 ? fillColor : onFill, null, ppd);
             }
             else if (saver) Leaf(drawing, new Point(inner.X + inner.Width / 2 - markSize / 2, inner.Y + (inner.Height - markSize) / 2), markSize, lit > inner.Width * .5 ? onFill : style.Saver);
         }
-        else if (compact && battery.Level != MemoryLevel.Normal && !charging)
+        else if (compact && battery.Level != MemoryLevel.Normal && !plugged)
         {
             double left = inner.X + lit;
             DeviceGlyphs.Exclamation(drawing, new Rect(left, body.Y + stroke / 2, Math.Max(0, inner.Width - lit), Math.Max(0, body.Height - stroke)), fillColor, null, ppd);
@@ -282,5 +267,32 @@ internal static class PowerGlyphs
         var head = points[^1];
         drawing.DrawEllipse(UI.Brush(MonitorDraw.Faint(color, .3)), null, head, 4, 4);
         drawing.DrawEllipse(UI.Brush(color), null, head, 1.8, 1.8);
+    }
+}
+
+// The mark drawn beside the battery on mains: the plug. The round-capped pens and the exclamation mark are DeviceGlyphs', shared
+// with the devices page.
+internal static class PowerMarks
+{
+    // A mains plug, filled and full: two broad rounded prongs, the body rounding down to a thick cable. 9.2 wide and 12 tall, from (0.4, 0).
+    private static readonly Geometry PlugShape = Frozen("M1.9,0.9 A1.1,0.9 0 0 1 4.1,0.9 V3.4 H5.9 V0.9 A1.1,0.9 0 0 1 8.1,0.9 V3.4 H9.6 V6 A3.6,3.6 0 0 1 6.4,9.6 V12 H3.6 V9.6 A3.6,3.6 0 0 1 0.4,6 V3.4 H1.9 Z");
+    private const double PlugWide = 9.2, PlugLeft = .4;
+    public const double PlugAspect = PlugWide / 12;
+    private static Geometry Frozen(string data) { var geometry = Geometry.Parse(data); geometry.Freeze(); return geometry; }
+
+    // The plug as tall as the area, centred in it, as a geometry in the area's coordinates (to draw it, or to cut its room out of another).
+    public static Geometry PlugIn(Rect area)
+    {
+        double scale = area.Height / 12;
+        var geometry = PlugShape.Clone();
+        geometry.Transform = new MatrixTransform(scale, 0, 0, scale, area.X + (area.Width - PlugWide * scale) / 2 - PlugLeft * scale, area.Y);
+        geometry.Freeze();
+        return geometry;
+    }
+
+    public static void Plug(DrawingContext drawing, Rect area, string color)
+    {
+        if (area.Height <= 0) return;
+        drawing.DrawGeometry(UI.Brush(color), null, PlugIn(area));
     }
 }

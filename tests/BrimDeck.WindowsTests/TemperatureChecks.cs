@@ -12,26 +12,28 @@ internal static class TemperatureChecks
     {
         bool elevated = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
         Console.WriteLine($"Temperatures read {(elevated ? "with" : "without")} administrator rights.");
+        Zones(check);
         using var pdh = new PdhQuery();
-        Zones(pdh, check);
         Adapters(pdh, check);
         Drives(check, elevated);
     }
 
-    private static void Zones(PdhQuery pdh, Action<string, bool> check)
+    // The zones in a query of their own, as the sampler keeps them.
+    private static void Zones(Action<string, bool> check)
     {
-        // A query whose counters have no instances at all collects nothing (PDH_NO_DATA); the sampler's always has the processor's.
-        pdh.Add(@"\Processor Information(_Total)\% Processor Utility");
-        var zones = new ThermalZones(pdh);
+        using var pdh = new PdhQuery();
+        var zones = new ThermalZones(pdh, () => { });
         check("thermal zones: unknown until asked", zones.State == SensorState.Unknown);
-        check("thermal zones: the first ask only adds the counters", zones.Sample(pdh.Collect(), true, 0) is null);
-        bool collected = pdh.Collect();
-        var cpu = zones.Sample(collected, true, 1);
+        var watch = Stopwatch.StartNew();
+        var cpu = zones.Sample(true, 0);
+        Console.WriteLine($"  thermal zones: added and collected in {watch.Elapsed.TotalMilliseconds:0.0} ms");
+        Thread.Sleep(1100);
+        cpu = zones.Sample(true, 1) ?? cpu;
         Console.WriteLine(cpu is { } zone ? $"  CPU {zone.Celsius:0.0} °C from {zone.Zone}" : $"  CPU: no ACPI thermal zone gives a temperature on this machine ({zones.State})");
         check("thermal zones: the processor's temperature is plausible or none", cpu is null || Temperatures.Plausible(cpu.Value.Celsius) is not null);
-        check("thermal zones: known once read", zones.State != SensorState.Unknown && (cpu is null || zones.State == SensorState.Found));
-        check("thermal zones: none without a collection", zones.Sample(false, true, 2) is null);
-        check("thermal zones: none once not wanted, and the counters leave the query", zones.Sample(pdh.Collect(), false, 3) is null && pdh.Read(@"\Thermal Zone Information(*)\Temperature").Count == 0);
+        // A zone counts once it has moved (SteadyZones): until then, or for good on a machine whose zones hold still, it may stay Unknown.
+        check("thermal zones: found once a temperature is read", cpu is null ? zones.State != SensorState.Found : zones.State == SensorState.Found);
+        check("thermal zones: none once not wanted, and the counters leave the query", zones.Sample(false, 3) is null && pdh.Read(@"\Thermal Zone Information(*)\Temperature").Count == 0);
     }
 
     private static void Adapters(PdhQuery pdh, Action<string, bool> check)
@@ -41,12 +43,14 @@ internal static class TemperatureChecks
         pdh.Add(Memory); pdh.Collect();
         var keys = pdh.Read(Memory).Select(item => item.Instance).Select(instance => instance.IndexOf("_phys", StringComparison.Ordinal) is var end and > 0 ? instance[..end] : instance)
             .Where(key => AdapterLuid.Parse(key) is not null).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
-        using var temperatures = new GpuTemperatures();
+        using var temperatures = new GpuTemperatures(() => { });
+        // Named by their keys here; the sampler names them by the adapters' names.
+        var names = keys.ToDictionary(key => key, key => key, StringComparer.OrdinalIgnoreCase);
         var found = new List<string>();
         foreach (var key in keys)
         {
-            var first = temperatures.Read(key, 0);
-            var soon = temperatures.Read(key, 1);
+            var first = temperatures.Read(key, key, 0);
+            var soon = temperatures.Read(key, key, 1);
             Console.WriteLine(first is { } celsius ? $"  GPU {key}: {celsius:0.0} °C" : $"  GPU {key}: no temperature");
             check($"graphics adapter {key}: plausible or none", first is null || Temperatures.Plausible(first.Value) is not null);
             check($"graphics adapter {key}: one without a temperature is not asked again at once", first is not null || soon is null);
@@ -55,19 +59,19 @@ internal static class TemperatureChecks
         if (keys.Count > 0)
         {
             // Whichever adapter is the busiest, the temperature comes from one with a sensor and stays with it.
-            var readings = keys.Select(shown => temperatures.ReadFor(shown, keys, 2)).ToList();
+            var readings = keys.Select(shown => temperatures.ReadFor(shown, keys, names, 2)).ToList();
             check("graphics adapters: an adapter without a sensor does not take the temperature away", found.Count == 0
                 ? readings.All(reading => reading is null) && temperatures.State != SensorState.Found
                 : readings.All(reading => reading is { } r && found.Contains(r.Adapter)) && temperatures.State == SensorState.Found);
             var without = keys.Except(found).ToList();
             if (found.Count > 0 && without.Count > 0)
-                check("graphics adapters: the adapter that last gave one keeps it", without.All(shown => temperatures.ReadFor(shown, keys, 3)?.Adapter == temperatures.ReadFor(without[0], keys, 3)?.Adapter));
+                check("graphics adapters: the adapter that last gave one keeps it", without.All(shown => temperatures.ReadFor(shown, keys, names, 3)?.Adapter == temperatures.ReadFor(without[0], keys, names, 3)?.Adapter));
         }
         // An adapter not in use is never asked for another's sake: shown alone, an adapter without a sensor reads nothing even
         // after another gave a temperature, so a powered-down dedicated adapter is left asleep.
         foreach (var without in keys.Except(found))
-            check($"graphics adapter {without}: an idle adapter is not asked for its sake", temperatures.ReadFor(without, [without], 10) is null);
-        check("graphics adapters: an unknown key reads nothing", temperatures.Read("luid_0x7FFFFFFF_0x7FFFFFFF", 0) is null && temperatures.Read("not an adapter", 0) is null);
+            check($"graphics adapter {without}: an idle adapter is not asked for its sake", temperatures.ReadFor(without, [without], names, 10) is null);
+        check("graphics adapters: an unknown key reads nothing", temperatures.Read("luid_0x7FFFFFFF_0x7FFFFFFF", "unknown", 0) is null && temperatures.Read("not an adapter", "unknown", 0) is null);
         Console.WriteLine($"  {keys.Count} adapter(s) listed, {found.Count} with a temperature");
     }
 
