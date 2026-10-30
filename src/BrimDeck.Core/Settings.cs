@@ -98,6 +98,10 @@ public sealed class AppEntry
     // New API, Sub2API and custom rows: also send requests, and so the API key, over plain HTTP to any address, such as a
     // gateway on a NAS or reached through Tailscale. Off by default; HTTP to this PC is allowed either way.
     public bool AllowHttp { get; set; }
+    // Rows whose source reports an account balance without a total (ProviderCatalog.HasAccountBalance): the balance that counts
+    // as 0% used, in the balance's own currency. The account balance is then drawn as (target − balance) / target used, with
+    // the warning and critical levels of any quota, and 0% while the balance is above the target. Null shows the bare amount.
+    public decimal? BalanceTarget { get; set; }
     [JsonIgnore] public string ConfigurationKey => ProviderCatalog.ConfigurationKey(this);
     // Shorthand for QuotaSource in code. The "Id" member of old files is converted by SettingsMigrations.
     [JsonIgnore] public ProviderId Id { get => QuotaSource; set => QuotaSource = value; }
@@ -150,6 +154,7 @@ public sealed class AppEntry
         ThemeColor = AppPresets.NormalizeColor(ThemeColor);
         WarningColor = AppPresets.NormalizeColor(WarningColor);
         CriticalColor = AppPresets.NormalizeColor(CriticalColor);
+        BalanceTarget = BalanceTarget is { } target && decimal.Round(target, 2, MidpointRounding.AwayFromZero) is > 0 and <= AppPresets.MaximumBalanceTarget and var rounded ? rounded : null;
         OffPeak = [.. (OffPeak ?? []).Where(period => period is not null).Take(AppPresets.MaximumOffPeakPeriods).Select(period => period.Normalized())];
         OffPeakColor = AppPresets.NormalizeColor(OffPeakColor);
         OffPeakWarningColor = AppPresets.NormalizeColor(OffPeakWarningColor);
@@ -192,6 +197,7 @@ public static class AppPresets
     public const int MaximumFullscreenExceptions = 32;
     public const string WarningColor = "#E5C890", CriticalColor = "#E78284";
     public const int MaximumOffPeakPeriods = 6;
+    public const decimal MaximumBalanceTarget = 1_000_000_000;
     public const double WarningPercent = 70, CriticalPercent = 90;
     // Each column needs this much width; the panel's minimum width follows the number of enabled applications.
     public const double MinimumColumnWidth = 150;
