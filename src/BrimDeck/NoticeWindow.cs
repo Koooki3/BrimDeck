@@ -896,7 +896,7 @@ internal sealed partial class NoticeWindow : Window
     private Button GlyphButton(string glyph, string name, Action click)
     {
         var button = TextButton("", click, primary: false, flat: true);
-        ((Border)button.Content).Child = new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 11, Foreground = UI.Brush(_look.Secondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        ((Border)button.Content).Child = new TextBlock { Text = glyph, FontFamily = Fonts.Icon, FontSize = 11, Foreground = UI.Brush(_look.Secondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         ((Border)button.Content).Padding = new Thickness(0);
         button.Width = 32; button.Height = 32; button.Margin = new Thickness(0); button.VerticalAlignment = VerticalAlignment.Top;
         AutomationProperties.SetName(button, name); button.ToolTip = name;

@@ -25,10 +25,11 @@ internal static class UI
         element.LayoutTransform = scale == 1 ? Transform.Identity : new ScaleTransform(scale, scale);
         SetScale(element, scale);
     }
-    public static readonly FontFamily TextFont = new("Microsoft YaHei");
+    // The families of the interface's text are Fonts' (the one place that names a font, and where the user's own font goes in).
+    public static FontFamily TextFont => Fonts.Text;
     // The panel sets Latin text and digits in Segoe UI Variable and falls back to YaHei for Chinese.
-    public static readonly FontFamily PanelFont = new("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
-    public static readonly FontFamily DisplayFont = new("Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI");
+    public static FontFamily PanelFont => Fonts.Panel;
+    public static FontFamily DisplayFont => Fonts.Display;
     // Text and structure on the panel's surface, from the panel theme (see PanelTheme): three label levels, hairlines and fills.
     public static string Accent => PanelTheme.Hex("accent");
     public static string Primary => PanelTheme.Hex("textPrimary");
