@@ -30,6 +30,9 @@ internal sealed class ResizeGripLayer : FrameworkElement
 
     public Form Shape => _form;
     public DipRect Rect => _rect;
+    // The layer is drawn in the frame of the edge the panel hangs from (MainWindow.Edge.cs); this turns the size label upright.
+    private Transform _upright = Transform.Identity;
+    public Transform Upright { get => _upright; set { _upright = value; InvalidateVisual(); } }
 
     // The panel's or the surface's box in this layer's coordinates (the window's), and what it is.
     public void Show(Form form, DipRect rect, double header, double radius, bool line)
@@ -277,13 +280,21 @@ internal sealed class ResizeGripLayer : FrameworkElement
         double ppd = MonitorDraw.PixelsPerDip(this), size = _form == Form.Panel ? 12 : 11;
         var text = MonitorDraw.Text(_label, size, UI.Primary, ppd, strong: true);
         double width = Math.Ceiling(text.WidthIncludingTrailingWhitespace) + 16, height = Math.Ceiling(size * 1.7);
-        double x = _form == Form.Panel ? _rect.Right - 14 - width : _rect.X + _rect.Width / 2 - width / 2;
-        double y = _form == Form.Panel ? _rect.Bottom - 12 - height : _rect.Bottom + 4;
-        var box = new Rect(Math.Round(x), Math.Round(y), width, height);
+        // Turned upright, the chip takes its own width and height on the screen: its place is worked out with them swapped when
+        // the frame turns them, and it is then turned about its centre.
+        var upright = _upright.Value;
+        bool turned = upright.M11 == 0;
+        double across = turned ? height : width, deep = turned ? width : height;
+        double x = _form == Form.Panel ? _rect.Right - 14 - across : _rect.X + _rect.Width / 2 - across / 2;
+        double y = _form == Form.Panel ? _rect.Bottom - 12 - deep : _rect.Bottom + 4;
+        var centre = new Point(Math.Round(x) + across / 2, Math.Round(y) + deep / 2);
+        var box = new Rect(centre.X - width / 2, centre.Y - height / 2, width, height);
+        drawing.PushTransform(new MatrixTransform(upright.M11, upright.M12, upright.M21, upright.M22,
+            centre.X - (centre.X * upright.M11 + centre.Y * upright.M21), centre.Y - (centre.X * upright.M12 + centre.Y * upright.M22)));
         drawing.PushOpacity(opacity);
         drawing.DrawRoundedRectangle(UI.Brush(PanelTheme.Hex("tooltip")), new Pen(UI.Brush(PanelTheme.Hex("tooltipBorder")), 1), box, height / 2, height / 2);
         drawing.DrawText(text, new Point(box.X + 8, box.Y + (height - text.Height) / 2));
-        drawing.Pop();
+        drawing.Pop(); drawing.Pop();
     }
 
     private static T Frozen<T>(T freezable) where T : Freezable { freezable.Freeze(); return freezable; }

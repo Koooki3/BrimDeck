@@ -211,12 +211,14 @@ public sealed partial class SettingsWindow
     {
         SectionTitle(Loc.T("收起时", "When collapsed"));
         Group(MusicChoice(Loc.T("中间文字", "Middle text"), S.MusicText, new[] { (CompactMusicText.None, Loc.T("无", "None")), (CompactMusicText.Title, Loc.T("歌名", "Title")), (CompactMusicText.Lyrics, Loc.T("歌词", "Lyrics")) }, v => Change(s => s.MusicText = v)),
-            Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)));
+            Toggle(Loc.T("切歌时短暂显示歌名", "Briefly show the title on a track change"), S.MusicTrackNotice, v => Change(s => s.MusicTrackNotice = v)),
+            Toggle(Loc.T("显示封面", "Show cover"), S.MusicCompactCover, v => Change(s => s.MusicCompactCover = v)));
         SectionTitle(Loc.T("展开时", "When expanded"));
         var bars = SliderRow(Loc.T("律动条长度", "Equalizer length"), S.MusicEqualizerBars, CompactMusicLayout.MinimumBars, CompactMusicLayout.MaximumBars, 1, Loc.T("根", "bars"),
             v => Change(s => s.MusicEqualizerBars = (int)v));
         bars.IsEnabled = S.MusicPage;
-        Group(Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars);
+        Group(Toggle(Loc.T("显示封面", "Show cover"), S.MusicPageCover, v => Change(s => s.MusicPageCover = v), S.MusicPage),
+            Toggle(Loc.T("显示歌词", "Show lyrics"), S.LyricsEnabled, v => Change(s => s.LyricsEnabled = v), S.MusicPage), bars);
     }
     // Operations only one player supports, grouped under that player's name.
     private void Players()
@@ -228,9 +230,78 @@ public sealed partial class SettingsWindow
             Toggle(Loc.T("启动后自动启用完整控制", "Enable full control when it starts"), S.NeteaseAutoFullControl, NeteaseAutoFullControl, S.MusicPage,
                 Loc.T("网易云音乐以普通方式启动后，BrimDeck 会自动将它重启一次，改为完整控制，通常需要几秒钟。",
                     "When NetEase Cloud Music is started the normal way, BrimDeck restarts it once with full control, which usually takes a few seconds.")));
+        SectionTitle(Loc.T("酷狗音乐", "KuGou Music"));
+        Group(KugouSwitch());
         SectionTitle("Apple Music");
         Group(Toggle(Loc.T("始终启用完整控制", "Always enable full control"), S.AppleMusicFullControl, v => Change(s => s.AppleMusicFullControl = v), S.MusicPage,
             Loc.T("BrimDeck 启动后自动启用 Apple Music 的完整控制。", "Enables full control of Apple Music when BrimDeck starts.")));
+    }
+    // KuGou's full control as one switch, since a changed libcef.dll makes every start of KuGou a full control start. On: after
+    // the explanation the file is changed and a running KuGou restarts; off: the file is restored and KuGou keeps running until
+    // its next start. A line beneath only when something needs saying. It follows the player while the page is open.
+    private FrameworkElement KugouSwitch()
+    {
+        var app = (App)Application.Current;
+        string title = Loc.T("完整控制", "Full control");
+        // A file another tool or an earlier change left changed is on as well: KuGou starts with full control either way.
+        bool changed = (app.Media is { } known ? known.KugouState : Native.KugouInstall.State()) == KugouPatchState.Patched;
+        var toggle = new CheckBox { Style = (Style)FindResource("SettingsToggle"), IsChecked = S.KugouFullControl || changed, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(toggle, title);
+        var note = TextLine("", 11, TextTertiary); note.TextWrapping = TextWrapping.Wrap;
+        bool busy = false, quiet = false;
+        string? failure = null;
+        async Task Switch(bool on)
+        {
+            if (quiet) return;
+            if (on && new KugouControlWindow(S.Theme) { Owner = this }.ShowDialog() != true) { Set(false); return; }
+            busy = true; failure = null; Update();
+            try
+            {
+                if (on)
+                {
+                    failure = app.Media is { } media ? await media.EnableKugouFullControlAsync(start: false)
+                        : await Task.Run(async () => { await Native.KugouInstall.EnableAsync(false, CancellationToken.None); return (string?)null; });
+                    if (failure is not null) Set(false);
+                    else Change(s => s.KugouFullControl = true);
+                }
+                else
+                {
+                    Change(s => s.KugouFullControl = false);
+                    await Task.Run(() => Native.KugouInstall.ChangeFileAsync(false, CancellationToken.None));
+                }
+            }
+            catch (Exception ex) { failure = ex.Message; if (on) Set(false); }
+            finally { busy = false; app.Media?.CheckKugouInstall(now: true); Update(); }
+        }
+        // Moves the switch without acting on it.
+        void Set(bool on) { quiet = true; toggle.IsChecked = on; quiet = false; }
+        toggle.Checked += async (_, _) => await Switch(true);
+        toggle.Unchecked += async (_, _) => await Switch(false);
+        void Update()
+        {
+            var media = app.Media;
+            var state = media is not null ? media.KugouState : Native.KugouInstall.State();
+            bool working = busy || media is { RestartingKugou: true };
+            bool supported = state is KugouPatchState.Original or KugouPatchState.Patched or KugouPatchState.Partial;
+            toggle.IsEnabled = supported && !working && S.MusicPage;
+            string? error = working ? null : failure ?? media?.KugouError;
+            // The port follows the file only from KuGou's next start.
+            bool pending = supported && (state == KugouPatchState.Patched) != (media is { KugouFullControl: true }) && Native.KugouInstall.Running();
+            note.Text = working ? Loc.T("正在处理…", "Working…")
+                : error is not null ? Loc.T("启用失败：", "Could not turn on: ") + error
+                : state is null ? Loc.T("未安装酷狗音乐", "KuGou Music is not installed")
+                : !supported ? Loc.T("不支持此版本", "This version is not supported")
+                : pending ? Loc.T("酷狗重启后生效", "Takes effect when KuGou restarts") : "";
+            note.Foreground = UI.Brush(error is not null || state is not null && !supported ? _palette.Negative : TextTertiary);
+            note.Visibility = note.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        void Changed() => Dispatcher.BeginInvoke(Update);
+        Update();
+        var row = Row(title, toggle, note, () => Loc.T("会修改酷狗的 libcef.dll，之后酷狗每次启动都是完整控制。",
+            "Changes KuGou's libcef.dll; KuGou then starts with full control every time."));
+        row.Loaded += (_, _) => app.MediaChanged += Changed;
+        row.Unloaded += (_, _) => app.MediaChanged -= Changed;
+        return row;
     }
     // Switching it on is confirmed with the explanation of the debugging port; declining rebuilds the page with the switch off.
     private void NeteaseAutoFullControl(bool on)

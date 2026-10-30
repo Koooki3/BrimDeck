@@ -21,6 +21,8 @@ internal sealed record SettingsPalette(bool Dark)
     public string Popup => Dark ? "#222227" : "#FCFCFD";
     public string Border => Dark ? "#42424B" : "#CED1DA";
     public string Accent => Dark ? "#88B0EE" : "#347BDF";
+    // Text that says something failed or is unavailable.
+    public string Negative => Dark ? "#F0A6AA" : "#B12E3A";
     public void Apply(ResourceDictionary resources)
     {
         void Brush(string key, string color) => resources[key] = UI.Brush(color);
