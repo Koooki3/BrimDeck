@@ -319,7 +319,8 @@ public partial class MainWindow
     }
 
     // Before its first reading a quota has its defaults: nothing read, no time, and the label and the detail alike.
-    private static bool Awaiting(ProviderSnapshot snapshot) => snapshot.Metrics.Count == 0 && !snapshot.LiveQuota && snapshot.QuotaTime is null && snapshot.Status == snapshot.StatusLabel;
+    // Only until the first read has ended, whatever it brought: a read that failed or found nothing shows its state, not the skeleton.
+    private bool Awaiting(ProviderSnapshot snapshot) => !_firstReadEnded && snapshot.Metrics.Count == 0 && !snapshot.LiveQuota && snapshot.QuotaTime is null && snapshot.Status == snapshot.StatusLabel;
 
     private FrameworkElement Column(AppEntry entry, ProviderSnapshot snapshot, ProviderSnapshot usage, QuotaView view, Layout layout, bool inline, bool wide, bool center, bool separator, double innerWidth)
     {
@@ -366,7 +367,7 @@ public partial class MainWindow
             var status = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             status.Children.Add(UI.Fixed(snapshot.StatusLabel, Math.Max(11, layout.Label + 1), Math.Ceiling(layout.Label * 1.5), UI.Secondary, FontWeights.SemiBold));
             var detail = UI.Text(snapshot.Status, Math.Max(10, layout.Reset), UI.Tertiary);
-            detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.MaxHeight = 34; detail.TextTrimming = TextTrimming.CharacterEllipsis;
+            detail.FontFamily = UI.PanelFont; detail.Margin = new Thickness(0, 3, 0, 0); detail.TextWrapping = TextWrapping.Wrap; detail.ToolTip = snapshot.Status;
             status.Children.Add(detail);
             var sync = new Button { Style = (Style)FindResource("PanelTextButton"), FontFamily = UI.TextFont, Padding = new Thickness(6, 2, 6, 2), Height = 24,
                 HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-6, 4, 0, 0), Content = Loc.T("立即同步", "Sync now") };
