@@ -23,6 +23,8 @@ internal static class Program
             Environment.ExitCode = Core.AppInstance.RequestExit(exit + 1 < args.Length && int.TryParse(args[exit + 1], out var seconds) ? seconds : 20);
             return;
         }
+        // The elevated instance KugouInstall starts writes KuGou's file and exits without opening the app.
+        if (args is [Native.KugouInstall.ElevatedSwitch, var mode, var library]) { Environment.ExitCode = Native.KugouInstall.RunElevated(mode, library); return; }
         var app = new App();
         app.InitializeComponent();
         app.Run();

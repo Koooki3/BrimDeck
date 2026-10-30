@@ -6,6 +6,12 @@ using System.Text.RegularExpressions;
 namespace BrimDeck.Core;
 
 public sealed record LyricLine(double Seconds, string Text);
+// The lines shown around the one being sung: Before ends with the line just sung, After starts with the next one.
+public sealed record LyricWindow(IReadOnlyList<string> Before, string Current, IReadOnlyList<string> After)
+{
+    public static LyricWindow Empty { get; } = new([], "", []);
+    public static LyricWindow Only(string current) => new([], current, []);
+}
 public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string Source, bool Instrumental = false)
 {
     public static Lyrics Empty { get; } = new([], true, "");
@@ -13,40 +19,46 @@ public sealed record Lyrics(IReadOnlyList<LyricLine> Lines, bool Synced, string 
     public const double AppleLead = 0.2;
     public bool QqPreview { get; init; }
     public bool CanSynchronize(MediaTrack track) => Synced && track.HasTimeline;
-    public (string Previous, string Current, string Next) At(MediaTrack track, DateTimeOffset now)
+    public (string Previous, string Current, string Next) At(MediaTrack track, DateTimeOffset now) => Nearest(Around(track, now, 1, 1));
+    public (string Previous, string Current, string Next) At(double seconds) => Nearest(Around(seconds, 1, 1));
+    private static (string Previous, string Current, string Next) Nearest(LyricWindow window)
+        => (window.Before.Count > 0 ? window.Before[^1] : "", window.Current, window.After.Count > 0 ? window.After[0] : "");
+    // The current line with up to before lines above it and after lines below it, in the order they are sung.
+    public LyricWindow Around(MediaTrack track, DateTimeOffset now, int before, int after)
     {
-        if (!CanSynchronize(track)) return ("", "", "");
-        if (!QqPreview || !track.IsQqMusic) return At(track.Position(now).TotalSeconds + (track.IsAppleMusic ? AppleLead : 0));
+        if (!CanSynchronize(track)) return LyricWindow.Empty;
+        if (!QqPreview || !track.IsQqMusic) return Around(track.Position(now).TotalSeconds + (track.IsAppleMusic ? AppleLead : 0), before, after);
         // A preview can start at zero or inside the song. QQ's actual current line and
         // full-song karaoke timestamp locate it without guessing from the clip metadata.
         string text = track.CurrentLyric ?? "";
         string key = NormalizeLine(text);
-        if (key.Length == 0) return ("", text.Length > 0 ? text : track.CurrentLyric is null ? "" : "♪", "");
+        if (key.Length == 0) return LyricWindow.Only(text.Length > 0 ? text : track.CurrentLyric is null ? "" : "♪");
         var matches = Lines.Select((line, index) => (Line: line, Index: index))
             .Where(row => NormalizeLine(row.Line.Text) == key).ToArray();
-        if (matches.Length == 1) return At(matches[0].Line.Seconds);
+        if (matches.Length == 1) return Around(matches[0].Line.Seconds, before, after);
         if (matches.Length > 1 && track.CurrentLyricStart is { } start)
         {
             var nearest = matches.OrderBy(row => Math.Abs(row.Line.Seconds - start.TotalSeconds)).First();
-            if (Math.Abs(nearest.Line.Seconds - start.TotalSeconds) <= 2) return At(nearest.Line.Seconds);
+            if (Math.Abs(nearest.Line.Seconds - start.TotalSeconds) <= 2) return Around(nearest.Line.Seconds, before, after);
         }
         // An unmatched line or ambiguous repeated chorus still has QQ's single-line fallback.
-        return ("", text, "");
+        return LyricWindow.Only(text);
     }
     private static string NormalizeLine(string text) => string.Concat(text.Where(char.IsLetterOrDigit)).ToUpperInvariant();
-    public (string Previous, string Current, string Next) At(double seconds)
+    public LyricWindow Around(double seconds, int before, int after)
     {
-        if (Lines.Count == 0) return ("", Instrumental ? "♪" : "", "");
-        if (!Synced) return ("", "", "");
+        before = Math.Max(0, before); after = Math.Max(0, after);
+        if (Lines.Count == 0) return LyricWindow.Only(Instrumental ? "♪" : "");
+        if (!Synced) return LyricWindow.Empty;
         int index = -1;
         for (int i = 0; i < Lines.Count && Lines[i].Seconds <= seconds; i++) index = i;
-        if (index < 0) return ("", "♪", Lines[0].Text);
-        var current = Lines[index];
-        var next = index + 1 < Lines.Count ? Lines[index + 1] : null;
+        string[] Texts(int from, int count) => [.. Lines.Skip(from).Take(count).Select(line => line.Text)];
+        if (index < 0) return new([], "♪", Texts(0, after));
         // LRC timestamps start a line; they do not specify how long it is sung.
         // Only an explicit blank line marks a gap before the next timestamp.
-        string text = string.IsNullOrWhiteSpace(current.Text) ? "♪" : current.Text;
-        return (index > 0 ? Lines[index - 1].Text : "", text, next?.Text ?? "");
+        string text = string.IsNullOrWhiteSpace(Lines[index].Text) ? "♪" : Lines[index].Text;
+        int first = Math.Max(0, index - before);
+        return new(Texts(first, index - first), text, Texts(index + 1, after));
     }
     public static Lyrics Parse(string? lrc, string? plain, double duration, string source, bool instrumental = false)
     {
@@ -118,8 +130,11 @@ public sealed partial class LyricsService : IDisposable
             {
                 if (track.SongId.StartsWith("netease:", StringComparison.Ordinal))
                     lyrics = await FindNeteaseId(track.SongId[8..], track.Duration.TotalSeconds, token);
+                // KuGou's songs ask KuGou first; for the others it is the last provider asked.
+                if (track.IsKugou) lyrics = await FindKugou(track, token);
                 if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindLrclib(track, token);
                 if (lyrics.Lines.Count == 0 && !lyrics.Instrumental) lyrics = await FindNetease(track, token);
+                if (lyrics.Lines.Count == 0 && !lyrics.Instrumental && !track.IsKugou) lyrics = await FindKugou(track, token);
             }
             token.ThrowIfCancellationRequested();
             // An empty result can be a temporary provider failure. Do not keep it for the entire app session.

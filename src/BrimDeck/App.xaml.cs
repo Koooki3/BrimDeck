@@ -467,7 +467,7 @@ public partial class App : Application
         else if (!wanted && Media is not null) { Media.Changed -= RaiseMediaChanged; Media.Dispose(); Media = null; RaiseMediaChanged(); }
         // Switching the setting off leaves full control on until BrimDeck restarts.
         if (Settings.AppleMusicFullControl && Media is { AppleMusicFullControl: false } media) media.EnableAppleMusicFullControl();
-        if (Media is not null) Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl;
+        if (Media is not null) { Media.NeteaseAutoFullControl = Settings.NeteaseAutoFullControl; Media.KugouFullControlWanted = Settings.KugouFullControl; }
     }
     private void RaiseMediaChanged() => MediaChanged?.Invoke();
     // Audio levels are read while any panel shows music: the player's while it shows a song's bars, the whole system's while

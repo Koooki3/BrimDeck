@@ -86,7 +86,8 @@ internal static class DeviceChecks
 
     // What the HID source opens, from the path alone: the vendor and product of a USB, classic Bluetooth and LE path, the link,
     // and which vendors' Bluetooth collections are opened at all.
-    private static void PathFilters(Action<string, bool> check)
+    // Public for the hosted subset: it reads no device.
+    public static void PathFilters(Action<string, bool> check)
     {
         const string usb = @"\\?\hid#vid_046d&pid_c52b&mi_02&col01#8&2a3b4c5d&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
         const string classic = @"\\?\hid#{00001124-0000-1000-8000-00805f9b34fb}_vid&0002054c_pid&0ce6#9&1a2b3c4d&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
