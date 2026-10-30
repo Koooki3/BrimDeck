@@ -349,6 +349,9 @@ public sealed class DeckSettings
     public bool NeteaseFullControlEntry { get; set; }
     // Restarts a player started the normal way with full control, without asking again; switching it on asks once.
     public bool NeteaseAutoFullControl { get; set; }
+    // KuGou's full control, which the user confirmed when switching it on: its libcef.dll is kept changed, also after a KuGou
+    // update replaces it (a running KuGou then restarts once). Switching it off restores the file.
+    public bool KugouFullControl { get; set; }
     // Enables Apple Music's full control when BrimDeck starts, without the entry and its explanation.
     public bool AppleMusicFullControl { get; set; }
     public DefaultDeckPage DefaultPage { get; set; }

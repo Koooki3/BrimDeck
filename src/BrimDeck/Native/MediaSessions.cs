@@ -95,6 +95,75 @@ internal sealed class MediaSessions : IDisposable
         Changed?.Invoke();
         return enabled;
     }
+    // KuGou's full control. Once its libcef.dll is changed, every start of KuGou opens the debugging port, so full control is a
+    // lasting state: the setting KugouFullControl. The file's state is read off the UI thread, at most once a minute, or every
+    // few seconds while the setting is on; while it is on, a file found unchanged (as after a KuGou update) is changed again
+    // and a running KuGou restarts, once for each start of KuGou.
+    private KugouCdpConnection? Kugou => _connections.OfType<KugouCdpConnection>().FirstOrDefault();
+    public bool RestartingKugou { get; private set; }
+    public KugouPatchState? KugouState { get; private set; }
+    public bool KugouInstalled => KugouState is not null;
+    public bool KugouFullControl => Kugou?.Ready == true;
+    // Why the last attempt to enable full control failed; cleared by the next attempt.
+    public string? KugouError { get; private set; }
+    public bool CanEnableKugouFullControl => KugouState is KugouPatchState.Original or KugouPatchState.Patched or KugouPatchState.Partial
+        && Current is { IsKugou: true } current && _routes.TryGetValue(current.Id, out var route) && route.Connection is null;
+    public bool KugouFullControlWanted
+    {
+        get => _kugouAuto;
+        set { if (_kugouAuto == value) return; _kugouAuto = value; _kugouAttempted = null; if (value) CheckKugouInstall(now: true); }
+    }
+    private bool _kugouAuto, _kugouChecking;
+    private string? _kugouAttempted;
+    private long _kugouCheckedAt = -60_000;
+    public void CheckKugouInstall(bool now = false)
+    {
+        if (_kugouChecking || !now && Environment.TickCount64 - _kugouCheckedAt < (_kugouAuto ? 5_000 : 60_000)) return;
+        _kugouChecking = true; _kugouCheckedAt = Environment.TickCount64;
+        _ = Task.Run(() => (State: KugouInstall.State(), Processes: KugouInstall.Processes())).ContinueWith(check => _dispatcher.BeginInvoke(() =>
+        {
+            _kugouChecking = false;
+            if (_disposed || !check.IsCompletedSuccessfully) return;
+            var (state, (processes, started)) = check.Result;
+            if (state != KugouState) { KugouState = state; Changed?.Invoke(); }
+            // An unchanged file is changed again at once; a KuGou with the debugging port is connected within a few seconds of its
+            // start, so one that runs longer without it started before the change and restarts.
+            bool unchanged = state is KugouPatchState.Original or KugouPatchState.Partial;
+            bool stale = state is KugouPatchState.Patched && !KugouFullControl && started is { } at && DateTime.UtcNow - at > TimeSpan.FromSeconds(8);
+            if (_kugouAuto && !RestartingKugou && (unchanged || stale) && _kugouAttempted != processes)
+            {
+                _kugouAttempted = processes;
+                _ = EnableKugouFullControlAsync(start: false);
+            }
+        }), TaskScheduler.Default);
+    }
+    // Patches KuGou (which may ask for administrator rights) and restarts it when it runs, or starts it when start asks for
+    // it, then waits for the connection. Null when it is done, otherwise what went wrong, which KugouError keeps.
+    public async Task<string?> EnableKugouFullControlAsync(bool start = true)
+    {
+        if (RestartingKugou || Kugou is not { } kugou) return null;
+        RestartingKugou = true; KugouError = null; Changed?.Invoke();
+        try
+        {
+            bool running = start || await Task.Run(KugouInstall.Running);
+            await Task.Run(() => KugouInstall.EnableAsync(start, CancellationToken.None));
+            if (!running) return null;
+            for (var deadline = Environment.TickCount64 + 30_000; Environment.TickCount64 < deadline && !_disposed;)
+            {
+                await Task.Delay(250);
+                if (kugou.Ready) return null;
+            }
+            return KugouError = Loc.T("酷狗已重启，但未能连接", "KuGou restarted, but could not be connected");
+        }
+        catch (Exception ex) { return KugouError = ex.Message; }
+        finally
+        {
+            RestartingKugou = false;
+            // The restarted KuGou is a new start; it is not changed again by the setting.
+            _kugouAttempted = (await Task.Run(KugouInstall.Processes)).Key;
+            if (!_disposed) { CheckKugouInstall(now: true); Changed?.Invoke(); Schedule(); }
+        }
+    }
     // A pinned source stays on screen whatever other players do, until it is unpinned or closes.
     public string? Pinned => _pinned;
     public event Action? Changed;
@@ -102,7 +171,7 @@ internal sealed class MediaSessions : IDisposable
     public MediaSessions(Dispatcher dispatcher, bool connectPlayers = true)
     {
         _dispatcher = dispatcher;
-        _connections = connectPlayers ? [new NeteaseSource(), new QqMediaConnection()] : [];
+        _connections = connectPlayers ? [new NeteaseSource(), new QqMediaConnection(), new KugouCdpConnection()] : [];
         _debounce = new PromptTimer(dispatcher, async () => { _debounce!.Stop(); await RefreshAsync(); }) { Interval = TimeSpan.FromMilliseconds(100) };
         _poll = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background,
             async (_, _) => await RefreshAsync(), dispatcher);
@@ -346,7 +415,7 @@ internal sealed class MediaSessions : IDisposable
                 _announcedPin = _pinned; _announcedRestarting = restarting;
                 Tracks = tracks; Current = current; Cover = cover;
                 Error = connectionError;
-                UpdateMeter();
+                UpdateMeter(); CheckKugouInstall();
                 if (changed) Changed?.Invoke();
             } while (_again && !_disposed);
         }
@@ -374,14 +443,16 @@ internal sealed class MediaSessions : IDisposable
         {
             if (connection.ProcessId is not { } pid || connection.Snapshot is not { } snapshot) continue;
             bool netease = connection is NeteaseSource;
-            string name = netease ? "cloudmusic" : "QQMusic";
-            var systems = _sessions.Values.Where(s => AppMatches(s, name + ".exe")).ToArray();
+            string name = connection switch { NeteaseSource => "cloudmusic", KugouCdpConnection => "kugou", _ => "QQMusic" };
+            // KuGou's session is named "kugou", the others by their executable.
+            var systems = _sessions.Values.Where(s => connection is KugouCdpConnection
+                ? string.Equals(s.App, name, StringComparison.OrdinalIgnoreCase) : AppMatches(s, name + ".exe")).ToArray();
             var system = systems.FirstOrDefault(s => s.Session == current) ?? systems.FirstOrDefault();
             // A disconnected QQ pipe falls back as a whole to GSMTC. Retain its last
             // song without capabilities only when there is no system replacement.
             if (connection is QqMediaConnection { Ready: false } && system is not null) continue;
             foreach (var entry in systems) consumed.Add(entry);
-            string identity = connection is NeteaseSource ns ? ns.Identity : ((QqMediaConnection)connection).Identity;
+            string identity = connection switch { NeteaseSource ns => ns.Identity, KugouCdpConnection kugou => kugou.Identity, _ => ((QqMediaConnection)connection).Identity };
             routes.Add(new(identity, name, system, connection, netease && snapshot.IsNeteaseLog));
         }
         foreach (var source in _sessions.Values.Where(s => !consumed.Contains(s)))

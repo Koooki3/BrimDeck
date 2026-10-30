@@ -56,6 +56,7 @@ public static class MediaAppTarget
         string lower = appId.ToLowerInvariant();
         if (lower.Contains("cloudmusic") || lower.Contains("netease")) return "网易云音乐";
         if (lower.Contains("qqmusic")) return "QQ 音乐";
+        if (lower == "kugou") return "酷狗音乐";
         if (lower.Contains("msedge")) return "Microsoft Edge";
         if (lower.Contains("chrome")) return "Google Chrome";
         if (lower.Contains("spotify")) return "Spotify";
