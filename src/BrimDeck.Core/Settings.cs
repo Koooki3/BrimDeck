@@ -102,8 +102,9 @@ public sealed class AppEntry
     public bool AllowHttp { get; set; }
     // Rows whose source reports an account balance without a total (ProviderCatalog.HasAccountBalance): the balance that counts
     // as 0% used, in the balance's own currency. The account balance is then drawn as (target − balance) / target used, with
-    // the warning and critical levels of any quota, and 0% while the balance is above the target. Null shows the bare amount.
-    public decimal? BalanceTarget { get; set; }
+    // the warning and critical levels of any quota, and 0% while the balance is above the target. New rows start at 100;
+    // null, saved when the field is cleared, shows the bare amount.
+    public decimal? BalanceTarget { get; set; } = 100;
     [JsonIgnore] public string ConfigurationKey => ProviderCatalog.ConfigurationKey(this);
     // Shorthand for QuotaSource in code. The "Id" member of old files is converted by SettingsMigrations.
     [JsonIgnore] public ProviderId Id { get => QuotaSource; set => QuotaSource = value; }

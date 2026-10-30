@@ -138,7 +138,7 @@ public sealed partial class SettingsWindow
     }
 
     // Sources billed per API call: the balance that counts as 0% used, so that the account balance is drawn as a used share
-    // with the row's warning and critical levels. Empty leaves the balance a bare amount.
+    // with the row's warning and critical levels. New rows start at 100; empty leaves the balance a bare amount.
     private FrameworkElement BalanceTargetDetails(AppEntry entry)
     {
         var grid = AppColumns();
