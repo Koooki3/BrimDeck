@@ -92,6 +92,9 @@ public partial class MainWindow : Window
     private readonly bool _rebuilt;
     public bool IsSuppressed => !_preview && (Settings.Behavior(_context, _host.App.Name, _host.App.Path) == WindowBehavior.Hide || HiddenByUser);
     public IReadOnlyList<ProviderSnapshot> Snapshots { get; private set; } = [];
+    // Set when the first read has ended, with data or without (RefreshAsync); until then the usage page shows its skeleton.
+    private bool _firstReadEnded;
+    internal void FirstReadEnded() => _firstReadEnded = true;
     public string? LastRefreshError { get; private set; }
 
     private sealed record CompactAlertInfo(AppEntry Entry, string Name, string Label, double Used, DateTimeOffset? ResetAt);
@@ -566,7 +569,7 @@ public partial class MainWindow : Window
     }
     public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots)
     {
-        Snapshots = snapshots; _updatedAt = DateTimeOffset.Now;
+        Snapshots = snapshots; _updatedAt = DateTimeOffset.Now; _firstReadEnded = true;
         DetectThresholds();
         RenderCompact(); RenderUsage();
     }
@@ -1038,7 +1041,8 @@ public partial class MainWindow : Window
         catch (Exception ex) { LastRefreshError = ex.GetType().Name + "\n" + ex.StackTrace; }
         finally
         {
-            _refreshing = false; RestartSyncCycle(); _app.RequestTrim();
+            _refreshing = false; foreach (var deck in _app.Decks) deck.FirstReadEnded();
+            RestartSyncCycle(); _app.RequestTrim();
             foreach (var deck in _app.Decks) deck.RenderUsage();
             if (_refreshRequested)
             {
