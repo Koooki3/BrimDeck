@@ -41,7 +41,7 @@ public partial class MainWindow
         bool page = shown && !ScreenOff;
         // A row whose only chosen reading is the battery reads the devices (UpdateDevicesDemand), not the system. A row whose
         // chosen readings all wait for their first figures shows nothing, yet must be read for them (StripAwaits).
-        bool strip = !_expanded && (_compactStrip?.Showing(Eased.Now) == true && _compactStrip.NeedsSystem || StripAwaits()) && IsVisible && !IsSuppressed && !ScreenOff && _alert is null && EffectiveStyle != CompactStyle.Line;
+        bool strip = !_expanded && (Strips.Any(reading => reading.Showing(Eased.Now) && reading.NeedsSystem) || StripAwaits()) && IsVisible && !IsSuppressed && !ScreenOff && _alert is null && EffectiveStyle != CompactStyle.Line;
         if (!shown)
         {
             // A list that is not on screen cannot be under the pointer, and a closed page keeps no card open.
@@ -56,7 +56,7 @@ public partial class MainWindow
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
-        if (strip && !_stripShowing) _compactStrip?.Update(_app.Monitor?.Latest, motion: false, (int)Settings.CompactSmoothing);
+        if (strip && !_stripShowing) UpdateCompactStrips(_app.Monitor?.Latest, motion: false);
         _monitorShowing = page; _stripShowing = strip;
         // The devices page and the collapsed battery reading ask on the same occasions.
         UpdateDevicesDemand();
@@ -94,9 +94,9 @@ public partial class MainWindow
             // The drives, a temperature, a drive letter or the battery got its first figure: the row is built again with it, and it comes
             // in with the row's own entrance while the others slide aside. Until then the row did not show it, so nothing else changes.
             if (admitted) return;
-            _compactStrip?.Update(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off, (int)Settings.CompactSmoothing);
+            UpdateCompactStrips(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off);
             // The last reading has faded out of a row that stays as it is: the sampler may rest.
-            if (_stripShowing && _compactStrip?.Showing(Eased.Now) != true) UpdateMonitorDemand();
+            if (_stripShowing && !Strips.Any(reading => reading.Showing(Eased.Now))) UpdateMonitorDemand();
             return;
         }
         if (!IsMonitorPage || _monitorView is null) return;

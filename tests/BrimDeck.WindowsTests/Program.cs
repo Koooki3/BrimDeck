@@ -16,6 +16,7 @@ internal static class Program
         {
             // "--only power": just the power and battery checks, for a quick look at what this machine reports.
             if (args is ["--only", "power"]) { PowerChecks.Run(Check); return 0; }
+            if (args is ["--only", "capture"]) { CaptureChecks.Run(Check); return 0; }
             if (args is ["--only", "layout"]) { LayoutRetryTests.Run(Check); return 0; }
             // "--hosted": only the checks that hold on a CI runner (a virtual machine with a session but no display output, GPU,
             // battery, devices or players, and no promise about speed). Everything left out reads this machine's hardware or its
@@ -24,6 +25,7 @@ internal static class Program
             bool hosted = args is ["--hosted"];
             Console.WriteLine($"Windows native smoke tests{(hosted ? " (hosted subset)" : "")}: {Environment.OSVersion.Version}");
             CheckWindowChrome();
+            CaptureChecks.Run(Check);
             CheckSettledClip();
             CheckIslandTakesClicks();
             NoticeProtectionTests.Run(Check);
@@ -59,6 +61,7 @@ internal static class Program
                 var (bounds, work, scale) = WindowsHost.PrimaryScreen();
                 Check("primary display has usable bounds and DPI", bounds.Width > 0 && bounds.Height > 0
                     && work.Width > 0 && work.Height > 0 && scale > 0);
+                AppIdentityChecks.Run(Check);
                 TemperatureChecks.Run(Check);
                 PowerChecks.Run(Check);
                 DeviceChecks.Run(Check);
