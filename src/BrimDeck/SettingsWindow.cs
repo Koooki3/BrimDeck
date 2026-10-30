@@ -891,15 +891,32 @@ public sealed partial class SettingsWindow : Window
             if (current is { } chosen) Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => chosen.BringIntoView());
         };
         select.Tag = menu;
-        select.Click += (_, _) => { if (!menu.IsOpen) FitMenuToScreen(select, menu, surface); };
+        // At most MenuRows sources show at once, with the next one cut through the middle so the list reads as one that scrolls.
+        // Headers and the divider above them count toward the height but not the rows. A shorter list shows whole.
+        double MenuLimit()
+        {
+            items.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double height = surface.Padding.Top + surface.Padding.Bottom + surface.BorderThickness.Top + surface.BorderThickness.Bottom;
+            int shown = 0;
+            foreach (UIElement row in items.Children)
+            {
+                bool source = row is Button;
+                if (source && shown == MenuRows) return height + row.DesiredSize.Height / 2;
+                height += row.DesiredSize.Height;
+                if (source) shown++;
+            }
+            return double.PositiveInfinity;
+        }
+        select.Click += (_, _) => { if (!menu.IsOpen) FitMenuToScreen(select, menu, surface, MenuLimit()); };
         TogglePopup(select, menu);
         return select;
     }
+    private const int MenuRows = 10;
 
     // Opens the menu on the side of the button that has room for it inside the monitor's work area, so it never covers
     // the taskbar, and limits its height to that room. The room depends on the screen resolution, the Windows scale and
-    // where the button is, so it is measured again each time the menu opens.
-    private static void FitMenuToScreen(FrameworkElement anchor, Popup menu, FrameworkElement surface)
+    // where the button is, so it is measured again each time the menu opens. limit caps the height even where there is more room.
+    private static void FitMenuToScreen(FrameworkElement anchor, Popup menu, FrameworkElement surface, double limit = double.PositiveInfinity)
     {
         const double Gap = 4, Edge = 8;
         if (PresentationSource.FromVisual(anchor)?.CompositionTarget is not { } target) return;
@@ -911,10 +928,10 @@ public sealed partial class SettingsWindow : Window
         double above = fromDevice.Transform(new Vector(0, top.Y - work.Top)).Y - Gap - Edge;
         surface.MaxHeight = double.PositiveInfinity;
         surface.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        bool down = surface.DesiredSize.Height <= below || below >= above;
+        bool down = Math.Min(surface.DesiredSize.Height, limit) <= below || below >= above;
         menu.Placement = down ? PlacementMode.Bottom : PlacementMode.Top;
         menu.VerticalOffset = down ? Gap : -Gap;
-        surface.MaxHeight = Math.Max(0, down ? below : above);
+        surface.MaxHeight = Math.Max(0, Math.Min(limit, down ? below : above));
     }
 
     // A popup that closes when the mouse goes down outside it also closes when its own button is pressed.
