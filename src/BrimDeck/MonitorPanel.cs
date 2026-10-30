@@ -55,7 +55,7 @@ public partial class MainWindow
         // Neither took readings while hidden: they show the current ones, or dashes once the sampler has paused, never the
         // figures they showed last time.
         if (page && !_monitorShowing) _monitorView?.Update(_app.Monitor?.Latest ?? WaitingSnapshot, motion: false);
-        if (strip && !_stripShowing) _compactStrip?.Update(_app.Monitor?.Latest, motion: false, (int)Settings.CompactSmoothing);
+        if (strip && !_stripShowing) UpdateCompactStrips(_app.Monitor?.Latest, motion: false);
         _monitorShowing = page; _stripShowing = strip;
     }
     // The collapsed readings the row was last built without (StripAdmission.Hidden): the drives until their first figures, and for
@@ -94,7 +94,7 @@ public partial class MainWindow
             if ((_compactStrip is not null || Settings.ShowsMonitor(EffectiveStyle)) && (hidden != _stripUnavailable || _stripAdmission.Layout != _stripLayout)) { _stripPresence.Arrive(arriving); RenderCompact(); return; }
             // A row still waiting for its first figures stops asking for readings once its sensors turn out to be missing.
             if (_compactStrip is null) { UpdateMonitorDemand(); return; }
-            _compactStrip?.Update(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off, (int)Settings.CompactSmoothing); return;
+            UpdateCompactStrips(snapshot, MonitorMotion && Settings.CompactSmoothing != CompactSmoothing.Off); return;
         }
         if (!IsMonitorPage || _monitorView is null) return;
         if (MonitorKey() != _monitorKey)

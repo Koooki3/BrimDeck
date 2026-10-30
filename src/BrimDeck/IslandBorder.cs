@@ -238,7 +238,9 @@ public sealed class IslandBorder : Border
         double inset = Math.Clamp(insetBy, 0, Math.Min(w, h) / 4), top = shoulder > 0 ? 0 : inset;
         w -= 2 * inset; h -= top + inset;
         double left = shoulder, right = w - shoulder;
-        double limit = Math.Max(0, Math.Min(shoulder > 0 ? h - shoulderDepth : h / 2, (right - left) / 2));
+        // With shoulders the bottom corners also stay within half the height, so the limit does not jump when a shoulder
+        // shrinking to nothing on a low surface (a notch becoming the line) ends; a notch at rest never reaches either bound.
+        double limit = Math.Max(0, Math.Min(shoulder > 0 ? Math.Min(h - shoulderDepth, h / 2) : h / 2, (right - left) / 2));
         double bl = Math.Clamp(corners.BottomLeft - inset, 0, limit);
         double br = Math.Clamp(corners.BottomRight - inset, 0, limit);
         double tl = Math.Clamp(corners.TopLeft - inset, 0, Math.Min(w, h) / 2);
