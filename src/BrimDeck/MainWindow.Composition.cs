@@ -74,7 +74,7 @@ public partial class MainWindow
     // While the island opens, closes or changes size, the region is set once, to cover where it starts and where it ends, and
     // held until the move is over: set on every frame, it made DWM shape the window again on every frame of the move. Clicks
     // beside the island are taken for those few hundred milliseconds. Bounds in window DIPs; the move's own curve overshoots
-    // its end by under 2 percent.
+    // its end by under 2 percent (Curves.BounceOvershoot is a sixth of that; the 2 percent below is kept as a wide margin).
     private long _regionHeldUntil;
     private Rect _regionHeld = Rect.Empty;
     private System.Windows.Threading.DispatcherTimer? _regionRelease;

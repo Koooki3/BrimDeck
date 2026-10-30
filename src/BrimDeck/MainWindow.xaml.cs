@@ -892,7 +892,8 @@ public partial class MainWindow : Window
             SetImmediate(Compact, OpacityProperty, 0d);
             SetImmediate(CompactScale, ScaleTransform.ScaleXProperty, Soft.Shrunk); SetImmediate(CompactScale, ScaleTransform.ScaleYProperty, Soft.Shrunk);
         }
-        // Opening, the size and place spring past their end by under 2 percent of the move and settle back; the corners never
+        // Opening, the size and place spring past their end by a third of a percent of the move and settle back (W-09: softened
+        // from 1.7 percent, so the bottom edge's rebound is felt rather than seen, in every theme alike); the corners never
         // bounce (a radius would pass zero). A panel that has no room in the window for that give opens on the plain curve.
         // Booting does not use that give: Bounce on Margin and Height would bob the whole capsule or line after the round
         // dot has already finished its jumps (the notch sits at the top edge, so the same overshoot is barely seen).

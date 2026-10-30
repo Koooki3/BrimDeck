@@ -77,6 +77,7 @@ try
     DeviceProtocolTests.Run(Check);
     ResizeMotionTests.Run(Check);
     CurvesTests.Run(Check);
+    ExpandBounceTests.Run(Check);
     GlassFeedbackTests.Run(Check);
     IdleCostTests.Run(Check);
     MusicCostTests.Run(Check);
