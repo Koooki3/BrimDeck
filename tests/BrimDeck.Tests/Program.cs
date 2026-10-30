@@ -14,6 +14,18 @@ Directory.CreateDirectory(root);
 try
 {
     ModelUsageTests.Run(Check);
+    await NoticeProtocolTests.Run(Check);
+    NoticeCoreTests.Run(root, Check);
+    NoticeWindowsAppTests.Run(Check);
+    NoticeTimeTests.Run(Check);
+    AuditUiTests.Run(Check);
+    AuditFollowupTests.Run(Check);
+    AuditWin2Tests.Run(Check);
+    NoticeEventLogTests.Run(Check);
+    NoticeBannerTests.Run(root, Check);
+    NoticeOpsTests.Run(Check);
+    NoticeLiquidTests.Run(Check);
+    NoticeGlyphTests.Run(Check);
     AntigravityUsageTests.Run(root, Check);
     await MusicTests.Run(Check);
     await AppleMusicLyricsTests.Run(root, Check);

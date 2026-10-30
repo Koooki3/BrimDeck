@@ -20,6 +20,7 @@ public partial class MainWindow
     private readonly Button AIUsageButton = new() { Content = "Usage", Width = 60, Height = 24 };
     private readonly Button MusicPageButton = new() { Content = "Music", Width = 60, Height = 24 };
     private readonly Button MonitorPageButton = new() { Content = "Monitor", Width = 60, Height = 24 };
+    private readonly Button NoticesPageButton = new() { Content = "Notices", Width = 60, Height = 24 };
     private readonly Grid PageSwitch = new();
     private readonly Border PageCapsule = new() { Width = 60, Height = 24 };
     private readonly TranslateTransform PageCapsuleShift = new();
@@ -32,6 +33,7 @@ public partial class MainWindow
             ShowActivated = false, WindowStyle = WindowStyle.None };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(window.AIUsageButton); buttons.Children.Add(window.MonitorPageButton); buttons.Children.Add(window.MusicPageButton);
+        buttons.Children.Add(window.NoticesPageButton);
         window.PageCapsule.RenderTransform = window.PageCapsuleShift;
         window.PageSwitch.Children.Add(window.PageCapsule); window.PageSwitch.Children.Add(buttons);
         window.Content = window.PageSwitch;

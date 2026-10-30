@@ -28,5 +28,23 @@ internal static class HotkeyTests
             && HotkeyText.Plan(HotkeyKind.Expand, "Ctrl+Alt+K", "alt+ctrl+K", Key) == (HotkeyStatus.Duplicate, "Ctrl+Alt+K")
             && HotkeyText.Plan(HotkeyKind.Expand, "Ctrl+Alt+J", "Ctrl+Alt+K", Key) == (null, "Ctrl+Alt+K")
             && HotkeyText.Plan(HotkeyKind.Expand, "Ctrl+", "Ctrl+Alt+K", Key) == (null, "Ctrl+Alt+K"));
+        // life-T2: the notices hotkey yields to both earlier ones.
+        check("The notices hotkey yields to the hide and expand hotkeys",
+            HotkeyText.Plan(HotkeyKind.Notices, "Ctrl+Alt+K", "", "Ctrl+Alt+K", Key) == (HotkeyStatus.Duplicate, "Ctrl+Alt+K")
+            && HotkeyText.Plan(HotkeyKind.Notices, "", "Ctrl+Alt+J", "Ctrl+Alt+J", Key) == (HotkeyStatus.Duplicate, "Ctrl+Alt+J")
+            && HotkeyText.Plan(HotkeyKind.Notices, "Ctrl+Alt+K", "Ctrl+Alt+J", "alt+ctrl+K", Key) == (HotkeyStatus.Duplicate, "Ctrl+Alt+K")
+            && HotkeyText.Plan(HotkeyKind.Notices, "Ctrl+Alt+K", "Ctrl+Alt+J", "Ctrl+Alt+N", Key) == (null, "Ctrl+Alt+N"));
+        check("When all three hotkeys match, only the hide hotkey registers",
+            HotkeyText.Plan(HotkeyKind.Hide, "Ctrl+Alt+K", "Ctrl+Alt+K", "Ctrl+Alt+K", Key) == (null, "Ctrl+Alt+K")
+            && HotkeyText.Plan(HotkeyKind.Expand, "Ctrl+Alt+K", "Ctrl+Alt+K", "Ctrl+Alt+K", Key) == (HotkeyStatus.Duplicate, "Ctrl+Alt+K")
+            && HotkeyText.Plan(HotkeyKind.Notices, "Ctrl+Alt+K", "Ctrl+Alt+K", "Ctrl+Alt+K", Key) == (HotkeyStatus.Duplicate, "Ctrl+Alt+K"));
+        check("The notices hotkey is unset or invalid on its own, and an invalid earlier hotkey does not take its combination",
+            HotkeyText.Plan(HotkeyKind.Notices, "Ctrl+Alt+K", "", "", Key).Status == HotkeyStatus.Unset
+            && HotkeyText.Plan(HotkeyKind.Notices, "Ctrl+Alt+K", "", null, Key).Status == HotkeyStatus.Unset
+            && HotkeyText.Plan(HotkeyKind.Notices, "", "", "Ctrl+5", Key).Status == HotkeyStatus.Invalid
+            && HotkeyText.Plan(HotkeyKind.Notices, "Ctrl+5", "Ctrl+", "Ctrl+Alt+N", Key) == (null, "Ctrl+Alt+N")
+            && HotkeyText.Plan(HotkeyKind.Expand, "Ctrl+Alt+K", "Ctrl+Alt+J", "Ctrl+Alt+J", Key) == (null, "Ctrl+Alt+J"));
+        // The audit group "win" keeps its tests in their own file; they run from here so that Program.cs stays untouched.
+        AuditWinTests.Run(check);
     }
 }

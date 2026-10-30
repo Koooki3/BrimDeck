@@ -22,7 +22,7 @@ BrimDeck reads only the sign-in state and usage records that apps already keep. 
 
 ## Files stored on this PC
 
-All files are stored in `%LOCALAPPDATA%\BrimDeck`:
+Files are stored in `%LOCALAPPDATA%\BrimDeck`, except the notice history, which is kept in BrimDeck's install folder by default (see their row):
 
 | File | Contents |
 | --- | --- |
@@ -35,6 +35,9 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 | `update-prompt.txt`, `updates\` | The last version you were told about, and downloaded installers or portable zips (while a portable copy updates, also the extracted new version) |
 | `sensor-stops.json`, `sensor-pending.json` | The system monitor readings stopped because the PC froze (the drive or graphics adapter model, the board model and BIOS version), and the readings under way, so a reading that froze the PC is found at the next start; a record is removed when the reading is turned on again in the settings |
 | `crash.log` | Error records; cleared when it exceeds 1 MB |
+| `notices\notices.dat`, `notices\icons\` | With live notices on and kept: the notice history (24 hours and at most 500 by default), encrypted for the current user with Windows encryption; application icons (from Windows, no notice content). **Kept by default in the `notices` folder of BrimDeck's install folder** (opened to the current user only), and here only when the install folder cannot be written to; the folder can be changed in settings; uninstalling with "Delete user data" removes the default folders only, so delete a folder you chose yourself by hand (or clear the notice history before uninstalling) |
+| `notices.log` | Live notices' error records: error types, codes and code locations only, never titles or bodies; rotated past 256 KB |
+| `notice-banners.json` | With "Turn off other apps' notification banners" on: the ids of the apps whose banner BrimDeck turned off and their previous `ShowBanner` value, so it can be put back exactly; and the ids of apps whose banner you turned on again in Windows, which BrimDeck leaves alone. Deleted once everything is restored and the switch is off |
 
 ## Network and security
 
@@ -45,6 +48,7 @@ All files are stored in `%LOCALAPPDATA%\BrimDeck`:
 - The system monitor's readings, temperatures and drive space included, are read and shown only on this PC, never saved or sent. Drive space comes from each lettered volume's file system, and the physical drive a volume lies on from Windows' volume information. Temperatures come from interfaces built into Windows: the ACPI thermal zones in the performance counters for the CPU, the data the graphics driver reports for the GPU, and each drive's own report, asked for with the drive opened without read or write access. No administrator rights or drivers are needed.
 - The whole machine's power draw and this PC's own battery are likewise read and shown only on this PC, never saved or sent, and only while the system monitor page is open or the collapsed row chooses the reading: processor power comes from Windows' Energy Meter performance counters, NVIDIA graphics power from the nvidia-smi.exe the graphics driver ships (started by BrimDeck only while the adapter is working and the page or the row shows the power, ended with BrimDeck; not read while the adapter is idle, so a sleeping discrete GPU is not woken), the battery's charge, rate and capacities from Windows' battery interface, and the power mode and Battery saver from Windows' power API. No administrator rights or drivers are needed.
 - The sound behind the equalizer is analyzed only in memory and never saved.
+- Live notices (off by default) read only the current user's Windows notifications and use no network; they change a Windows setting (each app's `ShowBanner` for the current user) only while "Turn off other apps' notification banners" is on, and restore it when it is switched off, on quitting or on uninstalling. Time notices (alarms, mail, event reminders) are sorted on this PC by the application's id and the notice's text; no mailbox, calendar or Clock data is read, and the list of time sources in the settings only checks whether those applications are installed. See [Live notices](notices.md#privacy).
 
 ## NetEase Cloud Music full control
 

@@ -8,7 +8,8 @@ using BrimDeck.Core;
 
 namespace BrimDeck;
 
-// The global shortcuts: hide/show (on the Collapsed view page), expand and resize (on the Expanded view page). Each is recorded
+// The global shortcuts: hide/show (on the Collapsed view page), expand and resize (on the Expanded view page) and notices (on
+// the Live notices page). Each is recorded
 // by clicking its box and pressing the combination; leaving the box cancels, and only the cross inside the box clears it. The
 // resize row reads "Alt + [box] + arrow keys": Alt and the arrows are fixed, so its box records only the other modifiers. While
 // a box records, the app's registered shortcuts are suspended so pressing the current combination records it instead of
@@ -36,24 +37,30 @@ public sealed partial class SettingsWindow
     private static string HotkeyName(HotkeyKind kind) => kind switch
     {
         HotkeyKind.Hide => Loc.T("“隐藏/显示快捷键”", "the hide/show shortcut"), HotkeyKind.Expand => Loc.T("“展开快捷键”", "the expand shortcut"),
-        _ => Loc.T("“调整大小快捷键”", "the resize shortcut")
+        HotkeyKind.Notices => Loc.T("“通知快捷键”", "the notices shortcut"), _ => Loc.T("“调整大小快捷键”", "the resize shortcut")
     };
     private static string SavedHotkey(DeckSettings settings, HotkeyKind kind) => (kind switch
     {
-        HotkeyKind.Hide => settings.HideHotkey, HotkeyKind.Expand => settings.ExpandHotkey, _ => settings.ResizeHotkey
+        HotkeyKind.Hide => settings.HideHotkey, HotkeyKind.Expand => settings.ExpandHotkey, HotkeyKind.Notices => settings.NoticeHotkey, _ => settings.ResizeHotkey
     }) ?? "";
     private static void SetHotkey(DeckSettings settings, HotkeyKind kind, string value)
     {
-        switch (kind) { case HotkeyKind.Hide: settings.HideHotkey = value; break; case HotkeyKind.Expand: settings.ExpandHotkey = value; break; default: settings.ResizeHotkey = value; break; }
+        switch (kind)
+        {
+            case HotkeyKind.Hide: settings.HideHotkey = value; break; case HotkeyKind.Expand: settings.ExpandHotkey = value; break;
+            case HotkeyKind.Notices: settings.NoticeHotkey = value; break; default: settings.ResizeHotkey = value; break;
+        }
     }
 
     private FrameworkElement HotkeyRow(HotkeyKind kind)
     {
-        string title = kind switch { HotkeyKind.Hide => Loc.T("隐藏/显示快捷键", "Hide/show shortcut"), HotkeyKind.Expand => Loc.T("展开快捷键", "Expand shortcut"), _ => Loc.T("调整大小快捷键", "Resize shortcut") };
+        string title = kind switch { HotkeyKind.Hide => Loc.T("隐藏/显示快捷键", "Hide/show shortcut"), HotkeyKind.Expand => Loc.T("展开快捷键", "Expand shortcut"), HotkeyKind.Notices => Loc.T("通知快捷键", "Notices shortcut"), _ => Loc.T("调整大小快捷键", "Resize shortcut") };
         string help = kind switch
         {
             HotkeyKind.Hide => Loc.T("按下快捷键即可隐藏刘海、胶囊或指示条，再按一次恢复显示。", "Press the shortcut to hide the notch, capsule or indicator bar; press it again to show it."),
             HotkeyKind.Expand => Loc.T("按下快捷键即可展开面板，再按一次收起。", "Press the shortcut to expand the panel; press it again to collapse it."),
+            HotkeyKind.Notices => Loc.T("有提示时打开它的详情并可用键盘操作（Tab 切换、Enter 确认、Esc 关闭）；没有提示时打开通知历史。默认不设置，避免与其他程序冲突。",
+                "With a notice on screen, opens its details for the keyboard (Tab to move, Enter to choose, Esc to close); otherwise opens the notice history. Unset by default, to avoid clashing with other programs."),
             _ => Loc.T("按住 Alt 和框里的修饰键，再按方向键调整大小：←/→ 改宽度，↑/↓ 改展开面板的高度，按住可连续调整。方向键对应调整的方向；Alt 加另一个修饰键是为了不占用系统自带的方向键操作（选择文字、排列窗口、浏览器后退等）。",
                 "Hold Alt and the modifiers in the box, then press an arrow key to resize: ← and → change the width, ↑ and ↓ the expanded panel's height; hold to keep going. The arrows point the way the size changes; Alt with one more modifier leaves the system's own arrow shortcuts (selecting text, arranging windows, going back in a browser) alone.")
         };
@@ -62,9 +69,10 @@ public sealed partial class SettingsWindow
         string waiting = arrows ? Loc.T("请按 Ctrl、Shift 或 Win…", "Press Ctrl, Shift or Win…") : Loc.T("请按下组合键…", "Press a combination…");
         string Saved() => SavedHotkey(S, kind);
         // The other shortcuts, with the names a clash message gives them. The resize shortcut yields to the others (App.Hotkeys), so
-        // only its own row speaks of a clash with them.
+        // only its own row speaks of a clash with them. The notices one counts only while notices are on, as only then is it
+        // registered (App.ApplyHotkeys) and its row shown to clear it.
         IEnumerable<(string Text, string Name)> Others() => Enum.GetValues<HotkeyKind>()
-            .Where(other => other != kind && (kind == HotkeyKind.Resize || other != HotkeyKind.Resize))
+            .Where(other => other != kind && (kind == HotkeyKind.Resize || other != HotkeyKind.Resize) && (other != HotkeyKind.Notices || S.NoticesEnabled))
             .Select(other => (SavedHotkey(S, other), HotkeyName(other)));
 
         // The box keeps one size and place in every state: the text on the left, trimmed before the clear button, which
